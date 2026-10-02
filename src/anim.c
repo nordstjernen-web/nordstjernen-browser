@@ -1053,12 +1053,12 @@ static void
 apply_propagate(GHashTable *styles, const ns_node *node, int prop,
                 const ns_css_value *base, ns_css_value *current)
 {
-    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
+    const ns_node *c = node->first_child;
+    while (c) {
         ns_style *st = g_hash_table_lookup(styles, c);
-        if (!st) continue;
-        if (st->values[prop] != base) continue;
-        style_set_value(st, prop, current);
-        apply_propagate(styles, c, prop, base, current);
+        gboolean inherits = st && st->values[prop] == base;
+        if (inherits) style_set_value(st, prop, current);
+        c = ns_node_next_in_subtree(c, node, inherits);
     }
 }
 
