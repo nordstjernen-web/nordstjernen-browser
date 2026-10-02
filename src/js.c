@@ -9424,6 +9424,15 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     JSValue target = JS_GetPropertyStr(ctx, this_val, "target");
     const ns_node *n = ns_unwrap_element(target);
     JS_FreeValue(ctx, target);
+    if (!n) {
+        /* A window, port, worker or request: the path is the target. */
+        JSValue current = JS_GetPropertyStr(ctx, this_val, "currentTarget");
+        if (JS_IsObject(current))
+            JS_SetPropertyUint32(ctx, arr, 0, current);
+        else
+            JS_FreeValue(ctx, current);
+        return arr;
+    }
     uint32_t idx = 0;
     gboolean saw_document = FALSE;
     for (const ns_node *cur = n; cur; cur = cur->parent) {
@@ -12377,6 +12386,45 @@ ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
     return ns_target_handler_realm(ctx, port, "message", "cb");
 }
 
+/* An event dispatched at a target outside the node tree is at its target
+ * while the listeners run; afterwards it has no current target and no
+ * phase, as after any dispatch. A dispatch that was already running when
+ * this one started gets its state back. */
+typedef struct {
+    JSValue phase;
+    JSValue current;
+    gboolean nested;
+} ns_event_at_target;
+
+static void
+ns_event_at_target_begin(JSContext *ctx, JSValueConst ev, JSValueConst target,
+                         ns_event_at_target *st)
+{
+    JSValue dispatching = JS_GetPropertyStr(ctx, ev, "_dispatching");
+    st->nested = JS_ToBool(ctx, dispatching) > 0;
+    JS_FreeValue(ctx, dispatching);
+    st->phase = JS_GetPropertyStr(ctx, ev, "eventPhase");
+    st->current = JS_GetPropertyStr(ctx, ev, "currentTarget");
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, target));
+    JS_SetPropertyStr(ctx, ev, "eventPhase", JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, ev, "_dispatching", JS_TRUE);
+}
+
+static void
+ns_event_at_target_end(JSContext *ctx, JSValueConst ev, ns_event_at_target *st)
+{
+    if (st->nested) {
+        JS_SetPropertyStr(ctx, ev, "eventPhase", st->phase);
+        JS_SetPropertyStr(ctx, ev, "currentTarget", st->current);
+        return;
+    }
+    JS_FreeValue(ctx, st->phase);
+    JS_FreeValue(ctx, st->current);
+    JS_SetPropertyStr(ctx, ev, "eventPhase", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_NULL);
+    JS_SetPropertyStr(ctx, ev, "_dispatching", JS_FALSE);
+}
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -12469,6 +12517,8 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     ns_js_budget_push(js, &bg);
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js, realm, &scope);
+    ns_event_at_target at_target;
+    ns_event_at_target_begin(ctx, ev, port, &at_target);
 
     JSValue onmessage = JS_GetPropertyStr(ctx, port, "onmessage");
     if (JS_IsFunction(ctx, onmessage)) {
@@ -12539,6 +12589,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         if (any_dead) ns_listeners_compact_dead(ctx, port);
     }
     JS_FreeValue(ctx, listeners);
+    ns_event_at_target_end(ctx, ev, &at_target);
 
     ns_js_realm_scope_leave(js, &scope);
     ns_js_budget_pop(js, &bg);
@@ -18499,6 +18550,8 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js_ce, ns_target_handler_realm(ctx, obj, type, "fn"),
                             &scope);
+    ns_event_at_target at_target;
+    ns_event_at_target_begin(ctx, ev, obj, &at_target);
     char on_name[32];
     g_snprintf(on_name, sizeof on_name, "on%s", type);
     JSValue prop = JS_GetPropertyStr(ctx, obj, on_name);
@@ -18591,6 +18644,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
         if (any_dead) ns_listeners_compact_dead(ctx, obj);
     }
     JS_FreeValue(ctx, listeners);
+    ns_event_at_target_end(ctx, ev, &at_target);
     ns_js_realm_scope_leave(js_ce, &scope);
 }
 
@@ -18739,6 +18793,10 @@ ns_event_dispatch_guard(JSContext *ctx, JSValueConst event)
     return JS_UNDEFINED;
 }
 
+/* The event the engine itself is dispatching through a target's
+ * dispatchEvent() (worker messages and errors): it stays trusted. */
+static __thread void *ns_engine_dispatch_event;
+
 static JSValue
 ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -18753,7 +18811,8 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     const char *type = JS_ToCString(ctx, tv);
     JS_FreeValue(ctx, tv);
     if (!type) return JS_FALSE;
-    JS_SetPropertyStr(ctx, argv[0], "_is_trusted", JS_FALSE);
+    if (JS_VALUE_GET_PTR(argv[0]) != ns_engine_dispatch_event)
+        JS_SetPropertyStr(ctx, argv[0], "_is_trusted", JS_FALSE);
     JS_SetPropertyStr(ctx, argv[0], "target", JS_DupValue(ctx, this_val));
     JS_SetPropertyStr(ctx, argv[0], "currentTarget", JS_DupValue(ctx, this_val));
     JSValue dp = JS_GetPropertyStr(ctx, argv[0], "defaultPrevented");
@@ -18785,6 +18844,14 @@ ns_xhr_fire_progress_event(JSContext *ctx, JSValueConst target,
                            gboolean length_computable)
 {
     JSValue event = ns_target_make_event(ctx, target, type);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ProgressEvent");
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, event, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
     JS_SetPropertyStr(ctx, event, "lengthComputable",
                       length_computable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "loaded", JS_NewFloat64(ctx, loaded));
@@ -19069,14 +19136,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
             ns_target_fire_event(ctx, st->obj, "readystatechange");
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 3));
             ns_target_fire_event(ctx, st->obj, "readystatechange");
-            JSValue pev = ns_target_make_event(ctx, st->obj, "progress");
-            JS_SetPropertyStr(ctx, pev, "lengthComputable", JS_TRUE);
-            JS_SetPropertyStr(ctx, pev, "loaded",
-                              JS_NewFloat64(ctx, (double)blen));
-            JS_SetPropertyStr(ctx, pev, "total",
-                              JS_NewFloat64(ctx, (double)blen));
-            ns_target_dispatch_with_event(ctx, st->obj, "progress", pev);
-            JS_FreeValue(ctx, pev);
+            ns_xhr_fire_progress_event(ctx, st->obj, "progress",
+                                       (double)blen, (double)blen, TRUE);
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
         } else {
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
@@ -19480,26 +19541,16 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, st->url,
                        st->js->current_url);
     JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_TRUE);
-    JSValue loadstart = ns_target_make_event(ctx, this_val, "loadstart");
-    JS_SetPropertyStr(ctx, loadstart, "lengthComputable", JS_FALSE);
-    JS_SetPropertyStr(ctx, loadstart, "loaded", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, loadstart, "total", JS_NewInt32(ctx, 0));
-    ns_target_dispatch_with_event(ctx, this_val, "loadstart", loadstart);
-    JS_FreeValue(ctx, loadstart);
+    ns_xhr_fire_progress_event(ctx, this_val, "loadstart", 0, 0, FALSE);
     if (send_body && body) {
         JSValue upload = JS_GetPropertyStr(ctx, this_val, "upload");
         static const char *const upload_events[] = {
             "loadstart", "progress", "load", "loadend",
         };
         for (gsize i = 0; i < G_N_ELEMENTS(upload_events); i++) {
-            JSValue event = ns_target_make_event(ctx, upload, upload_events[i]);
-            JS_SetPropertyStr(ctx, event, "lengthComputable", JS_TRUE);
-            JS_SetPropertyStr(ctx, event, "loaded",
-                              JS_NewFloat64(ctx, i == 0 ? 0 : (double)body_len));
-            JS_SetPropertyStr(ctx, event, "total",
-                              JS_NewFloat64(ctx, (double)body_len));
-            ns_target_dispatch_with_event(ctx, upload, upload_events[i], event);
-            JS_FreeValue(ctx, event);
+            ns_xhr_fire_progress_event(ctx, upload, upload_events[i],
+                                       i == 0 ? 0 : (double)body_len,
+                                       (double)body_len, TRUE);
         }
         JS_FreeValue(ctx, upload);
     }
@@ -23558,7 +23609,10 @@ ns_worker_dispatch(JSContext *ctx, JSValueConst target, const char *type,
     JSValue dispatch = JS_GetPropertyStr(ctx, target, "dispatchEvent");
     if (JS_IsFunction(ctx, dispatch)) {
         JSValueConst args[1] = { ev };
+        void *outer = ns_engine_dispatch_event;
+        ns_engine_dispatch_event = JS_VALUE_GET_PTR(ev);
         JSValue r = JS_Call(ctx, dispatch, target, 1, args);
+        ns_engine_dispatch_event = outer;
         if (JS_IsException(r)) {
             JSValue ex = JS_GetException(ctx);
             ns_js_report_uncaught(js_from_ctx(ctx), ex, "worker");
@@ -27979,6 +28033,17 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
     ns_event_define_legacy_accessors(ctx, ev);
+    /* Every event records when it was created, relative to the time origin
+     * like performance.now(); the constructors set it themselves. */
+    JSAtom ts = JS_NewAtom(ctx, "timeStamp");
+    int has_ts = JS_GetOwnProperty(ctx, NULL, ev, ts);
+    if (has_ts == 0)
+        JS_DefinePropertyValue(ctx, ev, ts,
+                               JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))),
+                               JS_PROP_C_W_E);
+    else if (has_ts < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeAtom(ctx, ts);
 }
 
 static gboolean

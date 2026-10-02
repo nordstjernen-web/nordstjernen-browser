@@ -3,6 +3,14 @@ Changelog:
 
 1.0.28:
 ======
+* Events the browser fires (messages from frames, workers, ports and
+  broadcast channels, `XMLHttpRequest` progress, `load` and the others)
+  carry a `timeStamp`, as in other browsers; it was `undefined`. Events
+  at a port, worker, request or channel are at their target while their
+  listeners run (`eventPhase` is 2 and `composedPath()` returns the
+  target) and have no phase or current target afterwards. Messages and
+  errors from a worker are trusted (`isTrusted` was false), and
+  `XMLHttpRequest` progress events are `ProgressEvent`s.
 * A frame without a source or with `srcdoc` shows `about:blank` or
   `about:srcdoc` as its `location.href`, `document.URL` and
   `document.location`, as in other browsers, and keeps the base URL and
