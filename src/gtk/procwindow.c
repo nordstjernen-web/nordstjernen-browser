@@ -2862,6 +2862,8 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     if (ns_proc_video_helper_available())
         g_setenv("NS_VIDEO_HELPER", "1", TRUE);
     procapp_clear_http_caches(FALSE);
+    if (!private_mode)
+        ns_history_init();
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
         .session_path = g_strdup(session_path),
@@ -2873,6 +2875,7 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     g_signal_connect(app, "activate", G_CALLBACK(on_proc_activate), &ctx);
     int status = g_application_run(G_APPLICATION(app), 0, NULL);
     g_object_unref(app);
+    ns_history_shutdown();
     procapp_clear_http_caches(TRUE);
     g_free(ctx.url);
     g_free(ctx.session_path);
