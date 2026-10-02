@@ -3578,17 +3578,8 @@
         defineCtor('indexedDB', new IDBFactory());
     })();
 
-    if (ndWorkerScope) return;
-
-    if (typeof Symbol !== 'undefined') {
-        if (typeof Symbol.dispose === 'undefined') {
-            try { Symbol.dispose = Symbol('Symbol.dispose'); } catch (e) {}
-        }
-        if (typeof Symbol.asyncDispose === 'undefined') {
-            try { Symbol.asyncDispose = Symbol('Symbol.asyncDispose'); } catch (e) {}
-        }
-    }
-
+    // Workers need DOMException too; QuickJS-ng has it built in, the
+    // original QuickJS does not.
     if (typeof DOMException !== 'function') {
         var DOM_EXCEPTION_CODES = {
             IndexSizeError:               1,
@@ -3635,6 +3626,18 @@
         }
         defineCtor('DOMException', DomException);
     }
+
+    if (ndWorkerScope) return;
+
+    if (typeof Symbol !== 'undefined') {
+        if (typeof Symbol.dispose === 'undefined') {
+            try { Symbol.dispose = Symbol('Symbol.dispose'); } catch (e) {}
+        }
+        if (typeof Symbol.asyncDispose === 'undefined') {
+            try { Symbol.asyncDispose = Symbol('Symbol.asyncDispose'); } catch (e) {}
+        }
+    }
+
 
     if (typeof QuotaExceededError !== 'function') {
         var QuotaErr = function (message, options) {
