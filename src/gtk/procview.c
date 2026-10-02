@@ -790,18 +790,13 @@ pv_audio_url_path(const char *url)
 }
 
 static gboolean
-pv_audio_url_allowed(NsProcView *v, const char *url)
+pv_stream_url_allowed(const char *url, const char *subdir)
 {
-    if (g_str_has_prefix(url, "http://") || g_str_has_prefix(url, "https://") ||
-        g_str_has_prefix(url, "data:"))
-        return TRUE;
     if (!g_str_has_prefix(url, "file://")) return FALSE;
-    if (v->current_url && g_str_has_prefix(v->current_url, "file:"))
-        return TRUE;
     char *path = pv_audio_url_path(url);
     char *canon = g_canonicalize_filename(path, NULL);
     char *streams = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
-                                     "msaudio", "", NULL);
+                                     subdir, "", NULL);
     g_strdelimit(canon, "\\", '/');
     g_strdelimit(streams, "\\", '/');
     gboolean inside = g_str_has_prefix(canon, streams);
@@ -812,16 +807,53 @@ pv_audio_url_allowed(NsProcView *v, const char *url)
 }
 
 static gboolean
+pv_audio_url_allowed(NsProcView *v, const char *url)
+{
+    if (g_str_has_prefix(url, "http://") || g_str_has_prefix(url, "https://") ||
+        g_str_has_prefix(url, "data:"))
+        return TRUE;
+    if (!g_str_has_prefix(url, "file://")) return FALSE;
+    if (v->current_url && g_str_has_prefix(v->current_url, "file:"))
+        return TRUE;
+    return pv_stream_url_allowed(url, "msaudio");
+}
+
+static gboolean
+pv_helper_is_blank(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+static const char *
+pv_helper_open_url(const char *cmd)
+{
+    const char *s = cmd;
+    while (pv_helper_is_blank(*s)) s++;
+    const char *op = s;
+    while (*s && !pv_helper_is_blank(*s)) s++;
+    gsize op_len = (gsize)(s - op);
+    if (!(op_len == 4 && strncmp(op, "open", 4) == 0) &&
+        !(op_len == 6 && strncmp(op, "reload", 6) == 0))
+        return NULL;
+    while (pv_helper_is_blank(*s)) s++;
+    while (*s && !pv_helper_is_blank(*s)) s++;
+    if (*s) s++;
+    while (*s == ' ') s++;
+    return s;
+}
+
+static gboolean
 pv_audio_command_allowed(NsProcView *v, const char *cmd)
 {
-    const char *rest = NULL;
-    if (g_str_has_prefix(cmd, "open ")) rest = cmd + strlen("open ");
-    else if (g_str_has_prefix(cmd, "reload ")) rest = cmd + strlen("reload ");
-    else return TRUE;
-    const char *url = strchr(rest, ' ');
-    if (!url) return FALSE;
-    while (*url == ' ') url++;
-    return pv_audio_url_allowed(v, url);
+    const char *url = pv_helper_open_url(cmd);
+    return !url || pv_audio_url_allowed(v, url);
+}
+
+static gboolean
+pv_video_command_allowed(const char *cmd)
+{
+    const char *url = pv_helper_open_url(cmd);
+    return !url || pv_stream_url_allowed(url, "msvideo");
 }
 
 static void
@@ -1361,9 +1393,12 @@ pv_media_pump(NsProcView *v, const char *commands)
     GString *audio = g_string_new(NULL);
     for (int i = 0; lines[i]; i++) {
         if (!*lines[i]) continue;
-        if (g_str_has_prefix(lines[i], "video "))
-            pv_video_dispatch(v, lines[i] + 6);
-        else {
+        if (g_str_has_prefix(lines[i], "video ")) {
+            if (pv_video_command_allowed(lines[i] + 6))
+                pv_video_dispatch(v, lines[i] + 6);
+            else if (g_getenv("NS_DBG_AUDIO"))
+                g_printerr("[video-pump] refused: %s\n", lines[i] + 6);
+        } else {
             g_string_append(audio, lines[i]);
             g_string_append_c(audio, '\x1f');
         }
