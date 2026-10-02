@@ -60,6 +60,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.27" date="2026-10-02">
+      <description>
+        <p>Frames, events, workers and robustness release.</p>
+        <ul>
+          <li>Frames behave as in other browsers: each has its own document lifecycle, WindowProxy, event handlers and performance timeline, and postMessage and MessagePort work across frames.</li>
+          <li>Events, structured cloning, dedicated workers and focus handling follow the HTML standard more closely, and scripts written by document.write or inserted with append() run.</li>
+          <li>Deeply nested pages, SVGs and CSS values no longer crash the renderer.</li>
+          <li>The desktop browser records visited pages in History again, and YouTube and other MSE players play video again.</li>
+          <li>align-content works on block containers, and textareas honour CSS heights and keep their placeholder while focused.</li>
+          <li>Nordstjernen can also be built on Fabrice Bellard's original QuickJS, and builds against GLib 2.90.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.26" date="2026-09-26">
       <description>
         <p>Grid, dialogs, security and styling performance release.</p>

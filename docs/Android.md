@@ -247,7 +247,7 @@ Versioning: `versionCode` is a monotonic int and Play rejects a repeat;
 `versionName` tracks the desktop version ("1.0.x"). Both live in
 `android/app/build.gradle` and are **not** derived from `meson.build`, so they
 are bumped by hand. The ladder so far: 1.0.22 = 7, 1.0.23 = 8, 1.0.24 = 9,
-1.0.25 = 10, 1.0.26 = 11. For a critical security fix, halt rollout, then re-submit on a
+1.0.25 = 10, 1.0.26 = 11, 1.0.27 = 12. For a critical security fix, halt rollout, then re-submit on a
 fast rollout.
 
 ## CI
