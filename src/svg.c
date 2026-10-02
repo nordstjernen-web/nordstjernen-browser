@@ -16,6 +16,7 @@
 
 enum {
     NS_SVG_MAX_DEPTH        = 24,
+    NS_SVG_MAX_NESTING      = 256,
     NS_SVG_MAX_NODES        = 60000,
     NS_SVG_MAX_INPUT_BYTES  = 8 * 1024 * 1024,
     NS_SVG_MAX_DIM_PX       = 8192,
@@ -71,6 +72,7 @@ typedef struct {
     GHashTable    *styles;
     GHashTable    *ids;
     int            depth;
+    int            nesting;
     int            nodes;
     double         vw, vh;
 } svg_ctx;
@@ -966,12 +968,12 @@ svg_shape_path(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 static void
 svg_index_ids(svg_ctx *ctx, const ns_node *n)
 {
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+    for (const ns_node *c = n->first_child; c;
+         c = ns_node_next_in_subtree(c, n, c->kind == NS_NODE_ELEMENT)) {
         if (c->kind != NS_NODE_ELEMENT) continue;
         const char *id = ns_element_get_attr(c, "id");
         if (id && *id && !g_hash_table_contains(ctx->ids, id))
             g_hash_table_insert(ctx->ids, (gpointer)id, (gpointer)c);
-        svg_index_ids(ctx, c);
     }
 }
 
@@ -1711,12 +1713,9 @@ svg_is_hidden(svg_ctx *ctx, const ns_node *n)
 }
 
 static void
-svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
+svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
+                       const svg_state *parent)
 {
-    if (!n->name) return;
-    if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
-    if (++ctx->nodes > NS_SVG_MAX_NODES) return;
-
     const char *tag = n->name;
     if (strcmp(tag, "defs") == 0 || strcmp(tag, "symbol") == 0 ||
         strcmp(tag, "title") == 0 || strcmp(tag, "desc") == 0 ||
@@ -1866,6 +1865,18 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
     svg_state_clear(&st);
 }
 
+static void
+svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
+{
+    if (!n->name) return;
+    if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
+    if (ctx->nesting >= NS_SVG_MAX_NESTING) return;
+    if (++ctx->nodes > NS_SVG_MAX_NODES) return;
+    ctx->nesting++;
+    svg_render_node_nested(ctx, n, parent);
+    ctx->nesting--;
+}
+
 gboolean
 ns_svg_node_is_root(const ns_node *n)
 {
@@ -1990,14 +2001,10 @@ ns_svg_bytes_look_like_svg(const guchar *data, gsize len)
 }
 
 static const ns_node *
-svg_find_root(const ns_node *n)
+svg_find_root(const ns_node *doc)
 {
-    if (!n) return NULL;
-    if (ns_svg_node_is_root(n)) return n;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        const ns_node *r = svg_find_root(c);
-        if (r) return r;
-    }
+    for (const ns_node *n = doc; n; n = ns_node_next_in_subtree(n, doc, TRUE))
+        if (ns_svg_node_is_root(n)) return n;
     return NULL;
 }
 
