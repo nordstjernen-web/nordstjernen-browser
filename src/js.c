@@ -14823,11 +14823,6 @@ ns_history_replaceState(JSContext *ctx, JSValueConst this_val,
     return ns_history_set_state_impl(ctx, argc, argv, TRUE);
 }
 
-static void ns_js_dispatch_window_only_event(ns_js *js,
-                                             const ns_node *target_doc,
-                                             const char *type, JSValue event,
-                                             gboolean *default_prevented);
-
 /* hashchange, popstate and similar events are fired at the window: the
  * window is their target, and they neither bubble nor can be cancelled. */
 static JSValue
