@@ -3,6 +3,11 @@ Changelog:
 
 1.0.27:
 ======
+* An asynchronous `XMLHttpRequest` a frame sends to its own origin works
+  when that origin differs from the page's. The response was checked
+  against whichever document the event loop was in when it arrived,
+  usually the page, so it failed with status 0; synchronous requests and
+  `fetch()` were not affected.
 * A CSS value with thousands of nested parentheses or functions, in an
   `@property` `initial-value` or in `CSS.registerProperty()`, no longer
   crashes the renderer. Values nested deeper than 128 levels are

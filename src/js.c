@@ -18292,6 +18292,7 @@ typedef struct ns_xhr_state {
     JSValue    obj;
     char      *method;
     char      *url;
+    char      *origin_url; /* URL of the document that sent the request */
     double     start_ms;
     GPtrArray *request_headers;
 } ns_xhr_state;
@@ -18432,6 +18433,7 @@ ns_xhr_state_free(ns_xhr_state *st)
     if (st->ctx) JS_FreeValue(st->ctx, st->obj);
     g_free(st->method);
     g_free(st->url);
+    g_free(st->origin_url);
     if (st->request_headers) g_ptr_array_free(st->request_headers, TRUE);
     g_free(st);
 }
@@ -18928,8 +18930,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JSContext *ctx = st->ctx;
     gboolean response_allowed = FALSE;
     if (resp && !err) {
-        gboolean allow = cors_allows(js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-                                     resp->final_url, resp->cors_allow_origin)
+        gboolean allow = cors_allows(st->origin_url, resp->final_url,
+                                     resp->cors_allow_origin)
                          && !ns_final_url_connect_blocked(js_from_ctx(ctx),
                                                           resp->final_url);
         response_allowed = allow;
@@ -18940,9 +18942,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(ctx, st->obj, "responseURL",
                           JS_NewString(ctx,
                               allow && resp->final_url ? resp->final_url : ""));
-        gboolean same_origin = ns_url_same_origin(
-            js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-            resp->final_url);
+        gboolean same_origin = ns_url_same_origin(st->origin_url,
+                                                  resp->final_url);
         char *hdrs;
         if (!allow) {
             hdrs = g_strdup("");
@@ -19417,6 +19418,11 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     char *resolved = (_js && _js->current_url)
         ? ns_url_resolve(_js->current_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
+    /* The response is checked against the sending document's origin; by the
+     * time an asynchronous response arrives, js->current_url is whatever
+     * document the event loop is in, often the page rather than the frame
+     * that sent the request. */
+    st->origin_url = g_strdup(_js ? _js->current_url : NULL);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
 
