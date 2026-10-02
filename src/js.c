@@ -330,6 +330,8 @@ static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
 static gboolean ns_node_is_shadow_root(const ns_node *n);
+static void ns_focus_guard_forget(ns_js *js, const ns_node *n);
+static void ns_parser_hold_forget(ns_js *js, const ns_node *n);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -1203,9 +1205,52 @@ typedef struct {
     ns_node   *frame;
     char      *url;
     char      *entered_url;
+    char     **prev_slot;
     gboolean   active;
     gboolean   is_base;
 } ns_realm_scope;
+
+/* The top-level document's URL, even while a frame's code has replaced
+ * current_url with the frame's own URL. */
+static const char *
+ns_js_top_url(ns_js *js)
+{
+    const char *url = js->top_url_slot ? *js->top_url_slot : js->current_url;
+    return url ? url : "";
+}
+
+static void
+ns_js_set_top_url(ns_js *js, const char *url)
+{
+    char **slot = js->top_url_slot ? js->top_url_slot : &js->current_url;
+    char *copy = g_strdup(url ? url : "");
+    g_free(*slot);
+    *slot = copy;
+}
+
+/* Makes url the current URL for a frame's script or event.  The outermost
+ * entry keeps the top-level URL where ns_js_top_url can find it. */
+typedef struct {
+    char *saved;
+    gboolean owns_slot;
+} ns_frame_url;
+
+static void
+ns_frame_url_enter(ns_js *js, ns_frame_url *fu, const char *url)
+{
+    fu->saved = js->current_url;
+    fu->owns_slot = js->top_url_slot == NULL;
+    if (fu->owns_slot) js->top_url_slot = &fu->saved;
+    js->current_url = g_strdup(url ? url : "");
+}
+
+static void
+ns_frame_url_leave(ns_js *js, ns_frame_url *fu)
+{
+    if (fu->owns_slot) js->top_url_slot = NULL;
+    g_free(js->current_url);
+    js->current_url = fu->saved;
+}
 
 static ns_node *
 ns_js_top_document(ns_node *doc)
@@ -1226,6 +1271,7 @@ ns_js_realm_scope_save(ns_js *js, ns_realm_scope *scope)
     scope->frame = js->raf_frame_ctx;
     scope->url = js->current_url;
     scope->entered_url = NULL;
+    scope->prev_slot = js->top_url_slot;
     scope->is_base = FALSE;
     scope->active = TRUE;
 }
@@ -1239,6 +1285,7 @@ ns_js_frame_scope_enter(ns_js *js, JSContext *realm, ns_node *frame,
         js->realm_scope_base = scope;
         scope->is_base = TRUE;
     }
+    if (!js->top_url_slot) js->top_url_slot = &scope->url;
     js->ctx = realm;
     ns_node *frame_doc = ns_iframe_document_node(frame);
     if (frame_doc) js->current_doc = frame_doc;
@@ -1258,9 +1305,9 @@ ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
         js->ctx = realm;
         js->raf_frame_ctx = base ? base->frame : NULL;
         js->current_doc = base ? base->doc : ns_js_top_document(js->current_doc);
-        const char *url = base ? base->url : scope->url;
-        js->current_url = g_strdup(url ? url : "");
+        js->current_url = g_strdup(ns_js_top_url(js));
         scope->entered_url = g_strdup(js->current_url);
+        js->top_url_slot = NULL;
         return;
     }
     if (!js->frame_contexts || g_hash_table_size(js->frame_contexts) == 0)
@@ -1282,14 +1329,14 @@ static void
 ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
 {
     if (!scope->active) return;
-    ns_realm_scope *base = js->realm_scope_base;
-    if (scope->entered_url && base &&
+    if (scope->entered_url && scope->prev_slot &&
         g_strcmp0(js->current_url, scope->entered_url) != 0) {
-        g_free(base->url);
-        base->url = g_strdup(js->current_url ? js->current_url : "");
+        g_free(*scope->prev_slot);
+        *scope->prev_slot = g_strdup(js->current_url ? js->current_url : "");
     }
     g_free(scope->entered_url);
     if (scope->is_base) js->realm_scope_base = NULL;
+    js->top_url_slot = scope->prev_slot;
     g_free(js->current_url);
     js->current_url = scope->url;
     js->raf_frame_ctx = scope->frame;
@@ -3557,6 +3604,12 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
+    if (js && js->focused_node == n) js->focused_node = NULL;
+    if (js && js->focused_doc == n) js->focused_doc = NULL;
+    if (js) ns_focus_guard_forget(js, n);
+    if (js) ns_parser_hold_forget(js, n);
+    if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
+    if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
     n->js_invalidate = NULL;
 
@@ -4081,6 +4134,11 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     }
     const ns_node *n = ns_unwrap_element(argv[0]);
     if (!n) return JS_FALSE;
+    /* A shadow root is stored as an element but is a DocumentFragment. */
+    if (ns_node_is_shadow_root(n))
+        return JS_NewBool(ctx, d->special == NS_INSTOF_NODE ||
+                               d->special == NS_INSTOF_FRAGMENT ||
+                               d->special == NS_INSTOF_SHADOW);
     switch (d->special) {
     case NS_INSTOF_NODE:
         return JS_NewBool(ctx, TRUE);
@@ -12265,6 +12323,36 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValueConst port = argv[0];
     JSValueConst data_in = argv[1];
 
+    JSValue shipped_to = JS_GetPropertyStr(ctx, port, "_shipped_to");
+    if (JS_IsObject(shipped_to)) {
+        /* The port moved to another realm while this message was queued;
+         * its messages move with it. */
+        JSValue started = JS_GetPropertyStr(ctx, shipped_to, "_started");
+        gboolean is_started = JS_ToBool(ctx, started);
+        JS_FreeValue(ctx, started);
+        if (is_started) {
+            JSValueConst job_args[3] = { shipped_to, data_in,
+                                         argc >= 3 ? argv[2] : JS_UNDEFINED };
+            JSValue r = ns_port_deliver_job(ctx, 3, job_args);
+            JS_FreeValue(ctx, shipped_to);
+            return r;
+        }
+        JSValue queue = JS_GetPropertyStr(ctx, shipped_to, "_queue");
+        if (JS_IsArray(queue)) {
+            JSValue message = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, message, "_portMessage", JS_TRUE);
+            JS_SetPropertyStr(ctx, message, "data", JS_DupValue(ctx, data_in));
+            JS_SetPropertyStr(ctx, message, "ports",
+                              argc >= 3 ? JS_DupValue(ctx, argv[2]) : JS_NewArray(ctx));
+            JS_SetPropertyUint32(ctx, queue, ns_js_array_length(ctx, queue),
+                                 message);
+        }
+        JS_FreeValue(ctx, queue);
+        JS_FreeValue(ctx, shipped_to);
+        return JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, shipped_to);
+
     JSValue closed = JS_GetPropertyStr(ctx, port, "_closed");
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
@@ -12399,19 +12487,18 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static JSValue ns_structured_clone_transfer(JSContext *ctx, JSValueConst value,
+                                            JSValue transfer, JSValueConst seed_from,
+                                            JSValueConst seed_to);
 static JSValue ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 
 static JSValue
 ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer)
 {
-    JSValue options = JS_NewObject(ctx);
-    if (JS_IsArray(transfer))
-        JS_SetPropertyStr(ctx, options, "transfer", JS_DupValue(ctx, transfer));
-    JSValueConst args[2] = { v, options };
-    JSValue out = ns_window_structured_clone(ctx, JS_UNDEFINED, 2, args);
-    JS_FreeValue(ctx, options);
-    return out;
+    return ns_structured_clone_transfer(ctx, v,
+        JS_IsArray(transfer) ? JS_DupValue(ctx, transfer) : JS_UNDEFINED,
+        JS_UNDEFINED, JS_UNDEFINED);
 }
 
 static void
@@ -12492,6 +12579,13 @@ ns_port_bridge_id(JSContext *ctx, JSValueConst port)
     return id;
 }
 
+static JSContext *ns_port_realm(JSContext *ctx, JSValueConst port);
+static int ns_port_transfer_prepare(JSContext *ctx, JSValueConst transfer,
+                                   JSValueConst source_port, JSContext *realm,
+                                   JSValue *old_ports, JSValue *new_ports);
+static void ns_port_transfer_commit(JSContext *ctx, JSValueConst old_ports,
+                                    JSValueConst new_ports);
+
 static JSValue
 ns_port_post_message(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -12513,27 +12607,29 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
     } else if (argc >= 2 && JS_IsObject(argv[1])) {
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
-    JSValue cloned = ns_structured_clone_value(ctx, data, transfer);
-    if (JS_IsException(cloned)) {
+    if (JS_IsException(transfer)) return JS_EXCEPTION;
+    JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
+    JSContext *realm = JS_IsObject(pair) ? ns_port_realm(ctx, pair) : ctx;
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, this_val, realm,
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, pair);
         JS_FreeValue(ctx, transfer);
         return JS_EXCEPTION;
     }
-    JSValue ports = JS_NewArray(ctx);
-    if (JS_IsArray(transfer)) {
-        uint32_t len = ns_js_array_length(ctx, transfer);
-        uint32_t k = 0;
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
-            JSValue is_port = JS_GetPropertyStr(ctx, item, "_is_port");
-            if (JS_ToBool(ctx, is_port))
-                JS_SetPropertyUint32(ctx, ports, k++, JS_DupValue(ctx, item));
-            JS_FreeValue(ctx, is_port);
-            JS_FreeValue(ctx, item);
-        }
+    JSValue cloned = ns_structured_clone_transfer(ctx, data, transfer,
+                                                  old_ports, ports);
+    if (JS_IsException(cloned)) {
+        JS_FreeValue(ctx, old_ports);
+        JS_FreeValue(ctx, ports);
+        JS_FreeValue(ctx, pair);
+        return JS_EXCEPTION;
     }
-    JS_FreeValue(ctx, transfer);
+    ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+    JS_FreeValue(ctx, pair);
+    pair = JS_GetPropertyStr(ctx, this_val, "_pair");
 
-    JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
     if (JS_IsUndefined(pair) || JS_IsNull(pair)) {
         JS_FreeValue(ctx, pair);
         JS_FreeValue(ctx, ports);
@@ -12685,6 +12781,14 @@ ns_port_close(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_port_realm_marker(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_port_new(JSContext *ctx)
 {
     JSValue p = JS_NewObject(ctx);
@@ -12709,11 +12813,117 @@ ns_port_new(JSContext *ctx)
         JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_FreeAtom(ctx, onmessage_atom);
     JS_SetPropertyStr(ctx, p, "onmessageerror", JS_NULL);
+    JS_DefinePropertyValueStr(ctx, p, "_realm",
+        JS_NewCFunction(ctx, ns_port_realm_marker, "", 0), 0);
     JS_SetPropertyStr(ctx, p, "_is_port",       JS_TRUE);
     JS_SetPropertyStr(ctx, p, "_closed",        JS_FALSE);
     JS_SetPropertyStr(ctx, p, "_started",       JS_FALSE);
     JS_SetPropertyStr(ctx, p, "_queue",         JS_NewArray(ctx));
     return p;
+}
+
+static JSContext *
+ns_port_realm(JSContext *ctx, JSValueConst port)
+{
+    JSValue marker = JS_GetPropertyStr(ctx, port, "_realm");
+    if (JS_IsException(marker)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JSContext *realm = ns_function_realm(ctx, marker);
+    JS_FreeValue(ctx, marker);
+    return realm;
+}
+
+static gboolean
+ns_port_flag(JSContext *ctx, JSValueConst port, const char *name)
+{
+    JSValue v = JS_GetPropertyStr(ctx, port, name);
+    gboolean set = JS_ToBool(ctx, v) > 0;
+    JS_FreeValue(ctx, v);
+    return set;
+}
+
+static void
+ns_port_ship(JSContext *ctx, JSValueConst port, JSValueConst shipped)
+{
+    JSValue pair = JS_GetPropertyStr(ctx, port, "_pair");
+    if (JS_IsObject(pair)) {
+        JS_SetPropertyStr(ctx, pair, "_pair", JS_DupValue(ctx, shipped));
+        JS_SetPropertyStr(ctx, shipped, "_pair", JS_DupValue(ctx, pair));
+    }
+    JS_FreeValue(ctx, pair);
+    JSValue origin = JS_GetPropertyStr(ctx, port, "_origin");
+    if (JS_IsString(origin)) JS_SetPropertyStr(ctx, shipped, "_origin", origin);
+    else JS_FreeValue(ctx, origin);
+    JS_SetPropertyStr(ctx, shipped, "_closed",
+                      JS_GetPropertyStr(ctx, port, "_closed"));
+    JSValue queue = JS_GetPropertyStr(ctx, port, "_queue");
+    if (JS_IsArray(queue)) JS_SetPropertyStr(ctx, shipped, "_queue", queue);
+    else JS_FreeValue(ctx, queue);
+    JS_SetPropertyStr(ctx, port, "_queue", JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, port, "_pair", JS_NULL);
+    JS_SetPropertyStr(ctx, port, "_closed", JS_TRUE);
+    JS_SetPropertyStr(ctx, port, "_shipped", JS_TRUE);
+    JS_DefinePropertyValueStr(ctx, port, "_shipped_to",
+                              JS_DupValue(ctx, shipped), 0);
+}
+
+/* Checks the MessagePorts in a postMessage transfer list and makes the
+ * receiving realm's replacement for each one.  Nothing is detached yet, so a
+ * failed clone leaves the sender's ports usable; ns_port_transfer_commit then
+ * moves each port's entanglement and queued messages to its replacement. */
+static int
+ns_port_transfer_prepare(JSContext *ctx, JSValueConst transfer,
+                         JSValueConst source_port, JSContext *realm,
+                         JSValue *old_ports, JSValue *new_ports)
+{
+    *old_ports = JS_NewArray(ctx);
+    *new_ports = JS_NewArray(realm);
+    uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
+    GPtrArray *seen = g_ptr_array_new();
+    gboolean bad = FALSE;
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < len && !bad; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        if (JS_IsObject(item) && ns_port_flag(ctx, item, "_is_port")) {
+            void *ptr = JS_VALUE_GET_PTR(item);
+            bad = g_ptr_array_find(seen, ptr, NULL) ||
+                  (JS_IsObject(source_port) &&
+                   ptr == JS_VALUE_GET_PTR(source_port)) ||
+                  ns_port_flag(ctx, item, "_shipped");
+            g_ptr_array_add(seen, ptr);
+            if (!bad) {
+                JSValue shipped = ns_port_bridge_id(ctx, item)
+                    ? JS_DupValue(ctx, item) : ns_port_new(realm);
+                JS_SetPropertyUint32(realm, *new_ports, k, shipped);
+                JS_SetPropertyUint32(ctx, *old_ports, k++,
+                                     JS_DupValue(ctx, item));
+            }
+        }
+        JS_FreeValue(ctx, item);
+    }
+    g_ptr_array_free(seen, TRUE);
+    if (!bad) return 0;
+    JS_FreeValue(ctx, *old_ports);
+    JS_FreeValue(realm, *new_ports);
+    *old_ports = *new_ports = JS_UNDEFINED;
+    ns_throw_dom_exception(ctx, "DataCloneError", 25,
+        "Failed to execute 'postMessage': a MessagePort in the transfer list "
+        "is the source port, a duplicate, or already transferred.");
+    return -1;
+}
+
+static void
+ns_port_transfer_commit(JSContext *ctx, JSValueConst old_ports,
+                        JSValueConst new_ports)
+{
+    uint32_t n = JS_IsArray(old_ports) ? ns_js_array_length(ctx, old_ports) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue from = JS_GetPropertyUint32(ctx, old_ports, i);
+        JSValue to = JS_GetPropertyUint32(ctx, new_ports, i);
+        if (JS_VALUE_GET_PTR(from) != JS_VALUE_GET_PTR(to))
+            ns_port_ship(ctx, from, to);
+        JS_FreeValue(ctx, from);
+        JS_FreeValue(ctx, to);
+    }
 }
 
 static JSValue
@@ -12974,18 +13184,15 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         ns_budget_guard bg = {0};
         ns_js_budget_push(js, &bg);
         g_autofree char *realm_url = ns_window_url_of(ctx, actual_target);
-        char *saved_url = js ? js->current_url : NULL;
-        if (js && realm_url && *realm_url)
-            js->current_url = g_strdup(realm_url);
+        ns_frame_url fu;
+        gboolean swap_url = js && realm_url && *realm_url;
+        if (swap_url) ns_frame_url_enter(js, &fu, realm_url);
         ns_message_event_adopt_data(ctx, JS_GetFunctionRealm(ctx, deliver), ev);
         JSValueConst args[1] = { ev };
         JSValue r = JS_Call(ctx, deliver, actual_target, 1, args);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
-        if (js && realm_url && *realm_url) {
-            g_free(js->current_url);
-            js->current_url = saved_url;
-        }
+        if (swap_url) ns_frame_url_leave(js, &fu);
         ns_js_budget_pop(js, &bg);
     } else if (js && js->ctx) {
         JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
@@ -13020,6 +13227,32 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_FreeValue(ctx, actual_target);
     JS_FreeValue(ctx, forwarded);
     return JS_UNDEFINED;
+}
+
+/* The realm that ns_window_post_message_deliver_job will deliver into. */
+static JSContext *
+ns_window_message_realm(JSContext *ctx, JSValueConst target)
+{
+    ns_js *js = js_from_ctx(ctx);
+    JSValue forwarded = ns_window_forward_of(js, target);
+    JSValueConst actual = JS_IsObject(forwarded) ? (JSValueConst)forwarded
+                                                 : target;
+    JSValue deliver = JS_GetPropertyStr(ctx, actual, "__nsDeliverMessage");
+    JSContext *realm = ctx;
+    if (JS_IsException(deliver)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    } else if (JS_IsFunction(ctx, deliver)) {
+        realm = ns_function_realm(ctx, deliver);
+    } else if (js && js->ctx) {
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+        JSValue main_global = JS_GetGlobalObject(main_ctx);
+        if (JS_VALUE_GET_PTR(main_global) == JS_VALUE_GET_PTR(actual))
+            realm = main_ctx;
+        JS_FreeValue(main_ctx, main_global);
+    }
+    JS_FreeValue(ctx, deliver);
+    JS_FreeValue(ctx, forwarded);
+    return realm;
 }
 
 static JSValue
@@ -13088,22 +13321,38 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                 "Failed to execute 'postMessage' on 'Window': Invalid target origin.");
         }
     }
+
+    /* Serializing and transferring happen before the origin check, so a
+     * message to the wrong origin still detaches its transferred ports. */
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, JS_UNDEFINED,
+                                 ns_window_message_realm(ctx, target),
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, transfer);
+        JS_FreeValue(ctx, target);
+        return JS_EXCEPTION;
+    }
+    JSValue data = ns_structured_clone_transfer(ctx, argv[0], transfer,
+                                                old_ports, ports);
+    if (JS_IsException(data)) {
+        JS_FreeValue(ctx, old_ports);
+        JS_FreeValue(ctx, ports);
+        JS_FreeValue(ctx, target);
+        return JS_EXCEPTION;
+    }
+    ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+
     if (strcmp(want_origin, "*") != 0) {
         g_autofree char *actual = ns_window_origin_of(ctx, target);
         gboolean match = actual && wanted && strcmp(wanted, "null") != 0 &&
                          g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
-            JS_FreeValue(ctx, transfer);
+            JS_FreeValue(ctx, data);
+            JS_FreeValue(ctx, ports);
             JS_FreeValue(ctx, target);
             return JS_UNDEFINED;
         }
-    }
-
-    JSValue data = ns_structured_clone_value(ctx, argv[0], transfer);
-    if (JS_IsException(data)) {
-        JS_FreeValue(ctx, transfer);
-        JS_FreeValue(ctx, target);
-        return JS_EXCEPTION;
     }
 
     JSValue source_global = JS_IsObject(source_override)
@@ -13127,21 +13376,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                       JS_NewString(ctx, src_origin ? src_origin : ""));
     JS_SetPropertyStr(ctx, ev, "lastEventId", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, ev, "source", source);
-    JSValue ports = JS_NewArray(ctx);
-    if (JS_IsArray(transfer)) {
-        uint32_t len = ns_js_array_length(ctx, transfer);
-        uint32_t k = 0;
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
-            JSValue is_port = JS_GetPropertyStr(ctx, item, "_is_port");
-            if (JS_ToBool(ctx, is_port))
-                JS_SetPropertyUint32(ctx, ports, k++, JS_DupValue(ctx, item));
-            JS_FreeValue(ctx, is_port);
-            JS_FreeValue(ctx, item);
-        }
-    }
     JS_SetPropertyStr(ctx, ev, "ports", ports);
-    JS_FreeValue(ctx, transfer);
 
     JSValueConst job_args[2] = { target, ev };
     ns_js_queue_message_task(ctx, ns_window_post_message_deliver_job, 2, job_args);
@@ -13853,13 +14088,24 @@ ns_sc_clone(ns_sc *s, JSValueConst v)
 }
 
 static JSValue
-ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transferred_in_place)
+ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transferred_in_place,
+          JSValueConst seed_from, JSValueConst seed_to)
 {
     ns_sc s;
     s.ctx = ctx;
     s.memo = g_array_new(FALSE, FALSE, sizeof(ns_sc_pair));
     s.transferred_in_place = transferred_in_place;
     s.depth = 0;
+    uint32_t seeds = JS_IsArray(seed_from) && JS_IsArray(seed_to)
+        ? ns_js_array_length(ctx, seed_from) : 0;
+    for (uint32_t i = 0; i < seeds; i++) {
+        JSValue from = JS_GetPropertyUint32(ctx, seed_from, i);
+        JSValue to = JS_GetPropertyUint32(ctx, seed_to, i);
+        if (JS_IsObject(from) && JS_IsObject(to))
+            ns_sc_memo_put(&s, JS_VALUE_GET_PTR(from), to);
+        JS_FreeValue(ctx, from);
+        JS_FreeValue(ctx, to);
+    }
     JSValue g = JS_GetGlobalObject(ctx);
     s.date_ctor     = JS_GetPropertyStr(ctx, g, "Date");
     s.regexp_ctor   = JS_GetPropertyStr(ctx, g, "RegExp");
@@ -13904,25 +14150,9 @@ ns_sc_transferred_in_place(JSContext *ctx, JSValueConst v)
 }
 
 static JSValue
-ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
+ns_structured_clone_transfer(JSContext *ctx, JSValueConst value, JSValue transfer,
+                             JSValueConst seed_from, JSValueConst seed_to)
 {
-    (void)this_val;
-    if (argc < 1)
-        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
-    JSValue transfer = JS_UNDEFINED;
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-        if (!JS_IsObject(argv[1]))
-            return JS_ThrowTypeError(ctx,
-                "structuredClone: options is not an object");
-        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
-        if (JS_IsException(transfer)) return transfer;
-        if (!JS_IsUndefined(transfer) && !JS_IsArray(transfer)) {
-            JS_FreeValue(ctx, transfer);
-            return JS_ThrowTypeError(ctx,
-                "structuredClone: transfer is not a sequence");
-        }
-    }
     uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
     GPtrArray *in_place = g_ptr_array_new();
     GPtrArray *seen = g_ptr_array_new();
@@ -13954,7 +14184,7 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, transfer);
     if (JS_IsUndefined(res)) {
-        res = ns_sc_run(ctx, argv[0], in_place);
+        res = ns_sc_run(ctx, value, in_place, seed_from, seed_to);
         if (!JS_IsException(res))
             for (guint i = 0; i < buffers->len; i++)
                 JS_DetachArrayBuffer(ctx, g_array_index(buffers, JSValue, i));
@@ -13964,6 +14194,40 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     g_array_free(buffers, TRUE);
     g_ptr_array_free(seen, TRUE);
     g_ptr_array_free(in_place, TRUE);
+    return res;
+}
+
+static JSValue
+ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
+    JSValue transfer = JS_UNDEFINED;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+        if (!JS_IsObject(argv[1]))
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: options is not an object");
+        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
+        if (JS_IsException(transfer)) return transfer;
+        if (!JS_IsUndefined(transfer) && !JS_IsArray(transfer)) {
+            JS_FreeValue(ctx, transfer);
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: transfer is not a sequence");
+        }
+    }
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, JS_UNDEFINED, ctx,
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, transfer);
+        return JS_EXCEPTION;
+    }
+    JSValue res = ns_structured_clone_transfer(ctx, argv[0], transfer,
+                                               old_ports, ports);
+    if (!JS_IsException(res)) ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+    JS_FreeValue(ctx, ports);
     return res;
 }
 
@@ -14559,6 +14823,23 @@ ns_history_replaceState(JSContext *ctx, JSValueConst this_val,
     return ns_history_set_state_impl(ctx, argc, argv, TRUE);
 }
 
+static void ns_js_dispatch_window_only_event(ns_js *js,
+                                             const ns_node *target_doc,
+                                             const char *type, JSValue event,
+                                             gboolean *default_prevented);
+
+/* hashchange, popstate and similar events are fired at the window: the
+ * window is their target, and they neither bubble nor can be cancelled. */
+static JSValue
+ns_make_window_event(JSContext *ctx, const char *type)
+{
+    JSValue event = ns_make_event(ctx, type, NULL);
+    JS_SetPropertyStr(ctx, event, "target", JS_GetGlobalObject(ctx));
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+    return event;
+}
+
 static JSValue
 ns_history_popstate_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -14566,9 +14847,10 @@ ns_history_popstate_job(JSContext *ctx, int argc, JSValueConst *argv)
     if (!js || !js->current_doc || js->halted || js->in_pump)
         return JS_UNDEFINED;
     JSValue state = argc >= 1 ? argv[0] : JS_NULL;
-    JSValue event = ns_make_event(ctx, "popstate", js->current_doc);
+    JSValue event = ns_make_window_event(ctx, "popstate");
     JS_SetPropertyStr(ctx, event, "state", JS_DupValue(ctx, state));
-    ns_js_dispatch_built_event(js, js->current_doc, "popstate", event, NULL);
+    ns_js_dispatch_window_only_event(js, js->current_doc, "popstate", event,
+                                     NULL);
     return JS_UNDEFINED;
 }
 
@@ -24442,7 +24724,13 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         JSValue cb = JS_DupValue(ctx, o->cb);
         JSValue self = JS_DupValue(ctx, o->wrapper);
         JSValueConst call_args[2] = { arr, self };
+        /* Each observer's callback runs against its own frame's document
+         * and URL, whichever realm queued this drain. */
+        JSContext *cb_realm = ns_function_realm(ctx, cb);
+        ns_realm_scope scope;
+        ns_js_realm_scope_enter(js, cb_realm, &scope);
         JSValue ret = JS_Call(ctx, cb, self, 2, call_args);
+        ns_js_realm_scope_leave(js, &scope);
         if (JS_IsException(ret)) {
             JSValue ex = JS_GetException(ctx);
             if (js->log_cb) {
@@ -24664,13 +24952,36 @@ ns_node_scope_document(ns_node *node)
     return NULL;
 }
 
+/* The parent of n within its own node tree: a shadow root and a frame's
+ * document are roots there, whatever node holds them in the engine. */
+static const ns_node *
+ns_dom_tree_parent(const ns_node *n)
+{
+    if (!n || ns_node_is_shadow_root(n) || ns_node_is_embedded_doc(n))
+        return NULL;
+    return n->parent;
+}
+
+/* True when n belongs to a shadow tree rather than its document's tree. */
+static gboolean
+ns_node_in_shadow_tree(const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent) {
+        if (ns_node_is_shadow_root(p)) return TRUE;
+        if (p->kind == NS_NODE_DOCUMENT) return FALSE;
+    }
+    return FALSE;
+}
+
 static void
 ns_js_index_child_change(ns_js *js, ns_node *parent,
                          ns_node *added, ns_node *removed)
 {
     ns_qcache_invalidate(js);
     ns_node *doc = ns_node_scope_document(parent);
-    if (js && doc) {
+    /* The document's id, class and tag indexes cover its own tree only;
+     * nodes inserted into a shadow tree stay out of them. */
+    if (js && doc && !ns_node_in_shadow_tree(parent)) {
         if (removed) {
             ns_doc_id_index_subtree_removed   (doc, removed);
             ns_doc_class_index_subtree_removed(doc, removed);
@@ -24732,7 +25043,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
 {
     ns_qcache_invalidate(js);
     ns_node *doc = ns_node_scope_document(parent);
-    if (js && doc) {
+    if (js && doc && !ns_node_in_shadow_tree(parent)) {
         if (removed)
             for (guint i = 0; i < removed->len; i++) {
                 ns_node *n = g_ptr_array_index(removed, i);
@@ -24782,6 +25093,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
          g_ascii_strcasecmp(name, "class") == 0))
         ns_qcache_invalidate(js);
     ns_node *doc = ns_node_scope_document(target);
+    if (doc && ns_node_in_shadow_tree(target)) doc = NULL;
     if (js && doc && target && name &&
         g_ascii_strcasecmp(name, "id") == 0) {
         if (old_value && *old_value)
@@ -27660,6 +27972,8 @@ ns_fire_inline_on_handler(ns_js *js, const ns_node *target, const char *type,
     return fired;
 }
 
+static gboolean ns_event_type_is_window_reflected(const char *type);
+
 static gboolean
 ns_fire_inline_on_handler_in_realm(ns_js *js, const ns_node *target,
                                    const char *type, JSValue event)
@@ -27694,7 +28008,12 @@ ns_fire_inline_on_handler_in_realm(ns_js *js, const ns_node *target,
         return FALSE;
     }
 
-    JSValue this_val = ns_make_element(js->ctx, target);
+    /* <body onload> and the other window-reflecting attributes are the
+     * window's handlers: they run with the window as this and currentTarget. */
+    gboolean window_handler = ns_node_is_window_handler_holder(target) &&
+                              ns_event_type_is_window_reflected(type);
+    JSValue this_val = window_handler ? JS_GetGlobalObject(js->ctx)
+                                      : ns_make_element(js->ctx, target);
     gboolean special = FALSE;
     JSValue prev_ct = JS_GetPropertyStr(js->ctx, event, "currentTarget");
     JS_SetPropertyStr(js->ctx, event, "currentTarget",
@@ -27880,16 +28199,6 @@ ns_current_event_pop(ns_js *js, ns_current_event_guard *g)
     JS_SetPropertyStr(js->ctx, g->global, "event", g->prev);
     JS_FreeValue(js->ctx, g->global);
     g->set = FALSE;
-}
-
-static gboolean
-ns_node_in_shadow_tree(const ns_node *n)
-{
-    for (const ns_node *p = n; p; p = p->parent)
-        if (p->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(p, NS_SHADOW_ATTR) != NULL)
-            return TRUE;
-    return FALSE;
 }
 
 static gboolean
@@ -28162,6 +28471,12 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
                                 gboolean *fired)
 {
     const ns_node *event_doc = ns_event_document_for_target(js, target);
+    JSValue global_obj = ns_event_window_for_document(js, event_doc);
+    JS_SetPropertyStr(js->ctx, event, "currentTarget",
+                      JS_DupValue(js->ctx, global_obj));
+    JS_SetPropertyStr(js->ctx, event, "eventPhase",
+                      JS_NewInt32(js->ctx,
+                                  at_target ? 2 : (capture_phase ? 1 : 3)));
     if (!capture_phase &&
         ns_fire_window_property_handlers(js, target, type, event))
         *fired = TRUE;
@@ -28177,19 +28492,9 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
         if (!!l->capture != !!capture_phase) continue;
         g_ptr_array_add(to_call, l);
     }
-    JSValue global_obj = JS_UNDEFINED;
-    if (to_call->len > 0) {
-        global_obj = ns_event_window_for_document(js, event_doc);
-        JS_SetPropertyStr(js->ctx, event, "currentTarget",
-                          JS_DupValue(js->ctx, global_obj));
-        JS_SetPropertyStr(js->ctx, event, "eventPhase",
-                          JS_NewInt32(js->ctx,
-                                      at_target ? 2 : (capture_phase ? 1 : 3)));
-    }
     gboolean stopped = ns_run_listener_array(js, to_call, global_obj,
                                              type, event, fired);
-    if (!JS_IsUndefined(global_obj))
-        JS_FreeValue(js->ctx, global_obj);
+    JS_FreeValue(js->ctx, global_obj);
     g_ptr_array_free(to_call, TRUE);
     if (!stopped)
         stopped = ns_event_propagation_is_stopped(js, event);
@@ -28197,6 +28502,21 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
     js->dispatch_depth--;
     ns_listeners_sweep(js);
     return stopped;
+}
+
+/* Only the outermost dispatch drains mutations and microtasks; a dispatch
+ * from inside a script or a microtask leaves that to its caller. */
+static void
+ns_dispatch_finish_mutations(ns_js *js)
+{
+    if (js->eval_depth == 0 && js->callback_depth == 0 && !js->in_pump) {
+        ns_drain_mutations(js);
+    } else {
+        if (js->mutated && js->mut_cb)
+            js->mut_cb(js->mut_user_data);
+        js->mutated = FALSE;
+        ns_storage_schedule_flush(js);
+    }
 }
 
 static void
@@ -28230,7 +28550,7 @@ ns_js_dispatch_window_only_event(ns_js *js, const ns_node *target_doc,
         JS_FreeValue(js->ctx, dp);
     }
     JS_FreeValue(js->ctx, event);
-    ns_drain_mutations(js);
+    ns_dispatch_finish_mutations(js);
     ns_js_budget_pop(js, &bg);
 }
 
@@ -28241,7 +28561,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     JSContext *saved_ctx = js->ctx;
     ns_node *saved_doc = js->current_doc;
     ns_node *saved_frame = js->raf_frame_ctx;
-    char *saved_url = js->current_url;
+    ns_frame_url fu;
     JSContext *target_ctx = ns_js_node_realm_context(js, target);
     const ns_node *target_root = target;
     while (target_root && target_root->parent) target_root = target_root->parent;
@@ -28257,9 +28577,8 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     if (target_frame) {
         js->current_doc = (ns_node *)target_doc;
         js->raf_frame_ctx = target_frame;
-        const char *frame_url = ns_element_get_attr(target_frame,
-                                                     "data-nd-frame-url");
-        js->current_url = g_strdup(frame_url ? frame_url : "");
+        ns_frame_url_enter(js, &fu, ns_element_get_attr(target_frame,
+                                                         "data-nd-frame-url"));
     }
     gboolean fired = FALSE;
     ns_budget_guard bg = {0};
@@ -28302,6 +28621,18 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         (strcmp(type, "load") == 0 || strcmp(type, "unload") == 0);
 
     gboolean stopped = ns_event_propagation_is_stopped(js, event);
+    if (window_is_target) {
+        /* The window's load and unload events are fired at the window with
+         * the document as their target; document listeners never see them. */
+        if (!stopped)
+            stopped = ns_invoke_window_listeners_full(js, target, type, event,
+                                                      TRUE, TRUE, &fired);
+        if (!stopped)
+            ns_invoke_window_listeners_full(js, target, type, event,
+                                            FALSE, TRUE, &fired);
+        stopped = TRUE;
+        window_in_path = FALSE;
+    }
     if (window_in_path && !stopped)
         stopped = ns_invoke_window_listeners(js, target, type, event, TRUE,
                                              &fired);
@@ -28352,19 +28683,9 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         JS_FreeValue(js->ctx, dp);
     }
     JS_FreeValue(js->ctx, event);
-    if (js->eval_depth == 0 && js->callback_depth == 0 && !js->in_pump) {
-        ns_drain_mutations(js);
-    } else {
-        if (js->mutated && js->mut_cb)
-            js->mut_cb(js->mut_user_data);
-        js->mutated = FALSE;
-        ns_storage_schedule_flush(js);
-    }
+    ns_dispatch_finish_mutations(js);
     ns_js_budget_pop(js, &bg);
-    if (target_frame) {
-        g_free(js->current_url);
-        js->current_url = saved_url;
-    }
+    if (target_frame) ns_frame_url_leave(js, &fu);
     js->raf_frame_ctx = saved_frame;
     js->current_doc = saved_doc;
     js->ctx = saved_ctx;
@@ -28706,15 +29027,14 @@ ns_js_run_animation_frame_internal(ns_js *js)
         JSContext *previous_ctx = js->ctx;
         ns_node *previous_doc = js->current_doc;
         ns_node *previous_frame = js->raf_frame_ctx;
-        char *previous_url = js->current_url;
+        ns_frame_url fu;
         js->ctx = callback_ctx;
         js->raf_frame_ctx = e->frame;
         if (e->frame) {
             ns_node *frame_doc = ns_iframe_document_node(e->frame);
             if (frame_doc) js->current_doc = frame_doc;
-            const char *frame_url = ns_element_get_attr(e->frame,
-                                                         "data-nd-frame-url");
-            js->current_url = g_strdup(frame_url ? frame_url : "");
+            ns_frame_url_enter(js, &fu, ns_element_get_attr(e->frame,
+                                                             "data-nd-frame-url"));
         }
         js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
         JSValue arg = JS_NewFloat64(callback_ctx, ts_ms);
@@ -28783,10 +29103,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
         JS_FreeValue(callback_ctx, arg);
         JS_FreeValue(callback_ctx, e->cb);
         ns_drain_microtasks(js);
-        if (e->frame) {
-            g_free(js->current_url);
-            js->current_url = previous_url;
-        }
+        if (e->frame) ns_frame_url_leave(js, &fu);
         js->raf_frame_ctx = previous_frame;
         js->current_doc = previous_doc;
         js->ctx = previous_ctx;
@@ -29024,6 +29341,52 @@ ns_js_purge_subtree_rafs(ns_js *js, ns_node *root)
         ns_js_purge_subtree_rafs(js, c);
 }
 
+/* The bubbles and cancelable flags the HTML, DOM and UI Events standards
+ * give the events the browser itself fires.  Anything not listed bubbles
+ * and can be cancelled, like click, submit, reset and beforeinput. */
+static void
+ns_event_type_init_flags(const char *type, gboolean at_document,
+                         gboolean *bubbles, gboolean *cancelable)
+{
+    static const char *const plain[] = {
+        "abort", "error", "load", "unload", "readystatechange", "resize",
+        "focus", "blur", "toggle", "close",
+        "loadstart", "progress", "suspend", "emptied", "stalled",
+        "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
+        "playing", "waiting", "seeking", "seeked", "ended",
+        "durationchange", "timeupdate", "play", "pause", "ratechange",
+        "volumechange",
+    };
+    static const char *const bubbling_only[] = {
+        "DOMContentLoaded", "input", "change", "focusin", "focusout",
+        "select", "fullscreenchange", "fullscreenerror",
+        "webkitfullscreenchange", "webkitfullscreenerror",
+        "mozfullscreenchange", "MSFullscreenChange",
+    };
+    *bubbles = TRUE;
+    *cancelable = TRUE;
+    if (strcmp(type, "scroll") == 0 || strcmp(type, "scrollend") == 0) {
+        /* Only the document's scroll event bubbles, up to the window. */
+        *bubbles = at_document;
+        *cancelable = FALSE;
+        return;
+    }
+    if (strcmp(type, "invalid") == 0 || strcmp(type, "cancel") == 0) {
+        *bubbles = FALSE;
+        return;
+    }
+    for (gsize i = 0; i < G_N_ELEMENTS(plain); i++)
+        if (strcmp(type, plain[i]) == 0) {
+            *bubbles = *cancelable = FALSE;
+            return;
+        }
+    for (gsize i = 0; i < G_N_ELEMENTS(bubbling_only); i++)
+        if (strcmp(type, bubbling_only[i]) == 0) {
+            *cancelable = FALSE;
+            return;
+        }
+}
+
 gboolean
 ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
                      gboolean *default_prevented)
@@ -29032,17 +29395,12 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
     JSValue event = ns_make_event(js->ctx, type, target);
-    static const char *const non_bubbling_types[] = {
-        "abort", "error", "invalid", "load", "unload",
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(non_bubbling_types); i++)
-        if (g_ascii_strcasecmp(type, non_bubbling_types[i]) == 0) {
-            JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
-            JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
-            break;
-        }
-    if (strcmp(type, "input") == 0 || strcmp(type, "change") == 0)
-        JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
+    gboolean bubbles = TRUE, cancelable = TRUE;
+    ns_event_type_init_flags(type, target->kind == NS_NODE_DOCUMENT,
+                             &bubbles, &cancelable);
+    JS_SetPropertyStr(js->ctx, event, "bubbles", JS_NewBool(js->ctx, bubbles));
+    JS_SetPropertyStr(js->ctx, event, "cancelable",
+                      JS_NewBool(js->ctx, cancelable));
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
@@ -31820,8 +32178,11 @@ static JSValue
 ns_element_get_parentElement(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || n->kind == NS_NODE_DOCUMENT) return JS_NULL;
-    if (!n->parent || n->parent->kind != NS_NODE_ELEMENT) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT || ns_node_is_shadow_root(n))
+        return JS_NULL;
+    if (!n->parent || n->parent->kind != NS_NODE_ELEMENT ||
+        ns_node_is_shadow_root(n->parent))
+        return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -31829,7 +32190,9 @@ static JSValue
 ns_element_get_parentNode(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || n->kind == NS_NODE_DOCUMENT || !n->parent) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT || !n->parent ||
+        ns_node_is_shadow_root(n))
+        return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -32062,7 +32425,8 @@ ns_root_uses_doc_index(const ns_node *root, const ns_node *doc)
     if (!doc || !root) return FALSE;
     for (const ns_node *p = root; p; p = p->parent) {
         if (p == doc) return TRUE;
-        if (ns_node_is_embedded_doc(p)) return FALSE;
+        if (ns_node_is_embedded_doc(p) || ns_node_is_shadow_root(p))
+            return FALSE;
     }
     return FALSE;
 }
@@ -32894,7 +33258,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     if (ns_is_simple_class_selector(sel)) {
         const char *cls = sel + 1;
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             if (ns_element_has_class(cur, cls)) {
                 JS_FreeCString(ctx, sel);
                 return ns_make_element(ctx, cur);
@@ -32905,7 +33270,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     }
     if (ns_is_simple_tag_selector(sel)) {
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             if (cur->name && g_ascii_strcasecmp(cur->name, sel) == 0) {
                 JS_FreeCString(ctx, sel);
                 return ns_make_element(ctx, cur);
@@ -32917,7 +33283,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     if (ns_is_simple_id_selector(sel)) {
         const char *target_id = sel + 1;
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             const char *id = ns_element_get_attr(cur, "id");
             if (id && strcmp(id, target_id) == 0) {
                 JS_FreeCString(ctx, sel);
@@ -32943,7 +33310,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
     const ns_node *cur = el;
     int depth = 0;
-    while (cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH) {
+    while (cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH) {
         if (ns_matches_any_selector(sels, cur)) {
             ns_css_set_focus_node(prev_focus);
             ns_css_set_match_scope(prev_scope);
@@ -32971,7 +33339,7 @@ ns_element_contains(JSContext *ctx, JSValueConst this_val,
     if (!el || argc < 1) return JS_FALSE;
     const ns_node *other = ns_unwrap_element(argv[0]);
     if (!other) return JS_FALSE;
-    for (const ns_node *cur = other; cur; cur = cur->parent)
+    for (const ns_node *cur = other; cur; cur = ns_dom_tree_parent(cur))
         if (cur == el) return JS_TRUE;
     return JS_FALSE;
 }
@@ -33140,15 +33508,17 @@ ns_element_compareDocumentPosition(JSContext *ctx, JSValueConst this_val,
     const ns_node *b = ns_unwrap_element(argv[0]);
     if (!b) return JS_NewInt32(ctx, 1);
     if (a == b) return JS_NewInt32(ctx, 0);
-    for (const ns_node *p = a->parent; p; p = p->parent)
+    for (const ns_node *p = ns_dom_tree_parent(a); p; p = ns_dom_tree_parent(p))
         if (p == b) return JS_NewInt32(ctx, 0x02 | 0x08);
-    for (const ns_node *p = b->parent; p; p = p->parent)
+    for (const ns_node *p = ns_dom_tree_parent(b); p; p = ns_dom_tree_parent(p))
         if (p == a) return JS_NewInt32(ctx, 0x04 | 0x10);
     const ns_node *anc_a = a, *anc_b = b;
     GPtrArray *pa = g_ptr_array_new();
     GPtrArray *pb = g_ptr_array_new();
-    for (; anc_a; anc_a = anc_a->parent) g_ptr_array_add(pa, (gpointer)anc_a);
-    for (; anc_b; anc_b = anc_b->parent) g_ptr_array_add(pb, (gpointer)anc_b);
+    for (; anc_a; anc_a = ns_dom_tree_parent(anc_a))
+        g_ptr_array_add(pa, (gpointer)anc_a);
+    for (; anc_b; anc_b = ns_dom_tree_parent(anc_b))
+        g_ptr_array_add(pb, (gpointer)anc_b);
     const ns_node *common = NULL;
     guint ia = pa->len, ib = pb->len;
     while (ia > 0 && ib > 0 && pa->pdata[ia - 1] == pb->pdata[ib - 1]) {
@@ -33174,7 +33544,8 @@ ns_element_get_nodeType(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_NewInt32(ctx, 0);
-    if (el->flags & NS_NODE_FRAGMENT) return JS_NewInt32(ctx, 11);
+    if ((el->flags & NS_NODE_FRAGMENT) || ns_node_is_shadow_root(el))
+        return JS_NewInt32(ctx, 11);
     switch (el->kind) {
         case NS_NODE_ELEMENT: return JS_NewInt32(ctx, 1);
         case NS_NODE_TEXT:
@@ -33192,7 +33563,7 @@ ns_element_get_nodeName(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_NewString(ctx, "#text");
-    if (el->flags & NS_NODE_FRAGMENT)
+    if ((el->flags & NS_NODE_FRAGMENT) || ns_node_is_shadow_root(el))
         return JS_NewString(ctx, "#document-fragment");
     switch (el->kind) {
         case NS_NODE_TEXT:
@@ -34677,14 +35048,6 @@ ns_element_get_will_validate(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
     return JS_NewBool(ctx, ns_node_will_validate(ns_unwrap_element(this_val)));
-}
-
-static gboolean
-ns_js_node_contains(const ns_node *ancestor, const ns_node *node)
-{
-    for (const ns_node *p = node; p; p = p->parent)
-        if (p == ancestor) return TRUE;
-    return FALSE;
 }
 
 static gboolean
@@ -38836,23 +39199,132 @@ ns_js_note_pointer_input(ns_js *js, gboolean pointer)
     if (js) js->pointer_input = pointer;
 }
 
+typedef struct ns_focus_guard {
+    const ns_node *node[4];     /* old element, new element, old and new document */
+    struct ns_focus_guard *prev;
+} ns_focus_guard;
+
+static void
+ns_focus_guard_forget(ns_js *js, const ns_node *n)
+{
+    for (ns_focus_guard *g = js->focus_guard; g; g = g->prev)
+        for (gsize i = 0; i < G_N_ELEMENTS(g->node); i++)
+            if (g->node[i] == n) g->node[i] = NULL;
+}
+
+static ns_node *
+ns_node_owner_doc(const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p->kind == NS_NODE_DOCUMENT) return (ns_node *)p;
+    return NULL;
+}
+
+static ns_node *
+ns_js_focused_document(ns_js *js)
+{
+    if (js->focused_doc) return (ns_node *)js->focused_doc;
+    return ns_js_top_document(js->current_doc);
+}
+
+static void
+ns_js_dispatch_focus_event(ns_js *js, const ns_node *target, const char *type,
+                           const ns_node *related)
+{
+    if (js->halted || js->in_pump) return;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, target);
+    gboolean bubbles = FALSE, cancelable = FALSE;
+    ns_event_type_init_flags(type, FALSE, &bubbles, &cancelable);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_NewBool(ctx, bubbles));
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_NewBool(ctx, cancelable));
+    JS_SetPropertyStr(ctx, event, "relatedTarget",
+                      related ? ns_make_element(ctx, related) : JS_NULL);
+    ns_js_dispatch_built_event(js, target, type, event, NULL);
+}
+
+/* focus or blur at the window of doc, in that window's realm. */
+static void
+ns_js_fire_window_focus_event(ns_js *js, ns_node *doc, const char *type)
+{
+    if (!doc || js->halted || js->in_pump) return;
+    JSContext *realm = doc->parent ? ns_js_node_realm_context(js, doc)
+                     : js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (!realm) return;
+    ns_realm_scope scope;
+    scope.active = FALSE;
+    if (doc->parent) {
+        if (realm != js->ctx)
+            ns_js_frame_scope_enter(js, realm, doc->parent, &scope);
+    } else {
+        ns_js_realm_scope_enter(js, realm, &scope);
+    }
+    JSValue ev = ns_make_window_event(js->ctx, type);
+    JS_SetPropertyStr(js->ctx, ev, "target",
+                      ns_event_window_for_document(js, doc));
+    JS_SetPropertyStr(js->ctx, ev, "relatedTarget", JS_NULL);
+    ns_js_dispatch_window_only_event(js, doc, type, ev, NULL);
+    ns_js_realm_scope_leave(js, &scope);
+}
+
+/* Moves focus to el, or with el NULL to no element of doc, following the
+ * HTML focus update steps: blur and focusout on the old element while no
+ * element has focus, blur and focus at the windows once focus has changed
+ * document, then focus and focusin on the new element.  relatedTarget is
+ * the other element when both are in one document. */
+static void
+ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
+{
+    if (!js) return;
+    ns_node *old_doc = ns_js_focused_document(js);
+    ns_node *new_doc = el ? ns_node_owner_doc(el) : doc ? doc : old_doc;
+    if (js->focused_node == el && new_doc == old_doc) return;
+    const ns_node *old = js->focused_node;
+    gboolean same_doc = new_doc == old_doc;
+
+    /* Handlers run between the steps below and may free any of these
+     * nodes; the free hook clears them and the update stops. */
+    ns_focus_guard g = { { old, el, old_doc, new_doc }, js->focus_guard };
+    for (gsize i = 0; i < G_N_ELEMENTS(g.node); i++)
+        if (g.node[i]) ns_node_arm_js_invalidate((ns_node *)g.node[i]);
+    js->focus_guard = &g;
+
+    js->focused_node = NULL;
+    ns_js_update_focus_visible(js);
+    js->mutated = TRUE;
+    if (old) {
+        ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
+        if (g.node[0])
+            ns_js_dispatch_focus_event(js, old, "focusout",
+                                       same_doc ? el : NULL);
+        if (js->focused_node) goto out;
+    }
+    if (!same_doc) {
+        /* The windows hear about the move after the focused document has
+         * changed, so the old window's blur already sees it. */
+        if (!g.node[3]) goto out;
+        js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
+        if (g.node[2]) ns_js_fire_window_focus_event(js, old_doc, "blur");
+        if (js->focused_node || !g.node[3]) goto out;
+        ns_js_fire_window_focus_event(js, new_doc, "focus");
+        if (js->focused_node) goto out;
+    }
+    if (!el || !g.node[1]) goto out;
+    js->focused_node = el;
+    js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
+    ns_js_update_focus_visible(js);
+    js->focus_nav_start = NULL;
+    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? old : NULL);
+    if (g.node[1])
+        ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+out:
+    js->focus_guard = g.prev;
+}
+
 void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
-    if (!js || js->focused_node == el) return;
-    const ns_node *old = js->focused_node;
-    if (old) {
-        ns_js_dispatch_event(js, old, "blur", NULL);
-        ns_js_dispatch_event(js, old, "focusout", NULL);
-    }
-    js->focused_node = el;
-    ns_js_update_focus_visible(js);
-    js->mutated = TRUE;
-    if (el) js->focus_nav_start = NULL;
-    if (el) {
-        ns_js_dispatch_event(js, el, "focus", NULL);
-        ns_js_dispatch_event(js, el, "focusin", NULL);
-    }
+    ns_js_set_focus_in(js, el, NULL);
 }
 
 void
@@ -38869,9 +39341,14 @@ ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
 {
     if (!js) return;
     const ns_node *focus = NULL;
-    for (const ns_node *a = target; a && !focus; a = a->parent)
+    /* Look for a focusable ancestor only within the clicked document: a
+     * click on plain content in a frame focuses the frame's document, not
+     * the iframe element around it. */
+    for (const ns_node *a = target; a && !focus; a = a->parent) {
+        if (a->kind == NS_NODE_DOCUMENT) break;
         if (ns_node_is_focusable(a)) focus = a;
-    ns_js_set_focus(js, focus);
+    }
+    ns_js_set_focus_in(js, focus, ns_node_owner_doc(target));
     if (focus || !target) return;
     js->focus_nav_start = target;
     ns_node_arm_js_invalidate((ns_node *)target);
@@ -39008,8 +39485,11 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!el || !js) return JS_UNDEFINED;
-    if (ns_element_effectively_inert(el)) return JS_UNDEFINED;
-    if (ns_element_effectively_disabled(el)) return JS_UNDEFINED;
+    /* Only a focusable element in this browser's document tree can take
+     * focus; focus() on anything else does nothing. */
+    if (!ns_node_is_focusable(el)) return JS_UNDEFINED;
+    if (!ns_node_ancestor_or_self(el, ns_js_top_document(js->current_doc)))
+        return JS_UNDEFINED;
     ns_js_set_focus(js, el);
     return JS_UNDEFINED;
 }
@@ -44572,6 +45052,10 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
     "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
     "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
+    /* Engine keys written as "\xff..." in C read back starting with
+     * U+FFFD; they hold a window's own state, such as its on<event>
+     * handlers, and a frame must not start with its parent's. */
+    "      if (pk.charCodeAt(0) === 0xfffd) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
     "        if (pd) Object.defineProperty(G, pk, pd);"
@@ -44640,7 +45124,13 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     }
 
     JSValue fg = JS_GetGlobalObject(fctx);
-    JSValue parent_global = JS_GetGlobalObject(js->ctx);
+    /* The parent is the window whose document holds the iframe, which for
+     * a nested frame is another frame's window, not the top-level one. */
+    JSContext *parent_ctx = iframe && iframe->parent
+        ? ns_js_node_realm_context(js, iframe->parent) : NULL;
+    if (!parent_ctx) parent_ctx = js->main_realm_ctx ? js->main_realm_ctx
+                                                     : js->ctx;
+    JSValue parent_global = JS_GetGlobalObject(parent_ctx);
 
     JSValue maker = JS_Eval(fctx, ns_iframe_global_bootstrap,
                             strlen(ns_iframe_global_bootstrap),
@@ -45915,6 +46405,29 @@ ns_document_get_head(JSContext *ctx, JSValueConst this_val)
     return ns_make_element(ctx, head);
 }
 
+/* The element of doc that is or contains the focused area: the focused
+ * element itself, the iframe whose document holds focus, or the shadow host
+ * whose shadow tree does.  NULL when focus is outside doc. */
+static const ns_node *
+ns_js_active_element_in(ns_js *js, const ns_node *doc)
+{
+    const ns_node *n = js->focused_node;
+    if (!n) {
+        const ns_node *fdoc = js->focused_doc;
+        n = fdoc && fdoc != doc ? fdoc->parent : NULL;
+    }
+    while (n) {
+        const ns_node *found = n;
+        const ns_node *p = n->parent;
+        for (; p && p->kind != NS_NODE_DOCUMENT; p = p->parent)
+            if (ns_node_is_shadow_root(p) && p->parent) found = p->parent;
+        if (!p) return NULL;
+        if (p == doc) return found;
+        n = p->parent;
+    }
+    return NULL;
+}
+
 static JSValue
 ns_document_get_activeElement(JSContext *ctx, JSValueConst this_val)
 {
@@ -45922,9 +46435,11 @@ ns_document_get_activeElement(JSContext *ctx, JSValueConst this_val)
     ns_js *js = js_from_ctx(ctx);
     if (!js || !doc) return JS_NULL;
     if (js->focused_node &&
-        ns_js_node_contains(doc, js->focused_node))
-        return ns_make_element(ctx, js->focused_node);
-    if (doc == js->current_doc) js->focused_node = NULL;
+        !ns_node_ancestor_or_self(js->focused_node,
+                                  ns_js_top_document(js->current_doc)))
+        js->focused_node = NULL;
+    const ns_node *active = ns_js_active_element_in(js, doc);
+    if (active) return ns_make_element(ctx, active);
     ns_node *body = ns_node_find_first_element(doc, "body");
     return ns_make_element(ctx, body);
 }
@@ -46138,8 +46653,14 @@ static JSValue
 ns_document_has_focus(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_TRUE;
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!js || !doc) return JS_FALSE;
+    /* A document has focus when the focused document is it or is nested
+     * inside it through frames. */
+    return JS_NewBool(ctx, ns_node_ancestor_or_self(ns_js_focused_document(js),
+                                                    doc) != NULL);
 }
 
 static gboolean
@@ -48486,12 +49007,15 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
         return;
     }
     js->in_scroll_dispatch = TRUE;
-    JSValue ev = ns_make_event(ctx, "scroll", NULL);
-    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
-    JS_FreeValue(ctx, global);
-    ns_js_dispatch_window_only_event(js, js->current_doc, "scroll", ev, NULL);
-    if (js->current_doc)
+    /* Viewport scrolling fires one scroll event at the document, which
+     * bubbles to the window. */
+    if (js->current_doc) {
         ns_js_dispatch_event(js, js->current_doc, "scroll", NULL);
+    } else {
+        JSValue ev = ns_make_window_event(ctx, "scroll");
+        ns_js_dispatch_window_only_event(js, NULL, "scroll", ev, NULL);
+    }
+    JS_FreeValue(ctx, global);
     js->in_scroll_dispatch = FALSE;
     ns_observer_schedule_tick(js);
 }
@@ -48501,14 +49025,9 @@ ns_js_dispatch_resize(ns_js *js)
 {
     if (!js || !js->ctx) return;
     JSContext *ctx = js->ctx;
-    JSValue ev = ns_make_event(ctx, "resize", NULL);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
-    JS_FreeValue(ctx, global);
+    JSValue ev = ns_make_window_event(ctx, "resize");
     ns_js_dispatch_window_only_event(js, js->current_doc, "resize", ev, NULL);
     ns_js_media_queries_reeval(js);
-    if (js->current_doc)
-        ns_js_dispatch_event(js, js->current_doc, "resize", NULL);
 }
 
 void
@@ -48516,11 +49035,9 @@ ns_js_fire_page_transition(ns_js *js, const char *type, gboolean persisted)
 {
     if (!js || !js->ctx || !type) return;
     JSContext *ctx = js->ctx;
-    JSValue ev = ns_make_event(ctx, type, NULL);
+    /* Fired at the window, but with the document as the event's target. */
+    JSValue ev = ns_make_event(ctx, type, js->current_doc);
     JS_SetPropertyStr(ctx, ev, "persisted", persisted ? JS_TRUE : JS_FALSE);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
-    JS_FreeValue(ctx, global);
     ns_js_dispatch_window_only_event(js, js->current_doc, type, ev, NULL);
 }
 
@@ -50018,6 +50535,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->frame_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, g_free);
+    js->frame_referrers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                NULL, g_free);
     js->frame_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
@@ -53193,9 +53712,15 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 static JSValue
 ns_document_get_referrer(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    if (!js_from_ctx(ctx)) return JS_NewString(ctx, "");
-    return JS_NewString(ctx, js_from_ctx(ctx)->referrer ? js_from_ctx(ctx)->referrer : "");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NewString(ctx, "");
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (doc && doc->parent) {
+        const char *r = js->frame_referrers
+            ? g_hash_table_lookup(js->frame_referrers, doc->parent) : NULL;
+        return JS_NewString(ctx, r ? r : "");
+    }
+    return JS_NewString(ctx, js->referrer ? js->referrer : "");
 }
 
 static void
@@ -53346,7 +53871,7 @@ ns_js_flush_document_write(ns_js *js)
         ctx_tag, html, -1, scripting);
     g_free(html);
     if (!fragment) return;
-    ns_mark_scripts_already_started(fragment);
+    /* Unlike innerHTML, markup from document.write runs its scripts. */
     GPtrArray *inserted = g_ptr_array_new();
     js->throw_on_dynamic_markup++;
     ns_node *c = fragment->first_child;
@@ -53446,6 +53971,94 @@ ns_document_close(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* True when markup written so far closes every element it opens and ends
+ * outside any tag, comment or raw-text element, so parsing it now gives
+ * the nodes the HTML parser would have inserted by the end of the write.
+ * Writes that leave an element open, such as write("<div>") followed by
+ * write("</div>"), are parsed once the script ends instead.  Markup with an
+ * external script is held too, so that script runs before parsing goes on. */
+static gboolean
+ns_written_markup_is_complete(const char *s)
+{
+    static const char *const void_tags[] = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+        "meta", "param", "source", "track", "wbr",
+    };
+    static const char *const raw_tags[] = {
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed",
+        "noframes",
+    };
+    GPtrArray *open = g_ptr_array_new_with_free_func(g_free);
+    gboolean ok = TRUE;
+    const char *p = s;
+    while (ok && (p = strchr(p, '<'))) {
+        if (g_str_has_prefix(p, "<!--")) {
+            const char *end = strstr(p + 4, "-->");
+            if (!end) ok = FALSE; else p = end + 3;
+            continue;
+        }
+        gboolean closing = p[1] == '/';
+        const char *name = p + (closing ? 2 : 1);
+        if (!g_ascii_isalpha(*name)) {
+            if (*name == '!' || *name == '?') {
+                const char *end = strchr(name, '>');
+                if (!end) ok = FALSE; else p = end + 1;
+            } else {
+                p++;
+            }
+            continue;
+        }
+        const char *q = name;
+        while (*q && (g_ascii_isalnum(*q) || *q == '-' || *q == ':')) q++;
+        char *tag = g_ascii_strdown(name, q - name);
+        char quote = 0;
+        gboolean self_closing = FALSE, has_src = FALSE;
+        for (; *q && (quote || *q != '>'); q++) {
+            if (quote) { if (*q == quote) quote = 0; continue; }
+            if (*q == '"' || *q == '\'') quote = *q;
+            else if (*q == '/' && q[1] == '>') self_closing = TRUE;
+            else if (g_ascii_strncasecmp(q, "src", 3) == 0 &&
+                     (q[3] == '=' || g_ascii_isspace(q[3])) &&
+                     g_ascii_isspace(q[-1]))
+                has_src = TRUE;
+        }
+        if (!*q) { g_free(tag); ok = FALSE; break; }
+        p = q + 1;
+        if (closing) {
+            for (guint i = open->len; i > 0; i--)
+                if (strcmp(g_ptr_array_index(open, i - 1), tag) == 0) {
+                    g_ptr_array_set_size(open, i - 1);
+                    break;
+                }
+            g_free(tag);
+            continue;
+        }
+        gboolean is_void = self_closing, is_raw = FALSE;
+        for (gsize i = 0; i < G_N_ELEMENTS(void_tags); i++)
+            if (strcmp(tag, void_tags[i]) == 0) is_void = TRUE;
+        for (gsize i = 0; i < G_N_ELEMENTS(raw_tags); i++)
+            if (strcmp(tag, raw_tags[i]) == 0) is_raw = TRUE;
+        if (strcmp(tag, "script") == 0 && has_src) ok = FALSE;
+        if (ok && is_raw && !is_void) {
+            char *end_tag = g_strconcat("</", tag, NULL);
+            const char *e = p;
+            while ((e = strchr(e, '<')) &&
+                   g_ascii_strncasecmp(e, end_tag, strlen(end_tag)) != 0)
+                e++;
+            g_free(end_tag);
+            if (!e || !(e = strchr(e, '>'))) ok = FALSE;
+            else p = e + 1;
+            g_free(tag);
+            continue;
+        }
+        if (is_void) g_free(tag);
+        else g_ptr_array_add(open, tag);
+    }
+    ok = ok && open->len == 0;
+    g_ptr_array_free(open, TRUE);
+    return ok;
+}
+
 static JSValue
 ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
                          gboolean newline)
@@ -53474,7 +54087,8 @@ ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
         JS_FreeCString(ctx, s);
     }
     if (newline) g_string_append_c(js->document_write_buffer, '\n');
-    if (!js->current_script)
+    if (!js->current_script ||
+        ns_written_markup_is_complete(js->document_write_buffer->str))
         ns_js_flush_document_write(js);
     return JS_UNDEFINED;
 }
@@ -53838,14 +54452,16 @@ ns_location_get_href(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     if (!js_from_ctx(ctx)) return JS_NewString(ctx, "");
-    return JS_NewString(ctx, js_from_ctx(ctx)->current_url ? js_from_ctx(ctx)->current_url : "");
+    return JS_NewString(ctx, ns_js_top_url(js_from_ctx(ctx)));
 }
 
+/* The window's own location: the top-level document's URL, also when a
+ * frame's code reads parent.location or top.location. */
 static const char *
 ns_loc_url(JSContext *ctx)
 {
     ns_js *js = js_from_ctx(ctx);
-    return js && js->current_url ? js->current_url : "";
+    return js ? ns_js_top_url(js) : "";
 }
 
 static JSValue
@@ -53979,7 +54595,7 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         return JS_UNDEFINED;
     }
     if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(js->current_url, s);
+        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
         if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
             js->nav_cb(s, FALSE, js->nav_user_data);
     }
@@ -54001,7 +54617,7 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
         return JS_UNDEFINED;
     }
     if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(js->current_url, s);
+        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
         if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
             js->nav_cb(s, FALSE, js->nav_user_data);
     }
@@ -54015,7 +54631,7 @@ ns_location_reload(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     (void)ctx; (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
     if (js && js->nav_cb && !ns_location_nav_in_iframe(js))
-        js->nav_cb(js->current_url, TRUE, js->nav_user_data);
+        js->nav_cb(ns_js_top_url(js), TRUE, js->nav_user_data);
     return JS_UNDEFINED;
 }
 
@@ -54028,7 +54644,7 @@ ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
     const char *frag = s[0] == '#' ? s + 1 : s;
-    char *old_url = g_strdup(js->current_url ? js->current_url : "");
+    char *old_url = g_strdup(ns_js_top_url(js));
     char *base = g_strdup(old_url);
     char *cut = strchr(base, '#');
     if (cut) *cut = '\0';
@@ -54040,12 +54656,11 @@ ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         g_free(new_url);
         return JS_UNDEFINED;
     }
-    g_free(js->current_url);
-    js->current_url = g_strdup(new_url);
+    ns_js_set_top_url(js, new_url);
     if (js->soft_nav_cb)
-        js->soft_nav_cb(js->current_url, FALSE, js->soft_nav_user_data);
+        js->soft_nav_cb(new_url, FALSE, js->soft_nav_user_data);
     if (js->fragment_nav_cb)
-        js->fragment_nav_cb(js->current_url, js->fragment_nav_user_data);
+        js->fragment_nav_cb(new_url, js->fragment_nav_user_data);
     ns_js_dispatch_hashchange(js, old_url, new_url);
     g_free(old_url);
     g_free(new_url);
@@ -54056,15 +54671,15 @@ static JSValue
 ns_location_set_component(JSContext *ctx, JSValueConst val, const char *comp)
 {
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_url || !*js->current_url) return JS_UNDEFINED;
+    if (!js || !*ns_js_top_url(js)) return JS_UNDEFINED;
     size_t vlen = 0;
     const char *v = JS_ToCStringLen(ctx, &vlen, val);
     if (!v) return JS_EXCEPTION;
-    char *next = ns_url_set_component_len(js->current_url, comp, v, vlen);
+    char *next = ns_url_set_component_len(ns_js_top_url(js), comp, v, vlen);
     JS_FreeCString(ctx, v);
     if (!next) return JS_UNDEFINED;
     if (js->nav_cb && !ns_location_nav_in_iframe(js) &&
-        strcmp(next, js->current_url) != 0)
+        strcmp(next, ns_js_top_url(js)) != 0)
         js->nav_cb(next, FALSE, js->nav_user_data);
     g_free(next);
     return JS_UNDEFINED;
@@ -54134,6 +54749,7 @@ ns_js_reset_runtime_state(ns_js *js)
     if (!js) return;
     ns_popover_state_clear(js);
     js->focused_node = NULL;
+    js->focused_doc = NULL;
     ns_storage_free_deferred_events(js);
 
     if (js->pending_scrollend) {
@@ -54290,6 +54906,8 @@ ns_js_reset_runtime_state(ns_js *js)
         g_hash_table_remove_all(js->frame_contexts);
     if (js->frame_urls)
         g_hash_table_remove_all(js->frame_urls);
+    if (js->frame_referrers)
+        g_hash_table_remove_all(js->frame_referrers);
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
@@ -54395,6 +55013,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     js->current_doc = doc;
     js->ce_main_doc = doc;
     js->focused_node = NULL;
+    js->focused_doc = NULL;
     js->autofocus_processed = FALSE;
     js->active_modal = NULL;
     ns_dom_set_active_modal(NULL);
@@ -55259,6 +55878,10 @@ ns_js_free(ns_js *js)
     if (js->frame_urls) {
         g_hash_table_destroy(js->frame_urls);
         js->frame_urls = NULL;
+    }
+    if (js->frame_referrers) {
+        g_hash_table_destroy(js->frame_referrers);
+        js->frame_referrers = NULL;
     }
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
@@ -56367,10 +56990,10 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     }
     ns_node *previous_doc = js->current_doc;
     ns_node *previous_script = js->current_script;
-    char *previous_url = js->current_url;
+    ns_frame_url fu;
     js->current_doc = document ? document : previous_doc;
     js->current_script = script;
-    js->current_url = g_strdup(origin ? origin : "");
+    ns_frame_url_enter(js, &fu, origin);
 
     if (is_module) {
         JSContext *previous_module_ctx = js->module_ctx;
@@ -56413,8 +57036,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
         ns_js_budget_pop(js, &budget);
     }
 
-    g_free(js->current_url);
-    js->current_url = previous_url;
+    ns_frame_url_leave(js, &fu);
     js->current_script = previous_script;
     js->current_doc = previous_doc;
 }
@@ -56568,6 +57190,150 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         ns_js_eval_script_source(js, n, c->text, tlen, origin, is_module);
     }
+}
+
+/* Nordstjernen parses a whole document before running its scripts, but a
+ * parser-blocking script runs while the HTML parser has only reached its
+ * end tag: nothing after it exists yet, so document.body is null in <head>
+ * and the script is the last <script> in the document.  Before the first
+ * such script, every node after it is taken out of the tree, each one on
+ * its own, and before each later script the nodes up to and including it
+ * are put back one at a time in document order, the way the parser inserts
+ * them: at the end of their parent, after anything scripts inserted, and
+ * each with the childList record a parser insertion produces.  The rest is
+ * put back once the last parser-blocking script has run. */
+typedef struct ns_parser_held {
+    ns_node *parent;
+    ns_node *node;
+} ns_parser_held;
+
+typedef struct ns_parser_hold {
+    GArray *held;                   /* ns_parser_held, in document order */
+    guint next;                     /* first one not yet put back */
+    GHashTable *members;            /* every held node and parent */
+    struct ns_parser_hold *prev;
+} ns_parser_hold;
+
+static void
+ns_parser_hold_forget(ns_js *js, const ns_node *n)
+{
+    for (ns_parser_hold *h = js->parser_hold; h; h = h->prev) {
+        if (!g_hash_table_remove(h->members, n)) continue;
+        for (guint i = h->next; i < h->held->len; i++) {
+            ns_parser_held *e = &g_array_index(h->held, ns_parser_held, i);
+            if (e->parent == n) e->parent = NULL;
+            if (e->node == n) e->node = NULL;
+        }
+    }
+}
+
+static void
+ns_parser_hold_collect(ns_parser_hold *hold, ns_node *parent, ns_node *n,
+                       int depth)
+{
+    if (ns_dom_hidden_child(n)) return;
+    ns_parser_held e = { parent, n };
+    g_array_append_val(hold->held, e);
+    g_hash_table_add(hold->members, parent);
+    g_hash_table_add(hold->members, n);
+    if (depth >= 512 || ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_parser_hold_collect(hold, n, c, depth + 1);
+}
+
+static void
+ns_js_parser_hold_after(ns_js *js, ns_node *script, ns_parser_hold *hold)
+{
+    hold->held = g_array_new(FALSE, FALSE, sizeof(ns_parser_held));
+    hold->next = 0;
+    hold->members = g_hash_table_new(g_direct_hash, g_direct_equal);
+    hold->prev = js->parser_hold;
+    js->parser_hold = hold;
+    GPtrArray *tops = g_ptr_array_new();
+    for (ns_node *n = script; n && n->parent && n->kind != NS_NODE_DOCUMENT;
+         n = n->parent)
+        for (ns_node *sib = n->next_sibling; sib; sib = sib->next_sibling)
+            if (!ns_dom_hidden_child(sib)) {
+                g_ptr_array_add(tops, sib);
+                ns_parser_hold_collect(hold, n->parent, sib, 0);
+            }
+    for (guint i = 0; i < tops->len; i++) {
+        ns_node *top = g_ptr_array_index(tops, i);
+        ns_node *parent = top->parent;
+        ns_js_index_child_change(js, parent, NULL, top);
+        ns_node_remove(top);
+    }
+    g_ptr_array_free(tops, TRUE);
+    for (guint i = 0; i < hold->held->len; i++) {
+        ns_parser_held *e = &g_array_index(hold->held, ns_parser_held, i);
+        ns_node_arm_js_invalidate(e->parent);
+        ns_node_arm_js_invalidate(e->node);
+        if (e->node->parent) ns_node_remove(e->node);
+    }
+}
+
+static void
+ns_js_parser_put_back(ns_js *js, ns_parser_hold *hold, guint upto)
+{
+    for (; hold->next < upto && hold->next < hold->held->len; hold->next++) {
+        ns_parser_held *e = &g_array_index(hold->held, ns_parser_held,
+                                           hold->next);
+        /* A freed parent keeps its content out, like markup the parser
+         * goes on inserting into an element no longer in the tree. */
+        if (!e->parent || !e->node || e->node->parent) continue;
+        ns_node *prev = e->parent->last_child;
+        ns_node_append_child(e->parent, e->node);
+        ns_js_record_child_change(js, e->parent, e->node, NULL, prev, NULL);
+        js->mutated = TRUE;
+    }
+}
+
+/* Puts back the held nodes up to script and its text. */
+static void
+ns_js_parser_reach(ns_js *js, ns_parser_hold *hold, const ns_node *script)
+{
+    guint i = hold->next;
+    while (i < hold->held->len &&
+           g_array_index(hold->held, ns_parser_held, i).node != script)
+        i++;
+    if (i == hold->held->len) return;
+    i++;
+    while (i < hold->held->len &&
+           g_array_index(hold->held, ns_parser_held, i).parent == script)
+        i++;
+    ns_js_parser_put_back(js, hold, i);
+}
+
+static void
+ns_js_parser_release(ns_js *js, ns_parser_hold *hold)
+{
+    ns_js_parser_put_back(js, hold, hold->held->len);
+    js->parser_hold = hold->prev;
+    g_hash_table_destroy(hold->members);
+    g_array_free(hold->held, TRUE);
+}
+
+/* The parser-blocking scripts of a document's initial parse, in order,
+ * each seeing only the part of the document parsed before it. */
+static void
+ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
+{
+    if (!js || !tasks) return;
+    ns_parser_hold hold;
+    gboolean holding = FALSE;
+    for (guint i = 0; i < tasks->len; i++) {
+        ns_script_task *task = &g_array_index(tasks, ns_script_task, i);
+        if (task->schedule != NS_SCRIPT_BLOCKING) continue;
+        if (!holding) {
+            ns_js_parser_hold_after(js, task->node, &hold);
+            holding = TRUE;
+        } else {
+            ns_js_parser_reach(js, &hold, task->node);
+        }
+        ns_js_run_script_element(js, task->node, origin);
+    }
+    if (holding) ns_js_parser_release(js, &hold);
+    ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
 
 static void
@@ -56842,8 +57608,12 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     gboolean have_external = FALSE;
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *t = &g_array_index(tasks, ns_script_task, i);
+        /* While the initial parse is held at a script, a blocking script it
+         * writes runs before the parser goes on, even an external one. */
+        gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
+                                 js->callback_depth == 0;
         if (t->schedule == NS_SCRIPT_BLOCKING &&
-            !ns_element_get_attr(t->node, "src") &&
+            (!ns_element_get_attr(t->node, "src") || parser_paused) &&
             !ns_script_type_is_module(t->node))
             ns_js_run_script_element(js, t->node, origin);
         else
@@ -56922,6 +57692,40 @@ ns_js_drain_load_event_scripts(ns_js *js)
     }
 }
 
+/* The document.referrer of the document loading into iframe: the URL of
+ * the document holding the iframe, cut down by the referrer policy. */
+static char *
+ns_js_frame_referrer(ns_js *js, ns_node *iframe, const char *frame_url)
+{
+    const ns_node *holder = iframe->parent;
+    while (holder && holder->kind != NS_NODE_DOCUMENT) holder = holder->parent;
+    const char *holder_url = holder && holder->parent && js->frame_urls
+        ? g_hash_table_lookup(js->frame_urls, holder->parent)
+        : ns_js_top_url(js);
+    const ns_config *cfg = ns_config_get();
+    ns_referer_policy policy = cfg ? cfg->referer_policy
+                                   : NS_REFERER_STRICT_ORIGIN_WHEN_CROSS;
+    const char *attr = ns_element_get_attr(iframe, "referrerpolicy");
+    if (attr && g_ascii_strcasecmp(attr, "no-referrer") == 0)
+        policy = NS_REFERER_NO_REFERRER;
+    else if (attr && g_ascii_strcasecmp(attr, "same-origin") == 0)
+        policy = NS_REFERER_SAME_ORIGIN;
+    else if (attr && g_ascii_strcasecmp(attr, "unsafe-url") == 0)
+        policy = NS_REFERER_UNSAFE_URL;
+    const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
+    if (srcdoc && *srcdoc && policy != NS_REFERER_UNSAFE_URL) {
+        /* about:srcdoc is never same-origin with its holder's URL. */
+        char *origin = policy == NS_REFERER_STRICT_ORIGIN_WHEN_CROSS &&
+                       ns_url_is_http_or_https(holder_url)
+            ? ns_url_origin_from(holder_url) : NULL;
+        char *out = origin ? g_strdup_printf("%s/", origin) : g_strdup("");
+        g_free(origin);
+        return out;
+    }
+    char *referrer = ns_net_referer_for(frame_url, holder_url, policy);
+    return referrer ? referrer : g_strdup("");
+}
+
 static void
 ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
                          const char *abs_url)
@@ -56932,6 +57736,9 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
     if (js && js->frame_urls)
         g_hash_table_replace(js->frame_urls, iframe,
                              g_strdup(frame_url ? frame_url : ""));
+    if (js && js->frame_referrers)
+        g_hash_table_replace(js->frame_referrers, iframe,
+            ns_js_frame_referrer(js, iframe, frame_url));
     if (srcdoc && *srcdoc) {
         ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
         ns_element_set_attr(iframe, "data-nd-frame-url", origin);
@@ -58277,8 +59084,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             JS_FreeValue(js->ctx, iw);
         }
 
-        char *prev_url = js->current_url;
-        js->current_url = g_strdup(iorigin);
+        ns_frame_url fu;
+        ns_frame_url_enter(js, &fu, iorigin);
         ns_node *prev_doc = js->current_doc;
         js->current_doc = content_doc;
         if (content_doc) ns_doc_id_index_build(content_doc);
@@ -58311,7 +59118,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         } else {
             GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
             ns_js_collect_script_tasks(content_root, tasks);
-            ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, iorigin);
+            ns_js_run_parser_blocking_scripts(js, tasks, iorigin);
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, iorigin);
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, iorigin);
             g_array_free(tasks, TRUE);
@@ -58333,8 +59140,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         js->iframe_doc_set = prev_idoc_set;
         js->current_script = prev_script;
         js->current_doc = prev_doc;
-        g_free(js->current_url);
-        js->current_url = prev_url;
+        ns_frame_url_leave(js, &fu);
         JS_FreeValue(js->ctx, realm_scope);
         JS_FreeValue(js->ctx, realm_doc);
     }
@@ -58574,7 +59380,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);
     ns_js_collect_script_tasks(doc, tasks);
-    ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
+    ns_js_run_parser_blocking_scripts(js, tasks, origin);
     js->lifecycle_tasks = tasks;
     js->lifecycle_doc = doc;
     js->lifecycle_origin = g_strdup(origin);
@@ -59062,17 +59868,20 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     if (!js || !js->ctx) return;
     if (js->halted || js->in_pump || js->in_hashchange) return;
     js->in_hashchange = TRUE;
+    /* The top-level window's hash changed, possibly through a frame's
+     * parent.location, so the event goes to the top-level window. */
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, js->main_realm_ctx, &scope);
     JSContext *ctx = js->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ev = ns_make_event(ctx, "hashchange", js->current_doc);
+    JSValue ev = ns_make_window_event(ctx, "hashchange");
     JS_SetPropertyStr(ctx, ev, "oldURL",
                       JS_NewString(ctx, old_url ? old_url : ""));
     JS_SetPropertyStr(ctx, ev, "newURL",
                       JS_NewString(ctx, new_url ? new_url : ""));
     if (js->current_doc) {
-        gboolean prev = FALSE;
-        ns_js_dispatch_built_event(js, js->current_doc, "hashchange",
-                                   JS_DupValue(ctx, ev), &prev);
+        ns_js_dispatch_window_only_event(js, js->current_doc, "hashchange",
+                                         JS_DupValue(ctx, ev), NULL);
     } else {
         JSValue handler = JS_GetPropertyStr(ctx, global, "onhashchange");
         if (JS_IsFunction(ctx, handler)) {
@@ -59085,6 +59894,7 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     }
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
+    ns_js_realm_scope_leave(js, &scope);
     js->in_hashchange = FALSE;
 }
 
