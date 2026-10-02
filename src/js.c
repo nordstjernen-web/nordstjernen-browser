@@ -59825,6 +59825,13 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(js->ctx, outward_window);
         gint64 iframe_deadline_us =
             g_get_monotonic_time() + ns_js_eval_budget_us();
+        /* The frame's scripts run in its realm scope, as its timers and
+         * event handlers do, so work they start (a fetch, an XHR) belongs
+         * to the frame's document. */
+        ns_realm_scope frame_scope;
+        gboolean in_frame_scope = iframe != NULL;
+        if (in_frame_scope)
+            ns_js_frame_scope_enter(js, fctx, iframe, &frame_scope);
         for (guint i = 0; i < classic_sources->len; i++) {
             if (g_get_monotonic_time() >= iframe_deadline_us) break;
             ns_iframe_classic_source *source =
@@ -59861,6 +59868,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             }
             JS_FreeValue(fctx, v);
         }
+        if (in_frame_scope) ns_js_realm_scope_leave(js, &frame_scope);
     } else if (concat->len > 0) {
         GString *w = g_string_new(
             "(function(window,self,globalThis,top,parent,document,location,history){\nwith(window){\n");
