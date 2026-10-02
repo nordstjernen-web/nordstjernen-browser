@@ -4,10 +4,13 @@
 
 #include <string.h>
 
+#define NS_CSS_SYNTAX_MAX_NESTING 128
+
 typedef struct ns_css_syntax_parser {
     const char *input;
     gsize length;
     gsize offset;
+    guint nesting;
     gboolean valid;
 } ns_css_syntax_parser;
 
@@ -306,6 +309,12 @@ css_syntax_parse_list(ns_css_syntax_parser *parser, char closing)
 {
     GPtrArray *components =
         g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_component_free);
+    if (parser->nesting >= NS_CSS_SYNTAX_MAX_NESTING) {
+        parser->valid = FALSE;
+        parser->offset = parser->length;
+        return components;
+    }
+    parser->nesting++;
     while (parser->offset < parser->length) {
         char c = parser->input[parser->offset];
         if (c == '/' && parser->offset + 1 < parser->length &&
@@ -315,16 +324,17 @@ css_syntax_parse_list(ns_css_syntax_parser *parser, char closing)
         }
         if (closing && c == closing) {
             parser->offset++;
-            return components;
+            break;
         }
         if (c == ')' || c == ']' || c == '}') {
             parser->valid = FALSE;
             parser->offset++;
-            if (closing) return components;
+            if (closing) break;
             continue;
         }
         g_ptr_array_add(components, css_syntax_consume(parser));
     }
+    parser->nesting--;
     return components;
 }
 
