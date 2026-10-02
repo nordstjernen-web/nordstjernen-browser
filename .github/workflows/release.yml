@@ -1,0 +1,78 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build Linux packages for
+        required: true
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  linux:
+    name: Debian package and portable zip
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 90
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      # Installs the build dependencies, builds, packs the zip and the .deb,
+      # then installs the .deb in this container and runs it headless.
+      - name: Build, package and verify
+        run: bash scripts/nightly-distro-build.sh debian
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach to the release
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: dist
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum -- *.deb *.zip > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
+            --clobber --repo "$GITHUB_REPOSITORY"
