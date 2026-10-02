@@ -1904,9 +1904,8 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
 }
 
 static void
-ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
+ns_video_discover_element(ns_video_cache *cache, const ns_node *node)
 {
-    if (!node) return;
     if (node->kind == NS_NODE_ELEMENT && node->name &&
         strcmp(node->name, "video") == 0) {
         const char *src = ns_element_get_attr(node, "src");
@@ -1941,8 +1940,14 @@ ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
             g_free(abs);
         }
     }
-    for (const ns_node *c = node->first_child; c; c = c->next_sibling)
-        ns_video_discover_dom(cache, c);
+}
+
+static void
+ns_video_discover_dom(ns_video_cache *cache, const ns_node *root)
+{
+    for (const ns_node *node = root; node;
+         node = ns_node_next_in_subtree(node, root, TRUE))
+        ns_video_discover_element(cache, node);
 }
 
 void

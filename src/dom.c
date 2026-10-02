@@ -1123,6 +1123,18 @@ ns_node_remove(ns_node *child)
     ns_node_detach(child);
 }
 
+ns_node *
+ns_node_next_in_subtree(const ns_node *node, const ns_node *root,
+                        gboolean descend)
+{
+    if (descend && node->first_child)
+        return node->first_child;
+    for (const ns_node *n = node; n && n != root; n = n->parent)
+        if (n->next_sibling)
+            return n->next_sibling;
+    return NULL;
+}
+
 gboolean
 ns_attr_name_is_internal(const char *name)
 {

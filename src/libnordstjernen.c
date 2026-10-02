@@ -137,11 +137,8 @@ struct ns_browser {
 static gboolean
 browser_doc_has_node(const ns_node *root, const ns_node *target)
 {
-    for (const ns_node *n = root; n; n = n->next_sibling) {
+    for (const ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE))
         if (n == target) return TRUE;
-        if (n->first_child && browser_doc_has_node(n->first_child, target))
-            return TRUE;
-    }
     return FALSE;
 }
 
