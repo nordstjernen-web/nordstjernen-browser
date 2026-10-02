@@ -122,9 +122,10 @@ DirectComposition). Every other platform builds from source — see
 ## Build
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential git pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
