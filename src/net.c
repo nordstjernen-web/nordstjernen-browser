@@ -75,8 +75,13 @@ static GMutex      g_conn_stats_lock;
 static GHashTable *g_conn_stats;
 
 #define NS_DEAD_HOST_TTL_US ((gint64)120 * G_USEC_PER_SEC)
+/* Origins (scheme, host and port) a connection recently failed to.  A
+ * refused port says nothing about the host's other ports, so the key is
+ * the origin, not the host. */
 static GHashTable *g_dead_hosts;
 static GMutex      g_dead_hosts_lock;
+
+static char *ns_url_origin_from_any(const char *url);
 
 static gboolean
 ns_net_host_recently_dead(const char *host)
@@ -886,6 +891,65 @@ ns_url_origin_from(const char *url)
             == LXB_STATUS_OK) {
             if (u->has_port)
                 g_string_append_printf(s, ":%u", (unsigned)u->port);
+            out = g_string_free(s, FALSE);
+        } else {
+            g_string_free(s, TRUE);
+        }
+    }
+    ns_url_parser_close(parser);
+    return out;
+}
+
+char *
+ns_net_raw_header_values(const char *raw, const char *name)
+{
+    if (!raw || !name) return NULL;
+    gsize n = strlen(name);
+    GString *out = NULL;
+    for (const char *line = raw; line && *line; ) {
+        const char *eol = strchr(line, '\n');
+        gsize len = eol ? (gsize)(eol - line) : strlen(line);
+        if (len > n && line[n] == ':' &&
+            g_ascii_strncasecmp(line, name, n) == 0) {
+            char *v = g_strstrip(g_strndup(line + n + 1, len - n - 1));
+            if (!out) out = g_string_new(v);
+            else g_string_append_printf(out, ",%s", v);
+            g_free(v);
+        }
+        line = eol ? eol + 1 : NULL;
+    }
+    return out ? g_string_free(out, FALSE) : NULL;
+}
+
+/* The origin of any URL with a host, also outside http(s), with the port
+ * written out: "ftp://host:21". */
+static char *
+ns_url_origin_from_any(const char *url)
+{
+    if (!url || !*url) return NULL;
+    lxb_url_parser_t *parser = ns_url_parser_open();
+    if (!parser) return NULL;
+    lxb_url_t *u = ns_url_parse_with_host(parser, url);
+    char *out = NULL;
+    if (u) {
+        GString *s = g_string_new(NULL);
+        g_string_append_len(s, (const char *)u->scheme.name.data,
+                            (gssize)u->scheme.name.length);
+        g_string_append(s, "://");
+        if (lxb_url_serialize_host(&u->host, ns_url_str_append_cb, s)
+            == LXB_STATUS_OK) {
+            unsigned port = u->has_port ? (unsigned)u->port : 0u;
+            if (!u->has_port) {
+                switch (u->scheme.type) {
+                case LXB_URL_SCHEMEL_TYPE_HTTP:
+                case LXB_URL_SCHEMEL_TYPE_WS:    port = 80;  break;
+                case LXB_URL_SCHEMEL_TYPE_HTTPS:
+                case LXB_URL_SCHEMEL_TYPE_WSS:   port = 443; break;
+                case LXB_URL_SCHEMEL_TYPE_FTP:   port = 21;  break;
+                default:                         break;
+                }
+            }
+            g_string_append_printf(s, ":%u", port);
             out = g_string_free(s, FALSE);
         } else {
             g_string_free(s, TRUE);
@@ -2298,6 +2362,7 @@ ns_response_free(ns_response *resp)
     g_free(resp->error);
     g_free(resp->tls_warning);
     g_free(resp->remote_ip);
+    g_free(resp->next_hop_protocol);
     g_free(resp);
 }
 
@@ -2320,6 +2385,7 @@ ns_response_copy(const ns_response *src)
     r->error = g_strdup(src->error);
     r->tls_warning = g_strdup(src->tls_warning);
     r->remote_ip = g_strdup(src->remote_ip);
+    r->next_hop_protocol = g_strdup(src->next_hop_protocol);
     r->body = g_byte_array_new();
     if (src->body && src->body->len)
         g_byte_array_append(r->body, src->body->data, src->body->len);
@@ -5343,7 +5409,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     resp->body = g_byte_array_new();
 
     if (!is_navigation) {
-        char *dead_host = ns_url_host_from(url);
+        char *dead_host = ns_url_origin_from_any(url);
         gboolean dead = dead_host && *dead_host &&
                         ns_net_host_recently_dead(dead_host);
         g_free(dead_host);
@@ -5726,6 +5792,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     resp->response_end_ms = out.t_total_ms;
     if (out.remote_ip)
         resp->remote_ip = g_strdup(out.remote_ip);
+    if (out.http_version)
+        resp->next_hop_protocol =
+            g_strdup(ns_net_http_version_name(out.http_version));
     if (out.tls_warning)
         resp->tls_warning = g_strdup(out.tls_warning);
     {
@@ -5748,7 +5817,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
 
     {
-        char *reach_host = ns_url_host_from(url);
+        char *reach_host = ns_url_origin_from_any(url);
         if (reach_host && *reach_host) {
             if (transport_ok || out.status > 0)
                 ns_net_host_mark_alive(reach_host);

@@ -3,6 +3,32 @@ Changelog:
 
 1.0.27:
 ======
+* A connection that fails to one port of a host no longer makes
+  requests to the host's other ports fail for two minutes: recent
+  connection failures are remembered per origin (scheme, host and port)
+  instead of per host.
+* `performance.getEntriesByType('resource')` lists the document's
+  scripts, stylesheets, frames and images along with `fetch()` and
+  `XMLHttpRequest` requests, as `PerformanceResourceTiming` entries with
+  the timings the network layer measured (DNS lookup, connection, TLS,
+  request and response), the connection's protocol in `nextHopProtocol`,
+  the real `responseStatus`, transfer and body sizes, and
+  `renderBlockingStatus`. A cross-origin resource without a
+  `Timing-Allow-Origin` header naming the page keeps only its start and
+  end time, and a no-CORS cross-origin response shows status 0, as in
+  other browsers. Only `fetch()`, `XMLHttpRequest` and script-made images
+  were listed before, with every phase at the start or the end of the
+  request, `nextHopProtocol` always `"h2"` and `responseStatus` always
+  200. A second image with the same URL comes from memory and gets no
+  entry, nor does a frame whose response is a download, and
+  `PerformanceObserver.supportedEntryTypes` is in alphabetical order.
+* Each document has its own performance timeline. A frame's
+  `performance` listed the page's entries and marks and its
+  `performance.mark()` added to the page's; now marks, measures and
+  resource entries stay with the document that made them, a
+  PerformanceObserver sees the entries of the document its callback
+  comes from, and `clearResourceTimings()` clears resource entries
+  instead of doing nothing.
 * Scripts inserted with `append()`, `prepend()`, `before()`, `after()`,
   `replaceWith()` or `replaceChildren()` run, as they do with
   `appendChild()`. They never ran, so `document.head.append(script)`

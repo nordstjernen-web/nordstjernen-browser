@@ -100,6 +100,8 @@ ns_image_free(gpointer p)
     g_free(img->url);
     g_free(img->final_url);
     g_free(img->cors_allow_origin);
+    g_free(img->next_hop_protocol);
+    g_free(img->timing_allow_origin);
     g_free(img->error);
     if (img->render_surface) cairo_surface_destroy(img->render_surface);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
@@ -557,6 +559,7 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_pending *pending = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (!pending->dead) pending->img->response_us = g_get_monotonic_time();
     if (pending->dead) {
         ns_response_free(resp);
         g_clear_error(&err);
@@ -579,6 +582,12 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     pending->img->final_url = g_strdup(resp->final_url);
     g_free(pending->img->cors_allow_origin);
     pending->img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
+    g_free(pending->img->next_hop_protocol);
+    pending->img->next_hop_protocol = g_strdup(resp->next_hop_protocol);
+    g_free(pending->img->timing_allow_origin);
+    pending->img->timing_allow_origin =
+        ns_net_raw_header_values(resp->raw_headers, "timing-allow-origin");
+    pending->img->body_size = resp->body ? (gint64)resp->body->len : 0;
     if (resp->error) {
         pending->img->failed = TRUE;
         pending->img->failed_at_us = g_get_monotonic_time();
@@ -651,6 +660,8 @@ ns_image_cache_start_request(ns_image_cache *cache,
     pending->user_data = user_data;
     g_ptr_array_add(cache->pending, pending);
     img->attempts++;
+    img->request_us = g_get_monotonic_time();
+    img->response_us = 0;
     ns_net_request_async(
         url, top_url, "GET", NULL, 0, NULL,
         ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
