@@ -3,6 +3,12 @@ Changelog:
 
 1.0.27:
 ======
+* A frame without a source or with `srcdoc` shows `about:blank` or
+  `about:srcdoc` as its `location.href`, `document.URL` and
+  `document.location`, as in other browsers, and keeps the base URL and
+  origin of the document that holds it. These frames showed the holding
+  page's URL. A frame's initial `about:blank` document now reads as
+  complete and same-origin with its creator from the start.
 * A same-origin frame no longer sees the page's own global variables and
   functions as its own. A frame's window started with a copy of every
   property of the page's window, so a script in the frame found the

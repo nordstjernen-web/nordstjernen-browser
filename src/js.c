@@ -45906,8 +45906,10 @@ ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 }
 
 static const char ns_iframe_scope_bootstrap[] =
-    "(function(realWin, iframeDoc, initialURL, sandbox){"
+    "(function(realWin, iframeDoc, initialURL, sandbox, docURL){"
     "  var url = initialURL || 'about:blank';"
+    "  var shown = docURL || '';"
+    "  function vis(){ return shown || url; }"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win;"
@@ -45931,25 +45933,26 @@ static const char ns_iframe_scope_bootstrap[] =
     "  var loc = {};"
     "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
     "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(url); return u ? u[p] : ''; } }); });"
+    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
     "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return url; },"
+    "    get: function(){ return vis(); },"
     "    set: function(v){ var u=mk(v);"
     "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=url; url=u.href;"
+    "      var o=vis(); url=u.href; shown='';"
     "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
     "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(url); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(url); if(!u) return; u.hash=v; var o=url; url=u.href;"
-    "      if (o!==url) fireHash(o,url); } });"
+    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
+    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
+    "      if (shown) shown=u.href; else url=u.href;"
+    "      if (o!==vis()) fireHash(o,vis()); } });"
     "  loc.assign = function(v){ this.href = v; };"
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
-    "  loc.toString = function(){ return url; };"
+    "  loc.toString = function(){ return vis(); };"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  var ov = {"
@@ -46033,7 +46036,7 @@ static const char ns_iframe_scope_bootstrap[] =
 
 static JSValue
 ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url,
-                     unsigned sandbox)
+                     const char *doc_url, unsigned sandbox)
 {
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue maker = JS_Eval(ctx, ns_iframe_scope_bootstrap,
@@ -46043,10 +46046,13 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValue urlv = JS_NewString(ctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(ctx, (int32_t)sandbox);
-        JSValueConst args[4] = { global, iframe_doc, urlv, sbv };
-        scope = JS_Call(ctx, maker, JS_UNDEFINED, 4, args);
+        JSValue docv = doc_url && *doc_url ? JS_NewString(ctx, doc_url)
+                                           : JS_UNDEFINED;
+        JSValueConst args[5] = { global, iframe_doc, urlv, sbv, docv };
+        scope = JS_Call(ctx, maker, JS_UNDEFINED, 5, args);
         if (JS_IsException(scope)) { JS_FreeValue(ctx, JS_GetException(ctx)); scope = JS_NULL; }
         JS_FreeValue(ctx, urlv);
+        JS_FreeValue(ctx, docv);
     } else if (JS_IsException(maker)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
     }
@@ -46056,8 +46062,13 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL){"
     "  var url = initialURL || 'about:blank';"
+    /* An initial about:blank or srcdoc document shows about:blank or
+     * about:srcdoc as its URL while url, the creator's, stays its base URL
+     * and gives it its origin. */
+    "  var shown = docURL || '';"
+    "  function vis(){ return shown || url; }"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win = G;"
@@ -46081,25 +46092,26 @@ static const char ns_iframe_global_bootstrap[] =
     "  var loc = {};"
     "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
     "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(url); return u ? u[p] : ''; } }); });"
+    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
     "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return url; },"
+    "    get: function(){ return vis(); },"
     "    set: function(v){ var u=mk(v);"
     "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=url; url=u.href;"
+    "      var o=vis(); url=u.href; shown='';"
     "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
     "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(url); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(url); if(!u) return; u.hash=v; var o=url; url=u.href;"
-    "      if (o!==url) fireHash(o,url); } });"
+    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
+    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
+    "      if (shown) shown=u.href; else url=u.href;"
+    "      if (o!==vis()) fireHash(o,vis()); } });"
     "  loc.assign = function(v){ this.href = v; };"
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
-    "  loc.toString = function(){ return url; };"
+    "  loc.toString = function(){ return vis(); };"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
@@ -46287,8 +46299,8 @@ ns_iframe_platform_names(JSContext *fctx, ns_js *js)
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                              JSValueConst iframe_doc,
-                             const char *initial_url, unsigned sandbox,
-                             JSContext *reuse,
+                             const char *initial_url, const char *doc_url,
+                             unsigned sandbox, JSContext *reuse,
                              JSValue *out_window, JSValue *out_location,
                              JSValue *out_history)
 {
@@ -46344,10 +46356,13 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValueConst post_data[1] = { fg };
         JSValue post_message = JS_NewCFunctionData(fctx,
             ns_window_post_message_data, 2, 0, 1, post_data);
-        JSValueConst args[10] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue docv = doc_url && *doc_url ? JS_NewString(fctx, doc_url)
+                                           : JS_UNDEFINED;
+        JSValueConst args[11] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
-                                  child_frame_of, post_message };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 10, args);
+                                  child_frame_of, post_message, docv };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 11, args);
+        JS_FreeValue(fctx, docv);
         JS_FreeValue(fctx, frame_name_v);
         JS_FreeValue(fctx, post_message);
         JS_FreeValue(fctx, child_frame_of);
@@ -46480,6 +46495,30 @@ ns_document_define_implementation_getter(JSContext *ctx, JSValueConst obj)
     JS_FreeAtom(ctx, atom);
 }
 
+/* The URL a frame's document shows when it differs from the URL it was
+ * loaded under: "about:blank" for a frame without a source and
+ * "about:srcdoc" for a srcdoc frame, whose base URL and origin come from
+ * the document that holds the frame (data-nd-frame-url). */
+static void ns_js_set_doc_ready_state(ns_js *js, const ns_node *doc, int state);
+
+static const char *
+ns_iframe_doc_url(const ns_node *iframe)
+{
+    const char *u = iframe
+        ? ns_element_get_attr(iframe, "data-nd-frame-doc-url") : NULL;
+    return u && *u ? u : NULL;
+}
+
+static void
+ns_frame_document_show_url(JSContext *ctx, JSValueConst doc, const char *url)
+{
+    if (!JS_IsObject(doc) || !url || !*url) return;
+    JS_DefinePropertyValueStr(ctx, doc, "URL", JS_NewString(ctx, url),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, doc, "documentURI", JS_NewString(ctx, url),
+                              JS_PROP_C_W_E);
+}
+
 static JSValue
 ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
 {
@@ -46491,9 +46530,18 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
         ? ns_element_get_attr(iframe, "data-nd-frame-charset") : NULL;
     const char *url = iframe
         ? ns_element_get_attr(iframe, "data-nd-frame-url") : NULL;
+    const char *shown = ns_iframe_doc_url(iframe);
+    if (!url || !*url) {
+        /* The frame's initial about:blank document: its base URL and origin
+         * are its creator's, and it is complete from the start. */
+        url = ns_js_node_doc_base(js_from_ctx(ctx), iframe);
+        shown = "about:blank";
+        ns_js_set_doc_ready_state(js_from_ctx(ctx), doc, 2);
+    }
     gboolean is_xml = (doc->flags & NS_NODE_XML_DOC) != 0;
     const char *mime = is_xml ? "application/xml" : "text/html";
     JSValue cd = ns_make_realm_document(ctx, doc, url, cs, mime, is_xml, FALSE);
+    ns_frame_document_show_url(ctx, cd, shown);
     if (JS_IsObject(cd))
         JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
@@ -46615,9 +46663,14 @@ ns_iframe_build_lite_window(JSContext *ctx, JSValueConst iframe_el,
         return JS_GetGlobalObject(ctx);
     }
     const char *url = ns_element_get_attr(iframe, "data-nd-frame-url");
+    const char *shown = ns_iframe_doc_url(iframe);
+    if (!url || !*url) {
+        url = ns_js_node_doc_base(js, iframe);
+        shown = "about:blank";
+    }
     JSValue fwin = JS_NULL, floc = JS_NULL, fhist = JS_NULL;
     JSContext *fctx = ns_iframe_make_realm_context(js, iframe, doc,
-        url && *url ? url : "about:blank",
+        url && *url ? url : "about:blank", shown,
         ns_iframe_effective_sandbox(iframe), NULL, &fwin, &floc, &fhist);
     if (!fctx || !JS_IsObject(fwin)) {
         JS_FreeValue(ctx, doc);
@@ -58963,11 +59016,14 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
     if (srcdoc && *srcdoc) {
         ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
         ns_element_set_attr(iframe, "data-nd-frame-url", origin);
+        ns_element_set_attr(iframe, "data-nd-frame-doc-url", "about:srcdoc");
         return;
     }
     ns_element_set_attr(iframe, "data-nd-frame-srcdoc", "");
     ns_element_set_attr(iframe, "data-nd-frame-url",
                         abs_url && *abs_url ? abs_url : origin);
+    ns_element_set_attr(iframe, "data-nd-frame-doc-url",
+                        abs_url && *abs_url ? "" : "about:blank");
     if (abs_url && *abs_url) ns_css_mark_visited(abs_url);
 }
 
@@ -59591,7 +59647,7 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
     JSContext *ctx = js->ctx;
     JSValue scope = JS_IsObject(iframe_scope)
         ? JS_DupValue(ctx, iframe_scope)
-        : ns_iframe_make_scope(ctx, iframe_doc, origin, sandbox);
+        : ns_iframe_make_scope(ctx, iframe_doc, origin, NULL, sandbox);
     if (!JS_IsObject(scope)) {
         JS_FreeValue(ctx, scope);
         for (guint i = 0; i < modules->len; i++)
@@ -59802,7 +59858,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
     if (reuse_blank || classic_sources->len > 0 || modules->len > 0 ||
         has_inline_handlers)
         fctx = ns_iframe_make_realm_context(js, iframe, iframe_doc, origin,
-                                            sandbox,
+                                            ns_iframe_doc_url(iframe), sandbox,
                                             reuse_blank ? initial_blank : NULL,
                                             &fwin, &floc, &fhist);
 
@@ -59893,7 +59949,8 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             JSValue g = JS_GetGlobalObject(js->ctx);
             JSValue scope = JS_IsObject(iframe_scope)
                 ? JS_DupValue(js->ctx, iframe_scope)
-                : ns_iframe_make_scope(js->ctx, iframe_doc, origin, sandbox);
+                : ns_iframe_make_scope(js->ctx, iframe_doc, origin,
+                                       ns_iframe_doc_url(iframe), sandbox);
             JSValue swin = JS_NULL, sloc = JS_NULL, shist = JS_NULL;
             if (JS_IsObject(scope)) {
                 swin  = JS_GetPropertyStr(js->ctx, scope, "window");
@@ -60298,11 +60355,17 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
     }
 
+    gboolean blank_frame = FALSE;
     if (!content_doc && !decoded &&
         ns_node_is_element_named(iframe, "iframe")) {
         content_root = ns_iframe_ensure_content_root(iframe);
         if (content_root) content_doc = content_root->parent;
-        if (!abs_url) abs_url = g_strdup(origin);
+        /* A frame without a source keeps about:blank as its URL; the
+         * creator's URL stands in for its base URL and origin. */
+        if (!abs_url) {
+            abs_url = g_strdup(origin);
+            blank_frame = TRUE;
+        }
     }
 
     if (content_root && content_doc) {
@@ -60310,7 +60373,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
-        ns_js_mark_iframe_source(js, iframe, origin, abs_url);
+        ns_js_mark_iframe_source(js, iframe, origin,
+                                 blank_frame ? NULL : abs_url);
         if ((iorigin && js->current_url &&
              !ns_url_same_origin(iorigin, js->current_url)) ||
             ((sandbox & NS_SANDBOX_ACTIVE) &&
@@ -60321,12 +60385,15 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         JSValue realm_doc = ns_make_realm_document(
             js->ctx, content_doc, iorigin, cs,
             resp ? resp->content_type : NULL, doc_is_xml, FALSE);
+        ns_frame_document_show_url(js->ctx, realm_doc,
+                                   ns_iframe_doc_url(iframe));
         if ((sandbox & NS_SANDBOX_ACTIVE) &&
             !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
             ns_realmdoc_deny_cookie(js->ctx, realm_doc);
         JSValue realm_scope = JS_NULL;
         if (JS_IsObject(realm_doc))
             realm_scope = ns_iframe_make_scope(js->ctx, realm_doc, iorigin,
+                                               ns_iframe_doc_url(iframe),
                                                sandbox);
         if (JS_IsObject(realm_doc) && JS_IsObject(realm_scope)) {
             JSValue win = JS_GetPropertyStr(js->ctx, realm_scope, "window");
