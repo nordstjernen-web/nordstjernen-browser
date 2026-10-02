@@ -15,6 +15,10 @@ Changelog:
   detection, animated-value propagation and iframe cleanup walked the
   tree recursively and ran out of stack around 50,000 levels (a plain
   run of `<div>` or `<li>` was enough); they now walk it in a loop.
+* The desktop browser now records visited pages in History. The shell
+  recorded each page title into a history database it never opened, so
+  in the default multi-process mode `about:history` stayed empty. A
+  `--private` launch still records nothing.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)
