@@ -710,16 +710,21 @@ def write_header(gif, header):
 
 def main():
     ver = version()
+    user_fonts = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")
     fonts = (find_font("Comic Neue:bold",
-                       "C:/Windows/Fonts/comicbd.ttf",
                        "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf",
+                       os.path.join(user_fonts, "ComicNeue-Bold.ttf"),
+                       "C:/Windows/Fonts/ComicNeue-Bold.ttf",
+                       "C:/Windows/Fonts/comicbd.ttf",
                        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                        "C:/Windows/Fonts/LiberationSans-Bold.ttf",
                        "C:/Windows/Fonts/DejaVuSans-Bold.ttf"),
              find_font("Comic Neue",
-                       "C:/Windows/Fonts/comic.ttf",
                        "/usr/share/fonts/opentype/comic-neue/ComicNeue-Regular.otf",
+                       os.path.join(user_fonts, "ComicNeue-Regular.ttf"),
+                       "C:/Windows/Fonts/ComicNeue-Regular.ttf",
+                       "C:/Windows/Fonts/comic.ttf",
                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
                        "C:/Windows/Fonts/LiberationSans-Regular.ttf",
