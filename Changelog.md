@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* A CSS value with thousands of nested parentheses or functions, in an
+  `@property` `initial-value` or in `CSS.registerProperty()`, no longer
+  crashes the renderer. Values nested deeper than 128 levels are
+  invalid.
 * An SVG with thousands of nested `<g>` elements, as an `<img>` or
   inline, no longer crashes the renderer. Rendering stops descending
   after 256 nested elements.
