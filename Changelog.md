@@ -3,6 +3,31 @@ Changelog:
 
 1.0.28:
 ======
+* Events the browser fires (messages from frames, workers, ports and
+  broadcast channels, `XMLHttpRequest` progress, `load` and the others)
+  carry a `timeStamp`, as in other browsers; it was `undefined`. Events
+  at a port, worker, request or channel are at their target while their
+  listeners run (`eventPhase` is 2 and `composedPath()` returns the
+  target) and have no phase or current target afterwards. Messages and
+  errors from a worker are trusted (`isTrusted` was false), and
+  `XMLHttpRequest` progress events are `ProgressEvent`s.
+* A frame without a source or with `srcdoc` shows `about:blank` or
+  `about:srcdoc` as its `location.href`, `document.URL` and
+  `document.location`, as in other browsers, and keeps the base URL and
+  origin of the document that holds it. These frames showed the holding
+  page's URL. A frame's initial `about:blank` document now reads as
+  complete and same-origin with its creator from the start.
+* A same-origin frame no longer sees the page's own global variables and
+  functions as its own. A frame's window started with a copy of every
+  property of the page's window, so a script in the frame found the
+  page's `var` declarations, functions and `window.x` values (reCAPTCHA's
+  frame found the page's `grecaptcha` configuration); it now gets only
+  the names the platform defines.
+* An asynchronous `XMLHttpRequest` a frame sends to its own origin works
+  when that origin differs from the page's. The response was checked
+  against whichever document the event loop was in when it arrived,
+  usually the page, so it failed with status 0; synchronous requests and
+  `fetch()` were not affected.
 
 1.0.27:
 ======
