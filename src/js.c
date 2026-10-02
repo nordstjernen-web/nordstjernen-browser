@@ -9424,6 +9424,15 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     JSValue target = JS_GetPropertyStr(ctx, this_val, "target");
     const ns_node *n = ns_unwrap_element(target);
     JS_FreeValue(ctx, target);
+    if (!n) {
+        /* A window, port, worker or request: the path is the target. */
+        JSValue current = JS_GetPropertyStr(ctx, this_val, "currentTarget");
+        if (JS_IsObject(current))
+            JS_SetPropertyUint32(ctx, arr, 0, current);
+        else
+            JS_FreeValue(ctx, current);
+        return arr;
+    }
     uint32_t idx = 0;
     gboolean saw_document = FALSE;
     for (const ns_node *cur = n; cur; cur = cur->parent) {
@@ -12377,6 +12386,45 @@ ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
     return ns_target_handler_realm(ctx, port, "message", "cb");
 }
 
+/* An event dispatched at a target outside the node tree is at its target
+ * while the listeners run; afterwards it has no current target and no
+ * phase, as after any dispatch. A dispatch that was already running when
+ * this one started gets its state back. */
+typedef struct {
+    JSValue phase;
+    JSValue current;
+    gboolean nested;
+} ns_event_at_target;
+
+static void
+ns_event_at_target_begin(JSContext *ctx, JSValueConst ev, JSValueConst target,
+                         ns_event_at_target *st)
+{
+    JSValue dispatching = JS_GetPropertyStr(ctx, ev, "_dispatching");
+    st->nested = JS_ToBool(ctx, dispatching) > 0;
+    JS_FreeValue(ctx, dispatching);
+    st->phase = JS_GetPropertyStr(ctx, ev, "eventPhase");
+    st->current = JS_GetPropertyStr(ctx, ev, "currentTarget");
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, target));
+    JS_SetPropertyStr(ctx, ev, "eventPhase", JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, ev, "_dispatching", JS_TRUE);
+}
+
+static void
+ns_event_at_target_end(JSContext *ctx, JSValueConst ev, ns_event_at_target *st)
+{
+    if (st->nested) {
+        JS_SetPropertyStr(ctx, ev, "eventPhase", st->phase);
+        JS_SetPropertyStr(ctx, ev, "currentTarget", st->current);
+        return;
+    }
+    JS_FreeValue(ctx, st->phase);
+    JS_FreeValue(ctx, st->current);
+    JS_SetPropertyStr(ctx, ev, "eventPhase", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_NULL);
+    JS_SetPropertyStr(ctx, ev, "_dispatching", JS_FALSE);
+}
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -12469,6 +12517,8 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     ns_js_budget_push(js, &bg);
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js, realm, &scope);
+    ns_event_at_target at_target;
+    ns_event_at_target_begin(ctx, ev, port, &at_target);
 
     JSValue onmessage = JS_GetPropertyStr(ctx, port, "onmessage");
     if (JS_IsFunction(ctx, onmessage)) {
@@ -12539,6 +12589,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         if (any_dead) ns_listeners_compact_dead(ctx, port);
     }
     JS_FreeValue(ctx, listeners);
+    ns_event_at_target_end(ctx, ev, &at_target);
 
     ns_js_realm_scope_leave(js, &scope);
     ns_js_budget_pop(js, &bg);
@@ -18292,6 +18343,7 @@ typedef struct ns_xhr_state {
     JSValue    obj;
     char      *method;
     char      *url;
+    char      *origin_url; /* URL of the document that sent the request */
     double     start_ms;
     GPtrArray *request_headers;
 } ns_xhr_state;
@@ -18432,6 +18484,7 @@ ns_xhr_state_free(ns_xhr_state *st)
     if (st->ctx) JS_FreeValue(st->ctx, st->obj);
     g_free(st->method);
     g_free(st->url);
+    g_free(st->origin_url);
     if (st->request_headers) g_ptr_array_free(st->request_headers, TRUE);
     g_free(st);
 }
@@ -18497,6 +18550,8 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js_ce, ns_target_handler_realm(ctx, obj, type, "fn"),
                             &scope);
+    ns_event_at_target at_target;
+    ns_event_at_target_begin(ctx, ev, obj, &at_target);
     char on_name[32];
     g_snprintf(on_name, sizeof on_name, "on%s", type);
     JSValue prop = JS_GetPropertyStr(ctx, obj, on_name);
@@ -18589,6 +18644,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
         if (any_dead) ns_listeners_compact_dead(ctx, obj);
     }
     JS_FreeValue(ctx, listeners);
+    ns_event_at_target_end(ctx, ev, &at_target);
     ns_js_realm_scope_leave(js_ce, &scope);
 }
 
@@ -18737,6 +18793,10 @@ ns_event_dispatch_guard(JSContext *ctx, JSValueConst event)
     return JS_UNDEFINED;
 }
 
+/* The event the engine itself is dispatching through a target's
+ * dispatchEvent() (worker messages and errors): it stays trusted. */
+static __thread void *ns_engine_dispatch_event;
+
 static JSValue
 ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -18751,7 +18811,8 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     const char *type = JS_ToCString(ctx, tv);
     JS_FreeValue(ctx, tv);
     if (!type) return JS_FALSE;
-    JS_SetPropertyStr(ctx, argv[0], "_is_trusted", JS_FALSE);
+    if (JS_VALUE_GET_PTR(argv[0]) != ns_engine_dispatch_event)
+        JS_SetPropertyStr(ctx, argv[0], "_is_trusted", JS_FALSE);
     JS_SetPropertyStr(ctx, argv[0], "target", JS_DupValue(ctx, this_val));
     JS_SetPropertyStr(ctx, argv[0], "currentTarget", JS_DupValue(ctx, this_val));
     JSValue dp = JS_GetPropertyStr(ctx, argv[0], "defaultPrevented");
@@ -18783,6 +18844,14 @@ ns_xhr_fire_progress_event(JSContext *ctx, JSValueConst target,
                            gboolean length_computable)
 {
     JSValue event = ns_target_make_event(ctx, target, type);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ProgressEvent");
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, event, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
     JS_SetPropertyStr(ctx, event, "lengthComputable",
                       length_computable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "loaded", JS_NewFloat64(ctx, loaded));
@@ -18928,8 +18997,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JSContext *ctx = st->ctx;
     gboolean response_allowed = FALSE;
     if (resp && !err) {
-        gboolean allow = cors_allows(js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-                                     resp->final_url, resp->cors_allow_origin)
+        gboolean allow = cors_allows(st->origin_url, resp->final_url,
+                                     resp->cors_allow_origin)
                          && !ns_final_url_connect_blocked(js_from_ctx(ctx),
                                                           resp->final_url);
         response_allowed = allow;
@@ -18940,9 +19009,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(ctx, st->obj, "responseURL",
                           JS_NewString(ctx,
                               allow && resp->final_url ? resp->final_url : ""));
-        gboolean same_origin = ns_url_same_origin(
-            js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-            resp->final_url);
+        gboolean same_origin = ns_url_same_origin(st->origin_url,
+                                                  resp->final_url);
         char *hdrs;
         if (!allow) {
             hdrs = g_strdup("");
@@ -19068,14 +19136,8 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
             ns_target_fire_event(ctx, st->obj, "readystatechange");
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 3));
             ns_target_fire_event(ctx, st->obj, "readystatechange");
-            JSValue pev = ns_target_make_event(ctx, st->obj, "progress");
-            JS_SetPropertyStr(ctx, pev, "lengthComputable", JS_TRUE);
-            JS_SetPropertyStr(ctx, pev, "loaded",
-                              JS_NewFloat64(ctx, (double)blen));
-            JS_SetPropertyStr(ctx, pev, "total",
-                              JS_NewFloat64(ctx, (double)blen));
-            ns_target_dispatch_with_event(ctx, st->obj, "progress", pev);
-            JS_FreeValue(ctx, pev);
+            ns_xhr_fire_progress_event(ctx, st->obj, "progress",
+                                       (double)blen, (double)blen, TRUE);
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
         } else {
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
@@ -19417,6 +19479,11 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     char *resolved = (_js && _js->current_url)
         ? ns_url_resolve(_js->current_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
+    /* The response is checked against the sending document's origin; by the
+     * time an asynchronous response arrives, js->current_url is whatever
+     * document the event loop is in, often the page rather than the frame
+     * that sent the request. */
+    st->origin_url = g_strdup(_js ? _js->current_url : NULL);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
 
@@ -19474,26 +19541,16 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, st->url,
                        st->js->current_url);
     JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_TRUE);
-    JSValue loadstart = ns_target_make_event(ctx, this_val, "loadstart");
-    JS_SetPropertyStr(ctx, loadstart, "lengthComputable", JS_FALSE);
-    JS_SetPropertyStr(ctx, loadstart, "loaded", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, loadstart, "total", JS_NewInt32(ctx, 0));
-    ns_target_dispatch_with_event(ctx, this_val, "loadstart", loadstart);
-    JS_FreeValue(ctx, loadstart);
+    ns_xhr_fire_progress_event(ctx, this_val, "loadstart", 0, 0, FALSE);
     if (send_body && body) {
         JSValue upload = JS_GetPropertyStr(ctx, this_val, "upload");
         static const char *const upload_events[] = {
             "loadstart", "progress", "load", "loadend",
         };
         for (gsize i = 0; i < G_N_ELEMENTS(upload_events); i++) {
-            JSValue event = ns_target_make_event(ctx, upload, upload_events[i]);
-            JS_SetPropertyStr(ctx, event, "lengthComputable", JS_TRUE);
-            JS_SetPropertyStr(ctx, event, "loaded",
-                              JS_NewFloat64(ctx, i == 0 ? 0 : (double)body_len));
-            JS_SetPropertyStr(ctx, event, "total",
-                              JS_NewFloat64(ctx, (double)body_len));
-            ns_target_dispatch_with_event(ctx, upload, upload_events[i], event);
-            JS_FreeValue(ctx, event);
+            ns_xhr_fire_progress_event(ctx, upload, upload_events[i],
+                                       i == 0 ? 0 : (double)body_len,
+                                       (double)body_len, TRUE);
         }
         JS_FreeValue(ctx, upload);
     }
@@ -23552,7 +23609,10 @@ ns_worker_dispatch(JSContext *ctx, JSValueConst target, const char *type,
     JSValue dispatch = JS_GetPropertyStr(ctx, target, "dispatchEvent");
     if (JS_IsFunction(ctx, dispatch)) {
         JSValueConst args[1] = { ev };
+        void *outer = ns_engine_dispatch_event;
+        ns_engine_dispatch_event = JS_VALUE_GET_PTR(ev);
         JSValue r = JS_Call(ctx, dispatch, target, 1, args);
+        ns_engine_dispatch_event = outer;
         if (JS_IsException(r)) {
             JSValue ex = JS_GetException(ctx);
             ns_js_report_uncaught(js_from_ctx(ctx), ex, "worker");
@@ -27973,6 +28033,17 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
     ns_event_define_legacy_accessors(ctx, ev);
+    /* Every event records when it was created, relative to the time origin
+     * like performance.now(); the constructors set it themselves. */
+    JSAtom ts = JS_NewAtom(ctx, "timeStamp");
+    int has_ts = JS_GetOwnProperty(ctx, NULL, ev, ts);
+    if (has_ts == 0)
+        JS_DefinePropertyValue(ctx, ev, ts,
+                               JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))),
+                               JS_PROP_C_W_E);
+    else if (has_ts < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeAtom(ctx, ts);
 }
 
 static gboolean
@@ -45900,8 +45971,10 @@ ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 }
 
 static const char ns_iframe_scope_bootstrap[] =
-    "(function(realWin, iframeDoc, initialURL, sandbox){"
+    "(function(realWin, iframeDoc, initialURL, sandbox, docURL){"
     "  var url = initialURL || 'about:blank';"
+    "  var shown = docURL || '';"
+    "  function vis(){ return shown || url; }"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win;"
@@ -45925,25 +45998,26 @@ static const char ns_iframe_scope_bootstrap[] =
     "  var loc = {};"
     "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
     "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(url); return u ? u[p] : ''; } }); });"
+    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
     "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return url; },"
+    "    get: function(){ return vis(); },"
     "    set: function(v){ var u=mk(v);"
     "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=url; url=u.href;"
+    "      var o=vis(); url=u.href; shown='';"
     "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
     "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(url); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(url); if(!u) return; u.hash=v; var o=url; url=u.href;"
-    "      if (o!==url) fireHash(o,url); } });"
+    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
+    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
+    "      if (shown) shown=u.href; else url=u.href;"
+    "      if (o!==vis()) fireHash(o,vis()); } });"
     "  loc.assign = function(v){ this.href = v; };"
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
-    "  loc.toString = function(){ return url; };"
+    "  loc.toString = function(){ return vis(); };"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  var ov = {"
@@ -46027,7 +46101,7 @@ static const char ns_iframe_scope_bootstrap[] =
 
 static JSValue
 ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url,
-                     unsigned sandbox)
+                     const char *doc_url, unsigned sandbox)
 {
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue maker = JS_Eval(ctx, ns_iframe_scope_bootstrap,
@@ -46037,10 +46111,13 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValue urlv = JS_NewString(ctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(ctx, (int32_t)sandbox);
-        JSValueConst args[4] = { global, iframe_doc, urlv, sbv };
-        scope = JS_Call(ctx, maker, JS_UNDEFINED, 4, args);
+        JSValue docv = doc_url && *doc_url ? JS_NewString(ctx, doc_url)
+                                           : JS_UNDEFINED;
+        JSValueConst args[5] = { global, iframe_doc, urlv, sbv, docv };
+        scope = JS_Call(ctx, maker, JS_UNDEFINED, 5, args);
         if (JS_IsException(scope)) { JS_FreeValue(ctx, JS_GetException(ctx)); scope = JS_NULL; }
         JS_FreeValue(ctx, urlv);
+        JS_FreeValue(ctx, docv);
     } else if (JS_IsException(maker)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
     }
@@ -46050,8 +46127,13 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL){"
     "  var url = initialURL || 'about:blank';"
+    /* An initial about:blank or srcdoc document shows about:blank or
+     * about:srcdoc as its URL while url, the creator's, stays its base URL
+     * and gives it its origin. */
+    "  var shown = docURL || '';"
+    "  function vis(){ return shown || url; }"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win = G;"
@@ -46075,25 +46157,26 @@ static const char ns_iframe_global_bootstrap[] =
     "  var loc = {};"
     "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
     "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(url); return u ? u[p] : ''; } }); });"
+    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
     "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return url; },"
+    "    get: function(){ return vis(); },"
     "    set: function(v){ var u=mk(v);"
     "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=url; url=u.href;"
+    "      var o=vis(); url=u.href; shown='';"
     "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
     "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(url); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(url); if(!u) return; u.hash=v; var o=url; url=u.href;"
-    "      if (o!==url) fireHash(o,url); } });"
+    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
+    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
+    "      if (shown) shown=u.href; else url=u.href;"
+    "      if (o!==vis()) fireHash(o,vis()); } });"
     "  loc.assign = function(v){ this.href = v; };"
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
-    "  loc.toString = function(){ return url; };"
+    "  loc.toString = function(){ return vis(); };"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
@@ -46233,8 +46316,13 @@ static const char ns_iframe_global_bootstrap[] =
     "    for (var pi = 0; pi < pnames.length; pi++) {"
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
-    "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
-    "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
+    /* Only names the platform defines are carried over: the page's own
+     * globals (its var and function declarations, window.x = ...) belong
+     * to the page's window, and a same-origin frame must not see them as
+     * its own, as it did while every own property was copied. */
+    "      if (platformNames ? !Object.prototype.hasOwnProperty.call(platformNames, pk)"
+    "                        : crossOrigin) continue;"
+    "      if (crossOrigin && parentOnly[pk]) continue;"
     /* Engine keys written as "\xff..." in C read back starting with
      * U+FFFD; they hold a window's own state, such as its on<event>
      * handlers, and a frame must not start with its parent's. */
@@ -46276,8 +46364,8 @@ ns_iframe_platform_names(JSContext *fctx, ns_js *js)
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                              JSValueConst iframe_doc,
-                             const char *initial_url, unsigned sandbox,
-                             JSContext *reuse,
+                             const char *initial_url, const char *doc_url,
+                             unsigned sandbox, JSContext *reuse,
                              JSValue *out_window, JSValue *out_location,
                              JSValue *out_history)
 {
@@ -46333,10 +46421,13 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValueConst post_data[1] = { fg };
         JSValue post_message = JS_NewCFunctionData(fctx,
             ns_window_post_message_data, 2, 0, 1, post_data);
-        JSValueConst args[10] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue docv = doc_url && *doc_url ? JS_NewString(fctx, doc_url)
+                                           : JS_UNDEFINED;
+        JSValueConst args[11] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
-                                  child_frame_of, post_message };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 10, args);
+                                  child_frame_of, post_message, docv };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 11, args);
+        JS_FreeValue(fctx, docv);
         JS_FreeValue(fctx, frame_name_v);
         JS_FreeValue(fctx, post_message);
         JS_FreeValue(fctx, child_frame_of);
@@ -46469,6 +46560,30 @@ ns_document_define_implementation_getter(JSContext *ctx, JSValueConst obj)
     JS_FreeAtom(ctx, atom);
 }
 
+/* The URL a frame's document shows when it differs from the URL it was
+ * loaded under: "about:blank" for a frame without a source and
+ * "about:srcdoc" for a srcdoc frame, whose base URL and origin come from
+ * the document that holds the frame (data-nd-frame-url). */
+static void ns_js_set_doc_ready_state(ns_js *js, const ns_node *doc, int state);
+
+static const char *
+ns_iframe_doc_url(const ns_node *iframe)
+{
+    const char *u = iframe
+        ? ns_element_get_attr(iframe, "data-nd-frame-doc-url") : NULL;
+    return u && *u ? u : NULL;
+}
+
+static void
+ns_frame_document_show_url(JSContext *ctx, JSValueConst doc, const char *url)
+{
+    if (!JS_IsObject(doc) || !url || !*url) return;
+    JS_DefinePropertyValueStr(ctx, doc, "URL", JS_NewString(ctx, url),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, doc, "documentURI", JS_NewString(ctx, url),
+                              JS_PROP_C_W_E);
+}
+
 static JSValue
 ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
 {
@@ -46480,9 +46595,18 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
         ? ns_element_get_attr(iframe, "data-nd-frame-charset") : NULL;
     const char *url = iframe
         ? ns_element_get_attr(iframe, "data-nd-frame-url") : NULL;
+    const char *shown = ns_iframe_doc_url(iframe);
+    if (!url || !*url) {
+        /* The frame's initial about:blank document: its base URL and origin
+         * are its creator's, and it is complete from the start. */
+        url = ns_js_node_doc_base(js_from_ctx(ctx), iframe);
+        shown = "about:blank";
+        ns_js_set_doc_ready_state(js_from_ctx(ctx), doc, 2);
+    }
     gboolean is_xml = (doc->flags & NS_NODE_XML_DOC) != 0;
     const char *mime = is_xml ? "application/xml" : "text/html";
     JSValue cd = ns_make_realm_document(ctx, doc, url, cs, mime, is_xml, FALSE);
+    ns_frame_document_show_url(ctx, cd, shown);
     if (JS_IsObject(cd))
         JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
@@ -46604,9 +46728,14 @@ ns_iframe_build_lite_window(JSContext *ctx, JSValueConst iframe_el,
         return JS_GetGlobalObject(ctx);
     }
     const char *url = ns_element_get_attr(iframe, "data-nd-frame-url");
+    const char *shown = ns_iframe_doc_url(iframe);
+    if (!url || !*url) {
+        url = ns_js_node_doc_base(js, iframe);
+        shown = "about:blank";
+    }
     JSValue fwin = JS_NULL, floc = JS_NULL, fhist = JS_NULL;
     JSContext *fctx = ns_iframe_make_realm_context(js, iframe, doc,
-        url && *url ? url : "about:blank",
+        url && *url ? url : "about:blank", shown,
         ns_iframe_effective_sandbox(iframe), NULL, &fwin, &floc, &fhist);
     if (!fctx || !JS_IsObject(fwin)) {
         JS_FreeValue(ctx, doc);
@@ -58952,11 +59081,14 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
     if (srcdoc && *srcdoc) {
         ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
         ns_element_set_attr(iframe, "data-nd-frame-url", origin);
+        ns_element_set_attr(iframe, "data-nd-frame-doc-url", "about:srcdoc");
         return;
     }
     ns_element_set_attr(iframe, "data-nd-frame-srcdoc", "");
     ns_element_set_attr(iframe, "data-nd-frame-url",
                         abs_url && *abs_url ? abs_url : origin);
+    ns_element_set_attr(iframe, "data-nd-frame-doc-url",
+                        abs_url && *abs_url ? "" : "about:blank");
     if (abs_url && *abs_url) ns_css_mark_visited(abs_url);
 }
 
@@ -59580,7 +59712,7 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
     JSContext *ctx = js->ctx;
     JSValue scope = JS_IsObject(iframe_scope)
         ? JS_DupValue(ctx, iframe_scope)
-        : ns_iframe_make_scope(ctx, iframe_doc, origin, sandbox);
+        : ns_iframe_make_scope(ctx, iframe_doc, origin, NULL, sandbox);
     if (!JS_IsObject(scope)) {
         JS_FreeValue(ctx, scope);
         for (guint i = 0; i < modules->len; i++)
@@ -59791,7 +59923,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
     if (reuse_blank || classic_sources->len > 0 || modules->len > 0 ||
         has_inline_handlers)
         fctx = ns_iframe_make_realm_context(js, iframe, iframe_doc, origin,
-                                            sandbox,
+                                            ns_iframe_doc_url(iframe), sandbox,
                                             reuse_blank ? initial_blank : NULL,
                                             &fwin, &floc, &fhist);
 
@@ -59882,7 +60014,8 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             JSValue g = JS_GetGlobalObject(js->ctx);
             JSValue scope = JS_IsObject(iframe_scope)
                 ? JS_DupValue(js->ctx, iframe_scope)
-                : ns_iframe_make_scope(js->ctx, iframe_doc, origin, sandbox);
+                : ns_iframe_make_scope(js->ctx, iframe_doc, origin,
+                                       ns_iframe_doc_url(iframe), sandbox);
             JSValue swin = JS_NULL, sloc = JS_NULL, shist = JS_NULL;
             if (JS_IsObject(scope)) {
                 swin  = JS_GetPropertyStr(js->ctx, scope, "window");
@@ -60287,11 +60420,17 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
     }
 
+    gboolean blank_frame = FALSE;
     if (!content_doc && !decoded &&
         ns_node_is_element_named(iframe, "iframe")) {
         content_root = ns_iframe_ensure_content_root(iframe);
         if (content_root) content_doc = content_root->parent;
-        if (!abs_url) abs_url = g_strdup(origin);
+        /* A frame without a source keeps about:blank as its URL; the
+         * creator's URL stands in for its base URL and origin. */
+        if (!abs_url) {
+            abs_url = g_strdup(origin);
+            blank_frame = TRUE;
+        }
     }
 
     if (content_root && content_doc) {
@@ -60299,7 +60438,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
-        ns_js_mark_iframe_source(js, iframe, origin, abs_url);
+        ns_js_mark_iframe_source(js, iframe, origin,
+                                 blank_frame ? NULL : abs_url);
         if ((iorigin && js->current_url &&
              !ns_url_same_origin(iorigin, js->current_url)) ||
             ((sandbox & NS_SANDBOX_ACTIVE) &&
@@ -60310,12 +60450,15 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         JSValue realm_doc = ns_make_realm_document(
             js->ctx, content_doc, iorigin, cs,
             resp ? resp->content_type : NULL, doc_is_xml, FALSE);
+        ns_frame_document_show_url(js->ctx, realm_doc,
+                                   ns_iframe_doc_url(iframe));
         if ((sandbox & NS_SANDBOX_ACTIVE) &&
             !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
             ns_realmdoc_deny_cookie(js->ctx, realm_doc);
         JSValue realm_scope = JS_NULL;
         if (JS_IsObject(realm_doc))
             realm_scope = ns_iframe_make_scope(js->ctx, realm_doc, iorigin,
+                                               ns_iframe_doc_url(iframe),
                                                sandbox);
         if (JS_IsObject(realm_doc) && JS_IsObject(realm_scope)) {
             JSValue win = JS_GetPropertyStr(js->ctx, realm_scope, "window");
