@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* A connection that fails to one port of a host no longer makes
+  requests to the host's other ports fail for two minutes: recent
+  connection failures are remembered per origin (scheme, host and port)
+  instead of per host.
 * `performance.getEntriesByType('resource')` lists the document's
   scripts, stylesheets, frames and images along with `fetch()` and
   `XMLHttpRequest` requests, as `PerformanceResourceTiming` entries with
