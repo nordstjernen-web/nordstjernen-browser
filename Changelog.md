@@ -3,6 +3,35 @@ Changelog:
 
 1.0.27:
 ======
+* Scripts inserted with `append()`, `prepend()`, `before()`, `after()`,
+  `replaceWith()` or `replaceChildren()` run, as they do with
+  `appendChild()`. They never ran, so `document.head.append(script)`
+  loaded nothing and Svelte 5 components lost the scripts in their
+  `<svelte:head>` (Stack Overflow's Google sign-in among them).
+  Stylesheet links and `srcdoc` frames these methods insert load now
+  too. Custom
+  elements these methods insert or move get `connectedCallback` and
+  `disconnectedCallback` before the method returns, moving a node out of
+  another parent produces its MutationObserver removal record and
+  updates NodeIterators, and for every insertion method scripts run
+  before custom element callbacks, as in other browsers.
+* Images in the page's own markup fire `load` and `error` events, and
+  the window's `load` event waits for them, as in other browsers. A
+  broken or missing image could finish without an `error` event and
+  still read as incomplete when the page's `load` event fired.
+* Dedicated workers follow the HTML standard more closely. Messages to
+  and from workers use structured cloning, so `Error` objects (with
+  `cause`), `DOMException`, `Blob` and `File`, non-index array
+  properties, shared references and cycles arrive intact, functions and
+  symbols throw `DataCloneError`, and a transferred `MessagePort` can be
+  sent back to where its other end lives. `new Worker()` accepts `data:`
+  URLs (which run with an opaque origin), resolves URLs against the
+  document's base URL, throws `SyntaxError` only for a URL that does not
+  parse and otherwise reports failures through an `error` event.
+  Uncaught worker errors reach `self.onerror`, then the `Worker`'s
+  `onerror`, then the page's `window.onerror`, unless one of them
+  cancels it; a worker keeps running after one, and `terminate()` drops
+  messages the worker had already sent.
 * `document.write` runs the scripts it writes; they used to be skipped.
   A write whose markup closes everything it opens is inserted right away,
   so the written elements exist when `write()` returns and a written

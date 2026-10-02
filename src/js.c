@@ -118,6 +118,7 @@ struct ns_worker_host {
     gboolean      is_module;
     gboolean      is_service_worker;
     gint          sw_active;
+    gint          terminated;       /* terminate() was called by the owner */
     char         *scope;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
@@ -253,6 +254,7 @@ static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
+static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
@@ -260,6 +262,9 @@ static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
 static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
 static void ns_js_promote_deferred_iframes(ns_js *js);
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
+static gboolean ns_js_report_error_event(ns_js *js, const char *message,
+                                         const char *filename, int lineno,
+                                         int colno, JSValueConst error);
 static gboolean ns_js_report_exception_at(ns_js *js, JSValueConst ex,
                                           const char *filename, int lineno,
                                           int colno);
@@ -297,6 +302,7 @@ static gboolean ns_mut_target_covers(const ns_mut_target *t, ns_node *node);
 static void ns_nodelist_decorate(JSContext *ctx, JSValueConst arr);
 static JSValue ns_nodelist_from_array(JSContext *ctx, JSValue arr);
 static char *ns_js_doc_base_url(ns_js *js);
+static char *ns_js_decode_data_url(const char *url, gsize *out_len);
 static JSValue ns_make_token_list(JSContext *ctx, JSValueConst element,
                                   const char *attr);
 static gboolean ns_node_is_disabled_form_control(const ns_node *el);
@@ -7697,8 +7703,8 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
                                              previous, next);
             g_ptr_array_free(removed, TRUE);
             _j->mutated = TRUE;
-            ns_ce_upgrade_subtree_all(_j, parent);
             ns_js_run_inserted_scripts(_j, parent);
+            ns_ce_upgrade_subtree_all(_j, parent);
         }
         g_ptr_array_free(kids, TRUE);
     }
@@ -7827,6 +7833,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                 added->len ? added : NULL, original->len ? original : NULL,
                 NULL, NULL);
         _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, self, added);
     }
     g_ptr_array_free(added, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -22395,6 +22402,8 @@ typedef struct ns_worker_message {
     gboolean        is_sw_state;
     char           *message;
     char           *filename;
+    int             lineno, colno;
+    gboolean        is_load_error;  /* the script could not be fetched */
     char           *sw_state;
     guint64         port_id;
     guint64        *xfer_ids;
@@ -22518,7 +22527,8 @@ ns_worker_message_free(ns_worker_message *msg)
 
 static ns_worker_message *ns_worker_message_new(JSContext *ctx,
                                                 ns_worker_host *host,
-                                                JSValueConst value);
+                                                JSValueConst value,
+                                                JSValueConst ports);
 
 static guint64
 ns_port_bridge_alloc_id(void)
@@ -22590,7 +22600,19 @@ ns_worker_transfer_port(JSContext *ctx, JSValueConst port, JSValueConst pair,
         uint32_t qlen = ns_js_array_length(ctx, q);
         for (uint32_t j = 0; j < qlen; j++) {
             JSValue qi = JS_GetPropertyUint32(ctx, q, j);
-            ns_worker_message *fm = ns_worker_message_new(ctx, msg->host, qi);
+            /* Messages queued by ns_port_post_message carry their data in a
+             * wrapper; bridged ones are the data itself. */
+            JSValue wrapped = JS_IsObject(qi)
+                ? JS_GetPropertyStr(ctx, qi, "_portMessage") : JS_UNDEFINED;
+            if (JS_ToBool(ctx, wrapped) > 0) {
+                JSValue inner = JS_GetPropertyStr(ctx, qi, "data");
+                JS_FreeValue(ctx, qi);
+                qi = inner;
+            }
+            JS_FreeValue(ctx, wrapped);
+            ns_worker_message *fm = ns_worker_message_new(ctx, msg->host, qi,
+                                                          JS_UNDEFINED);
+            if (!fm) JS_FreeValue(ctx, JS_GetException(ctx));
             if (fm) {
                 fm->port_id = id;
                 if (!msg->followups) msg->followups = g_ptr_array_new();
@@ -22604,6 +22626,45 @@ ns_worker_transfer_port(JSContext *ctx, JSValueConst port, JSValueConst pair,
     JS_SetPropertyStr(ctx, port, "_closed", JS_TRUE);
     JS_SetPropertyStr(ctx, port, "_pair",   JS_NULL);
 
+    msg->xfer_ids = g_realloc(msg->xfer_ids,
+                              (msg->n_xfer + 1) * sizeof *msg->xfer_ids);
+    msg->xfer_ids[msg->n_xfer++] = id;
+}
+
+/* A bridged port has its other end in another runtime: a worker's bridged
+ * ports all lead to its owner, and an owner's to the worker recorded on the
+ * port.  Sending such a port to that runtime brings both ends together. */
+static gboolean
+ns_port_bridge_goes_home(JSContext *ctx, JSValueConst port,
+                         JSValueConst target_worker)
+{
+    if (!ns_port_bridge_id(ctx, port)) return FALSE;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->worker_host) return JS_IsUndefined(target_worker);
+    JSValue w = JS_GetPropertyStr(ctx, port, "_bridge_worker");
+    gboolean home = JS_IsObject(w) && JS_IsObject(target_worker) &&
+                    JS_VALUE_GET_PTR(w) == JS_VALUE_GET_PTR(target_worker);
+    JS_FreeValue(ctx, w);
+    return home;
+}
+
+/* Sends a bridged port back under its bridge id; the receiving side pairs
+ * it with the other end there.  This side's port is left closed. */
+static void
+ns_worker_return_port(JSContext *ctx, JSValueConst port, ns_worker_message *msg)
+{
+    guint64 id = ns_port_bridge_id(ctx, port);
+    JSValue reg = ns_port_bridge_registry(ctx);
+    char key[32];
+    g_snprintf(key, sizeof key, "%" G_GUINT64_FORMAT, id);
+    JSAtom atom = JS_NewAtom(ctx, key);
+    JS_DeleteProperty(ctx, reg, atom, 0);
+    JS_FreeAtom(ctx, atom);
+    JS_FreeValue(ctx, reg);
+    JS_SetPropertyStr(ctx, port, "_bridge_id", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, port, "_bridge_worker", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, port, "_closed", JS_TRUE);
+    JS_SetPropertyStr(ctx, port, "_shipped", JS_TRUE);
     msg->xfer_ids = g_realloc(msg->xfer_ids,
                               (msg->n_xfer + 1) * sizeof *msg->xfer_ids);
     msg->xfer_ids[msg->n_xfer++] = id;
@@ -22630,17 +22691,31 @@ ns_worker_walk_transfers(JSContext *ctx, int argc, JSValueConst *argv,
     }
     uint32_t len = ns_js_array_length(ctx, transfer);
     gboolean all_ok = TRUE;
+    GPtrArray *seen = g_ptr_array_new();
     for (uint32_t i = 0; i < len; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        /* Listing an object twice, or a buffer already detached, makes the
+         * whole transfer fail with DataCloneError. */
+        if (!detach && JS_IsObject(item)) {
+            if (g_ptr_array_find(seen, JS_VALUE_GET_PTR(item), NULL) ||
+                (JS_IsArrayBuffer(item) && ns_sc_buffer_detached(ctx, item))) {
+                all_ok = FALSE;
+                if (has_nontransferable) *has_nontransferable = TRUE;
+            }
+            g_ptr_array_add(seen, JS_VALUE_GET_PTR(item));
+        }
         if (JS_IsArrayBuffer(item)) {
             if (detach) JS_DetachArrayBuffer(ctx, item);
         } else if (ns_worker_transfer_is_port(ctx, item)) {
             JSValue pair = JS_GetPropertyStr(ctx, item, "_pair");
-            if (!JS_IsObject(pair)) {
+            if (JS_IsObject(pair)) {
+                if (detach && msg)
+                    ns_worker_transfer_port(ctx, item, pair, msg, bridge_worker);
+            } else if (ns_port_bridge_goes_home(ctx, item, bridge_worker)) {
+                if (detach && msg) ns_worker_return_port(ctx, item, msg);
+            } else {
                 all_ok = FALSE;
                 if (has_nontransferable) *has_nontransferable = TRUE;
-            } else if (detach && msg) {
-                ns_worker_transfer_port(ctx, item, pair, msg, bridge_worker);
             }
             JS_FreeValue(ctx, pair);
         } else {
@@ -22649,12 +22724,616 @@ ns_worker_walk_transfers(JSContext *ctx, int argc, JSValueConst *argv,
         }
         JS_FreeValue(ctx, item);
     }
+    g_ptr_array_free(seen, TRUE);
     JS_FreeValue(ctx, transfer);
     return all_ok;
 }
 
+/* The MessagePorts in a postMessage transfer list, in list order, which is
+ * the order ns_worker_walk_transfers gives them bridge ids in. */
+static JSValue
+ns_worker_transfer_ports(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    JSValue ports = JS_NewArray(ctx);
+    if (argc < 2 || !JS_IsObject(argv[1])) return ports;
+    JSValue transfer = JS_IsArray(argv[1])
+        ? JS_DupValue(ctx, argv[1]) : JS_GetPropertyStr(ctx, argv[1], "transfer");
+    uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        if (ns_worker_transfer_is_port(ctx, item))
+            JS_SetPropertyUint32(ctx, ports, k++, JS_DupValue(ctx, item));
+        JS_FreeValue(ctx, item);
+    }
+    JS_FreeValue(ctx, transfer);
+    return ports;
+}
+
+/* Worker messages cross into another JS runtime, so they travel as bytes.
+ * JS_WriteObject on its own is not structured serialization: it rejects
+ * Error objects, drops non-index array properties and knows nothing of
+ * Blobs or transferred ports.  The value is first encoded, with the rules
+ * ns_sc_clone applies to window messages, into a graph JS_WriteObject
+ * carries faithfully: every object becomes an array whose first element
+ * names its kind, and one object always becomes the same array, so
+ * JS_WRITE_OBJ_REFERENCE keeps shared references and cycles.  The receiving
+ * runtime reads the graph back and rebuilds the objects in its own realm. */
+typedef struct {
+    JSContext   *ctx;
+    GHashTable  *memo;              /* object -> JSValue * of its node */
+    JSValueConst ports;             /* MessagePorts being transferred */
+    JSValue      blob_ctor, file_ctor, dom_exception_ctor;
+    int          depth;
+} ns_wire_enc;
+
+static JSValue ns_wire_encode(ns_wire_enc *e, JSValueConst v);
+
+static JSValue
+ns_wire_node(JSContext *ctx, const char *kind)
+{
+    JSValue node = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, node, 0, JS_NewString(ctx, kind));
+    return node;
+}
+
+static void
+ns_wire_push(JSContext *ctx, JSValueConst node, JSValue item)
+{
+    JS_SetPropertyUint32(ctx, node, ns_js_array_length(ctx, node), item);
+}
+
+static void
+ns_wire_remember(GHashTable *memo, JSContext *ctx, JSValueConst key,
+                 JSValueConst value)
+{
+    JSValue *slot = g_new(JSValue, 1);
+    *slot = JS_DupValue(ctx, value);
+    g_hash_table_insert(memo, JS_VALUE_GET_PTR(key), slot);
+}
+
+static void
+ns_wire_memo_free(GHashTable *memo, JSContext *ctx)
+{
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, memo);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        JS_FreeValue(ctx, *(JSValue *)v);
+        g_free(v);
+    }
+    g_hash_table_destroy(memo);
+}
+
+/* Appends a key and an encoded value for each own enumerable string-keyed
+ * property of v, reading them with [[Get]] as structured serialization does. */
+static gboolean
+ns_wire_encode_props(ns_wire_enc *e, JSValueConst v, JSValueConst node)
+{
+    JSContext *ctx = e->ctx;
+    JSPropertyEnum *tab = NULL;
+    uint32_t n = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &n, v,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) < 0)
+        return FALSE;
+    gboolean ok = TRUE;
+    for (uint32_t i = 0; i < n && ok; i++) {
+        JSValue pv = JS_GetProperty(ctx, v, tab[i].atom);
+        if (JS_IsException(pv)) { ok = FALSE; break; }
+        JSValue ev = ns_wire_encode(e, pv);
+        JS_FreeValue(ctx, pv);
+        if (JS_IsException(ev)) { ok = FALSE; break; }
+        ns_wire_push(ctx, node, JS_AtomToString(ctx, tab[i].atom));
+        ns_wire_push(ctx, node, ev);
+    }
+    JS_FreePropertyEnum(ctx, tab, n);
+    return ok;
+}
+
+static gboolean
+ns_wire_encode_entries(ns_wire_enc *e, JSValueConst src, const char *method,
+                       gboolean pairs, JSValueConst node)
+{
+    JSContext *ctx = e->ctx;
+    JSValue fn = JS_GetPropertyStr(ctx, src, method);
+    JSValue iter = JS_Call(ctx, fn, src, 0, NULL);
+    JS_FreeValue(ctx, fn);
+    if (JS_IsException(iter)) return FALSE;
+    JSValue next = JS_GetPropertyStr(ctx, iter, "next");
+    gboolean ok = TRUE;
+    for (;;) {
+        JSValue r = JS_Call(ctx, next, iter, 0, NULL);
+        if (JS_IsException(r)) { ok = FALSE; break; }
+        JSValue done = JS_GetPropertyStr(ctx, r, "done");
+        int finished = JS_ToBool(ctx, done);
+        JS_FreeValue(ctx, done);
+        if (finished) { JS_FreeValue(ctx, r); break; }
+        JSValue item = JS_GetPropertyStr(ctx, r, "value");
+        JS_FreeValue(ctx, r);
+        for (uint32_t k = 0; k < (pairs ? 2u : 1u) && ok; k++) {
+            JSValue part = pairs ? JS_GetPropertyUint32(ctx, item, k)
+                                 : JS_DupValue(ctx, item);
+            JSValue ev = ns_wire_encode(e, part);
+            JS_FreeValue(ctx, part);
+            if (JS_IsException(ev)) ok = FALSE;
+            else ns_wire_push(ctx, node, ev);
+        }
+        JS_FreeValue(ctx, item);
+        if (!ok) break;
+    }
+    JS_FreeValue(ctx, next);
+    JS_FreeValue(ctx, iter);
+    return ok;
+}
+
+static JSValue
+ns_wire_encode_error(ns_wire_enc *e, JSValueConst v)
+{
+    static const char *const known[] = {
+        "Error", "EvalError", "RangeError", "ReferenceError",
+        "SyntaxError", "TypeError", "URIError",
+    };
+    JSContext *ctx = e->ctx;
+    JSValue name = JS_GetPropertyStr(ctx, v, "name");
+    if (JS_IsException(name)) return name;
+    const char *nm = JS_IsString(name) ? JS_ToCString(ctx, name) : NULL;
+    const char *ctor = "Error";
+    for (gsize i = 0; nm && i < G_N_ELEMENTS(known); i++)
+        if (strcmp(nm, known[i]) == 0) ctor = known[i];
+    JSValue node = ns_wire_node(ctx, "E");
+    ns_wire_push(ctx, node, JS_NewString(ctx, ctor));
+    if (nm) JS_FreeCString(ctx, nm);
+    JS_FreeValue(ctx, name);
+    ns_wire_remember(e->memo, ctx, v, node);
+    JSValue message = JS_UNDEFINED;
+    JSPropertyDescriptor desc;
+    JSAtom atom = JS_NewAtom(ctx, "message");
+    int has = JS_GetOwnProperty(ctx, &desc, v, atom);
+    JS_FreeAtom(ctx, atom);
+    if (has < 0) { JS_FreeValue(ctx, node); return JS_EXCEPTION; }
+    if (has > 0) {
+        if (!(desc.flags & JS_PROP_GETSET))
+            message = JS_ToString(ctx, desc.value);
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+        if (JS_IsException(message)) { JS_FreeValue(ctx, node); return message; }
+    }
+    ns_wire_push(ctx, node, message);
+    JSValue stack = JS_GetPropertyStr(ctx, v, "stack");
+    ns_wire_push(ctx, node, JS_IsString(stack) ? stack : JS_UNDEFINED);
+    if (!JS_IsString(stack)) JS_FreeValue(ctx, stack);
+    JSValue cause = JS_GetPropertyStr(ctx, v, "cause");
+    if (!JS_IsUndefined(cause) && !JS_IsException(cause)) {
+        JSValue ec = ns_wire_encode(e, cause);
+        if (JS_IsException(ec)) {
+            JS_FreeValue(ctx, cause);
+            JS_FreeValue(ctx, node);
+            return ec;
+        }
+        ns_wire_push(ctx, node, ec);
+    }
+    JS_FreeValue(ctx, cause);
+    return node;
+}
+
+static JSValue
+ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
+{
+    JSContext *ctx = e->ctx;
+    if (JS_IsFunction(ctx, v) || ns_unwrap_element(v)) return ns_sc_fail(ctx);
+
+    if (ns_worker_transfer_is_port(ctx, v)) {
+        uint32_t n = JS_IsArray(e->ports) ? ns_js_array_length(ctx, e->ports) : 0;
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue p = JS_GetPropertyUint32(ctx, e->ports, i);
+            gboolean same = JS_VALUE_GET_PTR(p) == JS_VALUE_GET_PTR(v);
+            JS_FreeValue(ctx, p);
+            if (!same) continue;
+            JSValue node = ns_wire_node(ctx, "P");
+            ns_wire_push(ctx, node, JS_NewUint32(ctx, i));
+            return node;
+        }
+        /* A MessagePort can only be transferred, never copied. */
+        return ns_sc_fail(ctx);
+    }
+
+    if (JS_IsArrayBuffer(v)) {
+        if (ns_sc_buffer_detached(ctx, v)) return ns_sc_fail(ctx);
+        size_t size = 0;
+        uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, v);
+        JSValue node = ns_wire_node(ctx, "AB");
+        ns_wire_push(ctx, node, JS_NewArrayBufferCopy(ctx, bytes, size));
+        JSValue resizable = JS_GetPropertyStr(ctx, v, "resizable");
+        if (JS_ToBool(ctx, resizable) > 0)
+            ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "maxByteLength"));
+        JS_FreeValue(ctx, resizable);
+        return node;
+    }
+
+    int tt = JS_GetTypedArrayType(v);
+    if (tt >= 0) {
+        size_t off = 0, len = 0, bpe = 0;
+        JSValue buf = ns_sc_fail_on_exception(ctx,
+            JS_GetTypedArrayBuffer(ctx, v, &off, &len, &bpe));
+        if (JS_IsException(buf)) return buf;
+        JSValue bnode = ns_wire_encode(e, buf);
+        JS_FreeValue(ctx, buf);
+        if (JS_IsException(bnode)) return bnode;
+        JSValue node = ns_wire_node(ctx, "TA");
+        ns_wire_push(ctx, node, JS_NewInt32(ctx, tt));
+        ns_wire_push(ctx, node, bnode);
+        ns_wire_push(ctx, node, JS_NewInt64(ctx, (int64_t)off));
+        ns_wire_push(ctx, node, JS_NewInt64(ctx, (int64_t)(bpe ? len / bpe : 0)));
+        return node;
+    }
+
+    if (JS_IsDataView(v)) {
+        JSValue buf = JS_GetPropertyStr(ctx, v, "buffer");
+        JSValue bnode = ns_wire_encode(e, buf);
+        JS_FreeValue(ctx, buf);
+        if (JS_IsException(bnode)) return bnode;
+        JSValue node = ns_wire_node(ctx, "DV");
+        ns_wire_push(ctx, node, bnode);
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "byteOffset"));
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "byteLength"));
+        return node;
+    }
+
+    if (JS_IsDate(v)) {
+        JSValue fn = JS_GetPropertyStr(ctx, v, "getTime");
+        JSValue t = JS_Call(ctx, fn, v, 0, NULL);
+        JS_FreeValue(ctx, fn);
+        if (JS_IsException(t)) return t;
+        JSValue node = ns_wire_node(ctx, "D");
+        ns_wire_push(ctx, node, t);
+        return node;
+    }
+
+    if (JS_IsRegExp(v)) {
+        JSValue node = ns_wire_node(ctx, "RE");
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "source"));
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "flags"));
+        return node;
+    }
+
+    if (JS_IsMap(v) || JS_IsSet(v)) {
+        gboolean is_map = JS_IsMap(v);
+        JSValue node = ns_wire_node(ctx, is_map ? "M" : "S");
+        ns_wire_remember(e->memo, ctx, v, node);
+        if (!ns_wire_encode_entries(e, v, is_map ? "entries" : "values",
+                                    is_map, node)) {
+            JS_FreeValue(ctx, node);
+            return JS_EXCEPTION;
+        }
+        return node;
+    }
+
+    gboolean is_file = ns_sc_isa(ctx, v, e->file_ctor);
+    if (is_file || ns_sc_isa(ctx, v, e->blob_ctor)) {
+        JSValue bytes = JS_GetPropertyStr(ctx, v, "_b");
+        JSValue bnode = ns_wire_encode(e, bytes);
+        JS_FreeValue(ctx, bytes);
+        if (JS_IsException(bnode)) return bnode;
+        JSValue node = ns_wire_node(ctx, is_file ? "FI" : "BL");
+        ns_wire_push(ctx, node, bnode);
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "type"));
+        if (is_file) {
+            ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "name"));
+            ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "lastModified"));
+        }
+        return node;
+    }
+
+    if (ns_sc_isa(ctx, v, e->dom_exception_ctor)) {
+        JSValue node = ns_wire_node(ctx, "DE");
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "message"));
+        ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "name"));
+        return node;
+    }
+
+    if (JS_IsError(v)) return ns_wire_encode_error(e, v);
+
+    int boxed = JS_GetBoxedPrimitiveKind(v);
+    if (boxed == JS_BOXED_NUMBER || boxed == JS_BOXED_STRING ||
+        boxed == JS_BOXED_BOOLEAN || boxed == JS_BOXED_BIGINT) {
+        JSValue fn = JS_GetPropertyStr(ctx, v, "valueOf");
+        JSValue prim = JS_Call(ctx, fn, v, 0, NULL);
+        JS_FreeValue(ctx, fn);
+        if (JS_IsException(prim)) return prim;
+        JSValue node = ns_wire_node(ctx, "BX");
+        ns_wire_push(ctx, node, prim);
+        return node;
+    }
+
+    gboolean is_array = JS_IsArray(v);
+    JSValue node = ns_wire_node(ctx, is_array ? "A" : "O");
+    if (is_array) ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "length"));
+    ns_wire_remember(e->memo, ctx, v, node);
+    if (!ns_wire_encode_props(e, v, node)) {
+        JS_FreeValue(ctx, node);
+        return JS_EXCEPTION;
+    }
+    return node;
+}
+
+static JSValue
+ns_wire_encode(ns_wire_enc *e, JSValueConst v)
+{
+    JSContext *ctx = e->ctx;
+    if (JS_VALUE_GET_TAG(v) == JS_TAG_SYMBOL) return ns_sc_fail(ctx);
+    if (!JS_IsObject(v)) return JS_DupValue(ctx, v);
+    JSValue *seen = g_hash_table_lookup(e->memo, JS_VALUE_GET_PTR(v));
+    if (seen) return JS_DupValue(ctx, *seen);
+    if (e->depth >= NS_SC_MAX_DEPTH) return ns_sc_fail(ctx);
+    e->depth++;
+    JSValue node = ns_wire_encode_object(e, v);
+    e->depth--;
+    if (!JS_IsException(node) &&
+        !g_hash_table_contains(e->memo, JS_VALUE_GET_PTR(v)))
+        ns_wire_remember(e->memo, ctx, v, node);
+    return node;
+}
+
+/* Encodes value for a worker message; ports lists the MessagePorts being
+ * transferred, which the message refers to by position. */
+static JSValue
+ns_wire_encode_value(JSContext *ctx, JSValueConst value, JSValueConst ports)
+{
+    ns_wire_enc e = { ctx, g_hash_table_new(g_direct_hash, g_direct_equal),
+                      ports, JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED, 0 };
+    JSValue g = JS_GetGlobalObject(ctx);
+    e.blob_ctor = JS_GetPropertyStr(ctx, g, "Blob");
+    e.file_ctor = JS_GetPropertyStr(ctx, g, "File");
+    e.dom_exception_ctor = JS_GetPropertyStr(ctx, g, "DOMException");
+    JS_FreeValue(ctx, g);
+    JSValue out = ns_wire_encode(&e, value);
+    JS_FreeValue(ctx, e.blob_ctor);
+    JS_FreeValue(ctx, e.file_ctor);
+    JS_FreeValue(ctx, e.dom_exception_ctor);
+    ns_wire_memo_free(e.memo, ctx);
+    return out;
+}
+
+typedef struct {
+    JSContext   *ctx;
+    GHashTable  *memo;              /* node -> JSValue * of rebuilt value */
+    JSValueConst ports;
+    JSValue      global;
+    int          depth;
+} ns_wire_dec;
+
+static JSValue ns_wire_decode(ns_wire_dec *d, JSValueConst node);
+
+static JSValue
+ns_wire_construct(ns_wire_dec *d, const char *name, int argc, JSValueConst *argv)
+{
+    JSValue ctor = JS_GetPropertyStr(d->ctx, d->global, name);
+    JSValue out = JS_IsConstructor(d->ctx, ctor)
+        ? JS_CallConstructor(d->ctx, ctor, argc, argv) : JS_NewObject(d->ctx);
+    JS_FreeValue(d->ctx, ctor);
+    return out;
+}
+
+/* Calls method on target with the decoded items of node from index first,
+ * taking per items at a time (Map.set, Set.add). */
+static gboolean
+ns_wire_decode_calls(ns_wire_dec *d, JSValueConst node, uint32_t first,
+                     int per, JSValueConst target, const char *method)
+{
+    JSContext *ctx = d->ctx;
+    JSValue fn = JS_GetPropertyStr(ctx, target, method);
+    uint32_t n = ns_js_array_length(ctx, node);
+    gboolean ok = TRUE;
+    for (uint32_t i = first; i + (uint32_t)per <= n && ok; i += (uint32_t)per) {
+        JSValue args[2] = { JS_UNDEFINED, JS_UNDEFINED };
+        for (int k = 0; k < per && ok; k++) {
+            JSValue raw = JS_GetPropertyUint32(ctx, node, i + (uint32_t)k);
+            args[k] = ns_wire_decode(d, raw);
+            JS_FreeValue(ctx, raw);
+            if (JS_IsException(args[k])) ok = FALSE;
+        }
+        if (ok) {
+            JSValue r = JS_Call(ctx, fn, target, per, (JSValueConst *)args);
+            if (JS_IsException(r)) ok = FALSE;
+            JS_FreeValue(ctx, r);
+        }
+        for (int k = 0; k < per; k++) JS_FreeValue(ctx, args[k]);
+    }
+    JS_FreeValue(ctx, fn);
+    return ok;
+}
+
+static gboolean
+ns_wire_decode_props(ns_wire_dec *d, JSValueConst node, uint32_t first,
+                     JSValueConst target)
+{
+    JSContext *ctx = d->ctx;
+    uint32_t n = ns_js_array_length(ctx, node);
+    for (uint32_t i = first; i + 1 < n; i += 2) {
+        JSValue key = JS_GetPropertyUint32(ctx, node, i);
+        JSValue raw = JS_GetPropertyUint32(ctx, node, i + 1);
+        JSValue val = ns_wire_decode(d, raw);
+        JS_FreeValue(ctx, raw);
+        if (JS_IsException(val)) { JS_FreeValue(ctx, key); return FALSE; }
+        JSAtom atom = JS_ValueToAtom(ctx, key);
+        JS_FreeValue(ctx, key);
+        int r = JS_DefinePropertyValue(ctx, target, atom, val, JS_PROP_C_W_E);
+        JS_FreeAtom(ctx, atom);
+        if (r < 0) return FALSE;
+    }
+    return TRUE;
+}
+
+static JSValue
+ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
+{
+    JSContext *ctx = d->ctx;
+    JSValue a1 = JS_GetPropertyUint32(ctx, node, 1);
+    JSValue a2 = JS_GetPropertyUint32(ctx, node, 2);
+    JSValue a3 = JS_GetPropertyUint32(ctx, node, 3);
+    JSValue a4 = JS_GetPropertyUint32(ctx, node, 4);
+    JSValue out = JS_UNDEFINED;
+    if (strcmp(kind, "P") == 0) {
+        uint32_t i = 0;
+        JS_ToUint32(ctx, &i, a1);
+        out = JS_IsArray(d->ports) ? JS_GetPropertyUint32(ctx, d->ports, i)
+                                   : JS_NULL;
+    } else if (strcmp(kind, "AB") == 0) {
+        if (JS_IsUndefined(a2)) {
+            out = JS_DupValue(ctx, a1);
+        } else {
+            size_t size = 0;
+            uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, a1);
+            JSValue opts = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, opts, "maxByteLength", JS_DupValue(ctx, a2));
+            JSValueConst args[2] = { JS_NewInt64(ctx, (int64_t)size), opts };
+            out = ns_wire_construct(d, "ArrayBuffer", 2, args);
+            JS_FreeValue(ctx, opts);
+            size_t got = 0;
+            uint8_t *dst = JS_IsException(out) ? NULL
+                         : JS_GetArrayBuffer(ctx, &got, out);
+            if (dst && bytes && got >= size) memcpy(dst, bytes, size);
+        }
+    } else if (strcmp(kind, "TA") == 0 || strcmp(kind, "DV") == 0) {
+        gboolean typed = kind[0] == 'T';
+        JSValue buf = ns_wire_decode(d, typed ? a2 : a1);
+        if (JS_IsException(buf)) {
+            out = buf;
+        } else {
+            JSValueConst args[3] = { buf, typed ? a3 : a2, typed ? a4 : a3 };
+            if (typed) {
+                int32_t tt = 0;
+                JS_ToInt32(ctx, &tt, a1);
+                out = JS_NewTypedArray(ctx, 3, args, (JSTypedArrayEnum)tt);
+            } else {
+                out = ns_wire_construct(d, "DataView", 3, args);
+            }
+            JS_FreeValue(ctx, buf);
+        }
+    } else if (strcmp(kind, "D") == 0) {
+        JSValueConst args[1] = { a1 };
+        out = ns_wire_construct(d, "Date", 1, args);
+    } else if (strcmp(kind, "RE") == 0) {
+        JSValueConst args[2] = { a1, a2 };
+        out = ns_wire_construct(d, "RegExp", 2, args);
+    } else if (strcmp(kind, "M") == 0 || strcmp(kind, "S") == 0) {
+        gboolean is_map = kind[0] == 'M';
+        out = ns_wire_construct(d, is_map ? "Map" : "Set", 0, NULL);
+        if (!JS_IsException(out)) {
+            ns_wire_remember(d->memo, ctx, node, out);
+            if (!ns_wire_decode_calls(d, node, 1, is_map ? 2 : 1, out,
+                                      is_map ? "set" : "add")) {
+                JS_FreeValue(ctx, out);
+                out = JS_EXCEPTION;
+            }
+        }
+    } else if (strcmp(kind, "BL") == 0 || strcmp(kind, "FI") == 0) {
+        gboolean is_file = kind[0] == 'F';
+        JSValue bytes = ns_wire_decode(d, a1);
+        if (JS_IsException(bytes)) {
+            out = bytes;
+        } else {
+            JSValue parts = JS_NewArray(ctx);
+            JS_SetPropertyUint32(ctx, parts, 0, bytes);
+            JSValue opts = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, opts, "type", JS_DupValue(ctx, a2));
+            if (is_file) {
+                JS_SetPropertyStr(ctx, opts, "lastModified", JS_DupValue(ctx, a4));
+                JSValueConst args[3] = { parts, a3, opts };
+                out = ns_wire_construct(d, "File", 3, args);
+            } else {
+                JSValueConst args[2] = { parts, opts };
+                out = ns_wire_construct(d, "Blob", 2, args);
+            }
+            JS_FreeValue(ctx, parts);
+            JS_FreeValue(ctx, opts);
+        }
+    } else if (strcmp(kind, "DE") == 0) {
+        JSValueConst args[2] = { a1, a2 };
+        out = ns_wire_construct(d, "DOMException", 2, args);
+    } else if (strcmp(kind, "E") == 0) {
+        const char *ctor = JS_ToCString(ctx, a1);
+        JSValueConst args[1] = { a2 };
+        out = ns_wire_construct(d, ctor ? ctor : "Error",
+                                JS_IsUndefined(a2) ? 0 : 1, args);
+        if (ctor) JS_FreeCString(ctx, ctor);
+        if (!JS_IsException(out)) {
+            ns_wire_remember(d->memo, ctx, node, out);
+            if (JS_IsString(a3))
+                JS_DefinePropertyValueStr(ctx, out, "stack", JS_DupValue(ctx, a3),
+                                          JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            if (ns_js_array_length(ctx, node) > 4) {
+                JSValue cause = ns_wire_decode(d, a4);
+                if (JS_IsException(cause)) {
+                    JS_FreeValue(ctx, out);
+                    out = JS_EXCEPTION;
+                } else {
+                    JS_DefinePropertyValueStr(ctx, out, "cause", cause,
+                        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+                }
+            }
+        }
+    } else if (strcmp(kind, "BX") == 0) {
+        out = JS_ToObject(ctx, a1);
+    } else if (strcmp(kind, "A") == 0 || strcmp(kind, "O") == 0) {
+        gboolean is_array = kind[0] == 'A';
+        out = is_array ? JS_NewArray(ctx) : JS_NewObject(ctx);
+        if (is_array) JS_SetPropertyStr(ctx, out, "length", JS_DupValue(ctx, a1));
+        ns_wire_remember(d->memo, ctx, node, out);
+        if (!ns_wire_decode_props(d, node, is_array ? 2 : 1, out)) {
+            JS_FreeValue(ctx, out);
+            out = JS_EXCEPTION;
+        }
+    } else {
+        out = JS_NULL;
+    }
+    JS_FreeValue(ctx, a1);
+    JS_FreeValue(ctx, a2);
+    JS_FreeValue(ctx, a3);
+    JS_FreeValue(ctx, a4);
+    return out;
+}
+
+static JSValue
+ns_wire_decode(ns_wire_dec *d, JSValueConst node)
+{
+    JSContext *ctx = d->ctx;
+    if (!JS_IsObject(node)) return JS_DupValue(ctx, node);
+    JSValue *seen = g_hash_table_lookup(d->memo, JS_VALUE_GET_PTR(node));
+    if (seen) return JS_DupValue(ctx, *seen);
+    if (!JS_IsArray(node) || d->depth >= NS_SC_MAX_DEPTH) return JS_NULL;
+    JSValue k = JS_GetPropertyUint32(ctx, node, 0);
+    const char *kind = JS_IsString(k) ? JS_ToCString(ctx, k) : NULL;
+    JS_FreeValue(ctx, k);
+    if (!kind) return JS_NULL;
+    d->depth++;
+    JSValue out = ns_wire_decode_node(d, node, kind);
+    d->depth--;
+    JS_FreeCString(ctx, kind);
+    if (!JS_IsException(out) &&
+        !g_hash_table_contains(d->memo, JS_VALUE_GET_PTR(node)))
+        ns_wire_remember(d->memo, ctx, node, out);
+    return out;
+}
+
+static JSValue
+ns_wire_decode_value(JSContext *ctx, JSValueConst wire, JSValueConst ports)
+{
+    ns_wire_dec d = { ctx, g_hash_table_new(g_direct_hash, g_direct_equal),
+                      ports, JS_GetGlobalObject(ctx), 0 };
+    JSValue out = ns_wire_decode(&d, wire);
+    JS_FreeValue(ctx, d.global);
+    ns_wire_memo_free(d.memo, ctx);
+    return out;
+}
+
+/* Serializes value for another runtime.  Returns NULL with an exception
+ * pending: DataCloneError for what cannot be cloned, or whatever a getter
+ * threw while the value was read. */
 static ns_worker_message *
-ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value)
+ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value,
+                      JSValueConst ports)
 {
     ns_worker_message *msg = g_new0(ns_worker_message, 1);
     msg->host = ns_worker_host_ref(host);
@@ -22662,15 +23341,25 @@ ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value)
         msg->is_undefined = TRUE;
         return msg;
     }
+    JSValue wire = ns_wire_encode_value(ctx, value, ports);
+    if (JS_IsException(wire)) {
+        ns_worker_message_free(msg);
+        return NULL;
+    }
     size_t len = 0;
-    uint8_t *bytes = JS_WriteObject(ctx, &len, value, JS_WRITE_OBJ_REFERENCE);
+    uint8_t *bytes = JS_WriteObject(ctx, &len, wire, JS_WRITE_OBJ_REFERENCE);
+    JS_FreeValue(ctx, wire);
     if (!bytes) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        ns_sc_fail(ctx);
         ns_worker_message_free(msg);
         return NULL;
     }
     if (len > NS_WORKER_MESSAGE_BYTES_MAX) {
         js_free(ctx, bytes);
         ns_worker_message_free(msg);
+        ns_throw_dom_exception(ctx, "DataCloneError", 25,
+                               "postMessage: message is too large");
         return NULL;
     }
     msg->bytes = g_memdup2(bytes, len);
@@ -22680,11 +23369,17 @@ ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value)
 }
 
 static JSValue
-ns_worker_message_value(JSContext *ctx, const ns_worker_message *msg)
+ns_worker_message_value(JSContext *ctx, const ns_worker_message *msg,
+                        JSValueConst ports)
 {
     if (!msg || msg->is_undefined) return JS_UNDEFINED;
     if (!msg->bytes || msg->len == 0) return JS_NULL;
-    return JS_ReadObject(ctx, msg->bytes, msg->len, JS_READ_OBJ_REFERENCE);
+    JSValue wire = JS_ReadObject(ctx, msg->bytes, msg->len,
+                                 JS_READ_OBJ_REFERENCE);
+    if (JS_IsException(wire)) return wire;
+    JSValue value = ns_wire_decode_value(ctx, wire, ports);
+    JS_FreeValue(ctx, wire);
+    return value;
 }
 
 static void
@@ -22723,6 +23418,21 @@ ns_port_bridge_deliver(JSContext *ctx, guint64 id, JSValueConst data)
 static JSValue
 ns_port_bridge_receive(JSContext *ctx, guint64 id, JSValueConst worker_obj)
 {
+    JSValue other = ns_port_bridge_lookup(ctx, id);
+    if (JS_IsObject(other)) {
+        /* The port came back to the runtime holding its other end: the two
+         * are a local pair again, and messages queued for the port, which
+         * follow under the same id, are delivered to it. */
+        JSValue p = ns_port_new(ctx);
+        JS_SetPropertyStr(ctx, p, "_pair", JS_DupValue(ctx, other));
+        JS_SetPropertyStr(ctx, other, "_pair", JS_DupValue(ctx, p));
+        JS_SetPropertyStr(ctx, other, "_bridge_id", JS_UNDEFINED);
+        JS_SetPropertyStr(ctx, other, "_bridge_worker", JS_UNDEFINED);
+        ns_port_bridge_register(ctx, id, p);
+        JS_FreeValue(ctx, other);
+        return p;
+    }
+    JS_FreeValue(ctx, other);
     JSValue p = ns_port_new(ctx);
     JS_SetPropertyStr(ctx, p, "_bridge_id", JS_NewFloat64(ctx, (double)id));
     if (JS_IsObject(worker_obj))
@@ -22731,18 +23441,17 @@ ns_port_bridge_receive(JSContext *ctx, guint64 id, JSValueConst worker_obj)
     return p;
 }
 
-static void
-ns_worker_event_attach_ports(JSContext *ctx, JSValueConst ev,
-                             const ns_worker_message *msg,
-                             JSValueConst worker_obj)
+/* The ports a message transfers, as port objects of the receiving side. */
+static JSValue
+ns_worker_message_ports(JSContext *ctx, const ns_worker_message *msg,
+                        JSValueConst worker_obj)
 {
-    if (!msg->n_xfer) return;
     JSValue ports = JS_NewArray(ctx);
     for (guint i = 0; i < msg->n_xfer; i++)
         JS_SetPropertyUint32(ctx, ports, i,
                              ns_port_bridge_receive(ctx, msg->xfer_ids[i],
                                                     worker_obj));
-    JS_SetPropertyStr(ctx, ev, "ports", ports);
+    return ports;
 }
 
 static JSValue
@@ -22783,7 +23492,11 @@ ns_worker_dispatch(JSContext *ctx, JSValueConst target, const char *type,
     if (JS_IsFunction(ctx, dispatch)) {
         JSValueConst args[1] = { ev };
         JSValue r = JS_Call(ctx, dispatch, target, 1, args);
-        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        if (JS_IsException(r)) {
+            JSValue ex = JS_GetException(ctx);
+            ns_js_report_uncaught(js_from_ctx(ctx), ex, "worker");
+            JS_FreeValue(ctx, ex);
+        }
         JS_FreeValue(ctx, r);
     }
     JS_FreeValue(ctx, dispatch);
@@ -22833,13 +23546,55 @@ ns_sw_apply_state(JSContext *ctx, ns_worker_host *host, const char *state)
     JS_FreeValue(ctx, reg);
 }
 
+/* A Worker's error event: a plain Event when its script could not be
+ * fetched, otherwise a cancelable ErrorEvent with the error's position. */
+static void
+ns_worker_shape_error_event(JSContext *ctx, JSValueConst ev,
+                            const ns_worker_message *msg)
+{
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, g, msg->is_load_error ? "Event"
+                                                                : "ErrorEvent");
+    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
+                                      : JS_UNDEFINED;
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, g);
+    if (msg->is_load_error) {
+        static const char *const extra[] = {
+            "message", "filename", "lineno", "colno", "error", "data",
+            "origin", "lastEventId", "source", "ports",
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(extra); i++) {
+            JSAtom a = JS_NewAtom(ctx, extra[i]);
+            JS_DeleteProperty(ctx, ev, a, 0);
+            JS_FreeAtom(ctx, a);
+        }
+        return;
+    }
+    JS_SetPropertyStr(ctx, ev, "cancelable", JS_TRUE);
+    JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, msg->lineno));
+    JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, msg->colno));
+    static const char *const not_error[] = {
+        "data", "origin", "lastEventId", "source", "ports",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(not_error); i++) {
+        JSAtom a = JS_NewAtom(ctx, not_error[i]);
+        JS_DeleteProperty(ctx, ev, a, 0);
+        JS_FreeAtom(ctx, a);
+    }
+}
+
 static gboolean
 ns_worker_deliver_owner(gpointer data)
 {
     ns_worker_message *msg = data;
     ns_worker_host *host = msg->host;
+    /* After terminate(), whatever the worker had already sent is dropped. */
     if (!host || !g_atomic_int_get(&host->owner_alive) ||
-        !host->owner_ctx || JS_IsUndefined(host->owner_obj)) {
+        !host->owner_ctx || JS_IsUndefined(host->owner_obj) ||
+        (g_atomic_int_get(&host->terminated) && !msg->is_sw_state)) {
         ns_worker_message_free(msg);
         return G_SOURCE_REMOVE;
     }
@@ -22860,9 +23615,11 @@ ns_worker_deliver_owner(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     JSValue data_v = JS_UNDEFINED;
+    JSValue ports = msg->is_error || msg->port_id
+        ? JS_NewArray(ctx) : ns_worker_message_ports(ctx, msg, host->owner_obj);
     const char *type = msg->is_error ? "error" : "message";
     if (!msg->is_error) {
-        data_v = ns_worker_message_value(ctx, msg);
+        data_v = ns_worker_message_value(ctx, msg, ports);
         if (JS_IsException(data_v)) {
             JS_FreeValue(ctx, JS_GetException(ctx));
             type = "messageerror";
@@ -22872,6 +23629,7 @@ ns_worker_deliver_owner(gpointer data)
     if (msg->port_id) {
         ns_port_bridge_deliver(ctx, msg->port_id, data_v);
         JS_FreeValue(ctx, data_v);
+        JS_FreeValue(ctx, ports);
         ns_drain_mutations(js);
         ns_js_budget_pop(js, &bg);
         ns_worker_message_free(msg);
@@ -22879,8 +23637,8 @@ ns_worker_deliver_owner(gpointer data)
     }
     JSValue ev = ns_worker_event(ctx, type, data_v, host->origin,
                                  msg->message, msg->filename);
-    if (!msg->is_error)
-        ns_worker_event_attach_ports(ctx, ev, msg, host->owner_obj);
+    JS_SetPropertyStr(ctx, ev, "ports", ports);
+    if (msg->is_error) ns_worker_shape_error_event(ctx, ev, msg);
     JSValue target = JS_DupValue(ctx, host->owner_obj);
     if (host->is_service_worker && !msg->is_error) {
         JSValue global = JS_GetGlobalObject(ctx);
@@ -22896,6 +23654,20 @@ ns_worker_deliver_owner(gpointer data)
         JS_FreeValue(ctx, global);
     }
     ns_worker_dispatch(ctx, target, type, ev);
+    if (msg->is_error && !msg->is_load_error) {
+        /* An uncaught worker error nobody cancelled at the Worker object is
+         * reported at the owner's window too. */
+        JSValue dp = JS_GetPropertyStr(ctx, ev, "defaultPrevented");
+        gboolean cancelled = JS_ToBool(ctx, dp) > 0;
+        JS_FreeValue(ctx, dp);
+        if (!cancelled) {
+            ns_realm_scope scope;
+            ns_js_realm_scope_enter(js, ctx, &scope);
+            ns_js_report_error_event(js, msg->message, msg->filename,
+                                     msg->lineno, msg->colno, JS_NULL);
+            ns_js_realm_scope_leave(js, &scope);
+        }
+    }
     JS_FreeValue(ctx, target);
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, data_v);
@@ -22916,15 +23688,22 @@ ns_worker_post_owner_message(ns_worker_host *host, ns_worker_message *msg)
                                ns_worker_deliver_owner, msg, NULL);
 }
 
+/* An error for the Worker object: a script that could not be fetched
+ * (load_error, a plain error event) or an uncaught exception (an ErrorEvent
+ * that reaches the owner's window unless it is cancelled). */
 static void
 ns_worker_post_owner_error(ns_worker_host *host, const char *message,
-                           const char *filename)
+                           const char *filename, int lineno, int colno,
+                           gboolean load_error)
 {
     ns_worker_message *msg = g_new0(ns_worker_message, 1);
     msg->host = ns_worker_host_ref(host);
     msg->is_error = TRUE;
+    msg->is_load_error = load_error;
     msg->message = g_strdup(message ? message : "Worker error");
     msg->filename = g_strdup(filename ? filename : "");
+    msg->lineno = lineno;
+    msg->colno = colno;
     ns_worker_post_owner_message(host, msg);
 }
 
@@ -23000,6 +23779,21 @@ ns_worker_script_url_allowed(ns_worker_host *host, const char *url,
     return ns_url_is_http_or_https(url) || g_str_has_prefix(url, "file:");
 }
 
+/* Decodes worker script bytes as the HTML standard's "UTF-8 decode" does:
+ * a UTF-8 byte order mark is dropped, invalid sequences become U+FFFD, and
+ * no other encoding is ever used, so a UTF-16 script fails to compile. */
+static char *
+ns_worker_script_text(const guint8 *data, gsize len, gsize *out_len)
+{
+    if (len >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+        data += 3;
+        len -= 3;
+    }
+    char *text = g_utf8_make_valid((const char *)data, (gssize)len);
+    if (out_len) *out_len = strlen(text);
+    return text;
+}
+
 static char *
 ns_worker_fetch_script(ns_worker_host *host, const char *url,
                        gboolean allow_cross_origin,
@@ -23029,7 +23823,8 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
                                           &redirect_error)) {
             if (out_error) *out_error = g_steal_pointer(&redirect_error);
         } else {
-            body = g_strndup((const char *)resp->body->data, resp->body->len);
+            body = ns_worker_script_text(resp->body->data, resp->body->len,
+                                         NULL);
             if (out_final_url) *out_final_url = g_strdup(final_url);
         }
     } else if (out_error) {
@@ -23043,9 +23838,117 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
     return body;
 }
 
+typedef struct {
+    char    *message;   /* "Uncaught " and the exception, as in Chrome */
+    int      lineno, colno;
+    gboolean parse_error;   /* the script did not compile */
+    gboolean reported;      /* a runtime error already went to onerror */
+} ns_worker_error_info;
+
+/* The file, line and column of the innermost frame in ex's stack. */
+static void
+ns_js_exception_position(JSContext *ctx, JSValueConst ex, char **file,
+                         int *line, int *col)
+{
+    *line = *col = 0;
+    if (file) *file = NULL;
+    JSValue stack = JS_IsObject(ex) ? JS_GetPropertyStr(ctx, ex, "stack")
+                                    : JS_UNDEFINED;
+    const char *text = JS_IsString(stack) ? JS_ToCString(ctx, stack) : NULL;
+    JS_FreeValue(ctx, stack);
+    for (const char *p = text; p && *p; ) {
+        const char *eol = strchr(p, '\n');
+        gsize n = eol ? (gsize)(eol - p) : strlen(p);
+        g_autofree char *frame = g_strndup(p, n);
+        g_strchomp(frame);
+        gsize fl = strlen(frame);
+        if (fl && frame[fl - 1] == ')') frame[--fl] = '\0';
+        char *c2 = strrchr(frame, ':');
+        char *c1 = c2 ? g_strrstr_len(frame, c2 - frame, ":") : NULL;
+        if (c1 && c2 && g_ascii_isdigit(c1[1]) && g_ascii_isdigit(c2[1])) {
+            *line = atoi(c1 + 1);
+            *col = atoi(c2 + 1);
+            if (file) {
+                *c1 = '\0';
+                const char *open = strrchr(frame, '(');
+                const char *at = strstr(frame, "at ");
+                const char *f = open ? open + 1 : at ? at + 3 : frame;
+                while (*f == ' ') f++;
+                *file = g_strdup(f);
+            }
+            break;
+        }
+        p = eol ? eol + 1 : NULL;
+    }
+    if (text) JS_FreeCString(ctx, text);
+}
+
+/* Reports an uncaught exception in a worker as the HTML standard does: an
+ * ErrorEvent at the worker's global, which self.onerror or a listener can
+ * cancel, and otherwise an ErrorEvent at the Worker object in the owner,
+ * which goes on to the owner's window unless that is cancelled too.
+ * Returns TRUE when the worker itself handled the error. */
+static gboolean
+ns_worker_report_exception(ns_js *js, JSValueConst ex)
+{
+    ns_worker_host *host = js ? js->worker_host : NULL;
+    if (!host || !js->ctx || js->in_error_report) return FALSE;
+    JSContext *ctx = js->ctx;
+    js->in_error_report = 1;
+    char *raw = ns_js_exception_message(ctx, ex);
+    char *message = g_strdup_printf("Uncaught %s", raw);
+    g_free(raw);
+    char *file = NULL;
+    int line = 0, col = 0;
+    ns_js_exception_position(ctx, ex, &file, &line, &col);
+    if (!file || !*file) {
+        g_free(file);
+        file = g_strdup(js->current_url ? js->current_url : host->url);
+    }
+
+    gboolean handled = FALSE;
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, g, "ErrorEvent");
+    JSValue init = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, init, "message", JS_NewString(ctx, message));
+    JS_SetPropertyStr(ctx, init, "filename", JS_NewString(ctx, file));
+    JS_SetPropertyStr(ctx, init, "lineno", JS_NewInt32(ctx, line));
+    JS_SetPropertyStr(ctx, init, "colno", JS_NewInt32(ctx, col));
+    JS_SetPropertyStr(ctx, init, "error", JS_DupValue(ctx, ex));
+    JS_SetPropertyStr(ctx, init, "cancelable", JS_TRUE);
+    JSValue type = JS_NewString(ctx, "error");
+    JSValueConst args[2] = { type, init };
+    JSValue ev = JS_IsConstructor(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 2, args) : JS_EXCEPTION;
+    if (!JS_IsException(ev)) {
+        JS_DefinePropertyValueStr(ctx, ev, "isTrusted", JS_TRUE, JS_PROP_C_W_E);
+        JSValue dispatch = JS_GetPropertyStr(ctx, g, "dispatchEvent");
+        JSValueConst dargs[1] = { ev };
+        JSValue r = JS_Call(ctx, dispatch, g, 1, dargs);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        else handled = JS_IsBool(r) && !JS_ToBool(ctx, r);
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, dispatch);
+        JS_FreeValue(ctx, ev);
+    } else {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, type);
+    JS_FreeValue(ctx, init);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, g);
+    js->in_error_report = 0;
+    if (!handled && !g_atomic_int_get(&host->closing))
+        ns_worker_post_owner_error(host, message, file, line, col, FALSE);
+    g_free(message);
+    g_free(file);
+    return handled;
+}
+
 static gboolean
 ns_worker_eval_script(ns_js *js, const char *src, gsize len,
-                      const char *url, char **out_error)
+                      const char *url, char **out_error,
+                      ns_worker_error_info *info)
 {
     if (!js || !js->ctx) return FALSE;
     ns_budget_guard bg = {0};
@@ -23054,6 +23957,7 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
     if (js->worker_host && js->worker_host->is_module) {
         JSValue fn = ns_js_compile_module_cached(js->ctx, src ? src : "", len,
                                                  url ? url : "<worker>");
+        if (JS_IsException(fn) && info) info->parse_error = TRUE;
         if (!JS_IsException(fn) &&
             ns_js_module_set_import_meta(js->ctx, fn, TRUE) < 0) {
             JS_FreeValue(js->ctx, fn);
@@ -23067,8 +23971,15 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
             v = JS_Throw(js->ctx, reason);
         }
     } else {
+        /* Compiled first, so a script that does not parse can be told
+         * apart from one that throws while it runs. */
         v = JS_Eval(js->ctx, src ? src : "", len, url ? url : "<worker>",
-                    JS_EVAL_TYPE_GLOBAL);
+                    JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (JS_IsException(v)) {
+            if (info) info->parse_error = TRUE;
+        } else {
+            v = JS_EvalFunction(js->ctx, v);
+        }
     }
     gboolean ok = !JS_IsException(v);
     if (!ok) {
@@ -23078,6 +23989,15 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
         const char *stk = JS_ToCString(js->ctx, stack);
         gboolean closing = js->worker_host &&
             g_atomic_int_get(&js->worker_host->closing);
+        if (info && info->parse_error) {
+            info->message = g_strdup_printf("Uncaught %s",
+                                            msg ? msg : "exception");
+            ns_js_exception_position(js->ctx, ex, NULL, &info->lineno,
+                                     &info->colno);
+        } else if (info) {
+            ns_worker_report_exception(js, ex);
+            info->reported = TRUE;
+        }
         if (!closing) {
             char *line = g_strdup_printf("Worker error in %s: %s%s%s",
                                          url ? url : "<worker>",
@@ -23115,7 +24035,9 @@ ns_worker_deliver_worker(gpointer data)
     JSContext *ctx = js->ctx;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
-    JSValue data_v = ns_worker_message_value(ctx, msg);
+    JSValue ports = msg->port_id ? JS_NewArray(ctx)
+                                 : ns_worker_message_ports(ctx, msg, JS_UNDEFINED);
+    JSValue data_v = ns_worker_message_value(ctx, msg, ports);
     const char *type = "message";
     if (JS_IsException(data_v)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -23125,6 +24047,7 @@ ns_worker_deliver_worker(gpointer data)
     if (msg->port_id) {
         ns_port_bridge_deliver(ctx, msg->port_id, data_v);
         JS_FreeValue(ctx, data_v);
+        JS_FreeValue(ctx, ports);
         ns_drain_microtasks(js);
         ns_js_budget_pop(js, &bg);
         ns_worker_message_free(msg);
@@ -23132,7 +24055,7 @@ ns_worker_deliver_worker(gpointer data)
     }
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ev = ns_worker_event(ctx, type, data_v, host->origin, NULL, NULL);
-    ns_worker_event_attach_ports(ctx, ev, msg, JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, ev, "ports", ports);
     ns_worker_dispatch(ctx, global, type, ev);
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
@@ -23183,10 +24106,9 @@ ns_port_bridge_send(JSContext *ctx, JSValueConst port, guint64 id,
         JS_FreeValue(ctx, w);
     }
     if (!host || g_atomic_int_get(&host->closing)) return JS_UNDEFINED;
-    ns_worker_message *msg = ns_worker_message_new(ctx, host, data);
-    if (!msg)
-        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
-            "postMessage: value could not be cloned");
+    ns_worker_message *msg = ns_worker_message_new(ctx, host, data,
+                                                   JS_UNDEFINED);
+    if (!msg) return JS_EXCEPTION;
     msg->port_id = id;
     ns_worker_msg_send(host, msg, to_owner);
     return JS_UNDEFINED;
@@ -23200,14 +24122,14 @@ ns_worker_post_message(JSContext *ctx, JSValueConst this_val,
     if (!host || argc < 1 || g_atomic_int_get(&host->closing)) return JS_UNDEFINED;
     gboolean bad_transfer = FALSE;
     ns_worker_walk_transfers(ctx, argc, argv, FALSE, &bad_transfer, NULL,
-                             JS_UNDEFINED);
+                             this_val);
     if (bad_transfer)
         return ns_throw_dom_exception(ctx, "DataCloneError", 25,
             "Worker.postMessage: a value in the transfer list is not transferable");
-    ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
-    if (!msg)
-        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
-            "Worker.postMessage: value could not be cloned");
+    JSValue ports = ns_worker_transfer_ports(ctx, argc, argv);
+    ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0], ports);
+    JS_FreeValue(ctx, ports);
+    if (!msg) return JS_EXCEPTION;
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL, msg, this_val);
     ns_worker_msg_send(host, msg, FALSE);
     return JS_UNDEFINED;
@@ -23219,7 +24141,10 @@ ns_worker_terminate(JSContext *ctx, JSValueConst this_val,
 {
     (void)ctx; (void)argc; (void)argv;
     ns_worker_host *host = JS_GetOpaque(this_val, ns_worker_class_id);
-    if (host) ns_worker_host_stop(host, FALSE);
+    if (host) {
+        g_atomic_int_set(&host->terminated, 1);
+        ns_worker_host_stop(host, FALSE);
+    }
     return JS_UNDEFINED;
 }
 
@@ -23237,10 +24162,10 @@ ns_worker_global_post_message(JSContext *ctx, JSValueConst this_val,
     if (bad_transfer)
         return ns_throw_dom_exception(ctx, "DataCloneError", 25,
             "postMessage: a value in the transfer list is not transferable");
-    ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
-    if (!msg)
-        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
-            "postMessage: value could not be cloned");
+    JSValue ports = ns_worker_transfer_ports(ctx, argc, argv);
+    ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0], ports);
+    JS_FreeValue(ctx, ports);
+    if (!msg) return JS_EXCEPTION;
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL, msg, JS_UNDEFINED);
     ns_worker_msg_send(host, msg, TRUE);
     return JS_UNDEFINED;
@@ -23287,7 +24212,7 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
         char *prev_url = js->current_url;
         js->current_url = g_strdup(final_url ? final_url : host->url);
         gboolean ok = ns_worker_eval_script(js, body, strlen(body),
-                                            js->current_url, &error);
+                                            js->current_url, &error, NULL);
         g_free(js->current_url);
         js->current_url = prev_url;
         g_free(final_url);
@@ -24092,6 +25017,22 @@ ns_worker_js_new(ns_worker_host *host)
                       JS_NewString(ctx, host->origin ? host->origin : ""));
     JS_SetPropertyStr(ctx, global, "name",
                       JS_NewString(ctx, host->name ? host->name : ""));
+    if (host->origin && strcmp(host->origin, "null") == 0) {
+        /* A worker with an opaque origin, such as a data: worker, has no
+         * storage of its own: opening a database throws SecurityError. */
+        static const char deny_idb[] =
+            "(function(){var f=self.indexedDB;if(!f)return;"
+            "function deny(){throw new DOMException("
+            "'Access to IndexedDB is denied for an opaque origin.',"
+            "'SecurityError');}"
+            "['open','deleteDatabase','databases'].forEach(function(m){"
+            "try{Object.defineProperty(f,m,{value:deny,configurable:true,"
+            "writable:true});}catch(e){}});})()";
+        JSValue r = JS_Eval(ctx, deny_idb, sizeof deny_idb - 1, "<worker-origin>",
+                            JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
     const char *secure_url = host->url && g_str_has_prefix(host->url, "blob:")
         ? host->base_url : host->url;
     JS_SetPropertyStr(ctx, global, "isSecureContext",
@@ -24117,7 +25058,8 @@ ns_worker_thread(gpointer data)
         ? g_strndup(host->inline_script, host->inline_script_len)
         : ns_worker_fetch_script(host, host->url, FALSE, &final_url, &error);
     if (!body) {
-        ns_worker_post_owner_error(host, error ? error : "Worker load failed", host->url);
+        ns_worker_post_owner_error(host, error ? error : "Worker load failed",
+                                   host->url, 0, 0, TRUE);
         g_free(error);
         g_atomic_int_set(&host->closing, 1);
         ns_worker_context_drain(host);
@@ -24128,7 +25070,8 @@ ns_worker_thread(gpointer data)
 
     ns_js *js = ns_worker_js_new(host);
     if (!js) {
-        ns_worker_post_owner_error(host, "Worker runtime initialization failed", host->url);
+        ns_worker_post_owner_error(host, "Worker runtime initialization failed",
+                                   host->url, 0, 0, TRUE);
         g_free(final_url);
         g_free(body);
         g_atomic_int_set(&host->closing, 1);
@@ -24144,22 +25087,29 @@ ns_worker_thread(gpointer data)
     host->worker_js = js;
     g_mutex_unlock(&host->lock);
 
-    gboolean ok = ns_worker_eval_script(js, body, strlen(body), js->current_url, &error);
+    ns_worker_error_info info = { NULL, 0, 0, FALSE, FALSE };
+    gboolean ok = ns_worker_eval_script(js, body, strlen(body), js->current_url,
+                                        &error, &info);
     g_free(final_url);
     g_free(body);
-    if (!ok && !g_atomic_int_get(&host->closing)) {
-        ns_worker_post_owner_error(host, error ? error : "Worker script failed",
-                                   js->current_url ? js->current_url : host->url);
-        g_free(error);
-        g_atomic_int_set(&host->closing, 1);
-    } else if (!ok) {
-        g_free(error);
+    if (!ok && !info.reported && !g_atomic_int_get(&host->closing)) {
+        ns_worker_post_owner_error(host,
+            info.message ? info.message : error ? error : "Worker script failed",
+            js->current_url ? js->current_url : host->url,
+            info.lineno, info.colno, info.parse_error);
+        /* A script that does not compile never runs; one that throws while
+         * running leaves a worker whose event loop goes on, so handlers it
+         * set up before throwing still receive messages. */
+        if (info.parse_error) g_atomic_int_set(&host->closing, 1);
     }
+    gboolean runs = ok || !info.parse_error;
+    g_free(error);
+    g_free(info.message);
 
     if (ok && host->is_service_worker && !g_atomic_int_get(&host->closing))
         ns_sw_fire_lifecycle(js);
 
-    if (ok && !g_atomic_int_get(&host->closing)) {
+    if (runs && !g_atomic_int_get(&host->closing)) {
         GMainLoop *loop = g_main_loop_new(host->context, FALSE);
         g_mutex_lock(&host->lock);
         host->loop = loop;
@@ -24200,6 +25150,15 @@ ns_worker_option_string(JSContext *ctx, JSValueConst options, const char *name)
     return out;
 }
 
+/* The error event of a Worker whose script could not be obtained. */
+static JSValue
+ns_worker_fail_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    if (argc >= 1 && JS_IsObject(argv[0]))
+        ns_target_fire_event(ctx, argv[0], "error");
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -24213,21 +25172,43 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     char *abs_url = NULL;
     char *inline_script = NULL;
     gsize inline_script_len = 0;
+    /* A URL that does not parse throws; any other failure to get the
+     * script, such as a missing blob, a cross-origin or unsupported URL,
+     * leaves a Worker that reports an error event, as the HTML standard
+     * specifies. */
+    gboolean fails = FALSE;
+    gboolean opaque = FALSE;
     if (g_str_has_prefix(raw, "blob:")) {
         GBytes *blob = ns_js_blob_url_lookup(js, raw, NULL);
-        if (!blob) {
-            JS_FreeCString(ctx, raw);
-            return JS_ThrowTypeError(ctx, "Worker: blob URL not found");
+        if (blob) {
+            gsize blob_len = 0;
+            const guint8 *blob_data = g_bytes_get_data(blob, &blob_len);
+            inline_script = ns_worker_script_text(blob_data, blob_len,
+                                                  &inline_script_len);
+        } else {
+            fails = TRUE;
         }
-        const guint8 *blob_data = g_bytes_get_data(blob, &inline_script_len);
-        inline_script = g_strndup((const char *)blob_data, inline_script_len);
         abs_url = g_strdup(raw);
     } else {
-        abs_url = js->current_url ? ns_url_resolve(js->current_url, raw)
-                              : ns_url_resolve(NULL, raw);
+        g_autofree char *base = ns_js_doc_base_url(js);
+        abs_url = base && *base ? ns_url_resolve(base, raw)
+                                : ns_url_resolve(NULL, raw);
     }
     JS_FreeCString(ctx, raw);
-    if (!abs_url) return JS_ThrowTypeError(ctx, "Worker: invalid script URL");
+    if (!abs_url)
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+            "Failed to construct 'Worker': the script URL is invalid.");
+    if (g_str_has_prefix(abs_url, "data:")) {
+        /* A data: worker runs with an opaque origin. */
+        gsize raw_len = 0;
+        g_autofree char *raw_script = ns_js_decode_data_url(abs_url, &raw_len);
+        inline_script = raw_script
+            ? ns_worker_script_text((const guint8 *)raw_script, raw_len,
+                                    &inline_script_len)
+            : NULL;
+        fails = inline_script == NULL;
+        opaque = TRUE;
+    }
 
     g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
     gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
@@ -24238,23 +25219,23 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     }
     g_autofree char *name = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "name") : NULL;
 
-    if (!inline_script) {
+    if (!inline_script && !fails) {
         char *policy_error = NULL;
         ns_worker_host tmp = {0};
         tmp.base_url = js->current_url;
         if (!ns_worker_script_url_allowed(&tmp, abs_url, FALSE, &policy_error)) {
-            JSValue ret = JS_ThrowTypeError(ctx, "Worker: %s",
-                                            policy_error ? policy_error : "blocked");
-            g_free(policy_error);
-            g_free(abs_url);
-            return ret;
+            if (js->log_cb && policy_error) {
+                char *line = g_strdup_printf("Worker %s: %s", abs_url, policy_error);
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            fails = TRUE;
         }
+        g_free(policy_error);
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
-        g_free(abs_url);
-        g_free(inline_script);
-        return JS_ThrowTypeError(ctx, "Worker: blocked by Content-Security-Policy worker-src");
-    }
+    if (!fails && js->csp &&
+        !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url))
+        fails = TRUE;
 
     ns_new_class_id(&ns_worker_class_id);
     JS_NewClass(JS_GetRuntime(ctx), ns_worker_class_id, &ns_worker_class);
@@ -24265,6 +25246,17 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         ? JS_NewObjectProtoClass(ctx, proto, ns_worker_class_id)
         : JS_NewObjectClass(ctx, ns_worker_class_id);
     JS_FreeValue(ctx, proto);
+    if (fails) {
+        JS_SetPropertyStr(ctx, obj, "_listeners", JS_NewArray(ctx));
+        JS_SetPropertyStr(ctx, obj, "onmessage", JS_NULL);
+        JS_SetPropertyStr(ctx, obj, "onmessageerror", JS_NULL);
+        JS_SetPropertyStr(ctx, obj, "onerror", JS_NULL);
+        JSValueConst job_args[1] = { obj };
+        ns_js_queue_message_task(ctx, ns_worker_fail_job, 1, job_args);
+        g_free(abs_url);
+        g_free(inline_script);
+        return obj;
+    }
 
     ns_worker_host *host = g_new0(ns_worker_host, 1);
     g_atomic_int_set(&host->ref_count, 1);
@@ -24280,7 +25272,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->inline_script = inline_script;
     host->inline_script_len = inline_script_len;
     host->is_module = is_module;
-    host->origin = ns_url_origin_from(host->base_url);
+    host->origin = opaque ? g_strdup("null") : ns_url_origin_from(host->base_url);
     if (!host->origin) host->origin = g_strdup("");
     host->log_cb = js->log_cb;
     host->log_user_data = js->log_user_data;
@@ -29569,7 +30561,8 @@ ns_js_walk_collect_media_events(const ns_box *b, GPtrArray *imgs,
         if (strcmp(b->dom->name, "img") == 0 && b->media->image) {
             const ns_image *im = (const ns_image *)b->media->image;
             if ((im->loaded || im->failed) &&
-                !(b->dom->flags & NS_NODE_IMG_LOAD_FIRED)) {
+                !(b->dom->flags & NS_NODE_IMG_LOAD_FIRED) &&
+                !g_ptr_array_find(imgs, b->dom, NULL)) {
                 gboolean failed = im->failed ? TRUE : FALSE;
                 g_ptr_array_add(imgs, (gpointer)b->dom);
                 g_array_append_val(img_failed, failed);
@@ -29989,13 +30982,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
                                                  batch_prev, NULL);
         if (_j) {
             _j->mutated = TRUE;
-            if (!inert_parent) {
-                for (guint i = 0; i < moved->len; i++) {
-                    ns_node *moved_root = g_ptr_array_index(moved, i);
-                    ns_ce_upgrade_subtree_all(_j, moved_root);
-                    ns_js_run_inserted_scripts(_j, moved_root);
-                }
-            }
+            ns_js_nodes_inserted(_j, parent, moved);
         }
         g_ptr_array_free(moved, FALSE);
         return JS_DupValue(ctx, argv[0]);
@@ -30012,8 +30999,8 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         if (!inert_parent) {
-            ns_ce_upgrade_subtree_all(_j, child);
             ns_js_run_inserted_scripts(_j, child);
+            ns_ce_upgrade_subtree_all(_j, child);
         }
     }
     return JS_DupValue(ctx, argv[0]);
@@ -30272,8 +31259,8 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         if (_j) {
             _j->mutated = TRUE;
             if (!inert_parent) {
-                ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
+                ns_ce_upgrade_subtree_all(_j, parent);
             }
         }
         return JS_DupValue(ctx, argv[0]);
@@ -30293,8 +31280,8 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         ns_js_record_child_change(_j, parent, newc, NULL,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
-            ns_ce_upgrade_subtree_all(_j, newc);
             ns_js_run_inserted_scripts(_j, newc);
+            ns_ce_upgrade_subtree_all(_j, newc);
         }
     }
     return JS_DupValue(ctx, argv[0]);
@@ -30423,8 +31410,8 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         if (_j) {
             _j->mutated = TRUE;
             if (!inert_parent) {
-                ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
+                ns_ce_upgrade_subtree_all(_j, parent);
             }
         }
         return JS_DupValue(ctx, argv[1]);
@@ -30454,8 +31441,8 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         ns_js_record_child_change(_j, parent, newc, oldc,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
-            ns_ce_upgrade_subtree_all(_j, newc);
             ns_js_run_inserted_scripts(_j, newc);
+            ns_ce_upgrade_subtree_all(_j, newc);
         }
     }
     return JS_DupValue(ctx, argv[1]);
@@ -30693,8 +31680,8 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         _j->mutated = TRUE;
-        ns_ce_upgrade_subtree_all(_j, child);
         ns_js_run_inserted_scripts(_j, child);
+        ns_ce_upgrade_subtree_all(_j, child);
     }
     return ns_make_element(ctx, child);
 }
@@ -30743,10 +31730,33 @@ ns_convert_arg_node(ns_js *js, ns_node *node, GPtrArray *seq)
             c = next;
         }
     } else {
-        if (node->parent) ns_node_remove(node);
+        if (node->parent) {
+            if (js) {
+                ns_node_iters_pre_remove(js, node);
+                ns_ce_disconnect_subtree(js, node);
+                ns_js_record_move_removal(js, node);
+            }
+            ns_node_remove(node);
+        }
         if (js) g_hash_table_remove(js->orphan_nodes, node);
         g_ptr_array_add(seq, node);
     }
+}
+
+/* The steps that follow inserting nodes into parent, as appendChild() and
+ * the other insertion methods run them: scripts among the nodes run first,
+ * then custom elements get their upgrade and connectedCallback reactions,
+ * which the DOM standard runs as the inserting method returns.  Nodes
+ * inserted into template contents stay inert. */
+static void
+ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes)
+{
+    if (!js || !parent || !nodes || ns_node_in_template_content(parent))
+        return;
+    for (guint i = 0; i < nodes->len; i++)
+        ns_js_run_inserted_scripts(js, g_ptr_array_index(nodes, i));
+    for (guint i = 0; i < nodes->len; i++)
+        ns_ce_upgrade_subtree_all(js, g_ptr_array_index(nodes, i));
 }
 
 static JSValue
@@ -30770,16 +31780,20 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
+    ns_node *parent = self->parent;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
         ns_insert_sibling_before(self, to_insert);
         if (_j)
-            ns_js_record_child_change(_j, self->parent, to_insert, NULL,
+            ns_js_record_child_change(_j, parent, to_insert, NULL,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, parent, seq);
+    }
     g_ptr_array_free(seq, TRUE);
-    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -30824,8 +31838,11 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, parent, seq);
+    }
     g_ptr_array_free(seq, TRUE);
-    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -30880,11 +31897,14 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
 
     if (!self_in_args) {
         ns_node *saved_prev = self->prev_sibling;
         ns_node *saved_next = self->next_sibling;
+        if (_j) {
+            ns_node_iters_pre_remove(_j, self);
+            ns_ce_disconnect_subtree(_j, self);
+        }
         ns_node_remove(self);
         if (_j) {
             g_hash_table_add(_j->orphan_nodes, self);
@@ -30892,7 +31912,11 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
                                       saved_prev, saved_next);
         }
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, parent, seq);
+    }
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
@@ -31119,8 +32143,11 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, parent, seq);
+    }
     g_ptr_array_free(seq, TRUE);
-    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -31174,8 +32201,11 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_nodes_inserted(_j, parent, seq);
+    }
     g_ptr_array_free(seq, TRUE);
-    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -55997,9 +57027,11 @@ ns_js_exception_message(JSContext *ctx, JSValueConst ex)
     return out;
 }
 
+/* Fires the ErrorEvent of an uncaught error at the current window; returns
+ * TRUE when a handler cancelled it. */
 static gboolean
-ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
-                          int lineno, int colno)
+ns_js_report_error_event(ns_js *js, const char *message, const char *filename,
+                         int lineno, int colno, JSValueConst error)
 {
     if (!js || !js->ctx || js->in_error_report) return FALSE;
     JSContext *ctx = js->ctx;
@@ -56019,19 +57051,31 @@ ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
     JS_FreeValue(ctx, error_event);
     JS_FreeValue(ctx, g);
 
-    char *message = ns_js_exception_message(ctx, ex);
-    JS_SetPropertyStr(ctx, ev, "message", JS_NewString(ctx, message));
-    g_free(message);
+    JS_SetPropertyStr(ctx, ev, "message",
+                      JS_NewString(ctx, message ? message : ""));
     JS_SetPropertyStr(ctx, ev, "filename",
                       JS_NewString(ctx, filename ? filename : ""));
     JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, lineno));
     JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, colno));
-    JS_SetPropertyStr(ctx, ev, "error", JS_DupValue(ctx, ex));
+    JS_SetPropertyStr(ctx, ev, "error", JS_DupValue(ctx, error));
 
     gboolean prevented = FALSE;
     ns_js_dispatch_window_only_event(js, js->current_doc, "error", ev,
                                      &prevented);
     js->in_error_report = 0;
+    return prevented;
+}
+
+static gboolean
+ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
+                          int lineno, int colno)
+{
+    if (!js || !js->ctx || js->in_error_report) return FALSE;
+    if (js->worker_host) return ns_worker_report_exception(js, ex);
+    char *message = ns_js_exception_message(js->ctx, ex);
+    gboolean prevented = ns_js_report_error_event(js, message, filename,
+                                                  lineno, colno, ex);
+    g_free(message);
     return prevented;
 }
 
@@ -59225,6 +60269,7 @@ ns_js_lifecycle_has_blockers(ns_js *js)
 {
     if (!js) return FALSE;
     return js->eval_depth > 0 || js->iframe_load_depth > 0 || js->in_pump ||
+        ns_js_image_loads_pending(js) ||
         (js->pending_iframe_loads && js->pending_iframe_loads->len > 0) ||
         (js->deferred_script_roots && js->deferred_script_roots->len > 0) ||
         (js->async_script_roots && js->async_script_roots->len > 0) ||
@@ -59327,6 +60372,31 @@ ns_js_lifecycle_tick(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* Starts tracking the document's own <img> elements the way script-made
+ * images are tracked, so each gets its load or error event when the image
+ * cache finishes with it, and the window's load event waits for them.
+ * Images whose source depends on layout (srcset, <picture>) or that load
+ * lazily are left to layout. */
+static void
+ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
+{
+    if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
+    if (ns_node_is_element_named(n, "img")) {
+        const char *src = ns_element_get_attr(n, "src");
+        const char *loading = ns_element_get_attr(n, "loading");
+        if (src && *src && !ns_element_get_attr(n, "srcset") &&
+            !(loading && g_ascii_strcasecmp(loading, "lazy") == 0) &&
+            !ns_node_is_element_named(n->parent, "picture") &&
+            !(js->js_image_loads && g_hash_table_contains(js->js_image_loads, n)) &&
+            !(n->flags & NS_NODE_IMG_LOAD_FIRED))
+            ns_js_start_image_load(js, n, src);
+        return;
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_js_track_document_images(js, c, depth + 1);
+}
+
 void
 ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
 {
@@ -59371,6 +60441,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
     }
     ns_js_schedule_static_iframes(js, doc);
+    ns_js_track_document_images(js, doc, 0);
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);
