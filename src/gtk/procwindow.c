@@ -609,6 +609,9 @@ update_chrome(ProcWindow *pw)
 
 static void proc_window_add_tab(ProcWindow *pw, const char *url,
                                 gboolean foreground);
+static void proc_window_add_tab_full(ProcWindow *pw, const char *url,
+                                     gboolean foreground,
+                                     gboolean private_mode);
 
 typedef struct {
     char      *url;
@@ -1065,7 +1068,8 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     case NS_PROC_EVT_NEWTAB:
         if (text && *text)
-            proc_window_add_tab(pw, text, FALSE);
+            proc_window_add_tab_full(pw, text, FALSE,
+                                     ns_proc_view_is_private(v));
         break;
     case NS_PROC_EVT_LOADING: {
         gboolean loading = text && *text == '1';

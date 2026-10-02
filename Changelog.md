@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* A link opened in a new tab from a private tab (middle-click,
+  Ctrl+click or "Open in new tab") opens in a private tab. It opened in
+  a normal tab, so its cookies, cache and storage were written to the
+  profile on disk and its address was saved in the session file.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)
