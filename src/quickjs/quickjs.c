@@ -596,6 +596,12 @@ struct JSContext {
     JSValue function_ctor;
     JSValue array_ctor;
     JSValue regexp_ctor;
+    /* the legacy RegExp statics (RegExp.$1, lastMatch, ...): RegExp.input
+       and the subject and capture positions of the realm's last match */
+    JSValue regexp_legacy_input;
+    JSValue regexp_legacy_subject;
+    int regexp_legacy_count; /* groups + 1, at most 10 */
+    int32_t regexp_legacy_pos[20]; /* start, end per group; -1 unmatched */
     JSValue promise_ctor;
     JSValue native_error_proto[JS_NATIVE_ERROR_COUNT];
     JSValue error_ctor;
@@ -2919,6 +2925,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->iterator_ctor = JS_NULL;
     ctx->iterator_ctor_getset = JS_NULL;
     ctx->regexp_ctor = JS_NULL;
+    ctx->regexp_legacy_input = JS_NULL;
+    ctx->regexp_legacy_subject = JS_NULL;
+    ctx->regexp_legacy_count = 0;
     ctx->promise_ctor = JS_NULL;
     ctx->error_ctor = JS_NULL;
     ctx->error_back_trace = JS_UNDEFINED;
@@ -3065,6 +3074,8 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->promise_ctor, mark_func);
     JS_MarkValue(rt, ctx->array_ctor, mark_func);
     JS_MarkValue(rt, ctx->regexp_ctor, mark_func);
+    JS_MarkValue(rt, ctx->regexp_legacy_input, mark_func);
+    JS_MarkValue(rt, ctx->regexp_legacy_subject, mark_func);
     JS_MarkValue(rt, ctx->function_ctor, mark_func);
     JS_MarkValue(rt, ctx->function_proto, mark_func);
 
@@ -3148,6 +3159,8 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->promise_ctor);
     JS_FreeValue(ctx, ctx->array_ctor);
     JS_FreeValue(ctx, ctx->regexp_ctor);
+    JS_FreeValue(ctx, ctx->regexp_legacy_input);
+    JS_FreeValue(ctx, ctx->regexp_legacy_subject);
     JS_FreeValue(ctx, ctx->function_ctor);
     JS_FreeValue(ctx, ctx->function_proto);
 
@@ -50692,56 +50705,129 @@ static JSValue js_regexp_escape(JSContext *ctx, JSValueConst this_val,
     return ret;
 }
 
-static int js_regexp_init_static_captures(JSContext *ctx, JSValueConst ctor)
-{
-    char name[] = "$1";
+/* The legacy RegExp statics as V8 has them: accessors on the RegExp
+   constructor for input/$_, lastMatch/$&, lastParen/$+, leftContext/$`,
+   rightContext/$' and $1..$9, reading the realm's last successful match;
+   only input can be set. */
+enum {
+    JS_RE_LEGACY_INPUT, JS_RE_LEGACY_LAST_MATCH, JS_RE_LEGACY_LAST_PAREN,
+    JS_RE_LEGACY_LEFT, JS_RE_LEGACY_RIGHT, JS_RE_LEGACY_PAREN1,
+};
 
-    for (int i = 1; i <= 9; i++) {
-        name[1] = '0' + i;
-        if (JS_SetPropertyStr(ctx, ctor, name, JS_NewString(ctx, "")) < 0)
-            return -1;
-    }
-    return 0;
+static JSValue js_regexp_legacy_group(JSContext *ctx, int group)
+{
+    JSString *p;
+    int start, end;
+
+    if (!JS_IsString(ctx->regexp_legacy_subject) || group < 0 ||
+        group >= ctx->regexp_legacy_count)
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    p = JS_VALUE_GET_STRING(ctx->regexp_legacy_subject);
+    start = ctx->regexp_legacy_pos[2 * group];
+    end = ctx->regexp_legacy_pos[2 * group + 1];
+    if (start < 0 || end < start)
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    return js_sub_string(ctx, p, start, end);
 }
+
+static JSValue js_regexp_legacy_context(JSContext *ctx, bool right)
+{
+    JSString *p;
+
+    if (!JS_IsString(ctx->regexp_legacy_subject))
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    p = JS_VALUE_GET_STRING(ctx->regexp_legacy_subject);
+    if (right)
+        return js_sub_string(ctx, p, ctx->regexp_legacy_pos[1], p->len);
+    return js_sub_string(ctx, p, 0, ctx->regexp_legacy_pos[0]);
+}
+
+static JSValue js_regexp_legacy_get(JSContext *ctx, JSValueConst this_val,
+                                    int magic)
+{
+    (void)this_val;
+    switch (magic) {
+    case JS_RE_LEGACY_INPUT:
+        if (JS_IsString(ctx->regexp_legacy_input))
+            return js_dup(ctx->regexp_legacy_input);
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    case JS_RE_LEGACY_LAST_MATCH:
+        return js_regexp_legacy_group(ctx, 0);
+    case JS_RE_LEGACY_LAST_PAREN:
+        return js_regexp_legacy_group(ctx, ctx->regexp_legacy_count > 1 ?
+                                      ctx->regexp_legacy_count - 1 : -1);
+    case JS_RE_LEGACY_LEFT:
+        return js_regexp_legacy_context(ctx, false);
+    case JS_RE_LEGACY_RIGHT:
+        return js_regexp_legacy_context(ctx, true);
+    default:
+        return js_regexp_legacy_group(ctx, magic - JS_RE_LEGACY_PAREN1 + 1);
+    }
+}
+
+static JSValue js_regexp_legacy_set(JSContext *ctx, JSValueConst this_val,
+                                    JSValueConst val, int magic)
+{
+    JSValue s;
+
+    (void)this_val;
+    if (magic != JS_RE_LEGACY_INPUT)
+        return JS_UNDEFINED;
+    s = JS_ToString(ctx, val);
+    if (JS_IsException(s))
+        return s;
+    JS_FreeValue(ctx, ctx->regexp_legacy_input);
+    ctx->regexp_legacy_input = s;
+    return JS_UNDEFINED;
+}
+
+#define JS_RE_LEGACY_DEF(name, magic) \
+    JS_CGETSET_MAGIC_DEF(name, js_regexp_legacy_get, js_regexp_legacy_set, magic)
+
+static const JSCFunctionListEntry js_regexp_legacy_funcs[] = {
+    JS_RE_LEGACY_DEF("input", JS_RE_LEGACY_INPUT),
+    JS_RE_LEGACY_DEF("$_", JS_RE_LEGACY_INPUT),
+    JS_RE_LEGACY_DEF("lastMatch", JS_RE_LEGACY_LAST_MATCH),
+    JS_RE_LEGACY_DEF("$&", JS_RE_LEGACY_LAST_MATCH),
+    JS_RE_LEGACY_DEF("lastParen", JS_RE_LEGACY_LAST_PAREN),
+    JS_RE_LEGACY_DEF("$+", JS_RE_LEGACY_LAST_PAREN),
+    JS_RE_LEGACY_DEF("leftContext", JS_RE_LEGACY_LEFT),
+    JS_RE_LEGACY_DEF("$`", JS_RE_LEGACY_LEFT),
+    JS_RE_LEGACY_DEF("rightContext", JS_RE_LEGACY_RIGHT),
+    JS_RE_LEGACY_DEF("$'", JS_RE_LEGACY_RIGHT),
+    JS_RE_LEGACY_DEF("$1", JS_RE_LEGACY_PAREN1 + 0),
+    JS_RE_LEGACY_DEF("$2", JS_RE_LEGACY_PAREN1 + 1),
+    JS_RE_LEGACY_DEF("$3", JS_RE_LEGACY_PAREN1 + 2),
+    JS_RE_LEGACY_DEF("$4", JS_RE_LEGACY_PAREN1 + 3),
+    JS_RE_LEGACY_DEF("$5", JS_RE_LEGACY_PAREN1 + 4),
+    JS_RE_LEGACY_DEF("$6", JS_RE_LEGACY_PAREN1 + 5),
+    JS_RE_LEGACY_DEF("$7", JS_RE_LEGACY_PAREN1 + 6),
+    JS_RE_LEGACY_DEF("$8", JS_RE_LEGACY_PAREN1 + 7),
+    JS_RE_LEGACY_DEF("$9", JS_RE_LEGACY_PAREN1 + 8),
+};
 
 static int js_regexp_update_static_captures(JSContext *ctx, JSString *str,
                                             uint8_t **capture,
                                             int capture_count,
                                             uint8_t *str_buf, int shift)
 {
-    char name[] = "$1";
+    int n = capture_count < 10 ? capture_count : 10;
 
-    if (!JS_IsObject(ctx->regexp_ctor))
-        return 0;
-
-    for (int i = 1; i <= 9; i++) {
-        JSValue val;
-        JSAtom atom;
-        int ret;
-
-        name[1] = '0' + i;
-        if (i < capture_count && capture[2 * i] && capture[2 * i + 1]) {
-            int start = (capture[2 * i] - str_buf) >> shift;
-            int end = (capture[2 * i + 1] - str_buf) >> shift;
-            val = js_sub_string(ctx, str, start, end);
+    for (int i = 0; i < n; i++) {
+        if (capture[2 * i] && capture[2 * i + 1]) {
+            ctx->regexp_legacy_pos[2 * i] = (capture[2 * i] - str_buf) >> shift;
+            ctx->regexp_legacy_pos[2 * i + 1] =
+                (capture[2 * i + 1] - str_buf) >> shift;
         } else {
-            val = JS_NewString(ctx, "");
+            ctx->regexp_legacy_pos[2 * i] = -1;
+            ctx->regexp_legacy_pos[2 * i + 1] = -1;
         }
-        if (JS_IsException(val))
-            return -1;
-        atom = JS_NewAtom(ctx, name);
-        if (atom == JS_ATOM_NULL) {
-            JS_FreeValue(ctx, val);
-            return -1;
-        }
-        /* UpdateLegacyRegExpStaticProperties: Set(C, name, value, false) -
-           a non-writable/non-configurable "$1".."$9" must not throw and
-           must keep its old value. */
-        ret = JS_SetPropertyInternal(ctx, ctx->regexp_ctor, atom, val, 0);
-        JS_FreeAtom(ctx, atom);
-        if (ret < 0)
-            return -1;
     }
+    ctx->regexp_legacy_count = n;
+    JS_FreeValue(ctx, ctx->regexp_legacy_subject);
+    ctx->regexp_legacy_subject = js_dup(JS_MKPTR(JS_TAG_STRING, str));
+    JS_FreeValue(ctx, ctx->regexp_legacy_input);
+    ctx->regexp_legacy_input = js_dup(JS_MKPTR(JS_TAG_STRING, str));
     return 0;
 }
 
@@ -50948,7 +51034,9 @@ static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
                 goto fail;
         }
 
-        if (js_regexp_update_static_captures(ctx, str, capture, capture_count,
+        /* the embedder's own matches stay out of the page's RegExp.$1 */
+        if (!JS_IsHostAccess(ctx) &&
+            js_regexp_update_static_captures(ctx, str, capture, capture_count,
                                              str_buf, shift) < 0)
             goto fail;
 
@@ -51872,11 +51960,12 @@ int JS_AddIntrinsicRegExp(JSContext *ctx)
     if (JS_IsException(obj))
         return -1;
     ctx->regexp_ctor = js_dup(obj);
-    if (JS_SetPropertyFunctionList(ctx, obj, js_regexp_funcs,
-                                   countof(js_regexp_funcs))) {
+    if (JS_SetPropertyFunctionList(ctx, obj, js_regexp_legacy_funcs,
+                                   countof(js_regexp_legacy_funcs))) {
         return -1;
     }
-    if (js_regexp_init_static_captures(ctx, obj)) {
+    if (JS_SetPropertyFunctionList(ctx, obj, js_regexp_funcs,
+                                   countof(js_regexp_funcs))) {
         return -1;
     }
     static const JSShapeProperty regexp_props[] = {
@@ -61079,6 +61168,33 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
     return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
 }
 
+static bool dataview_is_oob(JSObject *p);
+
+/* The buffer, byte offset and length of an ArrayBufferView: a typed array
+   or a DataView (the WebIDL BufferSource views). */
+JSValue JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
+                                    size_t *pbyte_offset, size_t *pbyte_length)
+{
+    JSObject *p;
+    JSTypedArray *ta;
+
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT ||
+        JS_VALUE_GET_OBJ(obj)->class_id != JS_CLASS_DATAVIEW)
+        return JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, pbyte_length,
+                                      NULL);
+    p = JS_VALUE_GET_OBJ(obj);
+    if (dataview_is_oob(p))
+        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+    ta = p->u.typed_array;
+    if (pbyte_offset)
+        *pbyte_offset = ta->offset;
+    if (pbyte_length)
+        *pbyte_length = ta->track_rab
+            ? ta->buffer->u.array_buffer->byte_length - ta->offset
+            : ta->length;
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+}
+
 /* return NULL if exception. WARNING: any JS call can detach the
    buffer and render the returned pointer invalid */
 uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)
@@ -64884,12 +65000,21 @@ static JSValue js_domexception_get_code(JSContext *ctx, JSValueConst this_val)
     return js_int32(s->code);
 }
 
+/* WebIDL attributes: enumerable accessors */
+#define JS_DOMEXCEPTION_ATTR(name, fgetter, magic) { name, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, JS_DEF_CGETSET_MAGIC, magic, { .getset = { .get = { .getter_magic = fgetter }, .set = { .setter_magic = NULL } } } }
+
+static JSValue js_domexception_get_code_magic(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    (void)magic;
+    return js_domexception_get_code(ctx, this_val);
+}
+
 static const JSCFunctionListEntry js_domexception_proto_funcs[] = {
-    JS_CGETSET_MAGIC_DEF("name", js_domexception_getfield, NULL,
+    JS_DOMEXCEPTION_ATTR("code", js_domexception_get_code_magic, 0 ),
+    JS_DOMEXCEPTION_ATTR("name", js_domexception_getfield,
         offsetof(JSDOMExceptionData, name) ),
-    JS_CGETSET_MAGIC_DEF("message", js_domexception_getfield, NULL,
+    JS_DOMEXCEPTION_ATTR("message", js_domexception_getfield,
         offsetof(JSDOMExceptionData, message) ),
-    JS_CGETSET_DEF("code", js_domexception_get_code, NULL ),
     JS_PROP_STRING_DEF("[Symbol.toStringTag]", "DOMException", JS_PROP_CONFIGURABLE ),
 };
 
@@ -64944,6 +65069,10 @@ int JS_AddIntrinsicDOMException(JSContext *ctx)
                                countof(js_domexception_proto_funcs));
     ctor = JS_NewCFunction2(ctx, js_domexception_constructor, "DOMException", 2,
                             JS_CFUNC_constructor_or_func, 0);
+    /* both arguments are optional: WebIDL length 0 (the C function still
+       gets its two arguments, padded with undefined) */
+    JS_DefinePropertyValue(ctx, ctor, JS_ATOM_length, js_int32(0),
+                           JS_PROP_CONFIGURABLE);
     JS_SetConstructor(ctx, ctor, proto);
     for (i = 0; i < countof(js_dom_exception_names_table); i++) {
         name = JS_NewAtom(ctx, js_dom_exception_names_table[i].code_name);
@@ -65943,7 +66072,8 @@ static int js_uint8array_funcs_init(JSContext *ctx)
 
 int JS_AddIntrinsicAToB(JSContext *ctx)
 {
-    if (!JS_IsRegisteredClass(ctx->rt, JS_CLASS_DOM_EXCEPTION)) {
+    /* every realm has its own DOMException, inheriting its own Error */
+    if (!JS_IsObject(ctx->class_proto[JS_CLASS_DOM_EXCEPTION])) {
         if (JS_AddIntrinsicDOMException(ctx))
             return -1;
     }

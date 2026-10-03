@@ -135,6 +135,9 @@ typedef struct ns_box {
     const ns_style *style;
 
     double x, y;
+    /* offset of a relatively positioned inline-level atomic box (an image,
+       an inline block), applied where the box is placed on its line */
+    double rel_dx, rel_dy;
 
     double content_width, content_height;
     double first_baseline;

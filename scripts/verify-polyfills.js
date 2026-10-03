@@ -50,7 +50,7 @@ need('Blob utf-8 length (4-byte)', function () {
 need('Blob bytes are utf-8 encoded', function () {
     var b = new Blob(['héllo']);
     // 'h' 0x68, 'é' 0xc3 0xa9, 'l' 0x6c, 'l' 0x6c, 'o' 0x6f
-    var bytes = b._b;
+    var bytes = b.__ndBlobBytes;
     return bytes.length === 6 &&
            bytes[0] === 0x68 && bytes[1] === 0xc3 && bytes[2] === 0xa9 &&
            bytes[3] === 0x6c && bytes[4] === 0x6c && bytes[5] === 0x6f;

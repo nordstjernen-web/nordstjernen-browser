@@ -243,8 +243,8 @@ static guint8 *
 ns_wasm_copy_buffer_source(JSContext *ctx, JSValueConst v, size_t *out_len)
 {
     *out_len = 0;
-    size_t off = 0, blen = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, v, &off, &blen, &bpe);
+    size_t off = 0, blen = 0;
+    JSValue buf = JS_GetArrayBufferViewBuffer(ctx, v, &off, &blen);
     if (!JS_IsException(buf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
@@ -2310,17 +2310,23 @@ ns_wasm_module_imports_static(JSContext *ctx, JSValueConst this_val, int argc,
 
 static const char ns_wasm_bootstrap_js[] =
     "(() => {"
-    "  const W = WebAssembly;"
-    "  W.CompileError = class CompileError extends Error {};"
-    "  W.CompileError.prototype.name = 'CompileError';"
-    "  W.LinkError = class LinkError extends Error {};"
-    "  W.LinkError.prototype.name = 'LinkError';"
-    "  W.RuntimeError = class RuntimeError extends Error {};"
-    "  W.RuntimeError.prototype.name = 'RuntimeError';"
-    "  W.instantiateStreaming = async (src, imports) =>"
-    "    W.instantiate(await (await src).arrayBuffer(), imports);"
-    "  W.compileStreaming = async (src) =>"
-    "    W.compile(await (await src).arrayBuffer());"
+    "  const W = WebAssembly, dp = Object.defineProperty;"
+    /* The error types are native error constructors: length 1, with name
+     * and message on their prototypes, not enumerable. */
+    "  const error = (name) => {"
+    "    const C = ({ [name]: class extends Error {"
+    "      constructor(message) { super(message, arguments[1]); } } })[name];"
+    "    dp(C.prototype, 'name', { value: name, writable: true, configurable: true });"
+    "    dp(C.prototype, 'message', { value: '', writable: true, configurable: true });"
+    "    dp(W, name, { value: C, writable: true, configurable: true });"
+    "  };"
+    "  error('CompileError'); error('LinkError'); error('RuntimeError');"
+    "  const op = (f) => dp(W, f.name, { value: f, writable: true, enumerable: true, configurable: true });"
+    "  op(async function compileStreaming(source) {"
+    "    return W.compile(await (await source).arrayBuffer()); });"
+    "  op(async function instantiateStreaming(source) {"
+    "    const importObject = arguments[1];"
+    "    return W.instantiate(await (await source).arrayBuffer(), importObject); });"
     "})();";
 
 static void
@@ -2401,24 +2407,44 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
                                       "imports", 1));
     JS_SetPropertyStr(ctx, module_ctor, "prototype", module_proto);
     JS_SetPropertyStr(ctx, instance_ctor, "prototype", instance_proto);
-    JS_SetPropertyStr(ctx, ns, "Module", module_ctor);
-    JS_SetPropertyStr(ctx, ns, "Instance", instance_ctor);
-    JS_SetPropertyStr(ctx, ns, "Memory", memory_ctor);
-    JS_SetPropertyStr(ctx, ns, "Table", table_ctor);
-    JS_SetPropertyStr(ctx, ns, "Global", global_ctor);
+    /* The namespace's interfaces are not enumerable, its operations are
+     * (WebIDL namespaces); Instance(module, importObject) and
+     * instantiate(bytes, importObject) have one required argument, though
+     * the C functions keep taking two. */
+    const int iface = JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE;
+    JS_DefinePropertyValueStr(ctx, instance_ctor, "length", JS_NewInt32(ctx, 1),
+                              JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, ns, "Module", module_ctor, iface);
+    JS_DefinePropertyValueStr(ctx, ns, "Instance", instance_ctor, iface);
+    JS_DefinePropertyValueStr(ctx, ns, "Memory", memory_ctor, iface);
+    JS_DefinePropertyValueStr(ctx, ns, "Table", table_ctor, iface);
+    JS_DefinePropertyValueStr(ctx, ns, "Global", global_ctor, iface);
     JSValue compile_fn = JS_NewCFunction(ctx, ns_wasm_compile, "compile", 1);
     JS_SetPropertyStr(ctx, ns, "compile", compile_fn);
-    JSValue inst_fn = JS_NewCFunction(ctx, ns_wasm_instantiate, "instantiate",
-                                      2);
-    JS_SetPropertyStr(ctx, ns, "instantiate", inst_fn);
     JSValue validate_fn = JS_NewCFunction(ctx, ns_wasm_validate, "validate",
                                           1);
     JS_SetPropertyStr(ctx, ns, "validate", validate_fn);
-    JS_SetPropertyStr(ctx, global, "WebAssembly", ns);
+    JSValue inst_fn = JS_NewCFunction(ctx, ns_wasm_instantiate, "instantiate",
+                                      2);
+    JS_DefinePropertyValueStr(ctx, inst_fn, "length", JS_NewInt32(ctx, 1),
+                              JS_PROP_CONFIGURABLE);
+    JS_SetPropertyStr(ctx, ns, "instantiate", inst_fn);
+    JSValue sym_ctor = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue tag_sym = JS_GetPropertyStr(ctx, sym_ctor, "toStringTag");
+    JSAtom tag = JS_ValueToAtom(ctx, tag_sym);
+    if (tag != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, ns, tag, JS_NewString(ctx, "WebAssembly"),
+                               JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, tag);
+    }
+    JS_FreeValue(ctx, tag_sym);
+    JS_FreeValue(ctx, sym_ctor);
+    JS_DefinePropertyValueStr(ctx, global, "WebAssembly", ns, iface);
 
     JSValue boot = JS_Eval(ctx, ns_wasm_bootstrap_js,
                            sizeof(ns_wasm_bootstrap_js) - 1,
-                           "<wasm-bootstrap>", JS_EVAL_TYPE_GLOBAL);
+                           "<wasm-bootstrap>",
+                           JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(boot))
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, boot);
