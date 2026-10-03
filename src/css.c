@@ -2681,6 +2681,8 @@ css_selector_collect_ancestor_hashes(ns_css_selector *sel)
     }
 }
 
+static gboolean ns_css_html_ci_attr(const char *name);
+
 static ns_css_selector *
 parse_one_selector_rel(const char **pp, const char *end, int depth,
                        gboolean relative)
@@ -3055,6 +3057,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                 ns_css_attr_pred ap = {0};
                 ap.name = ascii_lower(attr_name, strlen(attr_name));
                 ap.name_bit = ns_attr_name_bloom_bit(ap.name);
+                ap.html_ci = ns_css_html_ci_attr(ap.name);
                 g_free(attr_name);
                 ap.op   = NS_CSS_ATTR_PRESENT;
                 p = css_skip_ws_comments(p, end);
@@ -22300,7 +22303,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 gsize vl = strlen(v), wl = strlen(a->value);
                 gboolean ci = a->case_insensitive ||
                     (!a->case_sensitive && html_doc &&
-                     ns_css_html_ci_attr(a->name));
+                     a->html_ci);
                 switch (a->op) {
                 case NS_CSS_ATTR_EQ:
                     if (ci ? g_ascii_strcasecmp(v, a->value)
@@ -28850,7 +28853,7 @@ incr_attr_pred_matches(const ns_node *n, const ns_css_attr_pred *wanted)
                         !(n->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
     gboolean ci = wanted->case_insensitive ||
         (!wanted->case_sensitive && html_doc &&
-         ns_css_html_ci_attr(wanted->name));
+         wanted->html_ci);
     switch (wanted->op) {
     case NS_CSS_ATTR_EQ:
         return ci ? g_ascii_strcasecmp(value, wanted->value) == 0
