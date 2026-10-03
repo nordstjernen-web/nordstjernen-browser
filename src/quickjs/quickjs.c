@@ -867,7 +867,9 @@ typedef struct JSFunctionBytecode {
     uint8_t super_allowed : 1;
     uint8_t arguments_allowed : 1;
     uint8_t backtrace_barrier : 1; /* stop backtrace on this function */
-    /* XXX: 5 bits available */
+    uint8_t is_engine_code : 1; /* compiled from hidden-source host code:
+                                   kept out of stack traces */
+    /* XXX: 4 bits available */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
@@ -8415,11 +8417,38 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
             backtrace_barrier = b->backtrace_barrier;
         }
 
+        /* Native functions and the host's own hidden-source code are not
+           frames of the page: a stack lists only the page's code, as a
+           browser's never shows its built-in DOM and its own internals. */
+        if (!b || b->is_engine_code) {
+            if (backtrace_barrier)
+                break;
+            continue;
+        }
+
         if (has_prepare) {
             js_new_callsite_data(ctx, &csd[i], sf);
+        } else if (sf->cur_pc &&
+                   ((func_name_str = get_func_name(ctx, sf->cur_func)) == NULL ||
+                    func_name_str[0] == '\0' ||
+                    strcmp(func_name_str, "<eval>") == 0)) {
+            /* An anonymous function or a script's top level: the position
+               alone, as "    at file:line:col". */
+            const char *atom_str;
+            int line_num1, col_num1;
+            uint32_t pc = sf->cur_pc - b->byte_code_buf - 1;
+            JS_FreeCString(ctx, func_name_str);
+            line_num1 = find_line_num(ctx, b, pc, &col_num1);
+            atom_str = b->filename ? JS_AtomToCString(ctx, b->filename) : NULL;
+            dbuf_printf(&dbuf, "    at %s", atom_str ? atom_str : "<anonymous>");
+            JS_FreeCString(ctx, atom_str);
+            if (line_num1 != -1)
+                dbuf_printf(&dbuf, ":%d:%d", line_num1, col_num1);
+            dbuf_putc(&dbuf, '\n');
         } else {
             /* func_name_str is UTF-8 encoded if needed */
-            func_name_str = get_func_name(ctx, sf->cur_func);
+            if (!sf->cur_pc)
+                func_name_str = get_func_name(ctx, sf->cur_func);
             if (!func_name_str || func_name_str[0] == '\0')
                 str1 = "<anonymous>";
             else
@@ -8490,6 +8519,9 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
         JS_FreeValue(ctx, prepare);
         JS_Throw(ctx, saved_exception);
     } else {
+        /* Lines are separated, not terminated, by newlines. */
+        if (dbuf.size > 0 && dbuf.buf[dbuf.size - 1] == '\n')
+            dbuf.size--;
         if (dbuf_error(&dbuf))
             stack = JS_NULL;
         else
@@ -22819,6 +22851,7 @@ typedef struct JSFunctionDef {
     bool is_derived_class_constructor : 1;
     bool in_function_body : 1;
     bool backtrace_barrier : 1;
+    bool is_engine_code : 1;
     bool need_home_object : 1;
     bool use_short_opcodes : 1; /* true if short opcodes are used in byte_code */
     bool has_await : 1; /* true if await is used (used in module eval) */
@@ -33636,6 +33669,7 @@ static JSFunctionDef *js_new_function_def(JSContext *ctx,
         list_add_tail(&fd->link, &parent->child_list);
         fd->is_strict_mode = parent->is_strict_mode;
         fd->parent_scope_level = parent->scope_level;
+        fd->is_engine_code = parent->is_engine_code;
     }
 
     fd->is_eval = is_eval;
@@ -37808,6 +37842,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->super_allowed = fd->super_allowed;
     b->arguments_allowed = fd->arguments_allowed;
     b->backtrace_barrier = fd->backtrace_barrier;
+    b->is_engine_code = fd->is_engine_code;
     b->realm = JS_DupContext(ctx);
 
     add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
@@ -38881,6 +38916,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fd->eval_type = eval_type;
     fd->has_this_binding = (eval_type != JS_EVAL_TYPE_DIRECT);
     fd->backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+    fd->is_engine_code = s->hide_source;
     if (eval_type == JS_EVAL_TYPE_DIRECT) {
         fd->new_target_allowed = b->new_target_allowed;
         fd->super_call_allowed = b->super_call_allowed;

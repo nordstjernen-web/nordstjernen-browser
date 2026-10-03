@@ -59167,10 +59167,15 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 
     JSValue v = JS_UNDEFINED;
     gboolean cache_hit = FALSE;
-    int src_line = (js->current_script && js->current_script->src_line > 0)
-                       ? js->current_script->src_line : 1;
-    int src_col = (js->current_script && js->current_script->src_col > 0)
-                      ? js->current_script->src_col : 1;
+    /* An inline script's positions count from where its text starts in the
+     * document; an external script's from the start of its own file. */
+    const ns_node *inline_script = js->current_script &&
+        !ns_element_get_attr(js->current_script, "src") ? js->current_script
+                                                         : NULL;
+    int src_line = (inline_script && inline_script->src_line > 0)
+                       ? inline_script->src_line : 1;
+    int src_col = (inline_script && inline_script->src_col > 0)
+                      ? inline_script->src_col : 1;
     if (!(ns_js_eval_bytecode_cached(js, copy, len, origin, &v, &cache_hit) &&
           cache_hit)) {
         JSValue geval = JS_GetGlobalObject(js->ctx);
