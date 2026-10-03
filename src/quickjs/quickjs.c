@@ -64884,12 +64884,21 @@ static JSValue js_domexception_get_code(JSContext *ctx, JSValueConst this_val)
     return js_int32(s->code);
 }
 
+/* WebIDL attributes: enumerable accessors */
+#define JS_DOMEXCEPTION_ATTR(name, fgetter, magic) { name, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, JS_DEF_CGETSET_MAGIC, magic, { .getset = { .get = { .getter_magic = fgetter }, .set = { .setter_magic = NULL } } } }
+
+static JSValue js_domexception_get_code_magic(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    (void)magic;
+    return js_domexception_get_code(ctx, this_val);
+}
+
 static const JSCFunctionListEntry js_domexception_proto_funcs[] = {
-    JS_CGETSET_MAGIC_DEF("name", js_domexception_getfield, NULL,
+    JS_DOMEXCEPTION_ATTR("code", js_domexception_get_code_magic, 0 ),
+    JS_DOMEXCEPTION_ATTR("name", js_domexception_getfield,
         offsetof(JSDOMExceptionData, name) ),
-    JS_CGETSET_MAGIC_DEF("message", js_domexception_getfield, NULL,
+    JS_DOMEXCEPTION_ATTR("message", js_domexception_getfield,
         offsetof(JSDOMExceptionData, message) ),
-    JS_CGETSET_DEF("code", js_domexception_get_code, NULL ),
     JS_PROP_STRING_DEF("[Symbol.toStringTag]", "DOMException", JS_PROP_CONFIGURABLE ),
 };
 
@@ -64944,6 +64953,10 @@ int JS_AddIntrinsicDOMException(JSContext *ctx)
                                countof(js_domexception_proto_funcs));
     ctor = JS_NewCFunction2(ctx, js_domexception_constructor, "DOMException", 2,
                             JS_CFUNC_constructor_or_func, 0);
+    /* both arguments are optional: WebIDL length 0 (the C function still
+       gets its two arguments, padded with undefined) */
+    JS_DefinePropertyValue(ctx, ctor, JS_ATOM_length, js_int32(0),
+                           JS_PROP_CONFIGURABLE);
     JS_SetConstructor(ctx, ctor, proto);
     for (i = 0; i < countof(js_dom_exception_names_table); i++) {
         name = JS_NewAtom(ctx, js_dom_exception_names_table[i].code_name);
@@ -65943,7 +65956,8 @@ static int js_uint8array_funcs_init(JSContext *ctx)
 
 int JS_AddIntrinsicAToB(JSContext *ctx)
 {
-    if (!JS_IsRegisteredClass(ctx->rt, JS_CLASS_DOM_EXCEPTION)) {
+    /* every realm has its own DOMException, inheriting its own Error */
+    if (!JS_IsObject(ctx->class_proto[JS_CLASS_DOM_EXCEPTION])) {
         if (JS_AddIntrinsicDOMException(ctx))
             return -1;
     }

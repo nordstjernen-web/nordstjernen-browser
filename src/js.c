@@ -26917,6 +26917,9 @@ static const char ns_interface_ctor_links_src[] =
     "    var PP = gp(P); if (!PP || PP === OP) return;"
     "    var c = gopd(PP, 'constructor');"
     "    if (!c || typeof c.value !== 'function' || c.value.prototype !== PP) return;"
+    /* DOMException's prototype inherits Error.prototype, but as an interface
+     * without a parent its interface object inherits Function.prototype. */
+    "    if (c.value === G.Error) return;"
     "    try { Object.setPrototypeOf(F, c.value); } catch (e) {}"
     "  });"
     "})(globalThis)";
@@ -27081,7 +27084,7 @@ static const char ns_worker_global_shape_src[] =
     "  method(ET.prototype, 'addEventListener', 2);"
     "  method(ET.prototype, 'removeEventListener', 2);"
     "  method(ET.prototype, 'dispatchEvent', 1);"
-    "  [['atob',1],['btoa',1],['clearInterval',0],['clearTimeout',0],['fetch',1],"
+    "  [['atob',1],['btoa',1],['clearInterval',0],['clearTimeout',0],['createImageBitmap',1],['fetch',1],"
     "   ['importScripts',0],['queueMicrotask',1],['reportError',1],['setInterval',1],"
     "   ['setTimeout',1],['structuredClone',1]].forEach(function(m){ method(WGS.prototype, m[0], m[1]); });"
     "  method(G, 'postMessage', 1); method(G, 'close', 0);"
@@ -48721,7 +48724,7 @@ static const char *const ns_realm_intrinsic_names[] = {
     "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array",
     "Uint32Array", "Float16Array", "Float32Array", "Float64Array",
     "BigInt64Array", "BigUint64Array", "Date", "RegExp", "Proxy", "Reflect",
-    "JSON", "Math", "Atomics", "Iterator",
+    "JSON", "Math", "Atomics", "Iterator", "DOMException",
 };
 
 static void
