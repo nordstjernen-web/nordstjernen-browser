@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* Content too wide for a centred line starts at the line's start and
+  overflows the end edge, as CSS Text says, instead of being centred with its
+  start cut off. reCAPTCHA's image challenge showed every tile one column off
+  and the last column empty; it can now be solved.
 * The IndexedDB interfaces (`IDBFactory`, `IDBDatabase`, `IDBObjectStore`,
   `IDBIndex`, `IDBCursor`, `IDBKeyRange`, `IDBRequest`, `IDBTransaction`,
   `IDBVersionChangeEvent` and the rest) have the shape of other browsers: their
