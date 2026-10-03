@@ -388,6 +388,8 @@ typedef enum ns_ho_kind {
     NS_HO_MESSAGE_PORT,
     NS_HO_TEXT_ENCODER,
     NS_HO_TEXT_DECODER,
+    NS_HO_XHR,
+    NS_HO_XHR_UPLOAD,
     NS_HO_KIND_COUNT
 } ns_ho_kind;
 static JSValue ns_proto_of(JSContext *ctx, JSValueConst global,
@@ -10069,6 +10071,7 @@ ns_audio_analysis_throw(JSContext *ctx, JSValueConst this_val,
 static JSClassID ns_hostobj_class_id;
 
 #define NS_HO_BIT(kind) (1u << (kind))
+#define NS_HO_XHR_EVENT_TARGETS (NS_HO_BIT(NS_HO_XHR) | NS_HO_BIT(NS_HO_XHR_UPLOAD))
 
 static const char *const ns_ho_iface_names[NS_HO_KIND_COUNT] = {
     [NS_HO_ABORT_CONTROLLER] = "AbortController",
@@ -10080,6 +10083,8 @@ static const char *const ns_ho_iface_names[NS_HO_KIND_COUNT] = {
     [NS_HO_MESSAGE_PORT] = "MessagePort",
     [NS_HO_TEXT_ENCODER] = "TextEncoder",
     [NS_HO_TEXT_DECODER] = "TextDecoder",
+    [NS_HO_XHR] = "XMLHttpRequest",
+    [NS_HO_XHR_UPLOAD] = "XMLHttpRequestUpload",
 };
 
 static ns_hostobj *
@@ -10320,6 +10325,22 @@ static const ns_ho_attr ns_ho_attrs[] = {
     { "TextDecoder", NS_HO_BIT(NS_HO_TEXT_DECODER), "encoding", NS_HA_STRING, FALSE },
     { "TextDecoder", NS_HO_BIT(NS_HO_TEXT_DECODER), "fatal", NS_HA_BOOL, FALSE },
     { "TextDecoder", NS_HO_BIT(NS_HO_TEXT_DECODER), "ignoreBOM", NS_HA_BOOL, FALSE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onabort", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onerror", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onload", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onloadend", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onloadstart", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "onprogress", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequestEventTarget", NS_HO_XHR_EVENT_TARGETS, "ontimeout", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "onreadystatechange", NS_HA_HANDLER, TRUE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "response", NS_HA_STRING, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "responseURL", NS_HA_STRING, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "responseXML", NS_HA_NULL, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "status", NS_HA_NUMBER, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "statusText", NS_HA_STRING, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "timeout", NS_HA_NUMBER, TRUE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "upload", NS_HA_NULL, FALSE },
+    { "XMLHttpRequest", NS_HO_BIT(NS_HO_XHR), "withCredentials", NS_HA_BOOL, TRUE },
 };
 
 static const ns_ho_attr *
@@ -19563,7 +19584,25 @@ typedef struct ns_xhr_state {
     char      *origin_url; /* URL of the document that sent the request */
     double     start_ms;
     GPtrArray *request_headers;
+    gint64     gen;
 } ns_xhr_state;
+
+static gint64
+ns_xhr_gen(JSContext *ctx, JSValueConst obj)
+{
+    JSValue g = JS_GetPropertyStr(ctx, obj, "_gen");
+    int64_t gen = 0;
+    JS_ToInt64(ctx, &gen, g);
+    JS_FreeValue(ctx, g);
+    return gen;
+}
+
+static void
+ns_xhr_bump_gen(JSContext *ctx, JSValueConst obj)
+{
+    JS_SetPropertyStr(ctx, obj, "_gen",
+                      JS_NewInt64(ctx, ns_xhr_gen(ctx, obj) + 1));
+}
 
 static const char *
 ns_http_status_text(int status)
@@ -19647,6 +19686,7 @@ static JSValue
 ns_xhr_getResponseHeader(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     if (argc < 1) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
@@ -19688,6 +19728,7 @@ ns_xhr_getAllResponseHeaders(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     JSValue hdrs_v = JS_GetPropertyStr(ctx, this_val, "_responseHeaders");
     if (JS_IsString(hdrs_v)) return hdrs_v;
     JS_FreeValue(ctx, hdrs_v);
@@ -20100,13 +20141,41 @@ ns_xhr_abort(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    JS_SetPropertyStr(ctx, this_val, "_aborted", JS_TRUE);
-    JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_FALSE);
-    JS_SetPropertyStr(ctx, this_val, "_readyState", JS_NewInt32(ctx, 4));
-    JS_SetPropertyStr(ctx, this_val, "status", JS_NewInt32(ctx, 0));
-    ns_target_fire_event(ctx, this_val, "readystatechange");
-    ns_xhr_fire_progress_event(ctx, this_val, "abort", 0, 0, FALSE);
-    ns_xhr_fire_progress_event(ctx, this_val, "loadend", 0, 0, FALSE);
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
+    JSValue state_v = JS_GetPropertyStr(ctx, this_val, "_readyState");
+    JSValue sent_v = JS_GetPropertyStr(ctx, this_val, "_sendFlag");
+    int32_t state = 0;
+    JS_ToInt32(ctx, &state, state_v);
+    gboolean sent = JS_ToBool(ctx, sent_v) > 0;
+    JS_FreeValue(ctx, state_v);
+    JS_FreeValue(ctx, sent_v);
+    gboolean in_flight = (state == 1 && sent) || state == 2 || state == 3;
+    if (in_flight) {
+        ns_xhr_bump_gen(ctx, this_val);
+        JS_SetPropertyStr(ctx, this_val, "_aborted", JS_TRUE);
+        JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_FALSE);
+        JS_SetPropertyStr(ctx, this_val, "_readyState", JS_NewInt32(ctx, 4));
+        JS_SetPropertyStr(ctx, this_val, "status", JS_NewInt32(ctx, 0));
+        ns_target_fire_event(ctx, this_val, "readystatechange");
+        ns_xhr_fire_progress_event(ctx, this_val, "abort", 0, 0, FALSE);
+        ns_xhr_fire_progress_event(ctx, this_val, "loadend", 0, 0, FALSE);
+        JSValue after_v = JS_GetPropertyStr(ctx, this_val, "_readyState");
+        int32_t after = 0;
+        JS_ToInt32(ctx, &after, after_v);
+        JS_FreeValue(ctx, after_v);
+        state = after;
+    }
+    if (state == 4) {
+        ns_xhr_bump_gen(ctx, this_val);
+        JS_SetPropertyStr(ctx, this_val, "_readyState", JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, this_val, "status", JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, this_val, "statusText", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, this_val, "responseText", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, this_val, "response", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, this_val, "responseXML", JS_NULL);
+        JS_SetPropertyStr(ctx, this_val, "responseURL", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, this_val, "_responseHeaders", JS_NewString(ctx, ""));
+    }
     return JS_UNDEFINED;
 }
 
@@ -20114,6 +20183,7 @@ static JSValue
 ns_xhr_overrideMimeType(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     if (argc > 0)
         JS_SetPropertyStr(ctx, this_val, "_mimeOverride",
                           JS_DupValue(ctx, argv[0]));
@@ -20222,6 +20292,13 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     ns_js_budget_push(st->js, &bg);
     if (st->js && st->js->pending_xhrs)
         g_ptr_array_remove_fast(st->js->pending_xhrs, st);
+    if (ns_xhr_gen(st->ctx, st->obj) != st->gen) {
+        ns_response_free(resp);
+        g_clear_error(&err);
+        ns_js_budget_pop(st->js, &bg);
+        ns_xhr_state_free(st);
+        return;
+    }
     if (st->js && st->url) {
         gint64 end_us = g_get_monotonic_time();
         gint64 start_us = st->start_ms > 0
@@ -20451,6 +20528,11 @@ ns_xhr_emit_blocked_idle(gpointer user_data)
         ns_js_budget_push(st->js, &bg);
         if (st->js && st->js->pending_xhrs)
             g_ptr_array_remove_fast(st->js->pending_xhrs, st);
+        if (ns_xhr_gen(ctx, st->obj) != st->gen) {
+            ns_js_budget_pop(st->js, &bg);
+            ns_xhr_state_free(st);
+            return G_SOURCE_REMOVE;
+        }
         JS_SetPropertyStr(ctx, st->obj, "status", JS_NewInt32(ctx, 0));
         JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
         JS_SetPropertyStr(ctx, st->obj, "_sendFlag", JS_FALSE);
@@ -20472,6 +20554,7 @@ ns_xhr_emit_blocked_idle(gpointer user_data)
 static JSValue
 ns_xhr_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     if (argc < 2)
         return JS_ThrowTypeError(ctx,
             "XMLHttpRequest.open requires at least 2 arguments");
@@ -20562,6 +20645,7 @@ ns_xhr_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     JS_SetPropertyStr(ctx, this_val, "_sync", async ? JS_FALSE : JS_TRUE);
     JS_SetPropertyStr(ctx, this_val, "_headers", JS_NewArray(ctx));
     JS_SetPropertyStr(ctx, this_val, "_aborted", JS_FALSE);
+    ns_xhr_bump_gen(ctx, this_val);
     JS_SetPropertyStr(ctx, this_val, "status", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, this_val, "statusText", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, this_val, "responseText", JS_NewString(ctx, ""));
@@ -20609,6 +20693,7 @@ static JSValue
 ns_xhr_setRequestHeader(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     if (argc < 2)
         return JS_ThrowTypeError(ctx,
             "setRequestHeader requires at least 2 arguments");
@@ -20826,6 +20911,7 @@ ns_xhr_content_type_utf8(const char *value)
 static JSValue
 ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
+    NS_HO_THIS(ctx, this_val, NS_HO_XHR);
     JSValue state_v = JS_GetPropertyStr(ctx, this_val, "_readyState");
     JSValue sent_v = JS_GetPropertyStr(ctx, this_val, "_sendFlag");
     int32_t ready_state = 0;
@@ -20878,6 +20964,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->timeline = _js ? _js->ctx : ctx;
     st->js  = _js;
     st->obj = JS_DupValue(ctx, this_val);
+    st->gen = ns_xhr_gen(ctx, this_val);
     char *resolved = (_js && _js->current_url)
         ? ns_url_resolve(_js->current_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
@@ -20993,24 +21080,17 @@ static JSValue
 ns_window_xhr_ctor(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    JSValue obj = JS_NewObject(ctx);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "XMLHttpRequest");
-    JSValue proto = JS_IsObject(ctor)
-        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
-    if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
-    JS_FreeValue(ctx, proto);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
+    (void)argc; (void)argv;
+    JSValue obj = ns_ho_construct(ctx, this_val, NS_HO_XHR);
+    if (JS_IsException(obj)) return obj;
     JS_SetPropertyStr(ctx, obj, "_readyState",  JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, obj, "_gen",         JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, obj, "status",       JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, obj, "statusText",   JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "responseText", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "response",     JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "responseXML",  JS_NULL);
     JS_SetPropertyStr(ctx, obj, "responseType", JS_NewString(ctx, ""));
-    JS_SetPropertyStr(ctx, obj, "_listeners", JS_NewArray(ctx));
     JS_SetPropertyStr(ctx, obj, "responseURL", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "_responseHeaders", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "timeout", JS_NewInt32(ctx, 0));
@@ -21022,18 +21102,7 @@ ns_window_xhr_ctor(JSContext *ctx, JSValueConst this_val,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(xhr_event_handlers); i++)
         JS_SetPropertyStr(ctx, obj, xhr_event_handlers[i], JS_NULL);
-    JSValue upload = JS_NewObject(ctx);
-    JSValue upload_global = JS_GetGlobalObject(ctx);
-    JSValue upload_ctor = JS_GetPropertyStr(ctx, upload_global,
-                                            "XMLHttpRequestUpload");
-    JSValue upload_proto = JS_GetPropertyStr(ctx, upload_ctor, "prototype");
-    if (JS_IsObject(upload_proto)) JS_SetPrototype(ctx, upload, upload_proto);
-    JS_FreeValue(ctx, upload_proto);
-    JS_FreeValue(ctx, upload_ctor);
-    JS_FreeValue(ctx, upload_global);
-    JS_SetPropertyStr(ctx, upload, "_listeners", JS_NewArray(ctx));
-    ns_bind_event_target_listeners(ctx, upload);
-    ns_bind_fn(ctx, upload, "dispatchEvent", ns_target_dispatchEvent, 1);
+    JSValue upload = ns_ho_new_default(ctx, NS_HO_XHR_UPLOAD);
     static const char *const upload_event_handlers[] = {
         "onloadstart", "onprogress", "onabort", "onerror", "onload",
         "ontimeout", "onloadend",
@@ -21047,7 +21116,9 @@ ns_window_xhr_ctor(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_xhr_get_readyState(JSContext *ctx, JSValueConst this_val)
 {
-    JSValue state = JS_GetPropertyStr(ctx, this_val, "_readyState");
+    ns_hostobj *d = ns_ho_of(this_val, NS_HO_XHR);
+    if (!d) return ns_ho_illegal(ctx);
+    JSValue state = JS_GetPropertyStr(ctx, d->state, "_readyState");
     if (JS_IsUndefined(state)) {
         JS_FreeValue(ctx, state);
         return JS_NewInt32(ctx, 0);
@@ -21055,8 +21126,91 @@ ns_xhr_get_readyState(JSContext *ctx, JSValueConst this_val)
     return state;
 }
 
+static gboolean
+ns_xhr_text_response_type(JSContext *ctx, JSValueConst obj)
+{
+    JSValue rt = JS_GetPropertyStr(ctx, obj, "responseType");
+    const char *s = JS_IsString(rt) ? JS_ToCString(ctx, rt) : NULL;
+    gboolean text = !s || !*s || strcmp(s, "text") == 0;
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, rt);
+    return text;
+}
+
+static JSValue
+ns_xhr_get_responseText(JSContext *ctx, JSValueConst this_val)
+{
+    ns_hostobj *d = ns_ho_of(this_val, NS_HO_XHR);
+    if (!d) return ns_ho_illegal(ctx);
+    if (!ns_xhr_text_response_type(ctx, this_val))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "Failed to read the 'responseText' property from 'XMLHttpRequest': "
+            "The value is only accessible if the object's 'responseType' is '' "
+            "or 'text'.");
+    JSValue v = JS_GetPropertyStr(ctx, d->state, "responseText");
+    if (JS_IsUndefined(v)) {
+        JS_FreeValue(ctx, v);
+        return JS_NewString(ctx, "");
+    }
+    return v;
+}
+
+static JSValue
+ns_xhr_get_responseType(JSContext *ctx, JSValueConst this_val)
+{
+    ns_hostobj *d = ns_ho_of(this_val, NS_HO_XHR);
+    if (!d) return ns_ho_illegal(ctx);
+    JSValue v = JS_GetPropertyStr(ctx, d->state, "responseType");
+    if (JS_IsUndefined(v)) {
+        JS_FreeValue(ctx, v);
+        return JS_NewString(ctx, "");
+    }
+    return v;
+}
+
+static JSValue
+ns_xhr_set_responseType(JSContext *ctx, JSValueConst this_val,
+                        JSValueConst value)
+{
+    ns_hostobj *d = ns_ho_of(this_val, NS_HO_XHR);
+    if (!d) return ns_ho_illegal(ctx);
+    JSValue str = JS_ToString(ctx, value);
+    if (JS_IsException(str)) return str;
+    const char *s = JS_ToCString(ctx, str);
+    static const char *const valid[] = {
+        "", "arraybuffer", "blob", "document", "json", "text",
+    };
+    gboolean ok = FALSE;
+    for (gsize i = 0; s && i < G_N_ELEMENTS(valid); i++)
+        if (strcmp(s, valid[i]) == 0) ok = TRUE;
+    ns_js *js = js_from_ctx(ctx);
+    if (ok && s && strcmp(s, "document") == 0 && js && js->worker_host)
+        ok = FALSE;
+    if (s) JS_FreeCString(ctx, s);
+    if (!ok) {
+        JS_FreeValue(ctx, str);
+        return JS_UNDEFINED;
+    }
+    JSValue state_v = JS_GetPropertyStr(ctx, d->state, "_readyState");
+    int32_t state = 0;
+    JS_ToInt32(ctx, &state, state_v);
+    JS_FreeValue(ctx, state_v);
+    if (state == 3 || state == 4) {
+        JS_FreeValue(ctx, str);
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "Failed to set the 'responseType' property on 'XMLHttpRequest': "
+            "The response type cannot be set if the object's state is LOADING "
+            "or DONE.");
+    }
+    JS_SetPropertyStr(ctx, d->state, "responseType", str);
+    return JS_UNDEFINED;
+}
+
 static const JSCFunctionListEntry ns_xhr_proto_accessors[] = {
     JS_CGETSET_DEF("readyState", ns_xhr_get_readyState, NULL),
+    JS_CGETSET_DEF("responseText", ns_xhr_get_responseText, NULL),
+    JS_CGETSET_DEF("responseType", ns_xhr_get_responseType,
+                   ns_xhr_set_responseType),
 };
 
 static void
@@ -21066,27 +21220,21 @@ ns_xhr_install_interface(JSContext *ctx, JSValueConst global)
     JSValue proto = JS_IsObject(ctor)
         ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
     if (JS_IsObject(proto)) {
-        ns_bind_fn(ctx, proto, "open",                  ns_xhr_open, 5);
-        ns_bind_fn(ctx, proto, "send",                  ns_xhr_send, 1);
+        ns_bind_fn(ctx, proto, "open",                  ns_xhr_open, 2);
+        ns_bind_fn(ctx, proto, "send",                  ns_xhr_send, 0);
         ns_bind_fn(ctx, proto, "setRequestHeader",      ns_xhr_setRequestHeader, 2);
         ns_bind_fn(ctx, proto, "getResponseHeader",     ns_xhr_getResponseHeader, 1);
         ns_bind_fn(ctx, proto, "getAllResponseHeaders", ns_xhr_getAllResponseHeaders, 0);
         ns_bind_fn(ctx, proto, "abort",                 ns_xhr_abort, 0);
         ns_bind_fn(ctx, proto, "overrideMimeType",      ns_xhr_overrideMimeType, 1);
-        ns_bind_event_target_listeners(ctx, proto);
-        ns_bind_fn(ctx, proto, "dispatchEvent", ns_target_dispatchEvent, 1);
         JS_SetPropertyFunctionList(ctx, proto, ns_xhr_proto_accessors,
                                    G_N_ELEMENTS(ns_xhr_proto_accessors));
-        static const struct { const char *name; int value; } constants[] = {
+        static const ns_int_constant constants[] = {
             { "UNSENT", 0 }, { "OPENED", 1 }, { "HEADERS_RECEIVED", 2 },
             { "LOADING", 3 }, { "DONE", 4 },
         };
-        for (gsize i = 0; i < G_N_ELEMENTS(constants); i++) {
-            JS_DefinePropertyValueStr(ctx, ctor, constants[i].name,
-                JS_NewInt32(ctx, constants[i].value), 0);
-            JS_DefinePropertyValueStr(ctx, proto, constants[i].name,
-                JS_NewInt32(ctx, constants[i].value), 0);
-        }
+        ns_bind_ctor_int_constants(ctx, global, "XMLHttpRequest", constants,
+                                   G_N_ELEMENTS(constants));
     }
     JS_FreeValue(ctx, proto);
     JS_FreeValue(ctx, ctor);
@@ -26630,11 +26778,14 @@ ns_net_link_event_targets(JSContext *ctx, JSValueConst global)
 {
     static const char *const ifaces[] = {
         "AbortSignal", "BroadcastChannel", "FileReader", "MessagePort",
+        "XMLHttpRequestEventTarget",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(ifaces); i++) {
         ns_ho_link_iface(ctx, global, ifaces[i], "EventTarget");
         ns_ho_event_target_shadow(ctx, global, ifaces[i]);
     }
+    ns_ho_link_iface(ctx, global, "XMLHttpRequest", "XMLHttpRequestEventTarget");
+    ns_ho_link_iface(ctx, global, "XMLHttpRequestUpload", "XMLHttpRequestEventTarget");
 }
 
 static void
@@ -26655,6 +26806,14 @@ static void
 ns_net_install_interfaces(JSContext *ctx, JSValueConst global)
 {
     ns_ho_install_attrs(ctx, global);
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->worker_host) {
+        JSValue xhr = ns_proto_of(ctx, global, "XMLHttpRequest");
+        JSAtom atom = JS_NewAtom(ctx, "responseXML");
+        if (JS_IsObject(xhr)) JS_DeleteProperty(ctx, xhr, atom, 0);
+        JS_FreeAtom(ctx, atom);
+        JS_FreeValue(ctx, xhr);
+    }
     ns_net_install_form_data(ctx, global);
     ns_net_install_ports(ctx, global);
     ns_net_install_file_reader(ctx, global);
@@ -27135,11 +27294,10 @@ ns_worker_js_new(ns_worker_host *host)
     ns_js_intl_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
+    ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequestUpload", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequest", ns_window_xhr_ctor, 0);
     ns_xhr_install_interface(ctx, global);
-    ns_event_link_proto(ctx, global, "XMLHttpRequest", "EventTarget");
-    ns_event_link_proto(ctx, global, "XMLHttpRequestUpload", "EventTarget");
     ns_bind_fn(ctx, global, "fetch",    ns_js_fetch,             1);
     ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 0);
     ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  1);
@@ -55914,6 +56072,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
     ns_usp_install_interface(ctx);
     ns_url_install_interface(ctx);
+    ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequestUpload", ns_illegal_constructor,    0);
     ns_bind_ctor(ctx, global, "XMLHttpRequest",  ns_window_xhr_ctor,             0);
     ns_xhr_install_interface(ctx, global);
@@ -56066,8 +56225,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     };
     ns_bind_ctors(ctx, global, ns_window_event_ctor,
                   event_base_ctors, G_N_ELEMENTS(event_base_ctors));
-    ns_event_link_proto(ctx, global, "XMLHttpRequest", "EventTarget");
-    ns_event_link_proto(ctx, global, "XMLHttpRequestUpload", "EventTarget");
     ns_canvas_install(ctx, global, TRUE);
     ns_bind_ctor(ctx, global, "Document", ns_document_ctor, 0);
 
