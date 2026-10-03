@@ -3586,7 +3586,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
             cairo_save(cr);
-            cairo_translate(cr, sx - a->box->x, sy - a->box->y);
+            cairo_translate(cr, sx + a->box->rel_dx - a->box->x,
+                            sy + a->box->rel_dy - a->box->y);
             g_paint_no_cull++;
             const ns_box *saved_flush = g_paint_flush_box;
             g_paint_flush_box = a->box;
