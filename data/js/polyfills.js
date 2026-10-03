@@ -6753,28 +6753,6 @@
         } catch (e) {}
     }
 
-    if (typeof TextEncoder === 'function' && TextEncoder.prototype &&
-        typeof TextEncoder.prototype.encodeInto !== 'function') {
-        defineMethod(TextEncoder.prototype, 'encodeInto', function (source, destination) {
-            var enc = this.encode(String(source));
-            var dest = destination;
-            var written = Math.min(enc.length, dest.length);
-            for (var i = 0; i < written; i++) dest[i] = enc[i];
-            var read = source.length;
-            if (written < enc.length) {
-                read = 0;
-                for (var b = 0; b < written;) {
-                    var c = source.charCodeAt(read++);
-                    if (c < 0x80) b += 1;
-                    else if (c < 0x800) b += 2;
-                    else if (c >= 0xd800 && c <= 0xdbff) b += 4;
-                    else b += 3;
-                }
-            }
-            return { read: read, written: written };
-        });
-    }
-
     if (typeof Headers === 'function' && Headers.prototype &&
         typeof Headers.prototype.getSetCookie !== 'function') {
         defineMethod(Headers.prototype, 'getSetCookie', function () {
