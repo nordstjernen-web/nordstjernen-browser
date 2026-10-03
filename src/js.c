@@ -351,6 +351,8 @@ static gboolean ns_valid_attr_name(const char *s);
 static gboolean ns_is_attr_qname(const char *s);
 static JSValue ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv);
+static JSValue ns_event_init_ui_event_data(JSContext *ctx, JSValueConst this_val,
+                                           int argc, JSValueConst *argv);
 static JSValue ns_event_initMouseEvent(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static JSValue ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
@@ -1897,6 +1899,654 @@ static JSClassID ns_storage_class_id;
 static JSClassID ns_live_class_id;
 static JSClassID ns_dataset_class_id;
 static JSClassID ns_window_named_class_id;
+
+/* Events.  What the engine sets on an event lives in a state object of its
+ * own that page scripts do not see: the attributes are getters on the event
+ * interfaces' prototypes, as WebIDL has them, and isTrusted is the one own
+ * property, as in other browsers.  The engine itself (its C functions and
+ * hidden-source scripts, see JS_IsHostAccess) reads and writes the state
+ * as if it were the event's own properties, so the code that builds and
+ * dispatches events keeps using plain property access. */
+static JSClassID ns_event_class_id;
+
+typedef struct ns_event_data {
+    JSValue state;
+} ns_event_data;
+
+static ns_event_data *
+ns_event_data_of(JSValueConst v)
+{
+    return ns_event_class_id && JS_VALUE_GET_TAG(v) == JS_TAG_OBJECT
+        ? JS_GetOpaque(v, ns_event_class_id) : NULL;
+}
+
+static void
+ns_event_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_event_data *d = JS_GetOpaque(val, ns_event_class_id);
+    if (!d) return;
+    JS_FreeValueRT(rt, d->state);
+    g_free(d);
+}
+
+static void
+ns_event_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_event_data *d = JS_GetOpaque(val, ns_event_class_id);
+    if (d) JS_MarkValue(rt, d->state, mark_func);
+}
+
+/* Whether the engine's own definition of prop belongs on the event
+ * itself: only isTrusted, which is [LegacyUnforgeable]. */
+static gboolean
+ns_event_keeps_own(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                   JSValueConst val)
+{
+    (void)obj; (void)val;
+    const char *name = JS_AtomToCString(ctx, prop);
+    gboolean is_trusted = name && strcmp(name, "isTrusted") == 0;
+    if (name) JS_FreeCString(ctx, name);
+    return is_trusted;
+}
+
+static int
+ns_event_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
+                          JSValueConst obj, JSAtom prop)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    if (!d) return 0;
+    if (JS_IsHostAccess(ctx))
+        return JS_GetOwnProperty(ctx, desc, d->state, prop);
+    /* A method the engine gave an event whose interfaces lack it (such as
+     * a navigation event's intercept()) stays reachable for the page. */
+    JSPropertyDescriptor own;
+    int has = JS_GetOwnProperty(ctx, &own, d->state, prop);
+    if (has <= 0) return has;
+    gboolean method = !(own.flags & JS_PROP_GETSET) &&
+                      JS_IsFunction(ctx, own.value);
+    if (method) {
+        JSValue proto = JS_GetPrototype(ctx, obj);
+        int inherited = JS_IsObject(proto)
+            ? JS_HasProperty(ctx, proto, prop) : 0;
+        JS_FreeValue(ctx, proto);
+        method = inherited == 0;
+    }
+    if (method && desc) {
+        *desc = own;
+        return 1;
+    }
+    JS_FreeValue(ctx, own.value);
+    JS_FreeValue(ctx, own.getter);
+    JS_FreeValue(ctx, own.setter);
+    return method ? 1 : 0;
+}
+
+static int
+ns_event_get_own_property_names(JSContext *ctx, JSPropertyEnum **ptab,
+                                uint32_t *plen, JSValueConst obj)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    *ptab = NULL;
+    *plen = 0;
+    if (!d || !JS_IsHostAccess(ctx)) return 0;
+    return JS_GetOwnPropertyNames(ctx, ptab, plen, d->state,
+                                  JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK);
+}
+
+static int
+ns_event_delete_property(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    if (!d || !JS_IsHostAccess(ctx)) return TRUE;
+    return JS_DeleteProperty(ctx, d->state, prop, 0);
+}
+
+static int
+ns_event_define_own_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                             JSValueConst val, JSValueConst getter,
+                             JSValueConst setter, int flags)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    if (d && JS_IsHostAccess(ctx)) {
+        if (!ns_event_keeps_own(ctx, obj, prop, val))
+            return JS_DefineProperty(ctx, d->state, prop, val, getter, setter,
+                                     flags);
+        const char *name = JS_AtomToCString(ctx, prop);
+        if (name && strcmp(name, "isTrusted") == 0)
+            flags = (flags & ~JS_PROP_CONFIGURABLE) | JS_PROP_HAS_CONFIGURABLE;
+        if (name) JS_FreeCString(ctx, name);
+    }
+    return JS_DefineProperty(ctx, obj, prop, val, getter, setter,
+                             flags | JS_PROP_NO_EXOTIC);
+}
+
+static int
+ns_event_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                      JSValueConst value, JSValueConst receiver, int flags)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    if (d && JS_IsHostAccess(ctx) &&
+        JS_VALUE_GET_PTR(receiver) == JS_VALUE_GET_PTR(obj) &&
+        !ns_event_keeps_own(ctx, obj, prop, value)) {
+        /* An accessor the engine put in the state runs on the event. */
+        JSPropertyDescriptor desc;
+        int has = JS_GetOwnProperty(ctx, &desc, d->state, prop);
+        if (has < 0) return -1;
+        if (has) {
+            JS_FreeValue(ctx, desc.value);
+            if (desc.flags & JS_PROP_GETSET) {
+                int ret = TRUE;
+                if (JS_IsFunction(ctx, desc.setter)) {
+                    JSValue r = JS_Call(ctx, desc.setter, obj, 1, &value);
+                    ret = JS_IsException(r) ? -1 : TRUE;
+                    JS_FreeValue(ctx, r);
+                }
+                JS_FreeValue(ctx, desc.getter);
+                JS_FreeValue(ctx, desc.setter);
+                return ret;
+            }
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        return JS_SetPropertyReceiver(ctx, d->state, prop,
+                                      JS_DupValue(ctx, value), d->state, flags);
+    }
+    /* The page's assignment: an ordinary [[Set]], which finds the
+     * interface's getter on the prototype or adds an own property. */
+    JSValue proto = JS_GetPrototype(ctx, obj);
+    int ret;
+    if (JS_IsObject(proto))
+        ret = JS_SetPropertyReceiver(ctx, proto, prop, JS_DupValue(ctx, value),
+                                     receiver, flags);
+    else
+        ret = JS_DefineProperty(ctx, receiver, prop, value, JS_UNDEFINED,
+                                JS_UNDEFINED, JS_PROP_C_W_E |
+                                JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                                JS_PROP_HAS_ENUMERABLE |
+                                JS_PROP_HAS_CONFIGURABLE);
+    JS_FreeValue(ctx, proto);
+    return ret;
+}
+
+static JSClassExoticMethods ns_event_exotic = {
+    .get_own_property = ns_event_get_own_property,
+    .get_own_property_names = ns_event_get_own_property_names,
+    .delete_property = ns_event_delete_property,
+    .define_own_property = ns_event_define_own_property,
+    .set_property = ns_event_set_property,
+};
+
+static JSClassDef ns_event_class = {
+    .class_name = "Event",
+    .finalizer = ns_event_finalizer,
+    .gc_mark = ns_event_gc_mark,
+    .exotic = &ns_event_exotic,
+};
+
+/* A new event object of ctx's realm, with proto as its prototype or
+ * Object.prototype, which the event's interface replaces later. */
+static JSValue
+ns_event_new_proto(JSContext *ctx, JSValueConst proto)
+{
+    ns_new_class_id(&ns_event_class_id);
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    if (!JS_IsRegisteredClass(rt, ns_event_class_id))
+        JS_NewClass(rt, ns_event_class_id, &ns_event_class);
+    JSValue object_proto = JS_UNDEFINED;
+    if (!JS_IsObject(proto)) {
+        JSValue plain = JS_NewObject(ctx);
+        object_proto = JS_GetPrototype(ctx, plain);
+        JS_FreeValue(ctx, plain);
+    }
+    JSValue ev = JS_NewObjectProtoClass(ctx,
+        JS_IsObject(proto) ? proto : object_proto, ns_event_class_id);
+    JS_FreeValue(ctx, object_proto);
+    if (JS_IsException(ev)) return ev;
+    ns_event_data *d = g_new0(ns_event_data, 1);
+    d->state = JS_NewObjectProto(ctx, JS_NULL);
+    JS_SetOpaque(ev, d);
+    return ev;
+}
+
+/* Whether objects with prototype proto are events of ctx's realm. */
+static gboolean
+ns_proto_is_event(JSContext *ctx, JSValueConst proto)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Event");
+    JSValue event_proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    gboolean is_event = FALSE;
+    JSValue p = JS_DupValue(ctx, proto);
+    for (int depth = 0; JS_IsObject(p) && depth < 32 && !is_event; depth++) {
+        if (JS_VALUE_GET_PTR(p) == JS_VALUE_GET_PTR(event_proto)) {
+            is_event = TRUE;
+            break;
+        }
+        JSValue next = JS_GetPrototype(ctx, p);
+        JS_FreeValue(ctx, p);
+        p = next;
+    }
+    JS_FreeValue(ctx, p);
+    JS_FreeValue(ctx, event_proto);
+    return is_event;
+}
+
+static JSValue
+ns_event_new(JSContext *ctx)
+{
+    return ns_event_new_proto(ctx, JS_UNDEFINED);
+}
+
+typedef enum {
+    NS_EV_NUMBER, NS_EV_BOOL, NS_EV_STRING, NS_EV_NULL, NS_EV_UNDEFINED,
+    NS_EV_ARRAY,
+} ns_event_attr_kind;
+
+typedef struct ns_event_attr {
+    const char *iface;
+    const char *name;
+    ns_event_attr_kind kind;
+    gboolean writable;
+} ns_event_attr;
+
+/* The attributes of the event interfaces, as Chrome has them on their
+ * prototypes, with the value a fresh event of the interface gives. */
+static const ns_event_attr ns_event_attrs[] = {
+    { "AnimationEvent", "animation", NS_EV_NULL, FALSE },
+    { "AnimationEvent", "animationName", NS_EV_STRING, FALSE },
+    { "AnimationEvent", "elapsedTime", NS_EV_NUMBER, FALSE },
+    { "AnimationEvent", "pseudoElement", NS_EV_STRING, FALSE },
+    { "AnimationEvent", "pseudoTarget", NS_EV_NULL, FALSE },
+    { "AnimationPlaybackEvent", "currentTime", NS_EV_NULL, FALSE },
+    { "AnimationPlaybackEvent", "timelineTime", NS_EV_NULL, FALSE },
+    { "AudioProcessingEvent", "inputBuffer", NS_EV_NULL, FALSE },
+    { "AudioProcessingEvent", "outputBuffer", NS_EV_NULL, FALSE },
+    { "AudioProcessingEvent", "playbackTime", NS_EV_NULL, FALSE },
+    { "BeforeInstallPromptEvent", "platforms", NS_EV_ARRAY, FALSE },
+    { "BeforeInstallPromptEvent", "userChoice", NS_EV_NULL, FALSE },
+    { "BeforeUnloadEvent", "returnValue", NS_EV_NULL, TRUE },
+    { "BlobEvent", "data", NS_EV_NULL, FALSE },
+    { "BlobEvent", "timecode", NS_EV_NUMBER, FALSE },
+    { "CharacterBoundsUpdateEvent", "rangeEnd", NS_EV_NUMBER, FALSE },
+    { "CharacterBoundsUpdateEvent", "rangeStart", NS_EV_NUMBER, FALSE },
+    { "ClipboardChangeEvent", "changeId", NS_EV_NULL, FALSE },
+    { "ClipboardChangeEvent", "types", NS_EV_NULL, FALSE },
+    { "ClipboardEvent", "clipboardData", NS_EV_NULL, FALSE },
+    { "CloseEvent", "code", NS_EV_NUMBER, FALSE },
+    { "CloseEvent", "reason", NS_EV_STRING, FALSE },
+    { "CloseEvent", "wasClean", NS_EV_BOOL, FALSE },
+    { "CommandEvent", "command", NS_EV_STRING, FALSE },
+    { "CommandEvent", "source", NS_EV_NULL, FALSE },
+    { "CompositionEvent", "data", NS_EV_STRING, FALSE },
+    { "ContentVisibilityAutoStateChangeEvent", "skipped", NS_EV_BOOL, FALSE },
+    { "CookieChangeEvent", "changed", NS_EV_ARRAY, FALSE },
+    { "CookieChangeEvent", "deleted", NS_EV_ARRAY, FALSE },
+    { "CustomEvent", "detail", NS_EV_NULL, FALSE },
+    { "DeviceMotionEvent", "acceleration", NS_EV_NULL, FALSE },
+    { "DeviceMotionEvent", "accelerationIncludingGravity", NS_EV_NULL, FALSE },
+    { "DeviceMotionEvent", "interval", NS_EV_NUMBER, FALSE },
+    { "DeviceMotionEvent", "rotationRate", NS_EV_NULL, FALSE },
+    { "DeviceOrientationEvent", "absolute", NS_EV_BOOL, FALSE },
+    { "DeviceOrientationEvent", "alpha", NS_EV_NULL, FALSE },
+    { "DeviceOrientationEvent", "beta", NS_EV_NULL, FALSE },
+    { "DeviceOrientationEvent", "gamma", NS_EV_NULL, FALSE },
+    { "DocumentPictureInPictureEvent", "window", NS_EV_NULL, FALSE },
+    { "DragEvent", "dataTransfer", NS_EV_NULL, FALSE },
+    { "ErrorEvent", "colno", NS_EV_NUMBER, FALSE },
+    { "ErrorEvent", "error", NS_EV_UNDEFINED, FALSE },
+    { "ErrorEvent", "filename", NS_EV_STRING, FALSE },
+    { "ErrorEvent", "lineno", NS_EV_NUMBER, FALSE },
+    { "ErrorEvent", "message", NS_EV_STRING, FALSE },
+    { "Event", "bubbles", NS_EV_BOOL, FALSE },
+    { "Event", "cancelBubble", NS_EV_BOOL, TRUE },
+    { "Event", "cancelable", NS_EV_BOOL, FALSE },
+    { "Event", "composed", NS_EV_BOOL, FALSE },
+    { "Event", "currentTarget", NS_EV_NULL, FALSE },
+    { "Event", "defaultPrevented", NS_EV_BOOL, FALSE },
+    { "Event", "eventPhase", NS_EV_NUMBER, FALSE },
+    { "Event", "returnValue", NS_EV_BOOL, TRUE },
+    { "Event", "srcElement", NS_EV_NULL, FALSE },
+    { "Event", "target", NS_EV_NULL, FALSE },
+    { "Event", "timeStamp", NS_EV_NUMBER, FALSE },
+    { "Event", "type", NS_EV_STRING, FALSE },
+    { "FocusEvent", "relatedTarget", NS_EV_NULL, FALSE },
+    { "FontFaceSetLoadEvent", "fontfaces", NS_EV_ARRAY, FALSE },
+    { "FormDataEvent", "formData", NS_EV_NULL, FALSE },
+    { "GamepadEvent", "gamepad", NS_EV_NULL, FALSE },
+    { "GPUUncapturedErrorEvent", "error", NS_EV_NULL, FALSE },
+    { "HashChangeEvent", "newURL", NS_EV_STRING, FALSE },
+    { "HashChangeEvent", "oldURL", NS_EV_STRING, FALSE },
+    { "HIDConnectionEvent", "device", NS_EV_NULL, FALSE },
+    { "HIDInputReportEvent", "data", NS_EV_NULL, FALSE },
+    { "HIDInputReportEvent", "device", NS_EV_NULL, FALSE },
+    { "HIDInputReportEvent", "reportId", NS_EV_NULL, FALSE },
+    { "IDBVersionChangeEvent", "dataLoss", NS_EV_STRING, FALSE },
+    { "IDBVersionChangeEvent", "dataLossMessage", NS_EV_STRING, FALSE },
+    { "IDBVersionChangeEvent", "newVersion", NS_EV_NULL, FALSE },
+    { "IDBVersionChangeEvent", "oldVersion", NS_EV_NUMBER, FALSE },
+    { "InputEvent", "data", NS_EV_NULL, FALSE },
+    { "InputEvent", "dataTransfer", NS_EV_NULL, FALSE },
+    { "InputEvent", "inputType", NS_EV_STRING, FALSE },
+    { "InputEvent", "isComposing", NS_EV_BOOL, FALSE },
+    { "InterestEvent", "source", NS_EV_NULL, FALSE },
+    { "KeyboardEvent", "altKey", NS_EV_BOOL, FALSE },
+    { "KeyboardEvent", "charCode", NS_EV_NUMBER, FALSE },
+    { "KeyboardEvent", "code", NS_EV_STRING, FALSE },
+    { "KeyboardEvent", "ctrlKey", NS_EV_BOOL, FALSE },
+    { "KeyboardEvent", "isComposing", NS_EV_BOOL, FALSE },
+    { "KeyboardEvent", "key", NS_EV_STRING, FALSE },
+    { "KeyboardEvent", "keyCode", NS_EV_NUMBER, FALSE },
+    { "KeyboardEvent", "location", NS_EV_NUMBER, FALSE },
+    { "KeyboardEvent", "metaKey", NS_EV_BOOL, FALSE },
+    { "KeyboardEvent", "repeat", NS_EV_BOOL, FALSE },
+    { "KeyboardEvent", "shiftKey", NS_EV_BOOL, FALSE },
+    { "MediaEncryptedEvent", "initData", NS_EV_NULL, FALSE },
+    { "MediaEncryptedEvent", "initDataType", NS_EV_STRING, FALSE },
+    { "MediaKeyMessageEvent", "message", NS_EV_NULL, FALSE },
+    { "MediaKeyMessageEvent", "messageType", NS_EV_NULL, FALSE },
+    { "MediaQueryListEvent", "matches", NS_EV_BOOL, FALSE },
+    { "MediaQueryListEvent", "media", NS_EV_STRING, FALSE },
+    { "MediaStreamEvent", "stream", NS_EV_NULL, FALSE },
+    { "MediaStreamTrackEvent", "track", NS_EV_NULL, FALSE },
+    { "MessageEvent", "data", NS_EV_NULL, FALSE },
+    { "MessageEvent", "lastEventId", NS_EV_STRING, FALSE },
+    { "MessageEvent", "origin", NS_EV_STRING, FALSE },
+    { "MessageEvent", "ports", NS_EV_ARRAY, FALSE },
+    { "MessageEvent", "source", NS_EV_NULL, FALSE },
+    { "MessageEvent", "userActivation", NS_EV_NULL, FALSE },
+    { "MIDIConnectionEvent", "port", NS_EV_NULL, FALSE },
+    { "MIDIMessageEvent", "data", NS_EV_NULL, FALSE },
+    { "MouseEvent", "altKey", NS_EV_BOOL, FALSE },
+    { "MouseEvent", "button", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "buttons", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "clientX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "clientY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "ctrlKey", NS_EV_BOOL, FALSE },
+    { "MouseEvent", "fromElement", NS_EV_NULL, FALSE },
+    { "MouseEvent", "layerX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "layerY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "metaKey", NS_EV_BOOL, FALSE },
+    { "MouseEvent", "movementX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "movementY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "offsetX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "offsetY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "pageX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "pageY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "relatedTarget", NS_EV_NULL, FALSE },
+    { "MouseEvent", "screenX", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "screenY", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "shiftKey", NS_EV_BOOL, FALSE },
+    { "MouseEvent", "toElement", NS_EV_NULL, FALSE },
+    { "MouseEvent", "x", NS_EV_NUMBER, FALSE },
+    { "MouseEvent", "y", NS_EV_NUMBER, FALSE },
+    { "NavigateEvent", "canIntercept", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "destination", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "downloadRequest", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "formData", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "hasUAVisualTransition", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "hashChange", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "info", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "navigationType", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "signal", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "sourceElement", NS_EV_NULL, FALSE },
+    { "NavigateEvent", "userInitiated", NS_EV_NULL, FALSE },
+    { "NavigationCurrentEntryChangeEvent", "from", NS_EV_NULL, FALSE },
+    { "NavigationCurrentEntryChangeEvent", "navigationType", NS_EV_NULL, FALSE },
+    { "OfflineAudioCompletionEvent", "renderedBuffer", NS_EV_NULL, FALSE },
+    { "PageRevealEvent", "viewTransition", NS_EV_NULL, FALSE },
+    { "PageSwapEvent", "activation", NS_EV_NULL, FALSE },
+    { "PageSwapEvent", "viewTransition", NS_EV_NULL, FALSE },
+    { "PageTransitionEvent", "persisted", NS_EV_BOOL, FALSE },
+    { "PaymentMethodChangeEvent", "methodDetails", NS_EV_NULL, FALSE },
+    { "PaymentMethodChangeEvent", "methodName", NS_EV_STRING, FALSE },
+    { "PictureInPictureEvent", "pictureInPictureWindow", NS_EV_NULL, FALSE },
+    { "PointerEvent", "altitudeAngle", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "azimuthAngle", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "height", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "isPrimary", NS_EV_BOOL, FALSE },
+    { "PointerEvent", "persistentDeviceId", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "pointerId", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "pointerType", NS_EV_STRING, FALSE },
+    { "PointerEvent", "pressure", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "tangentialPressure", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "tiltX", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "tiltY", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "twist", NS_EV_NUMBER, FALSE },
+    { "PointerEvent", "width", NS_EV_NUMBER, FALSE },
+    { "PopStateEvent", "hasUAVisualTransition", NS_EV_BOOL, FALSE },
+    { "PopStateEvent", "state", NS_EV_NULL, FALSE },
+    { "PresentationConnectionAvailableEvent", "connection", NS_EV_NULL, FALSE },
+    { "PresentationConnectionCloseEvent", "message", NS_EV_NULL, FALSE },
+    { "PresentationConnectionCloseEvent", "reason", NS_EV_NULL, FALSE },
+    { "ProgressEvent", "lengthComputable", NS_EV_BOOL, FALSE },
+    { "ProgressEvent", "loaded", NS_EV_NUMBER, FALSE },
+    { "ProgressEvent", "total", NS_EV_NUMBER, FALSE },
+    { "PromiseRejectionEvent", "promise", NS_EV_NULL, FALSE },
+    { "PromiseRejectionEvent", "reason", NS_EV_UNDEFINED, FALSE },
+    { "RTCDataChannelEvent", "channel", NS_EV_NULL, FALSE },
+    { "RTCDTMFToneChangeEvent", "tone", NS_EV_STRING, FALSE },
+    { "RTCErrorEvent", "error", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "address", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "errorCode", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "errorText", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "hostCandidate", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "port", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceErrorEvent", "url", NS_EV_NULL, FALSE },
+    { "RTCPeerConnectionIceEvent", "candidate", NS_EV_NULL, FALSE },
+    { "RTCTrackEvent", "receiver", NS_EV_NULL, FALSE },
+    { "RTCTrackEvent", "streams", NS_EV_NULL, FALSE },
+    { "RTCTrackEvent", "track", NS_EV_NULL, FALSE },
+    { "RTCTrackEvent", "transceiver", NS_EV_NULL, FALSE },
+    { "SecurityPolicyViolationEvent", "blockedURI", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "columnNumber", NS_EV_NUMBER, FALSE },
+    { "SecurityPolicyViolationEvent", "disposition", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "documentURI", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "effectiveDirective", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "lineNumber", NS_EV_NUMBER, FALSE },
+    { "SecurityPolicyViolationEvent", "originalPolicy", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "referrer", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "sample", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "sourceFile", NS_EV_STRING, FALSE },
+    { "SecurityPolicyViolationEvent", "statusCode", NS_EV_NUMBER, FALSE },
+    { "SecurityPolicyViolationEvent", "violatedDirective", NS_EV_STRING, FALSE },
+    { "SensorErrorEvent", "error", NS_EV_NULL, FALSE },
+    { "SnapEvent", "snapTargetBlock", NS_EV_NULL, FALSE },
+    { "SnapEvent", "snapTargetInline", NS_EV_NULL, FALSE },
+    { "SpeechRecognitionErrorEvent", "error", NS_EV_STRING, FALSE },
+    { "SpeechRecognitionErrorEvent", "message", NS_EV_STRING, FALSE },
+    { "SpeechRecognitionEvent", "resultIndex", NS_EV_NUMBER, FALSE },
+    { "SpeechRecognitionEvent", "results", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisErrorEvent", "error", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisEvent", "charIndex", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisEvent", "charLength", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisEvent", "elapsedTime", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisEvent", "name", NS_EV_NULL, FALSE },
+    { "SpeechSynthesisEvent", "utterance", NS_EV_NULL, FALSE },
+    { "StorageEvent", "key", NS_EV_NULL, FALSE },
+    { "StorageEvent", "newValue", NS_EV_NULL, FALSE },
+    { "StorageEvent", "oldValue", NS_EV_NULL, FALSE },
+    { "StorageEvent", "storageArea", NS_EV_NULL, FALSE },
+    { "StorageEvent", "url", NS_EV_STRING, FALSE },
+    { "SubmitEvent", "submitter", NS_EV_NULL, FALSE },
+    { "TaskPriorityChangeEvent", "previousPriority", NS_EV_STRING, FALSE },
+    { "TextEvent", "data", NS_EV_NULL, FALSE },
+    { "TextUpdateEvent", "selectionEnd", NS_EV_NUMBER, FALSE },
+    { "TextUpdateEvent", "selectionStart", NS_EV_NUMBER, FALSE },
+    { "TextUpdateEvent", "text", NS_EV_STRING, FALSE },
+    { "TextUpdateEvent", "updateRangeEnd", NS_EV_NUMBER, FALSE },
+    { "TextUpdateEvent", "updateRangeStart", NS_EV_NUMBER, FALSE },
+    { "ToggleEvent", "newState", NS_EV_STRING, FALSE },
+    { "ToggleEvent", "oldState", NS_EV_STRING, FALSE },
+    { "ToggleEvent", "source", NS_EV_NULL, FALSE },
+    { "TouchEvent", "altKey", NS_EV_BOOL, FALSE },
+    { "TouchEvent", "changedTouches", NS_EV_NULL, FALSE },
+    { "TouchEvent", "ctrlKey", NS_EV_BOOL, FALSE },
+    { "TouchEvent", "metaKey", NS_EV_BOOL, FALSE },
+    { "TouchEvent", "shiftKey", NS_EV_BOOL, FALSE },
+    { "TouchEvent", "targetTouches", NS_EV_NULL, FALSE },
+    { "TouchEvent", "touches", NS_EV_NULL, FALSE },
+    { "TrackEvent", "track", NS_EV_NULL, FALSE },
+    { "TransitionEvent", "animation", NS_EV_NULL, FALSE },
+    { "TransitionEvent", "elapsedTime", NS_EV_NUMBER, FALSE },
+    { "TransitionEvent", "propertyName", NS_EV_STRING, FALSE },
+    { "TransitionEvent", "pseudoElement", NS_EV_STRING, FALSE },
+    { "TransitionEvent", "pseudoTarget", NS_EV_NULL, FALSE },
+    { "UIEvent", "detail", NS_EV_NUMBER, FALSE },
+    { "UIEvent", "pseudoTarget", NS_EV_NULL, FALSE },
+    { "UIEvent", "sourceCapabilities", NS_EV_NULL, FALSE },
+    { "UIEvent", "view", NS_EV_NULL, FALSE },
+    { "UIEvent", "which", NS_EV_NUMBER, FALSE },
+    { "USBConnectionEvent", "device", NS_EV_NULL, FALSE },
+    { "WebGLContextEvent", "statusMessage", NS_EV_STRING, FALSE },
+    { "webkitSpeechRecognitionEvent", "resultIndex", NS_EV_NUMBER, FALSE },
+    { "webkitSpeechRecognitionEvent", "results", NS_EV_NULL, FALSE },
+    { "WheelEvent", "deltaMode", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "deltaX", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "deltaY", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "deltaZ", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "momentum", NS_EV_BOOL, FALSE },
+    { "WheelEvent", "wheelDelta", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "wheelDeltaX", NS_EV_NUMBER, FALSE },
+    { "WheelEvent", "wheelDeltaY", NS_EV_NUMBER, FALSE },
+    { "WindowControlsOverlayGeometryChangeEvent", "titlebarAreaRect", NS_EV_NULL, FALSE },
+    { "WindowControlsOverlayGeometryChangeEvent", "visible", NS_EV_NULL, FALSE },
+    { "XRInputSourceEvent", "frame", NS_EV_NULL, FALSE },
+    { "XRInputSourceEvent", "inputSource", NS_EV_NULL, FALSE },
+    { "XRInputSourcesChangeEvent", "added", NS_EV_NULL, FALSE },
+    { "XRInputSourcesChangeEvent", "removed", NS_EV_NULL, FALSE },
+    { "XRInputSourcesChangeEvent", "session", NS_EV_NULL, FALSE },
+    { "XRLayerEvent", "layer", NS_EV_NULL, FALSE },
+    { "XRReferenceSpaceEvent", "referenceSpace", NS_EV_NULL, FALSE },
+    { "XRReferenceSpaceEvent", "transform", NS_EV_NULL, FALSE },
+    { "XRSessionEvent", "session", NS_EV_NULL, FALSE },
+    { "XRVisibilityMaskChangeEvent", "eye", NS_EV_NULL, FALSE },
+    { "XRVisibilityMaskChangeEvent", "index", NS_EV_NULL, FALSE },
+    { "XRVisibilityMaskChangeEvent", "indices", NS_EV_NULL, FALSE },
+    { "XRVisibilityMaskChangeEvent", "session", NS_EV_NULL, FALSE },
+    { "XRVisibilityMaskChangeEvent", "vertices", NS_EV_NULL, FALSE },
+};
+
+/* The getter of an event attribute: the event's own state, or what a fresh
+ * event of the interface has. */
+static JSValue
+ns_event_attr_get(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv, int magic)
+{
+    (void)argc; (void)argv;
+    ns_event_data *d = ns_event_data_of(this_val);
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_event_attrs))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    const ns_event_attr *a = &ns_event_attrs[magic];
+    int has = 0;
+    JSPropertyDescriptor desc;
+    if (d) {
+        JSAtom atom = JS_NewAtom(ctx, a->name);
+        has = JS_GetOwnProperty(ctx, &desc, d->state, atom);
+        JS_FreeAtom(ctx, atom);
+        if (has < 0) return JS_EXCEPTION;
+    } else {
+        /* Events some engine paths still make as plain objects carry their
+         * attributes themselves; reaching here, they lack this one.  The
+         * interface's prototype is not an event. */
+        if (!JS_IsObject(this_val))
+            return JS_ThrowTypeError(ctx, "Illegal invocation");
+        JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
+        int is_proto = JS_GetOwnProperty(ctx, NULL, this_val, ctor_atom);
+        JS_FreeAtom(ctx, ctor_atom);
+        if (is_proto != 0)
+            return is_proto < 0 ? JS_EXCEPTION
+                                : JS_ThrowTypeError(ctx, "Illegal invocation");
+    }
+    if (has) {
+        if (desc.flags & JS_PROP_GETSET) {
+            JSValue r = JS_IsFunction(ctx, desc.getter)
+                ? JS_Call(ctx, desc.getter, this_val, 0, NULL) : JS_UNDEFINED;
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+            return r;
+        }
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+        return desc.value;
+    }
+    switch (a->kind) {
+    case NS_EV_NUMBER:    return JS_NewInt32(ctx, 0);
+    case NS_EV_BOOL:      return JS_FALSE;
+    case NS_EV_STRING:    return JS_NewString(ctx, "");
+    case NS_EV_UNDEFINED: return JS_UNDEFINED;
+    case NS_EV_ARRAY: {
+        JSValue arr = JS_NewArray(ctx);
+        JS_FreezeObject(ctx, arr);
+        return arr;
+    }
+    case NS_EV_NULL:
+    default:              return JS_NULL;
+    }
+}
+
+static JSValue
+ns_event_attr_set(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv, int magic)
+{
+    ns_event_data *d = ns_event_data_of(this_val);
+    if (!d || magic < 0 || magic >= (int)G_N_ELEMENTS(ns_event_attrs))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    const ns_event_attr *a = &ns_event_attrs[magic];
+    JSValue v = argc > 0 ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
+    if (a->kind == NS_EV_STRING) {
+        JSValue str = JS_ToString(ctx, v);
+        JS_FreeValue(ctx, v);
+        if (JS_IsException(str)) return str;
+        v = str;
+    }
+    JS_SetPropertyStr(ctx, d->state, a->name, v);
+    return JS_UNDEFINED;
+}
+
+/* Gives the event interfaces of the realm whose global is global the
+ * getters their attributes are missing. */
+static void
+ns_install_event_attribute_getters(JSContext *ctx, JSValueConst global)
+{
+    const char *iface = NULL;
+    JSValue proto = JS_UNDEFINED;
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_event_attrs); i++) {
+        const ns_event_attr *a = &ns_event_attrs[i];
+        if (!iface || strcmp(iface, a->iface) != 0) {
+            JS_FreeValue(ctx, proto);
+            iface = a->iface;
+            JSValue ctor = JS_GetPropertyStr(ctx, global, iface);
+            proto = JS_IsFunction(ctx, ctor)
+                ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+            JS_FreeValue(ctx, ctor);
+        }
+        if (!JS_IsObject(proto)) continue;
+        JSAtom atom = JS_NewAtom(ctx, a->name);
+        int own = JS_GetOwnProperty(ctx, NULL, proto, atom);
+        if (own == 0) {
+            char *get_name = g_strconcat("get ", a->name, NULL);
+            JSValue getter = JS_NewCFunctionMagic(ctx, ns_event_attr_get,
+                get_name, 0, JS_CFUNC_generic_magic, (int)i);
+            g_free(get_name);
+            JSValue setter = JS_UNDEFINED;
+            if (a->writable) {
+                char *set_name = g_strconcat("set ", a->name, NULL);
+                setter = JS_NewCFunctionMagic(ctx, ns_event_attr_set,
+                    set_name, 1, JS_CFUNC_generic_magic, (int)i);
+                g_free(set_name);
+            }
+            JS_DefinePropertyGetSet(ctx, proto, atom, getter, setter,
+                                    JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        } else if (own < 0) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        }
+        JS_FreeAtom(ctx, atom);
+    }
+    JS_FreeValue(ctx, proto);
+}
 
 typedef enum {
     NS_LIVE_CHILDREN,
@@ -12347,7 +12997,7 @@ ns_offline_audio_startRendering(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, this_val, "state", JS_NewString(ctx, "closed"));
     JSValue oncomplete = JS_GetPropertyStr(ctx, this_val, "oncomplete");
     if (JS_IsFunction(ctx, oncomplete)) {
-        JSValue ev = JS_NewObject(ctx);
+        JSValue ev = ns_event_new(ctx);
         JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "complete"));
         JS_SetPropertyStr(ctx, ev, "renderedBuffer", JS_DupValue(ctx, buf));
         JSValue r = JS_Call(ctx, oncomplete, this_val, 1, &ev);
@@ -12573,7 +13223,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValue port_origin = JS_GetPropertyStr(ctx, port, "_origin");
     const char *po = JS_IsString(port_origin) ? JS_ToCString(ctx, port_origin)
                                               : NULL;
-    JSValue ev = JS_NewObject(realm);
+    JSValue ev = ns_event_new(realm);
     JS_SetPropertyStr(ctx, ev, "type",             JS_NewString(ctx, "message"));
     JS_SetPropertyStr(ctx, ev, "data",             JS_DupValue(ctx, data));
     JS_SetPropertyStr(ctx, ev, "origin",           JS_NewString(ctx, po ? po : ""));
@@ -18595,7 +19245,7 @@ ns_xhr_state_free(ns_xhr_state *st)
 static JSValue
 ns_target_make_event(JSContext *ctx, JSValueConst target, const char *type)
 {
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, ev, "type",   JS_NewString(ctx, type));
     JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, target));
     JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, target));
@@ -20629,7 +21279,7 @@ ns_close_watcher_fire(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    JSValue evt = JS_NewObject(ctx);
+    JSValue evt = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, evt, "type", JS_NewString(ctx, "close"));
     JS_SetPropertyStr(ctx, evt, "target", JS_DupValue(ctx, this_val));
     JSValueConst args[1] = { evt };
@@ -22043,7 +22693,9 @@ ns_window_event_ctor(JSContext *ctx, JSValueConst this_val,
     JSValue obj;
     JSValue proto = JS_IsObject(this_val)
                         ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_NULL;
-    if (JS_IsObject(proto))
+    if (JS_IsObject(proto) && ns_proto_is_event(ctx, proto))
+        obj = ns_event_new_proto(ctx, proto);
+    else if (JS_IsObject(proto))
         obj = JS_NewObjectProto(ctx, proto);
     else
         obj = JS_NewObject(ctx);
@@ -22218,7 +22870,7 @@ ns_js_ws_dispatch(JSContext *ctx, JSValueConst this_v,
 static JSValue
 ns_js_ws_event(JSContext *ctx, const char *type)
 {
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type));
     JS_SetPropertyStr(ctx, ev, "bubbles", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable", JS_FALSE);
@@ -23871,7 +24523,7 @@ static JSValue
 ns_worker_event(JSContext *ctx, const char *type, JSValueConst data,
                 const char *origin, const char *message, const char *filename)
 {
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type ? type : ""));
     JS_SetPropertyStr(ctx, ev, "data", JS_DupValue(ctx, data));
     JS_SetPropertyStr(ctx, ev, "origin", JS_NewString(ctx, origin ? origin : ""));
@@ -25150,7 +25802,7 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 static JSValue
 ns_sw_make_extendable_event(JSContext *ctx, const char *type)
 {
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type ? type : ""));
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
@@ -25315,6 +25967,12 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "Event", ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "MessageEvent", ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ErrorEvent", ns_window_event_ctor, 2);
+    ns_event_link_proto(ctx, global, "MessageEvent", "Event");
+    ns_event_link_proto(ctx, global, "ErrorEvent", "Event");
+    ns_event_link_proto(ctx, global, "ExtendableEvent", "Event");
+    ns_event_link_proto(ctx, global, "FetchEvent", "ExtendableEvent");
+    ns_event_link_proto(ctx, global, "ExtendableMessageEvent",
+                        "ExtendableEvent");
     ns_bind_ctor(ctx, global, "EventTarget", ns_window_event_ctor, 0);
     ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
     ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
@@ -25348,6 +26006,11 @@ ns_worker_js_new(ns_worker_host *host)
     ns_idb_install(ctx, global);
     ns_js_eval(js, ns_js_polyfills_src,
                sizeof(ns_js_polyfills_src) - 1, "<worker-polyfills>");
+    {
+        JSValue g = JS_GetGlobalObject(ctx);
+        ns_install_event_attribute_getters(ctx, g);
+        JS_FreeValue(ctx, g);
+    }
     ns_js_name_engine_members(ctx);
     {
         JSValue crypto = JS_NewObject(ctx);
@@ -28376,7 +29039,7 @@ ns_event_type_is_composed(const char *type)
 static JSValue
 ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
 {
-    JSValue event = JS_NewObject(ctx);
+    JSValue event = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, event, "type", JS_NewString(ctx, type));
     JS_SetPropertyStr(ctx, event, "target", ns_make_element(ctx, target));
     JS_SetPropertyStr(ctx, event, "defaultPrevented", JS_FALSE);
@@ -28391,7 +29054,6 @@ ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
     JS_SetPropertyStr(ctx, event, "_is_trusted", JS_TRUE);
     ns_bind_fn(ctx, event, "stopImmediatePropagation", ns_event_stop_immediate, 0);
     ns_bind_fn(ctx, event, "composedPath",             ns_event_composed_path,    0);
-    ns_bind_fn(ctx, event, "getModifierState",         ns_event_get_modifier_state, 1);
     return event;
 }
 
@@ -28410,11 +29072,13 @@ ns_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         cancelable = ns_js_get_bool_prop(ctx, argv[1], "cancelable", NULL);
         composed   = ns_js_get_bool_prop(ctx, argv[1], "composed",   NULL);
     }
-    JSValue ev = JS_NewObject(ctx);
-    if (JS_IsObject(this_val)) {
-        JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
-        if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
-        JS_FreeValue(ctx, proto);
+    JSValue proto = JS_IsObject(this_val)
+        ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_UNDEFINED;
+    JSValue ev = ns_event_new_proto(ctx, proto);
+    JS_FreeValue(ctx, proto);
+    if (JS_IsException(ev)) {
+        JS_FreeCString(ctx, type);
+        return ev;
     }
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type));
     JS_FreeCString(ctx, type);
@@ -28940,7 +29604,6 @@ ns_storage_event_ctor(JSContext *ctx, JSValueConst this_val,
     ns_event_default_if_absent(ctx, ev, "newValue", JS_NULL);
     ns_event_default_if_absent(ctx, ev, "url", JS_NewString(ctx, ""));
     ns_event_default_if_absent(ctx, ev, "storageArea", JS_NULL);
-    ns_bind_fn(ctx, ev, "initStorageEvent", ns_storage_event_init, 1);
     return ev;
 }
 
@@ -28979,7 +29642,6 @@ ns_event_apply_modifier_init(JSContext *ctx, JSValueConst ev, JSValueConst init)
     JS_SetPropertyStr(ctx, ev, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "altKey",   alt   ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "metaKey",  meta  ? JS_TRUE : JS_FALSE);
-    ns_bind_fn(ctx, ev, "getModifierState", ns_event_get_modifier_state, 1);
 }
 
 static JSValue
@@ -29208,12 +29870,6 @@ ns_pointer_event_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, ev, "pointerType",
                       JS_NewString(ctx, pointer_type ? pointer_type : ""));
     JS_SetPropertyStr(ctx, ev, "isPrimary", is_primary ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(ctx, ev, "getCoalescedEvents",
-                      JS_NewCFunction(ctx, ns_event_empty_array,
-                                      "getCoalescedEvents", 0));
-    JS_SetPropertyStr(ctx, ev, "getPredictedEvents",
-                      JS_NewCFunction(ctx, ns_event_empty_array,
-                                      "getPredictedEvents", 0));
     if (pointer_type) JS_FreeCString(ctx, pointer_type);
     JS_FreeValue(ctx, pointer_type_v);
     return ev;
@@ -33292,7 +33948,7 @@ ns_anim_finish_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
     if (argc < 1) return JS_UNDEFINED;
     JSValueConst anim = argv[0];
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = ns_event_new(ctx);
     JS_SetPropertyStr(ctx, ev, "type",          JS_NewString(ctx, "finish"));
     JS_SetPropertyStr(ctx, ev, "target",        JS_DupValue(ctx, anim));
     JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, anim));
@@ -54006,7 +54662,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JSValue ev_proto = JS_GetPropertyStr(ctx, ev_ctor_obj, "prototype");
         if (JS_IsObject(ev_proto)) {
             ns_bind_fn(ctx, ev_proto, "initEvent",                ns_event_initEvent, 3);
-            ns_bind_fn(ctx, ev_proto, "initCustomEvent",          ns_event_initEvent, 4);
             ns_bind_fn(ctx, ev_proto, "preventDefault",           ns_event_prevent_default, 0);
             ns_bind_fn(ctx, ev_proto, "stopPropagation",          ns_event_stop_propagation, 0);
             ns_bind_fn(ctx, ev_proto, "stopImmediatePropagation", ns_event_stop_immediate, 0);
@@ -54222,6 +54877,48 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                           ns_event_initMouseEvent, 15);
     ns_bind_ctor_proto_fn(ctx, global, "KeyboardEvent", "initKeyboardEvent",
                           ns_event_initKeyboardEvent, 10);
+    ns_bind_ctor_proto_fn(ctx, global, "CustomEvent", "initCustomEvent",
+                          ns_event_initEvent, 4);
+    ns_bind_ctor_proto_fn(ctx, global, "MouseEvent", "getModifierState",
+                          ns_event_get_modifier_state, 1);
+    ns_bind_ctor_proto_fn(ctx, global, "KeyboardEvent", "getModifierState",
+                          ns_event_get_modifier_state, 1);
+    ns_bind_ctor_proto_fn(ctx, global, "PointerEvent", "getCoalescedEvents",
+                          ns_event_empty_array, 0);
+    ns_bind_ctor_proto_fn(ctx, global, "PointerEvent", "getPredictedEvents",
+                          ns_event_empty_array, 0);
+    ns_bind_ctor_proto_fn(ctx, global, "InputEvent", "getTargetRanges",
+                          ns_event_empty_array, 0);
+    ns_bind_ctor_proto_fn(ctx, global, "StorageEvent", "initStorageEvent",
+                          ns_storage_event_init, 1);
+    ns_bind_ctor_proto_fn(ctx, global, "CompositionEvent",
+                          "initCompositionEvent", ns_event_init_ui_event_data, 1);
+    ns_bind_ctor_proto_fn(ctx, global, "TextEvent", "initTextEvent",
+                          ns_event_init_ui_event_data, 1);
+    {
+        static const struct { const char *iface, *name; int value; } consts[] = {
+            { "KeyboardEvent", "DOM_KEY_LOCATION_STANDARD", 0 },
+            { "KeyboardEvent", "DOM_KEY_LOCATION_LEFT",     1 },
+            { "KeyboardEvent", "DOM_KEY_LOCATION_RIGHT",    2 },
+            { "KeyboardEvent", "DOM_KEY_LOCATION_NUMPAD",   3 },
+            { "WheelEvent",    "DOM_DELTA_PIXEL",           0 },
+            { "WheelEvent",    "DOM_DELTA_LINE",            1 },
+            { "WheelEvent",    "DOM_DELTA_PAGE",            2 },
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(consts); i++) {
+            JSValue c = JS_GetPropertyStr(ctx, global, consts[i].iface);
+            JSValue cp = JS_IsObject(c)
+                ? JS_GetPropertyStr(ctx, c, "prototype") : JS_UNDEFINED;
+            if (JS_IsObject(c))
+                JS_DefinePropertyValueStr(ctx, c, consts[i].name,
+                    JS_NewInt32(ctx, consts[i].value), JS_PROP_ENUMERABLE);
+            if (JS_IsObject(cp))
+                JS_DefinePropertyValueStr(ctx, cp, consts[i].name,
+                    JS_NewInt32(ctx, consts[i].value), JS_PROP_ENUMERABLE);
+            JS_FreeValue(ctx, cp);
+            JS_FreeValue(ctx, c);
+        }
+    }
 
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
@@ -55549,6 +56246,26 @@ ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* initCompositionEvent() and initTextEvent(): initUIEvent() and data. */
+static JSValue
+ns_event_init_ui_event_data(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present.");
+    JSValue dispatching = JS_GetPropertyStr(ctx, this_val, "_dispatching");
+    gboolean in_dispatch = JS_ToBool(ctx, dispatching) ? TRUE : FALSE;
+    JS_FreeValue(ctx, dispatching);
+    if (in_dispatch) return JS_UNDEFINED;
+    JS_FreeValue(ctx, ns_event_initUIEvent(ctx, this_val, argc < 4 ? argc : 4,
+                                           argv));
+    JSValue data = argc >= 5 && !JS_IsUndefined(argv[4])
+        ? JS_ToString(ctx, argv[4]) : JS_NewString(ctx, "");
+    if (JS_IsException(data)) return data;
+    JS_SetPropertyStr(ctx, this_val, "data", data);
+    return JS_UNDEFINED;
+}
+
 static gboolean
 ns_event_init_in_dispatch(JSContext *ctx, JSValueConst this_val)
 {
@@ -55671,9 +56388,6 @@ ns_document_createEvent(JSContext *ctx, JSValueConst this_val,
     if (JS_IsException(ev)) return ev;
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "_initialized", JS_FALSE);
-    ns_bind_fn(ctx, ev, "initEvent",       ns_event_initEvent, 3);
-    ns_bind_fn(ctx, ev, "initCustomEvent", ns_event_initEvent, 4);
-    ns_bind_fn(ctx, ev, "initUIEvent",     ns_event_initUIEvent, 5);
     return ev;
 }
 
@@ -58413,6 +59127,11 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_js_eval(js, ns_js_streaming_src,
                sizeof(ns_js_streaming_src) - 1, "<streaming>");
     ns_drain_microtasks(js);
+    {
+        JSValue g = JS_GetGlobalObject(ctx);
+        ns_install_event_attribute_getters(ctx, g);
+        JS_FreeValue(ctx, g);
+    }
     ns_install_navigator_shape(ctx);
     ns_js_link_interfaces(ctx);
     ns_js_name_engine_members(ctx);
