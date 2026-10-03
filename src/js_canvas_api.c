@@ -556,21 +556,23 @@ ns_color_serialize(guint8 r, guint8 g, guint8 b, guint8 a)
     return g_strdup_printf("rgba(%u, %u, %u, %s)", r, g, b, buf);
 }
 
-static char *
-ns_color_function_string(const char *css)
+static const char *const ns_color_function_names[] = {
+    "color", "lab", "lch", "oklab", "oklch",
+};
+
+static int
+ns_color_function_index(const char *name, gsize name_len)
 {
-    static const char *const names[] = { "color", "lab", "lch", "oklab", "oklch" };
-    const char *p = css;
-    while (g_ascii_isspace(*p)) p++;
-    const char *open = strchr(p, '(');
-    const char *close = strrchr(p, ')');
-    if (!open || !close || close < open) return NULL;
-    gsize name_len = (gsize)(open - p);
-    int fn = -1;
-    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
-        if (strlen(names[i]) == name_len && g_ascii_strncasecmp(p, names[i], name_len) == 0)
-            fn = (int)i;
-    if (fn < 0) return NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_color_function_names); i++)
+        if (strlen(ns_color_function_names[i]) == name_len &&
+            g_ascii_strncasecmp(name, ns_color_function_names[i], name_len) == 0)
+            return (int)i;
+    return -1;
+}
+
+static char **
+ns_color_function_tokens(const char *open, const char *close)
+{
     char *body = g_strndup(open + 1, (gsize)(close - open - 1));
     g_strdelimit(body, "\t\n\r", ' ');
     GString *spaced = g_string_new(NULL);
@@ -581,32 +583,68 @@ ns_color_function_string(const char *css)
     g_free(body);
     char **tokens = g_strsplit_set(spaced->str, " ", -1);
     g_string_free(spaced, TRUE);
-    GString *out = g_string_new(NULL);
-    g_string_append_printf(out, "%s(", names[fn]);
+    return tokens;
+}
+
+static void
+ns_color_append_number(GString *out, double v)
+{
+    char buf[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd(buf, sizeof buf, "%g", v);
+    g_string_append(out, buf);
+}
+
+static void
+ns_color_function_append_component(GString *out, const char *token, int fn,
+                                   gboolean first)
+{
+    if (fn >= 1 && first && g_str_has_suffix(token, "%"))
+        ns_color_append_number(out, g_ascii_strtod(token, NULL) * (fn >= 3 ? 0.01 : 1.0));
+    else
+        g_string_append(out, token);
+}
+
+static char *
+ns_color_function_append_tokens(GString *out, char **tokens, int fn)
+{
     gboolean slash = FALSE, first = TRUE;
-    char *alpha = NULL;
     for (char **t = tokens; *t; t++) {
         if (!**t) continue;
         if (strcmp(*t, "/") == 0) { slash = TRUE; continue; }
-        if (slash) { alpha = g_strdup(*t); break; }
+        if (slash) return g_strdup(*t);
         if (!first) g_string_append_c(out, ' ');
-        if (fn >= 1 && first && g_str_has_suffix(*t, "%")) {
-            double v = g_ascii_strtod(*t, NULL) * (fn >= 3 ? 0.01 : 1.0);
-            char buf[G_ASCII_DTOSTR_BUF_SIZE];
-            g_ascii_formatd(buf, sizeof buf, "%g", v);
-            g_string_append(out, buf);
-        } else {
-            g_string_append(out, *t);
-        }
+        ns_color_function_append_component(out, *t, fn, first);
         first = FALSE;
     }
+    return NULL;
+}
+
+static void
+ns_color_function_append_alpha(GString *out, const char *alpha)
+{
+    double v = g_ascii_strtod(alpha, NULL) * (g_str_has_suffix(alpha, "%") ? 0.01 : 1.0);
+    if (v < 1) {
+        g_string_append(out, " / ");
+        ns_color_append_number(out, v < 0 ? 0 : v);
+    }
+}
+
+static char *
+ns_color_function_string(const char *css)
+{
+    const char *p = css;
+    while (g_ascii_isspace(*p)) p++;
+    const char *open = strchr(p, '(');
+    const char *close = strrchr(p, ')');
+    if (!open || !close || close < open) return NULL;
+    int fn = ns_color_function_index(p, (gsize)(open - p));
+    if (fn < 0) return NULL;
+    char **tokens = ns_color_function_tokens(open, close);
+    GString *out = g_string_new(NULL);
+    g_string_append_printf(out, "%s(", ns_color_function_names[fn]);
+    char *alpha = ns_color_function_append_tokens(out, tokens, fn);
     if (alpha) {
-        double v = g_ascii_strtod(alpha, NULL) * (g_str_has_suffix(alpha, "%") ? 0.01 : 1.0);
-        if (v < 1) {
-            char buf[G_ASCII_DTOSTR_BUF_SIZE];
-            g_ascii_formatd(buf, sizeof buf, "%g", v < 0 ? 0 : v);
-            g_string_append_printf(out, " / %s", buf);
-        }
+        ns_color_function_append_alpha(out, alpha);
         g_free(alpha);
     }
     g_string_append_c(out, ')');
@@ -625,36 +663,51 @@ ns_canvas_color_string(const char *css)
                              (guint8)round(b * 255), (guint8)round(a * 255));
 }
 
+static const char *
+ns_skip_spaces(const char *p)
+{
+    while (g_ascii_isspace(*p)) p++;
+    return p;
+}
+
 static gboolean
-ns_filter_valid(const char *s)
+ns_filter_name_known(const char *name, gsize n)
 {
     static const char *const names[] = {
         "blur", "brightness", "contrast", "drop-shadow", "grayscale",
         "hue-rotate", "invert", "opacity", "saturate", "sepia", "url",
     };
-    const char *p = s;
-    while (g_ascii_isspace(*p)) p++;
-    if (!*p) return FALSE;
-    if (g_ascii_strncasecmp(p, "none", 4) == 0) {
-        p += 4;
-        while (g_ascii_isspace(*p)) p++;
-        return !*p;
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        if (strlen(names[i]) == n && g_ascii_strncasecmp(name, names[i], n) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static const char *
+ns_filter_skip_arguments(const char *p)
+{
+    int depth = 0;
+    for (; *p; p++) {
+        if (*p == '(') depth++;
+        else if (*p == ')' && --depth == 0) return p + 1;
     }
+    return NULL;
+}
+
+static gboolean
+ns_filter_valid(const char *s)
+{
+    const char *p = ns_skip_spaces(s);
+    if (!*p) return FALSE;
+    if (g_ascii_strncasecmp(p, "none", 4) == 0)
+        return !*ns_skip_spaces(p + 4);
     while (*p) {
         const char *start = p;
         while (g_ascii_isalpha(*p) || *p == '-') p++;
-        gsize n = (gsize)(p - start);
-        gboolean known = FALSE;
-        for (gsize i = 0; i < G_N_ELEMENTS(names) && !known; i++)
-            known = strlen(names[i]) == n && g_ascii_strncasecmp(start, names[i], n) == 0;
-        if (!known || *p != '(') return FALSE;
-        int depth = 0;
-        for (; *p; p++) {
-            if (*p == '(') depth++;
-            else if (*p == ')' && --depth == 0) { p++; break; }
-        }
-        if (depth != 0) return FALSE;
-        while (g_ascii_isspace(*p)) p++;
+        if (!ns_filter_name_known(start, (gsize)(p - start)) || *p != '(') return FALSE;
+        p = ns_filter_skip_arguments(p);
+        if (!p) return FALSE;
+        p = ns_skip_spaces(p);
     }
     return TRUE;
 }
@@ -711,21 +764,27 @@ ns_assign_style(JSContext *ctx, JSValueConst owner, ns_hidden *h, const ns_attr_
     return JS_UNDEFINED;
 }
 
+static char *
+ns_assign_string_value(JSContext *ctx, JSValueConst owner, const ns_attr_def *a,
+                       const char *s)
+{
+    switch (a->type) {
+    case NS_AT_COLOR:  return ns_canvas_color_for(ctx, owner, s);
+    case NS_AT_FONT:   return ns_canvas_font_string(s);
+    case NS_AT_FILTER: return ns_filter_valid(s) ? g_strstrip(g_strdup(s)) : NULL;
+    case NS_AT_LENGTH: return ns_length_valid(s) ? g_ascii_strdown(s, -1) : NULL;
+    case NS_AT_ENUM:   return ns_enum_has(a->values, s) ? g_strdup(s) : NULL;
+    default:           return g_strdup(s);
+    }
+}
+
 static JSValue
 ns_assign_string(JSContext *ctx, JSValueConst owner, ns_hidden *h, const ns_attr_def *a,
                  JSValueConst v)
 {
     const char *s = JS_ToCString(ctx, v);
     if (!s) return JS_EXCEPTION;
-    char *value = NULL;
-    switch (a->type) {
-    case NS_AT_COLOR:  value = ns_canvas_color_for(ctx, owner, s); break;
-    case NS_AT_FONT:   value = ns_canvas_font_string(s); break;
-    case NS_AT_FILTER: value = ns_filter_valid(s) ? g_strstrip(g_strdup(s)) : NULL; break;
-    case NS_AT_LENGTH: value = ns_length_valid(s) ? g_ascii_strdown(s, -1) : NULL; break;
-    case NS_AT_ENUM:   value = ns_enum_has(a->values, s) ? g_strdup(s) : NULL; break;
-    default:           value = g_strdup(s); break;
-    }
+    char *value = ns_assign_string_value(ctx, owner, a, s);
     JS_FreeCString(ctx, s);
     if (value) ns_set_string(ctx, h, a->name, value);
     g_free(value);
@@ -770,6 +829,27 @@ ns_assign_handler(JSContext *ctx, ns_hidden *h, const ns_attr_def *a, JSValueCon
 }
 
 static JSValue
+ns_attr_assign(JSContext *ctx, JSValueConst owner, ns_hidden *h, const ns_attr_def *a,
+               JSValueConst v)
+{
+    switch (a->type) {
+    case NS_AT_BOOL:
+        JS_SetPropertyStr(ctx, h->state, a->name, JS_NewBool(ctx, JS_ToBool(ctx, v)));
+        return JS_UNDEFINED;
+    case NS_AT_FINITE: case NS_AT_POSITIVE: case NS_AT_NONNEGATIVE: case NS_AT_ALPHA:
+        return ns_assign_number(ctx, h, a, v);
+    case NS_AT_STYLE:
+        return ns_assign_style(ctx, owner, h, a, v);
+    case NS_AT_SIZE:
+        return ns_assign_size(ctx, owner, h, a, v);
+    case NS_AT_HANDLER:
+        return ns_assign_handler(ctx, h, a, v);
+    default:
+        return ns_assign_string(ctx, owner, h, a, v);
+    }
+}
+
+static JSValue
 ns_attr_set(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
             int magic)
 {
@@ -779,21 +859,7 @@ ns_attr_set(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     ns_attr_sync_canvas(ctx, this_val);
     ns_hidden *h = JS_GetOpaque(this_val, ns_hidden_class_id);
     JSValueConst v = argc > 0 ? argv[0] : JS_UNDEFINED;
-    switch (a->type) {
-    case NS_AT_BOOL:
-        JS_SetPropertyStr(ctx, h->state, a->name, JS_NewBool(ctx, JS_ToBool(ctx, v)));
-        return JS_UNDEFINED;
-    case NS_AT_FINITE: case NS_AT_POSITIVE: case NS_AT_NONNEGATIVE: case NS_AT_ALPHA:
-        return ns_assign_number(ctx, h, a, v);
-    case NS_AT_STYLE:
-        return ns_assign_style(ctx, this_val, h, a, v);
-    case NS_AT_SIZE:
-        return ns_assign_size(ctx, this_val, h, a, v);
-    case NS_AT_HANDLER:
-        return ns_assign_handler(ctx, h, a, v);
-    default:
-        return ns_assign_string(ctx, this_val, h, a, v);
-    }
+    return ns_attr_assign(ctx, this_val, h, a, v);
 }
 
 static void
@@ -1295,6 +1361,40 @@ ns_font_size_px(const char *size, double *px)
     return FALSE;
 }
 
+static const char *
+ns_font_family_quoted(const char *p, const char **start, gsize *len)
+{
+    char quote = *p++;
+    *start = p;
+    while (*p && *p != quote) p += (*p == '\\' && p[1]) ? 2 : 1;
+    *len = (gsize)(p - *start);
+    if (*p) p++;
+    return p;
+}
+
+static const char *
+ns_font_family_bare(const char *p, const char **start, gsize *len)
+{
+    *start = p;
+    while (*p && *p != ',') p++;
+    *len = (gsize)(p - *start);
+    while (*len && (*start)[*len - 1] == ' ') (*len)--;
+    return p;
+}
+
+static void
+ns_font_family_emit(GString *out, const char *start, gsize len)
+{
+    if (out->len && out->str[out->len - 1] != ' ') g_string_append(out, ", ");
+    if (memchr(start, ' ', len)) {
+        g_string_append_c(out, '"');
+        g_string_append_len(out, start, (gssize)len);
+        g_string_append_c(out, '"');
+    } else {
+        g_string_append_len(out, start, (gssize)len);
+    }
+}
+
 static void
 ns_font_family_append(GString *out, const char *family)
 {
@@ -1304,27 +1404,84 @@ ns_font_family_append(GString *out, const char *family)
         if (!*p) break;
         const char *start;
         gsize len;
-        if (*p == '"' || *p == '\'') {
-            char quote = *p++;
-            start = p;
-            while (*p && *p != quote) p += (*p == '\\' && p[1]) ? 2 : 1;
-            len = (gsize)(p - start);
-            if (*p) p++;
-        } else {
-            start = p;
-            while (*p && *p != ',') p++;
-            len = (gsize)(p - start);
-            while (len && start[len - 1] == ' ') len--;
-        }
-        if (out->len && out->str[out->len - 1] != ' ') g_string_append(out, ", ");
-        if (memchr(start, ' ', len)) {
-            g_string_append_c(out, '"');
-            g_string_append_len(out, start, (gssize)len);
-            g_string_append_c(out, '"');
-        } else {
-            g_string_append_len(out, start, (gssize)len);
-        }
+        p = (*p == '"' || *p == '\'') ? ns_font_family_quoted(p, &start, &len)
+                                       : ns_font_family_bare(p, &start, &len);
+        ns_font_family_emit(out, start, len);
     }
+}
+
+enum {
+    NS_FONT_STYLE,
+    NS_FONT_WEIGHT,
+    NS_FONT_VARIANT,
+    NS_FONT_STRETCH,
+    NS_FONT_NORMAL,
+    NS_FONT_SIZE,
+};
+
+static gboolean
+ns_font_token_is_weight(const char *t)
+{
+    return g_ascii_strcasecmp(t, "bold") == 0 || g_ascii_strcasecmp(t, "bolder") == 0 ||
+           g_ascii_strcasecmp(t, "lighter") == 0 ||
+           (g_ascii_isdigit(t[0]) && strspn(t, "0123456789") == strlen(t));
+}
+
+static int
+ns_font_token_slot(const char *t)
+{
+    if (g_ascii_strcasecmp(t, "italic") == 0 || g_ascii_strcasecmp(t, "oblique") == 0)
+        return NS_FONT_STYLE;
+    if (g_ascii_strcasecmp(t, "small-caps") == 0) return NS_FONT_VARIANT;
+    if (ns_font_token_is_weight(t)) return NS_FONT_WEIGHT;
+    if (g_str_has_suffix(t, "condensed") || g_str_has_suffix(t, "expanded"))
+        return NS_FONT_STRETCH;
+    return g_ascii_strcasecmp(t, "normal") == 0 ? NS_FONT_NORMAL : NS_FONT_SIZE;
+}
+
+static int
+ns_font_collect_keywords(char **tokens, const char **parts)
+{
+    int i = 0;
+    for (; tokens[i]; i++) {
+        int slot = ns_font_token_slot(tokens[i]);
+        if (slot == NS_FONT_SIZE) break;
+        if (slot != NS_FONT_NORMAL) parts[slot] = tokens[i];
+    }
+    return i;
+}
+
+static void
+ns_font_append_keywords(GString *out, const char *const *parts)
+{
+    for (int k = 0; k < 4; k++) {
+        if (!parts[k]) continue;
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, strcmp(parts[k], "700") == 0 ? "bold" : parts[k]);
+    }
+}
+
+static void
+ns_font_append_size(GString *out, const char *size)
+{
+    double px = 0;
+    if (out->len) g_string_append_c(out, ' ');
+    if (ns_font_size_px(size, &px)) {
+        char buf[G_ASCII_DTOSTR_BUF_SIZE];
+        g_ascii_formatd(buf, sizeof buf, "%g", px);
+        g_string_append_printf(out, "%spx", buf);
+    } else {
+        g_string_append(out, size);
+    }
+}
+
+static void
+ns_font_append_family(GString *out, char **tokens)
+{
+    char *family = g_strjoinv(" ", tokens);
+    g_string_append_c(out, ' ');
+    ns_font_family_append(out, family);
+    g_free(family);
 }
 
 char *
@@ -1333,49 +1490,16 @@ ns_canvas_font_string(const char *css)
     char *canon = ns_css_font_shorthand_canonical(css);
     if (!canon) return NULL;
     char **tokens = g_strsplit(canon, " ", -1);
-    const char *style = NULL, *weight = NULL, *variant = NULL, *stretch = NULL;
-    int i = 0;
-    for (; tokens[i]; i++) {
-        const char *t = tokens[i];
-        if (g_ascii_strcasecmp(t, "italic") == 0 || g_ascii_strcasecmp(t, "oblique") == 0)
-            style = t;
-        else if (g_ascii_strcasecmp(t, "small-caps") == 0)
-            variant = t;
-        else if (g_ascii_strcasecmp(t, "bold") == 0 || g_ascii_strcasecmp(t, "bolder") == 0 ||
-                 g_ascii_strcasecmp(t, "lighter") == 0 || (g_ascii_isdigit(t[0]) &&
-                 strspn(t, "0123456789") == strlen(t)))
-            weight = t;
-        else if (g_str_has_suffix(t, "condensed") || g_str_has_suffix(t, "expanded"))
-            stretch = t;
-        else if (g_ascii_strcasecmp(t, "normal") != 0)
-            break;
-    }
+    const char *parts[4] = { NULL, NULL, NULL, NULL };
+    int i = ns_font_collect_keywords(tokens, parts);
     GString *out = g_string_new(NULL);
-    const char *parts[4] = { style, weight, variant, stretch };
-    for (int k = 0; k < 4; k++) {
-        if (!parts[k]) continue;
-        if (out->len) g_string_append_c(out, ' ');
-        g_string_append(out, strcmp(parts[k], "700") == 0 ? "bold" : parts[k]);
-    }
-    double px = 0;
+    ns_font_append_keywords(out, parts);
     if (tokens[i]) {
-        if (out->len) g_string_append_c(out, ' ');
-        if (ns_font_size_px(tokens[i], &px)) {
-            char buf[G_ASCII_DTOSTR_BUF_SIZE];
-            g_ascii_formatd(buf, sizeof buf, "%g", px);
-            g_string_append_printf(out, "%spx", buf);
-        } else {
-            g_string_append(out, tokens[i]);
-        }
+        ns_font_append_size(out, tokens[i]);
         i++;
     }
     if (tokens[i] && strcmp(tokens[i], "/") == 0 && tokens[i + 1]) i += 2;
-    if (tokens[i]) {
-        char *family = g_strjoinv(" ", tokens + i);
-        g_string_append_c(out, ' ');
-        ns_font_family_append(out, family);
-        g_free(family);
-    }
+    if (tokens[i]) ns_font_append_family(out, tokens + i);
     g_strfreev(tokens);
     g_free(canon);
     return g_string_free(out, FALSE);

@@ -528,42 +528,71 @@ ns_color_component(const char *tok, double *out)
     return TRUE;
 }
 
+static char **
+ns_color_fn_split(const char *body, gsize len)
+{
+    char *copy = g_strndup(body, len);
+    GString *spaced = g_string_new(NULL);
+    for (const char *q = copy; *q; q++) {
+        if (*q == '/') g_string_append(spaced, " / ");
+        else g_string_append_c(spaced, g_ascii_isspace(*q) ? ' ' : g_ascii_tolower(*q));
+    }
+    g_free(copy);
+    char **tok = g_strsplit_set(spaced->str, " ", -1);
+    g_string_free(spaced, TRUE);
+    return tok;
+}
+
+static GPtrArray *
+ns_color_fn_parts(char **tok)
+{
+    GPtrArray *parts = g_ptr_array_new();
+    for (char **t = tok; *t; t++)
+        if (**t) g_ptr_array_add(parts, *t);
+    return parts;
+}
+
+static gboolean
+ns_color_fn_shape(GPtrArray *parts, gboolean *p3)
+{
+    if (parts->len < 4) return FALSE;
+    const char *space = g_ptr_array_index(parts, 0);
+    *p3 = strcmp(space, "display-p3") == 0;
+    if (!*p3 && strcmp(space, "srgb") != 0) return FALSE;
+    return parts->len == 4 ||
+           (parts->len == 6 && strcmp(g_ptr_array_index(parts, 4), "/") == 0);
+}
+
+static gboolean
+ns_color_fn_values(GPtrArray *parts, double *c, double *alpha)
+{
+    for (int i = 0; i < 3; i++)
+        if (!ns_color_component(g_ptr_array_index(parts, (guint)(i + 1)), &c[i]))
+            return FALSE;
+    return parts->len != 6 || ns_color_component(g_ptr_array_index(parts, 5), alpha);
+}
+
+static void
+ns_display_p3_to_srgb(double *c)
+{
+    double lr = ns_srgb_decode(c[0]), lg = ns_srgb_decode(c[1]), lb = ns_srgb_decode(c[2]);
+    c[0] = ns_srgb_encode(1.2249401 * lr - 0.2249404 * lg);
+    c[1] = ns_srgb_encode(-0.0420569 * lr + 1.0420571 * lg);
+    c[2] = ns_srgb_encode(-0.0196376 * lr - 0.0786361 * lg + 1.0982735 * lb);
+}
+
 static gboolean
 ns_canvas_parse_color_function(const char *s, double *r, double *g, double *b, double *a)
 {
     while (g_ascii_isspace(*s)) s++;
     const char *close = strrchr(s, ')');
     if (g_ascii_strncasecmp(s, "color(", 6) != 0 || !close) return FALSE;
-    char *body = g_strndup(s + 6, (gsize)(close - s - 6));
-    GString *spaced = g_string_new(NULL);
-    for (const char *q = body; *q; q++) {
-        if (*q == '/') g_string_append(spaced, " / ");
-        else g_string_append_c(spaced, g_ascii_isspace(*q) ? ' ' : g_ascii_tolower(*q));
-    }
-    g_free(body);
-    char **tok = g_strsplit_set(spaced->str, " ", -1);
-    g_string_free(spaced, TRUE);
-    GPtrArray *parts = g_ptr_array_new();
-    for (char **t = tok; *t; t++)
-        if (**t) g_ptr_array_add(parts, *t);
-    gboolean ok = FALSE;
+    char **tok = ns_color_fn_split(s + 6, (gsize)(close - s - 6));
+    GPtrArray *parts = ns_color_fn_parts(tok);
+    gboolean p3 = FALSE;
     double c[3] = { 0, 0, 0 }, alpha = 1;
-    gboolean p3 = parts->len >= 4 && strcmp(g_ptr_array_index(parts, 0), "display-p3") == 0;
-    gboolean srgb = parts->len >= 4 && strcmp(g_ptr_array_index(parts, 0), "srgb") == 0;
-    if ((p3 || srgb) && (parts->len == 4 || (parts->len == 6 &&
-            strcmp(g_ptr_array_index(parts, 4), "/") == 0))) {
-        ok = TRUE;
-        for (int i = 0; i < 3 && ok; i++)
-            ok = ns_color_component(g_ptr_array_index(parts, (guint)(i + 1)), &c[i]);
-        if (ok && parts->len == 6)
-            ok = ns_color_component(g_ptr_array_index(parts, 5), &alpha);
-    }
-    if (ok && p3) {
-        double lr = ns_srgb_decode(c[0]), lg = ns_srgb_decode(c[1]), lb = ns_srgb_decode(c[2]);
-        c[0] = ns_srgb_encode(1.2249401 * lr - 0.2249404 * lg);
-        c[1] = ns_srgb_encode(-0.0420569 * lr + 1.0420571 * lg);
-        c[2] = ns_srgb_encode(-0.0196376 * lr - 0.0786361 * lg + 1.0982735 * lb);
-    }
+    gboolean ok = ns_color_fn_shape(parts, &p3) && ns_color_fn_values(parts, c, &alpha);
+    if (ok && p3) ns_display_p3_to_srgb(c);
     g_ptr_array_free(parts, TRUE);
     g_strfreev(tok);
     if (!ok) return FALSE;
