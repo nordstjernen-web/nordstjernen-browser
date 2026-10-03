@@ -1327,7 +1327,26 @@ typedef struct { const char *name; JSCFunction *fn; int argc; } tmp_method;
 static void
 tmp_bind(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc)
 {
-    JS_SetPropertyStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc));
+    /* built-in functions are not enumerable */
+    JS_DefinePropertyValueStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+static void
+tmp_tag(JSContext *ctx, JSValueConst obj, const char *tag)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue sym_ctor = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue sym = JS_GetPropertyStr(ctx, sym_ctor, "toStringTag");
+    JSAtom atom = JS_ValueToAtom(ctx, sym);
+    if (atom != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, obj, atom, JS_NewString(ctx, tag),
+                               JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, atom);
+    }
+    JS_FreeValue(ctx, sym);
+    JS_FreeValue(ctx, sym_ctor);
+    JS_FreeValue(ctx, global);
 }
 
 static JSValue
@@ -1352,11 +1371,15 @@ tmp_register(JSContext *ctx, JSValueConst temporal, const char *name,
     for (int i = 0; i < n_methods; i++)
         tmp_bind(ctx, proto, methods[i].name, methods[i].fn, methods[i].argc);
     tmp_bind(ctx, proto, "toJSON", tmp_make_toJSON, 0);
+    char *tag = g_strconcat("Temporal.", name, NULL);
+    tmp_tag(ctx, proto, tag);
+    g_free(tag);
     JS_SetConstructor(ctx, func, proto);
     JS_FreeValue(ctx, proto);
     for (int i = 0; i < n_statics; i++)
         tmp_bind(ctx, func, statics[i].name, statics[i].fn, statics[i].argc);
-    JS_SetPropertyStr(ctx, temporal, name, JS_DupValue(ctx, func));
+    JS_DefinePropertyValueStr(ctx, temporal, name, JS_DupValue(ctx, func),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return func;
 }
 
@@ -1486,6 +1509,9 @@ ns_js_temporal_install(JSContext *ctx, JSValueConst global)
     };
     c = tmp_register(ctx, temporal, "Duration", tmp_duration_ctor, 10,
                      dur_m, G_N_ELEMENTS(dur_m), dur_s, G_N_ELEMENTS(dur_s));
+    /* every argument is optional: length 0 (the C function keeps ten) */
+    JS_DefinePropertyValueStr(ctx, c, "length", JS_NewInt32(ctx, 0),
+                              JS_PROP_CONFIGURABLE);
     JS_FreeValue(ctx, c);
 
     JSValue now = JS_NewObject(ctx);
@@ -1495,7 +1521,11 @@ ns_js_temporal_install(JSContext *ctx, JSValueConst global)
     tmp_bind(ctx, now, "plainDateISO", tmp_now_pd, 0);
     tmp_bind(ctx, now, "plainTimeISO", tmp_now_pt, 0);
     tmp_bind(ctx, now, "timeZoneId", tmp_now_tz, 0);
-    JS_SetPropertyStr(ctx, temporal, "Now", now);
+    tmp_tag(ctx, now, "Temporal.Now");
+    JS_DefinePropertyValueStr(ctx, temporal, "Now", now,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    tmp_tag(ctx, temporal, "Temporal");
 
-    JS_SetPropertyStr(ctx, global, "Temporal", temporal);
+    JS_DefinePropertyValueStr(ctx, global, "Temporal", temporal,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 }

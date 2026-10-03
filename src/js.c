@@ -27355,6 +27355,7 @@ ns_worker_js_new(ns_worker_host *host)
 
     ns_wasm_install(ctx, global);
     ns_js_intl_install(ctx, global);
+    ns_js_temporal_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
