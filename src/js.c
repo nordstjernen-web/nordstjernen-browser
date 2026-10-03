@@ -25877,6 +25877,16 @@ ns_worker_stack_limit(void)
     return limit;
 }
 
+/* The names the engine keeps on platform objects for itself, which page
+ * scripts must neither see nor clash with (JS_AddEnginePrivateName). */
+static void
+ns_js_add_engine_private_names(JSContext *ctx)
+{
+    static const char *const names[] = { "_listeners" };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        JS_AddEnginePrivateName(ctx, names[i]);
+}
+
 static ns_js *
 ns_worker_js_new(ns_worker_host *host)
 {
@@ -25927,6 +25937,7 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetMaxStackSize(js->rt, ns_worker_stack_limit());
 
     js->ctx = JS_NewContext(js->rt);
+    if (js->ctx) ns_js_add_engine_private_names(js->ctx);
     if (!js->ctx) {
         JS_FreeRuntime(js->rt);
         if (js->perf_entries) g_ptr_array_free(js->perf_entries, TRUE);
@@ -54102,6 +54113,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     }
     if (!js->rt) { g_free(js); return NULL; }
     js->ctx = JS_NewContext(js->rt);
+    if (js->ctx) ns_js_add_engine_private_names(js->ctx);
     if (!js->ctx) { JS_FreeRuntime(js->rt); g_free(js); return NULL; }
     js->main_realm_ctx = js->ctx;
     JS_SetContextOpaque(js->ctx, js);

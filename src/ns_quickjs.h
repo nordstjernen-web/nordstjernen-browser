@@ -121,6 +121,14 @@ JS_IsHostAccess(JSContext *ctx)
 }
 
 static inline int
+JS_AddEnginePrivateName(JSContext *ctx, const char *name)
+{
+    (void)ctx;
+    (void)name;
+    return 0;
+}
+
+static inline int
 JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
                        JSValue val, JSValueConst receiver, int flags)
 {

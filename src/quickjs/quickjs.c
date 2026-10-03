@@ -324,9 +324,20 @@ typedef struct JSValueLink {
     JSValueConst value;
 } JSValueLink;
 
+typedef struct JSEnginePrivateName {
+    JSAtom name;    /* the name, as page scripts spell it */
+    JSAtom shadow;  /* the private name the embedder's accesses use */
+    JSValue symbol; /* keeps shadow alive */
+} JSEnginePrivateName;
+
 struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
+    /* names the embedder keeps for itself (JS_AddEnginePrivateName) */
+    JSEnginePrivateName *engine_private;
+    int engine_private_count;
+    uint32_t *engine_private_bits; /* bitmap over the names' atom indices */
+    uint32_t engine_private_words;
     JSArenaState arena_state;
     const char *rt_info;
 
@@ -1551,6 +1562,9 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
 static JSAtom JS_ValueToAtomInternal(JSContext *ctx, JSValueConst val,
                                      int flags);
 static JSAtom js_symbol_to_atom(JSContext *ctx, JSValueConst val);
+static JSAtom js_access_atom(JSContext *ctx, JSAtom prop);
+static inline bool js_atom_is_engine_private(JSRuntime *rt, JSAtom atom);
+static void js_free_engine_private_names(JSRuntime *rt);
 static void add_gc_object(JSRuntime *rt, JSGCObjectHeader *h,
                           JSGCObjectTypeEnum type);
 static void remove_gc_object(JSGCObjectHeader *h);
@@ -2677,6 +2691,7 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     rt->in_free = true;
     JS_FreeValueRT(rt, rt->current_exception);
+    js_free_engine_private_names(rt);
 
     list_for_each_safe(el, el1, &rt->job_list) {
         JSJobEntry *e = list_entry(el, JSJobEntry, link);
@@ -6778,6 +6793,98 @@ bool JS_IsHostAccess(JSContext *ctx)
     return f->is_host_function;
 }
 
+static inline bool js_atom_is_engine_private(JSRuntime *rt, JSAtom atom)
+{
+    return rt->engine_private_count && !__JS_AtomIsTaggedInt(atom) &&
+           (atom >> 5) < rt->engine_private_words &&
+           ((rt->engine_private_bits[atom >> 5] >> (atom & 31)) & 1);
+}
+
+/* The atom an access to prop really uses: when the embedder makes it, an
+   engine-private name stands for the embedder's own private name, which
+   page scripts can neither reach nor see; the page's property of that name
+   is a different one. */
+static JSAtom js_access_atom(JSContext *ctx, JSAtom prop)
+{
+    JSRuntime *rt = ctx->rt;
+    int i;
+
+    if (likely(!js_atom_is_engine_private(rt, prop)) || !JS_IsHostAccess(ctx))
+        return prop;
+    for (i = 0; i < rt->engine_private_count; i++)
+        if (rt->engine_private[i].name == prop)
+            return rt->engine_private[i].shadow;
+    return prop;
+}
+
+/* Makes name engine-private in ctx's runtime (see js_access_atom).  Call it
+   before the embedder stores anything under that name. */
+int JS_AddEnginePrivateName(JSContext *ctx, const char *name)
+{
+    JSRuntime *rt = ctx->rt;
+    JSEnginePrivateName *tab;
+    JSAtom atom;
+    JSValue sym;
+    uint32_t words;
+    int i;
+
+    atom = JS_NewAtom(ctx, name);
+    if (atom == JS_ATOM_NULL)
+        return -1;
+    for (i = 0; i < rt->engine_private_count; i++) {
+        if (rt->engine_private[i].name == atom) {
+            JS_FreeAtom(ctx, atom);
+            return 0;
+        }
+    }
+    sym = JS_NewSymbolFromAtom(ctx, atom, JS_ATOM_TYPE_PRIVATE);
+    if (JS_IsException(sym)) {
+        JS_FreeAtom(ctx, atom);
+        return -1;
+    }
+    tab = js_realloc_rt(rt, rt->engine_private,
+                        sizeof(*tab) * (rt->engine_private_count + 1));
+    if (!tab)
+        goto fail;
+    rt->engine_private = tab;
+    words = (atom >> 5) + 1;
+    if (words > rt->engine_private_words) {
+        uint32_t *bits = js_realloc_rt(rt, rt->engine_private_bits,
+                                       sizeof(*bits) * words);
+        if (!bits)
+            goto fail;
+        memset(bits + rt->engine_private_words, 0,
+               sizeof(*bits) * (words - rt->engine_private_words));
+        rt->engine_private_bits = bits;
+        rt->engine_private_words = words;
+    }
+    tab[rt->engine_private_count].name = atom;
+    tab[rt->engine_private_count].shadow = js_symbol_to_atom(ctx, sym);
+    tab[rt->engine_private_count].symbol = sym;
+    rt->engine_private_count++;
+    rt->engine_private_bits[atom >> 5] |= 1u << (atom & 31);
+    return 0;
+ fail:
+    JS_FreeValue(ctx, sym);
+    JS_FreeAtom(ctx, atom);
+    return -1;
+}
+
+static void js_free_engine_private_names(JSRuntime *rt)
+{
+    int i;
+    for (i = 0; i < rt->engine_private_count; i++) {
+        JS_FreeValueRT(rt, rt->engine_private[i].symbol);
+        JS_FreeAtomRT(rt, rt->engine_private[i].name);
+    }
+    js_free_rt(rt, rt->engine_private);
+    js_free_rt(rt, rt->engine_private_bits);
+    rt->engine_private = NULL;
+    rt->engine_private_bits = NULL;
+    rt->engine_private_count = 0;
+    rt->engine_private_words = 0;
+}
+
 int JS_GetClassCount(JSRuntime *rt)
 {
     return rt->class_count;
@@ -9384,6 +9491,7 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                                       JSAtom prop, JSValueConst this_obj,
                                       bool throw_ref_error)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     JSProperty *pr;
     JSShapeProperty *prs;
@@ -10183,6 +10291,7 @@ retry:
 static int JS_GetOwnPropertyInternal(JSContext *ctx, JSPropertyDescriptor *desc,
                                      JSObject *p, JSAtom prop)
 {
+    prop = js_access_atom(ctx, prop);
     return JS_GetOwnPropertyInternal2(ctx, desc, p, prop, NULL);
 }
 
@@ -10242,6 +10351,7 @@ int JS_PreventExtensions(JSContext *ctx, JSValueConst obj)
 /* return -1 if exception otherwise true or false */
 int JS_HasProperty(JSContext *ctx, JSValueConst obj, JSAtom prop)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     int ret;
     JSValue obj1;
@@ -10607,6 +10717,7 @@ static no_inline __exception int convert_fast_array_to_array(JSContext *ctx,
 
 static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
 {
+    atom = js_access_atom(ctx, atom);
     JSShape *sh;
     JSShapeProperty *pr, *lpr, *prop;
     JSProperty *pr1;
@@ -10907,6 +11018,7 @@ static void js_free_desc(JSContext *ctx, JSPropertyDescriptor *desc)
 static int JS_SetPropertyInternal2(JSContext *ctx, JSValueConst obj, JSAtom prop,
                                    JSValue val, JSValueConst this_obj, int flags)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p, *p1;
     JSShapeProperty *prs;
     JSProperty *pr;
@@ -11588,6 +11700,7 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
                       JSAtom prop, JSValueConst val,
                       JSValueConst getter, JSValueConst setter, int flags)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     JSShapeProperty *prs;
     JSProperty *pr;
@@ -20080,7 +20193,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-1];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     for(;;) {
                         prs = find_own_property(&pr, p, atom);
@@ -20128,7 +20242,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-1];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     for(;;) {
                         prs = find_own_property(&pr, p, atom);
@@ -20176,7 +20291,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-2];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     prs = find_own_property(&pr, p, atom);
                     if (!prs)
