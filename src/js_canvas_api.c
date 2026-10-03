@@ -240,7 +240,7 @@ static const ns_attr_def ns_ctx2d_attrs[] = {
     { "globalAlpha", NS_AT_ALPHA, NULL },
     { "globalCompositeOperation", NS_AT_ENUM,
       "source-over source-in source-out source-atop destination-over "
-      "destination-in destination-out destination-atop lighter copy xor "
+      "destination-in destination-out destination-atop lighter copy xor clear "
       "multiply screen overlay darken lighten color-dodge color-burn "
       "hard-light soft-light difference exclusion hue saturation color "
       "luminosity" },
@@ -370,15 +370,25 @@ ns_pattern_setTransform(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     double m[6] = { 1, 0, 0, 1, 0, 0 };
-    static const char *const keys[6] = { "a", "b", "c", "d", "e", "f" };
+    static const char *const aliases[6] = { "a", "b", "c", "d", "e", "f" };
+    static const char *const fields[6] = { "m11", "m12", "m21", "m22", "m41", "m42" };
     if (argc >= 1 && JS_IsObject(argv[0])) {
         for (int i = 0; i < 6; i++) {
-            JSValue v = JS_GetPropertyStr(ctx, argv[0], keys[i]);
-            if (!JS_IsUndefined(v) && JS_ToFloat64(ctx, &m[i], v) < 0) {
-                JS_FreeValue(ctx, v);
-                return JS_EXCEPTION;
-            }
-            JS_FreeValue(ctx, v);
+            JSValue alias = JS_GetPropertyStr(ctx, argv[0], aliases[i]);
+            JSValue field = JS_GetPropertyStr(ctx, argv[0], fields[i]);
+            double da = 0, df = 0;
+            gboolean has_alias = !JS_IsUndefined(alias), has_field = !JS_IsUndefined(field);
+            gboolean bad = (has_alias && JS_ToFloat64(ctx, &da, alias) < 0) ||
+                           (has_field && JS_ToFloat64(ctx, &df, field) < 0);
+            gboolean conflict = has_alias && has_field && !(da == df || (da != da && df != df));
+            JS_FreeValue(ctx, alias);
+            JS_FreeValue(ctx, field);
+            if (bad) return JS_EXCEPTION;
+            if (conflict)
+                return JS_ThrowTypeError(ctx,
+                    "The '%s' and '%s' members must be equal.", aliases[i], fields[i]);
+            if (has_alias) m[i] = da;
+            else if (has_field) m[i] = df;
         }
     }
     JSValue arr = JS_NewArray(ctx);
@@ -503,6 +513,13 @@ ns_api_call(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     return m->fn(ctx, this_val, argc, argv);
 }
 
+static void
+ns_attr_sync_canvas(JSContext *ctx, JSValueConst this_val)
+{
+    if (ns_ctx2d_is(this_val) && js_from_ctx(ctx))
+        ns_canvas_state_for(js_from_ctx(ctx), ns_hidden_ptr(this_val));
+}
+
 static JSValue
 ns_attr_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
             int magic)
@@ -510,6 +527,7 @@ ns_attr_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     (void)argc; (void)argv;
     const ns_api_table *t = NS_MAGIC_TABLE(magic);
     if (!t->brand(this_val)) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    ns_attr_sync_canvas(ctx, this_val);
     return ns_hget(ctx, this_val, t->attrs[NS_MAGIC_INDEX(magic)].name);
 }
 
@@ -665,8 +683,20 @@ ns_set_string(JSContext *ctx, ns_hidden *h, const char *name, const char *s)
     return JS_UNDEFINED;
 }
 
+static char *
+ns_canvas_color_for(JSContext *ctx, JSValueConst owner, const char *css)
+{
+    if (g_ascii_strcasecmp(css, "currentcolor") != 0) return ns_canvas_color_string(css);
+    const ns_node *el = ns_hidden_ptr(owner);
+    char *computed = el ? ns_js_computed_text(ctx, el, "color") : NULL;
+    char *color = computed ? ns_canvas_color_string(computed) : NULL;
+    g_free(computed);
+    return color ? color : g_strdup("#000000");
+}
+
 static JSValue
-ns_assign_style(JSContext *ctx, ns_hidden *h, const ns_attr_def *a, JSValueConst v)
+ns_assign_style(JSContext *ctx, JSValueConst owner, ns_hidden *h, const ns_attr_def *a,
+                JSValueConst v)
 {
     if (ns_hidden_is(v, NS_HK_GRADIENT) || ns_hidden_is(v, NS_HK_PATTERN)) {
         JS_SetPropertyStr(ctx, h->state, a->name, JS_DupValue(ctx, v));
@@ -674,7 +704,7 @@ ns_assign_style(JSContext *ctx, ns_hidden *h, const ns_attr_def *a, JSValueConst
     }
     const char *s = JS_ToCString(ctx, v);
     if (!s) return JS_EXCEPTION;
-    char *color = ns_canvas_color_string(s);
+    char *color = ns_canvas_color_for(ctx, owner, s);
     JS_FreeCString(ctx, s);
     if (color) ns_set_string(ctx, h, a->name, color);
     g_free(color);
@@ -682,22 +712,19 @@ ns_assign_style(JSContext *ctx, ns_hidden *h, const ns_attr_def *a, JSValueConst
 }
 
 static JSValue
-ns_assign_string(JSContext *ctx, ns_hidden *h, const ns_attr_def *a, JSValueConst v)
+ns_assign_string(JSContext *ctx, JSValueConst owner, ns_hidden *h, const ns_attr_def *a,
+                 JSValueConst v)
 {
     const char *s = JS_ToCString(ctx, v);
     if (!s) return JS_EXCEPTION;
     char *value = NULL;
     switch (a->type) {
-    case NS_AT_COLOR:  value = ns_canvas_color_string(s); break;
+    case NS_AT_COLOR:  value = ns_canvas_color_for(ctx, owner, s); break;
     case NS_AT_FONT:   value = ns_canvas_font_string(s); break;
     case NS_AT_FILTER: value = ns_filter_valid(s) ? g_strstrip(g_strdup(s)) : NULL; break;
     case NS_AT_LENGTH: value = ns_length_valid(s) ? g_ascii_strdown(s, -1) : NULL; break;
     case NS_AT_ENUM:   value = ns_enum_has(a->values, s) ? g_strdup(s) : NULL; break;
     default:           value = g_strdup(s); break;
-    }
-    if (value && strcmp(a->name, "direction") == 0 && strcmp(value, "inherit") == 0) {
-        g_free(value);
-        value = g_strdup("ltr");
     }
     JS_FreeCString(ctx, s);
     if (value) ns_set_string(ctx, h, a->name, value);
@@ -749,6 +776,7 @@ ns_attr_set(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     const ns_api_table *t = NS_MAGIC_TABLE(magic);
     const ns_attr_def *a = &t->attrs[NS_MAGIC_INDEX(magic)];
     if (!t->brand(this_val)) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    ns_attr_sync_canvas(ctx, this_val);
     ns_hidden *h = JS_GetOpaque(this_val, ns_hidden_class_id);
     JSValueConst v = argc > 0 ? argv[0] : JS_UNDEFINED;
     switch (a->type) {
@@ -758,13 +786,13 @@ ns_attr_set(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     case NS_AT_FINITE: case NS_AT_POSITIVE: case NS_AT_NONNEGATIVE: case NS_AT_ALPHA:
         return ns_assign_number(ctx, h, a, v);
     case NS_AT_STYLE:
-        return ns_assign_style(ctx, h, a, v);
+        return ns_assign_style(ctx, this_val, h, a, v);
     case NS_AT_SIZE:
         return ns_assign_size(ctx, this_val, h, a, v);
     case NS_AT_HANDLER:
         return ns_assign_handler(ctx, h, a, v);
     default:
-        return ns_assign_string(ctx, h, a, v);
+        return ns_assign_string(ctx, this_val, h, a, v);
     }
 }
 

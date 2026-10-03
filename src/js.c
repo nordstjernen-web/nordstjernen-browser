@@ -45128,6 +45128,12 @@ ns_js_realm_for_node(ns_js *js, const ns_node *node)
     return ns_js_node_realm_context(js, node);
 }
 
+char *
+ns_js_computed_text(JSContext *ctx, const ns_node *node, const char *name)
+{
+    return ns_computed_lookup(ctx, node, name);
+}
+
 /* The frame element whose content document holds node, or NULL for the
  * page's own document (fallback content inside an <object> included). */
 static ns_node *
