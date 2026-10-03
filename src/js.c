@@ -49089,9 +49089,27 @@ ns_realm_object_is_shape(ns_realm_cloner *rc, JSValueConst v)
 }
 
 static void
-ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
+ns_realm_define_cloned(ns_realm_cloner *rc, JSValueConst to, JSAtom atom,
+                       JSValue value, JSValue getter, JSValue setter, int flags)
 {
-    if (!JS_IsObject(obj)) return;
+    if (JS_DefineProperty(rc->dst, to, atom, value, getter, setter, flags) < 0)
+        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
+    JS_FreeValue(rc->dst, value);
+    JS_FreeValue(rc->dst, getter);
+    JS_FreeValue(rc->dst, setter);
+}
+
+static void
+ns_realm_free_descriptor(ns_realm_cloner *rc, JSPropertyDescriptor *desc)
+{
+    JS_FreeValue(rc->src, desc->value);
+    JS_FreeValue(rc->src, desc->getter);
+    JS_FreeValue(rc->src, desc->setter);
+}
+
+static void
+ns_realm_adopt_prototype(ns_realm_cloner *rc, JSValueConst obj)
+{
     JSValue proto = JS_GetPrototype(rc->src, obj);
     if (JS_IsObject(proto)) {
         JSValue cloned = ns_realm_clone(rc, proto, 0);
@@ -49100,6 +49118,42 @@ ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
         JS_FreeValue(rc->dst, cloned);
     }
     JS_FreeValue(rc->src, proto);
+}
+
+static void
+ns_realm_adopt_property(ns_realm_cloner *rc, JSValueConst obj, JSAtom atom)
+{
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(rc->src, &desc, obj, atom);
+    if (has <= 0) {
+        if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
+        return;
+    }
+    gboolean is_accessor = (desc.flags & JS_PROP_GETSET) != 0;
+    gboolean is_function = !is_accessor && JS_IsFunction(rc->src, desc.value);
+    if ((desc.flags & JS_PROP_CONFIGURABLE) && (is_accessor || is_function)) {
+        int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
+                    (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
+        JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
+        if (is_accessor) {
+            getter = ns_realm_clone(rc, desc.getter, 1);
+            setter = ns_realm_clone(rc, desc.setter, 1);
+            flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
+        } else {
+            value = ns_realm_clone(rc, desc.value, 1);
+            flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                     (desc.flags & JS_PROP_WRITABLE);
+        }
+        ns_realm_define_cloned(rc, obj, atom, value, getter, setter, flags);
+    }
+    ns_realm_free_descriptor(rc, &desc);
+}
+
+static void
+ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
+{
+    if (!JS_IsObject(obj)) return;
+    ns_realm_adopt_prototype(rc, obj);
     JSPropertyEnum *tab = NULL;
     uint32_t len = 0;
     if (JS_GetOwnPropertyNames(rc->src, &tab, &len, obj,
@@ -49107,39 +49161,8 @@ ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
         JS_FreeValue(rc->src, JS_GetException(rc->src));
         return;
     }
-    for (uint32_t i = 0; i < len; i++) {
-        JSPropertyDescriptor desc;
-        int has = JS_GetOwnProperty(rc->src, &desc, obj, tab[i].atom);
-        if (has <= 0) {
-            if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
-            continue;
-        }
-        gboolean is_accessor = (desc.flags & JS_PROP_GETSET) != 0;
-        gboolean is_function = !is_accessor && JS_IsFunction(rc->src, desc.value);
-        if ((desc.flags & JS_PROP_CONFIGURABLE) && (is_accessor || is_function)) {
-            int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
-                        (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
-            JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
-            if (is_accessor) {
-                getter = ns_realm_clone(rc, desc.getter, 1);
-                setter = ns_realm_clone(rc, desc.setter, 1);
-                flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
-            } else {
-                value = ns_realm_clone(rc, desc.value, 1);
-                flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                         (desc.flags & JS_PROP_WRITABLE);
-            }
-            if (JS_DefineProperty(rc->dst, obj, tab[i].atom, value, getter,
-                                  setter, flags) < 0)
-                JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-            JS_FreeValue(rc->dst, value);
-            JS_FreeValue(rc->dst, getter);
-            JS_FreeValue(rc->dst, setter);
-        }
-        JS_FreeValue(rc->src, desc.value);
-        JS_FreeValue(rc->src, desc.getter);
-        JS_FreeValue(rc->src, desc.setter);
-    }
+    for (uint32_t i = 0; i < len; i++)
+        ns_realm_adopt_property(rc, obj, tab[i].atom);
     JS_FreePropertyEnum(rc->src, tab, len);
 }
 
@@ -49175,13 +49198,9 @@ ns_realm_fn_is_interface(ns_realm_cloner *rc, JSValueConst fn)
     return iface;
 }
 
-/* A JS-implemented platform function becomes a native forwarder in the
- * frame's realm: its own identity, Function.prototype, name and length,
- * constructible only when it is an interface object. */
 static JSValue
-ns_realm_clone_js_function(ns_realm_cloner *rc, JSValueConst v, int depth)
+ns_realm_forwarder_for(ns_realm_cloner *rc, JSValueConst v, gboolean ctor)
 {
-    gboolean ctor = ns_realm_fn_is_interface(rc, v);
     JSValue nv = JS_GetPropertyStr(rc->src, v, "name");
     const char *name = JS_IsString(nv) ? JS_ToCString(rc->src, nv) : NULL;
     JSValue lv = JS_GetPropertyStr(rc->src, v, "length");
@@ -49191,6 +49210,52 @@ ns_realm_clone_js_function(ns_realm_cloner *rc, JSValueConst v, int depth)
     JSValue out = JS_NewForwarder(rc->dst, v, name ? name : "", len, ctor);
     if (name) JS_FreeCString(rc->src, name);
     JS_FreeValue(rc->src, nv);
+    return out;
+}
+
+static void
+ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
+                            JSAtom atom, gboolean is_proto, int depth)
+{
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(rc->src, &desc, v, atom);
+    if (has <= 0) {
+        if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
+        return;
+    }
+    int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
+                (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
+    JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
+    if (desc.flags & JS_PROP_GETSET) {
+        getter = ns_realm_clone(rc, desc.getter, depth + 1);
+        setter = ns_realm_clone(rc, desc.setter, depth + 1);
+        flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
+    } else if (is_proto && JS_IsObject(desc.value)) {
+        /* The JS layer's own checks (instanceof against its closure's
+         * interface) only accept its own prototype, so an interface the
+         * JS layer implements keeps it: the frame's constructor is new,
+         * the instances it makes are the JS layer's. */
+        ns_realm_cloner_put(rc, desc.value, desc.value);
+        value = JS_DupValue(rc->dst, desc.value);
+        flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                 (desc.flags & JS_PROP_WRITABLE);
+    } else {
+        value = ns_realm_clone(rc, desc.value, depth + 1);
+        flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                 (desc.flags & JS_PROP_WRITABLE);
+    }
+    ns_realm_define_cloned(rc, out, atom, value, getter, setter, flags);
+    ns_realm_free_descriptor(rc, &desc);
+}
+
+/* A JS-implemented platform function becomes a native forwarder in the
+ * frame's realm: its own identity, Function.prototype, name and length,
+ * constructible only when it is an interface object. */
+static JSValue
+ns_realm_clone_js_function(ns_realm_cloner *rc, JSValueConst v, int depth)
+{
+    gboolean ctor = ns_realm_fn_is_interface(rc, v);
+    JSValue out = ns_realm_forwarder_for(rc, v, ctor);
     if (JS_IsException(out)) {
         JS_FreeValue(rc->dst, JS_GetException(rc->dst));
         return JS_DupValue(rc->dst, v);
@@ -49210,48 +49275,29 @@ ns_realm_clone_js_function(ns_realm_cloner *rc, JSValueConst v, int depth)
         JSAtom atom = tab[i].atom;
         if (atom == a_name || atom == a_length) continue;
         if (atom == a_proto && !ctor) continue;
-        JSPropertyDescriptor desc;
-        int has = JS_GetOwnProperty(rc->src, &desc, v, atom);
-        if (has <= 0) {
-            if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
-            continue;
-        }
-        int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
-                    (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
-        JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
-        if (desc.flags & JS_PROP_GETSET) {
-            getter = ns_realm_clone(rc, desc.getter, depth + 1);
-            setter = ns_realm_clone(rc, desc.setter, depth + 1);
-            flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
-        } else if (atom == a_proto && JS_IsObject(desc.value)) {
-            /* The JS layer's own checks (instanceof against its closure's
-             * interface) only accept its own prototype, so an interface the
-             * JS layer implements keeps it: the frame's constructor is new,
-             * the instances it makes are the JS layer's. */
-            ns_realm_cloner_put(rc, desc.value, desc.value);
-            value = JS_DupValue(rc->dst, desc.value);
-            flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                     (desc.flags & JS_PROP_WRITABLE);
-        } else {
-            value = ns_realm_clone(rc, desc.value, depth + 1);
-            flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                     (desc.flags & JS_PROP_WRITABLE);
-        }
-        if (JS_DefineProperty(rc->dst, out, atom, value, getter, setter,
-                              flags) < 0)
-            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-        JS_FreeValue(rc->dst, value);
-        JS_FreeValue(rc->dst, getter);
-        JS_FreeValue(rc->dst, setter);
-        JS_FreeValue(rc->src, desc.value);
-        JS_FreeValue(rc->src, desc.getter);
-        JS_FreeValue(rc->src, desc.setter);
+        ns_realm_forwarder_property(rc, v, out, atom, atom == a_proto, depth);
     }
     JS_FreeAtom(rc->src, a_name);
     JS_FreeAtom(rc->src, a_length);
     JS_FreeAtom(rc->src, a_proto);
     JS_FreePropertyEnum(rc->src, tab, n);
     return out;
+}
+
+static void
+ns_realm_clone_prototype(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
+                         int depth)
+{
+    JSValue proto = JS_GetPrototype(rc->src, v);
+    if (JS_IsObject(proto)) {
+        JSValue cloned_proto = ns_realm_clone(rc, proto, depth + 1);
+        if (JS_SetPrototype(rc->dst, out, cloned_proto) < 0)
+            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
+        JS_FreeValue(rc->dst, cloned_proto);
+    } else if (JS_IsNull(proto)) {
+        JS_SetPrototype(rc->dst, out, JS_NULL);
+    }
+    JS_FreeValue(rc->src, proto);
 }
 
 static JSValue
@@ -49266,25 +49312,15 @@ ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth)
         JS_FreeValue(rc->dst, JS_GetException(rc->dst));
         return JS_DupValue(rc->dst, v);
     }
-    if (JS_IsUndefined(out) && JS_IsFunction(rc->src, v))
-        return ns_realm_clone_js_function(rc, v, depth);
     if (JS_IsUndefined(out)) {
-        if (JS_GetClassID(v) == 1 && ns_realm_object_is_shape(rc, v))
-            out = JS_NewObjectProto(rc->dst, JS_NULL);
-        else
+        if (JS_IsFunction(rc->src, v))
+            return ns_realm_clone_js_function(rc, v, depth);
+        if (JS_GetClassID(v) != 1 || !ns_realm_object_is_shape(rc, v))
             return JS_DupValue(rc->dst, v);
+        out = JS_NewObjectProto(rc->dst, JS_NULL);
     }
     ns_realm_cloner_put(rc, v, out);
-    JSValue proto = JS_GetPrototype(rc->src, v);
-    if (JS_IsObject(proto)) {
-        JSValue cloned_proto = ns_realm_clone(rc, proto, depth + 1);
-        if (JS_SetPrototype(rc->dst, out, cloned_proto) < 0)
-            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-        JS_FreeValue(rc->dst, cloned_proto);
-    } else if (JS_IsNull(proto)) {
-        JS_SetPrototype(rc->dst, out, JS_NULL);
-    }
-    JS_FreeValue(rc->src, proto);
+    ns_realm_clone_prototype(rc, v, out, depth);
     ns_realm_clone_own_properties(rc, v, out, depth);
     return out;
 }
@@ -49330,6 +49366,95 @@ ns_realm_proto_for(ns_js *js, JSContext *realm, JSValueConst proto)
     return hit ? JS_MKPTR(JS_TAG_OBJECT, hit) : proto;
 }
 
+static JSValue ns_realm_clone_instance(ns_realm_cloner *rc, JSValueConst v, int depth);
+
+static JSValue
+ns_realm_clone_storage(ns_realm_cloner *rc, JSValueConst v)
+{
+    JSValue out = JS_NewObjectClass(rc->dst, ns_storage_class_id);
+    if (JS_IsException(out)) {
+        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
+        return JS_DupValue(rc->dst, v);
+    }
+    JS_SetOpaque(out, JS_GetOpaque(v, ns_storage_class_id));
+    ns_realm_cloner_put(rc, v, out);
+    return out;
+}
+
+static gboolean
+ns_realm_instance_is_plain(ns_realm_cloner *rc, JSValueConst v, JSClassID cls,
+                           int depth)
+{
+    JSValue plain = JS_NewObject(rc->dst);
+    JSClassID object_class = JS_GetClassID(plain);
+    JS_FreeValue(rc->dst, plain);
+    return cls == object_class && depth <= 3 && !JS_IsArray(v);
+}
+
+static void
+ns_realm_clone_instance_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
+                                 JSAtom atom, int depth)
+{
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(rc->src, &desc, v, atom);
+    if (has <= 0) {
+        if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
+        return;
+    }
+    int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
+                (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
+    JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
+    if (desc.flags & JS_PROP_GETSET) {
+        getter = ns_realm_clone(rc, desc.getter, depth + 1);
+        setter = ns_realm_clone(rc, desc.setter, depth + 1);
+        flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
+    } else {
+        value = ns_realm_clone_instance(rc, desc.value, depth + 1);
+        flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                 (desc.flags & JS_PROP_WRITABLE);
+    }
+    ns_realm_define_cloned(rc, out, atom, value, getter, setter, flags);
+    ns_realm_free_descriptor(rc, &desc);
+}
+
+static void
+ns_realm_clone_instance_properties(ns_realm_cloner *rc, JSValueConst v,
+                                   JSValueConst out, int depth)
+{
+    /* Private names come along too: a script-implemented interface keeps
+     * its brand there, and the realm's copy is an instance as much as the
+     * original. */
+    JSPropertyEnum *tab = NULL;
+    uint32_t n = 0;
+    if (JS_GetOwnPropertyNames(rc->src, &tab, &n, v,
+                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK |
+                               JS_GPN_PRIVATE_MASK) < 0) {
+        JS_FreeValue(rc->src, JS_GetException(rc->src));
+        return;
+    }
+    for (uint32_t i = 0; i < n; i++)
+        ns_realm_clone_instance_property(rc, v, out, tab[i].atom, depth);
+    JS_FreePropertyEnum(rc->src, tab, n);
+}
+
+static JSValue
+ns_realm_clone_plain_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
+{
+    JSValue proto = JS_GetPrototype(rc->src, v);
+    JSValue cproto = JS_IsObject(proto) ? ns_realm_clone(rc, proto, 0)
+                                        : JS_DupValue(rc->dst, proto);
+    JS_FreeValue(rc->src, proto);
+    JSValue out = JS_NewObjectProto(rc->dst, cproto);
+    JS_FreeValue(rc->dst, cproto);
+    if (JS_IsException(out)) {
+        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
+        return JS_DupValue(rc->dst, v);
+    }
+    ns_realm_cloner_put(rc, v, out);
+    ns_realm_clone_instance_properties(rc, v, out, depth);
+    return out;
+}
+
 /* A window's own instance of one of the parent's singleton objects: a new
  * object with the realm's copy of its prototype and its own properties
  * copied, functions as the realm's functions and plain sub-objects (such as
@@ -49344,74 +49469,11 @@ ns_realm_clone_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
     gpointer hit = g_hash_table_lookup(rc->memo, JS_VALUE_GET_PTR(v));
     if (hit) return JS_DupValue(rc->dst, JS_MKPTR(JS_TAG_OBJECT, hit));
     JSClassID cls = JS_GetClassID(v);
-    if (ns_storage_class_id && cls == ns_storage_class_id) {
-        JSValue out = JS_NewObjectClass(rc->dst, ns_storage_class_id);
-        if (JS_IsException(out)) {
-            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-            return JS_DupValue(rc->dst, v);
-        }
-        JS_SetOpaque(out, JS_GetOpaque(v, ns_storage_class_id));
-        ns_realm_cloner_put(rc, v, out);
-        return out;
-    }
-    JSValue plain = JS_NewObject(rc->dst);
-    JSClassID object_class = JS_GetClassID(plain);
-    JS_FreeValue(rc->dst, plain);
-    if (cls != object_class || depth > 3 || JS_IsArray(v))
+    if (ns_storage_class_id && cls == ns_storage_class_id)
+        return ns_realm_clone_storage(rc, v);
+    if (!ns_realm_instance_is_plain(rc, v, cls, depth))
         return JS_DupValue(rc->dst, v);
-    JSValue proto = JS_GetPrototype(rc->src, v);
-    JSValue cproto = JS_IsObject(proto) ? ns_realm_clone(rc, proto, 0)
-                                        : JS_DupValue(rc->dst, proto);
-    JS_FreeValue(rc->src, proto);
-    JSValue out = JS_NewObjectProto(rc->dst, cproto);
-    JS_FreeValue(rc->dst, cproto);
-    if (JS_IsException(out)) {
-        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-        return JS_DupValue(rc->dst, v);
-    }
-    ns_realm_cloner_put(rc, v, out);
-    /* Private names come along too: a script-implemented interface keeps
-     * its brand there, and the realm's copy is an instance as much as the
-     * original. */
-    JSPropertyEnum *tab = NULL;
-    uint32_t n = 0;
-    if (JS_GetOwnPropertyNames(rc->src, &tab, &n, v,
-                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK |
-                               JS_GPN_PRIVATE_MASK) < 0) {
-        JS_FreeValue(rc->src, JS_GetException(rc->src));
-        return out;
-    }
-    for (uint32_t i = 0; i < n; i++) {
-        JSPropertyDescriptor desc;
-        int has = JS_GetOwnProperty(rc->src, &desc, v, tab[i].atom);
-        if (has <= 0) {
-            if (has < 0) JS_FreeValue(rc->src, JS_GetException(rc->src));
-            continue;
-        }
-        int flags = JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
-                    (desc.flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE));
-        JSValue value = JS_UNDEFINED, getter = JS_UNDEFINED, setter = JS_UNDEFINED;
-        if (desc.flags & JS_PROP_GETSET) {
-            getter = ns_realm_clone(rc, desc.getter, depth + 1);
-            setter = ns_realm_clone(rc, desc.setter, depth + 1);
-            flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
-        } else {
-            value = ns_realm_clone_instance(rc, desc.value, depth + 1);
-            flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                     (desc.flags & JS_PROP_WRITABLE);
-        }
-        if (JS_DefineProperty(rc->dst, out, tab[i].atom, value, getter, setter,
-                              flags) < 0)
-            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-        JS_FreeValue(rc->dst, value);
-        JS_FreeValue(rc->dst, getter);
-        JS_FreeValue(rc->dst, setter);
-        JS_FreeValue(rc->src, desc.value);
-        JS_FreeValue(rc->src, desc.getter);
-        JS_FreeValue(rc->src, desc.setter);
-    }
-    JS_FreePropertyEnum(rc->src, tab, n);
-    return out;
+    return ns_realm_clone_plain_instance(rc, v, depth);
 }
 
 /* The window objects every realm has its own of, which the realm bootstrap
@@ -49425,6 +49487,23 @@ static const char *const ns_realm_singleton_names[] = {
 };
 
 static void ns_install_pdf_plugins(JSContext *ctx);
+
+static void
+ns_realm_adopt_navigator_value(ns_realm_cloner *rc, JSValueConst mine, JSAtom atom,
+                               JSValueConst values)
+{
+    JSValue v = JS_GetProperty(rc->src, mine, atom);
+    if (JS_IsObject(v)) {
+        JSValue own = ns_realm_clone_instance(rc, v, 0);
+        const char *name = JS_AtomToCString(rc->src, atom);
+        if (name && JS_IsObject(own))
+            JS_SetPropertyStr(rc->dst, values, name, own);
+        else
+            JS_FreeValue(rc->dst, own);
+        if (name) JS_FreeCString(rc->src, name);
+    }
+    JS_FreeValue(rc->src, v);
+}
 
 /* A frame's navigator gets its own realm's copies of the page navigator's
  * object attributes (plugins, mediaDevices, ...), which its getters, shared
@@ -49443,19 +49522,8 @@ ns_realm_adopt_navigator_objects(ns_realm_cloner *rc, JSValueConst brand,
         JS_GetOwnPropertyNames(rc->src, &props, &n, mine,
                                JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
         JSValue values = JS_NewObjectProto(rc->dst, JS_NULL);
-        for (uint32_t i = 0; i < n; i++) {
-            JSValue v = JS_GetProperty(rc->src, mine, props[i].atom);
-            if (JS_IsObject(v)) {
-                JSValue own = ns_realm_clone_instance(rc, v, 0);
-                const char *name = JS_AtomToCString(rc->src, props[i].atom);
-                if (name && JS_IsObject(own))
-                    JS_SetPropertyStr(rc->dst, values, name, own);
-                else
-                    JS_FreeValue(rc->dst, own);
-                if (name) JS_FreeCString(rc->src, name);
-            }
-            JS_FreeValue(rc->src, v);
-        }
+        for (uint32_t i = 0; i < n; i++)
+            ns_realm_adopt_navigator_value(rc, mine, props[i].atom, values);
         JSValueConst args[2] = { frame_nav, values };
         JSValue r = JS_Call(rc->src, adopt, brand, 2, args);
         if (JS_IsException(r)) JS_FreeValue(rc->src, JS_GetException(rc->src));
@@ -49471,55 +49539,66 @@ ns_realm_adopt_navigator_objects(ns_realm_cloner *rc, JSValueConst brand,
 }
 
 static void
-ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
-                            JSValueConst frame_global)
+ns_realm_replace_singleton(ns_realm_cloner *rc, JSValueConst frame_global,
+                           JSAtom atom, const JSPropertyDescriptor *desc)
 {
-    for (gsize i = 0; i < G_N_ELEMENTS(ns_realm_singleton_names); i++) {
-        const char *name = ns_realm_singleton_names[i];
-        JSAtom atom = JS_NewAtom(rc->dst, name);
-        JSPropertyDescriptor desc;
-        int has = JS_GetOwnProperty(rc->dst, &desc, frame_global, atom);
-        if (has > 0 && !(desc.flags & JS_PROP_GETSET) &&
-            JS_IsObject(desc.value)) {
-            JSValue parent_v = JS_GetPropertyStr(rc->src, parent_global, name);
-            /* Only what the frame took over from its parent: a frame's own
-             * object, such as a sandbox's throwing localStorage, stays. */
-            if (JS_IsObject(parent_v) &&
-                JS_VALUE_GET_PTR(parent_v) == JS_VALUE_GET_PTR(desc.value)) {
-                JSValue own = ns_realm_clone_instance(rc, desc.value, 0);
-                int flags = JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                    JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
-                    (desc.flags & (JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE |
-                                   JS_PROP_ENUMERABLE));
-                if (JS_DefineProperty(rc->dst, frame_global, atom, own,
-                                      JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
-                    JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-                JS_FreeValue(rc->dst, own);
-            }
-            JS_FreeValue(rc->src, parent_v);
-        } else if (has < 0) {
-            JS_FreeValue(rc->dst, JS_GetException(rc->dst));
-        }
-        if (has > 0) {
-            JS_FreeValue(rc->dst, desc.value);
-            JS_FreeValue(rc->dst, desc.getter);
-            JS_FreeValue(rc->dst, desc.setter);
-        }
-        JS_FreeAtom(rc->dst, atom);
+    JSValue own = ns_realm_clone_instance(rc, desc->value, 0);
+    int flags = JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+        JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE |
+        (desc->flags & (JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE |
+                        JS_PROP_ENUMERABLE));
+    if (JS_DefineProperty(rc->dst, frame_global, atom, own,
+                          JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
+        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
+    JS_FreeValue(rc->dst, own);
+}
+
+static void
+ns_realm_install_singleton(ns_realm_cloner *rc, JSValueConst parent_global,
+                           JSValueConst frame_global, const char *name)
+{
+    JSAtom atom = JS_NewAtom(rc->dst, name);
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(rc->dst, &desc, frame_global, atom);
+    if (has > 0 && !(desc.flags & JS_PROP_GETSET) &&
+        JS_IsObject(desc.value)) {
+        JSValue parent_v = JS_GetPropertyStr(rc->src, parent_global, name);
+        /* Only what the frame took over from its parent: a frame's own
+         * object, such as a sandbox's throwing localStorage, stays. */
+        if (JS_IsObject(parent_v) &&
+            JS_VALUE_GET_PTR(parent_v) == JS_VALUE_GET_PTR(desc.value))
+            ns_realm_replace_singleton(rc, frame_global, atom, &desc);
+        JS_FreeValue(rc->src, parent_v);
+    } else if (has < 0) {
+        JS_FreeValue(rc->dst, JS_GetException(rc->dst));
     }
-    /* clientInformation is the window's navigator. */
-    JSValue nav = JS_GetPropertyStr(rc->dst, frame_global, "navigator");
+    if (has > 0) {
+        JS_FreeValue(rc->dst, desc.value);
+        JS_FreeValue(rc->dst, desc.getter);
+        JS_FreeValue(rc->dst, desc.setter);
+    }
+    JS_FreeAtom(rc->dst, atom);
+}
+
+static void
+ns_realm_register_navigator(ns_realm_cloner *rc, JSValueConst nav)
+{
     ns_js *js = js_from_ctx(rc->dst);
-    if (js && JS_IsObject(js->navigator_brand) && JS_IsObject(nav)) {
-        JSValue add = JS_GetPropertyStr(rc->src, js->navigator_brand, "add");
-        JSValueConst args[1] = { nav };
-        JSValue r = JS_IsFunction(rc->src, add)
-            ? JS_Call(rc->src, add, js->navigator_brand, 1, args) : JS_UNDEFINED;
-        if (JS_IsException(r)) JS_FreeValue(rc->src, JS_GetException(rc->src));
-        JS_FreeValue(rc->src, r);
-        JS_FreeValue(rc->src, add);
-        ns_realm_adopt_navigator_objects(rc, js->navigator_brand, nav);
-    }
+    if (!js || !JS_IsObject(js->navigator_brand) || !JS_IsObject(nav)) return;
+    JSValue add = JS_GetPropertyStr(rc->src, js->navigator_brand, "add");
+    JSValueConst args[1] = { nav };
+    JSValue r = JS_IsFunction(rc->src, add)
+        ? JS_Call(rc->src, add, js->navigator_brand, 1, args) : JS_UNDEFINED;
+    if (JS_IsException(r)) JS_FreeValue(rc->src, JS_GetException(rc->src));
+    JS_FreeValue(rc->src, r);
+    JS_FreeValue(rc->src, add);
+    ns_realm_adopt_navigator_objects(rc, js->navigator_brand, nav);
+}
+
+static void
+ns_realm_client_information(ns_realm_cloner *rc, JSValueConst frame_global,
+                            JSValueConst nav)
+{
     JSAtom ci = JS_NewAtom(rc->dst, "clientInformation");
     int has_ci = JS_GetOwnProperty(rc->dst, NULL, frame_global, ci);
     if (has_ci > 0 && JS_IsObject(nav))
@@ -49528,6 +49607,19 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
     else if (has_ci < 0)
         JS_FreeValue(rc->dst, JS_GetException(rc->dst));
     JS_FreeAtom(rc->dst, ci);
+}
+
+static void
+ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
+                            JSValueConst frame_global)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_realm_singleton_names); i++)
+        ns_realm_install_singleton(rc, parent_global, frame_global,
+                                   ns_realm_singleton_names[i]);
+    /* clientInformation is the window's navigator. */
+    JSValue nav = JS_GetPropertyStr(rc->dst, frame_global, "navigator");
+    ns_realm_register_navigator(rc, nav);
+    ns_realm_client_information(rc, frame_global, nav);
     JS_FreeValue(rc->dst, nav);
 }
 
@@ -49983,14 +50075,20 @@ ns_iframe_realm_window(JSContext *ctx, JSValueConst this_val, ns_node *n)
     return ns_iframe_build_lite_window(ctx, this_val, n);
 }
 
+static gboolean
+ns_node_is_frame_owner(const ns_node *n)
+{
+    return n && (ns_node_is_element_named(n, "iframe") ||
+                 ns_node_is_element_named(n, "object") ||
+                 ns_node_is_element_named(n, "frame") ||
+                 ns_node_is_element_named(n, "embed"));
+}
+
 static JSValue
 ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !ns_node_is_element_named(n, "object") &&
-               !ns_node_is_element_named(n, "frame") &&
-               !ns_node_is_element_named(n, "embed")))
+    if (!ns_node_is_frame_owner(n))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     if (!ns_node_is_element_named(n, "iframe")) return JS_NULL;
     if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
@@ -51203,6 +51301,69 @@ ns_point_in_hit_bounds(ns_js *js, double x, double y)
     return x <= w && y <= h;
 }
 
+static gboolean
+ns_hit_point_usable(double x, double y)
+{
+    return isfinite(x) && isfinite(y) && x >= 0 && y >= 0;
+}
+
+static ns_js *
+ns_hit_layout_js(JSContext *ctx)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->current_doc) return NULL;
+    ns_js_flush_layout(js);
+    return js->layout_root ? js : NULL;
+}
+
+static const ns_node *
+ns_hit_frame_of(const ns_node *doc)
+{
+    return doc && doc->kind == NS_NODE_DOCUMENT &&
+        ns_node_is_element_named(doc->parent, "iframe") ? doc->parent : NULL;
+}
+
+static gboolean
+ns_hit_frame_point(ns_js *js, const ns_node *frame, double *x, double *y)
+{
+    const ns_box *fb = ns_box_find_by_dom(js->layout_root, frame);
+    if (!fb) return FALSE;
+    double fx, fy, fw, fh;
+    ns_box_visual_border_box(fb, &fx, &fy, &fw, &fh);
+    double cw = fw - fb->border.left - fb->border.right -
+                fb->padding.left - fb->padding.right;
+    double ch = fh - fb->border.top - fb->border.bottom -
+                fb->padding.top - fb->padding.bottom;
+    if (*x >= cw || *y >= ch) return FALSE;
+    *x += fx + fb->border.left + fb->padding.left;
+    *y += fy + fb->border.top + fb->padding.top;
+    return TRUE;
+}
+
+static const ns_node *
+ns_hit_layout_point(JSContext *ctx, ns_js *js, const ns_node *doc, double *x, double *y)
+{
+    const ns_node *frame = ns_hit_frame_of(doc);
+    if (frame) return ns_hit_frame_point(js, frame, x, y) ? doc : NULL;
+    if (!ns_point_in_hit_bounds(js, *x, *y)) return NULL;
+    *x += ns_window_scroll_prop(ctx, "scrollX");
+    *y += ns_window_scroll_prop(ctx, "scrollY");
+    return js->current_doc;
+}
+
+static const ns_node *
+ns_hit_owner_node(const ns_box *hit, const ns_node *doc)
+{
+    /* Content of a nested document is not part of this document's hit
+     * test: a point over a frame hits the frame element. */
+    const ns_node *node = hit->dom;
+    const ns_node *p = hit->dom;
+    for (; p && p != doc; p = p->parent)
+        if (p->kind == NS_NODE_DOCUMENT && p->parent)
+            node = p->parent;
+    return p ? node : NULL;
+}
+
 /* The node a point hits in the document this_val is, or NULL: the point is
  * in that document's viewport coordinates, and for a frame's document it is
  * translated into the frame's content box first. local_x and local_y get the
@@ -51214,43 +51375,16 @@ ns_document_hit_node(JSContext *ctx, JSValueConst this_val, double x, double y,
 {
     *doc_out = NULL;
     *box_out = NULL;
-    if (!isfinite(x) || !isfinite(y) || x < 0 || y < 0) return NULL;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return NULL;
-    ns_js_flush_layout(js);
-    if (!js->layout_root) return NULL;
-    const ns_node *doc = ns_unwrap_element(this_val);
-    const ns_node *frame = doc && doc->kind == NS_NODE_DOCUMENT &&
-        ns_node_is_element_named(doc->parent, "iframe") ? doc->parent : NULL;
-    if (frame) {
-        const ns_box *fb = ns_box_find_by_dom(js->layout_root, frame);
-        if (!fb) return NULL;
-        double fx, fy, fw, fh;
-        ns_box_visual_border_box(fb, &fx, &fy, &fw, &fh);
-        double cw = fw - fb->border.left - fb->border.right -
-                    fb->padding.left - fb->padding.right;
-        double ch = fh - fb->border.top - fb->border.bottom -
-                    fb->padding.top - fb->padding.bottom;
-        if (x >= cw || y >= ch) return NULL;
-        x += fx + fb->border.left + fb->padding.left;
-        y += fy + fb->border.top + fb->padding.top;
-    } else {
-        if (!ns_point_in_hit_bounds(js, x, y)) return NULL;
-        x += ns_window_scroll_prop(ctx, "scrollX");
-        y += ns_window_scroll_prop(ctx, "scrollY");
-        doc = js->current_doc;
-    }
+    if (!ns_hit_point_usable(x, y)) return NULL;
+    ns_js *js = ns_hit_layout_js(ctx);
+    if (!js) return NULL;
+    const ns_node *doc = ns_hit_layout_point(ctx, js, ns_unwrap_element(this_val), &x, &y);
+    if (!doc) return NULL;
     const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
                                               local_x, local_y);
     if (!hit || !hit->dom) return NULL;
-    /* Content of a nested document is not part of this document's hit
-     * test: a point over a frame hits the frame element. */
-    const ns_node *node = hit->dom;
-    const ns_node *p = hit->dom;
-    for (; p && p != doc; p = p->parent)
-        if (p->kind == NS_NODE_DOCUMENT && p->parent)
-            node = p->parent;
-    if (!p) return NULL;
+    const ns_node *node = ns_hit_owner_node(hit, doc);
+    if (!node) return NULL;
     *doc_out = doc;
     *box_out = node == hit->dom ? hit : NULL;
     return node;
@@ -59084,6 +59218,20 @@ ns_document_get_readyState(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_document_window_global(JSContext *ctx, ns_js *js)
+{
+    return js && js->ctx ? JS_GetGlobalObject(js->ctx) : JS_GetGlobalObject(ctx);
+}
+
+static gboolean
+ns_node_is_frame_element(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT &&
+           (ns_node_is_element_named(n, "iframe") ||
+            ns_node_is_element_named(n, "frame"));
+}
+
+static JSValue
 ns_document_get_defaultView(JSContext *ctx, JSValueConst this_val)
 {
     /* The window of the document's browsing context: the page's window, or
@@ -59093,12 +59241,9 @@ ns_document_get_defaultView(JSContext *ctx, JSValueConst this_val)
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_unwrap_element_mut(this_val);
     if (!js || !doc || doc->kind != NS_NODE_DOCUMENT || doc == js->current_doc)
-        return js && js->ctx ? JS_GetGlobalObject(js->ctx)
-                             : JS_GetGlobalObject(ctx);
+        return ns_document_window_global(ctx, js);
     ns_node *owner = doc->parent;
-    if (owner && owner->kind == NS_NODE_ELEMENT &&
-        (ns_node_is_element_named(owner, "iframe") ||
-         ns_node_is_element_named(owner, "frame"))) {
+    if (ns_node_is_frame_element(owner)) {
         JSValue el = ns_make_element(ctx, owner);
         JSValue win = ns_iframe_realm_window(ctx, el, owner);
         JS_FreeValue(ctx, el);
