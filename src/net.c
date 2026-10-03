@@ -1785,9 +1785,14 @@ ns_xferinfo_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
     return (c && g_cancellable_is_cancelled(c)) ? 1 : 0;
 }
 
+extern const char *ns_app_self_exe(void);
+
 static char *
 ns_net_exe_dir(void)
 {
+    const char *self = ns_app_self_exe();
+    if (self && *self)
+        return g_path_get_dirname(self);
 #ifdef G_OS_WIN32
     DWORD cap = MAX_PATH;
     wchar_t *buf = g_new(wchar_t, cap);
@@ -1812,9 +1817,7 @@ ns_net_exe_dir(void)
     if (size == 0 || size > 32768) return NULL;
     char *raw = g_malloc(size);
     if (_NSGetExecutablePath(raw, &size) != 0) { g_free(raw); return NULL; }
-    char *real = realpath(raw, NULL);
-    char *dir = g_path_get_dirname(real ? real : raw);
-    free(real);
+    char *dir = g_path_get_dirname(raw);
     g_free(raw);
     return dir;
 #elif defined(__linux__)
@@ -2729,8 +2732,6 @@ ns_header_sink_feed(ns_header_ctx *ctx, const char *line, size_t len)
     if (line && len)
         ns_header_cb((char *)line, 1, len, ctx);
 }
-
-extern const char *ns_app_self_exe(void);
 
 static char *
 about_read_first(const char *const *rel_paths, gsize *out_len)
