@@ -12562,8 +12562,8 @@ ns_subtle_digest(JSContext *ctx, JSValueConst this_val,
         return promise;
     }
     if (algo_name) JS_FreeCString(ctx, algo_name);
-    size_t byte_off = 0, byte_len = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, argv[1], &byte_off, &byte_len, &bpe);
+    size_t byte_off = 0, byte_len = 0;
+    JSValue buf = JS_GetArrayBufferViewBuffer(ctx, argv[1], &byte_off, &byte_len);
     uint8_t *data = NULL;
     size_t data_len = 0;
     gboolean buffer_like = FALSE;
@@ -23065,8 +23065,8 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
 static JSValue
 ns_body_extract_buffer(JSContext *ctx, JSValueConst body)
 {
-    size_t off = 0, len = 0, bpe = 0;
-    JSValue view_buf = JS_GetTypedArrayBuffer(ctx, body, &off, &len, &bpe);
+    size_t off = 0, len = 0;
+    JSValue view_buf = JS_GetArrayBufferViewBuffer(ctx, body, &off, &len);
     if (!JS_IsException(view_buf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, view_buf);
@@ -23930,9 +23930,9 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, JS_GetException(ctx));
 
-    size_t byte_offset = 0, byte_len = 0, bytes_per = 0;
-    JSValue arrbuf = JS_GetTypedArrayBuffer(ctx, argv[0],
-                                            &byte_offset, &byte_len, &bytes_per);
+    size_t byte_offset = 0, byte_len = 0;
+    JSValue arrbuf = JS_GetArrayBufferViewBuffer(ctx, argv[0],
+                                                 &byte_offset, &byte_len);
     if (!JS_IsException(arrbuf)) {
         bdata = JS_GetArrayBuffer(ctx, &bsize, arrbuf);
         if (bdata && byte_offset + byte_len <= bsize)
@@ -54097,8 +54097,8 @@ ns_zlib_push(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     ns_zlib_codec *c = ns_zlib_unwrap(ctx, argv[0]);
     if (!c) return JS_ThrowTypeError(ctx, "zlib push: invalid codec");
 
-    size_t off = 0, len = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, argv[1], &off, &len, &bpe);
+    size_t off = 0, len = 0;
+    JSValue buf = JS_GetArrayBufferViewBuffer(ctx, argv[1], &off, &len);
     if (JS_IsException(buf)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         size_t total = 0;

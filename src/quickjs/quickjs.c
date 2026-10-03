@@ -61168,6 +61168,33 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
     return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
 }
 
+static bool dataview_is_oob(JSObject *p);
+
+/* The buffer, byte offset and length of an ArrayBufferView: a typed array
+   or a DataView (the WebIDL BufferSource views). */
+JSValue JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
+                                    size_t *pbyte_offset, size_t *pbyte_length)
+{
+    JSObject *p;
+    JSTypedArray *ta;
+
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT ||
+        JS_VALUE_GET_OBJ(obj)->class_id != JS_CLASS_DATAVIEW)
+        return JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, pbyte_length,
+                                      NULL);
+    p = JS_VALUE_GET_OBJ(obj);
+    if (dataview_is_oob(p))
+        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+    ta = p->u.typed_array;
+    if (pbyte_offset)
+        *pbyte_offset = ta->offset;
+    if (pbyte_length)
+        *pbyte_length = ta->track_rab
+            ? ta->buffer->u.array_buffer->byte_length - ta->offset
+            : ta->length;
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+}
+
 /* return NULL if exception. WARNING: any JS call can detach the
    buffer and render the returned pointer invalid */
 uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)

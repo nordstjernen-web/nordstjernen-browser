@@ -243,8 +243,8 @@ static guint8 *
 ns_wasm_copy_buffer_source(JSContext *ctx, JSValueConst v, size_t *out_len)
 {
     *out_len = 0;
-    size_t off = 0, blen = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, v, &off, &blen, &bpe);
+    size_t off = 0, blen = 0;
+    JSValue buf = JS_GetArrayBufferViewBuffer(ctx, v, &off, &blen);
     if (!JS_IsException(buf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);

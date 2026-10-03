@@ -135,6 +135,13 @@ JS_AddEnginePrivateName(JSContext *ctx, const char *name)
     return 0;
 }
 
+static inline JSValue
+JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
+                            size_t *pbyte_offset, size_t *pbyte_length)
+{
+    return JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, pbyte_length, NULL);
+}
+
 static inline bool
 JS_IsEngineFunction(JSValueConst fn)
 {
