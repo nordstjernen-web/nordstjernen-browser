@@ -46625,8 +46625,12 @@ ns_realm_cloner_put(ns_realm_cloner *rc, JSValueConst from, JSValueConst to)
 {
     if (!JS_IsObject(from) || !JS_IsObject(to)) return;
     if (g_hash_table_contains(rc->memo, JS_VALUE_GET_PTR(from))) return;
+    /* Both are held: an entry keyed by a freed object's address would map
+     * whatever object reuses the address to this copy. */
+    JSValue held_from = JS_DupValue(rc->src, from);
     JSValue held = JS_DupValue(rc->dst, to);
-    g_hash_table_insert(rc->memo, JS_VALUE_GET_PTR(from), JS_VALUE_GET_PTR(held));
+    g_hash_table_insert(rc->memo, JS_VALUE_GET_PTR(held_from),
+                        JS_VALUE_GET_PTR(held));
 }
 
 static void
@@ -46733,8 +46737,10 @@ ns_realm_cloner_free(ns_realm_cloner *rc)
     GHashTableIter it;
     gpointer k, v;
     g_hash_table_iter_init(&it, rc->memo);
-    while (g_hash_table_iter_next(&it, &k, &v))
+    while (g_hash_table_iter_next(&it, &k, &v)) {
         JS_FreeValue(rc->dst, JS_MKPTR(JS_TAG_OBJECT, v));
+        JS_FreeValue(rc->src, JS_MKPTR(JS_TAG_OBJECT, k));
+    }
     g_hash_table_destroy(rc->memo);
     g_free(rc);
 }
