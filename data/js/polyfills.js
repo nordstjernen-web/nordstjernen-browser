@@ -3105,7 +3105,7 @@
             s.result = result;
             s.error = null;
             s.readyState = 'done';
-            req.dispatchEvent(new EventClass('success'));
+            req.dispatchEvent(idlTrustedEvent(new EventClass('success')));
         }
 
         function fail(req, err) {
@@ -3113,7 +3113,7 @@
             s.result = undefined;
             s.error = err && err.name ? err : ex('UnknownError', String(err || 'IndexedDB error'));
             s.readyState = 'done';
-            var event = new EventClass('error', { bubbles: true, cancelable: true });
+            var event = idlTrustedEvent(new EventClass('error', { bubbles: true, cancelable: true }));
             return !bubbleEvent(event, req, transactionParents(s.transaction));
         }
 
@@ -3210,7 +3210,7 @@
         }
 
         function newVersionChangeEvent(type, oldVersion, newVersion) {
-            return new IDBVersionChangeEvent(type, { oldVersion: oldVersion, newVersion: newVersion });
+            return idlTrustedEvent(new IDBVersionChangeEvent(type, { oldVersion: oldVersion, newVersion: newVersion }));
         }
 
         function loadStores(db, info) {
@@ -3373,7 +3373,7 @@
                 s.completeQueued = false;
                 if (s.pending || s.done || s.aborted) return;
                 s.done = true;
-                tx.dispatchEvent(new EventClass('complete'));
+                tx.dispatchEvent(idlTrustedEvent(new EventClass('complete')));
                 if (s.afterComplete) s.afterComplete();
             });
         }
@@ -3383,7 +3383,7 @@
             if (s.done || s.aborted) return;
             s.aborted = true;
             s.error = err && err.name ? err : ex('AbortError', 'Transaction aborted');
-            bubbleEvent(new EventClass('abort', { bubbles: true }), tx, [s.db]);
+            bubbleEvent(idlTrustedEvent(new EventClass('abort', { bubbles: true })), tx, [s.db]);
             if (s.afterAbort) s.afterAbort();
         }
 
