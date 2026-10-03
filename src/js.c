@@ -14616,10 +14616,13 @@ ns_window_message_realm(JSContext *ctx, JSValueConst target)
     return realm;
 }
 
+/* Posts a message to target in the realm ctx, which throws the exceptions;
+ * caller is the realm of the code that called postMessage, the one the
+ * message's source window comes from. */
 static JSValue
-ns_post_message_to_target(JSContext *ctx, JSValue target,
-                          JSValueConst source_override,
-                          int argc, JSValueConst *argv)
+ns_post_message_to_target_in(JSContext *ctx, JSContext *caller, JSValue target,
+                             JSValueConst source_override,
+                             int argc, JSValueConst *argv)
 {
     if (argc < 1) {
         JS_FreeValue(ctx, target);
@@ -14627,7 +14630,6 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
             "Failed to execute 'postMessage' on 'Window': 1 argument required, "
             "but only 0 present.");
     }
-    JSContext *caller = JS_GetCallerRealm(ctx);
 
     g_autofree char *want_origin = NULL;
     JSValue transfer = JS_UNDEFINED;
@@ -14747,14 +14749,39 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
 }
 
 static JSValue
+ns_post_message_to_target(JSContext *ctx, JSValue target,
+                          JSValueConst source_override,
+                          int argc, JSValueConst *argv)
+{
+    return ns_post_message_to_target_in(ctx, JS_GetCallerRealm(ctx), target,
+                                        source_override, argc, argv);
+}
+
+/* The realm of a window: the one of its frame, or the main one. */
+static JSContext *
+ns_window_realm_context(JSContext *ctx, JSValueConst window)
+{
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *frame = ns_window_frame_node(js, window);
+    JSContext *realm = frame ? g_hash_table_lookup(js->frame_contexts, frame)
+                             : NULL;
+    if (realm) return realm;
+    return js && js->main_realm_ctx ? js->main_realm_ctx : ctx;
+}
+
+/* A C function with data runs in the realm of its caller, but postMessage
+ * throws the exceptions of the realm of the window it belongs to. */
+static JSValue
 ns_window_post_message_data(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv,
                             int magic, JSValue *data)
 {
     (void)magic;
+    JSContext *realm = ns_window_realm_context(ctx, data[0]);
     JSValue target = JS_IsObject(this_val) ? JS_DupValue(ctx, this_val)
                                            : JS_DupValue(ctx, data[0]);
-    return ns_post_message_to_target(ctx, target, JS_UNDEFINED, argc, argv);
+    return ns_post_message_to_target_in(realm, JS_GetCallerRealm(ctx), target,
+                                        JS_UNDEFINED, argc, argv);
 }
 
 static JSValue
