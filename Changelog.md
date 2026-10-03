@@ -3,6 +3,34 @@ Changelog:
 
 1.0.28:
 ======
+* The IndexedDB interfaces (`IDBFactory`, `IDBDatabase`, `IDBObjectStore`,
+  `IDBIndex`, `IDBCursor`, `IDBKeyRange`, `IDBRequest`, `IDBTransaction`,
+  `IDBVersionChangeEvent` and the rest) have the shape of other browsers: their
+  attributes are getters on the prototypes, their state is no longer kept in
+  `_records`, `_store` and `_meta` members, `IDBRequest`, `IDBDatabase` and
+  `IDBTransaction` inherit `EventTarget`, `IDBVersionChangeEvent` is an
+  `Event`, and `objectStoreNames` is a `DOMStringList`. A transaction no
+  longer stays open forever when a request is issued from a promise callback
+  after the last one finished (idb-style wrappers never saw `complete`), a
+  request's `result` throws until it is done, errors bubble from the request to
+  the transaction and the database and abort the transaction unless cancelled,
+  `cursor.continue(key)` lands on the key, `cursor.update()` works on stores
+  with a key path, and `getAll()` takes an options dictionary.
+* `MediaSource`, `SourceBuffer` and `SourceBufferList` keep their state out of
+  sight, inherit `EventTarget`'s listener methods instead of carrying copies,
+  and lose `appendBufferAsync()`, `removeAsync()`, `item()`, `audioTracks`,
+  `videoTracks` and `textTracks`, which other browsers do not have; `handle`
+  exists only in dedicated workers. Missing or empty arguments throw `TypeError`
+  and an invalid `SourceBuffer.mode` is ignored, as in other browsers.
+* `Cache` and `CacheStorage` are real interfaces (also in workers) whose
+  operations reject for a wrong receiver or missing arguments. `ignoreSearch`
+  now applies to `delete()` and `matchAll()`, `keys()` takes a request,
+  `caches.match()` takes `cacheName`, and a cached response keeps its own `url`.
+* `Observable` follows the current specification, and `Subscriber` exists (also
+  in workers): `subscribe()` returns nothing, the subscribe callback gets a
+  `Subscriber` with `active`, `signal` and `addTeardown()`, concurrent
+  subscriptions to one Observable share one producer, and the operators are
+  enumerable methods of the standard length.
 * A document, a text node, a comment or a document fragment no longer
   has the members of an element. The element member table was installed
   on the `Node`, `Document`, `HTMLDocument` and `DocumentFragment`
