@@ -3316,14 +3316,78 @@
             loadStores(db, info);
         }
 
-        function newDatabase(name, version, info) {
+        function newDatabase(name, version, info, queue) {
             var db = Object.create(IDBDatabase.prototype);
             databases.set(db, idlHandlerState({
                 name: name, version: version, stores: {}, storeNames: [],
-                closed: false, upgradeTx: null
+                closed: false, upgradeTx: null, liveTransactions: 0, released: false, queue: queue
             }));
             loadStores(db, info);
+            queue.connections.push(db);
             return db;
+        }
+
+        var connectionQueues = Object.create(null);
+
+        function connectionQueue(name) {
+            if (!connectionQueues[name])
+                connectionQueues[name] = { items: [], running: false, connections: [], waiting: null };
+            return connectionQueues[name];
+        }
+
+        function pumpConnectionQueue(queue) {
+            if (queue.running || !queue.items.length) return;
+            queue.running = true;
+            var run = queue.items.shift();
+            task(function () {
+                var finished = false;
+                var done = function () {
+                    if (finished) return;
+                    finished = true;
+                    queue.running = false;
+                    pumpConnectionQueue(queue);
+                };
+                try { run(done); } catch (e) { done(); throw e; }
+            });
+        }
+
+        function enqueueConnectionRequest(name, run) {
+            var queue = connectionQueue(name);
+            queue.items.push(run);
+            pumpConnectionQueue(queue);
+        }
+
+        function releaseConnection(db) {
+            var s = databases.get(db);
+            if (s.released || !s.closed || s.liveTransactions > 0) return;
+            s.released = true;
+            var connections = s.queue.connections;
+            var index = connections.indexOf(db);
+            if (index >= 0) connections.splice(index, 1);
+            if (s.queue.waiting) s.queue.waiting();
+        }
+
+        function fireVersionChange(queue, request, newVersion, proceed) {
+            if (!queue.connections.length) {
+                proceed();
+                return;
+            }
+            task(function () {
+                if (!queue.connections.length) {
+                    proceed();
+                    return;
+                }
+                request.dispatchEvent(newVersionChangeEvent('blocked', databases.get(queue.connections[0]).version, newVersion));
+                queue.waiting = function () {
+                    if (queue.connections.length) return;
+                    queue.waiting = null;
+                    task(proceed);
+                };
+                queue.waiting();
+            });
+            queue.connections.filter(function (db) { return !databases.get(db).closed; }).forEach(function (db) {
+                db.dispatchEvent(newVersionChangeEvent('versionchange', databases.get(db).version, newVersion));
+            });
         }
 
         class IDBDatabase {
@@ -3331,7 +3395,10 @@
             get name() { return databaseOf(this).name; }
             get version() { return databaseOf(this).version; }
             get objectStoreNames() { return newDOMStringList(databaseOf(this).storeNames); }
-            close() { databaseOf(this).closed = true; }
+            close() {
+                databaseOf(this).closed = true;
+                releaseConnection(this);
+            }
             createObjectStore(name, options = {}) {
                 var s = databaseOf(this);
                 idlNeed(arguments, 1, 'IDBDatabase', 'createObjectStore');
@@ -3393,11 +3460,21 @@
             var s = idlHandlerState({
                 db: db, mode: mode, durability: durability || 'default', error: null,
                 scope: scope.slice(), pending: 0, done: false, aborted: false,
-                completeQueued: false, handles: {}, active: true, activeFor: 0, serial: 0
+                completeQueued: false, handles: {}, active: true, activeFor: 0, serial: 0, finished: false
             });
             transactions.set(tx, s);
+            databases.get(db).liveTransactions++;
             task(function () { if (s.activeFor === 0) s.active = false; });
             return tx;
+        }
+
+        function transactionFinished(tx) {
+            var s = transactions.get(tx);
+            if (s.finished) return;
+            s.finished = true;
+            s.active = false;
+            databases.get(s.db).liveTransactions--;
+            releaseConnection(s.db);
         }
 
         function activateForDispatch(s, serial) {
@@ -3455,6 +3532,7 @@
                 s.done = true;
                 s.active = false;
                 tx.dispatchEvent(idlTrustedEvent(new EventClass('complete')));
+                transactionFinished(tx);
                 if (s.afterComplete) s.afterComplete();
             });
         }
@@ -3466,6 +3544,7 @@
             s.active = false;
             s.error = err && err.name ? err : ex('AbortError', 'Transaction aborted');
             bubbleEvent(idlTrustedEvent(new EventClass('abort', { bubbles: true })), tx, [s.db]);
+            transactionFinished(tx);
             if (s.afterAbort) s.afterAbort();
         }
 
@@ -4113,7 +4192,7 @@
                         throw new TypeError("Failed to execute 'open' on 'IDBFactory': The version provided must not be 0.");
                 }
                 var req = newRequest(IDBOpenDBRequest.prototype, null, null);
-                task(function () { openDatabase(req, name, version); });
+                enqueueConnectionRequest(name, function (done) { openDatabase(req, name, version, done); });
                 return req;
             }
             deleteDatabase(name) {
@@ -4121,14 +4200,7 @@
                 idlNeed(arguments, 1, 'IDBFactory', 'deleteDatabase');
                 name = String(name);
                 var req = newRequest(IDBOpenDBRequest.prototype, null, null);
-                task(function () {
-                    try {
-                        backend.deleteDatabase(name);
-                        succeed(req, undefined);
-                    } catch (e) {
-                        fail(req, e);
-                    }
-                });
+                enqueueConnectionRequest(name, function (done) { deleteDatabase(req, name, done); });
                 return req;
             }
             databases() {
@@ -4142,22 +4214,60 @@
             }
         }
 
-        function openDatabase(req, name, version) {
+        function openDatabase(req, name, version, done) {
+            var queue = connectionQueue(name);
+            var info, oldVersion, wanted;
             try {
-                var info = backend.open(name);
-                var oldVersion = Number(info.version || 0);
-                var wanted = version === undefined ? (oldVersion || 1) : version;
+                info = backend.open(name);
+                oldVersion = Number(info.version || 0);
+                wanted = version === undefined ? (oldVersion || 1) : version;
                 if (wanted < oldVersion)
                     throw ex('VersionError', 'The requested version (' + wanted + ') is less than the existing version (' + oldVersion + ').');
-                var db = newDatabase(name, oldVersion || wanted, info);
-                if (wanted > oldVersion) upgradeDatabase(req, db, oldVersion, wanted);
-                else succeed(req, db);
             } catch (e) {
                 fail(req, e);
+                done();
+                return;
             }
+            var proceed = function () {
+                var db = null;
+                try {
+                    db = newDatabase(name, oldVersion || wanted, info, queue);
+                    if (wanted > oldVersion) {
+                        upgradeDatabase(req, db, oldVersion, wanted, done);
+                    } else {
+                        succeed(req, db);
+                        done();
+                    }
+                } catch (e) {
+                    if (db) {
+                        var ds = databases.get(db);
+                        ds.closed = true;
+                        ds.liveTransactions = 0;
+                        releaseConnection(db);
+                    }
+                    fail(req, e);
+                    done();
+                }
+            };
+            if (wanted > oldVersion) fireVersionChange(queue, req, wanted, proceed);
+            else proceed();
         }
 
-        function upgradeDatabase(req, db, oldVersion, wanted) {
+        function deleteDatabase(req, name, done) {
+            var queue = connectionQueue(name);
+            var proceed = function () {
+                try {
+                    backend.deleteDatabase(name);
+                    succeed(req, undefined);
+                } catch (e) {
+                    fail(req, e);
+                }
+                done();
+            };
+            fireVersionChange(queue, req, null, proceed);
+        }
+
+        function upgradeDatabase(req, db, oldVersion, wanted, done) {
             var rs = requests.get(req);
             var ds = databases.get(db);
             var tx = newTransaction(db, ds.storeNames, 'versionchange', 'default');
@@ -4167,13 +4277,16 @@
                 ds.upgradeTx = null;
                 rs.transaction = null;
                 succeed(req, db);
+                done();
             };
             ts.afterAbort = function () {
                 task(function () {
                     ds.upgradeTx = null;
                     ds.closed = true;
+                    releaseConnection(db);
                     rs.transaction = null;
                     fail(req, ex('AbortError', 'The upgrade transaction was aborted.'));
+                    done();
                 });
             };
             rs.result = db;
