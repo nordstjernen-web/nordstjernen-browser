@@ -18370,6 +18370,31 @@ ns_css_container_map_new(void)
                                  NULL, cq_container_free);
 }
 
+static gboolean
+cq_container_equal(const ns_cq_container *a, const ns_cq_container *b)
+{
+    return a->type == b->type && a->vertical == b->vertical &&
+           a->width == b->width && a->height == b->height &&
+           a->sibling_index == b->sibling_index &&
+           a->sibling_count == b->sibling_count &&
+           g_strcmp0(a->names, b->names) == 0;
+}
+
+gboolean
+ns_css_container_maps_equal(GHashTable *a, GHashTable *b)
+{
+    if (!a || !b) return a == b;
+    if (g_hash_table_size(a) != g_hash_table_size(b)) return FALSE;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, a);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        const ns_cq_container *other = g_hash_table_lookup(b, key);
+        if (!other || !cq_container_equal(value, other)) return FALSE;
+    }
+    return TRUE;
+}
+
 void
 ns_css_container_map_add(GHashTable *map, const void *node,
                          const char *type_kw, const char *name_kw,
