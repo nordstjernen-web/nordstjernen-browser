@@ -324,9 +324,20 @@ typedef struct JSValueLink {
     JSValueConst value;
 } JSValueLink;
 
+typedef struct JSEnginePrivateName {
+    JSAtom name;    /* the name, as page scripts spell it */
+    JSAtom shadow;  /* the private name the embedder's accesses use */
+    JSValue symbol; /* keeps shadow alive */
+} JSEnginePrivateName;
+
 struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
+    /* names the embedder keeps for itself (JS_AddEnginePrivateName) */
+    JSEnginePrivateName *engine_private;
+    int engine_private_count;
+    uint32_t *engine_private_bits; /* bitmap over the names' atom indices */
+    uint32_t engine_private_words;
     JSArenaState arena_state;
     const char *rt_info;
 
@@ -571,6 +582,8 @@ struct JSContext {
        - the prototype of Object.prototype is null (always true as it is immutable)
     */
     uint8_t std_array_prototype : 1;
+    /* C functions made while set are the embedder's own */
+    uint8_t host_functions : 1;
 
     JSShape *array_shape;   /* initial shape for Array objects */
     JSShape *arguments_shape;  /* shape for arguments objects */
@@ -867,7 +880,9 @@ typedef struct JSFunctionBytecode {
     uint8_t super_allowed : 1;
     uint8_t arguments_allowed : 1;
     uint8_t backtrace_barrier : 1; /* stop backtrace on this function */
-    /* XXX: 5 bits available */
+    uint8_t is_engine_code : 1; /* compiled from hidden-source host code:
+                                   kept out of stack traces */
+    /* XXX: 4 bits available */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
@@ -1136,6 +1151,10 @@ struct JSObject {
     uint8_t is_uncatchable_error : 1; /* if true, error is not catchable */
     uint8_t tmp_mark : 1; /* used in JS_WriteObjectRec() */
     uint8_t is_HTMLDDA : 1; /* specific annex B IsHtmlDDA behavior */
+    uint8_t is_host_function : 1; /* a C function the embedder made (see
+                                     JS_SetHostFunctionMode) */
+    uint8_t is_immutable_prototype : 1; /* page scripts cannot change its
+                                           [[Prototype]] (JS_SetImmutablePrototype) */
     uint16_t class_id; /* see JS_CLASS_x */
     /* byte offsets: 16/24 */
     JSShape *shape; /* prototype and property names + flag */
@@ -1545,6 +1564,9 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
 static JSAtom JS_ValueToAtomInternal(JSContext *ctx, JSValueConst val,
                                      int flags);
 static JSAtom js_symbol_to_atom(JSContext *ctx, JSValueConst val);
+static JSAtom js_access_atom(JSContext *ctx, JSAtom prop);
+static inline bool js_atom_is_engine_private(JSRuntime *rt, JSAtom atom);
+static void js_free_engine_private_names(JSRuntime *rt);
 static void add_gc_object(JSRuntime *rt, JSGCObjectHeader *h,
                           JSGCObjectTypeEnum type);
 static void remove_gc_object(JSGCObjectHeader *h);
@@ -2671,6 +2693,7 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     rt->in_free = true;
     JS_FreeValueRT(rt, rt->current_exception);
+    js_free_engine_private_names(rt);
 
     list_for_each_safe(el, el1, &rt->job_list) {
         JSJobEntry *e = list_entry(el, JSJobEntry, link);
@@ -2938,6 +2961,8 @@ JSContext *JS_NewContext(JSRuntime *rt)
         JS_FreeContext(ctx);
         return NULL;
     }
+    /* What the embedder adds from here on is its own (JS_IsHostAccess). */
+    ctx->host_functions = true;
 
     return ctx;
 }
@@ -6167,6 +6192,8 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
     p->is_uncatchable_error = 0;
     p->tmp_mark = 0;
     p->is_HTMLDDA = 0;
+    p->is_host_function = 0;
+    p->is_immutable_prototype = 0;
     p->is_prototype = 0;
     p->first_weak_ref = NULL;
     p->u.opaque = NULL;
@@ -6542,6 +6569,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     if (JS_IsException(func_obj))
         return func_obj;
     p = JS_VALUE_GET_OBJ(func_obj);
+    p->is_host_function = ctx->host_functions;
     p->u.cfunc.realm = JS_DupContext(ctx);
     p->u.cfunc.c_function.generic = func;
     p->u.cfunc.length = length;
@@ -6648,6 +6676,279 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     return ret;
 }
 
+/* A native function in ctx's realm that forwards to target: a call passes
+   this and the arguments through, a construct call passes new.target, so
+   the instance takes new.target's prototype. It lets one realm present
+   another realm's JS-implemented functions as its own. */
+static JSValue js_forwarder_call(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic,
+                                 JSValueConst *data)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    (void)magic;
+    if (sf && sf->is_constructor)
+        return JS_CallConstructor2(ctx, data[0], this_val, argc, argv);
+    /* WebIDL: an operation called without a this value works on its own
+       realm's global object, which the target, a function of another
+       realm, would take for its own realm's. */
+    if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
+        return JS_Call(ctx, data[0], ctx->global_obj, argc, argv);
+    return JS_Call(ctx, data[0], this_val, argc, argv);
+}
+
+JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
+                        int length, bool constructor)
+{
+    JSValue f = JS_NewCFunctionData2(ctx, js_forwarder_call, name, 0, 0, 1,
+                                     &target);
+    if (JS_IsException(f))
+        return f;
+    /* The visible length; the record keeps 0 so calls are not padded. */
+    JS_DefinePropertyValue(ctx, f, JS_ATOM_length, js_int32(length),
+                           JS_PROP_CONFIGURABLE);
+    JS_VALUE_GET_OBJ(f)->is_constructor = constructor;
+    return f;
+}
+
+bool JS_IsForwarder(JSValueConst v, JSValue *target)
+{
+    JSObject *p;
+    JSCFunctionDataRecord *s;
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(v);
+    if (p->class_id != JS_CLASS_C_FUNCTION_DATA)
+        return false;
+    s = p->u.opaque;
+    if (!s || s->func != js_forwarder_call)
+        return false;
+    if (target)
+        *target = s->data[0];
+    return true;
+}
+
+JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
+{
+    JSObject *p, *q;
+    JSValue func_obj;
+
+    if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        q = JS_VALUE_GET_OBJ(func_obj);
+        q->u.cfunc.realm = JS_DupContext(ctx);
+        q->u.cfunc.c_function = p->u.cfunc.c_function;
+        q->u.cfunc.length = p->u.cfunc.length;
+        q->u.cfunc.cproto = p->u.cfunc.cproto;
+        q->u.cfunc.magic = p->u.cfunc.magic;
+        q->is_constructor = p->is_constructor;
+        q->is_host_function = p->is_host_function;
+        return func_obj;
+    }
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
+        JSCFunctionDataRecord *src = JS_GetOpaque(func, JS_CLASS_C_FUNCTION_DATA);
+        JSCFunctionDataRecord *dst;
+        int i;
+        if (!src)
+            return JS_UNDEFINED;
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION_DATA);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        dst = js_malloc(ctx, sizeof(*dst) + src->data_len * sizeof(JSValue));
+        if (!dst) {
+            JS_FreeValue(ctx, func_obj);
+            return JS_EXCEPTION;
+        }
+        dst->func = src->func;
+        dst->length = src->length;
+        dst->data_len = src->data_len;
+        dst->magic = src->magic;
+        for (i = 0; i < src->data_len; i++)
+            dst->data[i] = js_dup(src->data[i]);
+        JS_SetOpaqueInternal(func_obj, dst);
+        JS_VALUE_GET_OBJ(func_obj)->is_constructor = p->is_constructor;
+        JS_VALUE_GET_OBJ(func_obj)->is_host_function = p->is_host_function;
+        return func_obj;
+    }
+    return JS_UNDEFINED;
+}
+
+/* Makes obj an immutable prototype exotic object for page scripts, as the
+   global objects of the web platform and the prototypes they inherit are. */
+void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
+{
+    (void)ctx;
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)
+        JS_VALUE_GET_OBJ(obj)->is_immutable_prototype = true;
+}
+
+/* Functions made from now on in ctx are the embedder's own (JS_IsHostAccess). */
+void JS_SetHostFunctionMode(JSContext *ctx, bool on)
+{
+    ctx->host_functions = on;
+}
+
+/* Whether the property access now running is the embedder's: made from C
+   outside any script, by one of the embedder's C functions, or by engine
+   code compiled from hidden source. Page scripts and the built-ins they
+   call are not. */
+static bool js_frames_are_host(JSStackFrame *sf)
+{
+    for (; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(f->class_id))
+            return f->u.func.function_bytecode->is_engine_code;
+        if (f->is_host_function)
+            return true;
+    }
+    return true;
+}
+
+/* Whether fn is the embedder's: one of its C functions or a function
+   compiled from hidden-source engine code. */
+bool JS_IsEngineFunction(JSValueConst fn)
+{
+    JSObject *f;
+    if (JS_VALUE_GET_TAG(fn) != JS_TAG_OBJECT)
+        return false;
+    f = JS_VALUE_GET_OBJ(fn);
+    if (js_class_has_bytecode(f->class_id))
+        return f->u.func.function_bytecode->is_engine_code;
+    return f->is_host_function;
+}
+
+/* Whether the C function now running was called by the embedder rather than
+   by a page script (or a built-in acting for one). */
+bool JS_IsHostCaller(JSContext *ctx)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    return js_frames_are_host(sf ? sf->prev_frame : NULL);
+}
+
+bool JS_IsHostAccess(JSContext *ctx)
+{
+    JSStackFrame *sf;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(f->class_id))
+            return f->u.func.function_bytecode->is_engine_code;
+        if (f->is_host_function)
+            return true;
+        /* a built-in acts for whoever called it */
+    }
+    return true;
+}
+
+static inline bool js_atom_is_engine_private(JSRuntime *rt, JSAtom atom)
+{
+    return rt->engine_private_count && !__JS_AtomIsTaggedInt(atom) &&
+           (atom >> 5) < rt->engine_private_words &&
+           ((rt->engine_private_bits[atom >> 5] >> (atom & 31)) & 1);
+}
+
+/* The atom an access to prop really uses: when the embedder makes it, an
+   engine-private name stands for the embedder's own private name, which
+   page scripts can neither reach nor see; the page's property of that name
+   is a different one. */
+static JSAtom js_access_atom(JSContext *ctx, JSAtom prop)
+{
+    JSRuntime *rt = ctx->rt;
+    int i;
+
+    if (likely(!js_atom_is_engine_private(rt, prop)) || !JS_IsHostAccess(ctx))
+        return prop;
+    for (i = 0; i < rt->engine_private_count; i++)
+        if (rt->engine_private[i].name == prop)
+            return rt->engine_private[i].shadow;
+    return prop;
+}
+
+/* Makes name engine-private in ctx's runtime (see js_access_atom).  Call it
+   before the embedder stores anything under that name. */
+int JS_AddEnginePrivateName(JSContext *ctx, const char *name)
+{
+    JSRuntime *rt = ctx->rt;
+    JSEnginePrivateName *tab;
+    JSAtom atom;
+    JSValue sym;
+    uint32_t words;
+    int i;
+
+    atom = JS_NewAtom(ctx, name);
+    if (atom == JS_ATOM_NULL)
+        return -1;
+    for (i = 0; i < rt->engine_private_count; i++) {
+        if (rt->engine_private[i].name == atom) {
+            JS_FreeAtom(ctx, atom);
+            return 0;
+        }
+    }
+    sym = JS_NewSymbolFromAtom(ctx, atom, JS_ATOM_TYPE_PRIVATE);
+    if (JS_IsException(sym)) {
+        JS_FreeAtom(ctx, atom);
+        return -1;
+    }
+    tab = js_realloc_rt(rt, rt->engine_private,
+                        sizeof(*tab) * (rt->engine_private_count + 1));
+    if (!tab)
+        goto fail;
+    rt->engine_private = tab;
+    words = (atom >> 5) + 1;
+    if (words > rt->engine_private_words) {
+        uint32_t *bits = js_realloc_rt(rt, rt->engine_private_bits,
+                                       sizeof(*bits) * words);
+        if (!bits)
+            goto fail;
+        memset(bits + rt->engine_private_words, 0,
+               sizeof(*bits) * (words - rt->engine_private_words));
+        rt->engine_private_bits = bits;
+        rt->engine_private_words = words;
+    }
+    tab[rt->engine_private_count].name = atom;
+    tab[rt->engine_private_count].shadow = js_symbol_to_atom(ctx, sym);
+    tab[rt->engine_private_count].symbol = sym;
+    rt->engine_private_count++;
+    rt->engine_private_bits[atom >> 5] |= 1u << (atom & 31);
+    return 0;
+ fail:
+    JS_FreeValue(ctx, sym);
+    JS_FreeAtom(ctx, atom);
+    return -1;
+}
+
+static void js_free_engine_private_names(JSRuntime *rt)
+{
+    int i;
+    for (i = 0; i < rt->engine_private_count; i++) {
+        JS_FreeValueRT(rt, rt->engine_private[i].symbol);
+        JS_FreeAtomRT(rt, rt->engine_private[i].name);
+    }
+    js_free_rt(rt, rt->engine_private);
+    js_free_rt(rt, rt->engine_private_bits);
+    rt->engine_private = NULL;
+    rt->engine_private_bits = NULL;
+    rt->engine_private_count = 0;
+    rt->engine_private_words = 0;
+}
+
+int JS_GetClassCount(JSRuntime *rt)
+{
+    return rt->class_count;
+}
+
 JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
                              const char *name,
                              int length, int magic, int data_len,
@@ -6662,6 +6963,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
                                       JS_CLASS_C_FUNCTION_DATA);
     if (JS_IsException(func_obj))
         return func_obj;
+    JS_VALUE_GET_OBJ(func_obj)->is_host_function = ctx->host_functions;
     s = js_malloc(ctx, sizeof(*s) + data_len * sizeof(JSValue));
     if (!s) {
         JS_FreeValue(ctx, func_obj);
@@ -6696,7 +6998,13 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
 
 static JSContext *js_autoinit_get_realm(JSProperty *pr)
 {
-    return (JSContext *)(pr->u.init.realm_and_id & ~3);
+    return (JSContext *)(pr->u.init.realm_and_id & ~7);
+}
+
+/* Whether the embedder defined the property (JS_IsHostAccess). */
+static bool js_autoinit_is_host(JSProperty *pr)
+{
+    return (pr->u.init.realm_and_id & 4) != 0;
 }
 
 static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
@@ -6787,6 +7095,7 @@ JSValue JS_NewCClosure(JSContext *ctx, JSCClosure *func, const char *name,
         JS_CLASS_C_CLOSURE);
     if (JS_IsException(func_obj))
         return func_obj;
+    JS_VALUE_GET_OBJ(func_obj)->is_host_function = ctx->host_functions;
     s = js_malloc(ctx, sizeof(*s));
     if (!s) {
         JS_FreeValue(ctx, func_obj);
@@ -8314,11 +8623,38 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
             backtrace_barrier = b->backtrace_barrier;
         }
 
+        /* Native functions and the host's own hidden-source code are not
+           frames of the page: a stack lists only the page's code, as a
+           browser's never shows its built-in DOM and its own internals. */
+        if (!b || b->is_engine_code) {
+            if (backtrace_barrier)
+                break;
+            continue;
+        }
+
         if (has_prepare) {
             js_new_callsite_data(ctx, &csd[i], sf);
+        } else if (sf->cur_pc &&
+                   ((func_name_str = get_func_name(ctx, sf->cur_func)) == NULL ||
+                    func_name_str[0] == '\0' ||
+                    strcmp(func_name_str, "<eval>") == 0)) {
+            /* An anonymous function or a script's top level: the position
+               alone, as "    at file:line:col". */
+            const char *atom_str;
+            int line_num1, col_num1;
+            uint32_t pc = sf->cur_pc - b->byte_code_buf - 1;
+            JS_FreeCString(ctx, func_name_str);
+            line_num1 = find_line_num(ctx, b, pc, &col_num1);
+            atom_str = b->filename ? JS_AtomToCString(ctx, b->filename) : NULL;
+            dbuf_printf(&dbuf, "    at %s", atom_str ? atom_str : "<anonymous>");
+            JS_FreeCString(ctx, atom_str);
+            if (line_num1 != -1)
+                dbuf_printf(&dbuf, ":%d:%d", line_num1, col_num1);
+            dbuf_putc(&dbuf, '\n');
         } else {
             /* func_name_str is UTF-8 encoded if needed */
-            func_name_str = get_func_name(ctx, sf->cur_func);
+            if (!sf->cur_pc)
+                func_name_str = get_func_name(ctx, sf->cur_func);
             if (!func_name_str || func_name_str[0] == '\0')
                 str1 = "<anonymous>";
             else
@@ -8389,6 +8725,9 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
         JS_FreeValue(ctx, prepare);
         JS_Throw(ctx, saved_exception);
     } else {
+        /* Lines are separated, not terminated, by newlines. */
+        if (dbuf.size > 0 && dbuf.buf[dbuf.size - 1] == '\n')
+            dbuf.size--;
         if (dbuf_error(&dbuf))
             stack = JS_NULL;
         else
@@ -8811,6 +9150,13 @@ static int JS_SetPrototypeInternal(JSContext *ctx, JSValueConst obj,
         }
         return false;
     }
+    if (unlikely(p->is_immutable_prototype) && !JS_IsHostAccess(ctx)) {
+        if (throw_flag) {
+            JS_ThrowTypeError(ctx, "Immutable prototype object cannot have their prototype set");
+            return -1;
+        }
+        return false;
+    }
     if (!p->extensible) {
         if (throw_flag) {
             JS_ThrowTypeError(ctx, "object is not extensible");
@@ -9189,8 +9535,12 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
 
     realm = js_autoinit_get_realm(pr);
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
-    /* 'func' shall not modify the object properties 'pr' */
+    /* 'func' shall not modify the object properties 'pr'; what it makes
+       belongs to whoever defined the property, whenever it is first used */
+    bool host_functions = realm->host_functions;
+    realm->host_functions = js_autoinit_is_host(pr);
     val = func(realm, p, prop, pr->u.init.opaque);
+    realm->host_functions = host_functions;
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = JS_UNDEFINED;
@@ -9207,6 +9557,7 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                                       JSAtom prop, JSValueConst this_obj,
                                       bool throw_ref_error)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     JSProperty *pr;
     JSShapeProperty *prs;
@@ -10006,6 +10357,7 @@ retry:
 static int JS_GetOwnPropertyInternal(JSContext *ctx, JSPropertyDescriptor *desc,
                                      JSObject *p, JSAtom prop)
 {
+    prop = js_access_atom(ctx, prop);
     return JS_GetOwnPropertyInternal2(ctx, desc, p, prop, NULL);
 }
 
@@ -10065,6 +10417,7 @@ int JS_PreventExtensions(JSContext *ctx, JSValueConst obj)
 /* return -1 if exception otherwise true or false */
 int JS_HasProperty(JSContext *ctx, JSValueConst obj, JSAtom prop)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     int ret;
     JSValue obj1;
@@ -10430,6 +10783,7 @@ static no_inline __exception int convert_fast_array_to_array(JSContext *ctx,
 
 static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
 {
+    atom = js_access_atom(ctx, atom);
     JSShape *sh;
     JSShapeProperty *pr, *lpr, *prop;
     JSProperty *pr1;
@@ -10730,6 +11084,7 @@ static void js_free_desc(JSContext *ctx, JSPropertyDescriptor *desc)
 static int JS_SetPropertyInternal2(JSContext *ctx, JSValueConst obj, JSAtom prop,
                                    JSValue val, JSValueConst this_obj, int flags)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p, *p1;
     JSShapeProperty *prs;
     JSProperty *pr;
@@ -10990,6 +11345,14 @@ static int JS_SetPropertyInternal(JSContext *ctx, JSValueConst obj, JSAtom prop,
                                   JSValue val, int flags)
 {
     return JS_SetPropertyInternal2(ctx, obj, prop, val, obj, flags);
+}
+
+/* [[Set]] of prop on obj with receiver as the object being assigned to, as
+   Reflect.set does it; takes val. */
+int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                           JSValue val, JSValueConst receiver, int flags)
+{
+    return JS_SetPropertyInternal2(ctx, obj, prop, val, receiver, flags);
 }
 
 int JS_SetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop, JSValue val)
@@ -11403,6 +11766,7 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
                       JSAtom prop, JSValueConst val,
                       JSValueConst getter, JSValueConst setter, int flags)
 {
+    prop = js_access_atom(ctx, prop);
     JSObject *p;
     JSShapeProperty *prs;
     JSProperty *pr;
@@ -11687,9 +12051,11 @@ static int JS_DefineAutoInitProperty(JSContext *ctx, JSValueConst this_obj,
     if (unlikely(!pr))
         return -1;
     pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx);
-    assert((pr->u.init.realm_and_id & 3) == 0);
+    assert((pr->u.init.realm_and_id & 7) == 0);
     assert(id <= 3);
     pr->u.init.realm_and_id |= id;
+    if (ctx->host_functions)
+        pr->u.init.realm_and_id |= 4;
     pr->u.init.opaque = opaque;
     return true;
 }
@@ -19893,7 +20259,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-1];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     for(;;) {
                         prs = find_own_property(&pr, p, atom);
@@ -19941,7 +20308,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-1];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     for(;;) {
                         prs = find_own_property(&pr, p, atom);
@@ -19989,7 +20357,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 pc += 4;
 
                 obj = sp[-2];
-                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)) {
+                if (likely(JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) &&
+                    likely(!js_atom_is_engine_private(ctx->rt, atom))) {
                     p = JS_VALUE_GET_OBJ(obj);
                     prs = find_own_property(&pr, p, atom);
                     if (!prs)
@@ -22718,6 +23087,7 @@ typedef struct JSFunctionDef {
     bool is_derived_class_constructor : 1;
     bool in_function_body : 1;
     bool backtrace_barrier : 1;
+    bool is_engine_code : 1;
     bool need_home_object : 1;
     bool use_short_opcodes : 1; /* true if short opcodes are used in byte_code */
     bool has_await : 1; /* true if await is used (used in module eval) */
@@ -33535,6 +33905,7 @@ static JSFunctionDef *js_new_function_def(JSContext *ctx,
         list_add_tail(&fd->link, &parent->child_list);
         fd->is_strict_mode = parent->is_strict_mode;
         fd->parent_scope_level = parent->scope_level;
+        fd->is_engine_code = parent->is_engine_code;
     }
 
     fd->is_eval = is_eval;
@@ -37707,6 +38078,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->super_allowed = fd->super_allowed;
     b->arguments_allowed = fd->arguments_allowed;
     b->backtrace_barrier = fd->backtrace_barrier;
+    b->is_engine_code = fd->is_engine_code;
     b->realm = JS_DupContext(ctx);
 
     add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
@@ -38780,6 +39152,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fd->eval_type = eval_type;
     fd->has_this_binding = (eval_type != JS_EVAL_TYPE_DIRECT);
     fd->backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+    fd->is_engine_code = s->hide_source;
     if (eval_type == JS_EVAL_TYPE_DIRECT) {
         fd->new_target_allowed = b->new_target_allowed;
         fd->super_call_allowed = b->super_call_allowed;
@@ -39382,6 +39755,8 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     bc_set_flags(&flags, &idx, b->arguments_allowed, 1);
     bc_set_flags(&flags, &idx, b->backtrace_barrier, 1);
     bc_set_flags(&flags, &idx, s->allow_debug, 1);
+    /* engine code stays engine code through a bytecode cache */
+    bc_set_flags(&flags, &idx, b->is_engine_code, 1);
     assert(idx <= 16);
     bc_put_u16(s, flags);
     bc_put_u8(s, b->is_strict_mode);
@@ -40314,6 +40689,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
     bc.arguments_allowed = bc_get_flags(v16, &idx, 1);
     bc.backtrace_barrier = bc_get_flags(v16, &idx, 1);
     has_debug_info = bc_get_flags(v16, &idx, 1);
+    bc.is_engine_code = bc_get_flags(v16, &idx, 1);
     if (bc_get_u8(s, &v8))
         goto fail;
     bc.is_strict_mode = (v8 > 0);
@@ -43280,11 +43656,6 @@ static const JSCFunctionListEntry js_function_proto_funcs[] = {
     JS_CFUNC_DEF("bind", 1, js_function_bind ),
     JS_CFUNC_DEF("toString", 0, js_function_toString ),
     JS_CFUNC_DEF("[Symbol.hasInstance]", 1, js_function_hasInstance ),
-    JS_CGETSET_DEF("fileName", js_function_proto_fileName, NULL ),
-    JS_CGETSET_MAGIC_DEF("lineNumber", js_function_proto_int32, NULL,
-                         offsetof(JSFunctionBytecode, line_num)),
-    JS_CGETSET_MAGIC_DEF("columnNumber", js_function_proto_int32, NULL,
-                         offsetof(JSFunctionBytecode, col_num)),
 };
 
 /* Error class */
