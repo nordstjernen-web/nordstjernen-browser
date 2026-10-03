@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* A page that registers one custom property with `@property` no longer
+  makes every element that sets its own custom properties copy all the
+  inherited ones. YouTube registers one and carries 1361 variables, so each
+  forced layout on the watch page took 444 ms; it now takes 56 ms.
 * On macOS the sandboxed renderer can create its profile directories when
   their parents do not exist yet, so history and IndexedDB work on a fresh
   profile (before, every `indexedDB.open()` failed with `UnknownError`).
