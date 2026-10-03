@@ -1153,8 +1153,11 @@ void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
 void ns_css_append_unescaped(GString *out, const char **pp);
 
+/* sheet_docs, when not NULL, holds the document of each author sheet; a
+   sheet then styles the elements of its own document only. */
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
+                           const ns_node *const    *sheet_docs,
                            gsize                     n_sheets);
 void ns_css_selector_cache_begin(void);
 void ns_css_selector_cache_end(void);
