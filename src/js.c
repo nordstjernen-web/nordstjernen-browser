@@ -4503,6 +4503,17 @@ ns_html_tag_has_plain_interface(const char *lower_name)
                    ns_cmp_tag_name) != NULL;
 }
 
+/* The prototype of an element of a namespace other than HTML and SVG:
+ * MathMLElement's for MathML, Element's for the rest. */
+static JSValue
+ns_foreign_kind_proto(ns_js *js, const ns_node *node)
+{
+    const char *ns = ns_element_get_attr(node, "data-nd-ns-uri");
+    gboolean mathml = ns && strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0;
+    return mathml && JS_IsObject(js->proto_mathmlelement)
+        ? js->proto_mathmlelement : js->proto_element;
+}
+
 static JSValue
 ns_node_kind_proto(ns_js *js, const ns_node *node)
 {
@@ -4517,7 +4528,7 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
                 ? js->proto_svgelement : js->proto_element;
         }
         if (node->flags & NS_NODE_FOREIGN_NS)
-            return js->proto_element;
+            return ns_foreign_kind_proto(js, node);
         if (node->name && js->per_tag_protos) {
             char lower[32];
             gsize n = strlen(node->name);
@@ -54717,6 +54728,7 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
         "Comment", "CDATASection", "ProcessingInstruction", "Document",
         "HTMLDocument", "XMLDocument", "DocumentFragment", "ShadowRoot",
         "DocumentType", "Attr", "SVGElement", "SVGAElement", "SVGSVGElement",
+        "MathMLElement",
         "Event", "UIEvent", "MouseEvent", "KeyboardEvent", "FocusEvent",
         "InputEvent", "CompositionEvent", "TextEvent", "TouchEvent",
         "PointerEvent", "WheelEvent", "DragEvent", "CustomEvent",
@@ -54969,6 +54981,30 @@ static const char ns_element_shapes_src[] =
         "onwebkittransitionend onwheel outerText popover showPopover "
         "spellcheck style tabIndex title togglePopover translate "
         "virtualKeyboardPolicy writingSuggestions',"
+        "  MathMLElement: 'attributeStyleMap autofocus blur dataset focus focusGroup "
+        "focusGroupStart nonce onabort onanimationcancel onanimationend "
+        "onanimationiteration onanimationstart onauxclick onbeforeinput "
+        "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel "
+        "oncanplay oncanplaythrough onchange onclick onclose oncommand "
+        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
+        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
+        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
+        "ondurationchange onemptied onended onerror onfocus onformdata "
+        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
+        "onload onloadeddata onloadedmetadata onloadstart "
+        "onlostpointercapture onmousedown onmouseenter onmouseleave "
+        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
+        "onpause onplay onplaying onpointercancel onpointerdown "
+        "onpointerenter onpointerleave onpointermove onpointerout "
+        "onpointerover onpointerrawupdate onpointerup onprogress "
+        "onratechange onreset onresize onscroll onscrollend "
+        "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation "
+        "onseeked onseeking onselect onselectionchange onselectstart "
+        "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle "
+        "ontransitioncancel ontransitionend ontransitionrun "
+        "ontransitionstart onvolumechange onwaiting onwebkitanimationend "
+        "onwebkitanimationiteration onwebkitanimationstart "
+        "onwebkittransitionend onwheel style tabIndex',"
         "  SVGElement: 'LENGTHADJUST_SPACING LENGTHADJUST_SPACINGANDGLYPHS "
         "LENGTHADJUST_UNKNOWN SVG_CHANNEL_A SVG_CHANNEL_B SVG_CHANNEL_G "
         "SVG_CHANNEL_R SVG_CHANNEL_UNKNOWN SVG_EDGEMODE_DUPLICATE "
@@ -55246,6 +55282,7 @@ static const char ns_element_shapes_src[] =
     "  });"
     "  down('HTMLElement', [E]);"
     "  down('SVGElement', [E, H]);"
+    "  down('MathMLElement', [E, H]);"
     "  down('SVGSVGElement', [E]);"
     "  down('SVGAElement', [E]);"
     "  ['Element', 'HTMLElement'].forEach(function(n){"
@@ -55523,6 +55560,20 @@ ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
     JS_FreeAtom(ctx, atom);
 }
 
+/* MathMLElement extends Element and has the dataset of HTMLOrSVGElement; the
+ * rest of its members are moved down from Element by the element shapes. */
+static JSValue
+ns_install_mathml_proto(JSContext *ctx, JSValueConst global,
+                        JSValueConst elem_proto)
+{
+    ns_chain_proto(ctx, global, "MathMLElement", elem_proto);
+    JSValue proto = ns_proto_of(ctx, global, "MathMLElement");
+    if (JS_IsObject(proto))
+        ns_proto_define_getset(ctx, proto, "dataset",
+                               ns_element_get_dataset, NULL);
+    return proto;
+}
+
 static void
 ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
 {
@@ -55637,6 +55688,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(svg_proto))
         ns_proto_define_getset(ctx, svg_proto, "dataset",
                                ns_element_get_dataset, NULL);
+    JSValue mathml_proto = ns_install_mathml_proto(ctx, global, elem_proto);
 
     JSValue chardata_proto = ns_proto_of(ctx, global, "CharacterData");
     if (JS_IsObject(chardata_proto)) {
@@ -55695,6 +55747,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     js->proto_htmlelement = htmlelem_proto;
     js->proto_svgelement  = svg_proto;
     js->proto_svgaelement = svga_proto;
+    js->proto_mathmlelement = mathml_proto;
     js->proto_chardata    = chardata_proto;
     js->proto_text        = text_proto;
     js->proto_comment     = comment_proto;
@@ -56819,7 +56872,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
         { "HTMLElement", 0 }, { "SVGElement", 0 }, { "SVGAElement", 0 },
-        { "SVGSVGElement", 0 },
+        { "SVGSVGElement", 0 }, { "MathMLElement", 0 },
         { "HTMLDocument", 0 },
         { "Window", 0 },
     };
@@ -61059,7 +61112,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_install_tostringtag(ctx, global);
     {
         static const char *const on_targets[] = {
-            "HTMLElement", "SVGElement", "Document", "Window",
+            "HTMLElement", "SVGElement", "MathMLElement", "Document", "Window",
         };
         for (gsize i = 0; i < G_N_ELEMENTS(on_targets); i++) {
             JSValue p = ns_proto_of(ctx, global, on_targets[i]);
@@ -61392,6 +61445,7 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_htmlelement);
         JS_FreeValue(js->ctx, js->proto_svgelement);
         JS_FreeValue(js->ctx, js->proto_svgaelement);
+        JS_FreeValue(js->ctx, js->proto_mathmlelement);
         JS_FreeValue(js->ctx, js->proto_chardata);
         JS_FreeValue(js->ctx, js->proto_text);
         JS_FreeValue(js->ctx, js->proto_comment);
