@@ -361,6 +361,10 @@ Changelog:
 
 1.0.28:
 ======
+* `Map` and `Set` with number keys are fast again. Small integers hashed to a
+  handful of buckets, so a `Set` of a few thousand numbers searched long
+  chains on every `add`/`has`/`set` (100,000 operations took about 180 ms,
+  now about 5 ms).
 * Pages with container queries restyle incrementally again: after a small
   DOM change only the affected elements get new styles, instead of all of
   them. Incremental restyle was turned off whenever container sizes were in
