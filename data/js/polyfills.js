@@ -776,7 +776,6 @@
     }
     blobGetter(File.prototype, 'name', function () { return fileBrand(this).__ndFileName; });
     blobGetter(File.prototype, 'lastModified', function () { return fileBrand(this).__ndFileMtime; });
-    blobGetter(File.prototype, 'lastModifiedDate', function () { return new Date(fileBrand(this).__ndFileMtime); });
     blobGetter(File.prototype, 'webkitRelativePath', function () { fileBrand(this); return ''; });
     Object.defineProperty(File.prototype, Symbol.toStringTag, {
         value: 'File', configurable: true
