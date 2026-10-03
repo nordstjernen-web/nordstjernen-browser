@@ -194,7 +194,6 @@ Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal ·
 [![windows](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/windows.yml)
 [![android](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/android.yml)
 [![java](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml)
-[![codeql](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/codeql.yml/badge.svg)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/codeql.yml)
 [![Semgrep](https://img.shields.io/badge/semgrep-scan-success?logo=semgrep)](https://semgrep.dev/orgs/nordstjerna/projects/6111979)
 
 <img src="docs/best-viewed-in-nordstjernen.gif" alt="Best viewed in Nordstjernen" width="140">
