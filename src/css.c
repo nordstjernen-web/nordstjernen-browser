@@ -30493,8 +30493,10 @@ ns_merged_style_key_free(gpointer data)
     g_free(k);
 }
 
+static guint64 g_merged_style_pass_start;
+
 static void
-ns_merged_style_cache_trim(void)
+ns_merged_style_cache_trim(guint64 keep_after)
 {
     if (!g_merged_style_cache ||
         g_hash_table_size(g_merged_style_cache) <= 64)
@@ -30506,6 +30508,7 @@ ns_merged_style_cache_trim(void)
         g_hash_table_iter_init(&it, g_merged_style_cache);
         while (g_hash_table_iter_next(&it, &key, &value)) {
             ns_merged_style_cached *entry = value;
+            if (entry->stamp > keep_after) continue;
             if (entry->stamp < oldest) {
                 oldest = entry->stamp;
                 victim = key;
@@ -30545,7 +30548,8 @@ ns_css_style_element_cache_begin(void)
     if (g_css_relayout_depth > 1) return;
     if (g_style_el_cache && g_hash_table_size(g_style_el_cache) > 2048)
         g_hash_table_remove_all(g_style_el_cache);
-    ns_merged_style_cache_trim();
+    ns_merged_style_cache_trim(G_MAXUINT64);
+    g_merged_style_pass_start = g_merged_style_cache_clock;
     if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 256)
         g_hash_table_remove_all(g_link_sheet_cache);
     if (g_import_sheet_cache && g_hash_table_size(g_import_sheet_cache) > 256)
@@ -30587,7 +30591,7 @@ void
 ns_css_style_element_cache_end(void)
 {
     if (g_css_relayout_depth > 1) return;
-    ns_merged_style_cache_trim();
+    ns_merged_style_cache_trim(g_merged_style_pass_start);
 }
 
 ns_css_stylesheet *

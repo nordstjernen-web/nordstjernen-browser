@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* A page with many shadow roots no longer crashes the renderer. The cache of
+  parsed `<style>` sheets dropped its oldest entries when it grew past 64,
+  even sheets the relayout in progress was still using (Speedometer's
+  TodoMVC-WebComponents crashed as soon as it added its items).
 * A style sheet styles only its own document. The page's rules no longer
   apply to the elements of its frames, and a frame's `<link>` style sheets no
   longer apply to the page.
