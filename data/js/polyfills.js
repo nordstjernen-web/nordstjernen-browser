@@ -3078,7 +3078,7 @@
                 var c = compareEncoded(a[keyName], b[keyName]);
                 if (!c && a.primaryKey && b.primaryKey)
                     c = compareEncoded(a.primaryKey, b.primaryKey);
-                return direction && direction.indexOf('prev') === 0 ? -c : c;
+                return c;
             });
             if (direction === 'nextunique' || direction === 'prevunique') {
                 var out = [], last = null;
@@ -3090,6 +3090,7 @@
                 }
                 records = out;
             }
+            if (direction && direction.indexOf('prev') === 0) records.reverse();
             return records;
         }
 
