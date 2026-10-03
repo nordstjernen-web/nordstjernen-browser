@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* A grid item that spans a `1fr` row in a grid without a set height grows
+  only that row, not the `min-content` rows it also spans. Wikipedia's
+  Appearance sidebar spans the title, tab bar and article rows, and pushed
+  large blank gaps above and below the Article/Talk tabs.
 * A page with many shadow roots no longer crashes the renderer. The cache of
   parsed `<style>` sheets dropped its oldest entries when it grew past 64,
   even sheets the relayout in progress was still using (Speedometer's

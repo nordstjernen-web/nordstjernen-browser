@@ -11553,6 +11553,7 @@ layout_grid(ns_box *box, double cw,
     double *row_height = g_new0(double, n_rows + 1);
     gboolean *row_fixed = g_new0(gboolean, n_rows + 1);
     gboolean *row_flex = g_new0(gboolean, n_rows + 1);
+    double *row_fr = g_new0(double, n_rows + 1);
     for (int r = 0; r < n_rows; r++) {
         double fixed = 0;
         const ns_css_track *tk = NULL;
@@ -11574,6 +11575,7 @@ layout_grid(ns_box *box, double cw,
                            (definite_rows && flex && tk->has_min &&
                             !track_is_intrinsic(tk->min_kind));
             row_flex[r] = definite_rows && flex;
+            if (flex) row_fr[r] = tk->v > 0 ? tk->v : 1;
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
@@ -11590,7 +11592,7 @@ layout_grid(ns_box *box, double cw,
         for (int k = 0; k < rs; k++) {
             used += row_height[row + k];
             if (!row_fixed[row + k]) growable++;
-            if (row_flex[row + k]) crosses_flex = TRUE;
+            if (row_flex[row + k] || row_fr[row + k] > 0) crosses_flex = TRUE;
         }
         if (crosses_flex && rs > 1) continue;
         if (item_outer > used && growable > 0) {
@@ -11599,8 +11601,25 @@ layout_grid(ns_box *box, double cw,
                 if (!row_fixed[row + k]) row_height[row + k] += add;
         }
     }
+    for (guint i = 0; i < items->len && !definite_rows; i++) {
+        int row = g_array_index(placed_rows, int, i);
+        int rs = g_array_index(row_spans, int, i);
+        if (row < 0 || row >= n_rows || rs < 2) continue;
+        if (row + rs > n_rows) rs = n_rows - row;
+        double item_outer = g_array_index(item_heights, double, i);
+        double used = row_gap * (rs - 1);
+        double fr_total = 0;
+        for (int k = 0; k < rs; k++) {
+            used += row_height[row + k];
+            fr_total += row_fr[row + k];
+        }
+        if (fr_total <= 0 || item_outer <= used) continue;
+        for (int k = 0; k < rs; k++)
+            row_height[row + k] += (item_outer - used) * row_fr[row + k] / fr_total;
+    }
     g_free(row_fixed);
     g_free(row_flex);
+    g_free(row_fr);
 
     if (!rows_subgrid && row_basis > 0 && n_rows > 0) {
         double over = (n_rows > 1 ? row_gap * (n_rows - 1) : 0) - row_basis;
