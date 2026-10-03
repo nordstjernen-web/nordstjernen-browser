@@ -3,6 +3,20 @@ Changelog:
 
 1.0.28:
 ======
+* The browser window has a new, flatter look that follows the light or
+  dark desktop theme. The old toolbar stayed light with black text on a
+  dark desktop, and the active tab drew white text on a near-white tab.
+  Tabs now sit in the title bar at full width, and the selected tab joins
+  the toolbar below it. The toolbar has round icon buttons drawn for
+  Nordstjernen (Back, Forward, Reload, Home, Bookmarks, Downloads, Menu),
+  Reload turns into Stop while a page loads, and each tab shows a spinner
+  while its page loads, so the address bar no longer jumps when loading
+  starts. The address bar is a rounded field with a lock or warning icon,
+  the Nordstjernen mark on built-in pages and a star that bookmarks the
+  page. Private tabs and the toolbar above them are tinted purple, the zoom
+  level is a pill next to the address, and the find bar, status bubble and
+  window buttons are rounded to match. Print stays in the menu and on
+  Ctrl+P, and tabs shrink when many are open.
 * Switching tabs updates the tab strip, the address bar, the window title
   and the Back and Forward buttons for the tab you switch to. The shell
   read the current tab before GTK had changed it, so after a click on a

@@ -4426,8 +4426,6 @@ build_search_bar(NsProcView *v)
 {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_add_css_class(box, "toolbar");
-    gtk_widget_set_margin_top(box, 6);
-    gtk_widget_set_margin_end(box, 6);
 
     v->search_entry = gtk_search_entry_new();
     gtk_widget_set_size_request(v->search_entry, 220, -1);
@@ -4466,6 +4464,7 @@ build_search_bar(NsProcView *v)
     gtk_box_append(GTK_BOX(box), close);
 
     GtkWidget *frame = gtk_frame_new(NULL);
+    gtk_widget_add_css_class(frame, "ns-findbar");
     gtk_frame_set_child(GTK_FRAME(frame), box);
 
     v->search_revealer = gtk_revealer_new();
@@ -4474,6 +4473,8 @@ build_search_bar(NsProcView *v)
     gtk_revealer_set_child(GTK_REVEALER(v->search_revealer), frame);
     gtk_widget_set_halign(v->search_revealer, GTK_ALIGN_END);
     gtk_widget_set_valign(v->search_revealer, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(v->search_revealer, 8);
+    gtk_widget_set_margin_end(v->search_revealer, 20);
     gtk_overlay_add_overlay(GTK_OVERLAY(v->overlay), v->search_revealer);
 }
 
