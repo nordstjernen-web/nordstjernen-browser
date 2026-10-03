@@ -468,6 +468,8 @@ typedef struct {
     gboolean    strict_css_mime;
     gboolean    media_seen;
     int         frame_depth;   /* inside a frame's document when > 0 */
+    GPtrArray  *docs;          /* the document of each sheet in out, or NULL */
+    ns_node    *doc;           /* the document whose sheets are collected */
 } sheet_collect_ctx;
 
 /* Whether a <style> or <link> sits in its document's <head>, which makes
@@ -497,6 +499,17 @@ sheet_run_flush(sheet_collect_ctx *cc)
     }
     g_string_set_size(cc->run, 0);
     cc->run_base = NULL;
+}
+
+/* The sheets added since the last call are those of the document being
+ * walked. */
+static void
+sheet_docs_sync(sheet_collect_ctx *cc)
+{
+    sheet_run_flush(cc);
+    if (!cc->docs) return;
+    while (cc->docs->len < cc->out->len)
+        g_ptr_array_add(cc->docs, cc->doc);
 }
 
 static double
@@ -667,6 +680,29 @@ link_sheet_enabled(const ns_node *link)
            sheet_type_is_css(ns_element_get_attr(link, "type"));
 }
 
+static void collect_stylesheets_walk(ns_node *n, const char *base_url,
+                                     sheet_collect_ctx *cc, int depth);
+
+/* A frame's document has sheets of its own, which style its elements only
+ * (CSSOM: a CSS style sheet belongs to the document of its owner node). */
+static void
+collect_frame_children(ns_node *frame, const char *base_url,
+                       sheet_collect_ctx *cc, int depth)
+{
+    for (ns_node *c = frame->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_DOCUMENT) {
+            collect_stylesheets_walk(c, base_url, cc, depth + 1);
+            continue;
+        }
+        sheet_docs_sync(cc);
+        ns_node *outer = cc->doc;
+        cc->doc = c;
+        collect_stylesheets_walk(c, base_url, cc, depth + 1);
+        sheet_docs_sync(cc);
+        cc->doc = outer;
+    }
+}
+
 static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
@@ -688,8 +724,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             cc->media_seen = FALSE;
             ns_css_media_viewport_push(fw, fh);
             cc->frame_depth++;
-            for (ns_node *c = n->first_child; c; c = c->next_sibling)
-                collect_stylesheets_walk(c, base_url, cc, depth + 1);
+            collect_frame_children(n, base_url, cc, depth);
             sheet_run_flush(cc);
             cc->frame_depth--;
             gboolean frame_media = cc->media_seen;
@@ -770,7 +805,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
 
 void
 ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
-                              GPtrArray *out, GHashTable *css_cache)
+                              GPtrArray *out, GPtrArray *out_docs,
+                              GHashTable *css_cache)
 {
     if (!g_collect_frame_vp)
         g_collect_frame_vp = g_hash_table_new_full(g_direct_hash, g_direct_equal,
@@ -782,9 +818,10 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
         .run = g_string_new(NULL), .run_base = NULL,
         .top_url = base_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
+        .docs = out_docs, .doc = doc,
     };
     collect_stylesheets_walk(doc, base_url, &cc, 0);
-    sheet_run_flush(&cc);
+    sheet_docs_sync(&cc);
     g_string_free(cc.run, TRUE);
     ns_css_style_element_cache_end();
 }
@@ -798,16 +835,19 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
     ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
-    ns_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
+    GPtrArray *sheet_docs = g_ptr_array_new();
+    ns_engine_collect_stylesheets(doc, base_url, page_sheets, sheet_docs,
+                                  css_cache);
     if (anim)
         for (guint i = 0; i < page_sheets->len; i++)
             ns_anim_load_from_stylesheet(anim, g_ptr_array_index(page_sheets, i));
     GHashTable *styles = ns_css_compute(doc,
         (const ns_css_stylesheet *const *)page_sheets->pdata,
-        page_sheets->len);
+        (const ns_node *const *)sheet_docs->pdata, page_sheets->len);
     for (guint i = 0; i < page_sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
     g_ptr_array_free(page_sheets, TRUE);
+    g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
     return styles;
 }
@@ -826,11 +866,13 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
     ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *sheets = g_ptr_array_new();
-    ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
+    GPtrArray *sheet_docs = g_ptr_array_new();
+    ns_engine_collect_stylesheets(doc, base_url, sheets, sheet_docs, css_cache);
 
     ns_render_ctx rc = {
         .doc             = doc,
         .sheets          = (const ns_css_stylesheet *const *)sheets->pdata,
+        .sheet_docs      = (const ns_node *const *)sheet_docs->pdata,
         .n_sheets        = sheets->len,
         .viewport_width  = (double)viewport_width,
         .viewport_height = viewport_height > 0 ? viewport_height
@@ -885,10 +927,13 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
         for (guint i = 0; i < sheets->len; i++)
             ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
         g_ptr_array_set_size(sheets, 0);
+        g_ptr_array_set_size(sheet_docs, 0);
         ns_css_style_element_cache_begin();
-        ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
-        rc.sheets   = (const ns_css_stylesheet *const *)sheets->pdata;
-        rc.n_sheets = sheets->len;
+        ns_engine_collect_stylesheets(doc, base_url, sheets, sheet_docs,
+                                      css_cache);
+        rc.sheets     = (const ns_css_stylesheet *const *)sheets->pdata;
+        rc.sheet_docs = (const ns_node *const *)sheet_docs->pdata;
+        rc.n_sheets   = sheets->len;
         styles = ns_render_relayout(&rc, out_layout);
     }
     ns_engine_perf_add_relayout(g_get_monotonic_time() - relayout_t0);
@@ -898,6 +943,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
     for (guint i = 0; i < sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
     g_ptr_array_free(sheets, TRUE);
+    g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
     return styles;
 }
@@ -908,7 +954,7 @@ ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
 {
     if (!anim) return;
     GPtrArray *sheets = g_ptr_array_new();
-    ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
+    ns_engine_collect_stylesheets(doc, base_url, sheets, NULL, css_cache);
     for (guint i = 0; i < sheets->len; i++) {
         const ns_css_stylesheet *sh = g_ptr_array_index(sheets, i);
         if (sh) ns_anim_load_from_stylesheet(anim, sh);

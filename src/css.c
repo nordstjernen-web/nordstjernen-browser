@@ -29643,6 +29643,42 @@ frame_viewport_from_style(const ns_style *s, double *w, double *h)
     return TRUE;
 }
 
+/* The sheets of each document, when the caller of ns_css_compute() says
+ * whose each sheet is. */
+static __thread GHashTable *g_doc_sheets;
+
+static GHashTable *
+doc_sheets_new(const ns_css_stylesheet *const *sheets,
+               const ns_node *const *docs, gsize n)
+{
+    if (!docs) return NULL;
+    GHashTable *map = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                            NULL,
+                                            (GDestroyNotify)g_ptr_array_unref);
+    for (gsize i = 0; i < n; i++) {
+        GPtrArray *own = g_hash_table_lookup(map, docs[i]);
+        if (!own) {
+            own = g_ptr_array_new();
+            g_hash_table_insert(map, (gpointer)docs[i], own);
+        }
+        g_ptr_array_add(own, (gpointer)sheets[i]);
+    }
+    return map;
+}
+
+/* The elements of a document are styled by its own sheets only, not by
+ * those of the document its frame is in, nor by those of its frames'
+ * documents. */
+static void
+doc_own_sheets(const ns_node *node, const ns_css_stylesheet *const **author,
+               gsize *n_author)
+{
+    if (!g_doc_sheets || node->kind != NS_NODE_DOCUMENT) return;
+    const GPtrArray *own = g_hash_table_lookup(g_doc_sheets, node);
+    *author = own ? (const ns_css_stylesheet *const *)own->pdata : NULL;
+    *n_author = own ? own->len : 0;
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -29673,6 +29709,7 @@ cascade_walk(ns_node *node,
             frame_viewport = TRUE;
         }
     }
+    doc_own_sheets(node, &author, &n_author);
     const ns_style *child_parent_style = parent_style;
     const ns_style *child_layout_parent = layout_parent;
     gboolean nd_recurse_dirty = under_dirty;
@@ -30694,6 +30731,7 @@ ns_css_stylesheet_from_style_element_cached(ns_node *style)
 GHashTable *
 ns_css_compute(ns_node *doc,
                const ns_css_stylesheet *const *author_sheets,
+               const ns_node *const *sheet_docs,
                gsize n_sheets)
 {
     GHashTable *out = g_hash_table_new_full(g_direct_hash, g_direct_equal,
@@ -30781,8 +30819,12 @@ ns_css_compute(ns_node *doc,
 
     memset(g_ancestor_filter, 0, sizeof g_ancestor_filter);
     g_ancestor_filter_active = TRUE;
+    GHashTable *outer_doc_sheets = g_doc_sheets;
+    g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
                  &root_px, layer_ranks, out, FALSE);
+    g_clear_pointer(&g_doc_sheets, g_hash_table_destroy);
+    g_doc_sheets = outer_doc_sheets;
     g_ancestor_filter_active = FALSE;
     g_ancestor_filter_subject = NULL;
 

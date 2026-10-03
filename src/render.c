@@ -550,7 +550,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         cache_selectors = ns_css_stylesheet_has_container_rules(c->sheets[i]) ||
                           ns_css_stylesheet_has_container_units(c->sheets[i]);
     if (cache_selectors) ns_css_selector_cache_begin();
-    GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+    GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->sheet_docs, c->n_sheets);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 
     render_style_pass(c, styles);
@@ -597,7 +597,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_css_set_container_map(containers);
         ns_css_container_features_begin();
         gint64 t4 = profile ? g_get_monotonic_time() : 0;
-        GHashTable *styles2 = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+        GHashTable *styles2 = ns_css_compute(c->doc, c->sheets, c->sheet_docs, c->n_sheets);
         gint64 t5 = profile ? g_get_monotonic_time() : 0;
         gboolean container_features_used = ns_css_container_features_used();
         ns_css_set_container_map(NULL);
