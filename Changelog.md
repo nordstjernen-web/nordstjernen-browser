@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* Switching tabs updates the tab strip, the address bar, the window title
+  and the Back and Forward buttons for the tab you switch to. The shell
+  read the current tab before GTK had changed it, so after a click on a
+  tab, Ctrl+Tab or Ctrl+Page Down these kept showing the tab you left.
 * Content too wide for a centred line starts at the line's start and
   overflows the end edge, as CSS Text says, instead of being centred with its
   start cut off. reCAPTCHA's image challenge showed every tile one column off
