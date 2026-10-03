@@ -1673,7 +1673,7 @@ ns_doc_index_bucket_free(gpointer p)
     g_free(b);
 }
 
-static int
+int
 ns_node_document_order_cmp(const ns_node *a, const ns_node *b)
 {
     if (a == b) return 0;
