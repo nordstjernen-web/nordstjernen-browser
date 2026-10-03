@@ -3,6 +3,11 @@ Changelog:
 
 1.0.28:
 ======
+* Pages with container queries relayout in one pass instead of two when no
+  container changed size: the previous relayout's container sizes are used
+  for the first cascade and checked against the new layout, and only a
+  change in a container's size or position among its siblings runs the second
+  pass. Google's results page ran the second pass on 44 of its 45 relayouts.
 * Constructed style sheets adopted by a shadow root style it again. The
   engine scopes them like a `<style>` at the end of that shadow root, so
   `:host` works, `innerHTML` set later no longer drops them,
