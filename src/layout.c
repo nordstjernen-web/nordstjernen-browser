@@ -6748,8 +6748,10 @@ static void
 inline_atomic_hit_point(const ns_box *owner, const ns_inline_atomic *atomic,
                         double x, double y, double *child_x, double *child_y)
 {
-    double dx = owner->x + atomic->owner_offset_x - atomic->box->x;
-    double dy = owner->y + atomic->owner_offset_y - atomic->box->y;
+    double dx = owner->x + atomic->owner_offset_x + atomic->box->rel_dx -
+                atomic->box->x;
+    double dy = owner->y + atomic->owner_offset_y + atomic->box->rel_dy -
+                atomic->box->y;
     *child_x = x - dx;
     *child_y = y - dy;
 }
@@ -13052,42 +13054,78 @@ relative_pct_cb_height(const ns_box *box)
     return -1;
 }
 
+/* The vertical offset of a relatively positioned box.  A percentage is of
+   the containing block's height when that is definite (the parent of
+   pct_of holds it) and is 0 otherwise. */
+static double
+relative_offset_y(const ns_box *box, double parent_h, const ns_box *pct_of)
+{
+    const ns_css_value *tv = box->style->values[NS_CSS_TOP];
+    const ns_css_value *bv = box->style->values[NS_CSS_BOTTOM];
+    gboolean from_top = tv && !length_is_auto(tv);
+    const ns_css_value *v = from_top ? tv : bv;
+    double sign = from_top ? 1 : -1;
+    if (!v || length_is_auto(v)) return 0;
+    if (!value_is_percent(v)) return sign * length_or_zero(v, parent_h);
+    double cb_h = relative_pct_cb_height(pct_of);
+    return cb_h < 0 ? 0 : sign * length_or_zero(v, cb_h);
+}
+
+static double
+relative_offset_x(const ns_box *box, double parent_w)
+{
+    const ns_css_value *lv = box->style->values[NS_CSS_LEFT];
+    const ns_css_value *rv = box->style->values[NS_CSS_RIGHT];
+    if (lv && !length_is_auto(lv))
+        return length_or_zero(lv, parent_w);
+    if (rv && !length_is_auto(rv))
+        return -length_or_zero(rv, parent_w);
+    return 0;
+}
+
+static void
+apply_relative_offset(ns_box *box, double parent_w, double parent_h)
+{
+    translate_subtree(box, relative_offset_x(box, parent_w),
+                      relative_offset_y(box, parent_h, box));
+}
+
+static void apply_position_offsets(ns_box *box, double parent_w,
+                                   double parent_h);
+
+/* Inline-level atomic boxes (images, inline blocks) hang off the text box
+   of their line; their containing block is that box's parent, whose
+   content size the text box was given.  Painting places such a box where
+   the text puts it, so its offset is also kept apart. */
+static void
+apply_atomic_position_offsets(ns_box *box, double cb_w, double cb_h)
+{
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
+        if (!ab) continue;
+        if (style_is_relative(ab->style)) {
+            ab->rel_dx = relative_offset_x(ab, cb_w);
+            ab->rel_dy = relative_offset_y(ab, cb_h, box);
+            translate_subtree(ab, ab->rel_dx, ab->rel_dy);
+        }
+        for (ns_box *c = ab->first_child; c; c = c->next_sibling)
+            apply_position_offsets(c, ab->content_width, ab->content_height);
+        if (ab->inline_atomics)
+            apply_atomic_position_offsets(ab, ab->content_width,
+                                          ab->content_height);
+    }
+}
+
 static void
 apply_position_offsets(ns_box *box, double parent_w, double parent_h)
 {
     if (!box) return;
     double child_w = box->content_width;
     double child_h = box->content_height;
-    if (style_is_relative(box->style)) {
-        const ns_css_value *lv = box->style->values[NS_CSS_LEFT];
-        const ns_css_value *rv = box->style->values[NS_CSS_RIGHT];
-        const ns_css_value *tv = box->style->values[NS_CSS_TOP];
-        const ns_css_value *bv = box->style->values[NS_CSS_BOTTOM];
-        gboolean l_auto = !lv || length_is_auto(lv);
-        gboolean t_auto = !tv || length_is_auto(tv);
-        double dx = 0, dy = 0;
-        if (!l_auto)
-            dx = length_or_zero(lv, parent_w);
-        else if (rv && !length_is_auto(rv))
-            dx = -length_or_zero(rv, parent_w);
-        double cb_h = -2;
-        if (!t_auto) {
-            if (value_is_percent(tv)) {
-                if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : length_or_zero(tv, cb_h);
-            } else {
-                dy = length_or_zero(tv, parent_h);
-            }
-        } else if (bv && !length_is_auto(bv)) {
-            if (value_is_percent(bv)) {
-                if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : -length_or_zero(bv, cb_h);
-            } else {
-                dy = -length_or_zero(bv, parent_h);
-            }
-        }
-        translate_subtree(box, dx, dy);
-    }
+    if (style_is_relative(box->style))
+        apply_relative_offset(box, parent_w, parent_h);
+    if (box->inline_atomics)
+        apply_atomic_position_offsets(box, parent_w, parent_h);
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
         apply_position_offsets(c, child_w, child_h);
 }
@@ -14276,7 +14314,7 @@ compute_paint_bounds(ns_box *b)
             ns_box *ab = atomic->box;
             if (!ab) continue;
             compute_paint_bounds(ab);
-            double dy = b->y + atomic->owner_offset_y - ab->y;
+            double dy = b->y + atomic->owner_offset_y + ab->rel_dy - ab->y;
             if (ab->paint_top + dy < top) top = ab->paint_top + dy;
             if (ab->paint_bottom + dy > bottom) bottom = ab->paint_bottom + dy;
         }
@@ -15563,10 +15601,10 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
             const ns_inline_atomic *atomic =
                 &g_array_index(root->inline_atomics, ns_inline_atomic, i);
             if (!atomic->box) continue;
-            double adx = cdx + root->x + atomic->owner_offset_x -
-                         atomic->box->x;
-            double ady = cdy + root->y + atomic->owner_offset_y -
-                         atomic->box->y;
+            double adx = cdx + root->x + atomic->owner_offset_x +
+                         atomic->box->rel_dx - atomic->box->x;
+            double ady = cdy + root->y + atomic->owner_offset_y +
+                         atomic->box->rel_dy - atomic->box->y;
             box_inline_union_for_dom(atomic->box, target, adx, ady,
                                      x0, y0, x1, y1, any);
         }
