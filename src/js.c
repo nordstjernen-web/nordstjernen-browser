@@ -411,6 +411,8 @@ static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
                                     const char *type);
 static JSValue ns_target_make_event(JSContext *ctx, JSValueConst target,
                                     const char *type);
+static void    ns_event_adopt_interface(JSContext *ctx, JSValueConst ev,
+                                        const char *iface);
 static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   JSValueConst this_obj, const char *type,
                                   JSValue event, gboolean window_like,
@@ -4503,6 +4505,37 @@ ns_html_tag_has_plain_interface(const char *lower_name)
                    ns_cmp_tag_name) != NULL;
 }
 
+/* The prototype of an element of a namespace other than HTML and SVG:
+ * MathMLElement's for MathML, Element's for the rest. */
+static JSValue
+ns_foreign_kind_proto(ns_js *js, const ns_node *node)
+{
+    const char *ns = ns_element_get_attr(node, "data-nd-ns-uri");
+    gboolean mathml = ns && strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0;
+    return mathml && JS_IsObject(js->proto_mathmlelement)
+        ? js->proto_mathmlelement : js->proto_element;
+}
+
+static JSValue
+ns_html_kind_proto(ns_js *js, const ns_node *node)
+{
+    if (!node->name || !js->per_tag_protos) return js->proto_htmlelement;
+    gsize n = strlen(node->name);
+    gboolean lower_case = TRUE;
+    for (gsize i = 0; i < n; i++)
+        if (g_ascii_isupper(node->name[i])) lower_case = FALSE;
+    if (lower_case) {
+        JSValue *slot = g_hash_table_lookup(js->per_tag_protos, node->name);
+        if (slot) return *slot;
+        if (ns_html_tag_has_plain_interface(node->name))
+            return js->proto_htmlelement;
+    }
+    if (!ns_ce_name_valid(node->name) &&
+        JS_IsObject(js->proto_htmlunknownelement))
+        return js->proto_htmlunknownelement;
+    return js->proto_htmlelement;
+}
+
 static JSValue
 ns_node_kind_proto(ns_js *js, const ns_node *node)
 {
@@ -4517,23 +4550,8 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
                 ? js->proto_svgelement : js->proto_element;
         }
         if (node->flags & NS_NODE_FOREIGN_NS)
-            return js->proto_element;
-        if (node->name && js->per_tag_protos) {
-            char lower[32];
-            gsize n = strlen(node->name);
-            if (n < sizeof lower) {
-                for (gsize i = 0; i <= n; i++)
-                    lower[i] = g_ascii_tolower(node->name[i]);
-                JSValue *slot = g_hash_table_lookup(js->per_tag_protos, lower);
-                if (slot) return *slot;
-                if (ns_html_tag_has_plain_interface(lower))
-                    return js->proto_htmlelement;
-            }
-            if (!ns_ce_name_valid(node->name) &&
-                JS_IsObject(js->proto_htmlunknownelement))
-                return js->proto_htmlunknownelement;
-        }
-        return js->proto_htmlelement;
+            return ns_foreign_kind_proto(js, node);
+        return ns_html_kind_proto(js, node);
     case NS_NODE_TEXT:
         return (node->flags & NS_NODE_CDATA) ? js->proto_cdata : js->proto_text;
     case NS_NODE_COMMENT:
@@ -4655,16 +4673,25 @@ ns_install_body_reflected_handlers(JSContext *ctx, JSValueConst wrapper)
     }
 }
 
+/* The page's own document object, the main realm's document: every realm
+ * sees that one object for the page's document node. */
+static JSValue
+ns_page_document_object(ns_js *js)
+{
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSValue global = JS_GetGlobalObject(main_ctx);
+    JSValue doc = JS_GetPropertyStr(main_ctx, global, "document");
+    JS_FreeValue(main_ctx, global);
+    return doc;
+}
+
 JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
 {
     if (!cnode) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
-    if (js && cnode == js->current_doc && !cnode->parent &&
-        ctx == js->main_realm_ctx) {
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue doc = JS_GetPropertyStr(ctx, global, "document");
-        JS_FreeValue(ctx, global);
+    if (js && cnode == js->ce_main_doc && !cnode->parent) {
+        JSValue doc = ns_page_document_object(js);
         if (!JS_IsUndefined(doc) && !JS_IsNull(doc))
             return doc;
         JS_FreeValue(ctx, doc);
@@ -4778,7 +4805,7 @@ ns_window_named_document(JSContext *ctx, JSValueConst window)
 {
     if (ns_window_named_resolving) return NULL;
     ns_window_named_resolving++;
-    ns_node *doc = ns_window_document_for(ctx, window);
+    ns_node *doc = ns_window_current_document_for(ctx, window);
     ns_window_named_resolving--;
     return doc;
 }
@@ -4972,80 +4999,191 @@ static const ns_instof_def ns_instof_table[] = {
     { "ShadowRoot",               NULL,                 NS_INSTOF_SHADOW },
 };
 
+/* NodeList and HTMLCollection are told apart by the kind of live collection. */
+static JSValue
+ns_instof_collection(JSContext *ctx, const ns_instof_def *d, JSValueConst v)
+{
+    if (d->special == NS_INSTOF_HTMLCOLLECTION)
+        return JS_NewBool(ctx, ns_live_collection_kind(v) == 1);
+    if (ns_live_collection_kind(v) == 0)
+        return JS_TRUE;
+    if (!JS_IsObject(v))
+        return JS_FALSE;
+    JSValue m = JS_GetPropertyStr(ctx, v, "__nsNodeList");
+    int hit = JS_ToBool(ctx, m);
+    JS_FreeValue(ctx, m);
+    return JS_NewBool(ctx, hit == 1);
+}
+
+/* Whether tag is one of the space-separated names in list. */
+static gboolean
+ns_instof_list_has(const char *list, const char *tag)
+{
+    size_t tlen = strlen(tag);
+    while (*list) {
+        while (*list == ' ') list++;
+        const char *tok = list;
+        while (*list && *list != ' ') list++;
+        if ((size_t)(list - tok) == tlen && strncmp(tok, tag, tlen) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* Whether node n is an element with one of the tags of the table entry. */
+static gboolean
+ns_instof_tag_match(const ns_instof_def *d, const ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT || !n->name || !d->tags)
+        return FALSE;
+    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
+        return FALSE;
+    return ns_instof_list_has(d->tags, n->name);
+}
+
+static gboolean
+ns_instof_is_shadow_host_attr(const ns_node *n)
+{
+    return n->kind == NS_NODE_ELEMENT &&
+           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+}
+
+/* The entries decided by the kind of the node alone. */
+static gboolean
+ns_instof_leaf_match(int special, const ns_node *n)
+{
+    switch (special) {
+    case NS_INSTOF_TEXT:
+        return n->kind == NS_NODE_TEXT;
+    case NS_INSTOF_COMMENT:
+        return n->kind == NS_NODE_COMMENT;
+    case NS_INSTOF_CHARDATA:
+        return n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT;
+    case NS_INSTOF_DOCTYPE:
+        return n->kind == NS_NODE_DOCTYPE;
+    default:
+        return FALSE;
+    }
+}
+
+/* The entries for elements, documents and document fragments. */
+static gboolean
+ns_instof_container_match(int special, const ns_node *n)
+{
+    switch (special) {
+    case NS_INSTOF_ELEMENT:
+        return n->kind == NS_NODE_ELEMENT;
+    case NS_INSTOF_DOCUMENT:
+        return n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT);
+    case NS_INSTOF_FRAGMENT:
+        return (n->flags & NS_NODE_FRAGMENT) != 0 ||
+               ns_instof_is_shadow_host_attr(n);
+    case NS_INSTOF_SHADOW:
+        return ns_instof_is_shadow_host_attr(n);
+    case NS_INSTOF_HTMLELEMENT:
+        return n->kind == NS_NODE_ELEMENT &&
+               !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+    default:
+        return FALSE;
+    }
+}
+
+/* Whether node n, the wrapper of an instance, is of the kind of the table
+ * entry d. */
+static gboolean
+ns_instof_node_match(const ns_instof_def *d, const ns_node *n)
+{
+    /* A shadow root is stored as an element but is a DocumentFragment. */
+    if (ns_node_is_shadow_root(n))
+        return d->special == NS_INSTOF_NODE ||
+               d->special == NS_INSTOF_FRAGMENT ||
+               d->special == NS_INSTOF_SHADOW;
+    if (d->special == NS_INSTOF_NODE)
+        return TRUE;
+    if (d->special == NS_INSTOF_TAG)
+        return ns_instof_tag_match(d, n);
+    return ns_instof_leaf_match(d->special, n) ||
+           ns_instof_container_match(d->special, n);
+}
+
+/* Whether ctor is the interface object the table entry belongs to. The
+ * [Symbol.hasInstance] of an interface object is inherited by the interfaces
+ * that extend it, and those are not told apart by node kind: Attr extends
+ * Node, HTMLUnknownElement extends HTMLElement, XMLDocument extends Document. */
+static gboolean
+ns_instof_is_entry_ctor(JSContext *ctx, JSValueConst ctor,
+                        const ns_instof_def *d)
+{
+    if (!JS_IsObject(ctor))
+        return FALSE;
+    JSValue nv = JS_GetPropertyStr(ctx, ctor, "name");
+    const char *name = JS_IsString(nv) ? JS_ToCString(ctx, nv) : NULL;
+    if (JS_IsException(nv))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    gboolean same = name && strcmp(name, d->ctor) == 0;
+    if (name) JS_FreeCString(ctx, name);
+    JS_FreeValue(ctx, nv);
+    return same;
+}
+
+/* OrdinaryHasInstance: whether the prototype of ctor is on the prototype
+ * chain of v. */
+static JSValue
+ns_instof_ordinary(JSContext *ctx, JSValueConst ctor, JSValueConst v)
+{
+    if (!JS_IsObject(v) || !JS_IsFunction(ctx, ctor))
+        return JS_FALSE;
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    if (!JS_IsObject(proto)) {
+        if (JS_IsException(proto))
+            return proto;
+        JS_FreeValue(ctx, proto);
+        return JS_ThrowTypeError(ctx,
+            "operand 'prototype' property is not an object");
+    }
+    JSValue cur = JS_DupValue(ctx, v);
+    gboolean hit = FALSE;
+    for (;;) {
+        JSValue next = JS_GetPrototype(ctx, cur);
+        JS_FreeValue(ctx, cur);
+        if (JS_IsException(next)) {
+            JS_FreeValue(ctx, proto);
+            return next;
+        }
+        if (!JS_IsObject(next))
+            break;
+        hit = JS_VALUE_GET_PTR(next) == JS_VALUE_GET_PTR(proto);
+        cur = next;
+        if (hit) {
+            JS_FreeValue(ctx, cur);
+            break;
+        }
+    }
+    JS_FreeValue(ctx, proto);
+    return JS_NewBool(ctx, hit);
+}
+
 static JSValue
 ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv, int magic)
 {
-    (void)this_val;
     if (argc < 1 || magic < 0 ||
         magic >= (int)G_N_ELEMENTS(ns_instof_table))
         return JS_FALSE;
     const ns_instof_def *d = &ns_instof_table[magic];
-    if (d->special == NS_INSTOF_HTMLCOLLECTION)
-        return JS_NewBool(ctx, ns_live_collection_kind(argv[0]) == 1);
-    if (d->special == NS_INSTOF_NODELIST) {
-        if (ns_live_collection_kind(argv[0]) == 0)
-            return JS_TRUE;
-        if (JS_IsObject(argv[0])) {
-            JSValue m = JS_GetPropertyStr(ctx, argv[0], "__nsNodeList");
-            int hit = JS_ToBool(ctx, m);
-            JS_FreeValue(ctx, m);
-            return JS_NewBool(ctx, hit == 1);
-        }
-        return JS_FALSE;
-    }
+    /* A built-in interface that extends the entry's is told by its prototype
+     * chain; a class of the page that extends one keeps matching by node
+     * kind. */
+    if (JS_IsEngineFunction(this_val) &&
+        !ns_instof_is_entry_ctor(ctx, this_val, d))
+        return ns_instof_ordinary(ctx, this_val, argv[0]);
+    if (d->special == NS_INSTOF_HTMLCOLLECTION ||
+        d->special == NS_INSTOF_NODELIST)
+        return ns_instof_collection(ctx, d, argv[0]);
     const ns_node *n = ns_unwrap_element(argv[0]);
-    if (!n) return JS_FALSE;
-    /* A shadow root is stored as an element but is a DocumentFragment. */
-    if (ns_node_is_shadow_root(n))
-        return JS_NewBool(ctx, d->special == NS_INSTOF_NODE ||
-                               d->special == NS_INSTOF_FRAGMENT ||
-                               d->special == NS_INSTOF_SHADOW);
-    switch (d->special) {
-    case NS_INSTOF_NODE:
-        return JS_NewBool(ctx, TRUE);
-    case NS_INSTOF_ELEMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT);
-    case NS_INSTOF_DOCUMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_DOCUMENT &&
-                               !(n->flags & NS_NODE_FRAGMENT));
-    case NS_INSTOF_FRAGMENT:
-        return JS_NewBool(ctx, (n->flags & NS_NODE_FRAGMENT) != 0 ||
-                               (n->kind == NS_NODE_ELEMENT &&
-                                ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL));
-    case NS_INSTOF_TEXT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_TEXT);
-    case NS_INSTOF_COMMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_COMMENT);
-    case NS_INSTOF_CHARDATA:
-        return JS_NewBool(ctx, n->kind == NS_NODE_TEXT ||
-                               n->kind == NS_NODE_COMMENT);
-    case NS_INSTOF_DOCTYPE:
-        return JS_NewBool(ctx, n->kind == NS_NODE_DOCTYPE);
-    case NS_INSTOF_SHADOW:
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT &&
-                          ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL);
-    default:
-        break;
-    }
-    if (d->special == NS_INSTOF_HTMLELEMENT)
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT &&
-                          !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)));
-    if (n->kind != NS_NODE_ELEMENT || !n->name || !d->tags)
-        return JS_FALSE;
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
-        return JS_FALSE;
-    const char *s = d->tags;
-    size_t nlen = strlen(n->name);
-    while (*s) {
-        while (*s == ' ') s++;
-        const char *tok = s;
-        while (*s && *s != ' ') s++;
-        size_t tlen = (size_t)(s - tok);
-        if (tlen == nlen && strncmp(tok, n->name, tlen) == 0)
-            return JS_TRUE;
-    }
-    return JS_FALSE;
+    if (!n)
+        return ns_instof_ordinary(ctx, this_val, argv[0]);
+    return JS_NewBool(ctx, ns_instof_node_match(d, n));
 }
 
 static void
@@ -13475,6 +13613,7 @@ ns_offline_audio_startRendering(JSContext *ctx, JSValueConst this_val,
     JSValue oncomplete = JS_GetPropertyStr(ctx, this_val, "oncomplete");
     if (JS_IsFunction(ctx, oncomplete)) {
         JSValue ev = ns_event_new(ctx);
+        ns_event_adopt_interface(ctx, ev, "OfflineAudioCompletionEvent");
         JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "complete"));
         JS_SetPropertyStr(ctx, ev, "renderedBuffer", JS_DupValue(ctx, buf));
         JSValue r = JS_Call(ctx, oncomplete, this_val, 1, &ev);
@@ -14365,12 +14504,35 @@ ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
     JS_FreeValue(ctx, ports);
 }
 
+static gboolean
+ns_window_is_global_of(JSContext *ctx, JSValueConst win)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    gboolean same = JS_VALUE_GET_PTR(global) == JS_VALUE_GET_PTR(win);
+    JS_FreeValue(ctx, global);
+    return same;
+}
+
+static ns_node *
+ns_window_frame_document(JSContext *ctx, JSValueConst window, ns_node *stale)
+{
+    JSValue fe = JS_GetPropertyStr(ctx, window, "frameElement");
+    ns_node *frame = ns_unwrap_element_mut(fe);
+    JS_FreeValue(ctx, fe);
+    ns_node *doc = ns_iframe_document_node(frame);
+    return doc ? doc : stale;
+}
+
 static ns_node *
 ns_window_current_document_for(JSContext *ctx, JSValueConst window)
 {
-    JSValue forwarded = ns_window_forward_of(js_from_ctx(ctx), window);
-    ns_node *doc = ns_window_document_for(ctx,
-        JS_IsObject(forwarded) ? forwarded : window);
+    ns_js *js = js_from_ctx(ctx);
+    JSValue forwarded = ns_window_forward_of(js, window);
+    JSValueConst win = JS_IsObject(forwarded) ? forwarded : window;
+    ns_node *doc = ns_window_document_for(ctx, win);
+    if (doc && !doc->parent && js && (const ns_node *)doc != js->ce_main_doc &&
+        !ns_window_is_global_of(ctx, win))
+        doc = ns_window_frame_document(ctx, win, doc);
     JS_FreeValue(ctx, forwarded);
     return doc;
 }
@@ -14496,10 +14658,13 @@ ns_window_message_realm(JSContext *ctx, JSValueConst target)
     return realm;
 }
 
+/* Posts a message to target in the realm ctx, which throws the exceptions;
+ * caller is the realm of the code that called postMessage, the one the
+ * message's source window comes from. */
 static JSValue
-ns_post_message_to_target(JSContext *ctx, JSValue target,
-                          JSValueConst source_override,
-                          int argc, JSValueConst *argv)
+ns_post_message_to_target_in(JSContext *ctx, JSContext *caller, JSValue target,
+                             JSValueConst source_override,
+                             int argc, JSValueConst *argv)
 {
     if (argc < 1) {
         JS_FreeValue(ctx, target);
@@ -14507,7 +14672,6 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
             "Failed to execute 'postMessage' on 'Window': 1 argument required, "
             "but only 0 present.");
     }
-    JSContext *caller = JS_GetCallerRealm(ctx);
 
     g_autofree char *want_origin = NULL;
     JSValue transfer = JS_UNDEFINED;
@@ -14627,14 +14791,39 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
 }
 
 static JSValue
+ns_post_message_to_target(JSContext *ctx, JSValue target,
+                          JSValueConst source_override,
+                          int argc, JSValueConst *argv)
+{
+    return ns_post_message_to_target_in(ctx, JS_GetCallerRealm(ctx), target,
+                                        source_override, argc, argv);
+}
+
+/* The realm of a window: the one of its frame, or the main one. */
+static JSContext *
+ns_window_realm_context(JSContext *ctx, JSValueConst window)
+{
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *frame = ns_window_frame_node(js, window);
+    JSContext *realm = frame ? g_hash_table_lookup(js->frame_contexts, frame)
+                             : NULL;
+    if (realm) return realm;
+    return js && js->main_realm_ctx ? js->main_realm_ctx : ctx;
+}
+
+/* A C function with data runs in the realm of its caller, but postMessage
+ * throws the exceptions of the realm of the window it belongs to. */
+static JSValue
 ns_window_post_message_data(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv,
                             int magic, JSValue *data)
 {
     (void)magic;
+    JSContext *realm = ns_window_realm_context(ctx, data[0]);
     JSValue target = JS_IsObject(this_val) ? JS_DupValue(ctx, this_val)
                                            : JS_DupValue(ctx, data[0]);
-    return ns_post_message_to_target(ctx, target, JS_UNDEFINED, argc, argv);
+    return ns_post_message_to_target_in(realm, JS_GetCallerRealm(ctx), target,
+                                        JS_UNDEFINED, argc, argv);
 }
 
 static JSValue
@@ -16062,6 +16251,7 @@ ns_js_media_queries_reeval(ns_js *js)
         if (now == was) continue;
         JS_SetPropertyStr(ctx, mql, "matches", now ? JS_TRUE : JS_FALSE);
         JSValue ev = ns_target_make_event(ctx, mql, "change");
+        ns_event_adopt_interface(ctx, ev, "MediaQueryListEvent");
         JS_SetPropertyStr(ctx, ev, "matches", now ? JS_TRUE : JS_FALSE);
         JS_SetPropertyStr(ctx, ev, "media",
                           JS_GetPropertyStr(ctx, mql, "media"));
@@ -22156,6 +22346,11 @@ ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
     return view;
 }
 
+static uint8_t ns_text_encoder_no_bytes[1];
+
+/* The bytes a Uint8Array destination covers, or NULL when view is not one.
+ * A view of a detached buffer, or out of the bounds of its resizable one, has
+ * a byte length of 0: encodeInto() writes nothing into it and reports 0. */
 static uint8_t *
 ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
                        size_t *off, size_t *blen, size_t *total)
@@ -22163,10 +22358,16 @@ ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
     size_t bpe = 0;
     uint8_t *base = NULL;
     *buf = JS_UNDEFINED;
-    if (JS_GetTypedArrayType(view) == JS_TYPED_ARRAY_UINT8) {
-        *buf = JS_GetTypedArrayBuffer(ctx, view, off, blen, &bpe);
-        if (!JS_IsException(*buf)) base = JS_GetArrayBuffer(ctx, total, *buf);
+    if (JS_GetTypedArrayType(view) != JS_TYPED_ARRAY_UINT8)
+        return NULL;
+    *buf = JS_GetTypedArrayBuffer(ctx, view, off, blen, &bpe);
+    if (JS_IsException(*buf)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        *buf = JS_UNDEFINED;
+        *off = *blen = *total = 0;
+        return ns_text_encoder_no_bytes;
     }
+    base = JS_GetArrayBuffer(ctx, total, *buf);
     return base;
 }
 
@@ -23968,6 +24169,7 @@ ns_js_ws_on_close(int code, const char *reason, gboolean clean,
     ns_js_budget_push(s->js, &bg);
     JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 3));
     JSValue ev = ns_js_ws_event(ctx, "close");
+    ns_event_adopt_interface(ctx, ev, "CloseEvent");
     JS_SetPropertyStr(ctx, ev, "code",     JS_NewInt32(ctx, code));
     JS_SetPropertyStr(ctx, ev, "reason",   JS_NewString(ctx, reason ? reason : ""));
     JS_SetPropertyStr(ctx, ev, "wasClean", JS_NewBool(ctx, clean));
@@ -24312,6 +24514,7 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     ns_js_budget_push(s->js, &bg);
     const char *type = (event && *event) ? event : "message";
     JSValue ev = ns_js_ws_event(ctx, type);
+    ns_event_adopt_interface(ctx, ev, "MessageEvent");
     JS_SetPropertyStr(ctx, ev, "data", JS_NewString(ctx, data ? data : ""));
     JS_SetPropertyStr(ctx, ev, "lastEventId",
                       JS_NewString(ctx, last_id ? last_id : ""));
@@ -26983,7 +27186,8 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndAdoptWindowEventOps",
                                          "__ndEventTargetMethods",
                                          "__ndIsEngineFunction",
-                                         "__ndDispatchPath" };
+                                         "__ndDispatchPath",
+                                         "__ndRealmProto" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
     ns_net_add_private_names(ctx);
@@ -30413,6 +30617,28 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "mouseleave", "MouseEvent" }, { "dblclick", "MouseEvent" },
         { "focus", "FocusEvent" }, { "blur", "FocusEvent" },
         { "focusin", "FocusEvent" }, { "focusout", "FocusEvent" },
+        { "submit", "SubmitEvent" }, { "wheel", "WheelEvent" },
+        { "mousewheel", "WheelEvent" },
+        { "keydown", "KeyboardEvent" }, { "keyup", "KeyboardEvent" },
+        { "keypress", "KeyboardEvent" },
+        { "touchstart", "TouchEvent" }, { "touchmove", "TouchEvent" },
+        { "touchend", "TouchEvent" }, { "touchcancel", "TouchEvent" },
+        { "drag", "DragEvent" }, { "dragstart", "DragEvent" },
+        { "dragend", "DragEvent" }, { "dragenter", "DragEvent" },
+        { "dragover", "DragEvent" }, { "dragleave", "DragEvent" },
+        { "drop", "DragEvent" },
+        { "animationstart", "AnimationEvent" },
+        { "animationend", "AnimationEvent" },
+        { "animationiteration", "AnimationEvent" },
+        { "animationcancel", "AnimationEvent" },
+        { "webkitAnimationStart", "AnimationEvent" },
+        { "webkitAnimationEnd", "AnimationEvent" },
+        { "webkitAnimationIteration", "AnimationEvent" },
+        { "transitionrun", "TransitionEvent" },
+        { "transitionstart", "TransitionEvent" },
+        { "transitionend", "TransitionEvent" },
+        { "transitioncancel", "TransitionEvent" },
+        { "webkitTransitionEnd", "TransitionEvent" },
     };
     const char *iface = "Event";
     JSValue type = JS_GetPropertyStr(ctx, ev, "type");
@@ -49215,6 +49441,18 @@ ns_realm_forwarder_for(ns_realm_cloner *rc, JSValueConst v, gboolean ctor)
     return out;
 }
 
+/* Whether the JS layer made constructor ctor so that the copies of it in the
+ * frames get a prototype of their own: its instances are not tested against
+ * the prototype of the realm that made them (__ndRealmProto). */
+static gboolean
+ns_realm_ctor_owns_proto(ns_realm_cloner *rc, JSValueConst ctor)
+{
+    JSValue marker = JS_GetPropertyStr(rc->src, ctor, "__ndRealmProto");
+    gboolean owns = JS_ToBool(rc->src, marker) > 0;
+    JS_FreeValue(rc->src, marker);
+    return owns;
+}
+
 static void
 ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
                             JSAtom atom, gboolean is_proto, int depth)
@@ -49232,7 +49470,8 @@ ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst ou
         getter = ns_realm_clone(rc, desc.getter, depth + 1);
         setter = ns_realm_clone(rc, desc.setter, depth + 1);
         flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
-    } else if (is_proto && JS_IsObject(desc.value)) {
+    } else if (is_proto && JS_IsObject(desc.value) &&
+               !ns_realm_ctor_owns_proto(rc, v)) {
         /* The JS layer's own checks (instanceof against its closure's
          * interface) only accept its own prototype, so an interface the
          * JS layer implements keeps it: the frame's constructor is new,
@@ -49302,6 +49541,21 @@ ns_realm_clone_prototype(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
     JS_FreeValue(rc->src, proto);
 }
 
+/* The empty object that becomes the realm's copy of v when v is a namespace
+ * object or the named properties object of the window, whose prototype chain
+ * must run through the realm's own prototypes; JS_UNDEFINED for the objects
+ * that stay shared. */
+static JSValue
+ns_realm_new_shell(ns_realm_cloner *rc, JSValueConst v)
+{
+    JSClassID cls = JS_GetClassID(v);
+    if (ns_window_named_class_id && cls == ns_window_named_class_id)
+        return JS_NewObjectClass(rc->dst, ns_window_named_class_id);
+    if (cls != 1 || !ns_realm_object_is_shape(rc, v))
+        return JS_UNDEFINED;
+    return JS_NewObjectProto(rc->dst, JS_NULL);
+}
+
 static JSValue
 ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth)
 {
@@ -49317,9 +49571,8 @@ ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth)
     if (JS_IsUndefined(out)) {
         if (JS_IsFunction(rc->src, v))
             return ns_realm_clone_js_function(rc, v, depth);
-        if (JS_GetClassID(v) != 1 || !ns_realm_object_is_shape(rc, v))
-            return JS_DupValue(rc->dst, v);
-        out = JS_NewObjectProto(rc->dst, JS_NULL);
+        out = ns_realm_new_shell(rc, v);
+        if (JS_IsUndefined(out)) return JS_DupValue(rc->dst, v);
     }
     ns_realm_cloner_put(rc, v, out);
     ns_realm_clone_prototype(rc, v, out, depth);
@@ -49485,7 +49738,7 @@ static const char *const ns_realm_singleton_names[] = {
     "caches", "indexedDB", "cookieStore", "trustedTypes", "visualViewport",
     "scheduler", "navigation", "external", "locationbar", "menubar",
     "personalbar", "scrollbars", "statusbar", "toolbar", "console",
-    "speechSynthesis", "styleMedia",
+    "speechSynthesis", "styleMedia", "customElements",
 };
 
 static void ns_install_pdf_plugins(JSContext *ctx);
@@ -54569,6 +54822,7 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
         "Comment", "CDATASection", "ProcessingInstruction", "Document",
         "HTMLDocument", "XMLDocument", "DocumentFragment", "ShadowRoot",
         "DocumentType", "Attr", "SVGElement", "SVGAElement", "SVGSVGElement",
+        "MathMLElement",
         "Event", "UIEvent", "MouseEvent", "KeyboardEvent", "FocusEvent",
         "InputEvent", "CompositionEvent", "TextEvent", "TouchEvent",
         "PointerEvent", "WheelEvent", "DragEvent", "CustomEvent",
@@ -54821,6 +55075,30 @@ static const char ns_element_shapes_src[] =
         "onwebkittransitionend onwheel outerText popover showPopover "
         "spellcheck style tabIndex title togglePopover translate "
         "virtualKeyboardPolicy writingSuggestions',"
+        "  MathMLElement: 'attributeStyleMap autofocus blur dataset focus focusGroup "
+        "focusGroupStart nonce onabort onanimationcancel onanimationend "
+        "onanimationiteration onanimationstart onauxclick onbeforeinput "
+        "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel "
+        "oncanplay oncanplaythrough onchange onclick onclose oncommand "
+        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
+        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
+        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
+        "ondurationchange onemptied onended onerror onfocus onformdata "
+        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
+        "onload onloadeddata onloadedmetadata onloadstart "
+        "onlostpointercapture onmousedown onmouseenter onmouseleave "
+        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
+        "onpause onplay onplaying onpointercancel onpointerdown "
+        "onpointerenter onpointerleave onpointermove onpointerout "
+        "onpointerover onpointerrawupdate onpointerup onprogress "
+        "onratechange onreset onresize onscroll onscrollend "
+        "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation "
+        "onseeked onseeking onselect onselectionchange onselectstart "
+        "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle "
+        "ontransitioncancel ontransitionend ontransitionrun "
+        "ontransitionstart onvolumechange onwaiting onwebkitanimationend "
+        "onwebkitanimationiteration onwebkitanimationstart "
+        "onwebkittransitionend onwheel style tabIndex',"
         "  SVGElement: 'LENGTHADJUST_SPACING LENGTHADJUST_SPACINGANDGLYPHS "
         "LENGTHADJUST_UNKNOWN SVG_CHANNEL_A SVG_CHANNEL_B SVG_CHANNEL_G "
         "SVG_CHANNEL_R SVG_CHANNEL_UNKNOWN SVG_EDGEMODE_DUPLICATE "
@@ -55098,6 +55376,7 @@ static const char ns_element_shapes_src[] =
     "  });"
     "  down('HTMLElement', [E]);"
     "  down('SVGElement', [E, H]);"
+    "  down('MathMLElement', [E, H]);"
     "  down('SVGSVGElement', [E]);"
     "  down('SVGAElement', [E]);"
     "  ['Element', 'HTMLElement'].forEach(function(n){"
@@ -55375,6 +55654,20 @@ ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
     JS_FreeAtom(ctx, atom);
 }
 
+/* MathMLElement extends Element and has the dataset of HTMLOrSVGElement; the
+ * rest of its members are moved down from Element by the element shapes. */
+static JSValue
+ns_install_mathml_proto(JSContext *ctx, JSValueConst global,
+                        JSValueConst elem_proto)
+{
+    ns_chain_proto(ctx, global, "MathMLElement", elem_proto);
+    JSValue proto = ns_proto_of(ctx, global, "MathMLElement");
+    if (JS_IsObject(proto))
+        ns_proto_define_getset(ctx, proto, "dataset",
+                               ns_element_get_dataset, NULL);
+    return proto;
+}
+
 static void
 ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
 {
@@ -55489,6 +55782,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(svg_proto))
         ns_proto_define_getset(ctx, svg_proto, "dataset",
                                ns_element_get_dataset, NULL);
+    JSValue mathml_proto = ns_install_mathml_proto(ctx, global, elem_proto);
 
     JSValue chardata_proto = ns_proto_of(ctx, global, "CharacterData");
     if (JS_IsObject(chardata_proto)) {
@@ -55547,6 +55841,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     js->proto_htmlelement = htmlelem_proto;
     js->proto_svgelement  = svg_proto;
     js->proto_svgaelement = svga_proto;
+    js->proto_mathmlelement = mathml_proto;
     js->proto_chardata    = chardata_proto;
     js->proto_text        = text_proto;
     js->proto_comment     = comment_proto;
@@ -56671,7 +56966,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
         { "HTMLElement", 0 }, { "SVGElement", 0 }, { "SVGAElement", 0 },
-        { "SVGSVGElement", 0 },
+        { "SVGSVGElement", 0 }, { "MathMLElement", 0 },
         { "HTMLDocument", 0 },
         { "Window", 0 },
     };
@@ -59230,7 +59525,8 @@ ns_node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT &&
            (ns_node_is_element_named(n, "iframe") ||
-            ns_node_is_element_named(n, "frame"));
+            ns_node_is_element_named(n, "frame") ||
+            ns_node_is_element_named(n, "object"));
 }
 
 static JSValue
@@ -60911,7 +61207,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_install_tostringtag(ctx, global);
     {
         static const char *const on_targets[] = {
-            "HTMLElement", "SVGElement", "Document", "Window",
+            "HTMLElement", "SVGElement", "MathMLElement", "Document", "Window",
         };
         for (gsize i = 0; i < G_N_ELEMENTS(on_targets); i++) {
             JSValue p = ns_proto_of(ctx, global, on_targets[i]);
@@ -61244,6 +61540,7 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_htmlelement);
         JS_FreeValue(js->ctx, js->proto_svgelement);
         JS_FreeValue(js->ctx, js->proto_svgaelement);
+        JS_FreeValue(js->ctx, js->proto_mathmlelement);
         JS_FreeValue(js->ctx, js->proto_chardata);
         JS_FreeValue(js->ctx, js->proto_text);
         JS_FreeValue(js->ctx, js->proto_comment);
@@ -61576,6 +61873,34 @@ ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
     ns_js_report_exception_at(js, ex, origin, 0, 0);
 }
 
+/* The location of a stack line: "at name (file:line:column)", or "at
+ * file:line:column" for a function without a name. */
+static char *
+ns_js_stack_line_location(const char *line, gsize n)
+{
+    while (n > 0 && (*line == ' ' || *line == '\t')) { line++; n--; }
+    if (n < 3 || strncmp(line, "at ", 3) != 0) return NULL;
+    line += 3;
+    n -= 3;
+    const char *open = n > 0 && line[n - 1] == ')' ? memchr(line, '(', n) : NULL;
+    if (open)
+        return g_strndup(open + 1, (gsize)(line + n - 1 - open - 1));
+    return g_strndup(line, n);
+}
+
+static gboolean
+ns_js_parse_location(const char *loc, char **file, int *line, int *col)
+{
+    const char *c2 = strrchr(loc, ':');
+    const char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
+    if (!c1 || !g_ascii_isdigit(c1[1]) || !g_ascii_isdigit(c2[1]))
+        return FALSE;
+    *line = atoi(c1 + 1);
+    *col = atoi(c2 + 1);
+    *file = g_strndup(loc, (gsize)(c1 - loc));
+    return TRUE;
+}
+
 static gboolean
 ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
 {
@@ -61587,20 +61912,9 @@ ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
     gboolean found = FALSE;
     for (const char *p = text; p && *p && !found; ) {
         const char *eol = strchr(p, '\n');
-        gsize n = eol ? (gsize)(eol - p) : strlen(p);
-        const char *open = memchr(p, '(', n);
-        if (open && n > 0 && p[n - 1] == ')') {
-            g_autofree char *loc = g_strndup(open + 1, (gsize)(p + n - 1 - open - 1));
-            char *c2 = strrchr(loc, ':');
-            char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
-            if (c1 && c2 && g_ascii_isdigit(c1[1]) && g_ascii_isdigit(c2[1])) {
-                *line = atoi(c1 + 1);
-                *col = atoi(c2 + 1);
-                *c1 = '\0';
-                *file = g_strdup(loc);
-                found = TRUE;
-            }
-        }
+        g_autofree char *loc = ns_js_stack_line_location(
+            p, eol ? (gsize)(eol - p) : strlen(p));
+        found = loc && ns_js_parse_location(loc, file, line, col);
         p = eol ? eol + 1 : NULL;
     }
     if (text) JS_FreeCString(ctx, text);
