@@ -4798,7 +4798,7 @@ ns_window_named_document(JSContext *ctx, JSValueConst window)
 {
     if (ns_window_named_resolving) return NULL;
     ns_window_named_resolving++;
-    ns_node *doc = ns_window_document_for(ctx, window);
+    ns_node *doc = ns_window_current_document_for(ctx, window);
     ns_window_named_resolving--;
     return doc;
 }
@@ -14496,12 +14496,28 @@ ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
     JS_FreeValue(ctx, ports);
 }
 
+/* The document a frame window the page kept across a navigation of its frame
+ * shows now: its own document has been taken out of the frame, which still
+ * holds the current one. */
+static ns_node *
+ns_window_frame_document(JSContext *ctx, JSValueConst window, ns_node *stale)
+{
+    JSValue fe = JS_GetPropertyStr(ctx, window, "frameElement");
+    ns_node *frame = ns_unwrap_element_mut(fe);
+    JS_FreeValue(ctx, fe);
+    ns_node *doc = ns_iframe_document_node(frame);
+    return doc ? doc : stale;
+}
+
 static ns_node *
 ns_window_current_document_for(JSContext *ctx, JSValueConst window)
 {
-    JSValue forwarded = ns_window_forward_of(js_from_ctx(ctx), window);
-    ns_node *doc = ns_window_document_for(ctx,
-        JS_IsObject(forwarded) ? forwarded : window);
+    ns_js *js = js_from_ctx(ctx);
+    JSValue forwarded = ns_window_forward_of(js, window);
+    JSValueConst win = JS_IsObject(forwarded) ? forwarded : window;
+    ns_node *doc = ns_window_document_for(ctx, win);
+    if (doc && !doc->parent && js && (const ns_node *)doc != js->ce_main_doc)
+        doc = ns_window_frame_document(ctx, win, doc);
     JS_FreeValue(ctx, forwarded);
     return doc;
 }
