@@ -3,6 +3,18 @@ Changelog:
 
 1.0.28:
 ======
+* `instanceof` on an interface that extends `Node`, `Element`, `HTMLElement`
+  or `Document` is the ordinary prototype chain test: every HTML element was an
+  instance of `SVGElement`, `HTMLUnknownElement` and `HTMLMediaElement`, so Vue
+  rendered whole apps as SVG elements without `click()` (Speedometer's
+  TodoMVC-Vue, TodoMVC-Vue-Complex-DOM and NewsSite-Nuxt failed). MathML
+  elements are `MathMLElement`s, an HTML element named with upper-case letters
+  through `createElementNS()` is an `HTMLUnknownElement`, and the events the
+  engine fires (submit, wheel, keyboard, touch, drag, animation, transition,
+  WebSocket close, EventSource, media query change, offline audio completion)
+  have their interfaces. Frame realms get their own `customElements`,
+  `WindowProperties` and stream objects, and named access on a kept frame
+  window follows its navigations.
 * A box that sizes itself to its content (flex, inline-block, float) counts a
   child's `calc()` width. Wikipedia's "Checked" review indicator came out
   20 px too narrow, its icon shrank to half width and the text ran into the
