@@ -120,12 +120,33 @@ JS_IsHostAccess(JSContext *ctx)
     return true;
 }
 
+static inline void
+JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
+{
+    (void)ctx;
+    (void)obj;
+}
+
 static inline int
 JS_AddEnginePrivateName(JSContext *ctx, const char *name)
 {
     (void)ctx;
     (void)name;
     return 0;
+}
+
+static inline bool
+JS_IsEngineFunction(JSValueConst fn)
+{
+    (void)fn;
+    return true;
+}
+
+static inline bool
+JS_IsHostCaller(JSContext *ctx)
+{
+    (void)ctx;
+    return false;
 }
 
 static inline int
