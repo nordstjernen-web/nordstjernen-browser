@@ -59463,7 +59463,8 @@ ns_node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT &&
            (ns_node_is_element_named(n, "iframe") ||
-            ns_node_is_element_named(n, "frame"));
+            ns_node_is_element_named(n, "frame") ||
+            ns_node_is_element_named(n, "object"));
 }
 
 static JSValue
