@@ -883,6 +883,15 @@ sb_append_subpath(GString *prof, const char *dir)
     g_string_append(prof, "\")\n");
 }
 
+static void
+sb_append_own_dir(GString *prof, const char *base)
+{
+    char *dir = g_build_filename(base, "nordstjernen", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    sb_append_subpath(prof, dir);
+    g_free(dir);
+}
+
 void
 ns_security_sandbox_init(const char *self_exe)
 {
@@ -902,15 +911,9 @@ ns_security_sandbox_init(const char *self_exe)
 
     sb_append_subpath(prof, g_get_user_runtime_dir());
 
-    char *cfg = g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
-    sb_append_subpath(prof, cfg);
-    g_free(cfg);
-    char *data = g_build_filename(g_get_user_data_dir(), "nordstjernen", NULL);
-    sb_append_subpath(prof, data);
-    g_free(data);
-    char *cache = g_build_filename(g_get_user_cache_dir(), "nordstjernen", NULL);
-    sb_append_subpath(prof, cache);
-    g_free(cache);
+    sb_append_own_dir(prof, g_get_user_config_dir());
+    sb_append_own_dir(prof, g_get_user_data_dir());
+    sb_append_own_dir(prof, g_get_user_cache_dir());
 
     const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
     sb_append_subpath(prof, dl);
