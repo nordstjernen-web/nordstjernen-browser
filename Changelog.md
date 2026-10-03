@@ -3,6 +3,14 @@ Changelog:
 
 1.0.28:
 ======
+* The built-in pages share one modern style with light and dark colours.
+  about:start is a new-tab page with the Nordstjernen mark, a large search
+  field that also opens typed addresses, and shortcuts to History,
+  Settings, About and nordstjernen.org; the release splash moves to the
+  top of about:nordstjernen. about:settings has a section list, a short
+  description under each option and switches that save as soon as they
+  change. about:history groups visits by day and has a filter box, error
+  pages use drawn icons instead of emoji, and the license pages match.
 * The browser window has a new, flatter look that follows the light or
   dark desktop theme. The old toolbar stayed light with black text on a
   dark desktop, and the active tab drew white text on a near-white tab.
