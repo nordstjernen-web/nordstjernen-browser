@@ -4,6 +4,7 @@
  */
 
 #include "history.h"
+#include "about_style.h"
 #include "config.h"
 
 #include <glib/gstdio.h>
@@ -179,42 +180,148 @@ ns_history_clear(void)
 }
 
 static const char k_history_style[] =
-    "<style>"
-    "body{font-family:system-ui,sans-serif;max-width:820px;margin:2.4em auto;"
-    "padding:0 1.2em;color:#222;background:#fff;}"
-    "h1{font-size:1.6em;font-weight:600;margin:0 0 0.2em 0;}"
-    ".sub{color:#777;margin:0 0 1.8em 0;font-size:0.92em;}"
-    "ul{list-style:none;padding:0;margin:0;}"
-    "li{padding:0.5em 0;border-bottom:1px solid #eee;}"
-    "a{color:#3a63d0;text-decoration:none;font-size:1.02em;}"
-    "a:hover{text-decoration:underline;}"
-    ".u{display:block;color:#999;font-size:0.82em;word-break:break-all;}"
-    ".d{color:#bbb;font-size:0.8em;float:right;}"
-    ".empty{color:#999;font-style:italic;margin-top:2em;}"
-    "@media (prefers-color-scheme: dark){"
-    "body{color:#e6e8ec;background:#16181d;}"
-    ".sub{color:#9aa3b2;}"
-    "li{border-bottom-color:#26292f;}"
-    "a{color:#7fa4ff;}"
-    ".u{color:#7d8593;}"
-    ".d{color:#666d78;}"
-    ".empty{color:#8b93a1;}"
-    "}"
+    "<style>" NS_ABOUT_BASE_CSS
+    ".wrap{max-width:860px;margin:0 auto;padding:28px 24px 56px}\n"
+    ".top{display:flex;align-items:center;justify-content:space-between;"
+    "gap:16px;margin:18px 0 24px}\n"
+    "h1{margin:0;font-size:28px;letter-spacing:-.02em}\n"
+    ".filter{flex:0 1 320px;display:flex;align-items:center;gap:10px;"
+    "height:42px;padding:0 16px;border-radius:999px;background:var(--card);"
+    "border:1px solid var(--line);box-shadow:var(--shadow);"
+    "color:var(--faint)}\n"
+    ".filter:focus-within{border-color:var(--accent);"
+    "box-shadow:0 0 0 3px var(--accent-soft)}\n"
+    ".filter input{flex:1 1 auto;min-width:0;border:0;outline:0;"
+    "background:transparent;color:var(--text);font:inherit;font-size:14px}\n"
+    ".day{margin:0 0 18px}\n"
+    ".day h2{margin:0 0 8px 6px;font-size:13px;font-weight:700;"
+    "letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}\n"
+    ".day ul{list-style:none;margin:0;padding:6px;}\n"
+    ".day li a{display:flex;align-items:center;gap:14px;padding:9px 12px;"
+    "border-radius:12px;color:var(--text)}\n"
+    ".day li a:hover{background:var(--field);text-decoration:none}\n"
+    ".av{flex:0 0 auto;display:flex;align-items:center;"
+    "justify-content:center;width:32px;height:32px;border-radius:10px;"
+    "background:var(--accent-soft);color:var(--accent);font-weight:700;"
+    "font-size:14px;text-transform:uppercase}\n"
+    ".tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}\n"
+    ".t{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;"
+    "text-overflow:ellipsis}\n"
+    ".u{font-size:12.5px;color:var(--muted);white-space:nowrap;"
+    "overflow:hidden;text-overflow:ellipsis}\n"
+    ".tm{flex:0 0 auto;font-size:12.5px;color:var(--faint);"
+    "font-variant-numeric:tabular-nums}\n"
+    ".empty{padding:48px 24px;text-align:center;color:var(--muted)}\n"
+    ".empty b{display:block;margin-bottom:4px;font-size:16px;"
+    "color:var(--text)}\n"
+    "[hidden]{display:none}\n"
     "</style>";
 
-char *
-ns_history_html_page(void)
-{
-    GString *s = g_string_new(
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<title>History</title>");
-    g_string_append(s, k_history_style);
-    g_string_append(s, "</head><body><h1>History</h1>"
-                       "<p class=\"sub\">Recently visited pages.</p>");
+static const char k_history_script[] =
+    "<script>\n"
+    "var q=document.getElementById('hq');\n"
+    "if(q)q.addEventListener('input',function(){\n"
+    " var v=q.value.toLowerCase();\n"
+    " var days=document.querySelectorAll('.day');\n"
+    " for(var i=0;i<days.length;i++){var any=false;\n"
+    "  var rows=days[i].querySelectorAll('li');\n"
+    "  for(var j=0;j<rows.length;j++){\n"
+    "   var hit=!v||rows[j].textContent.toLowerCase().indexOf(v)>=0;\n"
+    "   rows[j].hidden=!hit;if(hit)any=true;}\n"
+    "  days[i].hidden=!any;}});\n"
+    "</script>";
 
+static char *
+history_day_label(GDateTime *when, GDateTime *now)
+{
+    int days = g_date_time_get_day_of_year(now) -
+               g_date_time_get_day_of_year(when);
+    gboolean same_year =
+        g_date_time_get_year(now) == g_date_time_get_year(when);
+    if (same_year && days == 0)
+        return g_strdup("Today");
+    if (same_year && days == 1)
+        return g_strdup("Yesterday");
+    return g_date_time_format(when, same_year ? "%A, %e %B"
+                                              : "%A, %e %B %Y");
+}
+
+static char *
+history_host(const char *url)
+{
+    GUri *uri = g_uri_parse(url, G_URI_FLAGS_NONE, NULL);
+    const char *host = uri ? g_uri_get_host(uri) : NULL;
+    char *out = g_strdup(host && *host ? host : url);
+    if (uri)
+        g_uri_unref(uri);
+    if (g_str_has_prefix(out, "www.")) {
+        char *trimmed = g_strdup(out + 4);
+        g_free(out);
+        out = trimmed;
+    }
+    return out;
+}
+
+static void
+history_initial(const char *host, char out[8])
+{
+    gunichar first = g_utf8_get_char_validated(host, -1);
+    if (first != (gunichar)-1 && first != (gunichar)-2 &&
+        g_unichar_isalnum(first))
+        out[g_unichar_to_utf8(first, out)] = '\0';
+    else
+        g_strlcpy(out, "\xe2\x80\xa2", 8);
+}
+
+static void
+history_switch_day(GString *s, char **open_day, const char *day)
+{
+    if (*open_day && strcmp(*open_day, day) == 0)
+        return;
+    if (*open_day)
+        g_string_append(s, "</ul></section>");
+    char *e_day = g_markup_escape_text(day, -1);
+    g_string_append_printf(s,
+        "<section class=\"day\"><h2>%s</h2><ul class=\"card\">", e_day);
+    g_free(e_day);
+    g_free(*open_day);
+    *open_day = g_strdup(day);
+}
+
+static void
+history_append_row(GString *s, const char *url, const char *title,
+                   GDateTime *when)
+{
+    char *host = history_host(url);
+    char initial[8];
+    history_initial(host, initial);
+    char *e_url   = g_markup_escape_text(url, -1);
+    char *e_host  = g_markup_escape_text(host, -1);
+    char *e_init  = g_markup_escape_text(initial, -1);
+    char *e_title = g_markup_escape_text((title && *title) ? title : url, -1);
+    char *clock   = when ? g_date_time_format(when, "%H:%M") : NULL;
+    g_string_append_printf(s,
+        "<li><a href=\"%s\"><span class=\"av\">%s</span>"
+        "<span class=\"tx\"><span class=\"t\">%s</span>"
+        "<span class=\"u\">%s</span></span>"
+        "<span class=\"tm\">%s</span></a></li>",
+        e_url, e_init, e_title, e_host, clock ? clock : "");
+    g_free(clock);
+    g_free(e_url);
+    g_free(e_host);
+    g_free(e_init);
+    g_free(e_title);
+    g_free(host);
+}
+
+static gboolean
+history_append_visits(GString *s)
+{
+    gboolean have = FALSE;
+    char *open_day = NULL;
+    GDateTime *now = g_date_time_new_now_local();
     g_mutex_lock(&g_history_mutex);
     sqlite3_stmt *st = NULL;
-    int have = 0;
     if (g_history_db &&
         sqlite3_prepare_v2(g_history_db,
             "SELECT url,title,last_visit FROM visits "
@@ -224,31 +331,50 @@ ns_history_html_page(void)
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *url   = (const char *)sqlite3_column_text(st, 0);
             const char *title = (const char *)sqlite3_column_text(st, 1);
-            gint64 when       = sqlite3_column_int64(st, 2);
             if (!url) continue;
-            if (!have) g_string_append(s, "<ul>");
-            have = 1;
-            char *e_url   = g_markup_escape_text(url, -1);
-            char *e_title = g_markup_escape_text(
-                (title && *title) ? title : url, -1);
-            GDateTime *dt = g_date_time_new_from_unix_local(when);
-            char *date = dt ? g_date_time_format(dt, "%Y-%m-%d %H:%M") : NULL;
+            have = TRUE;
+            GDateTime *dt =
+                g_date_time_new_from_unix_local(sqlite3_column_int64(st, 2));
+            char *day = dt ? history_day_label(dt, now) : g_strdup("Earlier");
+            history_switch_day(s, &open_day, day);
+            history_append_row(s, url, title, dt);
+            g_free(day);
             if (dt) g_date_time_unref(dt);
-            g_string_append_printf(s,
-                "<li><span class=\"d\">%s</span>"
-                "<a href=\"%s\">%s</a>"
-                "<span class=\"u\">%s</span></li>",
-                date ? date : "", e_url, e_title, e_url);
-            g_free(date);
-            g_free(e_url);
-            g_free(e_title);
         }
         sqlite3_finalize(st);
     }
     g_mutex_unlock(&g_history_mutex);
+    g_date_time_unref(now);
+    if (open_day)
+        g_string_append(s, "</ul></section>");
+    g_free(open_day);
+    return have;
+}
 
-    if (have) g_string_append(s, "</ul>");
-    else      g_string_append(s, "<p class=\"empty\">No history yet.</p>");
+char *
+ns_history_html_page(void)
+{
+    GString *s = g_string_new(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"color-scheme\" content=\"light dark\">"
+        "<title>History</title>");
+    g_string_append(s, k_history_style);
+    g_string_append(s,
+        "</head><body><main class=\"wrap\">"
+        "<a class=\"crumb\" href=\"about:start\">\xe2\x86\x90 New Tab</a>"
+        "<div class=\"top\"><h1>History</h1>"
+        "<label class=\"filter\">"
+        "<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\""
+        " stroke=\"currentColor\" stroke-width=\"1.6\""
+        " stroke-linecap=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.6\"/>"
+        "<path d=\"M10.4 10.4 14 14\"/></svg>"
+        "<input id=\"hq\" type=\"search\" placeholder=\"Search history\""
+        " aria-label=\"Search history\" autocomplete=\"off\"></label></div>");
+    if (!history_append_visits(s))
+        g_string_append(s, "<div class=\"card empty\"><b>No history yet</b>"
+                           "Pages you visit will show up here.</div>");
+    g_string_append(s, "</main>");
+    g_string_append(s, k_history_script);
     g_string_append(s, "</body></html>");
     return g_string_free(s, FALSE);
 }
