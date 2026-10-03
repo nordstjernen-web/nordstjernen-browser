@@ -15123,19 +15123,10 @@ ns_geometry_clone(JSContext *ctx, int kind, JSValueConst v)
     return out;
 }
 
-/* Whether v is an instance of one of the realm's interfaces: its prototype
-   is the prototype of an engine-made constructor that the global object
-   exposes under its name. Such objects are cloned only when serializable. */
-static gboolean
-ns_sc_is_platform_instance(JSContext *ctx, JSValueConst v)
+static JSValue
+ns_proto_own_constructor(JSContext *ctx, JSValueConst proto)
 {
-    gboolean result = FALSE;
-    JSValue proto = JS_GetPrototype(ctx, v);
-    if (!JS_IsObject(proto)) {
-        JS_FreeValue(ctx, proto);
-        return FALSE;
-    }
-    JSValue ctor = JS_UNDEFINED, name = JS_UNDEFINED;
+    JSValue ctor = JS_UNDEFINED;
     JSPropertyDescriptor d;
     JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
     int has = JS_GetOwnProperty(ctx, &d, proto, ctor_atom);
@@ -15148,6 +15139,23 @@ ns_sc_is_platform_instance(JSContext *ctx, JSValueConst v)
     } else if (has < 0) {
         JS_FreeValue(ctx, JS_GetException(ctx));
     }
+    return ctor;
+}
+
+/* Whether v is an instance of one of the realm's interfaces: its prototype
+   is the prototype of an engine-made constructor that the global object
+   exposes under its name. Such objects are cloned only when serializable. */
+static gboolean
+ns_sc_is_platform_instance(JSContext *ctx, JSValueConst v)
+{
+    gboolean result = FALSE;
+    JSValue proto = JS_GetPrototype(ctx, v);
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        return FALSE;
+    }
+    JSValue name = JS_UNDEFINED;
+    JSValue ctor = ns_proto_own_constructor(ctx, proto);
     if (JS_IsFunction(ctx, ctor) && JS_IsEngineFunction(ctor))
         name = JS_GetPropertyStr(ctx, ctor, "name");
     const char *n = JS_IsString(name) ? JS_ToCString(ctx, name) : NULL;
@@ -19094,14 +19102,10 @@ ns_usp_install_interface(JSContext *ctx)
     JS_FreeValue(ctx, r);
 }
 
-static JSValue
-ns_url_construct(JSContext *ctx, JSValueConst new_target,
-                 int argc, JSValueConst *argv)
+static char *
+ns_url_resolve_args(JSContext *ctx, int argc, JSValueConst *argv,
+                    const char *raw, size_t raw_len)
 {
-    if (argc < 1) return JS_ThrowTypeError(ctx, "URL: requires a url string");
-    size_t raw_len = 0;
-    const char *raw = JS_ToCStringLen(ctx, &raw_len, argv[0]);
-    if (!raw) return JS_ThrowTypeError(ctx, "URL: invalid url argument");
     char *resolved = NULL;
     if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
         const char *base = JS_ToCString(ctx, argv[1]);
@@ -19109,20 +19113,19 @@ ns_url_construct(JSContext *ctx, JSValueConst new_target,
             resolved = ns_url_resolve_len(base, raw, raw_len);
             JS_FreeCString(ctx, base);
         }
-        if (!resolved) {
-            JS_FreeCString(ctx, raw);
-            return JS_ThrowTypeError(ctx, "URL: invalid url");
-        }
+        if (!resolved)
+            JS_ThrowTypeError(ctx, "URL: invalid url");
+        return resolved;
     }
-    if (!resolved) {
-        resolved = ns_url_resolve_len(NULL, raw, raw_len);
-        if (!resolved) {
-            JS_FreeCString(ctx, raw);
-            return JS_ThrowTypeError(ctx,
-                "URL: invalid or relative URL requires a base");
-        }
-    }
-    JS_FreeCString(ctx, raw);
+    resolved = ns_url_resolve_len(NULL, raw, raw_len);
+    if (!resolved)
+        JS_ThrowTypeError(ctx, "URL: invalid or relative URL requires a base");
+    return resolved;
+}
+
+static JSValue
+ns_url_data_object(JSContext *ctx, const char *resolved)
+{
     ns_url_parts *parts = ns_url_parts_new(resolved);
     JSValue obj = JS_NewObject(ctx);
     if (parts) {
@@ -19157,74 +19160,98 @@ ns_url_construct(JSContext *ctx, JSValueConst new_target,
         JS_SetPropertyStr(ctx, obj, "searchParams",
                           ns_url_get_searchParams_object(ctx, ""));
     }
+    return obj;
+}
+
+static void
+ns_url_install_helper(JSContext *ctx, ns_js *jsx)
+{
+    static const char *helper_src =
+        "(function(urlParts, urlSet){ "
+        " return function(u, proto){ "
+        "  var URLp = URL.prototype; "
+        "  if (!URLp.__ndReady) { "
+        "    function nm(fn, n){ try { Object.defineProperty(fn, 'name', { value: n, configurable: true }); } catch(e) {} return fn; } "
+        "    function st(o){ var d = o !== null && typeof o === 'object' ? o.__nd : undefined; if (!d) throw new TypeError('Illegal invocation'); return d; } "
+        "    function gettr(name){ return function(){ return st(this)[name]; }; } "
+        "    function setComp(comp){ return function(v){ var d = st(this); var p = urlSet(d.href, comp, String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; } "
+        "    function accessor(name, setter){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, get: nm(gettr(name), 'get ' + name), set: setter ? nm(setter, 'set ' + name) : undefined }); } "
+        "    accessor('href', function(v){ st(this); var p = urlParts(String(v)); if (!p) throw new TypeError('Invalid URL'); this.__nd = p; this.__ndSync(); }); "
+        "    accessor('origin', undefined); "
+        "    ['protocol','username','password','host','hostname','port','pathname','search','hash'].forEach(function(n){ accessor(n, setComp(n)); }); "
+        "    Object.defineProperty(URLp, 'searchParams', { configurable: true, enumerable: true, get: nm(function(){ st(this); return this.__ndSP; }, 'get searchParams') }); "
+        "    function method(name, fn){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, writable: true, value: nm(fn, name) }); } "
+        "    method('toString', function(){ return st(this).href; }); "
+        "    method('toJSON', function(){ return st(this).href; }); "
+        "    URLp.__ndSync = function(){ try { var sp = new URLSearchParams(this.__nd.search); if (this.__ndSP) { this.__ndSP.__ndPairs = sp.__ndPairs; } else { sp.__ndOwner = this; this.__ndSP = sp; } } catch(e) {} }; "
+        "    URLp.__ndSetSearchRaw = function(v){ var p = urlSet(this.__nd.href, 'search', String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; "
+        "    try { Object.defineProperty(URLp, Symbol.toStringTag, { value: 'URL', configurable: true }); } catch(e) {} "
+        "    URLp.__ndReady = true; "
+        "  } "
+        "  var nd = { href: u.href, origin: u.origin, protocol: u.protocol, username: u.username, password: u.password, host: u.host, hostname: u.hostname, port: u.port, pathname: (u.pathname == null ? '' : u.pathname), search: u.search || '', hash: u.hash || '' }; "
+        "  var inst = Object.create(proto && (proto === URLp || URLp.isPrototypeOf(proto)) ? proto : URLp); "
+        "  inst.__nd = nd; "
+        "  inst.__ndSync(); "
+        "  return inst; "
+        " }; "
+        "}) ";
+    JSValue factory = JS_Eval(ctx, helper_src, strlen(helper_src),
+                              "<url-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    JSValue h = JS_UNDEFINED;
+    if (!JS_IsException(factory)) {
+        JSValue parts_fn = JS_NewCFunction(ctx, ns_window_url_parts_internal,
+                                           "parts", 1);
+        JSValue set_fn = JS_NewCFunction(ctx, ns_window_url_set_internal,
+                                         "set", 3);
+        JSValueConst fargs[2] = { parts_fn, set_fn };
+        h = JS_Call(ctx, factory, JS_UNDEFINED, 2, fargs);
+        JS_FreeValue(ctx, parts_fn);
+        JS_FreeValue(ctx, set_fn);
+    }
+    JS_FreeValue(ctx, factory);
+    if (!JS_IsException(h)) {
+        jsx->url_helper = h;
+        jsx->url_helper_set = 1;
+    } else {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, h);
+    }
+}
+
+static JSValue
+ns_url_wrap_instance(JSContext *ctx, ns_js *jsx, JSValue obj, JSValueConst new_target)
+{
+    JSValue new_proto = JS_IsObject(new_target)
+        ? JS_GetPropertyStr(ctx, new_target, "prototype") : JS_UNDEFINED;
+    JSValueConst args[2] = { obj, new_proto };
+    JSValue r = JS_Call(ctx, jsx->url_helper, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, new_proto);
+    if (JS_IsException(r)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+        return obj;
+    }
+    JS_FreeValue(ctx, obj);
+    return r;
+}
+
+static JSValue
+ns_url_construct(JSContext *ctx, JSValueConst new_target,
+                 int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_ThrowTypeError(ctx, "URL: requires a url string");
+    size_t raw_len = 0;
+    const char *raw = JS_ToCStringLen(ctx, &raw_len, argv[0]);
+    if (!raw) return JS_ThrowTypeError(ctx, "URL: invalid url argument");
+    char *resolved = ns_url_resolve_args(ctx, argc, argv, raw, raw_len);
+    JS_FreeCString(ctx, raw);
+    if (!resolved) return JS_EXCEPTION;
+    JSValue obj = ns_url_data_object(ctx, resolved);
     g_free(resolved);
     ns_js *jsx = js_from_ctx(ctx);
-    if (jsx && !jsx->url_helper_set) {
-        static const char *helper_src =
-            "(function(urlParts, urlSet){ "
-            " return function(u, proto){ "
-            "  var URLp = URL.prototype; "
-            "  if (!URLp.__ndReady) { "
-            "    function nm(fn, n){ try { Object.defineProperty(fn, 'name', { value: n, configurable: true }); } catch(e) {} return fn; } "
-            "    function st(o){ var d = o !== null && typeof o === 'object' ? o.__nd : undefined; if (!d) throw new TypeError('Illegal invocation'); return d; } "
-            "    function gettr(name){ return function(){ return st(this)[name]; }; } "
-            "    function setComp(comp){ return function(v){ var d = st(this); var p = urlSet(d.href, comp, String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; } "
-            "    function accessor(name, setter){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, get: nm(gettr(name), 'get ' + name), set: setter ? nm(setter, 'set ' + name) : undefined }); } "
-            "    accessor('href', function(v){ st(this); var p = urlParts(String(v)); if (!p) throw new TypeError('Invalid URL'); this.__nd = p; this.__ndSync(); }); "
-            "    accessor('origin', undefined); "
-            "    ['protocol','username','password','host','hostname','port','pathname','search','hash'].forEach(function(n){ accessor(n, setComp(n)); }); "
-            "    Object.defineProperty(URLp, 'searchParams', { configurable: true, enumerable: true, get: nm(function(){ st(this); return this.__ndSP; }, 'get searchParams') }); "
-            "    function method(name, fn){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, writable: true, value: nm(fn, name) }); } "
-            "    method('toString', function(){ return st(this).href; }); "
-            "    method('toJSON', function(){ return st(this).href; }); "
-            "    URLp.__ndSync = function(){ try { var sp = new URLSearchParams(this.__nd.search); if (this.__ndSP) { this.__ndSP.__ndPairs = sp.__ndPairs; } else { sp.__ndOwner = this; this.__ndSP = sp; } } catch(e) {} }; "
-            "    URLp.__ndSetSearchRaw = function(v){ var p = urlSet(this.__nd.href, 'search', String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; "
-            "    try { Object.defineProperty(URLp, Symbol.toStringTag, { value: 'URL', configurable: true }); } catch(e) {} "
-            "    URLp.__ndReady = true; "
-            "  } "
-            "  var nd = { href: u.href, origin: u.origin, protocol: u.protocol, username: u.username, password: u.password, host: u.host, hostname: u.hostname, port: u.port, pathname: (u.pathname == null ? '' : u.pathname), search: u.search || '', hash: u.hash || '' }; "
-            "  var inst = Object.create(proto && (proto === URLp || URLp.isPrototypeOf(proto)) ? proto : URLp); "
-            "  inst.__nd = nd; "
-            "  inst.__ndSync(); "
-            "  return inst; "
-            " }; "
-            "}) ";
-        JSValue factory = JS_Eval(ctx, helper_src, strlen(helper_src),
-                                  "<url-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
-        JSValue h = JS_UNDEFINED;
-        if (!JS_IsException(factory)) {
-            JSValue parts_fn = JS_NewCFunction(ctx, ns_window_url_parts_internal,
-                                               "parts", 1);
-            JSValue set_fn = JS_NewCFunction(ctx, ns_window_url_set_internal,
-                                             "set", 3);
-            JSValueConst fargs[2] = { parts_fn, set_fn };
-            h = JS_Call(ctx, factory, JS_UNDEFINED, 2, fargs);
-            JS_FreeValue(ctx, parts_fn);
-            JS_FreeValue(ctx, set_fn);
-        }
-        JS_FreeValue(ctx, factory);
-        if (!JS_IsException(h)) {
-            jsx->url_helper = h;
-            jsx->url_helper_set = 1;
-        } else {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            JS_FreeValue(ctx, h);
-        }
-    }
-    if (jsx && jsx->url_helper_set) {
-        JSValue new_proto = JS_IsObject(new_target)
-            ? JS_GetPropertyStr(ctx, new_target, "prototype") : JS_UNDEFINED;
-        JSValueConst args[2] = { obj, new_proto };
-        JSValue r = JS_Call(ctx, jsx->url_helper, JS_UNDEFINED, 2, args);
-        JS_FreeValue(ctx, new_proto);
-        if (JS_IsException(r)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            JS_FreeValue(ctx, r);
-        } else {
-            JS_FreeValue(ctx, obj);
-            return r;
-        }
-    }
+    if (jsx && !jsx->url_helper_set) ns_url_install_helper(ctx, jsx);
+    if (jsx && jsx->url_helper_set)
+        return ns_url_wrap_instance(ctx, jsx, obj, new_target);
     return obj;
 }
 
@@ -21223,6 +21250,22 @@ ns_xhr_get_responseType(JSContext *ctx, JSValueConst this_val)
     return v;
 }
 
+static gboolean
+ns_xhr_response_type_valid(JSContext *ctx, const char *s)
+{
+    static const char *const valid[] = {
+        "", "arraybuffer", "blob", "document", "json", "text",
+    };
+    if (!s) return FALSE;
+    gboolean ok = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(valid); i++)
+        if (strcmp(s, valid[i]) == 0) ok = TRUE;
+    ns_js *js = js_from_ctx(ctx);
+    if (ok && strcmp(s, "document") == 0 && js && js->worker_host)
+        ok = FALSE;
+    return ok;
+}
+
 static JSValue
 ns_xhr_set_responseType(JSContext *ctx, JSValueConst this_val,
                         JSValueConst value)
@@ -21232,15 +21275,7 @@ ns_xhr_set_responseType(JSContext *ctx, JSValueConst this_val,
     JSValue str = JS_ToString(ctx, value);
     if (JS_IsException(str)) return str;
     const char *s = JS_ToCString(ctx, str);
-    static const char *const valid[] = {
-        "", "arraybuffer", "blob", "document", "json", "text",
-    };
-    gboolean ok = FALSE;
-    for (gsize i = 0; s && i < G_N_ELEMENTS(valid); i++)
-        if (strcmp(s, valid[i]) == 0) ok = TRUE;
-    ns_js *js = js_from_ctx(ctx);
-    if (ok && s && strcmp(s, "document") == 0 && js && js->worker_host)
-        ok = FALSE;
+    gboolean ok = ns_xhr_response_type_valid(ctx, s);
     if (s) JS_FreeCString(ctx, s);
     if (!ok) {
         JS_FreeValue(ctx, str);
@@ -21317,6 +21352,36 @@ ns_form_data_too_few(JSContext *ctx, const char *method, int need, int have)
         need == 1 ? "" : "s", have);
 }
 
+static int
+ns_form_data_is_instance(JSContext *ctx, JSValueConst value, JSValueConst ctor)
+{
+    return JS_IsConstructor(ctx, ctor) && JS_IsObject(value) &&
+           JS_IsInstanceOf(ctx, value, ctor) > 0;
+}
+
+static JSValue
+ns_form_data_file_of(JSContext *ctx, JSValueConst value, JSValueConst filename,
+                     gboolean has_filename, JSValueConst file_ctor, int is_file)
+{
+    JSValue name = has_filename ? JS_ToString(ctx, filename)
+                                : JS_NewString(ctx, "blob");
+    if (JS_IsException(name)) return name;
+    JSValue parts = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, parts, 0, JS_DupValue(ctx, value));
+    JSValue opts = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, opts, "type", JS_GetPropertyStr(ctx, value, "type"));
+    if (is_file)
+        JS_SetPropertyStr(ctx, opts, "lastModified",
+                          JS_GetPropertyStr(ctx, value, "lastModified"));
+    JSValueConst args[3] = { parts, name, opts };
+    JSValue out = JS_IsConstructor(ctx, file_ctor)
+        ? JS_CallConstructor(ctx, file_ctor, 3, args) : JS_DupValue(ctx, value);
+    JS_FreeValue(ctx, parts);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, opts);
+    return out;
+}
+
 static JSValue
 ns_form_data_value(JSContext *ctx, JSValueConst value, JSValueConst filename,
                    gboolean has_filename)
@@ -21325,12 +21390,9 @@ ns_form_data_value(JSContext *ctx, JSValueConst value, JSValueConst filename,
     JSValue blob_ctor = JS_GetPropertyStr(ctx, global, "Blob");
     JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");
     JS_FreeValue(ctx, global);
-    int is_blob = JS_IsConstructor(ctx, blob_ctor) &&
-                  JS_IsObject(value) && JS_IsInstanceOf(ctx, value, blob_ctor) > 0;
-    int is_file = is_blob && JS_IsConstructor(ctx, file_ctor) &&
-                  JS_IsInstanceOf(ctx, value, file_ctor) > 0;
+    int is_blob = ns_form_data_is_instance(ctx, value, blob_ctor);
+    int is_file = is_blob && ns_form_data_is_instance(ctx, value, file_ctor);
     JS_FreeValue(ctx, blob_ctor);
-    JSValue out;
     if (!is_blob) {
         JS_FreeValue(ctx, file_ctor);
         if (has_filename)
@@ -21342,25 +21404,8 @@ ns_form_data_value(JSContext *ctx, JSValueConst value, JSValueConst filename,
         JS_FreeValue(ctx, file_ctor);
         return JS_DupValue(ctx, value);
     }
-    JSValue name = has_filename ? JS_ToString(ctx, filename)
-                                : JS_NewString(ctx, "blob");
-    if (JS_IsException(name)) {
-        JS_FreeValue(ctx, file_ctor);
-        return name;
-    }
-    JSValue parts = JS_NewArray(ctx);
-    JS_SetPropertyUint32(ctx, parts, 0, JS_DupValue(ctx, value));
-    JSValue opts = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, opts, "type", JS_GetPropertyStr(ctx, value, "type"));
-    if (is_file)
-        JS_SetPropertyStr(ctx, opts, "lastModified",
-                          JS_GetPropertyStr(ctx, value, "lastModified"));
-    JSValueConst args[3] = { parts, name, opts };
-    out = JS_IsConstructor(ctx, file_ctor)
-        ? JS_CallConstructor(ctx, file_ctor, 3, args) : JS_DupValue(ctx, value);
-    JS_FreeValue(ctx, parts);
-    JS_FreeValue(ctx, name);
-    JS_FreeValue(ctx, opts);
+    JSValue out = ns_form_data_file_of(ctx, value, filename, has_filename,
+                                       file_ctor, is_file);
     JS_FreeValue(ctx, file_ctor);
     return out;
 }
@@ -22111,6 +22156,36 @@ ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
     return view;
 }
 
+static uint8_t *
+ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
+                       size_t *off, size_t *blen, size_t *total)
+{
+    size_t bpe = 0;
+    uint8_t *base = NULL;
+    *buf = JS_UNDEFINED;
+    if (JS_GetTypedArrayType(view) == JS_TYPED_ARRAY_UINT8) {
+        *buf = JS_GetTypedArrayBuffer(ctx, view, off, blen, &bpe);
+        if (!JS_IsException(*buf)) base = JS_GetArrayBuffer(ctx, total, *buf);
+    }
+    return base;
+}
+
+static void
+ns_text_encoder_copy_into(const guint8 *src, gsize n, uint8_t *dst, size_t room,
+                          gsize *read, gsize *written)
+{
+    for (gsize i = 0; i < n; ) {
+        guint8 c = src[i];
+        gsize cl = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+        if (i + cl > n) cl = n - i;
+        if (*written + cl > room) break;
+        memcpy(dst + *written, src + i, cl);
+        *written += cl;
+        *read += cl == 4 ? 2 : 1;
+        i += cl;
+    }
+}
+
 static JSValue
 ns_text_encoder_encode_into(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
@@ -22126,13 +22201,9 @@ ns_text_encoder_encode_into(JSContext *ctx, JSValueConst this_val,
     g_autofree char *fixed = ns_utf8_replace_lone_surrogates(s, len, &fixed_len);
     const guint8 *src = (const guint8 *)(fixed ? fixed : s);
     gsize n = fixed ? fixed_len : len;
-    size_t off = 0, blen = 0, bpe = 0, total = 0;
+    size_t off = 0, blen = 0, total = 0;
     JSValue buf = JS_UNDEFINED;
-    uint8_t *base = NULL;
-    if (JS_GetTypedArrayType(argv[1]) == JS_TYPED_ARRAY_UINT8) {
-        buf = JS_GetTypedArrayBuffer(ctx, argv[1], &off, &blen, &bpe);
-        if (!JS_IsException(buf)) base = JS_GetArrayBuffer(ctx, &total, buf);
-    }
+    uint8_t *base = ns_text_encoder_target(ctx, argv[1], &buf, &off, &blen, &total);
     if (!base || off + blen > total) {
         JS_FreeValue(ctx, buf);
         JS_FreeCString(ctx, s);
@@ -22141,16 +22212,7 @@ ns_text_encoder_encode_into(JSContext *ctx, JSValueConst this_val,
             "'TextEncoder': parameter 2 is not of type 'Uint8Array'.");
     }
     gsize read = 0, written = 0;
-    for (gsize i = 0; i < n; ) {
-        guint8 c = src[i];
-        gsize cl = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-        if (i + cl > n) cl = n - i;
-        if (written + cl > blen) break;
-        memcpy(base + off + written, src + i, cl);
-        written += cl;
-        read += cl == 4 ? 2 : 1;
-        i += cl;
-    }
+    ns_text_encoder_copy_into(src, n, base + off, blen, &read, &written);
     JS_FreeValue(ctx, buf);
     JS_FreeCString(ctx, s);
     JSValue result = JS_NewObject(ctx);
@@ -22598,6 +22660,25 @@ ns_filereader_fire(JSContext *ctx, JSValueConst self, const char *type)
     ns_xhr_fire_progress_event(ctx, self, type, loaded ? total : 0, total, TRUE);
 }
 
+static void
+ns_filereader_run(JSContext *ctx, JSValueConst self, gint64 gen)
+{
+    gboolean live = ns_filereader_current(ctx, self, gen);
+    if (live) ns_filereader_fire(ctx, self, "loadstart");
+    live = live && ns_filereader_current(ctx, self, gen);
+    if (live) ns_filereader_fire(ctx, self, "progress");
+    live = live && ns_filereader_current(ctx, self, gen);
+    if (live) {
+        JS_SetPropertyStr(ctx, self, "result",
+                          JS_GetPropertyStr(ctx, self, "_pending"));
+        JS_SetPropertyStr(ctx, self, "_pending", JS_UNDEFINED);
+        JS_SetPropertyStr(ctx, self, "readyState", JS_NewInt32(ctx, 2));
+        ns_filereader_fire(ctx, self, "load");
+    }
+    live = live && ns_filereader_current(ctx, self, gen);
+    if (live) ns_filereader_fire(ctx, self, "loadend");
+}
+
 static gboolean
 ns_filereader_complete(gpointer ud)
 {
@@ -22609,20 +22690,7 @@ ns_filereader_complete(gpointer ud)
     }
     JSContext *ctx = js->ctx;
     JSValue self = fr->self;
-    gboolean live = ns_filereader_current(ctx, self, fr->gen);
-    if (live) ns_filereader_fire(ctx, self, "loadstart");
-    live = live && ns_filereader_current(ctx, self, fr->gen);
-    if (live) ns_filereader_fire(ctx, self, "progress");
-    live = live && ns_filereader_current(ctx, self, fr->gen);
-    if (live) {
-        JS_SetPropertyStr(ctx, self, "result",
-                          JS_GetPropertyStr(ctx, self, "_pending"));
-        JS_SetPropertyStr(ctx, self, "_pending", JS_UNDEFINED);
-        JS_SetPropertyStr(ctx, self, "readyState", JS_NewInt32(ctx, 2));
-        ns_filereader_fire(ctx, self, "load");
-    }
-    live = live && ns_filereader_current(ctx, self, fr->gen);
-    if (live) ns_filereader_fire(ctx, self, "loadend");
+    ns_filereader_run(ctx, self, fr->gen);
     JS_FreeValue(ctx, self);
     if (js->filereader_idles)
         g_ptr_array_remove_fast(js->filereader_idles, fr);
@@ -22646,42 +22714,35 @@ ns_filereader_schedule(JSContext *ctx, JSValueConst self, gint64 gen)
 }
 
 static char *
-ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
+ns_blob_text_bytes(JSContext *ctx, JSValueConst blob, gsize *out_len)
 {
-    if (out_len) *out_len = 0;
-    JSValue b = JS_GetPropertyStr(ctx, blob, "__ndBlobBytes");
-    if (JS_IsUndefined(b) || JS_IsNull(b)) {
-        JS_FreeValue(ctx, b);
-        const char *s = JS_ToCString(ctx, blob);
-        if (!s) return g_strdup("");
-        char *out = g_strdup(s);
-        if (out_len) *out_len = strlen(out);
-        JS_FreeCString(ctx, s);
-        return out;
-    }
-    size_t view_off = 0, view_len = 0, view_bpe = 0;
-    JSValue view_buf = JS_GetTypedArrayBuffer(ctx, b, &view_off, &view_len, &view_bpe);
-    if (!JS_IsException(view_buf)) {
-        size_t total = 0;
-        uint8_t *base = JS_GetArrayBuffer(ctx, &total, view_buf);
-        char *copy = NULL;
-        if (base && view_off + view_len <= total) {
-            copy = g_malloc(view_len + 1);
-            memcpy(copy, base + view_off, view_len);
-            copy[view_len] = '\0';
-            if (out_len) *out_len = view_len;
-        }
-        JS_FreeValue(ctx, view_buf);
-        JS_FreeValue(ctx, b);
-        if (copy) return copy;
-        return g_strdup("");
-    }
-    JS_FreeValue(ctx, JS_GetException(ctx));
+    const char *s = JS_ToCString(ctx, blob);
+    if (!s) return g_strdup("");
+    char *out = g_strdup(s);
+    if (out_len) *out_len = strlen(out);
+    JS_FreeCString(ctx, s);
+    return out;
+}
+
+static char *
+ns_blob_view_copy(JSContext *ctx, JSValueConst view_buf, size_t view_off,
+                  size_t view_len, gsize *out_len)
+{
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, view_buf);
+    if (!base || view_off + view_len > total) return NULL;
+    char *copy = g_malloc(view_len + 1);
+    memcpy(copy, base + view_off, view_len);
+    copy[view_len] = '\0';
+    if (out_len) *out_len = view_len;
+    return copy;
+}
+
+static char *
+ns_blob_array_copy(JSContext *ctx, JSValueConst b, gsize *out_len)
+{
     uint32_t len = ns_js_array_length(ctx, b);
-    if ((gsize)len + 1 < (gsize)len) {
-        JS_FreeValue(ctx, b);
-        return g_strdup("");
-    }
+    if ((gsize)len + 1 < (gsize)len) return g_strdup("");
     char *out = g_malloc((gsize)len + 1);
     for (uint32_t i = 0; i < len; i++) {
         JSValue v = JS_GetPropertyUint32(ctx, b, i);
@@ -22691,8 +22752,31 @@ ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
         JS_FreeValue(ctx, v);
     }
     out[len] = '\0';
-    JS_FreeValue(ctx, b);
     if (out_len) *out_len = len;
+    return out;
+}
+
+static char *
+ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
+{
+    if (out_len) *out_len = 0;
+    JSValue b = JS_GetPropertyStr(ctx, blob, "__ndBlobBytes");
+    if (JS_IsUndefined(b) || JS_IsNull(b)) {
+        JS_FreeValue(ctx, b);
+        return ns_blob_text_bytes(ctx, blob, out_len);
+    }
+    size_t view_off = 0, view_len = 0, view_bpe = 0;
+    JSValue view_buf = JS_GetTypedArrayBuffer(ctx, b, &view_off, &view_len, &view_bpe);
+    if (!JS_IsException(view_buf)) {
+        char *copy = ns_blob_view_copy(ctx, view_buf, view_off, view_len, out_len);
+        JS_FreeValue(ctx, view_buf);
+        JS_FreeValue(ctx, b);
+        if (copy) return copy;
+        return g_strdup("");
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    char *out = ns_blob_array_copy(ctx, b, out_len);
+    JS_FreeValue(ctx, b);
     return out;
 }
 
