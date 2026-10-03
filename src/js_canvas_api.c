@@ -365,31 +365,51 @@ static const ns_api_method ns_gradient_methods[] = {
     { "addColorStop", ns_ctx_gradient_addColorStop, 2 },
 };
 
+static gboolean
+ns_matrix_member_equal(double a, double b)
+{
+    return a == b || (a != a && b != b);
+}
+
+static int
+ns_matrix_member_value(JSContext *ctx, JSValueConst alias, JSValueConst field,
+                       const char *alias_name, const char *field_name, double *out)
+{
+    double da = 0, df = 0;
+    gboolean has_alias = !JS_IsUndefined(alias), has_field = !JS_IsUndefined(field);
+    if (has_alias && JS_ToFloat64(ctx, &da, alias) < 0) return -1;
+    if (has_field && JS_ToFloat64(ctx, &df, field) < 0) return -1;
+    if (has_alias && has_field && !ns_matrix_member_equal(da, df)) {
+        JS_ThrowTypeError(ctx, "The '%s' and '%s' members must be equal.",
+                          alias_name, field_name);
+        return -1;
+    }
+    if (has_alias) *out = da;
+    else if (has_field) *out = df;
+    return 0;
+}
+
+static int
+ns_matrix_init_member(JSContext *ctx, JSValueConst init, int i, double *out)
+{
+    static const char *const aliases[6] = { "a", "b", "c", "d", "e", "f" };
+    static const char *const fields[6] = { "m11", "m12", "m21", "m22", "m41", "m42" };
+    JSValue alias = JS_GetPropertyStr(ctx, init, aliases[i]);
+    JSValue field = JS_GetPropertyStr(ctx, init, fields[i]);
+    int ret = ns_matrix_member_value(ctx, alias, field, aliases[i], fields[i], out);
+    JS_FreeValue(ctx, alias);
+    JS_FreeValue(ctx, field);
+    return ret;
+}
+
 static JSValue
 ns_pattern_setTransform(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     double m[6] = { 1, 0, 0, 1, 0, 0 };
-    static const char *const aliases[6] = { "a", "b", "c", "d", "e", "f" };
-    static const char *const fields[6] = { "m11", "m12", "m21", "m22", "m41", "m42" };
     if (argc >= 1 && JS_IsObject(argv[0])) {
-        for (int i = 0; i < 6; i++) {
-            JSValue alias = JS_GetPropertyStr(ctx, argv[0], aliases[i]);
-            JSValue field = JS_GetPropertyStr(ctx, argv[0], fields[i]);
-            double da = 0, df = 0;
-            gboolean has_alias = !JS_IsUndefined(alias), has_field = !JS_IsUndefined(field);
-            gboolean bad = (has_alias && JS_ToFloat64(ctx, &da, alias) < 0) ||
-                           (has_field && JS_ToFloat64(ctx, &df, field) < 0);
-            gboolean conflict = has_alias && has_field && !(da == df || (da != da && df != df));
-            JS_FreeValue(ctx, alias);
-            JS_FreeValue(ctx, field);
-            if (bad) return JS_EXCEPTION;
-            if (conflict)
-                return JS_ThrowTypeError(ctx,
-                    "The '%s' and '%s' members must be equal.", aliases[i], fields[i]);
-            if (has_alias) m[i] = da;
-            else if (has_field) m[i] = df;
-        }
+        for (int i = 0; i < 6; i++)
+            if (ns_matrix_init_member(ctx, argv[0], i, &m[i]) < 0) return JS_EXCEPTION;
     }
     JSValue arr = JS_NewArray(ctx);
     for (uint32_t i = 0; i < 6; i++)
@@ -1191,6 +1211,30 @@ ns_imagedata_color_space(JSContext *ctx, JSValueConst settings, const char **out
 }
 
 static JSValue
+ns_imagedata_array_size(JSContext *ctx, size_t blen, int argc, JSValueConst *argv,
+                        uint32_t *sw, uint64_t *rows)
+{
+    if (blen % 4)
+        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+                                   "The input data length is not a multiple of 4.");
+    if (JS_ToUint32(ctx, sw, argv[1]) < 0) return JS_EXCEPTION;
+    if (*sw == 0)
+        return ns_canvas_throw_dom(ctx, "IndexSizeError", "The source width is zero.");
+    uint64_t pixels = blen / 4;
+    if (pixels % *sw)
+        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+            "The input data byte length is not a multiple of (4 * width).");
+    *rows = pixels / *sw;
+    if (argc < 3 || JS_IsUndefined(argv[2])) return JS_UNDEFINED;
+    uint32_t sh = 0;
+    if (JS_ToUint32(ctx, &sh, argv[2]) < 0) return JS_EXCEPTION;
+    if (sh != *rows)
+        return ns_canvas_throw_dom(ctx, "IndexSizeError",
+            "The input data byte length is not equal to (4 * width * height).");
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_imagedata_from_array(JSContext *ctx, JSValueConst proto, JSValueConst data,
                         int argc, JSValueConst *argv, const char *space_hint)
 {
@@ -1199,24 +1243,10 @@ ns_imagedata_from_array(JSContext *ctx, JSValueConst proto, JSValueConst data,
     JSValue buf = JS_GetTypedArrayBuffer(ctx, data, &off, &blen, &bpe);
     if (JS_IsException(buf)) return buf;
     JS_FreeValue(ctx, buf);
-    if (blen % 4)
-        return ns_canvas_throw_dom(ctx, "InvalidStateError",
-                                   "The input data length is not a multiple of 4.");
-    uint32_t sw = 0, sh = 0;
-    if (JS_ToUint32(ctx, &sw, argv[1]) < 0) return JS_EXCEPTION;
-    if (sw == 0)
-        return ns_canvas_throw_dom(ctx, "IndexSizeError", "The source width is zero.");
-    uint64_t pixels = blen / 4;
-    if (pixels % sw)
-        return ns_canvas_throw_dom(ctx, "InvalidStateError",
-            "The input data byte length is not a multiple of (4 * width).");
-    uint64_t rows = pixels / sw;
-    if (argc >= 3 && !JS_IsUndefined(argv[2])) {
-        if (JS_ToUint32(ctx, &sh, argv[2]) < 0) return JS_EXCEPTION;
-        if (sh != rows)
-            return ns_canvas_throw_dom(ctx, "IndexSizeError",
-                "The input data byte length is not equal to (4 * width * height).");
-    }
+    uint32_t sw = 0;
+    uint64_t rows = 0;
+    JSValue bad = ns_imagedata_array_size(ctx, blen, argc, argv, &sw, &rows);
+    if (JS_IsException(bad)) return bad;
     const char *space = "srgb";
     JSValue err = ns_imagedata_color_space(ctx, argc >= 4 ? argv[3] : JS_UNDEFINED, &space);
     if (JS_IsException(err)) return err;
@@ -1224,6 +1254,34 @@ ns_imagedata_from_array(JSContext *ctx, JSValueConst proto, JSValueConst data,
         return JS_ThrowRangeError(ctx, "Failed to construct 'ImageData': The requested image size exceeds the supported range.");
     return ns_imagedata_wrap(ctx, ctx, proto, (int)sw, (int)rows,
                              JS_DupValue(ctx, data), space);
+}
+
+static JSValue
+ns_imagedata_check_size(JSContext *ctx, uint32_t sw, uint32_t sh)
+{
+    if (sw == 0 || sh == 0)
+        return ns_canvas_throw_dom(ctx, "IndexSizeError", sw == 0
+            ? "The source width is zero or not a number."
+            : "The source height is zero or not a number.");
+    if (sw > 32767 || sh > 32767)
+        return JS_ThrowRangeError(ctx, "Failed to construct 'ImageData': The requested image size exceeds the supported range.");
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_imagedata_from_size(JSContext *ctx, JSValueConst proto, int argc, JSValueConst *argv)
+{
+    uint32_t sw = 0, sh = 0;
+    if (JS_ToUint32(ctx, &sw, argv[0]) < 0 || JS_ToUint32(ctx, &sh, argv[1]) < 0)
+        return JS_EXCEPTION;
+    const char *space = "srgb";
+    JSValue err = ns_imagedata_color_space(ctx, argc >= 3 ? argv[2] : JS_UNDEFINED, &space);
+    if (JS_IsException(err)) return err;
+    JSValue bad = ns_imagedata_check_size(ctx, sw, sh);
+    if (JS_IsException(bad)) return bad;
+    JSValue data = ns_clamped_array(ctx, NULL, (size_t)sw * (size_t)sh * 4u);
+    if (JS_IsException(data)) return data;
+    return ns_imagedata_wrap(ctx, ctx, proto, (int)sw, (int)sh, data, space);
 }
 
 JSValue
@@ -1237,38 +1295,10 @@ ns_imagedata_construct(JSContext *ctx, JSValueConst new_target, int argc,
             argc);
     JSValue proto = ns_api_proto_of_ctor(ctx, new_target, "ImageData");
     JSValue result;
-    if (JS_IsObject(argv[0]) && JS_GetTypedArrayType(argv[0]) == JS_TYPED_ARRAY_UINT8C) {
+    if (JS_IsObject(argv[0]) && JS_GetTypedArrayType(argv[0]) == JS_TYPED_ARRAY_UINT8C)
         result = ns_imagedata_from_array(ctx, proto, argv[0], argc, argv, NULL);
-        JS_FreeValue(ctx, proto);
-        return result;
-    }
-    uint32_t sw = 0, sh = 0;
-    if (JS_ToUint32(ctx, &sw, argv[0]) < 0 || JS_ToUint32(ctx, &sh, argv[1]) < 0) {
-        JS_FreeValue(ctx, proto);
-        return JS_EXCEPTION;
-    }
-    const char *space = "srgb";
-    JSValue err = ns_imagedata_color_space(ctx, argc >= 3 ? argv[2] : JS_UNDEFINED, &space);
-    if (JS_IsException(err)) {
-        JS_FreeValue(ctx, proto);
-        return err;
-    }
-    if (sw == 0 || sh == 0) {
-        JS_FreeValue(ctx, proto);
-        return ns_canvas_throw_dom(ctx, "IndexSizeError", sw == 0
-            ? "The source width is zero or not a number."
-            : "The source height is zero or not a number.");
-    }
-    if (sw > 32767 || sh > 32767) {
-        JS_FreeValue(ctx, proto);
-        return JS_ThrowRangeError(ctx, "Failed to construct 'ImageData': The requested image size exceeds the supported range.");
-    }
-    JSValue data = ns_clamped_array(ctx, NULL, (size_t)sw * (size_t)sh * 4u);
-    if (JS_IsException(data)) {
-        JS_FreeValue(ctx, proto);
-        return data;
-    }
-    result = ns_imagedata_wrap(ctx, ctx, proto, (int)sw, (int)sh, data, space);
+    else
+        result = ns_imagedata_from_size(ctx, proto, argc, argv);
     JS_FreeValue(ctx, proto);
     return result;
 }
