@@ -23,6 +23,7 @@ typedef struct ns_video {
     char        *poster_url;
     ns_texture  *frame_texture;
     gboolean     loaded;
+    gboolean     load_events_fired;
     gboolean     failed;
 
     void        *player;
@@ -66,6 +67,7 @@ typedef struct ns_video {
     double       volume;
     gboolean     meta_sent;
     gboolean     buf_sent;
+    double       sent_buffered_end;
     guint        seq;
     gint64       base_us;
     gint64       last_refresh_us;

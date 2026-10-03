@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* `loadedmetadata`, `loadeddata` and `canplay` fire once per video resource
+  instead of after every layout, and `progress` fires only when the buffered
+  range grows. YouTube got them several times a second and ran its player
+  handlers for each one.
 * A `<video>` that switches to a new source stops getting events from the old
   one. After a YouTube ad the old stream kept sending its buffered range,
   position and `ended` to the element, so the player saw the video stall,
