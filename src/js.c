@@ -14499,9 +14499,15 @@ ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
     JS_FreeValue(ctx, ports);
 }
 
-/* The document a frame window the page kept across a navigation of its frame
- * shows now: its own document has been taken out of the frame, which still
- * holds the current one. */
+static gboolean
+ns_window_is_global_of(JSContext *ctx, JSValueConst win)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    gboolean same = JS_VALUE_GET_PTR(global) == JS_VALUE_GET_PTR(win);
+    JS_FreeValue(ctx, global);
+    return same;
+}
+
 static ns_node *
 ns_window_frame_document(JSContext *ctx, JSValueConst window, ns_node *stale)
 {
@@ -14519,7 +14525,8 @@ ns_window_current_document_for(JSContext *ctx, JSValueConst window)
     JSValue forwarded = ns_window_forward_of(js, window);
     JSValueConst win = JS_IsObject(forwarded) ? forwarded : window;
     ns_node *doc = ns_window_document_for(ctx, win);
-    if (doc && !doc->parent && js && (const ns_node *)doc != js->ce_main_doc)
+    if (doc && !doc->parent && js && (const ns_node *)doc != js->ce_main_doc &&
+        !ns_window_is_global_of(ctx, win))
         doc = ns_window_frame_document(ctx, win, doc);
     JS_FreeValue(ctx, forwarded);
     return doc;
