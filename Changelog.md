@@ -226,6 +226,8 @@ Changelog:
   `copyTexSubImage2D()` work in WebGL 1, `drawingBufferWidth` follows a
   resize, the stencil masks read back unsigned and `getContextAttributes()`
   lists its members in dictionary order.
+* CI no longer runs CodeQL: the `codeql` workflow, its configuration and
+  the README badge are gone.
 
 1.0.27:
 ======
