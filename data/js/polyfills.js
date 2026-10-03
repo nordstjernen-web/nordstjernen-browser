@@ -478,7 +478,7 @@
             return blobBufferBytes(part, 0, part.byteLength);
         if (ArrayBuffer.isView(part))
             return blobBufferBytes(part.buffer, part.byteOffset, part.byteLength);
-        if (part instanceof Blob) return part._b || new Uint8Array(0);
+        if (part instanceof Blob) return part.__ndBlobBytes || new Uint8Array(0);
         return blobIdlString(part);
     }
 
@@ -575,8 +575,8 @@
     }
 
     function blobInit(self, bytes, type) {
-        Object.defineProperty(self, '_b', { value: bytes, writable: true, configurable: true });
-        Object.defineProperty(self, '_type', { value: type, writable: true, configurable: true });
+        self.__ndBlobBytes = bytes;
+        self.__ndBlobType = type;
     }
 
     function Blob() {
@@ -598,13 +598,22 @@
         });
     }
     function blobBytesOf(blob) {
-        return blob && blob._b ? blob._b : new Uint8Array(0);
+        var bytes = blob !== null && typeof blob === 'object' ? blob.__ndBlobBytes : undefined;
+        if (!ArrayBuffer.isView(bytes)) throw new TypeError('Illegal invocation');
+        return bytes;
+    }
+    function blobAsync(fn) {
+        return function () {
+            try { return fn.call(this); } catch (e) { return Promise.reject(e); }
+        };
     }
     blobGetter(Blob.prototype, 'size', function () { return blobBytesOf(this).length; });
     blobGetter(Blob.prototype, 'type', function () {
-        return this && typeof this._type === 'string' ? this._type : '';
+        blobBytesOf(this);
+        return this.__ndBlobType;
     });
-    blobDefine(Blob.prototype, 'slice', function (start, end, contentType) {
+    blobDefine(Blob.prototype, 'slice', function () {
+        var start = arguments[0], end = arguments[1], contentType = arguments[2];
         var bytes = blobBytesOf(this);
         var size = bytes.length;
         var from = start === undefined ? 0 : blobLongLong(start, true);
@@ -643,21 +652,21 @@
         }
         return s;
     }
-    blobDefine(Blob.prototype, 'text', function () {
+    blobDefine(Blob.prototype, 'text', blobAsync(function () {
         var b = blobBytesOf(this);
         var text = (typeof TextDecoder === 'function')
             ? new TextDecoder().decode(b) : utf8Decode(b);
         return Promise.resolve(text);
-    });
-    blobDefine(Blob.prototype, 'arrayBuffer', function () {
+    }));
+    blobDefine(Blob.prototype, 'arrayBuffer', blobAsync(function () {
         var b = blobBytesOf(this);
         var buf = new ArrayBuffer(b.length);
         new Uint8Array(buf).set(b);
         return Promise.resolve(buf);
-    });
-    blobDefine(Blob.prototype, 'bytes', function () {
+    }));
+    blobDefine(Blob.prototype, 'bytes', blobAsync(function () {
         return Promise.resolve(new Uint8Array(blobBytesOf(this)));
-    });
+    }));
     blobDefine(Blob.prototype, 'stream', function () {
         var bytes = blobBytesOf(this);
         if (typeof ReadableStream === 'function') {
@@ -701,11 +710,8 @@
         var bag = blobPropertyBag(arguments[2], true);
         blobInit(this, blobConcatParts(items, bag.endings),
                  blobNormalizeType(bag.type));
-        Object.defineProperty(this, '_name', { value: name, writable: true, configurable: true });
-        Object.defineProperty(this, '_lastModified', {
-            value: bag.lastModified === undefined ? Date.now() : bag.lastModified,
-            writable: true, configurable: true
-        });
+        this.__ndFileName = name;
+        this.__ndFileMtime = bag.lastModified === undefined ? Date.now() : bag.lastModified;
     }
     Object.defineProperty(File, 'length', { value: 2 });
     File.prototype = Object.create(Blob.prototype);
@@ -713,13 +719,15 @@
         value: File, writable: true, configurable: true
     });
     Object.setPrototypeOf(File, Blob);
-    blobGetter(File.prototype, 'name', function () {
-        return this && typeof this._name === 'string' ? this._name : '';
-    });
-    blobGetter(File.prototype, 'lastModified', function () {
-        return this && typeof this._lastModified === 'number' ? this._lastModified : 0;
-    });
-    blobGetter(File.prototype, 'webkitRelativePath', function () { return ''; });
+    function fileBrand(file) {
+        blobBytesOf(file);
+        if (typeof file.__ndFileName !== 'string') throw new TypeError('Illegal invocation');
+        return file;
+    }
+    blobGetter(File.prototype, 'name', function () { return fileBrand(this).__ndFileName; });
+    blobGetter(File.prototype, 'lastModified', function () { return fileBrand(this).__ndFileMtime; });
+    blobGetter(File.prototype, 'lastModifiedDate', function () { return new Date(fileBrand(this).__ndFileMtime); });
+    blobGetter(File.prototype, 'webkitRelativePath', function () { fileBrand(this); return ''; });
     Object.defineProperty(File.prototype, Symbol.toStringTag, {
         value: 'File', configurable: true
     });
