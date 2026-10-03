@@ -3,6 +3,12 @@ Changelog:
 
 1.0.28:
 ======
+* Constructed style sheets adopted by a shadow root style it again. The
+  engine scopes them like a `<style>` at the end of that shadow root, so
+  `:host` works, `innerHTML` set later no longer drops them,
+  `adoptedStyleSheets.push()` takes effect, and a frame's adopted sheets no
+  longer pile up in the top document (they made every later relayout slower;
+  Speedometer's later suites ran several times slower than alone).
 * `instanceof` on an interface that extends `Node`, `Element`, `HTMLElement`
   or `Document` is the ordinary prototype chain test: every HTML element was an
   instance of `SVGElement`, `HTMLUnknownElement` and `HTMLMediaElement`, so Vue
