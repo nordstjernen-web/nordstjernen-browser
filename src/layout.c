@@ -6706,13 +6706,25 @@ typedef struct {
     guint        order;
 } hit_stack_entry;
 
+/* Boxes of one stack level are stacked in tree order, which the box tree
+   does not keep: it puts out-of-flow boxes after their in-flow siblings. */
+static int
+hit_tree_order_cmp(const ns_box *a, const ns_box *b, guint order_a,
+                   guint order_b)
+{
+    if (a->dom && b->dom && a->dom != b->dom) {
+        int c = ns_node_document_order_cmp(a->dom, b->dom);
+        if (c) return c;
+    }
+    return order_a < order_b ? -1 : order_a > order_b ? 1 : 0;
+}
+
 static int
 hit_stack_cmp(const void *a, const void *b)
 {
     const hit_stack_entry *pa = a, *pb = b;
     if (pa->key != pb->key) return pa->key < pb->key ? -1 : 1;
-    if (pa->order != pb->order) return pa->order < pb->order ? -1 : 1;
-    return 0;
+    return hit_tree_order_cmp(pa->box, pb->box, pa->order, pb->order);
 }
 
 static const ns_box **
@@ -15034,7 +15046,7 @@ hit_deferred_cmp(const void *a, const void *b)
 {
     const hit_deferred *pa = a, *pb = b;
     if (pa->z != pb->z) return pa->z < pb->z ? -1 : 1;
-    return pa->order < pb->order ? -1 : pa->order > pb->order ? 1 : 0;
+    return hit_tree_order_cmp(pa->box, pb->box, pa->order, pb->order);
 }
 
 static const ns_box *box_hit_test_tree(const ns_box *root, double x, double y);
