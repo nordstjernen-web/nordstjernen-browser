@@ -20,7 +20,8 @@ JSValue ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
                              const ns_node *canvas, int version,
                              JSValueConst attrs);
 
-void ns_webgl_install_constants(JSContext *ctx, JSValueConst obj, int version);
+void ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor,
+                                JSValueConst proto, int version);
 
 cairo_surface_t *ns_webgl_canvas_surface(const ns_node *canvas);
 
