@@ -47166,10 +47166,14 @@ ns_realm_clone_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
         return JS_DupValue(rc->dst, v);
     }
     ns_realm_cloner_put(rc, v, out);
+    /* Private names come along too: a script-implemented interface keeps
+     * its brand there, and the realm's copy is an instance as much as the
+     * original. */
     JSPropertyEnum *tab = NULL;
     uint32_t n = 0;
     if (JS_GetOwnPropertyNames(rc->src, &tab, &n, v,
-                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK) < 0) {
+                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK |
+                               JS_GPN_PRIVATE_MASK) < 0) {
         JS_FreeValue(rc->src, JS_GetException(rc->src));
         return out;
     }
