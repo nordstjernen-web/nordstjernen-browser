@@ -2351,7 +2351,7 @@
     defineCtor('TransformStream', TransformStream);
 
     function TextEncoderStream() {
-        if (!(this instanceof TextEncoderStream)) return new TextEncoderStream();
+        if (new.target === undefined) return new TextEncoderStream();
         var enc = new TextEncoder();
         initTransformStream(this, {
             transform: function (chunk, controller) {
@@ -2360,10 +2360,11 @@
         });
         Object.defineProperty(this, 'encoding', { value: 'utf-8', configurable: true });
     }
+    TextEncoderStream.__ndRealmProto = true;
     defineCtor('TextEncoderStream', TextEncoderStream);
 
     function TextDecoderStream(label, options) {
-        if (!(this instanceof TextDecoderStream)) return new TextDecoderStream(label, options);
+        if (new.target === undefined) return new TextDecoderStream(label, options);
         var dec = new TextDecoder(label || 'utf-8', options);
         initTransformStream(this, {
             transform: function (chunk, controller) {
@@ -2384,6 +2385,7 @@
             configurable: true
         });
     }
+    TextDecoderStream.__ndRealmProto = true;
     defineCtor('TextDecoderStream', TextDecoderStream);
 
     // Intl (ECMA-402) is implemented natively in C; see src/js_intl.c.
@@ -2424,15 +2426,17 @@
     }
 
     function CompressionStream(format) {
-        if (!(this instanceof CompressionStream)) return new CompressionStream(format);
+        if (new.target === undefined) return new CompressionStream(format);
         initTransformStream(this, zlibTransformer(format, false));
     }
+    CompressionStream.__ndRealmProto = true;
     defineCtor('CompressionStream', CompressionStream);
 
     function DecompressionStream(format) {
-        if (!(this instanceof DecompressionStream)) return new DecompressionStream(format);
+        if (new.target === undefined) return new DecompressionStream(format);
         initTransformStream(this, zlibTransformer(format, true));
     }
+    DecompressionStream.__ndRealmProto = true;
     defineCtor('DecompressionStream', DecompressionStream);
 
     if (typeof Request === 'function' && typeof Response === 'function') {
