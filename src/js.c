@@ -22314,6 +22314,11 @@ ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
     return view;
 }
 
+static uint8_t ns_text_encoder_no_bytes[1];
+
+/* The bytes a Uint8Array destination covers, or NULL when view is not one.
+ * A view of a detached buffer, or out of the bounds of its resizable one, has
+ * a byte length of 0: encodeInto() writes nothing into it and reports 0. */
 static uint8_t *
 ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
                        size_t *off, size_t *blen, size_t *total)
@@ -22321,10 +22326,16 @@ ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
     size_t bpe = 0;
     uint8_t *base = NULL;
     *buf = JS_UNDEFINED;
-    if (JS_GetTypedArrayType(view) == JS_TYPED_ARRAY_UINT8) {
-        *buf = JS_GetTypedArrayBuffer(ctx, view, off, blen, &bpe);
-        if (!JS_IsException(*buf)) base = JS_GetArrayBuffer(ctx, total, *buf);
+    if (JS_GetTypedArrayType(view) != JS_TYPED_ARRAY_UINT8)
+        return NULL;
+    *buf = JS_GetTypedArrayBuffer(ctx, view, off, blen, &bpe);
+    if (JS_IsException(*buf)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        *buf = JS_UNDEFINED;
+        *off = *blen = *total = 0;
+        return ns_text_encoder_no_bytes;
     }
+    base = JS_GetArrayBuffer(ctx, total, *buf);
     return base;
 }
 
