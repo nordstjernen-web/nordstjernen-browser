@@ -1576,16 +1576,96 @@ ns_nav_screen_metrics(int *width, int *height,
 #endif
 }
 
+/* IdleDeadline: the end of the idle period an idle callback runs in.  A
+ * period lasts at most 50 ms and ends early when a timer or an animation
+ * frame is due; a callback run because its timeout passed gets none. */
+static JSClassID ns_idle_deadline_class_id;
+
+typedef struct ns_idle_deadline {
+    gint64   deadline_us;
+    gboolean did_timeout;
+} ns_idle_deadline;
+
+static void
+ns_idle_deadline_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    g_free(JS_GetOpaque(val, ns_idle_deadline_class_id));
+}
+
+static JSClassDef ns_idle_deadline_class = {
+    .class_name = "IdleDeadline",
+    .finalizer = ns_idle_deadline_finalizer,
+};
+
 static JSValue
 ns_idle_deadline_time_remaining(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "__tr");
-    double tr = 50.0;
-    if (JS_IsNumber(v)) JS_ToFloat64(ctx, &tr, v);
-    JS_FreeValue(ctx, v);
-    return JS_NewFloat64(ctx, tr);
+    ns_idle_deadline *d = ns_idle_deadline_class_id
+        ? JS_GetOpaque(this_val, ns_idle_deadline_class_id) : NULL;
+    if (!d) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    gint64 left = d->deadline_us - g_get_monotonic_time();
+    if (left < 0) left = 0;
+    return JS_NewFloat64(ctx, (double)((left / 100) * 100) / 1000.0);
+}
+
+static JSValue
+ns_idle_deadline_did_timeout(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_idle_deadline *d = ns_idle_deadline_class_id
+        ? JS_GetOpaque(this_val, ns_idle_deadline_class_id) : NULL;
+    if (!d) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    return JS_NewBool(ctx, d->did_timeout);
+}
+
+static JSValue
+ns_idle_deadline_new(ns_js *js, JSContext *ctx, gboolean did_timeout)
+{
+    ns_new_class_id(&ns_idle_deadline_class_id);
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    if (!JS_IsRegisteredClass(rt, ns_idle_deadline_class_id))
+        JS_NewClass(rt, ns_idle_deadline_class_id, &ns_idle_deadline_class);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "IdleDeadline");
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JSValue o = JS_IsObject(proto)
+        ? JS_NewObjectProtoClass(ctx, proto, ns_idle_deadline_class_id)
+        : JS_NewObjectClass(ctx, ns_idle_deadline_class_id);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    if (JS_IsException(o)) return o;
+    ns_idle_deadline *d = g_new0(ns_idle_deadline, 1);
+    gint64 now = g_get_monotonic_time();
+    d->did_timeout = did_timeout;
+    d->deadline_us = now;
+    if (!did_timeout) {
+        gint64 end = now + 50 * 1000;
+        if (js && js->timers) {
+            GHashTableIter it;
+            gpointer k, v;
+            g_hash_table_iter_init(&it, js->timers);
+            while (g_hash_table_iter_next(&it, &k, &v)) {
+                const ns_timer *t = v;
+                if (t && !t->is_idle && !t->firing && t->glib_source &&
+                    t->due_us > now && t->due_us < end)
+                    end = t->due_us;
+            }
+        }
+        if (js && js->raf_pending && js->raf_pending->len > 0) {
+            gint64 frame = (js->raf_last_us > 0 ? js->raf_last_us : now) +
+                           16667;
+            if (frame > now && frame < end) end = frame;
+        }
+        d->deadline_us = end;
+    }
+    JS_SetOpaque(o, d);
+    return o;
 }
 
 static gboolean
@@ -1653,16 +1733,8 @@ ns_timer_fire(gpointer data)
         ret = JS_Eval(callback_ctx, code, strlen(code), "<timer>",
                       JS_EVAL_TYPE_GLOBAL);
     } else if (t->is_idle) {
-        JSValue deadline = JS_NewObject(callback_ctx);
-        JS_SetPropertyStr(callback_ctx, deadline, "didTimeout",
-                          idle_expired ? JS_TRUE : JS_FALSE);
-        JS_DefinePropertyValueStr(callback_ctx, deadline, "__tr",
-                                  JS_NewFloat64(callback_ctx,
-                                               idle_expired ? 0.0 : 50.0), 0);
-        JS_SetPropertyStr(callback_ctx, deadline, "timeRemaining",
-                          JS_NewCFunction(callback_ctx,
-                                          ns_idle_deadline_time_remaining,
-                                          "timeRemaining", 0));
+        JSValue deadline = ns_idle_deadline_new(js, callback_ctx,
+                                                idle_expired);
         JSValueConst args[1] = { deadline };
         ret = JS_Call(callback_ctx, cb, JS_UNDEFINED, 1, args);
         JS_FreeValue(callback_ctx, deadline);
@@ -1779,9 +1851,9 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
             t->extra_args[i] = JS_DupValue(ctx, argv[2 + i]);
     }
     t->id = ++js->next_timer_id;
+    t->due_us = g_get_monotonic_time() + (gint64)ms * 1000;
     if (!is_interval && ms <= 1) {
         t->immediate = TRUE;
-        t->due_us = g_get_monotonic_time() + (gint64)ms * 1000;
         js->n_immediate_timers++;
     }
     t->glib_source = ns_js_attach_timeout(js, (guint)ms, ns_timer_fire, t);
@@ -53319,6 +53391,28 @@ ns_js_set_navigation_milestone(ns_js *js, double *field,
     JS_FreeValue(js->ctx, global);
 }
 
+static void
+ns_install_idle_deadline(JSContext *ctx, JSValueConst global)
+{
+    ns_bind_ctor(ctx, global, "IdleDeadline", ns_illegal_constructor, 0);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "IdleDeadline");
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    if (JS_IsObject(proto)) {
+        ns_bind_fn(ctx, proto, "timeRemaining",
+                   ns_idle_deadline_time_remaining, 0);
+        JSAtom atom = JS_NewAtom(ctx, "didTimeout");
+        JS_DefinePropertyGetSet(ctx, proto, atom,
+            JS_NewCFunction2(ctx, ns_idle_deadline_did_timeout,
+                             "get didTimeout", 0, JS_CFUNC_generic, 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, atom);
+        ns_set_tostring_tag(ctx, proto, "IdleDeadline");
+    }
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -54465,6 +54559,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "getSelection",        ns_window_get_selection, 0);
     ns_bind_fn(ctx, global, "requestIdleCallback", ns_window_request_idle_callback, 2);
     ns_bind_fn(ctx, global, "cancelIdleCallback",  ns_js_clearTimer,                1);
+    ns_install_idle_deadline(ctx, global);
 
     JS_SetPropertyStr(ctx, global, "screenX",     JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, global, "screenY",     JS_NewInt32(ctx, 0));
@@ -58836,7 +58931,10 @@ ns_js_apply_site_quirks(ns_js *js)
         "s('l0.inaccessible',MATCH_NONE,CELL_WHOLE);"
         "}catch(e){}"
         "})()";
-    if (!js || js->halted) return;
+    if (!js || js->halted || !js->current_url ||
+        (!strstr(js->current_url, "freecivweb.com") &&
+         !strstr(js->current_url, "fcw.movingborders.es")))
+        return;
     JSValue v = JS_Eval(js->ctx, src, strlen(src), "site-quirks",
                         JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(v))
