@@ -49297,6 +49297,8 @@ static const char *const ns_realm_singleton_names[] = {
     "speechSynthesis", "styleMedia",
 };
 
+static void ns_install_pdf_plugins(JSContext *ctx);
+
 /* A frame's navigator gets its own realm's copies of the page navigator's
  * object attributes (plugins, mediaDevices, ...), which its getters, shared
  * with the page's, return for it. */
@@ -49502,6 +49504,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
 
     if (ok) {
         ns_realm_install_singletons(cloner, parent_global, fg);
+        ns_install_pdf_plugins(fctx);
         ns_js_adopt_frame_window_events(js, fctx, fg);
         ns_js_link_interface_ctors(fctx);
         ns_js_lock_global_prototypes(fctx);
@@ -54908,6 +54911,76 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
     (void)global;
+}
+
+/* HTML's PDF viewer plugins: when the user agent views PDFs itself
+ * (pdfViewerEnabled), navigator.plugins holds the five PDF viewer plugin
+ * objects and navigator.mimeTypes the two PDF MIME types, as the standard
+ * prescribes for every browser. */
+static const char ns_pdf_plugins_src[] =
+    "(function(){"
+    " if (typeof PluginArray !== 'function' || typeof Plugin !== 'function' ||"
+    "     typeof MimeType !== 'function' || typeof MimeTypeArray !== 'function') return;"
+    " var nav = navigator; if (!nav || nav.pdfViewerEnabled !== true) return;"
+    " var pa = nav.plugins, ma = nav.mimeTypes;"
+    " if (!pa || !ma || typeof pa !== 'object' || typeof ma !== 'object') return;"
+    " var dp = Object.defineProperty, gopd = Object.getOwnPropertyDescriptor, st = new WeakMap();"
+    " function state(o){ var s = st.get(o); if (!s) throw new TypeError('Illegal invocation'); return s; }"
+    " function getter(P, name, f){"
+    "  var h = { get [name](){ return f(state(this)); } };"
+    "  dp(P, name, { get: gopd(h, name).get, enumerable: true, configurable: true }); }"
+    " function need(n, iface, op){"
+    "  if (n < 1) throw new TypeError(\"Failed to execute '\" + op + \"' on '\" + iface +"
+    "    \"': 1 argument required, but only 0 present.\"); }"
+    " function list(P, iface, refresh){"
+    "  var m = { item(index){ var s = state(this); need(arguments.length, iface, 'item');"
+    "      var i = index >>> 0; return i < s.items.length ? s.items[i] : null; },"
+    "    namedItem(name){ var s = state(this); need(arguments.length, iface, 'namedItem');"
+    "      name = String(name); for (var i = 0; i < s.items.length; i++)"
+    "        if (s.key(s.items[i]) === name) return s.items[i]; return null; } };"
+    "  dp(P, 'item', { value: m.item, writable: true, enumerable: true, configurable: true });"
+    "  dp(P, 'namedItem', { value: m.namedItem, writable: true, enumerable: true, configurable: true });"
+    "  if (refresh) dp(P, 'refresh', { value: { refresh(){ state(this); } }.refresh,"
+    "    writable: true, enumerable: true, configurable: true });"
+    "  getter(P, 'length', function(s){ return s.items.length; });"
+    "  dp(P, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true }); }"
+    " function fill(o, items, key){"
+    "  Object.getOwnPropertyNames(o).forEach(function(k){ try { delete o[k]; } catch (e) {} });"
+    "  st.set(o, { items: items, key: key });"
+    "  items.forEach(function(it, i){ dp(o, i, { value: it, writable: false, enumerable: true, configurable: true }); });"
+    "  items.forEach(function(it){ var k = key(it); if (!(k in o))"
+    "    dp(o, k, { value: it, writable: false, enumerable: false, configurable: true }); }); }"
+    " var names = ['PDF Viewer', 'Chrome PDF Viewer', 'Chromium PDF Viewer',"
+    "              'Microsoft Edge PDF Viewer', 'WebKit built-in PDF'];"
+    " var types = ['application/pdf', 'text/pdf'];"
+    " function mimesFor(plugin){ return types.map(function(t){"
+    "   var m = Object.create(MimeType.prototype); st.set(m, { type: t, plugin: plugin }); return m; }); }"
+    " var plugins = names.map(function(n){ return Object.create(Plugin.prototype); });"
+    " var mimes = mimesFor(plugins[0]);"
+    " plugins.forEach(function(p, i){ fill(p, mimesFor(p), function(m){ return st.get(m).type; });"
+    "   st.get(p).name = names[i]; });"
+    " fill(pa, plugins, function(p){ return st.get(p).name; });"
+    " fill(ma, mimes, function(m){ return st.get(m).type; });"
+    " list(PluginArray.prototype, 'PluginArray', true);"
+    " list(MimeTypeArray.prototype, 'MimeTypeArray', false);"
+    " list(Plugin.prototype, 'Plugin', false);"
+    " getter(Plugin.prototype, 'name', function(s){ return s.name; });"
+    " getter(Plugin.prototype, 'description', function(){ return 'Portable Document Format'; });"
+    " getter(Plugin.prototype, 'filename', function(){ return 'internal-pdf-viewer'; });"
+    " getter(MimeType.prototype, 'type', function(s){ return s.type; });"
+    " getter(MimeType.prototype, 'description', function(){ return 'Portable Document Format'; });"
+    " getter(MimeType.prototype, 'suffixes', function(){ return 'pdf'; });"
+    " getter(MimeType.prototype, 'enabledPlugin', function(s){ return s.plugin; });"
+    "})()";
+
+static void
+ns_install_pdf_plugins(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_pdf_plugins_src, sizeof(ns_pdf_plugins_src) - 1,
+                        "<pdf-plugins>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
 }
 
 static void
@@ -60590,6 +60663,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         JS_FreeValue(ctx, g);
     }
     ns_install_navigator_shape(ctx);
+    ns_install_pdf_plugins(ctx);
     ns_js_link_interfaces(ctx);
     ns_js_name_engine_members(ctx);
     ns_js_shape_window_global(ctx);
