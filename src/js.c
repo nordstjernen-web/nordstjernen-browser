@@ -382,6 +382,7 @@ typedef enum ns_ho_kind {
     NS_HO_ABORT_CONTROLLER,
     NS_HO_ABORT_SIGNAL,
     NS_HO_BROADCAST_CHANNEL,
+    NS_HO_FILE_READER,
     NS_HO_FORM_DATA,
     NS_HO_MESSAGE_CHANNEL,
     NS_HO_MESSAGE_PORT,
@@ -10073,6 +10074,7 @@ static const char *const ns_ho_iface_names[NS_HO_KIND_COUNT] = {
     [NS_HO_ABORT_CONTROLLER] = "AbortController",
     [NS_HO_ABORT_SIGNAL] = "AbortSignal",
     [NS_HO_BROADCAST_CHANNEL] = "BroadcastChannel",
+    [NS_HO_FILE_READER] = "FileReader",
     [NS_HO_FORM_DATA] = "FormData",
     [NS_HO_MESSAGE_CHANNEL] = "MessageChannel",
     [NS_HO_MESSAGE_PORT] = "MessagePort",
@@ -10302,6 +10304,15 @@ static const ns_ho_attr ns_ho_attrs[] = {
     { "BroadcastChannel", NS_HO_BIT(NS_HO_BROADCAST_CHANNEL), "name", NS_HA_STRING, FALSE },
     { "BroadcastChannel", NS_HO_BIT(NS_HO_BROADCAST_CHANNEL), "onmessage", NS_HA_HANDLER, TRUE },
     { "BroadcastChannel", NS_HO_BIT(NS_HO_BROADCAST_CHANNEL), "onmessageerror", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "error", NS_HA_NULL, FALSE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onabort", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onerror", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onload", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onloadend", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onloadstart", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "onprogress", NS_HA_HANDLER, TRUE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "readyState", NS_HA_NUMBER, FALSE },
+    { "FileReader", NS_HO_BIT(NS_HO_FILE_READER), "result", NS_HA_NULL, FALSE },
     { "MessageChannel", NS_HO_BIT(NS_HO_MESSAGE_CHANNEL), "port1", NS_HA_NULL, FALSE },
     { "MessageChannel", NS_HO_BIT(NS_HO_MESSAGE_CHANNEL), "port2", NS_HA_NULL, FALSE },
     { "MessagePort", NS_HO_BIT(NS_HO_MESSAGE_PORT), "onmessageerror", NS_HA_HANDLER, TRUE },
@@ -21736,7 +21747,7 @@ ns_abort_signal_timeout_fire(gpointer user_data)
     if (!t || !t->ctx) { g_free(t); return G_SOURCE_REMOVE; }
     ns_js *abort_js = js_from_ctx(t->ctx);
     if (abort_js && abort_js->in_pump) {
-        g_timeout_add(4, ns_abort_signal_timeout_fire, t);
+        ns_js_attach_timeout(abort_js, 4, ns_abort_signal_timeout_fire, t);
         return G_SOURCE_REMOVE;
     }
     JSValue aborted = JS_GetPropertyStr(t->ctx, t->sig, "aborted");
@@ -21776,7 +21787,7 @@ ns_abort_signal_static_timeout(JSContext *ctx, JSValueConst this_val,
         if (!abort_js->pending_aborts) abort_js->pending_aborts = g_ptr_array_new();
         g_ptr_array_add(abort_js->pending_aborts, t);
     }
-    g_timeout_add((guint)ms, ns_abort_signal_timeout_fire, t);
+    ns_js_attach_timeout(abort_js, (guint)ms, ns_abort_signal_timeout_fire, t);
     return sig;
 }
 
@@ -22360,7 +22371,29 @@ typedef struct ns_filereader_idle {
     ns_js  *js;
     JSValue self;
     guint   source;
+    gint64  gen;
 } ns_filereader_idle;
+
+static gboolean
+ns_filereader_current(JSContext *ctx, JSValueConst self, gint64 gen)
+{
+    JSValue g = JS_GetPropertyStr(ctx, self, "_gen");
+    int64_t now = -1;
+    JS_ToInt64(ctx, &now, g);
+    JS_FreeValue(ctx, g);
+    return now == gen;
+}
+
+static void
+ns_filereader_fire(JSContext *ctx, JSValueConst self, const char *type)
+{
+    JSValue tv = JS_GetPropertyStr(ctx, self, "_total");
+    double total = 0;
+    JS_ToFloat64(ctx, &total, tv);
+    JS_FreeValue(ctx, tv);
+    gboolean loaded = strcmp(type, "loadstart") != 0;
+    ns_xhr_fire_progress_event(ctx, self, type, loaded ? total : 0, total, TRUE);
+}
 
 static gboolean
 ns_filereader_complete(gpointer ud)
@@ -22368,14 +22401,25 @@ ns_filereader_complete(gpointer ud)
     ns_filereader_idle *fr = ud;
     ns_js *js = fr->js;
     if (js && js->in_pump) {
-        fr->source = g_timeout_add(4, ns_filereader_complete, fr);
+        fr->source = ns_js_attach_timeout(js, 4, ns_filereader_complete, fr);
         return G_SOURCE_REMOVE;
     }
     JSContext *ctx = js->ctx;
     JSValue self = fr->self;
-    JS_SetPropertyStr(ctx, self, "readyState", JS_NewInt32(ctx, 2));
-    ns_target_fire_event(ctx, self, "load");
-    ns_target_fire_event(ctx, self, "loadend");
+    gboolean live = ns_filereader_current(ctx, self, fr->gen);
+    if (live) ns_filereader_fire(ctx, self, "loadstart");
+    live = live && ns_filereader_current(ctx, self, fr->gen);
+    if (live) ns_filereader_fire(ctx, self, "progress");
+    live = live && ns_filereader_current(ctx, self, fr->gen);
+    if (live) {
+        JS_SetPropertyStr(ctx, self, "result",
+                          JS_GetPropertyStr(ctx, self, "_pending"));
+        JS_SetPropertyStr(ctx, self, "_pending", JS_UNDEFINED);
+        JS_SetPropertyStr(ctx, self, "readyState", JS_NewInt32(ctx, 2));
+        ns_filereader_fire(ctx, self, "load");
+    }
+    live = live && ns_filereader_current(ctx, self, fr->gen);
+    if (live) ns_filereader_fire(ctx, self, "loadend");
     JS_FreeValue(ctx, self);
     if (js->filereader_idles)
         g_ptr_array_remove_fast(js->filereader_idles, fr);
@@ -22384,17 +22428,18 @@ ns_filereader_complete(gpointer ud)
 }
 
 static void
-ns_filereader_schedule(JSContext *ctx, JSValueConst self)
+ns_filereader_schedule(JSContext *ctx, JSValueConst self, gint64 gen)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return;
     ns_filereader_idle *fr = g_new0(ns_filereader_idle, 1);
     fr->js = js;
     fr->self = JS_DupValue(ctx, self);
+    fr->gen = gen;
     if (!js->filereader_idles)
         js->filereader_idles = g_ptr_array_new();
     g_ptr_array_add(js->filereader_idles, fr);
-    fr->source = g_idle_add(ns_filereader_complete, fr);
+    fr->source = ns_js_attach_idle(js, ns_filereader_complete, fr);
 }
 
 static char *
@@ -22411,6 +22456,24 @@ ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
         JS_FreeCString(ctx, s);
         return out;
     }
+    size_t view_off = 0, view_len = 0, view_bpe = 0;
+    JSValue view_buf = JS_GetTypedArrayBuffer(ctx, b, &view_off, &view_len, &view_bpe);
+    if (!JS_IsException(view_buf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, view_buf);
+        char *copy = NULL;
+        if (base && view_off + view_len <= total) {
+            copy = g_malloc(view_len + 1);
+            memcpy(copy, base + view_off, view_len);
+            copy[view_len] = '\0';
+            if (out_len) *out_len = view_len;
+        }
+        JS_FreeValue(ctx, view_buf);
+        JS_FreeValue(ctx, b);
+        if (copy) return copy;
+        return g_strdup("");
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx));
     uint32_t len = ns_js_array_length(ctx, b);
     if ((gsize)len + 1 < (gsize)len) {
         JS_FreeValue(ctx, b);
@@ -22430,26 +22493,19 @@ ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
     return out;
 }
 
-static JSValue
-ns_filereader_readAsText(JSContext *ctx, JSValueConst this_val,
-                         int argc, JSValueConst *argv)
+static gboolean
+ns_filereader_blob_arg(JSContext *ctx, JSValueConst v)
 {
-    if (argc < 1) return JS_UNDEFINED;
-    gsize len = 0;
-    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
-    JS_SetPropertyStr(ctx, this_val, "result", JS_NewStringLen(ctx, bytes, len));
-    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
-    ns_filereader_schedule(ctx, this_val);
-    return JS_UNDEFINED;
+    if (!JS_IsObject(v)) return FALSE;
+    JSValue b = JS_GetPropertyStr(ctx, v, "__ndBlobBytes");
+    gboolean is_blob = JS_IsObject(b);
+    JS_FreeValue(ctx, b);
+    return is_blob;
 }
 
 static JSValue
-ns_filereader_readAsBinaryString(JSContext *ctx, JSValueConst this_val,
-                                 int argc, JSValueConst *argv)
+ns_filereader_binary_string(JSContext *ctx, const char *bytes, gsize len)
 {
-    if (argc < 1) return JS_UNDEFINED;
-    gsize len = 0;
-    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
     GByteArray *utf8 = g_byte_array_sized_new(len + len / 2 + 1);
     for (gsize i = 0; i < len; i++) {
         guint8 b = (guint8)bytes[i];
@@ -22461,48 +22517,99 @@ ns_filereader_readAsBinaryString(JSContext *ctx, JSValueConst this_val,
             g_byte_array_append(utf8, two, 2);
         }
     }
-    JS_SetPropertyStr(ctx, this_val, "result",
-                      JS_NewStringLen(ctx, (const char *)utf8->data, utf8->len));
+    JSValue out = JS_NewStringLen(ctx, (const char *)utf8->data, utf8->len);
     g_byte_array_free(utf8, TRUE);
-    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
-    ns_filereader_schedule(ctx, this_val);
-    return JS_UNDEFINED;
+    return out;
 }
 
 static JSValue
-ns_filereader_readAsDataURL(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
+ns_filereader_data_url(JSContext *ctx, JSValueConst blob, const char *bytes,
+                       gsize len)
 {
-    if (argc < 1) return JS_UNDEFINED;
-    gsize len = 0;
-    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
-    JSValue type = JS_GetPropertyStr(ctx, argv[0], "type");
-    const char *type_s = JS_ToCString(ctx, type);
+    JSValue type = JS_GetPropertyStr(ctx, blob, "type");
+    const char *type_s = JS_IsString(type) ? JS_ToCString(ctx, type) : NULL;
     char *b64 = g_base64_encode((const guchar *)bytes, len);
     char *url = g_strdup_printf("data:%s;base64,%s",
                                 type_s && *type_s ? type_s : "application/octet-stream",
                                 b64);
-    JS_SetPropertyStr(ctx, this_val, "result", JS_NewString(ctx, url));
-    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
+    JSValue out = JS_NewString(ctx, url);
     g_free(url);
     g_free(b64);
     if (type_s) JS_FreeCString(ctx, type_s);
     JS_FreeValue(ctx, type);
-    ns_filereader_schedule(ctx, this_val);
+    return out;
+}
+
+static JSValue
+ns_filereader_read(JSContext *ctx, JSValueConst this_val, int argc,
+                   JSValueConst *argv, int magic)
+{
+    NS_HO_THIS(ctx, this_val, NS_HO_FILE_READER);
+    static const char *const names[] = {
+        "readAsArrayBuffer", "readAsBinaryString", "readAsDataURL", "readAsText",
+    };
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute '%s' on 'FileReader': "
+            "1 argument required, but only 0 present.", names[magic]);
+    if (!ns_filereader_blob_arg(ctx, argv[0]))
+        return JS_ThrowTypeError(ctx, "Failed to execute '%s' on 'FileReader': "
+            "parameter 1 is not of type 'Blob'.", names[magic]);
+    JSValue state = JS_GetPropertyStr(ctx, this_val, "readyState");
+    int32_t ready = 0;
+    JS_ToInt32(ctx, &ready, state);
+    JS_FreeValue(ctx, state);
+    if (ready == 1)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "Failed to execute 'read' on 'FileReader': The object is already busy reading Blobs.");
+    gsize len = 0;
+    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
+    JSValue pending;
+    switch (magic) {
+    case 0:  pending = JS_NewArrayBufferCopy(ctx, (const uint8_t *)bytes, len); break;
+    case 1:  pending = ns_filereader_binary_string(ctx, bytes, len); break;
+    case 2:  pending = ns_filereader_data_url(ctx, argv[0], bytes, len); break;
+    default: pending = JS_NewStringLen(ctx, bytes, len); break;
+    }
+    JSValue gv = JS_GetPropertyStr(ctx, this_val, "_gen");
+    int64_t gen = 0;
+    JS_ToInt64(ctx, &gen, gv);
+    JS_FreeValue(ctx, gv);
+    gen++;
+    JS_SetPropertyStr(ctx, this_val, "_gen", JS_NewInt64(ctx, gen));
+    JS_SetPropertyStr(ctx, this_val, "_total", JS_NewInt64(ctx, (int64_t)len));
+    JS_SetPropertyStr(ctx, this_val, "_pending", pending);
+    JS_SetPropertyStr(ctx, this_val, "result", JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "error", JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
+    ns_filereader_schedule(ctx, this_val, gen);
     return JS_UNDEFINED;
 }
 
 static JSValue
-ns_filereader_readAsArrayBuffer(JSContext *ctx, JSValueConst this_val,
-                                int argc, JSValueConst *argv)
+ns_filereader_abort(JSContext *ctx, JSValueConst this_val, int argc,
+                    JSValueConst *argv)
 {
-    if (argc < 1) return JS_UNDEFINED;
-    gsize len = 0;
-    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
-    JSValue ab = JS_NewArrayBufferCopy(ctx, (const uint8_t *)bytes, len);
-    JS_SetPropertyStr(ctx, this_val, "result", ab);
-    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
-    ns_filereader_schedule(ctx, this_val);
+    (void)argc; (void)argv;
+    NS_HO_THIS(ctx, this_val, NS_HO_FILE_READER);
+    JSValue state = JS_GetPropertyStr(ctx, this_val, "readyState");
+    int32_t ready = 0;
+    JS_ToInt32(ctx, &ready, state);
+    JS_FreeValue(ctx, state);
+    if (ready != 1) {
+        JS_SetPropertyStr(ctx, this_val, "result", JS_NULL);
+        return JS_UNDEFINED;
+    }
+    JSValue gv = JS_GetPropertyStr(ctx, this_val, "_gen");
+    int64_t gen = 0;
+    JS_ToInt64(ctx, &gen, gv);
+    JS_FreeValue(ctx, gv);
+    JS_SetPropertyStr(ctx, this_val, "_gen", JS_NewInt64(ctx, gen + 1));
+    JS_SetPropertyStr(ctx, this_val, "_pending", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, this_val, "result", JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "error", ns_make_abort_error(ctx));
+    ns_filereader_fire(ctx, this_val, "abort");
+    ns_filereader_fire(ctx, this_val, "loadend");
     return JS_UNDEFINED;
 }
 
@@ -22510,26 +22617,44 @@ static JSValue
 ns_window_filereader_ctor(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    JSValue obj = JS_NewObject(ctx);
+    (void)argc; (void)argv;
+    JSValue obj = ns_ho_construct(ctx, this_val, NS_HO_FILE_READER);
+    if (JS_IsException(obj)) return obj;
     JS_SetPropertyStr(ctx, obj, "result",     JS_NULL);
     JS_SetPropertyStr(ctx, obj, "error",      JS_NULL);
     JS_SetPropertyStr(ctx, obj, "readyState", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, obj, "onload",        JS_NULL);
-    JS_SetPropertyStr(ctx, obj, "onerror",       JS_NULL);
-    JS_SetPropertyStr(ctx, obj, "onloadend",     JS_NULL);
-    JS_SetPropertyStr(ctx, obj, "onprogress",    JS_NULL);
-    JS_SetPropertyStr(ctx, obj, "onabort",       JS_NULL);
-    JS_SetPropertyStr(ctx, obj, "onloadstart",   JS_NULL);
-    ns_bind_fn(ctx, obj, "readAsText",         ns_filereader_readAsText, 2);
-    ns_bind_fn(ctx, obj, "readAsDataURL",      ns_filereader_readAsDataURL, 1);
-    ns_bind_fn(ctx, obj, "readAsArrayBuffer",  ns_filereader_readAsArrayBuffer, 1);
-    ns_bind_fn(ctx, obj, "readAsBinaryString", ns_filereader_readAsBinaryString, 1);
-    ns_bind_fn(ctx, obj, "abort",              ns_event_noop, 0);
-    JS_SetPropertyStr(ctx, obj, "_listeners",  JS_NewArray(ctx));
-    ns_bind_event_target_listeners(ctx, obj);
-    ns_bind_fn(ctx, obj, "dispatchEvent",       ns_target_dispatchEvent, 1);
+    JS_SetPropertyStr(ctx, obj, "_gen",       JS_NewInt32(ctx, 0));
+    static const char *const handlers[] = {
+        "onload", "onerror", "onloadend", "onprogress", "onabort", "onloadstart",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(handlers); i++)
+        JS_SetPropertyStr(ctx, obj, handlers[i], JS_NULL);
     return obj;
+}
+
+static void
+ns_net_install_file_reader(JSContext *ctx, JSValueConst global)
+{
+    JSValue proto = ns_proto_of(ctx, global, "FileReader");
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        return;
+    }
+    static const char *const reads[] = {
+        "readAsArrayBuffer", "readAsBinaryString", "readAsDataURL", "readAsText",
+    };
+    for (int i = 0; i < 4; i++)
+        JS_DefinePropertyValueStr(ctx, proto, reads[i],
+            JS_NewCFunctionMagic(ctx, ns_filereader_read, reads[i], 1,
+                                 JS_CFUNC_generic_magic, i),
+            JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    ns_bind_fn(ctx, proto, "abort", ns_filereader_abort, 0);
+    JS_FreeValue(ctx, proto);
+    static const ns_int_constant constants[] = {
+        { "EMPTY", 0 }, { "LOADING", 1 }, { "DONE", 2 },
+    };
+    ns_bind_ctor_int_constants(ctx, global, "FileReader", constants,
+                               G_N_ELEMENTS(constants));
 }
 
 static JSValue
@@ -26504,7 +26629,7 @@ static void
 ns_net_link_event_targets(JSContext *ctx, JSValueConst global)
 {
     static const char *const ifaces[] = {
-        "AbortSignal", "BroadcastChannel", "MessagePort",
+        "AbortSignal", "BroadcastChannel", "FileReader", "MessagePort",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(ifaces); i++) {
         ns_ho_link_iface(ctx, global, ifaces[i], "EventTarget");
@@ -26532,6 +26657,7 @@ ns_net_install_interfaces(JSContext *ctx, JSValueConst global)
     ns_ho_install_attrs(ctx, global);
     ns_net_install_form_data(ctx, global);
     ns_net_install_ports(ctx, global);
+    ns_net_install_file_reader(ctx, global);
     ns_net_link_event_targets(ctx, global);
 }
 
@@ -26996,6 +27122,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
     ns_usp_install_interface(ctx);
     ns_bind_ctor(ctx, global, "FormData", ns_window_form_data_ctor, 0);
+    ns_bind_ctor(ctx, global, "FileReader", ns_window_filereader_ctor, 0);
     JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
     ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 1);
     ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 1);
@@ -60383,7 +60510,7 @@ ns_js_free(ns_js *js)
         for (guint i = 0; i < js->filereader_idles->len; i++) {
             ns_filereader_idle *fr = g_ptr_array_index(js->filereader_idles, i);
             if (!fr) continue;
-            g_source_remove(fr->source);
+            ns_js_source_remove(js, fr->source);
             JS_FreeValue(js->ctx, fr->self);
             g_free(fr);
         }
