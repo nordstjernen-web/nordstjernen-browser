@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* Style resolution is faster on pages with attribute selectors: whether an
+  attribute's value compares case-insensitively is decided once per selector
+  instead of for every element (Speedometer's Complex-DOM suites run about 18%
+  faster).
 * Constructed style sheets adopted by a shadow root style it again. The
   engine scopes them like a `<style>` at the end of that shadow root, so
   `:host` works, `innerHTML` set later no longer drops them,
