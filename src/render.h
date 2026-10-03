@@ -21,6 +21,7 @@ struct ns_image_cache;
 typedef struct ns_render_ctx {
     ns_node                        *doc;
     const ns_css_stylesheet *const *sheets;
+    const ns_node *const           *sheet_docs;  /* or NULL */
     guint                           n_sheets;
     double                          viewport_width;
     double                          viewport_height;

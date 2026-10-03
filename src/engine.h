@@ -33,8 +33,10 @@ ns_response *ns_engine_navigate_post_blocking(
     const void *body, gsize body_len,
     const char *content_type, gboolean user_activated, GError **error);
 
+/* out_docs, when not NULL, gets the document of each sheet in out. */
 void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
-                                   GPtrArray *out, GHashTable *css_cache);
+                                   GPtrArray *out, GPtrArray *out_docs,
+                                   GHashTable *css_cache);
 
 char *ns_engine_linked_css_text(const char *url);
 

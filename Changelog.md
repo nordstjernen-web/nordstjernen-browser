@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* A style sheet styles only its own document. The page's rules no longer
+  apply to the elements of its frames, and a frame's `<link>` style sheets no
+  longer apply to the page.
 * `loadedmetadata`, `loadeddata` and `canplay` fire once per video resource
   instead of after every layout, and `progress` fires only when the buffered
   range grows. YouTube got them several times a second and ran its player
