@@ -263,6 +263,8 @@ struct ns_js {
     gint64        last_pump_us;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
+    /* listener lists copied for a dispatch in progress (kept from sweeps) */
+    int           listener_snapshots;
     int           callback_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;

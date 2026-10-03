@@ -4411,7 +4411,9 @@ ns_listener_signal_aborted(ns_js *js, const ns_listener *l)
 static void
 ns_listeners_sweep(ns_js *js)
 {
-    if (!js || !js->listeners || js->dispatch_depth > 0) return;
+    if (!js || !js->listeners || js->dispatch_depth > 0 ||
+        js->listener_snapshots > 0)
+        return;
     guint w = 0;
     for (guint r = 0; r < js->listeners->len; r++) {
         ns_listener *l = g_ptr_array_index(js->listeners, r);
@@ -19857,6 +19859,15 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                             &scope);
     ns_event_at_target at_target;
     ns_event_at_target_begin(ctx, ev, obj, &at_target);
+    /* The listeners are those registered when the dispatch starts: one the
+       event handler adds runs from the next dispatch on. */
+    JSValue listeners = JS_GetPropertyStr(ctx, obj, "_listeners");
+    uint32_t n = 0;
+    if (JS_IsArray(listeners)) {
+        JSValue lenv = JS_GetPropertyStr(ctx, listeners, "length");
+        JS_ToUint32(ctx, &n, lenv);
+        JS_FreeValue(ctx, lenv);
+    }
     char on_name[32];
     g_snprintf(on_name, sizeof on_name, "on%s", type);
     JSValue prop = JS_GetPropertyStr(ctx, obj, on_name);
@@ -19879,10 +19890,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
         ns_js_microtask_checkpoint(js_ce);
     }
     JS_FreeValue(ctx, prop);
-    JSValue listeners = JS_GetPropertyStr(ctx, obj, "_listeners");
     if (JS_IsArray(listeners)) {
-        JSValue lenv = JS_GetPropertyStr(ctx, listeners, "length");
-        uint32_t n = 0; JS_ToUint32(ctx, &n, lenv); JS_FreeValue(ctx, lenv);
         gboolean any_dead = FALSE;
         for (uint32_t i = 0; i < n; i++) {
             JSValue entry = JS_GetPropertyUint32(ctx, listeners, i);
@@ -31782,18 +31790,9 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
             JS_FreeValue(js->ctx, basev);
         }
     }
-    if (!capture_phase) {
-        if (ns_fire_property_on_handler(js, cur, type, event))
-            *fired = TRUE;
-        else if (ns_fire_inline_on_handler(js, cur, type, event))
-            *fired = TRUE;
-        if (cur->kind == NS_NODE_DOCUMENT &&
-            ns_fire_window_level_handlers(js, cur, type, event, at_target))
-            *fired = TRUE;
-    }
-
-    js->dispatch_depth++;
-
+    /* The listeners are those registered when the dispatch reaches this
+     * target: one an event handler adds runs from the next dispatch on. */
+    js->listener_snapshots++;
     gboolean has_listeners = (cur->kind == NS_NODE_DOCUMENT) ||
                              ((cur->flags & NS_NODE_HAS_LISTENERS) != 0);
     GPtrArray *to_call = NULL;
@@ -31808,6 +31807,18 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
             g_ptr_array_add(to_call, l);
         }
     }
+
+    if (!capture_phase) {
+        if (ns_fire_property_on_handler(js, cur, type, event))
+            *fired = TRUE;
+        else if (ns_fire_inline_on_handler(js, cur, type, event))
+            *fired = TRUE;
+        if (cur->kind == NS_NODE_DOCUMENT &&
+            ns_fire_window_level_handlers(js, cur, type, event, at_target))
+            *fired = TRUE;
+    }
+
+    js->dispatch_depth++;
     JSValue cur_target_obj = JS_UNDEFINED;
     gboolean stopped = FALSE;
     if (to_call && to_call->len > 0) {
@@ -31828,6 +31839,7 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
         stopped = ns_event_propagation_is_stopped(js, event);
 
     js->dispatch_depth--;
+    js->listener_snapshots--;
     ns_listeners_sweep(js);
     return stopped;
 }
@@ -31936,14 +31948,9 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
     JS_SetPropertyStr(js->ctx, event, "eventPhase",
                       JS_NewInt32(js->ctx,
                                   at_target ? 2 : (capture_phase ? 1 : 3)));
-    if (!capture_phase &&
-        ns_fire_window_property_handlers(js, target, type, event))
-        *fired = TRUE;
-
-    js->dispatch_depth++;
-
+    js->listener_snapshots++;
     GPtrArray *to_call = g_ptr_array_new();
-    for (guint i = 0; i < js->listeners->len; i++) {
+    for (guint i = 0; js->listeners && i < js->listeners->len; i++) {
         ns_listener *l = g_ptr_array_index(js->listeners, i);
         if (ns_listener_is_tombstoned(l)) continue;
         if (!l->window_level || strcmp(l->type, type) != 0) continue;
@@ -31951,6 +31958,11 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
         if (!!l->capture != !!capture_phase) continue;
         g_ptr_array_add(to_call, l);
     }
+    if (!capture_phase &&
+        ns_fire_window_property_handlers(js, target, type, event))
+        *fired = TRUE;
+
+    js->dispatch_depth++;
     gboolean stopped = ns_run_listener_array(js, to_call, global_obj,
                                              type, event, fired);
     JS_FreeValue(js->ctx, global_obj);
@@ -31959,6 +31971,7 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
         stopped = ns_event_propagation_is_stopped(js, event);
 
     js->dispatch_depth--;
+    js->listener_snapshots--;
     ns_listeners_sweep(js);
     return stopped;
 }
@@ -56641,14 +56654,13 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  function invoke(obj, ev, phase, capture){"
             "    define(ev, 'currentTarget', obj); define(ev, 'eventPhase', phase);"
             "    var type = String(ev.type);"
+            "    var m = obj[K], list = m && m[type], snap = list ? list.slice() : [];"
             "    if(!capture){"
             "      var h = handlerOf(obj, type);"
             "      if(typeof h === 'function'){ try { __ns_event_call(h, obj, ev); } catch(e){ __ns_event_report(e); } }"
             "      if(ev._immediate_stopped) return;"
             "    }"
-            "    var m = obj[K]; if(!m) return;"
-            "    var list = m[type]; if(!list) return;"
-            "    var snap = list.slice();"
+            "    if(!snap.length) return;"
             "    for(var i=0;i<snap.length;i++){"
             "      var L = snap[i];"
             "      if(L.removed || !!L.capture !== capture) continue;"
