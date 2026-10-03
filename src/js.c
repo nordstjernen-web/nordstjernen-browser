@@ -381,13 +381,21 @@ typedef enum ns_ho_kind {
     NS_HO_NONE,
     NS_HO_ABORT_CONTROLLER,
     NS_HO_ABORT_SIGNAL,
+    NS_HO_FORM_DATA,
     NS_HO_TEXT_ENCODER,
     NS_HO_TEXT_DECODER,
     NS_HO_KIND_COUNT
 } ns_ho_kind;
 static JSValue ns_proto_of(JSContext *ctx, JSValueConst global,
                            const char *ctor_name);
+typedef struct ns_hostobj {
+    ns_ho_kind kind;
+    JSValue    state;
+    gpointer   native;
+    void     (*free_native)(JSRuntime *rt, gpointer native);
+} ns_hostobj;
 static JSValue ns_ho_new_default(JSContext *ctx, ns_ho_kind kind);
+static ns_hostobj *ns_ho_of(JSValueConst v, ns_ho_kind kind);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
 static char *ns_fetch_normalize_method(const char *method);
@@ -949,17 +957,8 @@ ns_js_body_bytes(JSContext *ctx, JSValueConst value, gsize *out_len)
 static gboolean
 ns_js_value_is_form_data(JSContext *ctx, JSValueConst v)
 {
-    if (!JS_IsObject(v) || JS_IsFunction(ctx, v)) return FALSE;
-    JSValue e = JS_GetPropertyStr(ctx, v, "_entries");
-    gboolean is_arr = JS_IsArray(e);
-    JS_FreeValue(ctx, e);
-    if (!is_arr) return FALSE;
-    JSValue a = JS_GetPropertyStr(ctx, v, "append");
-    JSValue s = JS_GetPropertyStr(ctx, v, "getAll");
-    gboolean ok = JS_IsFunction(ctx, a) && JS_IsFunction(ctx, s);
-    JS_FreeValue(ctx, a);
-    JS_FreeValue(ctx, s);
-    return ok;
+    (void)ctx;
+    return ns_ho_of(v, NS_HO_FORM_DATA) != NULL;
 }
 
 static gboolean
@@ -10063,13 +10062,6 @@ ns_audio_analysis_throw(JSContext *ctx, JSValueConst this_val,
  * objects keeps using plain property access.  The page sees the interface's
  * prototype accessors and nothing else; what the page defines on the object
  * is the object's own. */
-typedef struct ns_hostobj {
-    ns_ho_kind kind;
-    JSValue    state;
-    gpointer   native;
-    void     (*free_native)(JSRuntime *rt, gpointer native);
-} ns_hostobj;
-
 static JSClassID ns_hostobj_class_id;
 
 #define NS_HO_BIT(kind) (1u << (kind))
@@ -10077,6 +10069,7 @@ static JSClassID ns_hostobj_class_id;
 static const char *const ns_ho_iface_names[NS_HO_KIND_COUNT] = {
     [NS_HO_ABORT_CONTROLLER] = "AbortController",
     [NS_HO_ABORT_SIGNAL] = "AbortSignal",
+    [NS_HO_FORM_DATA] = "FormData",
     [NS_HO_TEXT_ENCODER] = "TextEncoder",
     [NS_HO_TEXT_DECODER] = "TextDecoder",
 };
@@ -21165,29 +21158,115 @@ ns_form_data_method(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_form_data_too_few(JSContext *ctx, const char *method, int need, int have)
+{
+    return JS_ThrowTypeError(ctx, "Failed to execute '%s' on 'FormData': "
+        "%d argument%s required, but only %d present.", method, need,
+        need == 1 ? "" : "s", have);
+}
+
+static JSValue
+ns_form_data_value(JSContext *ctx, JSValueConst value, JSValueConst filename,
+                   gboolean has_filename)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue blob_ctor = JS_GetPropertyStr(ctx, global, "Blob");
+    JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");
+    JS_FreeValue(ctx, global);
+    int is_blob = JS_IsConstructor(ctx, blob_ctor) &&
+                  JS_IsObject(value) && JS_IsInstanceOf(ctx, value, blob_ctor) > 0;
+    int is_file = is_blob && JS_IsConstructor(ctx, file_ctor) &&
+                  JS_IsInstanceOf(ctx, value, file_ctor) > 0;
+    JS_FreeValue(ctx, blob_ctor);
+    JSValue out;
+    if (!is_blob) {
+        JS_FreeValue(ctx, file_ctor);
+        if (has_filename)
+            return JS_ThrowTypeError(ctx, "Failed to execute on 'FormData': "
+                "parameter 2 is not of type 'Blob'.");
+        return JS_ToString(ctx, value);
+    }
+    if (is_file && !has_filename) {
+        JS_FreeValue(ctx, file_ctor);
+        return JS_DupValue(ctx, value);
+    }
+    JSValue name = has_filename ? JS_ToString(ctx, filename)
+                                : JS_NewString(ctx, "blob");
+    if (JS_IsException(name)) {
+        JS_FreeValue(ctx, file_ctor);
+        return name;
+    }
+    JSValue parts = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, parts, 0, JS_DupValue(ctx, value));
+    JSValue opts = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, opts, "type", JS_GetPropertyStr(ctx, value, "type"));
+    if (is_file)
+        JS_SetPropertyStr(ctx, opts, "lastModified",
+                          JS_GetPropertyStr(ctx, value, "lastModified"));
+    JSValueConst args[3] = { parts, name, opts };
+    out = JS_IsConstructor(ctx, file_ctor)
+        ? JS_CallConstructor(ctx, file_ctor, 3, args) : JS_DupValue(ctx, value);
+    JS_FreeValue(ctx, parts);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, opts);
+    JS_FreeValue(ctx, file_ctor);
+    return out;
+}
+
+static JSValue
+ns_form_data_make_pair(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    JSValue name = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(name)) return name;
+    JSValue value = ns_form_data_value(ctx, argv[1],
+                                       argc >= 3 ? argv[2] : JS_UNDEFINED,
+                                       argc >= 3);
+    if (JS_IsException(value)) {
+        JS_FreeValue(ctx, name);
+        return value;
+    }
+    JSValue pair = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, pair, 0, name);
+    JS_SetPropertyUint32(ctx, pair, 1, value);
+    return pair;
+}
+
+static JSValue
 ns_form_data_append(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
-    if (argc < 2) return JS_UNDEFINED;
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 2) return ns_form_data_too_few(ctx, "append", 2, argc);
+    JSValue pair = ns_form_data_make_pair(ctx, argc, argv);
+    if (JS_IsException(pair)) return pair;
     JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
-    uint32_t len = ns_js_array_length(ctx, entries);
-    JSValue pair = JS_NewArray(ctx);
-    JS_SetPropertyUint32(ctx, pair, 0, JS_DupValue(ctx, argv[0]));
-    JS_SetPropertyUint32(ctx, pair, 1, JS_DupValue(ctx, argv[1]));
-    if (argc >= 3 && JS_IsString(argv[2]))
-        JS_SetPropertyUint32(ctx, pair, 2, JS_DupValue(ctx, argv[2]));
-    JS_SetPropertyUint32(ctx, entries, len, pair);
+    JS_SetPropertyUint32(ctx, entries, ns_js_array_length(ctx, entries), pair);
     JS_FreeValue(ctx, entries);
     return JS_UNDEFINED;
+}
+
+static gboolean
+ns_form_data_pair_named(JSContext *ctx, JSValueConst pair, const char *name)
+{
+    JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
+    const char *ks = JS_ToCString(ctx, k);
+    gboolean same = ks && strcmp(ks, name) == 0;
+    if (ks) JS_FreeCString(ctx, ks);
+    JS_FreeValue(ctx, k);
+    return same;
 }
 
 static JSValue
 ns_form_data_set(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    if (argc < 2) return JS_UNDEFINED;
-    const char *key = JS_ToCString(ctx, argv[0]);
-    if (!key) return JS_UNDEFINED;
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 2) return ns_form_data_too_few(ctx, "set", 2, argc);
+    JSValue fresh = ns_form_data_make_pair(ctx, argc, argv);
+    if (JS_IsException(fresh)) return fresh;
+    JSValue key_v = JS_GetPropertyUint32(ctx, fresh, 0);
+    const char *key = JS_ToCString(ctx, key_v);
+    JS_FreeValue(ctx, key_v);
     JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
     uint32_t len = ns_js_array_length(ctx, entries);
     JSValue kept = JS_NewArray(ctx);
@@ -21195,36 +21274,21 @@ ns_form_data_set(JSContext *ctx, JSValueConst this_val,
     gboolean placed = FALSE;
     for (uint32_t i = 0; i < len; i++) {
         JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
-        JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
-        const char *ks = JS_ToCString(ctx, k);
-        if (ks && strcmp(ks, key) == 0) {
+        if (key && ns_form_data_pair_named(ctx, pair, key)) {
             if (!placed) {
-                JSValue new_pair = JS_NewArray(ctx);
-                JS_SetPropertyUint32(ctx, new_pair, 0, JS_DupValue(ctx, argv[0]));
-                JS_SetPropertyUint32(ctx, new_pair, 1, JS_DupValue(ctx, argv[1]));
-                if (argc >= 3 && JS_IsString(argv[2]))
-                    JS_SetPropertyUint32(ctx, new_pair, 2, JS_DupValue(ctx, argv[2]));
-                JS_SetPropertyUint32(ctx, kept, out++, new_pair);
+                JS_SetPropertyUint32(ctx, kept, out++, JS_DupValue(ctx, fresh));
                 placed = TRUE;
             }
+            JS_FreeValue(ctx, pair);
         } else {
-            JS_SetPropertyUint32(ctx, kept, out++, JS_DupValue(ctx, pair));
+            JS_SetPropertyUint32(ctx, kept, out++, pair);
         }
-        if (ks) JS_FreeCString(ctx, ks);
-        JS_FreeValue(ctx, k);
-        JS_FreeValue(ctx, pair);
     }
-    if (!placed) {
-        JSValue new_pair = JS_NewArray(ctx);
-        JS_SetPropertyUint32(ctx, new_pair, 0, JS_DupValue(ctx, argv[0]));
-        JS_SetPropertyUint32(ctx, new_pair, 1, JS_DupValue(ctx, argv[1]));
-        if (argc >= 3 && JS_IsString(argv[2]))
-            JS_SetPropertyUint32(ctx, new_pair, 2, JS_DupValue(ctx, argv[2]));
-        JS_SetPropertyUint32(ctx, kept, out++, new_pair);
-    }
+    if (!placed) JS_SetPropertyUint32(ctx, kept, out++, JS_DupValue(ctx, fresh));
     JS_SetPropertyStr(ctx, this_val, "_entries", kept);
     JS_FreeValue(ctx, entries);
-    JS_FreeCString(ctx, key);
+    JS_FreeValue(ctx, fresh);
+    if (key) JS_FreeCString(ctx, key);
     return JS_UNDEFINED;
 }
 
@@ -21232,23 +21296,18 @@ static JSValue
 ns_form_data_getAll(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
-    JSValue out = JS_NewArray(ctx);
-    if (argc < 1) return out;
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 1) return ns_form_data_too_few(ctx, "getAll", 1, argc);
     const char *key = JS_ToCString(ctx, argv[0]);
-    if (!key) return out;
+    if (!key) return JS_EXCEPTION;
+    JSValue out = JS_NewArray(ctx);
     JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
     uint32_t len = ns_js_array_length(ctx, entries);
     uint32_t o = 0;
     for (uint32_t i = 0; i < len; i++) {
         JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
-        JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
-        const char *ks = JS_ToCString(ctx, k);
-        if (ks && strcmp(ks, key) == 0) {
-            JSValue v = JS_GetPropertyUint32(ctx, pair, 1);
-            JS_SetPropertyUint32(ctx, out, o++, v);
-        }
-        if (ks) JS_FreeCString(ctx, ks);
-        JS_FreeValue(ctx, k);
+        if (ns_form_data_pair_named(ctx, pair, key))
+            JS_SetPropertyUint32(ctx, out, o++, JS_GetPropertyUint32(ctx, pair, 1));
         JS_FreeValue(ctx, pair);
     }
     JS_FreeValue(ctx, entries);
@@ -21257,42 +21316,43 @@ ns_form_data_getAll(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_form_data_lookup(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv, const char *method)
+{
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 1) return ns_form_data_too_few(ctx, method, 1, argc);
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (!key) return JS_EXCEPTION;
+    JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
+    JSValue result = JS_UNINITIALIZED;
+    uint32_t len = ns_js_array_length(ctx, entries);
+    for (uint32_t i = 0; i < len && JS_IsUninitialized(result); i++) {
+        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+        if (ns_form_data_pair_named(ctx, pair, key))
+            result = JS_GetPropertyUint32(ctx, pair, 1);
+        JS_FreeValue(ctx, pair);
+    }
+    JS_FreeValue(ctx, entries);
+    JS_FreeCString(ctx, key);
+    return result;
+}
+
+static JSValue
 ns_form_data_get(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    if (argc < 1) return JS_NULL;
-    JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
-    const char *key = JS_ToCString(ctx, argv[0]);
-    JSValue result = JS_NULL;
-    if (key) {
-        uint32_t len = ns_js_array_length(ctx, entries);
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
-            JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
-            const char *ks = JS_ToCString(ctx, k);
-            JSValue v = JS_GetPropertyUint32(ctx, pair, 1);
-            if (ks && strcmp(ks, key) == 0) {
-                result = JS_DupValue(ctx, v);
-                JS_FreeCString(ctx, ks);
-                JS_FreeValue(ctx, k); JS_FreeValue(ctx, v); JS_FreeValue(ctx, pair);
-                break;
-            }
-            if (ks) JS_FreeCString(ctx, ks);
-            JS_FreeValue(ctx, k); JS_FreeValue(ctx, v); JS_FreeValue(ctx, pair);
-        }
-        JS_FreeCString(ctx, key);
-    }
-    JS_FreeValue(ctx, entries);
-    return result;
+    JSValue v = ns_form_data_lookup(ctx, this_val, argc, argv, "get");
+    return JS_IsUninitialized(v) ? JS_NULL : v;
 }
 
 static JSValue
 ns_form_data_has(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    JSValue v = ns_form_data_get(ctx, this_val, argc, argv);
-    gboolean has = !JS_IsNull(v);
-    JS_FreeValue(ctx, v);
+    JSValue v = ns_form_data_lookup(ctx, this_val, argc, argv, "has");
+    if (JS_IsException(v)) return v;
+    gboolean has = !JS_IsUninitialized(v);
+    if (has) JS_FreeValue(ctx, v);
     return has ? JS_TRUE : JS_FALSE;
 }
 
@@ -21305,23 +21365,20 @@ static JSValue
 ns_form_data_delete(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
-    if (argc < 1) return JS_UNDEFINED;
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 1) return ns_form_data_too_few(ctx, "delete", 1, argc);
     const char *name = JS_ToCString(ctx, argv[0]);
-    if (!name) return JS_UNDEFINED;
+    if (!name) return JS_EXCEPTION;
     JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
     uint32_t len = ns_js_array_length(ctx, entries);
     JSValue kept = JS_NewArray(ctx);
     uint32_t out = 0;
     for (uint32_t i = 0; i < len; i++) {
         JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
-        JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
-        const char *ks = JS_ToCString(ctx, k);
-        if (ks && strcmp(ks, name) != 0) {
-            JS_SetPropertyUint32(ctx, kept, out++, JS_DupValue(ctx, pair));
-        }
-        if (ks) JS_FreeCString(ctx, ks);
-        JS_FreeValue(ctx, k);
-        JS_FreeValue(ctx, pair);
+        if (ns_form_data_pair_named(ctx, pair, name))
+            JS_FreeValue(ctx, pair);
+        else
+            JS_SetPropertyUint32(ctx, kept, out++, pair);
     }
     JS_SetPropertyStr(ctx, this_val, "_entries", kept);
     JS_FreeValue(ctx, entries);
@@ -21333,21 +21390,28 @@ static JSValue
 ns_form_data_forEach(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    if (argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
-    JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
-    uint32_t len = ns_js_array_length(ctx, entries);
-    for (uint32_t i = 0; i < len; i++) {
-        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+    NS_HO_THIS(ctx, this_val, NS_HO_FORM_DATA);
+    if (argc < 1) return ns_form_data_too_few(ctx, "forEach", 1, argc);
+    if (!JS_IsFunction(ctx, argv[0]))
+        return JS_ThrowTypeError(ctx, "Failed to execute 'forEach' on "
+            "'FormData': parameter 1 is not of type 'Function'.");
+    JSValueConst this_arg = argc >= 2 ? argv[1] : JS_UNDEFINED;
+    for (uint32_t i = 0; ; i++) {
+        JSValue entries = ns_form_data_method(ctx, this_val, 0, NULL);
+        gboolean more = i < ns_js_array_length(ctx, entries);
+        JSValue pair = more ? JS_GetPropertyUint32(ctx, entries, i) : JS_UNDEFINED;
+        JS_FreeValue(ctx, entries);
+        if (!more) break;
         JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
         JSValue v = JS_GetPropertyUint32(ctx, pair, 1);
         JSValueConst args[3] = { v, k, this_val };
-        JSValue r = JS_Call(ctx, argv[0], JS_UNDEFINED, 3, args);
-        JS_FreeValue(ctx, r);
+        JSValue r = JS_Call(ctx, argv[0], this_arg, 3, args);
         JS_FreeValue(ctx, k);
         JS_FreeValue(ctx, v);
         JS_FreeValue(ctx, pair);
+        if (JS_IsException(r)) return r;
+        JS_FreeValue(ctx, r);
     }
-    JS_FreeValue(ctx, entries);
     return JS_UNDEFINED;
 }
 
@@ -21497,16 +21561,9 @@ static JSValue
 ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    (void)this_val;
-    JSValue obj = JS_NewObject(ctx);
+    JSValue obj = ns_ho_construct(ctx, this_val, NS_HO_FORM_DATA);
+    if (JS_IsException(obj)) return obj;
     JS_SetPropertyStr(ctx, obj, "_entries", JS_NewArray(ctx));
-    ns_bind_fn(ctx, obj, "append",  ns_form_data_append, 2);
-    ns_bind_fn(ctx, obj, "set",     ns_form_data_set,    2);
-    ns_bind_fn(ctx, obj, "get",     ns_form_data_get,    1);
-    ns_bind_fn(ctx, obj, "getAll",  ns_form_data_getAll, 1);
-    ns_bind_fn(ctx, obj, "has",     ns_form_data_has,    1);
-    ns_bind_fn(ctx, obj, "delete",  ns_form_data_delete, 1);
-    ns_bind_fn(ctx, obj, "forEach", ns_form_data_forEach, 1);
     if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         const ns_node *form = ns_unwrap_element(argv[0]);
         if (!form || !form->name || strcmp(form->name, "form") != 0) {
@@ -21532,56 +21589,67 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
         }
         ns_form_data_populate_from_form(ctx, obj, form, submitter);
     }
-    ns_js *jsx = js_from_ctx(ctx);
-    if (jsx && !jsx->form_data_helper_set) {
-        static const char *helper_src =
-            "(function(fd){"
-            " var rawAppend=fd.append,rawSet=fd.set;"
-            " function isBlob(v){return typeof Blob==='function'&&v instanceof Blob;}"
-            " function isFile(v){return typeof File==='function'&&v instanceof File;}"
-            " function fileValue(v,name,hasName){"
-            "   if(hasName&&!isBlob(v))throw new TypeError('filename requires Blob');"
-            "   if(!isBlob(v))return String(v);"
-            "   if(isFile(v)&&!hasName)return v;"
-            "   var opts={type:v.type||''};"
-            "   if(isFile(v))opts.lastModified=v.lastModified;"
-            "   return new File([v],hasName?String(name):'blob',opts);"
-            " }"
-            " fd.append=function(name,value,filename){"
-            "   rawAppend.call(fd,String(name),fileValue(value,filename,arguments.length>=3));"
-            " };"
-            " fd.set=function(name,value,filename){"
-            "   rawSet.call(fd,String(name),fileValue(value,filename,arguments.length>=3));"
-            " };"
-            " fd.entries = function*(){"
-            "   for (var i = 0; i < fd._entries.length; i++) yield [fd._entries[i][0], fd._entries[i][1]];"
-            " };"
-            " fd.keys = function*(){"
-            "   for (var i = 0; i < fd._entries.length; i++) yield fd._entries[i][0];"
-            " };"
-            " fd.values = function*(){"
-            "   for (var i = 0; i < fd._entries.length; i++) yield fd._entries[i][1];"
-            " };"
-            " fd[Symbol.iterator] = fd.entries;"
-            " return fd;"
-            "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<formdata>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
-        if (!JS_IsException(h)) {
-            jsx->form_data_helper = h;
-            jsx->form_data_helper_set = 1;
-        } else {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            JS_FreeValue(ctx, h);
-        }
+    return obj;
+}
+
+static JSValue
+ns_form_data_brand_check(JSContext *ctx, JSValueConst this_val, int argc,
+                         JSValueConst *argv)
+{
+    (void)argc;
+    NS_HO_THIS(ctx, argc > 0 ? argv[0] : JS_UNDEFINED, NS_HO_FORM_DATA);
+    (void)this_val;
+    return JS_UNDEFINED;
+}
+
+static void
+ns_net_install_form_data(JSContext *ctx, JSValueConst global)
+{
+    JSValue proto = ns_proto_of(ctx, global, "FormData");
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        return;
     }
-    if (jsx && jsx->form_data_helper_set) {
-        JSValueConst args[1] = { obj };
-        JSValue r = JS_Call(ctx, jsx->form_data_helper, JS_UNDEFINED, 1, args);
+    ns_bind_fn(ctx, proto, "append",  ns_form_data_append, 2);
+    ns_bind_fn(ctx, proto, "delete",  ns_form_data_delete, 1);
+    ns_bind_fn(ctx, proto, "get",     ns_form_data_get,    1);
+    ns_bind_fn(ctx, proto, "getAll",  ns_form_data_getAll, 1);
+    ns_bind_fn(ctx, proto, "has",     ns_form_data_has,    1);
+    ns_bind_fn(ctx, proto, "set",     ns_form_data_set,    2);
+    ns_bind_fn(ctx, proto, "forEach", ns_form_data_forEach, 1);
+    static const char *src =
+        "(function(P,check){"
+        " function* walk(fd,kind){"
+        "  for(var i=0;i<fd._entries.length;i++){"
+        "   var e=fd._entries[i];"
+        "   yield kind===0?[e[0],e[1]]:kind===1?e[0]:e[1];"
+        "  }"
+        " }"
+        " function make(name,kind){"
+        "  var f=({[name]:function(){check(this);return walk(this,kind);}})[name];"
+        "  Object.defineProperty(f,'length',{value:0,configurable:true});"
+        "  Object.defineProperty(P,name,{value:f,writable:true,enumerable:true,configurable:true});"
+        "  return f;"
+        " }"
+        " var entries=make('entries',0);"
+        " make('keys',1);make('values',2);"
+        " Object.defineProperty(P,Symbol.iterator,{value:entries,writable:true,configurable:true});"
+        "})";
+    JSValue helper = JS_Eval(ctx, src, strlen(src), "<formdata>",
+                             JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (!JS_IsException(helper)) {
+        JSValue check = JS_NewCFunction(ctx, ns_form_data_brand_check,
+                                        "check", 1);
+        JSValueConst args[2] = { proto, check };
+        JSValue r = JS_Call(ctx, helper, JS_UNDEFINED, 2, args);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, check);
+    } else {
+        JS_FreeValue(ctx, JS_GetException(ctx));
     }
-    return obj;
+    JS_FreeValue(ctx, helper);
+    JS_FreeValue(ctx, proto);
 }
 
 static JSValue
@@ -26511,6 +26579,7 @@ static void
 ns_net_install_interfaces(JSContext *ctx, JSValueConst global)
 {
     ns_ho_install_attrs(ctx, global);
+    ns_net_install_form_data(ctx, global);
     ns_net_link_event_targets(ctx, global);
 }
 
@@ -26973,6 +27042,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_net_install_text_codecs(ctx, global);
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
     ns_usp_install_interface(ctx);
+    ns_bind_ctor(ctx, global, "FormData", ns_window_form_data_ctor, 0);
     JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
     ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 1);
     ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 1);
@@ -55770,7 +55840,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "DOMParser",       ns_window_dom_parser_ctor,      0);
     ns_bind_ctor_proto_fn(ctx, global, "DOMParser", "parseFromString",
                           ns_dom_parser_parseFromString, 2);
-    ns_bind_ctor(ctx, global, "FormData",        ns_window_form_data_ctor,       1);
+    ns_bind_ctor(ctx, global, "FormData",        ns_window_form_data_ctor,       0);
     ns_bind_ctor(ctx, global, "AbortController", ns_window_abort_controller_ctor, 0);
     ns_bind_ctor(ctx, global, "CloseWatcher",    ns_window_close_watcher_ctor,    0);
 
