@@ -30560,6 +30560,7 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "mouseleave", "MouseEvent" }, { "dblclick", "MouseEvent" },
         { "focus", "FocusEvent" }, { "blur", "FocusEvent" },
         { "focusin", "FocusEvent" }, { "focusout", "FocusEvent" },
+        { "submit", "SubmitEvent" },
     };
     const char *iface = "Event";
     JSValue type = JS_GetPropertyStr(ctx, ev, "type");
