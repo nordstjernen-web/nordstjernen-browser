@@ -2888,7 +2888,8 @@
 
         function canonKey(v, seen) {
             if (typeof v === 'number') {
-                if (!isFinite(v)) throw ex('DataError', 'Invalid IndexedDB key');
+                if (isNaN(v)) throw ex('DataError', 'Invalid IndexedDB key');
+                if (!isFinite(v)) return { t: 'n', v: 0, inf: v > 0 ? 1 : -1 };
                 return { t: 'n', v: v };
             }
             if (typeof v === 'string') return { t: 's', v: v };
@@ -2914,7 +2915,7 @@
 
         function decodeCanon(c) {
             if (!c) return undefined;
-            if (c.t === 'n') return c.v;
+            if (c.t === 'n') return c.inf ? c.inf * Infinity : c.v;
             if (c.t === 's') return c.v;
             if (c.t === 'd') return new Date(c.v);
             if (c.t === 'b') {
@@ -2946,6 +2947,10 @@
         function cmpCanon(a, b) {
             var ra = typeRank(a.t), rb = typeRank(b.t);
             if (ra !== rb) return ra < rb ? -1 : 1;
+            if (a.t === 'n') {
+                var ai = a.inf || 0, bi = b.inf || 0;
+                if (ai !== bi) return ai < bi ? -1 : 1;
+            }
             if (a.t === 'n' || a.t === 'd') return a.v === b.v ? 0 : (a.v < b.v ? -1 : 1);
             if (a.t === 's') return a.v === b.v ? 0 : (a.v < b.v ? -1 : 1);
             if (a.t === 'b') {
@@ -3305,7 +3310,7 @@
                 idlNeed(arguments, 1, 'IDBDatabase', 'transaction');
                 if (typeof storeNames === 'string') storeNames = [storeNames];
                 else storeNames = Array.prototype.map.call(Array.from(storeNames), String);
-                mode = oneOf(mode, ['readonly', 'readwrite'], 'IDBDatabase', 'transaction', 'mode');
+                mode = oneOf(mode, ['readonly', 'readwrite', 'versionchange'], 'IDBDatabase', 'transaction', 'mode');
                 options = options === undefined || options === null ? {} : Object(options);
                 var durability = options.durability === undefined ? 'default' :
                     oneOf(options.durability, ['default', 'strict', 'relaxed'], 'IDBDatabase', 'transaction', 'durability');
@@ -3316,6 +3321,8 @@
                 for (var i = 0; i < storeNames.length; i++)
                     if (!s.stores[storeNames[i]])
                         throw ex('NotFoundError', "Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.");
+                if (mode === 'versionchange')
+                    throw new TypeError("Failed to execute 'transaction' on 'IDBDatabase': The mode provided ('versionchange') is not one of 'readonly' or 'readwrite'.");
                 var tx = newTransaction(this, storeNames, mode, durability);
                 task(function () { maybeComplete(tx); });
                 return tx;
@@ -3589,6 +3596,8 @@
             }
             delete(query) {
                 objectStoreOf(this);
+                idlNeed(arguments, 1, 'IDBObjectStore', 'delete');
+                assertWritable(this, 'delete');
                 return storeDelete(this, requireQuery(arguments, 'IDBObjectStore', 'delete', query));
             }
             clear() {
@@ -3927,7 +3936,10 @@
             advance(count) {
                 var s = cursorOf(this);
                 idlNeed(arguments, 1, 'IDBCursor', 'advance');
-                count = unsignedLong(count);
+                count = Number(count);
+                if (!isFinite(count) || count < 0 || count > 4294967295)
+                    throw new TypeError("Failed to execute 'advance' on 'IDBCursor': Value is outside the 'unsigned long' value range.");
+                count = Math.floor(count);
                 if (!count) throw new TypeError("Failed to execute 'advance' on 'IDBCursor': A count argument with value 0 (zero) was supplied, must be greater than 0.");
                 cursorMustBeActive(s, 'advance');
                 s.pos += count;
