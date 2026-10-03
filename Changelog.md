@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* A style sheet styles only its own document. The page's rules no longer
+  apply to the elements of its frames, and a frame's `<link>` style sheets no
+  longer apply to the page.
 * On macOS the sandboxed renderer can create its profile directories when
   their parents do not exist yet, so history and IndexedDB work on a fresh
   profile (before, every `indexedDB.open()` failed with `UnknownError`).
