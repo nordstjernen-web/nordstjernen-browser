@@ -49297,6 +49297,50 @@ static const char *const ns_realm_singleton_names[] = {
     "speechSynthesis", "styleMedia",
 };
 
+/* A frame's navigator gets its own realm's copies of the page navigator's
+ * object attributes (plugins, mediaDevices, ...), which its getters, shared
+ * with the page's, return for it. */
+static void
+ns_realm_adopt_navigator_objects(ns_realm_cloner *rc, JSValueConst brand,
+                                 JSValueConst frame_nav)
+{
+    JSValue get = JS_GetPropertyStr(rc->src, brand, "navigatorObjects");
+    JSValue adopt = JS_GetPropertyStr(rc->src, brand, "adoptNavigatorObjects");
+    JSValue mine = JS_IsFunction(rc->src, get)
+        ? JS_Call(rc->src, get, brand, 0, NULL) : JS_UNDEFINED;
+    JSPropertyEnum *props = NULL;
+    uint32_t n = 0;
+    if (JS_IsObject(mine) && JS_IsFunction(rc->src, adopt) &&
+        JS_GetOwnPropertyNames(rc->src, &props, &n, mine,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+        JSValue values = JS_NewObjectProto(rc->dst, JS_NULL);
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue v = JS_GetProperty(rc->src, mine, props[i].atom);
+            if (JS_IsObject(v)) {
+                JSValue own = ns_realm_clone_instance(rc, v, 0);
+                const char *name = JS_AtomToCString(rc->src, props[i].atom);
+                if (name && JS_IsObject(own))
+                    JS_SetPropertyStr(rc->dst, values, name, own);
+                else
+                    JS_FreeValue(rc->dst, own);
+                if (name) JS_FreeCString(rc->src, name);
+            }
+            JS_FreeValue(rc->src, v);
+        }
+        JSValueConst args[2] = { frame_nav, values };
+        JSValue r = JS_Call(rc->src, adopt, brand, 2, args);
+        if (JS_IsException(r)) JS_FreeValue(rc->src, JS_GetException(rc->src));
+        JS_FreeValue(rc->src, r);
+        JS_FreeValue(rc->dst, values);
+        JS_FreePropertyEnum(rc->src, props, n);
+    } else if (JS_IsException(mine)) {
+        JS_FreeValue(rc->src, JS_GetException(rc->src));
+    }
+    JS_FreeValue(rc->src, mine);
+    JS_FreeValue(rc->src, adopt);
+    JS_FreeValue(rc->src, get);
+}
+
 static void
 ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
                             JSValueConst frame_global)
@@ -49345,6 +49389,7 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
         if (JS_IsException(r)) JS_FreeValue(rc->src, JS_GetException(rc->src));
         JS_FreeValue(rc->src, r);
         JS_FreeValue(rc->src, add);
+        ns_realm_adopt_navigator_objects(rc, js->navigator_brand, nav);
     }
     JSAtom ci = JS_NewAtom(rc->dst, "clientInformation");
     int has_ci = JS_GetOwnProperty(rc->dst, NULL, frame_global, ci);
@@ -54875,6 +54920,14 @@ ns_install_navigator_shape(JSContext *ctx)
         " if(typeof Navigator!=='function'||typeof navigator!=='object'||!navigator)return;"
         " var nav=navigator,P=Navigator.prototype;"
         " if(!(others instanceof WeakSet))others=new WeakSet();"
+        /* An attribute whose value is an object ([SameObject] in WebIDL) is
+         * each navigator's own: a frame's navigator gets objects of its own
+         * realm (ns_realm_install_singletons hands them over). */
+        " var slots=new WeakMap(),mine=Object.create(null);slots.set(nav,mine);"
+        " function objectGetter(name){"
+        "  var holder={get [name](){var m=slots.get(this);if(!m)throw new TypeError('Illegal invocation');return m[name];}};"
+        "  return Object.getOwnPropertyDescriptor(holder,name).get;"
+        " }"
         " Object.getOwnPropertyNames(nav).forEach(function(name){"
         "  if(name[0]==='_')return;"
         "  var d=Object.getOwnPropertyDescriptor(nav,name);"
@@ -54884,12 +54937,26 @@ ns_install_navigator_shape(JSContext *ctx)
         "   try{Object.defineProperty(P,name,{value:d.value,writable:true,enumerable:true,configurable:true});delete nav[name];}catch(e){}"
         "   return;"
         "  }"
+        "  if(d.value&&typeof d.value==='object'){"
+        "   mine[name]=d.value;"
+        "   try{Object.defineProperty(P,name,{get:objectGetter(name),enumerable:true,configurable:true});delete nav[name];}catch(e){}"
+        "   return;"
+        "  }"
         "  (function(value){"
         "   var holder={get value(){if(this!==nav&&!others.has(this))throw new TypeError('Illegal invocation');return value;}};"
         "   var get=Object.getOwnPropertyDescriptor(holder,'value').get;"
         "   try{Object.defineProperty(P,name,{get:get,enumerable:true,configurable:true});delete nav[name];}catch(e){}"
         "  })(d.value);"
         " });"
+        " Object.getOwnPropertyNames(P).forEach(function(name){"
+        "  if(name==='constructor')return;"
+        "  var d=Object.getOwnPropertyDescriptor(P,name);"
+        "  if(!d||!d.configurable||!('value' in d)||!d.value||typeof d.value!=='object')return;"
+        "  mine[name]=d.value;"
+        "  try{Object.defineProperty(P,name,{get:objectGetter(name),enumerable:true,configurable:true});}catch(e){}"
+        " });"
+        " Object.defineProperty(others,'navigatorObjects',{value:function(){return mine;}});"
+        " Object.defineProperty(others,'adoptNavigatorObjects',{value:function(n,values){slots.set(n,values);}});"
         " try{Object.setPrototypeOf(nav,P);}catch(e){}"
         " try{Object.defineProperty(P,Symbol.toStringTag,{value:'Navigator',configurable:true});}catch(e){}"
         "})";
