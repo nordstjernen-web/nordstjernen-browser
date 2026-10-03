@@ -49632,7 +49632,7 @@ static const char *const ns_realm_singleton_names[] = {
     "caches", "indexedDB", "cookieStore", "trustedTypes", "visualViewport",
     "scheduler", "navigation", "external", "locationbar", "menubar",
     "personalbar", "scrollbars", "statusbar", "toolbar", "console",
-    "speechSynthesis", "styleMedia",
+    "speechSynthesis", "styleMedia", "customElements",
 };
 
 static void ns_install_pdf_plugins(JSContext *ctx);
