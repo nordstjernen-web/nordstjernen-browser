@@ -3390,12 +3390,23 @@
 
         function newTransaction(db, scope, mode, durability) {
             var tx = Object.create(IDBTransaction.prototype);
-            transactions.set(tx, idlHandlerState({
+            var s = idlHandlerState({
                 db: db, mode: mode, durability: durability || 'default', error: null,
                 scope: scope.slice(), pending: 0, done: false, aborted: false,
-                completeQueued: false, handles: {}
-            }));
+                completeQueued: false, handles: {}, active: true, activeFor: 0, serial: 0
+            });
+            transactions.set(tx, s);
+            task(function () { if (s.activeFor === 0) s.active = false; });
             return tx;
+        }
+
+        function activateForDispatch(s, serial) {
+            s.active = true;
+            s.activeFor = serial;
+        }
+
+        function deactivateAfterDispatch(s, serial) {
+            task(function () { if (s.activeFor === serial) s.active = false; });
         }
 
         function requestFrom(source, tx, op) {
@@ -3408,7 +3419,9 @@
         function queueRequest(tx, req, op) {
             var s = transactions.get(tx);
             if (s.done || s.aborted) throw ex('TransactionInactiveError', 'The transaction has finished.');
+            if (!s.active) throw ex('TransactionInactiveError', 'The transaction is not active.');
             s.pending++;
+            var serial = ++s.serial;
             task(function () {
                 if (s.aborted) {
                     fail(req, s.error || ex('AbortError', 'Transaction aborted'));
@@ -3416,6 +3429,7 @@
                     maybeComplete(tx);
                     return;
                 }
+                activateForDispatch(s, serial);
                 var result;
                 var failure = null;
                 try { result = op(); } catch (e) { failure = e || ex('UnknownError', 'IndexedDB error'); }
@@ -3428,6 +3442,7 @@
                 s.pending--;
                 maybeComplete(tx);
             });
+            deactivateAfterDispatch(s, serial);
         }
 
         function maybeComplete(tx) {
@@ -3438,6 +3453,7 @@
                 s.completeQueued = false;
                 if (s.pending || s.done || s.aborted) return;
                 s.done = true;
+                s.active = false;
                 tx.dispatchEvent(idlTrustedEvent(new EventClass('complete')));
                 if (s.afterComplete) s.afterComplete();
             });
@@ -3447,6 +3463,7 @@
             var s = transactions.get(tx);
             if (s.done || s.aborted) return;
             s.aborted = true;
+            s.active = false;
             s.error = err && err.name ? err : ex('AbortError', 'Transaction aborted');
             bubbleEvent(idlTrustedEvent(new EventClass('abort', { bubbles: true })), tx, [s.db]);
             if (s.afterAbort) s.afterAbort();
@@ -3508,8 +3525,8 @@
 
         function assertWritable(store, member) {
             var p = storeParts(store);
-            if (p.tx.done || p.tx.aborted)
-                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBObjectStore': The transaction has finished.");
+            if (p.tx.done || p.tx.aborted || !p.tx.active)
+                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBObjectStore': The transaction is not active.");
             if (p.tx.mode === 'readonly')
                 throw ex('ReadOnlyError', "Failed to execute '" + member + "' on 'IDBObjectStore': The transaction is read-only.");
             return p;
@@ -3956,7 +3973,9 @@
             var ts = tx && transactions.get(tx);
             requests.get(req).readyState = 'pending';
             if (ts) ts.pending++;
+            var serial = ts ? ++ts.serial : 0;
             task(function () {
+                if (ts && !ts.aborted) activateForDispatch(ts, serial);
                 try {
                     if (ts && ts.aborted)
                         fail(req, ts.error || ex('AbortError', 'Transaction aborted'));
@@ -3969,13 +3988,14 @@
                     }
                 }
             });
+            if (ts) deactivateAfterDispatch(ts, serial);
         }
 
         function cursorMustBeActive(s, member) {
             var req = requests.get(s.request);
             var ts = req.transaction && transactions.get(req.transaction);
-            if (ts && (ts.done || ts.aborted))
-                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBCursor': The transaction has finished.");
+            if (ts && (ts.done || ts.aborted || !ts.active))
+                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBCursor': The transaction is not active.");
             if (req.readyState !== 'done' || !s.records[s.pos])
                 throw ex('InvalidStateError', "Failed to execute '" + member + "' on 'IDBCursor': The cursor is being iterated or has iterated past its end.");
         }
