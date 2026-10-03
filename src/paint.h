@@ -83,6 +83,7 @@ double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);
 void ns_paint_apply_css_line_spacing(NsPangoLayout *layout,
                                      const ns_style *style);
+void ns_paint_start_align_overflow(NsPangoLayout *layout);
 
 gboolean ns_paint_li_is_inside(const ns_style *li_style);
 void     ns_paint_list_ordinals_begin(void);
