@@ -166,6 +166,21 @@ ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
     return obj;
 }
 
+JSValue
+ns_image_bitmap_clone(JSContext *ctx, JSValueConst v)
+{
+    ns_image_bitmap *b = JS_GetOpaque(v, ns_image_bitmap_class_id);
+    if (!b || !b->surf)
+        return ns_canvas_throw_dom(ctx, "DataCloneError", "The ImageBitmap is closed.");
+    cairo_surface_t *copy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, b->w, b->h);
+    cairo_t *cr = cairo_create(copy);
+    cairo_set_source_surface(cr, b->surf, 0, 0);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    return ns_image_bitmap_make(ctx, copy, b->w, b->h, b->origin_clean);
+}
+
 cairo_surface_t *
 ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
                                int *out_w, int *out_h)

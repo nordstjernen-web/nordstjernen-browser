@@ -14712,6 +14712,77 @@ ns_sc_iterate(ns_sc *s, JSValueConst src, const char *iter_method,
     return ok;
 }
 
+static const struct { const char *name; const char *from; } ns_geometry_ifaces[] = {
+    { "DOMRect", "fromRect" }, { "DOMRectReadOnly", "fromRect" },
+    { "DOMPoint", "fromPoint" }, { "DOMPointReadOnly", "fromPoint" },
+    { "DOMQuad", "fromQuad" },
+    { "DOMMatrix", "fromMatrix" }, { "DOMMatrixReadOnly", "fromMatrix" },
+};
+
+static int
+ns_geometry_kind(JSContext *ctx, JSValueConst v)
+{
+    JSValue proto = JS_GetPrototype(ctx, v);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue object = JS_GetPropertyStr(ctx, global, "Object");
+    JSValue plain = JS_IsObject(object) ? JS_GetPropertyStr(ctx, object, "prototype")
+                                        : JS_UNDEFINED;
+    gboolean skip = !JS_IsObject(proto) ||
+        (JS_IsObject(plain) && JS_VALUE_GET_PTR(proto) == JS_VALUE_GET_PTR(plain));
+    JS_FreeValue(ctx, plain);
+    JS_FreeValue(ctx, object);
+    JS_FreeValue(ctx, proto);
+    int found = -1;
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_geometry_ifaces) && !skip && found < 0; i++) {
+        JSValue ctor = JS_GetPropertyStr(ctx, global, ns_geometry_ifaces[i].name);
+        if (JS_IsObject(ctor) && JS_IsInstanceOf(ctx, v, ctor) > 0) found = (int)i;
+        JS_FreeValue(ctx, ctor);
+    }
+    JS_FreeValue(ctx, global);
+    return found;
+}
+
+static JSValue
+ns_geometry_plain(JSContext *ctx, int kind, JSValueConst v)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, ns_geometry_ifaces[kind].name);
+    JS_FreeValue(ctx, global);
+    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JSValue to_json = JS_IsObject(proto) ? JS_GetPropertyStr(ctx, proto, "toJSON") : JS_UNDEFINED;
+    JSValue out = JS_IsFunction(ctx, to_json) ? JS_Call(ctx, to_json, v, 0, NULL)
+                                              : JS_NewObject(ctx);
+    JS_FreeValue(ctx, to_json);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    return out;
+}
+
+static JSValue
+ns_geometry_construct(JSContext *ctx, int kind, JSValueConst init)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, ns_geometry_ifaces[kind].name);
+    JS_FreeValue(ctx, global);
+    JSValue from = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, ns_geometry_ifaces[kind].from) : JS_UNDEFINED;
+    JSValue out = JS_IsFunction(ctx, from) ? JS_Call(ctx, from, ctor, 1, &init)
+                                           : JS_NewObject(ctx);
+    JS_FreeValue(ctx, from);
+    JS_FreeValue(ctx, ctor);
+    return out;
+}
+
+static JSValue
+ns_geometry_clone(JSContext *ctx, int kind, JSValueConst v)
+{
+    JSValue plain = ns_geometry_plain(ctx, kind, v);
+    if (JS_IsException(plain)) return plain;
+    JSValue out = ns_geometry_construct(ctx, kind, plain);
+    JS_FreeValue(ctx, plain);
+    return out;
+}
+
 static JSValue
 ns_sc_clone_value(ns_sc *s, JSValueConst v)
 {
@@ -14970,6 +15041,19 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         JS_FreeValue(ctx, a);
         if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
         return clone;
+    }
+
+    int geometry = ns_geometry_kind(ctx, v);
+    if (geometry >= 0) {
+        JSValue clone = ns_geometry_clone(ctx, geometry, v);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
+    JSValue platform = ns_canvas_clone_object(ctx, v);
+    if (!JS_IsUndefined(platform)) {
+        if (!JS_IsException(platform)) ns_sc_memo_put(s, ptr, platform);
+        return platform;
     }
 
     JSValue clone = JS_IsArray(v) ? JS_NewArray(ctx) : JS_NewObject(ctx);
@@ -24151,6 +24235,32 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
         return node;
     }
 
+    int geometry = ns_geometry_kind(ctx, v);
+    if (geometry >= 0) {
+        JSValue plain = ns_geometry_plain(ctx, geometry, v);
+        if (JS_IsException(plain)) return plain;
+        JSValue dnode = ns_wire_encode(e, plain);
+        JS_FreeValue(ctx, plain);
+        if (JS_IsException(dnode)) return dnode;
+        JSValue node = ns_wire_node(ctx, "GE");
+        ns_wire_push(ctx, node, JS_NewInt32(ctx, geometry));
+        ns_wire_push(ctx, node, dnode);
+        return node;
+    }
+
+    if (ns_hidden_is(v, NS_HK_IMAGEDATA)) {
+        JSValue data = ns_hget(ctx, v, "data");
+        JSValue dnode = ns_wire_encode(e, data);
+        JS_FreeValue(ctx, data);
+        if (JS_IsException(dnode)) return dnode;
+        JSValue node = ns_wire_node(ctx, "IM");
+        ns_wire_push(ctx, node, dnode);
+        ns_wire_push(ctx, node, ns_hget(ctx, v, "width"));
+        ns_wire_push(ctx, node, ns_hget(ctx, v, "height"));
+        ns_wire_push(ctx, node, ns_hget(ctx, v, "colorSpace"));
+        return node;
+    }
+
     if (ns_sc_isa(ctx, v, e->dom_exception_ctor)) {
         JSValue node = ns_wire_node(ctx, "DE");
         ns_wire_push(ctx, node, JS_GetPropertyStr(ctx, v, "message"));
@@ -24374,6 +24484,29 @@ ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
             }
             JS_FreeValue(ctx, parts);
             JS_FreeValue(ctx, opts);
+        }
+    } else if (strcmp(kind, "GE") == 0) {
+        int32_t geometry = 0;
+        JS_ToInt32(ctx, &geometry, a1);
+        JSValue init = ns_wire_decode(d, a2);
+        if (JS_IsException(init)) {
+            out = init;
+        } else {
+            out = geometry >= 0 && geometry < (int32_t)G_N_ELEMENTS(ns_geometry_ifaces)
+                ? ns_geometry_construct(ctx, geometry, init) : JS_NewObject(ctx);
+            JS_FreeValue(ctx, init);
+        }
+    } else if (strcmp(kind, "IM") == 0) {
+        JSValue data = ns_wire_decode(d, a1);
+        if (JS_IsException(data)) {
+            out = data;
+        } else {
+            JSValue opts = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, opts, "colorSpace", JS_DupValue(ctx, a4));
+            JSValueConst args[4] = { data, a2, a3, opts };
+            out = ns_wire_construct(d, "ImageData", 4, args);
+            JS_FreeValue(ctx, opts);
+            JS_FreeValue(ctx, data);
         }
     } else if (strcmp(kind, "DE") == 0) {
         JSValueConst args[2] = { a1, a2 };
@@ -59311,9 +59444,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "HTMLOptionsCollection", 0 }, { "HTMLAllCollection", 0 },
         { "RadioNodeList", 0 },
         { "ValidityState", 0 },
-        { "DOMRect", 4 }, { "DOMRectReadOnly", 4 },
-        { "DOMPoint", 4 }, { "DOMPointReadOnly", 4 },
-        { "DOMQuad", 4 }, { "DOMStringList", 0 }, { "DOMStringMap", 0 },
+        { "DOMStringList", 0 }, { "DOMStringMap", 0 },
         { "NamedNodeMap", 0 }, { "TreeWalker", 0 }, { "NodeIterator", 0 },
         { "MutationRecord", 0 }, { "IntersectionObserverEntry", 0 },
         { "ResizeObserverEntry", 0 },
