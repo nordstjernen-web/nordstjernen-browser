@@ -1314,6 +1314,16 @@ ns_js_top_document(ns_node *doc)
     return doc;
 }
 
+/* Whether node is in the page: in its document or in one of its frames'.
+   The engine's current document says which of them code is running for,
+   and parent code can run while a frame's document is current. */
+static gboolean
+ns_js_node_in_page(ns_js *js, const ns_node *node)
+{
+    ns_node *top = js ? ns_js_top_document(js->current_doc) : NULL;
+    return top && node && ns_js_top_document((ns_node *)node) == top;
+}
+
 static void
 ns_js_realm_scope_save(ns_js *js, ns_realm_scope *scope)
 {
@@ -31392,10 +31402,7 @@ ns_js_flush_scrollend(ns_js *js)
     if (targets) {
         for (guint i = 0; i < targets->len; i++) {
             const ns_node *el = targets->pdata[i];
-            gboolean connected = FALSE;
-            for (const ns_node *p = el; p; p = p->parent)
-                if (p == js->current_doc) { connected = TRUE; break; }
-            if (!connected) continue;
+            if (!ns_js_node_in_page(js, el)) continue;
             JSValue ev = ns_make_event(ctx, "scrollend", el);
             JS_SetPropertyStr(ctx, ev, "bubbles", JS_FALSE);
             JS_SetPropertyStr(ctx, ev, "cancelable", JS_FALSE);
@@ -44169,9 +44176,7 @@ ns_js_request_submit_form(JSContext *ctx, const ns_node *form,
 {
     ns_js *js = js_from_ctx(ctx);
     if (!form || !js) return JS_UNDEFINED;
-    gboolean form_connected = FALSE;
-    for (const ns_node *p = form; p; p = p->parent)
-        if (p == js->current_doc) { form_connected = TRUE; break; }
+    gboolean form_connected = ns_js_node_in_page(js, form);
     if (!form_connected)
         return JS_UNDEFINED;
     if (!ns_js_form_validation_allows_submit(ctx, form, submitter))
@@ -51828,10 +51833,7 @@ ns_ce_call_callback(JSContext *ctx, JSValue elem, JSValueConst klass,
 static gboolean
 ns_ce_node_connected(ns_js *js, const ns_node *node)
 {
-    if (!js || !node) return FALSE;
-    for (const ns_node *p = node; p; p = p->parent)
-        if (p == js->current_doc) return TRUE;
-    return FALSE;
+    return ns_js_node_in_page(js, node);
 }
 
 static void
@@ -61617,10 +61619,7 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
 static gboolean
 ns_js_root_connected(ns_js *js, const ns_node *root)
 {
-    if (!js || !root || !js->current_doc) return FALSE;
-    for (const ns_node *p = root; p; p = p->parent)
-        if (p == js->current_doc) return TRUE;
-    return FALSE;
+    return ns_js_node_in_page(js, root);
 }
 
 static gboolean
@@ -62941,10 +62940,7 @@ static void
 ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 {
     if (!js || !iframe || js->halted || !js->current_doc) return;
-    gboolean connected = FALSE;
-    for (const ns_node *p = iframe; p; p = p->parent)
-        if (p == js->current_doc) { connected = TRUE; break; }
-    if (!connected) return;
+    if (!ns_js_node_in_page(js, iframe)) return;
 
     if (ns_element_get_attr(iframe, "data-nd-doc-written")) {
         const char *sa = ns_frame_src_attr(iframe);
