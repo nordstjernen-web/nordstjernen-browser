@@ -48,6 +48,143 @@
         } catch (e) { proto[name] = fn; }
     }
 
+    function idlBrand(map) {
+        return function (obj) {
+            var state = map.get(obj);
+            if (state === undefined) throw new TypeError('Illegal invocation');
+            return state;
+        };
+    }
+
+    function idlIllegalConstructor(iface) {
+        return new TypeError("Failed to construct '" + iface + "': Illegal constructor");
+    }
+
+    function idlNeed(args, count, iface, member) {
+        if (args.length >= count) return;
+        throw new TypeError("Failed to execute '" + member + "' on '" + iface + "': " +
+                            count + (count === 1 ? ' argument' : ' arguments') +
+                            ' required, but only ' + args.length + ' present.');
+    }
+
+    function idlNeedCtor(args, count, iface) {
+        if (args.length >= count) return;
+        throw new TypeError("Failed to construct '" + iface + "': " +
+                            count + (count === 1 ? ' argument' : ' arguments') +
+                            ' required, but only ' + args.length + ' present.');
+    }
+
+    function idlExpose(ctor, name, parent) {
+        var proto = ctor.prototype;
+        Object.getOwnPropertyNames(proto).forEach(function (key) {
+            if (key === 'constructor') return;
+            var desc = Object.getOwnPropertyDescriptor(proto, key);
+            if (desc.enumerable) return;
+            desc.enumerable = true;
+            Object.defineProperty(proto, key, desc);
+        });
+        Object.getOwnPropertyNames(ctor).forEach(function (key) {
+            if (key === 'length' || key === 'name' || key === 'prototype') return;
+            var desc = Object.getOwnPropertyDescriptor(ctor, key);
+            if (desc.enumerable) return;
+            desc.enumerable = true;
+            Object.defineProperty(ctor, key, desc);
+        });
+        Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
+        if (parent) {
+            Object.setPrototypeOf(proto, parent.prototype);
+            Object.setPrototypeOf(ctor, parent);
+        }
+        replaceCtor(name, ctor);
+    }
+
+    function idlConstants(ctor, table) {
+        Object.keys(table).forEach(function (key) {
+            var desc = { value: table[key], writable: false, enumerable: true, configurable: false };
+            Object.defineProperty(ctor, key, desc);
+            Object.defineProperty(ctor.prototype, key, desc);
+        });
+    }
+
+    function idlEventHandlers(proto, types, stateOf) {
+        types.forEach(function (type) {
+            var name = 'on' + type;
+            var getName = 'get ' + name;
+            var setName = 'set ' + name;
+            var accessors = {
+                [getName]() { return stateOf(this).handlers[type] || null; },
+                [setName](value) {
+                    stateOf(this).handlers[type] = typeof value === 'function' ? value : null;
+                }
+            };
+            Object.defineProperty(proto, name, {
+                get: accessors[getName], set: accessors[setName],
+                enumerable: true, configurable: true
+            });
+        });
+    }
+
+    function idlHandlerState(state) {
+        state.handlers = Object.create(null);
+        return state;
+    }
+
+    function idlTrustedEvent(event) {
+        event._is_trusted = true;
+        return event;
+    }
+
+    function idlEventTarget() {
+        return typeof global.EventTarget === 'function' ? global.EventTarget : null;
+    }
+
+    function idlPinTarget(event, target) {
+        Object.defineProperty(event, 'target', {
+            get: function () { return target; },
+            set: function () {},
+            configurable: true
+        });
+    }
+
+    function idlDispatchPath(event, path) {
+        for (var i = 0; i < path.length; i++) {
+            path[i].dispatchEvent(event);
+            if (event.cancelBubble) break;
+        }
+        return !event.defaultPrevented;
+    }
+
+    var domStringLists = new WeakMap();
+    var domStringList = idlBrand(domStringLists);
+
+    class DOMStringList {
+        constructor() { throw idlIllegalConstructor('DOMStringList'); }
+        get length() { return domStringList(this).length; }
+        item(index) {
+            var items = domStringList(this);
+            idlNeed(arguments, 1, 'DOMStringList', 'item');
+            index = index >>> 0;
+            return index < items.length ? items[index] : null;
+        }
+        contains(string) {
+            var items = domStringList(this);
+            idlNeed(arguments, 1, 'DOMStringList', 'contains');
+            return items.indexOf(String(string)) >= 0;
+        }
+    }
+    Object.defineProperty(DOMStringList.prototype, Symbol.iterator,
+        { value: Array.prototype[Symbol.iterator], writable: true, configurable: true });
+    idlExpose(DOMStringList, 'DOMStringList', null);
+
+    function newDOMStringList(items) {
+        var list = Object.create(DOMStringList.prototype);
+        var copy = items.slice();
+        domStringLists.set(list, copy);
+        for (var i = 0; i < copy.length; i++)
+            Object.defineProperty(list, i, { value: copy[i], enumerable: true, configurable: true });
+        return list;
+    }
+
     function encodeKV(s) {
         return encodeURIComponent(String(s == null ? '' : s)).replace(/%20/g, '+');
     }
@@ -2660,6 +2797,9 @@
             try { global.__nd_idb = undefined; } catch (e2) {}
         }
 
+        var scheduleTask = global.setTimeout;
+        var EventClass = global.Event;
+
         function ex(name, message) {
             try { return new DOMException(message || name, name); }
             catch (e) {
@@ -2669,20 +2809,7 @@
             }
         }
 
-        function task(fn) { setTimeout(fn, 0); }
-
-        function names(list) {
-            var a = (list || []).slice().sort();
-            Object.defineProperty(a, 'contains', {
-                value: function (name) { return a.indexOf(String(name)) >= 0; },
-                configurable: true
-            });
-            Object.defineProperty(a, 'item', {
-                value: function (i) { return i >= 0 && i < a.length ? a[i] : null; },
-                configurable: true
-            });
-            return a;
-        }
+        function task(fn) { scheduleTask.call(global, fn, 0); }
 
         function parseStoredKeyPath(s) {
             try { return JSON.parse(s); }
@@ -2832,25 +2959,6 @@
             cur[parts[parts.length - 1]] = key;
         }
 
-        function inRangeEncoded(encoded, range) {
-            if (!range) return true;
-            if (range._lowerEncoded !== null) {
-                var cl = compareEncoded(encoded, range._lowerEncoded);
-                if (cl < 0 || (cl === 0 && range.lowerOpen)) return false;
-            }
-            if (range._upperEncoded !== null) {
-                var cu = compareEncoded(encoded, range._upperEncoded);
-                if (cu > 0 || (cu === 0 && range.upperOpen)) return false;
-            }
-            return true;
-        }
-
-        function asRange(query) {
-            if (query === undefined || query === null) return null;
-            if (query instanceof IDBKeyRange) return query;
-            return IDBKeyRange.only(query);
-        }
-
         function sortedRecords(records, keyName, direction) {
             records = records || [];
             records.sort(function (a, b) {
@@ -2872,142 +2980,206 @@
             return records;
         }
 
-        function IDBEventTarget() { this._idbListeners = {}; }
-        IDBEventTarget.prototype.addEventListener = function (type, cb) {
-            if (!cb) return;
-            type = String(type);
-            (this._idbListeners[type] || (this._idbListeners[type] = [])).push(cb);
-        };
-        IDBEventTarget.prototype.removeEventListener = function (type, cb) {
-            var list = this._idbListeners[String(type)];
-            if (!list) return;
-            for (var i = list.length - 1; i >= 0; i--)
-                if (list[i] === cb) list.splice(i, 1);
-        };
-        IDBEventTarget.prototype.dispatchEvent = function (ev) {
-            if (!ev || !ev.type) return true;
-            fire(this, ev.type, ev);
-            return !ev.defaultPrevented;
-        };
+        var requests = new WeakMap();
+        var databases = new WeakMap();
+        var transactions = new WeakMap();
+        var objectStores = new WeakMap();
+        var indexes = new WeakMap();
+        var cursors = new WeakMap();
+        var keyRanges = new WeakMap();
+        var idbRecords = new WeakMap();
+        var factories = new WeakMap();
+        var requestOf = idlBrand(requests);
+        var databaseOf = idlBrand(databases);
+        var transactionOf = idlBrand(transactions);
+        var objectStoreOf = idlBrand(objectStores);
+        var indexOf = idlBrand(indexes);
+        var cursorOf = idlBrand(cursors);
+        var keyRangeOf = idlBrand(keyRanges);
+        var recordOf = idlBrand(idbRecords);
+        var factoryOf = idlBrand(factories);
 
-        function makeEvent(type, fields) {
-            var ev;
-            try { ev = new Event(type, { bubbles: false, cancelable: type === 'error' }); }
-            catch (e) { ev = { type: type, defaultPrevented: false }; }
-            if (fields) for (var k in fields) ev[k] = fields[k];
-            if (typeof ev.preventDefault !== 'function')
-                ev.preventDefault = function () { ev.defaultPrevented = true; };
-            return ev;
-        }
-
-        function fire(target, type, fields) {
-            var ev = fields && fields.type ? fields : makeEvent(type, fields);
-            try { ev.target = target; ev.currentTarget = target; } catch (e) {}
-            var handler = target['on' + type];
-            if (typeof handler === 'function') handler.call(target, ev);
-            var list = target._idbListeners && target._idbListeners[type];
-            if (list) {
-                list = list.slice();
-                for (var i = 0; i < list.length; i++) {
-                    if (typeof list[i] === 'function') list[i].call(target, ev);
-                    else if (list[i] && typeof list[i].handleEvent === 'function')
-                        list[i].handleEvent(ev);
-                }
+        function inRangeEncoded(encoded, range) {
+            if (!range) return true;
+            var bounds = keyRanges.get(range);
+            if (bounds.lowerEncoded !== null) {
+                var cl = compareEncoded(encoded, bounds.lowerEncoded);
+                if (cl < 0 || (cl === 0 && bounds.lowerOpen)) return false;
             }
-            return ev;
+            if (bounds.upperEncoded !== null) {
+                var cu = compareEncoded(encoded, bounds.upperEncoded);
+                if (cu > 0 || (cu === 0 && bounds.upperOpen)) return false;
+            }
+            return true;
         }
 
-        function IDBRequest() {
-            IDBEventTarget.call(this);
-            this.result = undefined;
-            this.error = null;
-            this.source = null;
-            this.transaction = null;
-            this.readyState = 'pending';
-            this.onsuccess = null;
-            this.onerror = null;
+        function asRange(query) {
+            if (query === undefined || query === null) return null;
+            if (keyRanges.has(query)) return query;
+            return newKeyRange(query, query, false, false);
         }
-        IDBRequest.prototype = Object.create(IDBEventTarget.prototype);
-        IDBRequest.prototype.constructor = IDBRequest;
 
-        function IDBOpenDBRequest() {
-            IDBRequest.call(this);
-            this.onblocked = null;
-            this.onupgradeneeded = null;
+        function unsignedLong(value) {
+            value = Number(value);
+            return isFinite(value) ? Math.floor(Math.abs(value)) % 4294967296 : 0;
         }
-        IDBOpenDBRequest.prototype = Object.create(IDBRequest.prototype);
-        IDBOpenDBRequest.prototype.constructor = IDBOpenDBRequest;
+
+        function oneOf(value, allowed, iface, member, attribute) {
+            value = String(value);
+            if (allowed.indexOf(value) >= 0) return value;
+            throw new TypeError("Failed to execute '" + member + "' on '" + iface + "': The " +
+                                attribute + " provided ('" + value + "') is not one of " +
+                                allowed.map(function (v) { return "'" + v + "'"; }).join(', ') + '.');
+        }
+
+        function newRequest(proto, source, tx) {
+            var req = Object.create(proto);
+            requests.set(req, idlHandlerState({
+                result: undefined, error: null, source: source || null,
+                transaction: tx || null, readyState: 'pending'
+            }));
+            return req;
+        }
+
+        function bubbleEvent(event, target, parents) {
+            idlPinTarget(event, target);
+            return idlDispatchPath(event, [target].concat(parents));
+        }
+
+        function transactionParents(tx) {
+            return tx ? [tx, transactions.get(tx).db] : [];
+        }
 
         function succeed(req, result) {
-            req.result = result;
-            req.error = null;
-            req.readyState = 'done';
-            fire(req, 'success');
+            var s = requests.get(req);
+            s.result = result;
+            s.error = null;
+            s.readyState = 'done';
+            req.dispatchEvent(new EventClass('success'));
         }
 
         function fail(req, err) {
-            req.result = undefined;
-            req.error = err && err.name ? err : ex('UnknownError', String(err || 'IndexedDB error'));
-            req.readyState = 'done';
-            fire(req, 'error');
+            var s = requests.get(req);
+            s.result = undefined;
+            s.error = err && err.name ? err : ex('UnknownError', String(err || 'IndexedDB error'));
+            s.readyState = 'done';
+            var event = new EventClass('error', { bubbles: true, cancelable: true });
+            return !bubbleEvent(event, req, transactionParents(s.transaction));
         }
 
-        function IDBKeyRange(lower, upper, lowerOpen, upperOpen) {
-            this.lower = lower;
-            this.upper = upper;
-            this.lowerOpen = !!lowerOpen;
-            this.upperOpen = !!upperOpen;
-            this._lowerEncoded = lower === undefined ? null : encodeKey(lower);
-            this._upperEncoded = upper === undefined ? null : encodeKey(upper);
-        }
-        IDBKeyRange.only = function (value) { return new IDBKeyRange(value, value, false, false); };
-        IDBKeyRange.lowerBound = function (lower, open) { return new IDBKeyRange(lower, undefined, open, false); };
-        IDBKeyRange.upperBound = function (upper, open) { return new IDBKeyRange(undefined, upper, false, open); };
-        IDBKeyRange.bound = function (lower, upper, lowerOpen, upperOpen) {
-            if (cmpCanon(canonKey(lower, []), canonKey(upper, [])) > 0)
-                throw ex('DataError', 'Lower bound is greater than upper bound');
-            return new IDBKeyRange(lower, upper, lowerOpen, upperOpen);
-        };
-        IDBKeyRange.prototype.includes = function (key) {
-            return inRangeEncoded(encodeKey(key), this);
-        };
-
-        function IDBRecord(key, primaryKey, value) {
-            this.key = key;
-            this.primaryKey = primaryKey;
-            this.value = value;
+        function newKeyRange(lower, upper, lowerOpen, upperOpen) {
+            var range = Object.create(IDBKeyRange.prototype);
+            keyRanges.set(range, {
+                lower: lower, upper: upper,
+                lowerOpen: !!lowerOpen, upperOpen: !!upperOpen,
+                lowerEncoded: lower === undefined ? null : encodeKey(lower),
+                upperEncoded: upper === undefined ? null : encodeKey(upper)
+            });
+            return range;
         }
 
-        function IDBDatabase(name, version, info) {
-            IDBEventTarget.call(this);
-            this.name = name;
-            this.version = version;
-            this.onabort = null;
-            this.onerror = null;
-            this.onclose = null;
-            this.onversionchange = null;
-            this._closed = false;
-            this._upgradeTx = null;
-            this._load(info);
+        class IDBKeyRange {
+            constructor() { throw idlIllegalConstructor('IDBKeyRange'); }
+            static only(value) {
+                idlNeed(arguments, 1, 'IDBKeyRange', 'only');
+                return newKeyRange(value, value, false, false);
+            }
+            static lowerBound(lower, open = false) {
+                idlNeed(arguments, 1, 'IDBKeyRange', 'lowerBound');
+                return newKeyRange(lower, undefined, !!open, true);
+            }
+            static upperBound(upper, open = false) {
+                idlNeed(arguments, 1, 'IDBKeyRange', 'upperBound');
+                return newKeyRange(undefined, upper, true, !!open);
+            }
+            static bound(lower, upper, lowerOpen = false, upperOpen = false) {
+                idlNeed(arguments, 2, 'IDBKeyRange', 'bound');
+                var cmp = cmpCanon(canonKey(lower, []), canonKey(upper, []));
+                if (cmp > 0 || (cmp === 0 && (lowerOpen || upperOpen)))
+                    throw ex('DataError', 'The lower key is greater than the upper key');
+                return newKeyRange(lower, upper, !!lowerOpen, !!upperOpen);
+            }
+            get lower() { return keyRangeOf(this).lower; }
+            get upper() { return keyRangeOf(this).upper; }
+            get lowerOpen() { return keyRangeOf(this).lowerOpen; }
+            get upperOpen() { return keyRangeOf(this).upperOpen; }
+            includes(key) {
+                keyRangeOf(this);
+                idlNeed(arguments, 1, 'IDBKeyRange', 'includes');
+                return inRangeEncoded(encodeKey(key), this);
+            }
         }
-        IDBDatabase.prototype = Object.create(IDBEventTarget.prototype);
-        IDBDatabase.prototype.constructor = IDBDatabase;
-        IDBDatabase.prototype._load = function (info) {
-            this._stores = {};
+
+        class IDBRecord {
+            constructor() { throw idlIllegalConstructor('IDBRecord'); }
+            get key() { return recordOf(this).key; }
+            get primaryKey() { return recordOf(this).primaryKey; }
+            get value() { return recordOf(this).value; }
+        }
+
+        function newRecord(key, primaryKey, value) {
+            var record = Object.create(IDBRecord.prototype);
+            idbRecords.set(record, { key: key, primaryKey: primaryKey, value: value });
+            return record;
+        }
+
+        class IDBRequest {
+            constructor() { throw idlIllegalConstructor('IDBRequest'); }
+            get result() {
+                var s = requestOf(this);
+                if (s.readyState !== 'done')
+                    throw ex('InvalidStateError', "Failed to read the 'result' property from 'IDBRequest': The request has not finished.");
+                return s.result;
+            }
+            get error() {
+                var s = requestOf(this);
+                if (s.readyState !== 'done')
+                    throw ex('InvalidStateError', "Failed to read the 'error' property from 'IDBRequest': The request has not finished.");
+                return s.error;
+            }
+            get source() { return requestOf(this).source; }
+            get transaction() { return requestOf(this).transaction; }
+            get readyState() { return requestOf(this).readyState; }
+        }
+        idlEventHandlers(IDBRequest.prototype, ['success', 'error'], requestOf);
+
+        class IDBOpenDBRequest extends IDBRequest {
+            constructor() { throw idlIllegalConstructor('IDBOpenDBRequest'); }
+        }
+        idlEventHandlers(IDBOpenDBRequest.prototype, ['blocked', 'upgradeneeded'], requestOf);
+
+        class IDBVersionChangeEvent extends Event {
+            constructor(type, eventInitDict = undefined) {
+                idlNeedCtor(arguments, 1, 'IDBVersionChangeEvent');
+                super(type, eventInitDict);
+                var init = eventInitDict === undefined || eventInitDict === null ? {} : Object(eventInitDict);
+                if (init.oldVersion !== undefined) this.oldVersion = Math.floor(Number(init.oldVersion)) || 0;
+                if (init.newVersion !== undefined && init.newVersion !== null)
+                    this.newVersion = Math.floor(Number(init.newVersion)) || 0;
+            }
+        }
+
+        function newVersionChangeEvent(type, oldVersion, newVersion) {
+            return new IDBVersionChangeEvent(type, { oldVersion: oldVersion, newVersion: newVersion });
+        }
+
+        function loadStores(db, info) {
+            var s = databases.get(db);
+            var kept = {};
             var list = [];
             var stores = info && info.stores || [];
             for (var i = 0; i < stores.length; i++) {
-                var s = stores[i];
-                var meta = {
-                    name: s.name,
-                    keyPath: parseStoredKeyPath(s.keyPath),
-                    autoIncrement: !!s.autoIncrement,
-                    indexes: {}
-                };
+                var src = stores[i];
+                var meta = s.stores[src.name] || { indexes: {} };
+                meta.name = src.name;
+                meta.keyPath = parseStoredKeyPath(src.keyPath);
+                meta.autoIncrement = !!src.autoIncrement;
+                var indexMetas = {};
                 var idxNames = [];
-                for (var j = 0; j < (s.indexes || []).length; j++) {
-                    var ix = s.indexes[j];
-                    meta.indexes[ix.name] = {
+                var idxList = src.indexes || [];
+                for (var j = 0; j < idxList.length; j++) {
+                    var ix = idxList[j];
+                    indexMetas[ix.name] = {
                         name: ix.name,
                         keyPath: parseStoredKeyPath(ix.keyPath),
                         unique: !!ix.unique,
@@ -3015,154 +3187,238 @@
                     };
                     idxNames.push(ix.name);
                 }
-                meta.indexNames = names(idxNames);
-                this._stores[s.name] = meta;
-                list.push(s.name);
+                meta.indexes = indexMetas;
+                meta.indexNames = idxNames.sort();
+                kept[src.name] = meta;
+                list.push(src.name);
             }
-            this.objectStoreNames = names(list);
-        };
-        IDBDatabase.prototype._refresh = function () {
-            var info = backend.info(this.name);
-            this.version = info.version;
-            this._load(info);
-        };
-        IDBDatabase.prototype.close = function () {
-            this._closed = true;
-            fire(this, 'close');
-        };
-        IDBDatabase.prototype.createObjectStore = function (name, options) {
-            if (!this._upgradeTx) throw ex('InvalidStateError', 'Not in a versionchange transaction');
-            name = String(name);
-            options = options || {};
-            var kp = options.keyPath === undefined ? null : options.keyPath;
-            backend.createStore(this.name, name, storedKeyPath(kp), !!options.autoIncrement);
-            this._refresh();
-            if (this._upgradeTx._scope.indexOf(name) < 0) this._upgradeTx._scope.push(name);
-            return this._upgradeTx.objectStore(name);
-        };
-        IDBDatabase.prototype.deleteObjectStore = function (name) {
-            if (!this._upgradeTx) throw ex('InvalidStateError', 'Not in a versionchange transaction');
-            name = String(name);
-            if (!this._stores[name]) throw ex('NotFoundError', 'Object store not found');
-            backend.deleteStore(this.name, name);
-            this._refresh();
-        };
-        IDBDatabase.prototype.transaction = function (storeNames, mode, options) {
-            if (this._closed) throw ex('InvalidStateError', 'Database is closed');
-            if (typeof storeNames === 'string') storeNames = [storeNames];
-            else storeNames = Array.prototype.slice.call(storeNames || []);
-            if (!storeNames.length) throw ex('InvalidAccessError', 'Transaction scope is empty');
-            for (var i = 0; i < storeNames.length; i++)
-                if (!this._stores[storeNames[i]]) throw ex('NotFoundError', 'Object store not found');
-            return new IDBTransaction(this, storeNames, mode || 'readonly', options || {});
-        };
-
-        function IDBTransaction(db, scope, mode, options) {
-            IDBEventTarget.call(this);
-            this.db = db;
-            this.mode = mode || 'readonly';
-            this.durability = options && options.durability || 'default';
-            this.error = null;
-            this.onabort = null;
-            this.oncomplete = null;
-            this.onerror = null;
-            this.objectStoreNames = names(scope);
-            this._scope = scope.slice();
-            this._pending = 0;
-            this._done = false;
-            this._aborted = false;
-            this._completeQueued = false;
+            s.stores = kept;
+            s.storeNames = list.sort();
         }
-        IDBTransaction.prototype = Object.create(IDBEventTarget.prototype);
-        IDBTransaction.prototype.constructor = IDBTransaction;
-        IDBTransaction.prototype.objectStore = function (name) {
-            name = String(name);
-            if (this._scope.indexOf(name) < 0 || !this.db._stores[name])
-                throw ex('NotFoundError', 'Object store not in transaction scope');
-            return new IDBObjectStore(this, this.db._stores[name]);
-        };
-        IDBTransaction.prototype._request = function (req, op) {
-            if (this._done || this._aborted) throw ex('TransactionInactiveError', 'Transaction is inactive');
-            var tx = this;
-            tx._pending++;
-            task(function () {
-                if (tx._aborted) {
-                    fail(req, tx.error || ex('AbortError', 'Transaction aborted'));
-                    tx._pending--;
-                    tx._maybeComplete();
-                    return;
-                }
-                try {
-                    succeed(req, op());
-                } catch (e) {
-                    fail(req, e);
-                    tx._abort(e);
-                }
-                tx._pending--;
-                tx._maybeComplete();
-            });
-        };
-        IDBTransaction.prototype._maybeComplete = function () {
-            var tx = this;
-            if (tx._pending !== 0 || tx._done || tx._aborted || tx._completeQueued) return;
-            tx._completeQueued = true;
-            task(function () {
-                if (tx._pending || tx._done || tx._aborted) return;
-                tx._done = true;
-                fire(tx, 'complete');
-            });
-        };
-        IDBTransaction.prototype._abort = function (err) {
-            if (this._done || this._aborted) return;
-            this._aborted = true;
-            this.error = err && err.name ? err : ex('AbortError', 'Transaction aborted');
-            fire(this, 'abort');
-            fire(this.db, 'abort');
-        };
-        IDBTransaction.prototype.abort = function () {
-            if (this._done || this._aborted) throw ex('InvalidStateError', 'Transaction already finished');
-            this._abort(ex('AbortError', 'Transaction aborted'));
-        };
-        IDBTransaction.prototype.commit = function () { this._maybeComplete(); };
+
+        function refreshDatabase(db) {
+            var s = databases.get(db);
+            var info = backend.info(s.name);
+            s.version = info.version;
+            loadStores(db, info);
+        }
+
+        function newDatabase(name, version, info) {
+            var db = Object.create(IDBDatabase.prototype);
+            databases.set(db, idlHandlerState({
+                name: name, version: version, stores: {}, storeNames: [],
+                closed: false, upgradeTx: null
+            }));
+            loadStores(db, info);
+            return db;
+        }
+
+        class IDBDatabase {
+            constructor() { throw idlIllegalConstructor('IDBDatabase'); }
+            get name() { return databaseOf(this).name; }
+            get version() { return databaseOf(this).version; }
+            get objectStoreNames() { return newDOMStringList(databaseOf(this).storeNames); }
+            close() { databaseOf(this).closed = true; }
+            createObjectStore(name, options = {}) {
+                var s = databaseOf(this);
+                idlNeed(arguments, 1, 'IDBDatabase', 'createObjectStore');
+                if (!s.upgradeTx)
+                    throw ex('InvalidStateError', "Failed to execute 'createObjectStore' on 'IDBDatabase': The database is not running a version change transaction.");
+                name = String(name);
+                options = options === undefined || options === null ? {} : Object(options);
+                var kp = options.keyPath === undefined || options.keyPath === null ? null : options.keyPath;
+                if (kp !== null && typeof kp !== 'string' && !Array.isArray(kp)) kp = String(kp);
+                var autoIncrement = !!options.autoIncrement;
+                if (s.stores[name])
+                    throw ex('ConstraintError', "Failed to execute 'createObjectStore' on 'IDBDatabase': An object store with the specified name already exists.");
+                if (autoIncrement && (kp === '' || Array.isArray(kp)))
+                    throw ex('InvalidAccessError', "Failed to execute 'createObjectStore' on 'IDBDatabase': The autoIncrement option was set but the keyPath option was empty or an array.");
+                backend.createStore(s.name, name, storedKeyPath(kp), autoIncrement);
+                refreshDatabase(this);
+                var tx = transactions.get(s.upgradeTx);
+                if (tx.scope.indexOf(name) < 0) tx.scope.push(name);
+                return s.upgradeTx.objectStore(name);
+            }
+            deleteObjectStore(name) {
+                var s = databaseOf(this);
+                idlNeed(arguments, 1, 'IDBDatabase', 'deleteObjectStore');
+                if (!s.upgradeTx)
+                    throw ex('InvalidStateError', "Failed to execute 'deleteObjectStore' on 'IDBDatabase': The database is not running a version change transaction.");
+                name = String(name);
+                if (!s.stores[name])
+                    throw ex('NotFoundError', "Failed to execute 'deleteObjectStore' on 'IDBDatabase': The specified object store was not found.");
+                backend.deleteStore(s.name, name);
+                refreshDatabase(this);
+            }
+            transaction(storeNames, mode = 'readonly', options = {}) {
+                var s = databaseOf(this);
+                idlNeed(arguments, 1, 'IDBDatabase', 'transaction');
+                if (typeof storeNames === 'string') storeNames = [storeNames];
+                else storeNames = Array.prototype.map.call(Array.from(storeNames), String);
+                mode = oneOf(mode, ['readonly', 'readwrite'], 'IDBDatabase', 'transaction', 'mode');
+                options = options === undefined || options === null ? {} : Object(options);
+                var durability = options.durability === undefined ? 'default' :
+                    oneOf(options.durability, ['default', 'strict', 'relaxed'], 'IDBDatabase', 'transaction', 'durability');
+                if (s.closed)
+                    throw ex('InvalidStateError', "Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing.");
+                if (!storeNames.length)
+                    throw ex('InvalidAccessError', "Failed to execute 'transaction' on 'IDBDatabase': The storeNames parameter is empty.");
+                for (var i = 0; i < storeNames.length; i++)
+                    if (!s.stores[storeNames[i]])
+                        throw ex('NotFoundError', "Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.");
+                var tx = newTransaction(this, storeNames, mode, durability);
+                task(function () { maybeComplete(tx); });
+                return tx;
+            }
+        }
+        idlEventHandlers(IDBDatabase.prototype, ['abort', 'close', 'error', 'versionchange'], databaseOf);
+
+        function newTransaction(db, scope, mode, durability) {
+            var tx = Object.create(IDBTransaction.prototype);
+            transactions.set(tx, idlHandlerState({
+                db: db, mode: mode, durability: durability || 'default', error: null,
+                scope: scope.slice(), pending: 0, done: false, aborted: false,
+                completeQueued: false, handles: {}
+            }));
+            return tx;
+        }
 
         function requestFrom(source, tx, op) {
-            var req = new IDBRequest();
-            req.source = source;
-            req.transaction = tx || null;
-            if (tx) tx._request(req, op);
+            var req = newRequest(IDBRequest.prototype, source, tx);
+            if (tx) queueRequest(tx, req, op);
             else task(function () { try { succeed(req, op()); } catch (e) { fail(req, e); } });
             return req;
         }
 
-        function IDBObjectStore(tx, meta) {
-            this.transaction = tx;
-            this.name = meta.name;
-            this.keyPath = meta.keyPath;
-            this.autoIncrement = !!meta.autoIncrement;
-            this.indexNames = meta.indexNames;
-            this._meta = meta;
+        function queueRequest(tx, req, op) {
+            var s = transactions.get(tx);
+            if (s.done || s.aborted) throw ex('TransactionInactiveError', 'The transaction has finished.');
+            s.pending++;
+            task(function () {
+                if (s.aborted) {
+                    fail(req, s.error || ex('AbortError', 'Transaction aborted'));
+                    s.pending--;
+                    maybeComplete(tx);
+                    return;
+                }
+                var result;
+                var failure = null;
+                try { result = op(); } catch (e) { failure = e || ex('UnknownError', 'IndexedDB error'); }
+                if (failure) {
+                    var handled = fail(req, failure);
+                    if (!handled) abortTransaction(tx, failure);
+                } else {
+                    succeed(req, result);
+                }
+                s.pending--;
+                maybeComplete(tx);
+            });
         }
-        IDBObjectStore.prototype._writeable = function () {
-            if (this.transaction.mode === 'readonly') throw ex('ReadOnlyError', 'Transaction is readonly');
-        };
-        IDBObjectStore.prototype._keyFor = function (value, key) {
-            var inline = this.keyPath !== null && this.keyPath !== undefined;
+
+        function maybeComplete(tx) {
+            var s = transactions.get(tx);
+            if (s.pending !== 0 || s.done || s.aborted || s.completeQueued) return;
+            s.completeQueued = true;
+            task(function () {
+                s.completeQueued = false;
+                if (s.pending || s.done || s.aborted) return;
+                s.done = true;
+                tx.dispatchEvent(new EventClass('complete'));
+                if (s.afterComplete) s.afterComplete();
+            });
+        }
+
+        function abortTransaction(tx, err) {
+            var s = transactions.get(tx);
+            if (s.done || s.aborted) return;
+            s.aborted = true;
+            s.error = err && err.name ? err : ex('AbortError', 'Transaction aborted');
+            bubbleEvent(new EventClass('abort', { bubbles: true }), tx, [s.db]);
+            if (s.afterAbort) s.afterAbort();
+        }
+
+        class IDBTransaction {
+            constructor() { throw idlIllegalConstructor('IDBTransaction'); }
+            get objectStoreNames() {
+                var s = transactionOf(this);
+                var names = s.mode === 'versionchange' ? databases.get(s.db).storeNames : s.scope;
+                return newDOMStringList(names.slice().sort());
+            }
+            get mode() { return transactionOf(this).mode; }
+            get durability() { return transactionOf(this).durability; }
+            get db() { return transactionOf(this).db; }
+            get error() { return transactionOf(this).error; }
+            objectStore(name) {
+                var s = transactionOf(this);
+                idlNeed(arguments, 1, 'IDBTransaction', 'objectStore');
+                name = String(name);
+                var meta = databases.get(s.db).stores[name];
+                if (s.done || s.aborted)
+                    throw ex('InvalidStateError', "Failed to execute 'objectStore' on 'IDBTransaction': The transaction has finished.");
+                if (s.scope.indexOf(name) < 0 || !meta)
+                    throw ex('NotFoundError', "Failed to execute 'objectStore' on 'IDBTransaction': The specified object store was not found.");
+                var handle = s.handles[name];
+                if (!handle || objectStores.get(handle).meta !== meta) {
+                    handle = newObjectStore(this, meta);
+                    s.handles[name] = handle;
+                }
+                return handle;
+            }
+            abort() {
+                var s = transactionOf(this);
+                if (s.done || s.aborted)
+                    throw ex('InvalidStateError', "Failed to execute 'abort' on 'IDBTransaction': The transaction has already completed or aborted.");
+                abortTransaction(this, ex('AbortError', 'Transaction aborted'));
+            }
+            commit() {
+                var s = transactionOf(this);
+                if (s.done || s.aborted)
+                    throw ex('InvalidStateError', "Failed to execute 'commit' on 'IDBTransaction': The transaction has already completed or aborted.");
+                maybeComplete(this);
+            }
+        }
+        idlEventHandlers(IDBTransaction.prototype, ['abort', 'complete', 'error'], transactionOf);
+
+        function newObjectStore(tx, meta) {
+            var store = Object.create(IDBObjectStore.prototype);
+            objectStores.set(store, { tx: tx, meta: meta, handles: {} });
+            return store;
+        }
+
+        function storeParts(store) {
+            var s = objectStores.get(store);
+            var tx = transactions.get(s.tx);
+            return { s: s, tx: tx, db: databases.get(tx.db).name, name: s.meta.name, meta: s.meta };
+        }
+
+        function assertWritable(store, member) {
+            var p = storeParts(store);
+            if (p.tx.done || p.tx.aborted)
+                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBObjectStore': The transaction has finished.");
+            if (p.tx.mode === 'readonly')
+                throw ex('ReadOnlyError', "Failed to execute '" + member + "' on 'IDBObjectStore': The transaction is read-only.");
+            return p;
+        }
+
+        function storeKeyFor(p, value, key) {
+            var inline = p.meta.keyPath !== null && p.meta.keyPath !== undefined;
             if (inline && key !== undefined)
                 throw ex('DataError', 'Inline key stores do not accept explicit keys');
-            if (inline) key = keyPathGet(value, this.keyPath);
+            if (inline) key = keyPathGet(value, p.meta.keyPath);
             if (key === undefined) {
-                if (!this.autoIncrement) throw ex('DataError', 'A key is required');
-                key = backend.nextKey(this.transaction.db.name, this.name);
-                if (inline) keyPathSet(value, this.keyPath, key);
+                if (!p.meta.autoIncrement) throw ex('DataError', 'A key is required');
+                key = backend.nextKey(p.db, p.name);
+                if (inline) keyPathSet(value, p.meta.keyPath, key);
             }
             var encoded = encodeKey(key);
             var numeric = typeof key === 'number' && isFinite(key) && key >= 1 ? Math.floor(key) : undefined;
             return { key: key, encoded: encoded, numeric: numeric };
-        };
-        IDBObjectStore.prototype._indexEntries = function (value) {
+        }
+
+        function storeIndexEntries(p, value) {
             var out = [];
-            for (var n in this._meta.indexes) {
-                var ix = this._meta.indexes[n];
+            for (var n in p.meta.indexes) {
+                var ix = p.meta.indexes[n];
                 var raw = keyPathGet(value, ix.keyPath);
                 if (raw === undefined) continue;
                 if (ix.multiEntry && Array.isArray(raw)) {
@@ -3180,402 +3436,633 @@
                 }
             }
             return out;
-        };
-        IDBObjectStore.prototype._checkUnique = function (entries, primary) {
+        }
+
+        function storeCheckUnique(p, entries, primary) {
             for (var i = 0; i < entries.length; i++) {
-                var ix = this._meta.indexes[entries[i].name];
+                var ix = p.meta.indexes[entries[i].name];
                 if (!ix || !ix.unique) continue;
-                var rows = backend.indexRecords(this.transaction.db.name, this.name, ix.name);
+                var rows = backend.indexRecords(p.db, p.name, ix.name);
                 for (var j = 0; j < rows.length; j++)
                     if (rows[j].key === entries[i].key && rows[j].primaryKey !== primary)
                         throw ex('ConstraintError', 'Unique index constraint failed');
             }
-        };
-        IDBObjectStore.prototype._records = function (query, direction) {
+        }
+
+        function storeRecords(p, query, direction) {
             var range = asRange(query);
-            var rows = backend.records(this.transaction.db.name, this.name);
+            var rows = backend.records(p.db, p.name);
             var out = [];
             for (var i = 0; i < rows.length; i++)
                 if (!range || inRangeEncoded(rows[i].key, range)) out.push(rows[i]);
             return sortedRecords(out, 'key', direction || 'next');
-        };
-        IDBObjectStore.prototype.put = function (value, key) { return this._store(value, key, false); };
-        IDBObjectStore.prototype.add = function (value, key) { return this._store(value, key, true); };
-        IDBObjectStore.prototype._store = function (value, key, addOnly) {
-            this._writeable();
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                var k = os._keyFor(value, key);
-                var entries = os._indexEntries(value);
-                os._checkUnique(entries, k.encoded);
-                backend.put(os.transaction.db.name, os.name, k.encoded, value,
-                            !!addOnly, entries, k.numeric);
+        }
+
+        function storePut(store, value, key, addOnly, member) {
+            var p = assertWritable(store, member);
+            return requestFrom(store, p.s.tx, function () {
+                var k = storeKeyFor(p, value, key);
+                var entries = storeIndexEntries(p, value);
+                storeCheckUnique(p, entries, k.encoded);
+                backend.put(p.db, p.name, k.encoded, value, !!addOnly, entries, k.numeric);
                 return k.key;
             });
-        };
-        IDBObjectStore.prototype.get = function (query) {
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                if (!(query instanceof IDBKeyRange)) return backend.get(os.transaction.db.name, os.name, encodeKey(query));
-                var r = os._records(query, 'next');
-                return r.length ? r[0].value : undefined;
-            });
-        };
-        IDBObjectStore.prototype.getKey = function (query) {
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                var r = os._records(query instanceof IDBKeyRange ? query : IDBKeyRange.only(query), 'next');
-                return r.length ? decodeKey(r[0].key) : undefined;
-            });
-        };
-        IDBObjectStore.prototype.getAll = function (query, count) {
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                var r = os._records(query, 'next');
-                if (count !== undefined) r = r.slice(0, Number(count) >>> 0);
-                return r.map(function (x) { return x.value; });
-            });
-        };
-        IDBObjectStore.prototype.getAllKeys = function (query, count) {
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                var r = os._records(query, 'next');
-                if (count !== undefined) r = r.slice(0, Number(count) >>> 0);
-                return r.map(function (x) { return decodeKey(x.key); });
-            });
-        };
-        IDBObjectStore.prototype.getAllRecords = function (options) {
-            var os = this;
-            options = options || {};
-            return requestFrom(os, os.transaction, function () {
-                var r = os._records(options.query, options.direction || 'next');
-                if (options.count !== undefined) r = r.slice(0, Number(options.count) >>> 0);
-                return r.map(function (x) {
-                    var k = decodeKey(x.key);
-                    return new IDBRecord(k, k, x.value);
-                });
-            });
-        };
-        IDBObjectStore.prototype.count = function (query) {
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                return os._records(query, 'next').length;
-            });
-        };
-        IDBObjectStore.prototype.delete = function (query) {
-            this._writeable();
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                var r = query instanceof IDBKeyRange ? os._records(query, 'next')
-                    : [{ key: encodeKey(query) }];
-                for (var i = 0; i < r.length; i++)
-                    backend.deleteRecord(os.transaction.db.name, os.name, r[i].key);
-                return undefined;
-            });
-        };
-        IDBObjectStore.prototype.clear = function () {
-            this._writeable();
-            var os = this;
-            return requestFrom(os, os.transaction, function () {
-                backend.clear(os.transaction.db.name, os.name);
-                return undefined;
-            });
-        };
-        IDBObjectStore.prototype.index = function (name) {
-            name = String(name);
-            if (!this._meta.indexes[name]) throw ex('NotFoundError', 'Index not found');
-            return new IDBIndex(this, this._meta.indexes[name]);
-        };
-        IDBObjectStore.prototype.createIndex = function (name, keyPath, options) {
-            if (this.transaction.mode !== 'versionchange')
-                throw ex('InvalidStateError', 'Not in a versionchange transaction');
-            name = String(name);
-            options = options || {};
-            backend.createIndex(this.transaction.db.name, this.name, name,
-                                storedKeyPath(keyPath), !!options.unique,
-                                !!options.multiEntry);
-            this.transaction.db._refresh();
-            this._meta = this.transaction.db._stores[this.name];
-            this.indexNames = this._meta.indexNames;
-            var ix = this.index(name);
-            var rows = backend.records(this.transaction.db.name, this.name);
-            for (var i = 0; i < rows.length; i++) {
-                var entries = this._indexEntries(rows[i].value);
-                backend.put(this.transaction.db.name, this.name, rows[i].key,
-                            rows[i].value, false, entries, undefined);
-            }
-            return ix;
-        };
-        IDBObjectStore.prototype.deleteIndex = function (name) {
-            if (this.transaction.mode !== 'versionchange')
-                throw ex('InvalidStateError', 'Not in a versionchange transaction');
-            backend.deleteIndex(this.transaction.db.name, this.name, String(name));
-            this.transaction.db._refresh();
-            this._meta = this.transaction.db._stores[this.name];
-            this.indexNames = this._meta.indexNames;
-        };
-        IDBObjectStore.prototype.openCursor = function (query, direction) {
-            return cursorRequest(this, this._records(query, direction || 'next'), false, direction || 'next');
-        };
-        IDBObjectStore.prototype.openKeyCursor = function (query, direction) {
-            return cursorRequest(this, this._records(query, direction || 'next'), true, direction || 'next');
-        };
-
-        function IDBIndex(store, meta) {
-            this.objectStore = store;
-            this.name = meta.name;
-            this.keyPath = meta.keyPath;
-            this.multiEntry = !!meta.multiEntry;
-            this.unique = !!meta.unique;
-            this._meta = meta;
         }
-        IDBIndex.prototype._records = function (query, direction) {
+
+        function storeDelete(store, range) {
+            var p = assertWritable(store, 'delete');
+            return requestFrom(store, p.s.tx, function () {
+                var r = storeRecords(p, range, 'next');
+                for (var i = 0; i < r.length; i++)
+                    backend.deleteRecord(p.db, p.name, r[i].key);
+                return undefined;
+            });
+        }
+
+        function checkedQuery(query) {
+            if (query === undefined || query === null) return null;
+            if (keyRanges.has(query)) return query;
+            return asRange(query);
+        }
+
+        function limitedCount(count) {
+            return count === undefined ? undefined : unsignedLong(count) || undefined;
+        }
+
+        function getAllArguments(queryOrOptions, count, iface, member) {
+            var isOptions = queryOrOptions !== null && typeof queryOrOptions === 'object' &&
+                !keyRanges.has(queryOrOptions) && !validKey(queryOrOptions);
+            var options = isOptions ? queryOrOptions : { query: queryOrOptions, count: count };
+            return {
+                range: checkedQuery(options.query),
+                limit: limitedCount(options.count),
+                direction: options.direction === undefined || !isOptions ? 'next' :
+                    validDirection(options.direction, iface, member)
+            };
+        }
+
+        function validDirection(direction, iface, member) {
+            return oneOf(direction, ['next', 'nextunique', 'prev', 'prevunique'], iface, member, 'direction');
+        }
+
+        function requireQuery(args, iface, member, query) {
+            idlNeed(args, 1, iface, member);
+            if (query === undefined || query === null)
+                throw ex('DataError', "Failed to execute '" + member + "' on '" + iface + "': The parameter is not a valid key.");
+            return asRange(query);
+        }
+
+        class IDBObjectStore {
+            constructor() { throw idlIllegalConstructor('IDBObjectStore'); }
+            get name() { return objectStoreOf(this).meta.name; }
+            set name(value) {
+                var s = objectStoreOf(this);
+                if (transactions.get(s.tx).mode !== 'versionchange')
+                    throw ex('InvalidStateError', "Failed to set the 'name' property on 'IDBObjectStore': The database is not running a version change transaction.");
+                value = String(value);
+                if (value === s.meta.name) return;
+                throw ex('NotSupportedError', "Failed to set the 'name' property on 'IDBObjectStore': Renaming is not supported.");
+            }
+            get keyPath() { return objectStoreOf(this).meta.keyPath; }
+            get indexNames() { return newDOMStringList(objectStoreOf(this).meta.indexNames); }
+            get transaction() { return objectStoreOf(this).tx; }
+            get autoIncrement() { return objectStoreOf(this).meta.autoIncrement; }
+            put(value, key = undefined) {
+                objectStoreOf(this);
+                idlNeed(arguments, 1, 'IDBObjectStore', 'put');
+                return storePut(this, value, key, false, 'put');
+            }
+            add(value, key = undefined) {
+                objectStoreOf(this);
+                idlNeed(arguments, 1, 'IDBObjectStore', 'add');
+                return storePut(this, value, key, true, 'add');
+            }
+            delete(query) {
+                objectStoreOf(this);
+                return storeDelete(this, requireQuery(arguments, 'IDBObjectStore', 'delete', query));
+            }
+            clear() {
+                objectStoreOf(this);
+                var p = assertWritable(this, 'clear');
+                return requestFrom(this, p.s.tx, function () {
+                    backend.clear(p.db, p.name);
+                    return undefined;
+                });
+            }
+            get(query) {
+                objectStoreOf(this);
+                var range = requireQuery(arguments, 'IDBObjectStore', 'get', query);
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    var bounds = keyRanges.get(range);
+                    if (bounds.lowerEncoded !== null && bounds.lowerEncoded === bounds.upperEncoded &&
+                        !bounds.lowerOpen && !bounds.upperOpen)
+                        return backend.get(p.db, p.name, bounds.lowerEncoded);
+                    var r = storeRecords(p, range, 'next');
+                    return r.length ? r[0].value : undefined;
+                });
+            }
+            getKey(query) {
+                objectStoreOf(this);
+                var range = requireQuery(arguments, 'IDBObjectStore', 'getKey', query);
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    var r = storeRecords(p, range, 'next');
+                    return r.length ? decodeKey(r[0].key) : undefined;
+                });
+            }
+            getAll(queryOrOptions = undefined, count = undefined) {
+                objectStoreOf(this);
+                var a = getAllArguments(queryOrOptions, count, 'IDBObjectStore', 'getAll');
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    var r = storeRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) { return x.value; });
+                });
+            }
+            getAllKeys(queryOrOptions = undefined, count = undefined) {
+                objectStoreOf(this);
+                var a = getAllArguments(queryOrOptions, count, 'IDBObjectStore', 'getAllKeys');
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    var r = storeRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) { return decodeKey(x.key); });
+                });
+            }
+            getAllRecords(options = {}) {
+                objectStoreOf(this);
+                var a = getAllArguments(options === undefined || options === null ? {} : Object(options),
+                                        undefined, 'IDBObjectStore', 'getAllRecords');
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    var r = storeRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) {
+                        var k = decodeKey(x.key);
+                        return newRecord(k, k, x.value);
+                    });
+                });
+            }
+            count(query = undefined) {
+                objectStoreOf(this);
+                var range = checkedQuery(query);
+                var p = storeParts(this);
+                return requestFrom(this, p.s.tx, function () {
+                    return storeRecords(p, range, 'next').length;
+                });
+            }
+            openCursor(query = undefined, direction = 'next') {
+                objectStoreOf(this);
+                var range = checkedQuery(query);
+                direction = validDirection(direction, 'IDBObjectStore', 'openCursor');
+                return cursorRequest(this, range, false, direction);
+            }
+            openKeyCursor(query = undefined, direction = 'next') {
+                objectStoreOf(this);
+                var range = checkedQuery(query);
+                direction = validDirection(direction, 'IDBObjectStore', 'openKeyCursor');
+                return cursorRequest(this, range, true, direction);
+            }
+            index(name) {
+                var s = objectStoreOf(this);
+                idlNeed(arguments, 1, 'IDBObjectStore', 'index');
+                name = String(name);
+                var meta = s.meta.indexes[name];
+                if (!meta)
+                    throw ex('NotFoundError', "Failed to execute 'index' on 'IDBObjectStore': The specified index was not found.");
+                var handle = s.handles[name];
+                if (!handle || indexes.get(handle).meta !== meta) {
+                    handle = newIndex(this, meta);
+                    s.handles[name] = handle;
+                }
+                return handle;
+            }
+            createIndex(name, keyPath, options = {}) {
+                objectStoreOf(this);
+                idlNeed(arguments, 2, 'IDBObjectStore', 'createIndex');
+                var p = storeParts(this);
+                if (p.tx.mode !== 'versionchange')
+                    throw ex('InvalidStateError', "Failed to execute 'createIndex' on 'IDBObjectStore': The database is not running a version change transaction.");
+                name = String(name);
+                options = options === undefined || options === null ? {} : Object(options);
+                if (p.meta.indexes[name])
+                    throw ex('ConstraintError', "Failed to execute 'createIndex' on 'IDBObjectStore': An index with the specified name already exists.");
+                if (typeof keyPath !== 'string' && !Array.isArray(keyPath)) keyPath = String(keyPath);
+                if (!!options.multiEntry && Array.isArray(keyPath))
+                    throw ex('InvalidAccessError', "Failed to execute 'createIndex' on 'IDBObjectStore': The keyPath argument was an array and the multiEntry option is true.");
+                backend.createIndex(p.db, p.name, name, storedKeyPath(keyPath),
+                                    !!options.unique, !!options.multiEntry);
+                refreshDatabase(p.tx.db);
+                var fresh = storeParts(this);
+                var rows = backend.records(p.db, p.name);
+                for (var i = 0; i < rows.length; i++) {
+                    var entries = storeIndexEntries(fresh, rows[i].value);
+                    backend.put(p.db, p.name, rows[i].key, rows[i].value, false, entries, undefined);
+                }
+                return this.index(name);
+            }
+            deleteIndex(name) {
+                objectStoreOf(this);
+                idlNeed(arguments, 1, 'IDBObjectStore', 'deleteIndex');
+                var p = storeParts(this);
+                if (p.tx.mode !== 'versionchange')
+                    throw ex('InvalidStateError', "Failed to execute 'deleteIndex' on 'IDBObjectStore': The database is not running a version change transaction.");
+                name = String(name);
+                if (!p.meta.indexes[name])
+                    throw ex('NotFoundError', "Failed to execute 'deleteIndex' on 'IDBObjectStore': The specified index was not found.");
+                backend.deleteIndex(p.db, p.name, name);
+                refreshDatabase(p.tx.db);
+            }
+        }
+
+        function newIndex(store, meta) {
+            var index = Object.create(IDBIndex.prototype);
+            indexes.set(index, { store: store, meta: meta });
+            return index;
+        }
+
+        function indexParts(index) {
+            var s = indexes.get(index);
+            var sp = storeParts(s.store);
+            return { s: s, tx: sp.s.tx, db: sp.db, store: sp.name, meta: s.meta };
+        }
+
+        function indexRecords(p, query, direction) {
             var range = asRange(query);
-            var rows = backend.indexRecords(this.objectStore.transaction.db.name,
-                                            this.objectStore.name, this.name);
+            var rows = backend.indexRecords(p.db, p.store, p.meta.name);
             var out = [];
             for (var i = 0; i < rows.length; i++)
                 if (!range || inRangeEncoded(rows[i].key, range)) out.push(rows[i]);
             return sortedRecords(out, 'key', direction || 'next');
-        };
-        IDBIndex.prototype.get = function (query) {
-            var ix = this;
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                var r = ix._records(query, 'next');
-                return r.length ? r[0].value : undefined;
-            });
-        };
-        IDBIndex.prototype.getKey = function (query) {
-            var ix = this;
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                var r = ix._records(query, 'next');
-                return r.length ? decodeKey(r[0].primaryKey) : undefined;
-            });
-        };
-        IDBIndex.prototype.getAll = function (query, count) {
-            var ix = this;
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                var r = ix._records(query, 'next');
-                if (count !== undefined) r = r.slice(0, Number(count) >>> 0);
-                return r.map(function (x) { return x.value; });
-            });
-        };
-        IDBIndex.prototype.getAllKeys = function (query, count) {
-            var ix = this;
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                var r = ix._records(query, 'next');
-                if (count !== undefined) r = r.slice(0, Number(count) >>> 0);
-                return r.map(function (x) { return decodeKey(x.primaryKey); });
-            });
-        };
-        IDBIndex.prototype.getAllRecords = function (options) {
-            var ix = this;
-            options = options || {};
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                var r = ix._records(options.query, options.direction || 'next');
-                if (options.count !== undefined) r = r.slice(0, Number(options.count) >>> 0);
-                return r.map(function (x) {
-                    return new IDBRecord(decodeKey(x.key), decodeKey(x.primaryKey), x.value);
+        }
+
+        class IDBIndex {
+            constructor() { throw idlIllegalConstructor('IDBIndex'); }
+            get name() { return indexOf(this).meta.name; }
+            set name(value) {
+                var s = indexOf(this);
+                var tx = transactions.get(objectStores.get(s.store).tx);
+                if (tx.mode !== 'versionchange')
+                    throw ex('InvalidStateError', "Failed to set the 'name' property on 'IDBIndex': The database is not running a version change transaction.");
+                value = String(value);
+                if (value === s.meta.name) return;
+                throw ex('NotSupportedError', "Failed to set the 'name' property on 'IDBIndex': Renaming is not supported.");
+            }
+            get objectStore() { return indexOf(this).store; }
+            get keyPath() { return indexOf(this).meta.keyPath; }
+            get multiEntry() { return indexOf(this).meta.multiEntry; }
+            get unique() { return indexOf(this).meta.unique; }
+            get(query) {
+                indexOf(this);
+                var range = requireQuery(arguments, 'IDBIndex', 'get', query);
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    var r = indexRecords(p, range, 'next');
+                    return r.length ? r[0].value : undefined;
                 });
-            });
-        };
-        IDBIndex.prototype.count = function (query) {
-            var ix = this;
-            return requestFrom(ix, ix.objectStore.transaction, function () {
-                return ix._records(query, 'next').length;
-            });
-        };
-        IDBIndex.prototype.openCursor = function (query, direction) {
-            return cursorRequest(this, this._records(query, direction || 'next'), false, direction || 'next');
-        };
-        IDBIndex.prototype.openKeyCursor = function (query, direction) {
-            return cursorRequest(this, this._records(query, direction || 'next'), true, direction || 'next');
-        };
-
-        function IDBCursor(source, records, keyOnly, direction, request) {
-            this.source = source;
-            this.direction = direction || 'next';
-            this.request = request;
-            this._records = records;
-            this._keyOnly = !!keyOnly;
-            this._pos = 0;
-            this._apply();
-        }
-        IDBCursor.prototype._apply = function () {
-            var r = this._records[this._pos];
-            if (!r) return false;
-            this.key = decodeKey(r.key);
-            this.primaryKey = decodeKey(r.primaryKey || r.key);
-            if (!this._keyOnly) this.value = r.value;
-            else delete this.value;
-            return true;
-        };
-        IDBCursor.prototype._deliver = function () {
-            var c = this._apply() ? this : null;
-            succeed(this.request, c);
-        };
-        IDBCursor.prototype._schedule = function () {
-            var cur = this;
-            var tx = cur.request.transaction;
-            cur.request.readyState = 'pending';
-            if (tx) tx._pending++;
-            task(function () {
-                try {
-                    if (tx && tx._aborted)
-                        fail(cur.request, tx.error || ex('AbortError', 'Transaction aborted'));
-                    else
-                        cur._deliver();
-                } finally {
-                    if (tx) {
-                        tx._pending--;
-                        tx._maybeComplete();
-                    }
-                }
-            });
-        };
-        IDBCursor.prototype.continue = function (key) {
-            var cur = this;
-            if (key !== undefined) {
-                var target = encodeKey(key);
-                while (cur._pos < cur._records.length &&
-                       compareEncoded(cur._records[cur._pos].key, target) <= 0)
-                    cur._pos++;
-            } else {
-                cur._pos++;
             }
-            cur._schedule();
-        };
-        IDBCursor.prototype.continuePrimaryKey = function (key, primaryKey) {
-            var target = encodeKey(key);
-            var primary = encodeKey(primaryKey);
-            while (this._pos < this._records.length) {
-                this._pos++;
-                var r = this._records[this._pos];
-                if (!r) break;
-                if (compareEncoded(r.key, target) > 0 ||
-                    (r.key === target && compareEncoded(r.primaryKey || r.key, primary) > 0))
-                    break;
+            getKey(query) {
+                indexOf(this);
+                var range = requireQuery(arguments, 'IDBIndex', 'getKey', query);
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    var r = indexRecords(p, range, 'next');
+                    return r.length ? decodeKey(r[0].primaryKey) : undefined;
+                });
             }
-            this._schedule();
-        };
-        IDBCursor.prototype.advance = function (count) {
-            count = Number(count) >>> 0;
-            if (!count) throw ex('TypeError', 'advance count must be positive');
-            this._pos += count;
-            this._schedule();
-        };
-        IDBCursor.prototype.update = function (value) {
-            var store = this.source instanceof IDBIndex ? this.source.objectStore : this.source;
-            return store.put(value, this.primaryKey);
-        };
-        IDBCursor.prototype.delete = function () {
-            var store = this.source instanceof IDBIndex ? this.source.objectStore : this.source;
-            return store.delete(this.primaryKey);
-        };
-
-        function IDBCursorWithValue(source, records, direction, request) {
-            IDBCursor.call(this, source, records, false, direction, request);
+            getAll(queryOrOptions = undefined, count = undefined) {
+                indexOf(this);
+                var a = getAllArguments(queryOrOptions, count, 'IDBIndex', 'getAll');
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    var r = indexRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) { return x.value; });
+                });
+            }
+            getAllKeys(queryOrOptions = undefined, count = undefined) {
+                indexOf(this);
+                var a = getAllArguments(queryOrOptions, count, 'IDBIndex', 'getAllKeys');
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    var r = indexRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) { return decodeKey(x.primaryKey); });
+                });
+            }
+            getAllRecords(options = {}) {
+                indexOf(this);
+                var a = getAllArguments(options === undefined || options === null ? {} : Object(options),
+                                        undefined, 'IDBIndex', 'getAllRecords');
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    var r = indexRecords(p, a.range, a.direction);
+                    if (a.limit !== undefined) r = r.slice(0, a.limit);
+                    return r.map(function (x) {
+                        return newRecord(decodeKey(x.key), decodeKey(x.primaryKey), x.value);
+                    });
+                });
+            }
+            count(query = undefined) {
+                indexOf(this);
+                var range = checkedQuery(query);
+                var p = indexParts(this);
+                return requestFrom(this, p.tx, function () {
+                    return indexRecords(p, range, 'next').length;
+                });
+            }
+            openCursor(query = undefined, direction = 'next') {
+                indexOf(this);
+                var range = checkedQuery(query);
+                direction = validDirection(direction, 'IDBIndex', 'openCursor');
+                return cursorRequest(this, range, false, direction);
+            }
+            openKeyCursor(query = undefined, direction = 'next') {
+                indexOf(this);
+                var range = checkedQuery(query);
+                direction = validDirection(direction, 'IDBIndex', 'openKeyCursor');
+                return cursorRequest(this, range, true, direction);
+            }
         }
-        IDBCursorWithValue.prototype = Object.create(IDBCursor.prototype);
-        IDBCursorWithValue.prototype.constructor = IDBCursorWithValue;
 
-        function cursorRequest(source, records, keyOnly, direction) {
-            var tx = source instanceof IDBIndex ? source.objectStore.transaction : source.transaction;
-            var req = new IDBRequest();
-            req.source = source;
-            req.transaction = tx;
-            tx._request(req, function () {
+        function cursorSourceParts(source) {
+            if (indexes.has(source)) {
+                var ip = indexParts(source);
+                return { tx: ip.tx, store: indexes.get(source).store, records: function (range, direction) {
+                    return indexRecords(ip, range, direction);
+                } };
+            }
+            var sp = storeParts(source);
+            return { tx: sp.s.tx, store: source, records: function (range, direction) {
+                return storeRecords(sp, range, direction);
+            } };
+        }
+
+        function cursorRequest(source, range, keyOnly, direction) {
+            var parts = cursorSourceParts(source);
+            var req = newRequest(IDBRequest.prototype, source, parts.tx);
+            queueRequest(parts.tx, req, function () {
+                var records = parts.records(range, direction);
                 if (!records.length) return null;
-                return keyOnly ? new IDBCursor(source, records, true, direction, req)
-                               : new IDBCursorWithValue(source, records, direction, req);
+                return newCursor(source, records, keyOnly, direction, req);
             });
             return req;
         }
 
-        function IDBVersionChangeEvent(type, init) {
-            var ev = makeEvent(type, init || {});
-            ev.oldVersion = init && init.oldVersion || 0;
-            ev.newVersion = init && init.newVersion === undefined ? null : init && init.newVersion;
-            return ev;
+        function newCursor(source, records, keyOnly, direction, request) {
+            var cursor = Object.create(keyOnly ? IDBCursor.prototype : IDBCursorWithValue.prototype);
+            var s = {
+                source: source, direction: direction || 'next', request: request,
+                records: records, keyOnly: !!keyOnly, pos: 0,
+                key: undefined, primaryKey: undefined, value: undefined
+            };
+            cursors.set(cursor, s);
+            applyCursorPosition(s);
+            return cursor;
         }
 
-        function IDBFactory() {}
-        IDBFactory.prototype.cmp = function (first, second) {
-            return cmpCanon(canonKey(first, []), canonKey(second, []));
-        };
-        IDBFactory.prototype.open = function (name, version) {
-            name = String(name);
-            if (version !== undefined) {
-                version = Number(version);
-                if (!isFinite(version) || version <= 0 || Math.floor(version) !== version)
-                    throw ex('TypeError', 'Invalid IndexedDB version');
-            }
-            var req = new IDBOpenDBRequest();
+        function applyCursorPosition(s) {
+            var r = s.records[s.pos];
+            if (!r) return false;
+            s.key = decodeKey(r.key);
+            s.primaryKey = decodeKey(r.primaryKey || r.key);
+            if (!s.keyOnly) s.value = r.value;
+            return true;
+        }
+
+        function scheduleCursor(cursor) {
+            var s = cursors.get(cursor);
+            var req = s.request;
+            var tx = requests.get(req).transaction;
+            var ts = tx && transactions.get(tx);
+            requests.get(req).readyState = 'pending';
+            if (ts) ts.pending++;
             task(function () {
                 try {
-                    var info = backend.open(name);
-                    var oldVersion = Number(info.version || 0);
-                    var wanted = version === undefined ? (oldVersion || 1) : version;
-                    if (wanted < oldVersion) throw ex('VersionError', 'Requested version is lower than current version');
-                    var db = new IDBDatabase(name, oldVersion || wanted, info);
-                    if (wanted > oldVersion) {
-                        var tx = new IDBTransaction(db, db.objectStoreNames, 'versionchange', {});
-                        db._upgradeTx = tx;
-                        req.result = db;
-                        req.transaction = tx;
-                        req.readyState = 'done';
-                        fire(req, 'upgradeneeded', new IDBVersionChangeEvent('upgradeneeded', {
-                            oldVersion: oldVersion,
-                            newVersion: wanted
-                        }));
-                        backend.setVersion(name, wanted);
-                        db._refresh();
-                        db.version = wanted;
-                        db._upgradeTx = null;
-                        tx._maybeComplete();
+                    if (ts && ts.aborted)
+                        fail(req, ts.error || ex('AbortError', 'Transaction aborted'));
+                    else
+                        succeed(req, applyCursorPosition(s) ? cursor : null);
+                } finally {
+                    if (ts) {
+                        ts.pending--;
+                        maybeComplete(tx);
                     }
-                    succeed(req, db);
-                } catch (e) {
-                    fail(req, e);
                 }
             });
-            return req;
-        };
-        IDBFactory.prototype.deleteDatabase = function (name) {
-            name = String(name);
-            var req = new IDBOpenDBRequest();
-            task(function () {
-                try {
-                    backend.deleteDatabase(name);
-                    succeed(req, undefined);
-                } catch (e) {
-                    fail(req, e);
-                }
-            });
-            return req;
-        };
-        IDBFactory.prototype.databases = function () {
-            return new Promise(function (resolve, reject) {
-                task(function () {
-                    try { resolve(backend.databases()); }
-                    catch (e) { reject(e); }
-                });
-            });
-        };
+        }
 
-        defineCtor('IDBRequest', IDBRequest);
-        defineCtor('IDBOpenDBRequest', IDBOpenDBRequest);
-        defineCtor('IDBFactory', IDBFactory);
-        defineCtor('IDBDatabase', IDBDatabase);
-        defineCtor('IDBTransaction', IDBTransaction);
-        defineCtor('IDBObjectStore', IDBObjectStore);
-        defineCtor('IDBIndex', IDBIndex);
-        defineCtor('IDBKeyRange', IDBKeyRange);
-        defineCtor('IDBCursor', IDBCursor);
-        defineCtor('IDBCursorWithValue', IDBCursorWithValue);
-        defineCtor('IDBRecord', IDBRecord);
-        defineCtor('IDBVersionChangeEvent', IDBVersionChangeEvent);
-        defineCtor('indexedDB', new IDBFactory());
+        function cursorMustBeActive(s, member) {
+            var req = requests.get(s.request);
+            var ts = req.transaction && transactions.get(req.transaction);
+            if (ts && (ts.done || ts.aborted))
+                throw ex('TransactionInactiveError', "Failed to execute '" + member + "' on 'IDBCursor': The transaction has finished.");
+            if (req.readyState !== 'done' || !s.records[s.pos])
+                throw ex('InvalidStateError', "Failed to execute '" + member + "' on 'IDBCursor': The cursor is being iterated or has iterated past its end.");
+        }
+
+        function cursorIsAscending(s) {
+            return s.direction.indexOf('prev') !== 0;
+        }
+
+        class IDBCursor {
+            constructor() { throw idlIllegalConstructor('IDBCursor'); }
+            get source() { return cursorOf(this).source; }
+            get direction() { return cursorOf(this).direction; }
+            get key() { return cursorOf(this).key; }
+            get primaryKey() { return cursorOf(this).primaryKey; }
+            get request() { return cursorOf(this).request; }
+            advance(count) {
+                var s = cursorOf(this);
+                idlNeed(arguments, 1, 'IDBCursor', 'advance');
+                count = unsignedLong(count);
+                if (!count) throw new TypeError("Failed to execute 'advance' on 'IDBCursor': A count argument with value 0 (zero) was supplied, must be greater than 0.");
+                cursorMustBeActive(s, 'advance');
+                s.pos += count;
+                scheduleCursor(this);
+            }
+            continue(key = undefined) {
+                var s = cursorOf(this);
+                var target = key === undefined ? null : encodeKey(key);
+                cursorMustBeActive(s, 'continue');
+                var ascending = cursorIsAscending(s);
+                if (target !== null) {
+                    var cmp = compareEncoded(target, s.records[s.pos].key);
+                    if (ascending ? cmp <= 0 : cmp >= 0)
+                        throw ex('DataError', "Failed to execute 'continue' on 'IDBCursor': The parameter is less than or equal to this cursor's position.");
+                    while (s.pos < s.records.length &&
+                           (ascending ? compareEncoded(s.records[s.pos].key, target) < 0
+                                      : compareEncoded(s.records[s.pos].key, target) > 0))
+                        s.pos++;
+                } else {
+                    s.pos++;
+                }
+                scheduleCursor(this);
+            }
+            continuePrimaryKey(key, primaryKey) {
+                var s = cursorOf(this);
+                idlNeed(arguments, 2, 'IDBCursor', 'continuePrimaryKey');
+                if (!indexes.has(s.source))
+                    throw ex('InvalidAccessError', "Failed to execute 'continuePrimaryKey' on 'IDBCursor': The cursor's source is not an index.");
+                if (s.direction !== 'next' && s.direction !== 'prev')
+                    throw ex('InvalidAccessError', "Failed to execute 'continuePrimaryKey' on 'IDBCursor': The cursor's direction is not 'next' or 'prev'.");
+                var target = encodeKey(key);
+                var primary = encodeKey(primaryKey);
+                cursorMustBeActive(s, 'continuePrimaryKey');
+                var ascending = cursorIsAscending(s);
+                while (s.pos < s.records.length) {
+                    s.pos++;
+                    var r = s.records[s.pos];
+                    if (!r) break;
+                    var byKey = compareEncoded(r.key, target);
+                    var byPrimary = compareEncoded(r.primaryKey || r.key, primary);
+                    var passed = ascending ? (byKey > 0 || (byKey === 0 && byPrimary >= 0))
+                                           : (byKey < 0 || (byKey === 0 && byPrimary <= 0));
+                    if (passed) break;
+                }
+                scheduleCursor(this);
+            }
+            update(value) {
+                var s = cursorOf(this);
+                idlNeed(arguments, 1, 'IDBCursor', 'update');
+                cursorMustBeActive(s, 'update');
+                if (s.keyOnly)
+                    throw ex('InvalidStateError', "Failed to execute 'update' on 'IDBCursor': The cursor is a key cursor.");
+                var store = indexes.has(s.source) ? indexes.get(s.source).store : s.source;
+                var p = assertWritable(store, 'update');
+                var inline = p.meta.keyPath !== null && p.meta.keyPath !== undefined;
+                var primary = s.primaryKey;
+                if (inline && cmpCanon(canonKey(keyPathGet(value, p.meta.keyPath), []), canonKey(primary, [])) !== 0)
+                    throw ex('DataError', "Failed to execute 'update' on 'IDBCursor': The effective key of the provided value differs from the cursor's primary key.");
+                return storePut(store, value, inline ? undefined : primary, false, 'update');
+            }
+            delete() {
+                var s = cursorOf(this);
+                cursorMustBeActive(s, 'delete');
+                if (s.keyOnly)
+                    throw ex('InvalidStateError', "Failed to execute 'delete' on 'IDBCursor': The cursor is a key cursor.");
+                var store = indexes.has(s.source) ? indexes.get(s.source).store : s.source;
+                return storeDelete(store, asRange(s.primaryKey));
+            }
+        }
+
+        class IDBCursorWithValue extends IDBCursor {
+            constructor() { throw idlIllegalConstructor('IDBCursorWithValue'); }
+            get value() { return cursorOf(this).value; }
+        }
+
+        class IDBFactory {
+            constructor() { throw idlIllegalConstructor('IDBFactory'); }
+            cmp(first, second) {
+                factoryOf(this);
+                idlNeed(arguments, 2, 'IDBFactory', 'cmp');
+                return cmpCanon(canonKey(first, []), canonKey(second, []));
+            }
+            open(name, version = undefined) {
+                factoryOf(this);
+                idlNeed(arguments, 1, 'IDBFactory', 'open');
+                name = String(name);
+                if (version !== undefined) {
+                    var wanted = Number(version);
+                    if (!isFinite(wanted) || wanted < 0 || wanted > 9007199254740991)
+                        throw new TypeError("Failed to execute 'open' on 'IDBFactory': Value is outside the 'unsigned long long' value range.");
+                    version = Math.floor(wanted);
+                    if (version === 0)
+                        throw new TypeError("Failed to execute 'open' on 'IDBFactory': The version provided must not be 0.");
+                }
+                var req = newRequest(IDBOpenDBRequest.prototype, null, null);
+                task(function () { openDatabase(req, name, version); });
+                return req;
+            }
+            deleteDatabase(name) {
+                factoryOf(this);
+                idlNeed(arguments, 1, 'IDBFactory', 'deleteDatabase');
+                name = String(name);
+                var req = newRequest(IDBOpenDBRequest.prototype, null, null);
+                task(function () {
+                    try {
+                        backend.deleteDatabase(name);
+                        succeed(req, undefined);
+                    } catch (e) {
+                        fail(req, e);
+                    }
+                });
+                return req;
+            }
+            databases() {
+                try { factoryOf(this); } catch (e) { return Promise.reject(e); }
+                return new Promise(function (resolve, reject) {
+                    task(function () {
+                        try { resolve(backend.databases()); }
+                        catch (e) { reject(e); }
+                    });
+                });
+            }
+        }
+
+        function openDatabase(req, name, version) {
+            try {
+                var info = backend.open(name);
+                var oldVersion = Number(info.version || 0);
+                var wanted = version === undefined ? (oldVersion || 1) : version;
+                if (wanted < oldVersion)
+                    throw ex('VersionError', 'The requested version (' + wanted + ') is less than the existing version (' + oldVersion + ').');
+                var db = newDatabase(name, oldVersion || wanted, info);
+                if (wanted > oldVersion) upgradeDatabase(req, db, oldVersion, wanted);
+                else succeed(req, db);
+            } catch (e) {
+                fail(req, e);
+            }
+        }
+
+        function upgradeDatabase(req, db, oldVersion, wanted) {
+            var rs = requests.get(req);
+            var ds = databases.get(db);
+            var tx = newTransaction(db, ds.storeNames, 'versionchange', 'default');
+            var ts = transactions.get(tx);
+            ds.upgradeTx = tx;
+            ts.afterComplete = function () {
+                ds.upgradeTx = null;
+                rs.transaction = null;
+                succeed(req, db);
+            };
+            ts.afterAbort = function () {
+                task(function () {
+                    ds.upgradeTx = null;
+                    ds.closed = true;
+                    rs.transaction = null;
+                    fail(req, ex('AbortError', 'The upgrade transaction was aborted.'));
+                });
+            };
+            rs.result = db;
+            rs.transaction = tx;
+            rs.readyState = 'done';
+            req.dispatchEvent(newVersionChangeEvent('upgradeneeded', oldVersion, wanted));
+            if (ts.aborted) return;
+            backend.setVersion(ds.name, wanted);
+            refreshDatabase(db);
+            ds.version = wanted;
+            maybeComplete(tx);
+        }
+
+        idlExpose(IDBKeyRange, 'IDBKeyRange', null);
+        idlExpose(IDBRecord, 'IDBRecord', null);
+        idlExpose(IDBRequest, 'IDBRequest', idlEventTarget());
+        idlExpose(IDBOpenDBRequest, 'IDBOpenDBRequest', IDBRequest);
+        idlExpose(IDBVersionChangeEvent, 'IDBVersionChangeEvent', global.Event);
+        idlExpose(IDBDatabase, 'IDBDatabase', idlEventTarget());
+        idlExpose(IDBTransaction, 'IDBTransaction', idlEventTarget());
+        idlExpose(IDBObjectStore, 'IDBObjectStore', null);
+        idlExpose(IDBIndex, 'IDBIndex', null);
+        idlExpose(IDBCursor, 'IDBCursor', null);
+        idlExpose(IDBCursorWithValue, 'IDBCursorWithValue', IDBCursor);
+        idlExpose(IDBFactory, 'IDBFactory', null);
+
+        var indexedDBFactory = Object.create(IDBFactory.prototype);
+        factories.set(indexedDBFactory, {});
+        defineCtor('indexedDB', indexedDBFactory);
     })();
 
     // Workers need DOMException too; QuickJS-ng has it built in, the
