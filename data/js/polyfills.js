@@ -169,6 +169,8 @@
     }
 
     function idlDispatchPath(event, path) {
+        if (typeof __ndDispatchPath === 'function')
+            return __ndDispatchPath(event, path);
         for (var i = 0; i < path.length; i++) {
             path[i].dispatchEvent(event);
             if (event.cancelBubble) break;
