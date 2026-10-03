@@ -853,6 +853,7 @@ ns_ctx_parse_composite(const char *s)
     if (!strcmp(s, "lighter"))                 return CAIRO_OPERATOR_ADD;
     if (!strcmp(s, "copy"))                    return CAIRO_OPERATOR_SOURCE;
     if (!strcmp(s, "xor"))                     return CAIRO_OPERATOR_XOR;
+    if (!strcmp(s, "clear"))                   return CAIRO_OPERATOR_CLEAR;
     if (!strcmp(s, "multiply"))                return CAIRO_OPERATOR_MULTIPLY;
     if (!strcmp(s, "screen"))                  return CAIRO_OPERATOR_SCREEN;
     if (!strcmp(s, "overlay"))                 return CAIRO_OPERATOR_OVERLAY;
@@ -2010,14 +2011,12 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
     ns_js *js = js_from_ctx(ctx);
     if (!js) return NULL;
     if (strcmp(n->name, "canvas") == 0) {
-        if (js->canvas_states) {
-            ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
-            if (st && st->surf) {
-                *out_w = st->w;
-                *out_h = st->h;
-                *origin_clean = st->origin_clean;
-                return cairo_surface_reference(st->surf);
-            }
+        ns_canvas_state *st = ns_canvas_state_for(js, n);
+        if (st && st->surf) {
+            *out_w = st->w;
+            *out_h = st->h;
+            *origin_clean = st->origin_clean;
+            return cairo_surface_reference(st->surf);
         }
         return NULL;
     }

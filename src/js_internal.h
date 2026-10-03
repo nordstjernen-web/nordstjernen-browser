@@ -716,6 +716,7 @@ gboolean ns_ctx2d_is(JSValueConst v);
 JSContext *ns_canvas_realm(JSContext *ctx, const ns_node *el);
 JSContext *ns_ctx_realm(JSContext *ctx, JSValueConst this_val);
 JSContext *ns_js_realm_for_node(ns_js *js, const ns_node *node);
+char *ns_js_computed_text(JSContext *ctx, const ns_node *node, const char *name);
 JSValue ns_api_proto(JSContext *realm, const char *iface);
 JSValue ns_api_proto_of_ctor(JSContext *ctx, JSValueConst new_target,
                              const char *iface);
