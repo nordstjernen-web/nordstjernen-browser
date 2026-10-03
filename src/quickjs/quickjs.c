@@ -1153,6 +1153,8 @@ struct JSObject {
     uint8_t is_HTMLDDA : 1; /* specific annex B IsHtmlDDA behavior */
     uint8_t is_host_function : 1; /* a C function the embedder made (see
                                      JS_SetHostFunctionMode) */
+    uint8_t is_immutable_prototype : 1; /* page scripts cannot change its
+                                           [[Prototype]] (JS_SetImmutablePrototype) */
     uint16_t class_id; /* see JS_CLASS_x */
     /* byte offsets: 16/24 */
     JSShape *shape; /* prototype and property names + flag */
@@ -6190,6 +6192,8 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
     p->is_uncatchable_error = 0;
     p->tmp_mark = 0;
     p->is_HTMLDDA = 0;
+    p->is_host_function = 0;
+    p->is_immutable_prototype = 0;
     p->is_prototype = 0;
     p->first_weak_ref = NULL;
     p->u.opaque = NULL;
@@ -6684,6 +6688,11 @@ static JSValue js_forwarder_call(JSContext *ctx, JSValueConst this_val,
     (void)magic;
     if (sf && sf->is_constructor)
         return JS_CallConstructor2(ctx, data[0], this_val, argc, argv);
+    /* WebIDL: an operation called without a this value works on its own
+       realm's global object, which the target, a function of another
+       realm, would take for its own realm's. */
+    if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
+        return JS_Call(ctx, data[0], ctx->global_obj, argc, argv);
     return JS_Call(ctx, data[0], this_val, argc, argv);
 }
 
@@ -6770,6 +6779,15 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
     return JS_UNDEFINED;
 }
 
+/* Makes obj an immutable prototype exotic object for page scripts, as the
+   global objects of the web platform and the prototypes they inherit are. */
+void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
+{
+    (void)ctx;
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)
+        JS_VALUE_GET_OBJ(obj)->is_immutable_prototype = true;
+}
+
 /* Functions made from now on in ctx are the embedder's own (JS_IsHostAccess). */
 void JS_SetHostFunctionMode(JSContext *ctx, bool on)
 {
@@ -6780,17 +6798,58 @@ void JS_SetHostFunctionMode(JSContext *ctx, bool on)
    outside any script, by one of the embedder's C functions, or by engine
    code compiled from hidden source. Page scripts and the built-ins they
    call are not. */
-bool JS_IsHostAccess(JSContext *ctx)
+static bool js_frames_are_host(JSStackFrame *sf)
 {
-    JSStackFrame *sf = ctx->rt->current_stack_frame;
-    JSObject *f;
+    for (; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(f->class_id))
+            return f->u.func.function_bytecode->is_engine_code;
+        if (f->is_host_function)
+            return true;
+    }
+    return true;
+}
 
-    if (!sf || JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
-        return true;
-    f = JS_VALUE_GET_OBJ(sf->cur_func);
+/* Whether fn is the embedder's: one of its C functions or a function
+   compiled from hidden-source engine code. */
+bool JS_IsEngineFunction(JSValueConst fn)
+{
+    JSObject *f;
+    if (JS_VALUE_GET_TAG(fn) != JS_TAG_OBJECT)
+        return false;
+    f = JS_VALUE_GET_OBJ(fn);
     if (js_class_has_bytecode(f->class_id))
         return f->u.func.function_bytecode->is_engine_code;
     return f->is_host_function;
+}
+
+/* Whether the C function now running was called by the embedder rather than
+   by a page script (or a built-in acting for one). */
+bool JS_IsHostCaller(JSContext *ctx)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    return js_frames_are_host(sf ? sf->prev_frame : NULL);
+}
+
+bool JS_IsHostAccess(JSContext *ctx)
+{
+    JSStackFrame *sf;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(f->class_id))
+            return f->u.func.function_bytecode->is_engine_code;
+        if (f->is_host_function)
+            return true;
+        /* a built-in acts for whoever called it */
+    }
+    return true;
 }
 
 static inline bool js_atom_is_engine_private(JSRuntime *rt, JSAtom atom)
@@ -9087,6 +9146,13 @@ static int JS_SetPrototypeInternal(JSContext *ctx, JSValueConst obj,
     if (p == JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_OBJECT])) {
         if (throw_flag) {
             JS_ThrowTypeError(ctx, "'Immutable prototype object \'Object.prototype\' cannot have their prototype set'");
+            return -1;
+        }
+        return false;
+    }
+    if (unlikely(p->is_immutable_prototype) && !JS_IsHostAccess(ctx)) {
+        if (throw_flag) {
+            JS_ThrowTypeError(ctx, "Immutable prototype object cannot have their prototype set");
             return -1;
         }
         return false;
@@ -39689,6 +39755,8 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     bc_set_flags(&flags, &idx, b->arguments_allowed, 1);
     bc_set_flags(&flags, &idx, b->backtrace_barrier, 1);
     bc_set_flags(&flags, &idx, s->allow_debug, 1);
+    /* engine code stays engine code through a bytecode cache */
+    bc_set_flags(&flags, &idx, b->is_engine_code, 1);
     assert(idx <= 16);
     bc_put_u16(s, flags);
     bc_put_u8(s, b->is_strict_mode);
@@ -40621,6 +40689,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
     bc.arguments_allowed = bc_get_flags(v16, &idx, 1);
     bc.backtrace_barrier = bc_get_flags(v16, &idx, 1);
     has_debug_info = bc_get_flags(v16, &idx, 1);
+    bc.is_engine_code = bc_get_flags(v16, &idx, 1);
     if (bc_get_u8(s, &v8))
         goto fail;
     bc.is_strict_mode = (v8 > 0);

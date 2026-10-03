@@ -19581,7 +19581,8 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     const char *type = JS_ToCString(ctx, tv);
     JS_FreeValue(ctx, tv);
     if (!type) return JS_FALSE;
-    if (JS_VALUE_GET_PTR(argv[0]) != ns_engine_dispatch_event)
+    if (JS_VALUE_GET_PTR(argv[0]) != ns_engine_dispatch_event &&
+        !JS_IsHostCaller(ctx))
         JS_SetPropertyStr(ctx, argv[0], "_is_trusted", JS_FALSE);
     JS_SetPropertyStr(ctx, argv[0], "target", JS_DupValue(ctx, this_val));
     JS_SetPropertyStr(ctx, argv[0], "currentTarget", JS_DupValue(ctx, this_val));
@@ -25715,11 +25716,14 @@ ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                ns_sw_dispatch_fetch_on_worker, r, NULL);
 }
 
+static JSValue ns_illegal_constructor(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv);
+
 static void
 ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 {
-    JS_SetPropertyStr(ctx, global, "ServiceWorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
+    ns_bind_ctor(ctx, global, "ServiceWorkerGlobalScope",
+                 ns_illegal_constructor, 0);
     ns_bind_fn(ctx, global, "skipWaiting", ns_returns_resolved_undefined, 0);
     JS_SetPropertyStr(ctx, global, "oninstall",  JS_NULL);
     JS_SetPropertyStr(ctx, global, "onactivate", JS_NULL);
@@ -25841,9 +25845,6 @@ ns_sw_fire_lifecycle(ns_js *js)
     JS_FreeValue(ctx, global);
 }
 
-static JSValue ns_illegal_constructor(JSContext *ctx, JSValueConst this_val,
-                                      int argc, JSValueConst *argv);
-
 static void
 ns_install_abort_signal_interface(JSContext *ctx, JSValueConst global)
 {
@@ -25882,9 +25883,309 @@ ns_worker_stack_limit(void)
 static void
 ns_js_add_engine_private_names(JSContext *ctx)
 {
-    static const char *const names[] = { "_listeners" };
+    static const char *const names[] = { "_listeners",
+                                         "__ndAdoptWindowEventOps",
+                                         "__ndEventTargetMethods",
+                                         "__ndIsEngineFunction" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
+}
+
+static void ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst obj);
+static JSValue ns_message_event_init(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
+
+/* An interface object's [[Prototype]] is its parent interface object, as
+ * its prototype object's is the parent's prototype object (WebIDL); many
+ * were left at Function.prototype. */
+static const char ns_interface_ctor_links_src[] =
+    "(function(G){"
+    "  var FP = Function.prototype, OP = Object.prototype, gp = Object.getPrototypeOf,"
+    "      gopd = Object.getOwnPropertyDescriptor;"
+    "  Object.getOwnPropertyNames(G).forEach(function(n){"
+    "    if (!/^[A-Z]/.test(n)) return;"
+    "    var d = gopd(G, n); if (!d || typeof d.value !== 'function') return;"
+    "    var F = d.value, P = F.prototype;"
+    "    if (!P || typeof P !== 'object' || gp(F) !== FP) return;"
+    "    var PP = gp(P); if (!PP || PP === OP) return;"
+    "    var c = gopd(PP, 'constructor');"
+    "    if (!c || typeof c.value !== 'function' || c.value.prototype !== PP) return;"
+    "    try { Object.setPrototypeOf(F, c.value); } catch (e) {}"
+    "  });"
+    "})(globalThis)";
+
+static void
+ns_js_link_interface_ctors(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_interface_ctor_links_src,
+                        sizeof(ns_interface_ctor_links_src) - 1,
+                        "<interface-ctor-links>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
+/* The global object and the prototypes it inherits are immutable prototype
+ * exotic objects for page scripts (WebIDL [Global]). */
+static void
+ns_js_lock_global_prototypes(JSContext *ctx)
+{
+    JSValue o = JS_GetGlobalObject(ctx);
+    for (int depth = 0; JS_IsObject(o) && depth < 8; depth++) {
+        JS_SetImmutablePrototype(ctx, o);
+        JSValue next = JS_GetPrototype(ctx, o);
+        JS_FreeValue(ctx, o);
+        o = next;
+    }
+    JS_FreeValue(ctx, o);
+}
+
+/* The window's prototype chain as WebIDL has a [Global] interface's:
+ * Window.prototype > WindowProperties > EventTarget.prototype; Window's
+ * members are the window's own, so Window.prototype keeps only its tag, and
+ * EventTarget's methods serve windows through the registry et_src keeps. */
+static const char ns_window_global_shape_src[] =
+    "(function(G){"
+    "  var gp = Object.getPrototypeOf, sp = Object.setPrototypeOf,"
+    "      def = Object.defineProperty, gopd = Object.getOwnPropertyDescriptor;"
+    "  var ETC = G.EventTarget, WC = G.Window;"
+    "  if (typeof ETC !== 'function' || typeof WC !== 'function') return;"
+    "  var ET = ETC.prototype, W = WC.prototype, named = gp(W);"
+    "  if (named === Object.prototype || named === null) {"
+    "    named = Object.create(ET);"
+    "    try { sp(W, named); } catch (e) {}"
+    "  } else if (named !== ET) {"
+    "    try { sp(named, ET); } catch (e) {}"
+    "  }"
+    "  if (named !== ET)"
+    "    try { def(named, Symbol.toStringTag, { value: 'WindowProperties', configurable: true }); } catch (e) {}"
+    "  Object.getOwnPropertyNames(W).forEach(function(k){"
+    "    if (k !== 'constructor') try { delete W[k]; } catch (e) {} });"
+    "  Object.getOwnPropertySymbols(W).forEach(function(k){ try { delete W[k]; } catch (e) {} });"
+    "  def(W, Symbol.toStringTag, { value: 'Window', configurable: true });"
+    "  try { delete G[Symbol.toStringTag]; } catch (e) {}"
+    "  var adopt = G.__ndAdoptWindowEventOps;"
+    "  if (typeof adopt === 'function') adopt(G);"
+    "  [['addEventListener', 2], ['removeEventListener', 2], ['dispatchEvent', 1]].forEach(function(m){"
+    "    var d = gopd(ET, m[0]);"
+    "    if (d && typeof d.value === 'function')"
+    "      try { def(d.value, 'length', { value: m[1], configurable: true }); } catch (e) {} });"
+    "})(globalThis)";
+
+static void
+ns_js_shape_window_global(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_window_global_shape_src,
+                        sizeof(ns_window_global_shape_src) - 1,
+                        "<window-global-shape>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
+/* A frame window's listener operations join the page's registry (see
+ * et_src), and its tag is its Window.prototype's. */
+/* A frame window's prototype chain, copied from the page's, runs through the
+ * frame's own Window and EventTarget prototypes. */
+static const char ns_frame_window_chain_src[] =
+    "(function(G){"
+    "  var gp = Object.getPrototypeOf, sp = Object.setPrototypeOf;"
+    "  var W = G.Window && G.Window.prototype, ET = G.EventTarget && G.EventTarget.prototype;"
+    "  if (!W || !ET) return;"
+    "  var named = gp(W);"
+    "  if (named && named !== ET && named !== Object.prototype && gp(named) !== ET)"
+    "    try { sp(named, ET); } catch (e) {}"
+    "  if (gp(G) !== W) try { sp(G, W); } catch (e) {}"
+    "})(globalThis)";
+
+static void
+ns_js_adopt_frame_window_events(ns_js *js, JSContext *fctx, JSValueConst fg)
+{
+    JSValue chain = JS_Eval(fctx, ns_frame_window_chain_src,
+                            sizeof(ns_frame_window_chain_src) - 1,
+                            "<frame-window-chain>",
+                            JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(chain)) JS_FreeValue(fctx, JS_GetException(fctx));
+    JS_FreeValue(fctx, chain);
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSValue main_global = JS_GetGlobalObject(main_ctx);
+    JSValue adopt = JS_GetPropertyStr(main_ctx, main_global,
+                                      "__ndAdoptWindowEventOps");
+    if (JS_IsFunction(main_ctx, adopt)) {
+        JSValue r = JS_Call(main_ctx, adopt, JS_UNDEFINED, 1, &fg);
+        if (JS_IsException(r)) JS_FreeValue(main_ctx, JS_GetException(main_ctx));
+        JS_FreeValue(main_ctx, r);
+    }
+    JS_FreeValue(main_ctx, adopt);
+    JS_FreeValue(main_ctx, main_global);
+    JSValue sym_ctor = JS_GetPropertyStr(fctx, fg, "Symbol");
+    JSValue tag_sym = JS_GetPropertyStr(fctx, sym_ctor, "toStringTag");
+    JSAtom tag_atom = JS_ValueToAtom(fctx, tag_sym);
+    if (tag_atom != JS_ATOM_NULL) {
+        JS_DeleteProperty(fctx, fg, tag_atom, 0);
+        JS_FreeAtom(fctx, tag_atom);
+    }
+    JS_FreeValue(fctx, tag_sym);
+    JS_FreeValue(fctx, sym_ctor);
+}
+
+static JSValue
+ns_is_engine_function(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv)
+{
+    (void)this_val;
+    return JS_NewBool(ctx, argc > 0 && JS_IsEngineFunction(argv[0]));
+}
+
+/* A worker's global object as WebIDL shapes a [Global] interface: its
+ * prototype chain is DedicatedWorkerGlobalScope (or ServiceWorkerGlobalScope),
+ * WorkerGlobalScope and EventTarget; the members of WorkerGlobalScope and
+ * EventTarget are on those prototypes, the scope interface's own members on
+ * the global itself; attributes are accessors, event handlers among them;
+ * location and navigator are a WorkerLocation and a WorkerNavigator. */
+static const char ns_worker_global_shape_src[] =
+    "(function(G, scopeName){"
+    "  'use strict';"
+    "  var def = Object.defineProperty, gopd = Object.getOwnPropertyDescriptor,"
+    "      setProto = Object.setPrototypeOf;"
+    "  var ET = G.EventTarget, WGS = G.WorkerGlobalScope, Scope = G[scopeName];"
+    "  if (typeof ET !== 'function' || typeof WGS !== 'function' ||"
+    "      typeof Scope !== 'function') return;"
+    "  function illegal(){ return new TypeError('Illegal invocation'); }"
+    "  function self_of(t){ var s = t === undefined || t === null ? G : t;"
+    "    if (s !== G) throw illegal(); return s; }"
+    "  function tag(C, n){ def(C.prototype, Symbol.toStringTag, { value: n, configurable: true }); }"
+    "  function accessor(name, get, set){"
+    "    var o = {}; def(o, name, { get: get, set: set, configurable: true });"
+    "    return gopd(o, name); }"
+    /* named getter and setter functions ("get x", "set x") */
+    "  function getter(name, fn){ return gopd({ get [name](){ return fn.call(this); } }, name).get; }"
+    "  function setter(name, fn){ return gopd({ set [name](v){ fn.call(this, v); } }, name).set; }"
+    "  setProto(WGS.prototype, ET.prototype); setProto(WGS, ET);"
+    "  setProto(Scope.prototype, WGS.prototype); setProto(Scope, WGS);"
+    "  tag(ET, 'EventTarget'); tag(WGS, 'WorkerGlobalScope'); tag(Scope, scopeName);"
+    "  try { delete G[Symbol.toStringTag]; } catch (e) {}"
+    "  function take(name){ var d = gopd(G, name); if (d) delete G[name]; return d; }"
+    "  function method(proto, name, length){"
+    "    var d = proto === G ? gopd(G, name) : take(name);"
+    "    if (!d || typeof d.value !== 'function') return;"
+    "    def(d.value, 'length', { value: length, configurable: true });"
+    "    def(proto, name, { value: d.value, writable: true, enumerable: true, configurable: true }); }"
+    "  method(ET.prototype, 'addEventListener', 2);"
+    "  method(ET.prototype, 'removeEventListener', 2);"
+    "  method(ET.prototype, 'dispatchEvent', 1);"
+    "  [['atob',1],['btoa',1],['clearInterval',0],['clearTimeout',0],['fetch',1],"
+    "   ['importScripts',0],['queueMicrotask',1],['reportError',1],['setInterval',1],"
+    "   ['setTimeout',1],['structuredClone',1]].forEach(function(m){ method(WGS.prototype, m[0], m[1]); });"
+    "  method(G, 'postMessage', 1); method(G, 'close', 0);"
+    "  function wrap(cls, fields, names){"
+    "    var C = G[cls]; if (typeof C !== 'function') return null;"
+    "    var o = Object.create(C.prototype);"
+    "    names.forEach(function(k){"
+    "      if (!(k in fields)) return;"
+    "      def(C.prototype, k, { get: getter(k, function(){ if (this !== o) throw illegal(); return fields[k]; }),"
+    "                            enumerable: true, configurable: true }); });"
+    "    tag(C, cls); return o; }"
+    "  var loc = gopd(G, 'location'), nav = gopd(G, 'navigator');"
+    "  if (loc && loc.value && typeof loc.value === 'object') {"
+    "    var lf = {}; var lsrc = loc.value;"
+    "    ['href','origin','protocol','host','hostname','port','pathname','search','hash'].forEach(function(k){ lf[k] = lsrc[k]; });"
+    "    var L = wrap('WorkerLocation', lf, ['hash','host','hostname','href','origin','pathname','port','protocol','search']);"
+    "    if (L) { def(G.WorkerLocation.prototype, 'toString', { value: function toString(){"
+    "        if (this !== L) throw illegal(); return lf.href; }, writable: true, enumerable: true, configurable: true });"
+    "      def(G, 'location', { value: L, writable: true, enumerable: true, configurable: true }); } }"
+    "  if (nav && nav.value && typeof nav.value === 'object') {"
+    "    var nf = {}, nsrc = nav.value;"
+    "    Object.getOwnPropertyNames(nsrc).forEach(function(k){ var d = gopd(nsrc, k); if (d && 'value' in d) nf[k] = d.value; });"
+    "    var Nv = wrap('WorkerNavigator', nf, ['appCodeName','appName','appVersion','connection','deviceMemory',"
+    "      'hardwareConcurrency','language','languages','locks','mediaCapabilities','onLine','permissions',"
+    "      'platform','product','storage','userAgent','userAgentData']);"
+    "    if (Nv) def(G, 'navigator', { value: Nv, writable: true, enumerable: true, configurable: true }); }"
+    "  function readonly(name, replaceable){"
+    "    var d = take(name); if (!d || !('value' in d)) { if (d) def(G, name, d); return; }"
+    "    var value = d.value;"
+    "    def(WGS.prototype, name, { get: getter(name, function(){ self_of(this); return value; }),"
+    "      set: replaceable ? setter(name, function(v){ def(self_of(this), name,"
+    "        { value: v, writable: true, enumerable: true, configurable: true }); }) : undefined,"
+    "      enumerable: true, configurable: true }); }"
+    "  ['caches','crossOriginIsolated','crypto','indexedDB','isSecureContext','location',"
+    "   'navigator'].forEach(function(n){ readonly(n, false); });"
+    "  ['origin','performance'].forEach(function(n){ readonly(n, true); });"
+    "  take('self');"
+    "  def(WGS.prototype, 'self', { get: getter('self', function(){ return self_of(this); }),"
+    "    enumerable: true, configurable: true });"
+    "  function handler(target, name){"
+    "    var d = target === G ? gopd(G, name) : take(name);"
+    "    var slot = d && 'value' in d && d.value !== undefined ? d.value : null;"
+    "    def(target, name, {"
+    "      get: getter(name, function(){ self_of(this); return slot; }),"
+    "      set: setter(name, function(v){ self_of(this);"
+    "        slot = typeof v === 'function' || (typeof v === 'object' && v !== null) ? v : null; }),"
+    "      enumerable: true, configurable: true }); }"
+    "  ['onerror','onlanguagechange','onrejectionhandled','onunhandledrejection'].forEach(function(n){"
+    "    handler(WGS.prototype, n); });"
+    "  if (scopeName === 'DedicatedWorkerGlobalScope') {"
+    "    handler(G, 'onmessage'); handler(G, 'onmessageerror');"
+    "    var nd = gopd(G, 'name'); var nameValue = nd && 'value' in nd ? nd.value : '';"
+    "    def(G, 'name', { get: getter('name', function(){ self_of(this); return nameValue; }),"
+    "      set: setter('name', function(v){ def(self_of(this), 'name',"
+    "        { value: v, writable: true, enumerable: true, configurable: true }); }),"
+    "      enumerable: true, configurable: true });"
+    "    var rafId = 0, rafCallbacks = new Map(), rafTimer = 0;"
+    "    function rafFlush(){ rafTimer = 0; var cbs = rafCallbacks; rafCallbacks = new Map();"
+    "      var ts = G.performance.now();"
+    "      cbs.forEach(function(cb){ try { cb.call(G, ts); } catch (e) { G.reportError(e); } }); }"
+    "    def(G, 'requestAnimationFrame', { value: function requestAnimationFrame(cb){"
+    "        if (typeof cb !== 'function') throw new TypeError(\"Failed to execute 'requestAnimationFrame' \" +"
+    "          \"on 'DedicatedWorkerGlobalScope': The callback provided as parameter 1 is not a function.\");"
+    "        var id = ++rafId; rafCallbacks.set(id, cb);"
+    "        if (!rafTimer) rafTimer = G.setTimeout(rafFlush, 16);"
+    "        return id; }, writable: true, enumerable: true, configurable: true });"
+    "    def(G, 'cancelAnimationFrame', { value: function cancelAnimationFrame(id){"
+    "        rafCallbacks.delete(Number(id)); }, writable: true, enumerable: true, configurable: true });"
+    "  }"
+    "  try { delete G.NodeFilter; } catch (e) {}"
+    "  setProto(G, Scope.prototype);"
+    "})";
+
+static void
+ns_worker_shape_global(JSContext *ctx, gboolean service_worker)
+{
+    JSValue fn = JS_Eval(ctx, ns_worker_global_shape_src,
+                         sizeof(ns_worker_global_shape_src) - 1,
+                         "<worker-global-shape>",
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsFunction(ctx, fn)) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue args[2] = {
+            global,
+            JS_NewString(ctx, service_worker ? "ServiceWorkerGlobalScope"
+                                             : "DedicatedWorkerGlobalScope"),
+        };
+        JSValue r = JS_Call(ctx, fn, JS_UNDEFINED, 2, (JSValueConst *)args);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, args[1]);
+        JS_FreeValue(ctx, global);
+    } else if (JS_IsException(fn)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, fn);
+    ns_js_link_interface_ctors(ctx);
+    ns_js_lock_global_prototypes(ctx);
+}
+
+/* reportError() in a worker: the worker reports the exception as it would
+ * an uncaught one, to its error handlers and then to the Worker object. */
+static JSValue
+ns_worker_report_error(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "reportError: 1 argument required");
+    ns_worker_report_exception(js_from_ctx(ctx), argv[0]);
+    return JS_UNDEFINED;
 }
 
 static ns_js *
@@ -25975,9 +26276,40 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "MessageChannel", ns_window_message_channel, 0);
     ns_bind_ctor(ctx, global, "MessagePort", ns_illegal_constructor, 0);
 
-    ns_bind_ctor(ctx, global, "Event", ns_window_event_ctor, 2);
-    ns_bind_ctor(ctx, global, "MessageEvent", ns_window_event_ctor, 2);
-    ns_bind_ctor(ctx, global, "ErrorEvent", ns_window_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "Event", ns_window_event_ctor, 1);
+    ns_bind_ctor(ctx, global, "MessageEvent", ns_window_event_ctor, 1);
+    ns_bind_ctor(ctx, global, "ErrorEvent", ns_window_event_ctor, 1);
+    {
+        JSValue ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
+        JSValue ev_proto = JS_IsObject(ev_ctor)
+            ? JS_GetPropertyStr(ctx, ev_ctor, "prototype") : JS_UNDEFINED;
+        if (JS_IsObject(ev_proto)) {
+            static const struct { const char *name; int value; } phases[] = {
+                { "NONE", 0 }, { "CAPTURING_PHASE", 1 },
+                { "AT_TARGET", 2 }, { "BUBBLING_PHASE", 3 },
+            };
+            ns_bind_fn(ctx, ev_proto, "initEvent", ns_event_initEvent, 1);
+            ns_bind_fn(ctx, ev_proto, "preventDefault",
+                       ns_event_prevent_default, 0);
+            ns_bind_fn(ctx, ev_proto, "stopPropagation",
+                       ns_event_stop_propagation, 0);
+            ns_bind_fn(ctx, ev_proto, "stopImmediatePropagation",
+                       ns_event_stop_immediate, 0);
+            ns_bind_fn(ctx, ev_proto, "composedPath",
+                       ns_event_composed_path, 0);
+            ns_event_define_legacy_accessors(ctx, ev_proto);
+            for (gsize i = 0; i < G_N_ELEMENTS(phases); i++) {
+                JS_DefinePropertyValueStr(ctx, ev_ctor, phases[i].name,
+                    JS_NewInt32(ctx, phases[i].value), JS_PROP_ENUMERABLE);
+                JS_DefinePropertyValueStr(ctx, ev_proto, phases[i].name,
+                    JS_NewInt32(ctx, phases[i].value), JS_PROP_ENUMERABLE);
+            }
+        }
+        JS_FreeValue(ctx, ev_proto);
+        JS_FreeValue(ctx, ev_ctor);
+    }
+    ns_bind_ctor_proto_fn(ctx, global, "MessageEvent", "initMessageEvent",
+                          ns_message_event_init, 1);
     ns_event_link_proto(ctx, global, "MessageEvent", "Event");
     ns_event_link_proto(ctx, global, "ErrorEvent", "Event");
     ns_event_link_proto(ctx, global, "ExtendableEvent", "Event");
@@ -26066,10 +26398,13 @@ ns_worker_js_new(ns_worker_host *host)
 
     JS_SetPropertyStr(ctx, global, "self", JS_DupValue(ctx, global));
     JS_SetPropertyStr(ctx, global, "globalThis", JS_DupValue(ctx, global));
-    JS_SetPropertyStr(ctx, global, "DedicatedWorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
-    JS_SetPropertyStr(ctx, global, "WorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
+    ns_bind_ctor(ctx, global, "WorkerGlobalScope", ns_illegal_constructor, 0);
+    if (!host->is_service_worker)
+        ns_bind_ctor(ctx, global, "DedicatedWorkerGlobalScope",
+                     ns_illegal_constructor, 0);
+    ns_bind_ctor(ctx, global, "WorkerLocation", ns_illegal_constructor, 0);
+    ns_bind_ctor(ctx, global, "WorkerNavigator", ns_illegal_constructor, 0);
+    ns_bind_fn(ctx, global, "reportError", ns_worker_report_error, 1);
     JS_SetPropertyStr(ctx, global, "_listeners", JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, global);
     ns_bind_fn(ctx, global, "dispatchEvent",       ns_target_dispatchEvent, 1);
@@ -26146,6 +26481,7 @@ ns_worker_js_new(ns_worker_host *host)
 
     if (host->is_service_worker)
         ns_sw_install_scope(ctx, global, host);
+    ns_worker_shape_global(ctx, host->is_service_worker);
 
     JS_FreeValue(ctx, global);
     return js;
@@ -47108,7 +47444,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents){"
     "  var url = initialURL || 'about:blank';"
     /* An initial about:blank or srcdoc document shows about:blank or
      * about:srcdoc as its URL while url, the creator's, stays its base URL
@@ -47229,17 +47565,17 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (type==='hashchange'){ hashL.push(fn); return; }"
     "      if (type==='popstate'){ popL.push(fn); return; }"
     "      if (type==='message'){ msgL.push(fn); return; }"
-    "      return realWin.addEventListener.call(win, type, fn, o); } });"
+    "      return windowEvents.add.call(win, type, fn, o); } });"
     "  def('removeEventListener', { writable: true, value: function(type, fn, o){"
     "      var i; if (type==='hashchange'){ i=hashL.indexOf(fn); if(i>=0) hashL.splice(i,1); return; }"
     "      if (type==='popstate'){ i=popL.indexOf(fn); if(i>=0) popL.splice(i,1); return; }"
     "      if (type==='message'){ i=msgL.indexOf(fn); if(i>=0) msgL.splice(i,1); return; }"
-    "      return realWin.removeEventListener.call(win, type, fn, o); } });"
+    "      return windowEvents.remove.call(win, type, fn, o); } });"
     "  def('dispatchEvent', { writable: true, value: function(ev){"
     "      if (ev && ev.type==='hashchange'){ fire(hashL, onhash, ev); return true; }"
     "      if (ev && ev.type==='popstate'){ fire(popL, onpop, ev); return true; }"
     "      if (ev && ev.type==='message'){ fire(msgL, onmsg, ev); return true; }"
-    "      return realWin.dispatchEvent.call(win, ev); } });"
+    "      return windowEvents.dispatch.call(win, ev); } });"
     "  if (sandbox & 1) {"
     "    if (!(sandbox & 32)) {"
     "      def('alert',   { writable: true, value: function(){} });"
@@ -48080,11 +48416,22 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                                            : JS_UNDEFINED;
         JSValue realm_clone = JS_NewCFunction(fctx, ns_realm_clone_fn,
                                               "realmClone", 1);
-        JSValueConst args[12] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue window_events = JS_NewObjectProto(fctx, JS_NULL);
+        JS_SetPropertyStr(fctx, window_events, "add",
+            JS_NewCFunction(fctx, ns_window_addEventListener,
+                            "addEventListener", 2));
+        JS_SetPropertyStr(fctx, window_events, "remove",
+            JS_NewCFunction(fctx, ns_window_removeEventListener,
+                            "removeEventListener", 2));
+        JS_SetPropertyStr(fctx, window_events, "dispatch",
+            JS_NewCFunction(fctx, ns_window_dispatchEvent,
+                            "dispatchEvent", 1));
+        JSValueConst args[13] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
-                                  realm_clone };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 12, args);
+                                  realm_clone, window_events };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 13, args);
+        JS_FreeValue(fctx, window_events);
         JS_FreeValue(fctx, realm_clone);
         JS_FreeValue(fctx, docv);
         JS_FreeValue(fctx, frame_name_v);
@@ -48106,8 +48453,12 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     }
     JS_FreeValue(fctx, maker);
 
-    if (ok)
+    if (ok) {
         ns_realm_install_singletons(cloner, parent_global, fg);
+        ns_js_adopt_frame_window_events(js, fctx, fg);
+        ns_js_link_interface_ctors(fctx);
+        ns_js_lock_global_prototypes(fctx);
+    }
     if (ok) {
         JSValue parent_performance =
             JS_GetPropertyStr(fctx, parent_global, "performance");
@@ -55059,6 +55410,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_FreeValue(ctx, ev_carrier);
     }
 
+    ns_bind_fn(ctx, global, "__ndIsEngineFunction", ns_is_engine_function, 1);
     {
         static const char *et_src =
             "(function(){"
@@ -55069,13 +55421,39 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  var nDisp = NP && Object.prototype.hasOwnProperty.call(NP,'dispatchEvent') ? NP.dispatchEvent : null;"
             "  function isNode(o){ return o && typeof o.nodeType === 'number'; }"
             "  var K = '__nd_et_listeners';"
+            /* A window's addEventListener and friends are EventTarget's, as in
+             * WebIDL; each window's own implementation (the C one for the page,
+             * the frame bootstrap's for a frame) is kept here by window. */
+            "  var G = globalThis, WINDOW_OPS = new WeakMap();"
+            "  Object.defineProperty(G, '__ndAdoptWindowEventOps', { value: function(w){"
+            "    var gopd = Object.getOwnPropertyDescriptor;"
+            "    var a = gopd(w, 'addEventListener'), r = gopd(w, 'removeEventListener'),"
+            "        d = gopd(w, 'dispatchEvent');"
+            "    if (!a || typeof a.value !== 'function') return;"
+            "    WINDOW_OPS.set(w, { add: a.value, remove: r && r.value, dispatch: d && d.value });"
+            "    delete w.addEventListener; delete w.removeEventListener; delete w.dispatchEvent;"
+            "  } });"
+            "  function windowOps(o){ return WINDOW_OPS.get(o === undefined || o === null ? G : o); }"
+            "  var isEngineFn = G.__ndIsEngineFunction;"
+            /* An event handler IDL attribute is an accessor; a page's own data
+             * property named like one is not a handler. */
+            "  function handlerOf(o, type){"
+            "    var k = 'on' + type;"
+            "    for(var p = o; p; p = Object.getPrototypeOf(p)){"
+            "      var d = Object.getOwnPropertyDescriptor(p, k);"
+            "      if(d) return d.get && isEngineFn(d.get) ? d.get.call(o) : null;"
+            "    }"
+            "    return null;"
+            "  }"
             "  function reg(self){"
             "    var m = self[K];"
             "    if(!m){ m = Object.create(null);"
             "      Object.defineProperty(self, K, {value:m, enumerable:false, writable:true, configurable:true}); }"
             "    return m;"
             "  }"
-            "  ET.addEventListener = function(type, cb, opts){"
+            "  ET.addEventListener = function(type, cb){"
+            "    var opts = arguments[2], wo = windowOps(this);"
+            "    if(wo) return wo.add.apply(this == null ? G : this, arguments);"
             "    if(nAdd && isNode(this)) return nAdd.call(this, type, cb, opts);"
             "    var capture = !!(opts === true || (opts && typeof opts === 'object' && opts.capture));"
             "    var once = !!(opts && typeof opts === 'object' && opts.once);"
@@ -55094,7 +55472,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "      signal.addEventListener('abort', function(){ self.removeEventListener(type, cb, {capture:capture}); }, {once:true});"
             "    }"
             "  };"
-            "  ET.removeEventListener = function(type, cb, opts){"
+            "  ET.removeEventListener = function(type, cb){"
+            "    var opts = arguments[2], wo = windowOps(this);"
+            "    if(wo && wo.remove) return wo.remove.apply(this == null ? G : this, arguments);"
             "    if(nRem && isNode(this)) return nRem.call(this, type, cb, opts);"
             "    var m = this[K]; if(!m) return;"
             "    var capture = !!(opts === true || (opts && typeof opts === 'object' && opts.capture));"
@@ -55102,10 +55482,16 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    for(var i=0;i<list.length;i++){ if(list[i].cb===cb && list[i].capture===capture){ list[i].removed = true; list.splice(i,1); return; } }"
             "  };"
             "  ET.dispatchEvent = function(ev){"
+            "    var wo = windowOps(this);"
+            "    if(wo && wo.dispatch) return wo.dispatch.apply(this == null ? G : this, arguments);"
             "    if(nDisp && isNode(this)) return nDisp.call(this, ev);"
             "    if(!ev) return true;"
             "    try { Object.defineProperty(ev,'target',{value:this,configurable:true}); } catch(e){}"
             "    try { Object.defineProperty(ev,'currentTarget',{value:this,configurable:true}); } catch(e){}"
+            "    var h = handlerOf(this, String(ev.type));"
+            "    if(typeof h === 'function'){"
+            "      try { __ns_event_call(h, this, ev); } catch(e){ __ns_event_report(e); }"
+            "    }"
             "    var m = this[K];"
             "    if(m){"
             "      var list = m[String(ev.type)];"
@@ -55127,12 +55513,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    try { Object.defineProperty(ev,'currentTarget',{value:null,configurable:true,writable:true}); } catch(e){}"
             "    return !(ev && ev.defaultPrevented);"
             "  };"
+            "  Object.defineProperty(G, '__ndEventTargetMethods', { value: {"
+            "    add: ET.addEventListener, remove: ET.removeEventListener, dispatch: ET.dispatchEvent } });"
             "  var W = typeof Window !== 'undefined' && Window.prototype;"
             "  if(W){"
-            "    ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(k){"
-            "      if(!Object.prototype.hasOwnProperty.call(W,k))"
-            "        Object.defineProperty(W,k,{value:ET[k],writable:true,configurable:true});"
-            "    });"
+
             "    var win = typeof window !== 'undefined' ? window : globalThis;"
             "    try { if(Object.getPrototypeOf(win)!==W) Object.setPrototypeOf(win,W); } catch(e){}"
             "  }"
@@ -57107,7 +57492,8 @@ ns_window_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, type_v);
     if (!type) return JS_FALSE;
     JSValue ev = JS_DupValue(ctx, argv[0]);
-    JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_FALSE);
+    if (!JS_IsHostCaller(ctx))
+        JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_FALSE);
     JSValue event_window = JS_IsObject(this_val)
         ? JS_DupValue(ctx, this_val) : JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, ev, "target", event_window);
@@ -59147,6 +59533,9 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_install_navigator_shape(ctx);
     ns_js_link_interfaces(ctx);
     ns_js_name_engine_members(ctx);
+    ns_js_shape_window_global(ctx);
+    ns_js_link_interface_ctors(ctx);
+    ns_js_lock_global_prototypes(ctx);
     {
         JSValue g = JS_GetGlobalObject(ctx);
         JSValue doc_val = JS_GetPropertyStr(ctx, g, "document");
@@ -62022,6 +62411,15 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
     ns_bind_fn(ctx, g, "addEventListener",    ns_window_addEventListener,    2);
     ns_bind_fn(ctx, g, "removeEventListener", ns_window_removeEventListener, 2);
     ns_bind_fn(ctx, g, "dispatchEvent",       ns_window_dispatchEvent,         1);
+    {
+        JSValue adopt = JS_GetPropertyStr(ctx, g, "__ndAdoptWindowEventOps");
+        if (JS_IsFunction(ctx, adopt)) {
+            JSValue r = JS_Call(ctx, adopt, JS_UNDEFINED, 1, (JSValueConst *)&g);
+            if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, r);
+        }
+        JS_FreeValue(ctx, adopt);
+    }
     static const char *const carriers[] = {
         "Node", "Element", "HTMLElement", "SVGElement", "SVGAElement",
         "SVGSVGElement",
@@ -62045,37 +62443,15 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
         JS_FreeValue(ctx, proto);
         JS_FreeValue(ctx, ctor);
     }
+    /* EventTarget's methods are the ones et_src made, which also serve
+     * windows; a frame script that ran in this realm may have replaced them. */
     static const char src[] =
         "(function(){"
         "var ET=typeof EventTarget!=='undefined'&&EventTarget.prototype;"
-        "if(!ET)return;var K='__nd_et_listeners';"
-        "function reg(self){var m=self[K];if(!m){m=Object.create(null);"
-        "Object.defineProperty(self,K,{value:m,enumerable:false,writable:true,configurable:true});}return m;}"
-        "Object.defineProperty(ET,'addEventListener',{configurable:true,writable:true,value:function(type,cb,opts){"
-        "if(!cb||(typeof cb!=='function'&&typeof cb.handleEvent!=='function'))return;"
-        "var capture=!!(opts===true||(opts&&typeof opts==='object'&&opts.capture));"
-        "var once=!!(opts&&typeof opts==='object'&&opts.once);"
-        "var m=reg(this),key=String(type),list=m[key]||(m[key]=[]);"
-        "for(var i=0;i<list.length;i++){if(list[i].cb===cb&&list[i].capture===capture)return;}"
-        "list.push({cb:cb,once:once,capture:capture});}});"
-        "Object.defineProperty(ET,'removeEventListener',{configurable:true,writable:true,value:function(type,cb,opts){"
-        "var m=this[K];if(!m)return;var capture=!!(opts===true||(opts&&typeof opts==='object'&&opts.capture));"
-        "var list=m[String(type)];if(!list)return;"
-        "for(var i=0;i<list.length;i++){if(list[i].cb===cb&&list[i].capture===capture){list.splice(i,1);return;}}}});"
-        "Object.defineProperty(ET,'dispatchEvent',{configurable:true,writable:true,value:function(ev){"
-        "if(!ev)return true;try{Object.defineProperty(ev,'target',{value:this,configurable:true});}catch(e){}"
-        "try{Object.defineProperty(ev,'currentTarget',{value:this,configurable:true});}catch(e){}"
-        "var m=this[K];if(m){var list=m[String(ev.type)];if(list){var snap=list.slice();"
-        "for(var i=0;i<snap.length;i++){var L=snap[i];if(L.once){var idx=list.indexOf(L);if(idx>=0)list.splice(idx,1);}"
-        "try{if(typeof L.cb==='function')L.cb.call(this,ev);else if(L.cb&&typeof L.cb.handleEvent==='function')L.cb.handleEvent(ev);}"
-        "catch(e){console.log('[event listener error] '+e+(e&&e.stack?'\\n'+e.stack:''));}}}}"
-        "try{Object.defineProperty(ev,'currentTarget',{value:null,configurable:true});}catch(e){}"
-        "return !(ev&&ev.defaultPrevented);}});"
-        "var W=typeof Window!=='undefined'&&Window.prototype;"
-        "if(W){['addEventListener','removeEventListener','dispatchEvent'].forEach(function(k){"
-        "Object.defineProperty(W,k,{value:ET[k],writable:true,configurable:true});});"
-        "var win=typeof window!=='undefined'?window:globalThis;"
-        "try{if(Object.getPrototypeOf(win)!==W)Object.setPrototypeOf(win,W);}catch(e){}}"
+        "var m=globalThis.__ndEventTargetMethods;"
+        "if(!ET||!m)return;"
+        "[['addEventListener',m.add],['removeEventListener',m.remove],['dispatchEvent',m.dispatch]].forEach(function(e){"
+        "Object.defineProperty(ET,e[0],{value:e[1],writable:true,enumerable:true,configurable:true});});"
         "})()";
     JSValue v = JS_Eval(ctx, src, strlen(src), "<iframe-events>",
                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
