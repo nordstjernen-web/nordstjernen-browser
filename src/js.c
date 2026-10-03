@@ -941,7 +941,7 @@ ns_js_body_bytes(JSContext *ctx, JSValueConst value, gsize *out_len)
     }
 
     if (JS_IsObject(value)) {
-        JSValue b = JS_GetPropertyStr(ctx, value, "_b");
+        JSValue b = JS_GetPropertyStr(ctx, value, "__ndBlobBytes");
         if (JS_IsException(b)) {
             JS_FreeValue(ctx, JS_GetException(ctx));
             return NULL;
@@ -999,7 +999,7 @@ ns_js_form_data_serialize(JSContext *ctx, JSValueConst fd,
             const char *ks = JS_ToCString(ctx, k);
 
             JSValue b_priv = JS_IsObject(v)
-                ? JS_GetPropertyStr(ctx, v, "_b") : JS_UNDEFINED;
+                ? JS_GetPropertyStr(ctx, v, "__ndBlobBytes") : JS_UNDEFINED;
             gboolean is_blob = !JS_IsUndefined(b_priv) && !JS_IsNull(b_priv);
             JS_FreeValue(ctx, b_priv);
 
@@ -15248,7 +15248,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
 
     if (ns_sc_isa(ctx, v, s->file_ctor) || ns_sc_isa(ctx, v, s->blob_ctor)) {
         gboolean is_file = ns_sc_isa(ctx, v, s->file_ctor);
-        JSValue bytes = JS_GetPropertyStr(ctx, v, "_b");
+        JSValue bytes = JS_GetPropertyStr(ctx, v, "__ndBlobBytes");
         JSValue cbytes = ns_sc_clone(s, bytes);
         JS_FreeValue(ctx, bytes);
         if (JS_IsException(cbytes)) return cbytes;
@@ -22463,7 +22463,7 @@ static char *
 ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob, gsize *out_len)
 {
     if (out_len) *out_len = 0;
-    JSValue b = JS_GetPropertyStr(ctx, blob, "_b");
+    JSValue b = JS_GetPropertyStr(ctx, blob, "__ndBlobBytes");
     if (JS_IsUndefined(b) || JS_IsNull(b)) {
         JS_FreeValue(ctx, b);
         const char *s = JS_ToCString(ctx, blob);
@@ -22878,7 +22878,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
             return;
         }
 
-        JSValue b_priv = JS_GetPropertyStr(ctx, body, "_b");
+        JSValue b_priv = JS_GetPropertyStr(ctx, body, "__ndBlobBytes");
         gboolean is_blob = !JS_IsUndefined(b_priv) && !JS_IsNull(b_priv);
         JS_FreeValue(ctx, b_priv);
         if (is_blob) {
@@ -23678,7 +23678,7 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ex);
 
     if (JS_IsObject(argv[0])) {
-        JSValue b = JS_GetPropertyStr(ctx, argv[0], "_b");
+        JSValue b = JS_GetPropertyStr(ctx, argv[0], "__ndBlobBytes");
         gboolean is_blob = !JS_IsException(b) &&
                            !JS_IsUndefined(b) && !JS_IsNull(b);
         if (JS_IsException(b)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -24716,7 +24716,7 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
 
     gboolean is_file = ns_sc_isa(ctx, v, e->file_ctor);
     if (is_file || ns_sc_isa(ctx, v, e->blob_ctor)) {
-        JSValue bytes = JS_GetPropertyStr(ctx, v, "_b");
+        JSValue bytes = JS_GetPropertyStr(ctx, v, "__ndBlobBytes");
         JSValue bnode = ns_wire_encode(e, bytes);
         JS_FreeValue(ctx, bytes);
         if (JS_IsException(bnode)) return bnode;
@@ -26576,6 +26576,16 @@ ns_net_link_event_targets(JSContext *ctx, JSValueConst global)
 }
 
 static void
+ns_net_add_private_names(JSContext *ctx)
+{
+    static const char *const names[] = {
+        "__ndBlobBytes", "__ndBlobType", "__ndFileName", "__ndFileMtime",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        JS_AddEnginePrivateName(ctx, names[i]);
+}
+
+static void
 ns_net_install_interfaces(JSContext *ctx, JSValueConst global)
 {
     ns_ho_install_attrs(ctx, global);
@@ -26609,6 +26619,7 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndIsEngineFunction" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
+    ns_net_add_private_names(ctx);
 }
 
 static void ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst obj);
@@ -46155,7 +46166,7 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, u8c);
             JS_FreeValue(ctx, ab);
             blob = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, blob, "_b", u8a);
+            JS_SetPropertyStr(ctx, blob, "__ndBlobBytes", u8a);
             JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
             JS_SetPropertyStr(ctx, blob, "type",
                               JS_NewString(ctx, "image/png"));
