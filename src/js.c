@@ -1468,9 +1468,12 @@ static gboolean ns_timer_fire(gpointer data);
 static void
 ns_js_run_due_timers(ns_js *js)
 {
+    /* A timer is a task of its own: never run one inside another task's
+       work, such as a frame being loaded, a script or a callback. */
     if (!js || !js->ctx || js->halted || js->in_pump ||
         js->dispatch_depth > 0 || js->running_due_timers ||
-        js->n_immediate_timers <= 0)
+        js->iframe_load_depth > 0 || js->callback_depth > 0 ||
+        js->eval_depth > 0 || js->n_immediate_timers <= 0)
         return;
     if (ns_engine_in_blocking_fetch()) return;
     gint64 now = g_get_monotonic_time();
@@ -1807,9 +1810,11 @@ ns_timer_this_is_detached_window(ns_js *js, JSContext *ctx,
     if (!doc || doc == js->current_doc) return FALSE;
     if (doc->kind != NS_NODE_DOCUMENT || (doc->flags & NS_NODE_FRAGMENT))
         return FALSE;
-    for (const ns_node *p = doc; p; p = p->parent)
-        if (p == js->current_doc) return FALSE;
-    return TRUE;
+    /* Attached means in the page's frame tree, whichever of its documents
+       the engine is running code for (a parent's listener can run while a
+       frame's document is current). */
+    ns_node *top = ns_js_top_document(js->current_doc);
+    return top && ns_js_top_document((ns_node *)doc) != top;
 }
 
 static JSValue
