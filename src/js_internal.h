@@ -32,6 +32,11 @@ typedef struct ns_canvas_state {
     double shadow_r, shadow_g, shadow_b, shadow_a;
     double shadow_blur, shadow_ox, shadow_oy;
     gboolean origin_clean;
+    JSValue ctx2d;
+    JSContext *jsctx;
+    JSRuntime *rt;
+    ns_node *owned_node;
+    int context_kind;
 } ns_canvas_state;
 
 typedef struct ns_path2d {
@@ -258,6 +263,8 @@ struct ns_js {
     gint64        last_pump_us;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
+    /* listener lists copied for a dispatch in progress (kept from sweeps) */
+    int           listener_snapshots;
     int           callback_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;
@@ -416,17 +423,23 @@ ns_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
 gboolean
 ns_image_bitmap_is(JSValueConst v);
 JSValue
+ns_image_bitmap_clone(JSContext *ctx, JSValueConst v);
+JSValue
+ns_canvas_clone_object(JSContext *ctx, JSValueConst v);
+JSValue
 ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv);
 JSValue
 ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
 JSValue
+ns_offscreen_getContext(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv);
+JSValue
 ns_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
                   double e, double f);
 JSValue
-ns_window_offscreen_canvas_ctor(JSContext *ctx, JSValueConst this_val,
-                                int argc, JSValueConst *argv);
+ns_canvas_throw_dom(JSContext *ctx, const char *name, const char *msg);
 int
 ns_canvas_dim_from_attr(const ns_node *el, const char *name, int defv);
 gboolean
@@ -579,8 +592,6 @@ JSValue
 ns_ctx_createConicGradient(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv);
 JSValue
-ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba);
-JSValue
 ns_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv);
 JSValue
@@ -648,8 +659,6 @@ ns_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_path2d_addPath(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv);
-void
-ns_path2d_attach_methods(JSContext *ctx, JSValueConst obj);
 const char *
 ns_svg_skip_ws(const char *p);
 gboolean
@@ -684,6 +693,58 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
 
 void ns_canvas_register_image_bitmap_class(JSRuntime *rt);
 void ns_canvas_register_path2d_class(JSRuntime *rt);
+void ns_image_bitmap_define_members(JSContext *ctx, JSValueConst global);
+
+/* The canvas objects' WebIDL surface (js_canvas_api.c). */
+enum {
+    NS_HK_CTX2D,
+    NS_HK_OFFSCREEN_CTX2D,
+    NS_HK_GRADIENT,
+    NS_HK_PATTERN,
+    NS_HK_IMAGEDATA,
+    NS_HK_TEXTMETRICS,
+    NS_HK_OFFSCREEN,
+    NS_HK_ACTIVEINFO,
+    NS_HK_PRECISION,
+};
+void ns_canvas_register_classes(JSRuntime *rt);
+gpointer ns_hidden_ptr(JSValueConst v);
+void ns_hidden_set_ptr(JSValueConst v, gpointer ptr);
+JSValue ns_hidden_new(JSContext *realm, int kind, JSValueConst proto);
+gboolean ns_hidden_is(JSValueConst v, int kind);
+JSValue ns_hget(JSContext *ctx, JSValueConst obj, const char *name);
+void ns_hset(JSContext *ctx, JSValueConst obj, const char *name, JSValue val);
+gboolean ns_ctx2d_is(JSValueConst v);
+JSContext *ns_canvas_realm(JSContext *ctx, const ns_node *el);
+JSContext *ns_ctx_realm(JSContext *ctx, JSValueConst this_val);
+JSContext *ns_js_realm_for_node(ns_js *js, const ns_node *node);
+char *ns_js_computed_text(JSContext *ctx, const ns_node *node, const char *name);
+JSValue ns_api_proto(JSContext *realm, const char *iface);
+JSValue ns_api_proto_of_ctor(JSContext *ctx, JSValueConst new_target,
+                             const char *iface);
+JSValue ns_api_throw_new_required(JSContext *ctx, const char *iface);
+JSValue ns_api_interface(JSContext *ctx, JSValueConst global, const char *name,
+                         JSValue ctor, const char *parent);
+char *ns_canvas_color_string(const char *css);
+char *ns_canvas_font_string(const char *css);
+void ns_ctx2d_init_state(JSContext *ctx, JSValueConst obj);
+JSValue ns_ctx2d_new(JSContext *ctx, const ns_node *el, JSValueConst canvas_obj,
+                     gboolean offscreen, JSValue attrs);
+JSValue ns_gradient_new(JSContext *ctx, JSContext *realm, const char *type);
+JSValue ns_pattern_new(JSContext *ctx, JSContext *realm, JSValueConst source,
+                       const char *repetition);
+JSValue ns_textmetrics_new(JSContext *ctx, JSContext *realm, const double v[10]);
+JSValue ns_imagedata_wrap(JSContext *ctx, JSContext *realm, JSValueConst proto,
+                          int w, int h, JSValue data, const char *color_space);
+JSValue ns_imagedata_new(JSContext *ctx, JSContext *realm, int w, int h,
+                         const uint8_t *rgba);
+JSValue ns_imagedata_construct(JSContext *ctx, JSValueConst new_target, int argc,
+                               JSValueConst *argv);
+const ns_node *ns_offscreen_node(JSValueConst obj);
+void ns_offscreen_sync_size(JSContext *ctx, JSValueConst obj);
+JSValue ns_offscreen_construct(JSContext *ctx, JSValueConst new_target, int argc,
+                               JSValueConst *argv);
+void ns_canvas_install(JSContext *ctx, JSValueConst global, gboolean window);
 
 /* Performance API (js_perf.c) and the js.c helpers it shares. */
 void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
