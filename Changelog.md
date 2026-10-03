@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* The fetcher looks for a bundled CA certificate file next to the browser
+  through the executable path the app resolved at startup, instead of
+  resolving that path a second time with its own copy of the code.
 * The built-in pages share one modern style with light and dark colours.
   about:start is a new-tab page with the Nordstjernen mark, a large search
   field that also opens typed addresses, and shortcuts to History,
