@@ -1638,7 +1638,7 @@ ns_idle_deadline_did_timeout(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_idle_deadline_new(ns_js *js, JSContext *ctx, gboolean did_timeout)
+ns_idle_deadline_object(JSContext *ctx)
 {
     ns_new_class_id(&ns_idle_deadline_class_id);
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -1654,30 +1654,51 @@ ns_idle_deadline_new(ns_js *js, JSContext *ctx, gboolean did_timeout)
     JS_FreeValue(ctx, proto);
     JS_FreeValue(ctx, ctor);
     JS_FreeValue(ctx, global);
+    return o;
+}
+
+static gboolean
+ns_idle_timer_due_before(const ns_timer *t, gint64 now, gint64 end)
+{
+    return t && !t->is_idle && !t->firing && t->glib_source &&
+           t->due_us > now && t->due_us < end;
+}
+
+static gint64
+ns_idle_timers_end(ns_js *js, gint64 now, gint64 end)
+{
+    if (!js || !js->timers) return end;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, js->timers);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        const ns_timer *t = v;
+        if (ns_idle_timer_due_before(t, now, end)) end = t->due_us;
+    }
+    return end;
+}
+
+static gint64
+ns_idle_frame_end(ns_js *js, gint64 now, gint64 end)
+{
+    if (!js || !js->raf_pending || js->raf_pending->len == 0) return end;
+    gint64 frame = (js->raf_last_us > 0 ? js->raf_last_us : now) + 16667;
+    if (frame > now && frame < end) end = frame;
+    return end;
+}
+
+static JSValue
+ns_idle_deadline_new(ns_js *js, JSContext *ctx, gboolean did_timeout)
+{
+    JSValue o = ns_idle_deadline_object(ctx);
     if (JS_IsException(o)) return o;
     ns_idle_deadline *d = g_new0(ns_idle_deadline, 1);
     gint64 now = g_get_monotonic_time();
     d->did_timeout = did_timeout;
     d->deadline_us = now;
     if (!did_timeout) {
-        gint64 end = now + 50 * 1000;
-        if (js && js->timers) {
-            GHashTableIter it;
-            gpointer k, v;
-            g_hash_table_iter_init(&it, js->timers);
-            while (g_hash_table_iter_next(&it, &k, &v)) {
-                const ns_timer *t = v;
-                if (t && !t->is_idle && !t->firing && t->glib_source &&
-                    t->due_us > now && t->due_us < end)
-                    end = t->due_us;
-            }
-        }
-        if (js && js->raf_pending && js->raf_pending->len > 0) {
-            gint64 frame = (js->raf_last_us > 0 ? js->raf_last_us : now) +
-                           16667;
-            if (frame > now && frame < end) end = frame;
-        }
-        d->deadline_us = end;
+        gint64 end = ns_idle_timers_end(js, now, now + 50 * 1000);
+        d->deadline_us = ns_idle_frame_end(js, now, end);
     }
     JS_SetOpaque(o, d);
     return o;
@@ -2036,36 +2057,42 @@ ns_event_define_own_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
 }
 
 static int
+ns_event_set_state_property(JSContext *ctx, ns_event_data *d, JSValueConst obj,
+                            JSAtom prop, JSValueConst value, int flags)
+{
+    /* An accessor the engine put in the state runs on the event. */
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, d->state, prop);
+    if (has < 0) return -1;
+    if (has) {
+        JS_FreeValue(ctx, desc.value);
+        if (desc.flags & JS_PROP_GETSET) {
+            int ret = TRUE;
+            if (JS_IsFunction(ctx, desc.setter)) {
+                JSValue r = JS_Call(ctx, desc.setter, obj, 1, &value);
+                ret = JS_IsException(r) ? -1 : TRUE;
+                JS_FreeValue(ctx, r);
+            }
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+            return ret;
+        }
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+    }
+    return JS_SetPropertyReceiver(ctx, d->state, prop,
+                                  JS_DupValue(ctx, value), d->state, flags);
+}
+
+static int
 ns_event_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                       JSValueConst value, JSValueConst receiver, int flags)
 {
     ns_event_data *d = ns_event_data_of(obj);
     if (d && JS_IsHostAccess(ctx) &&
         JS_VALUE_GET_PTR(receiver) == JS_VALUE_GET_PTR(obj) &&
-        !ns_event_keeps_own(ctx, obj, prop, value)) {
-        /* An accessor the engine put in the state runs on the event. */
-        JSPropertyDescriptor desc;
-        int has = JS_GetOwnProperty(ctx, &desc, d->state, prop);
-        if (has < 0) return -1;
-        if (has) {
-            JS_FreeValue(ctx, desc.value);
-            if (desc.flags & JS_PROP_GETSET) {
-                int ret = TRUE;
-                if (JS_IsFunction(ctx, desc.setter)) {
-                    JSValue r = JS_Call(ctx, desc.setter, obj, 1, &value);
-                    ret = JS_IsException(r) ? -1 : TRUE;
-                    JS_FreeValue(ctx, r);
-                }
-                JS_FreeValue(ctx, desc.getter);
-                JS_FreeValue(ctx, desc.setter);
-                return ret;
-            }
-            JS_FreeValue(ctx, desc.getter);
-            JS_FreeValue(ctx, desc.setter);
-        }
-        return JS_SetPropertyReceiver(ctx, d->state, prop,
-                                      JS_DupValue(ctx, value), d->state, flags);
-    }
+        !ns_event_keeps_own(ctx, obj, prop, value))
+        return ns_event_set_state_property(ctx, d, obj, prop, value, flags);
     /* The page's assignment: an ordinary [[Set]], which finds the
      * interface's getter on the prototype or adds an own property. */
     JSValue proto = JS_GetPrototype(ctx, obj);
@@ -2444,6 +2471,56 @@ static const ns_event_attr ns_event_attrs[] = {
     { "XRVisibilityMaskChangeEvent", "vertices", NS_EV_NULL, FALSE },
 };
 
+static JSValue
+ns_event_attr_default(JSContext *ctx, ns_event_attr_kind kind)
+{
+    switch (kind) {
+    case NS_EV_NUMBER:    return JS_NewInt32(ctx, 0);
+    case NS_EV_BOOL:      return JS_FALSE;
+    case NS_EV_STRING:    return JS_NewString(ctx, "");
+    case NS_EV_UNDEFINED: return JS_UNDEFINED;
+    case NS_EV_ARRAY: {
+        JSValue arr = JS_NewArray(ctx);
+        JS_FreezeObject(ctx, arr);
+        return arr;
+    }
+    case NS_EV_NULL:
+    default:              return JS_NULL;
+    }
+}
+
+static JSValue
+ns_event_attr_plain_receiver(JSContext *ctx, JSValueConst this_val)
+{
+    /* Events some engine paths still make as plain objects carry their
+     * attributes themselves; reaching here, they lack this one.  The
+     * interface's prototype is not an event. */
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
+    int is_proto = JS_GetOwnProperty(ctx, NULL, this_val, ctor_atom);
+    JS_FreeAtom(ctx, ctor_atom);
+    if (is_proto == 0) return JS_UNDEFINED;
+    return is_proto < 0 ? JS_EXCEPTION
+                        : JS_ThrowTypeError(ctx, "Illegal invocation");
+}
+
+static JSValue
+ns_event_attr_from_descriptor(JSContext *ctx, JSValueConst this_val,
+                              JSPropertyDescriptor *desc)
+{
+    if (desc->flags & JS_PROP_GETSET) {
+        JSValue r = JS_IsFunction(ctx, desc->getter)
+            ? JS_Call(ctx, desc->getter, this_val, 0, NULL) : JS_UNDEFINED;
+        JS_FreeValue(ctx, desc->getter);
+        JS_FreeValue(ctx, desc->setter);
+        return r;
+    }
+    JS_FreeValue(ctx, desc->getter);
+    JS_FreeValue(ctx, desc->setter);
+    return desc->value;
+}
+
 /* The getter of an event attribute: the event's own state, or what a fresh
  * event of the interface has. */
 static JSValue
@@ -2463,43 +2540,11 @@ ns_event_attr_get(JSContext *ctx, JSValueConst this_val, int argc,
         JS_FreeAtom(ctx, atom);
         if (has < 0) return JS_EXCEPTION;
     } else {
-        /* Events some engine paths still make as plain objects carry their
-         * attributes themselves; reaching here, they lack this one.  The
-         * interface's prototype is not an event. */
-        if (!JS_IsObject(this_val))
-            return JS_ThrowTypeError(ctx, "Illegal invocation");
-        JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
-        int is_proto = JS_GetOwnProperty(ctx, NULL, this_val, ctor_atom);
-        JS_FreeAtom(ctx, ctor_atom);
-        if (is_proto != 0)
-            return is_proto < 0 ? JS_EXCEPTION
-                                : JS_ThrowTypeError(ctx, "Illegal invocation");
+        JSValue bad = ns_event_attr_plain_receiver(ctx, this_val);
+        if (!JS_IsUndefined(bad)) return bad;
     }
-    if (has) {
-        if (desc.flags & JS_PROP_GETSET) {
-            JSValue r = JS_IsFunction(ctx, desc.getter)
-                ? JS_Call(ctx, desc.getter, this_val, 0, NULL) : JS_UNDEFINED;
-            JS_FreeValue(ctx, desc.getter);
-            JS_FreeValue(ctx, desc.setter);
-            return r;
-        }
-        JS_FreeValue(ctx, desc.getter);
-        JS_FreeValue(ctx, desc.setter);
-        return desc.value;
-    }
-    switch (a->kind) {
-    case NS_EV_NUMBER:    return JS_NewInt32(ctx, 0);
-    case NS_EV_BOOL:      return JS_FALSE;
-    case NS_EV_STRING:    return JS_NewString(ctx, "");
-    case NS_EV_UNDEFINED: return JS_UNDEFINED;
-    case NS_EV_ARRAY: {
-        JSValue arr = JS_NewArray(ctx);
-        JS_FreezeObject(ctx, arr);
-        return arr;
-    }
-    case NS_EV_NULL:
-    default:              return JS_NULL;
-    }
+    if (has) return ns_event_attr_from_descriptor(ctx, this_val, &desc);
+    return ns_event_attr_default(ctx, a->kind);
 }
 
 static JSValue
@@ -57484,6 +57529,15 @@ ns_window_removeEventListener(JSContext *ctx, JSValueConst this_val,
                                             argc, argv, TRUE);
 }
 
+static void
+ns_event_default_false(JSContext *ctx, JSValueConst ev, const char *name)
+{
+    JSValue v = JS_GetPropertyStr(ctx, ev, name);
+    if (JS_IsUndefined(v))
+        JS_SetPropertyStr(ctx, ev, name, JS_FALSE);
+    JS_FreeValue(ctx, v);
+}
+
 static JSValue
 ns_window_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -57504,14 +57558,8 @@ ns_window_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     JSValue event_window = JS_IsObject(this_val)
         ? JS_DupValue(ctx, this_val) : JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, ev, "target", event_window);
-    JSValue dp = JS_GetPropertyStr(ctx, ev, "defaultPrevented");
-    if (JS_IsUndefined(dp))
-        JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
-    JS_FreeValue(ctx, dp);
-    JSValue propstop = JS_GetPropertyStr(ctx, ev, "_propagation_stopped");
-    if (JS_IsUndefined(propstop))
-        JS_SetPropertyStr(ctx, ev, "_propagation_stopped", JS_FALSE);
-    JS_FreeValue(ctx, propstop);
+    ns_event_default_false(ctx, ev, "defaultPrevented");
+    ns_event_default_false(ctx, ev, "_propagation_stopped");
     gboolean prevented = FALSE;
     ns_js_dispatch_window_only_event(js,
                                      ns_window_document_for(ctx, this_val),
