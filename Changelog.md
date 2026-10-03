@@ -227,7 +227,7 @@ Changelog:
   resize, the stencil masks read back unsigned and `getContextAttributes()`
   lists its members in dictionary order.
 * CI no longer runs CodeQL: the `codeql` workflow, its configuration and
-  the README badge are gone.
+  the README badge are gone. The Semgrep badge is gone too.
 
 1.0.27:
 ======
