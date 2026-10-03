@@ -2112,8 +2112,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->buf_sent = TRUE;
             double buffered_end = ns_video_buffered_end(cache, v);
             if (buffered_end <= 0.0) buffered_end = v->duration;
-            if (buffered_end > 0.0)
+            if (buffered_end > 0.0 && buffered_end != v->sent_buffered_end) {
+                v->sent_buffered_end = buffered_end;
                 ns_video_queue_emit(emits, v, "buf", buffered_end);
+            }
         }
         gboolean helper_owns = ns_video_helper_enabled() &&
                                (v->video_opened || v->mse_id != 0);

@@ -33161,9 +33161,11 @@ ns_js_walk_collect_media_events(const ns_box *b, GPtrArray *imgs,
                 g_array_append_val(img_failed, failed);
             }
         } else if (strcmp(b->dom->name, "video") == 0 && b->media->video) {
-            const ns_video *v = (const ns_video *)b->media->video;
-            if (v->loaded)
+            ns_video *v = b->media->video;
+            if (v->loaded && !v->load_events_fired) {
+                v->load_events_fired = TRUE;
                 g_ptr_array_add(videos, (gpointer)b->dom);
+            }
         }
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
