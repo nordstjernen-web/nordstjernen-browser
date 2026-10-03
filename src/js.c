@@ -27103,6 +27103,18 @@ static const char ns_worker_global_shape_src[] =
     "    if (L) { def(G.WorkerLocation.prototype, 'toString', { value: function toString(){"
     "        if (this !== L) throw illegal(); return lf.href; }, writable: true, enumerable: true, configurable: true });"
     "      def(G, 'location', { value: L, writable: true, enumerable: true, configurable: true }); } }"
+    /* navigator.userAgentData is a NavigatorUAData: attributes as getters,
+     * operations on the prototype */
+    "  var uad = nav && nav.value && gopd(nav.value, 'userAgentData');"
+    "  if (uad && uad.value && typeof G.NavigatorUAData === 'function') {"
+    "    var uf = uad.value, UP = G.NavigatorUAData.prototype, U = Object.create(UP);"
+    "    ['brands','mobile','platform'].forEach(function(k){ var v = uf[k];"
+    "      def(UP, k, { get: getter(k, function(){ if (this !== U) throw illegal(); return v; }),"
+    "                   enumerable: true, configurable: true }); });"
+    "    ['getHighEntropyValues','toJSON'].forEach(function(k){ var f = uf[k];"
+    "      if (typeof f === 'function') def(UP, k, { value: f, writable: true, enumerable: true, configurable: true }); });"
+    "    tag(G.NavigatorUAData, 'NavigatorUAData');"
+    "    def(nav.value, 'userAgentData', { value: U, writable: true, enumerable: true, configurable: true }); }"
     "  if (nav && nav.value && typeof nav.value === 'object') {"
     "    var nf = {}, nsrc = nav.value;"
     "    Object.getOwnPropertyNames(nsrc).forEach(function(k){ var d = gopd(nsrc, k); if (d && 'value' in d) nf[k] = d.value; });"
@@ -27403,6 +27415,7 @@ ns_worker_js_new(ns_worker_host *host)
                      ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WorkerLocation", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WorkerNavigator", ns_illegal_constructor, 0);
+    ns_bind_ctor(ctx, global, "NavigatorUAData", ns_illegal_constructor, 0);
     ns_bind_fn(ctx, global, "reportError", ns_worker_report_error, 1);
     JS_SetPropertyStr(ctx, global, "_listeners", JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, global);
@@ -27438,6 +27451,20 @@ ns_worker_js_new(ns_worker_host *host)
                       (!c || c->do_not_track) ? JS_NewString(ctx, "1") : JS_NULL);
     JS_SetPropertyStr(ctx, navigator, "globalPrivacyControl",
                       JS_NewBool(ctx, !c || c->global_privacy_control));
+    if (ns_compat_has_client_hints(wkr_ua)) {
+        /* the same User-Agent Client Hints as the window's navigator */
+        JSValue ua_data = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, ua_data, "brands",
+                          ns_ua_client_hint_brands(ctx, FALSE));
+        JS_SetPropertyStr(ctx, ua_data, "mobile",
+                          JS_NewBool(ctx, ns_net_is_mobile_mode()));
+        JS_SetPropertyStr(ctx, ua_data, "platform",
+                          JS_NewString(ctx, ns_net_ua_hint_platform()));
+        ns_bind_fn(ctx, ua_data, "getHighEntropyValues",
+                   ns_navigator_high_entropy_values, 1);
+        ns_bind_fn(ctx, ua_data, "toJSON", ns_navigator_ua_data_to_json, 0);
+        JS_SetPropertyStr(ctx, navigator, "userAgentData", ua_data);
+    }
     JS_SetPropertyStr(ctx, global, "navigator", navigator);
 
     JSValue performance = JS_NewObject(ctx);
