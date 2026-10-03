@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* Scripts with many functions parse faster (about 9% on a 1.2 MB script of
+  40,000 small functions): a nested function now shares its script's file
+  name instead of looking the URL up again in the atom table.
 * Pages with container queries relayout in one pass instead of two when no
   container changed size: the previous relayout's container sizes are used
   for the first cascade and checked against the new layout, and only a
