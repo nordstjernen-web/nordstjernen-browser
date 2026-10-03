@@ -33951,7 +33951,10 @@ static JSFunctionDef *js_new_function_def(JSContext *ctx,
     fd->scope_first = -1;
     fd->body_scope = -1;
 
-    fd->filename = JS_NewAtom(ctx, filename);
+    if (parent)
+        fd->filename = JS_DupAtom(ctx, parent->filename);
+    else
+        fd->filename = JS_NewAtom(ctx, filename);
     fd->line_num = line_num;
     fd->col_num = col_num;
 
