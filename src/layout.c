@@ -7522,11 +7522,14 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     }
     {
         const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
+        double w = -1;
         if (wv && wv->kind == NS_CSS_V_LENGTH &&
             (wv->u.length.unit == NS_CSS_UNIT_PX ||
-             wv->u.length.unit == NS_CSS_UNIT_NUMBER) &&
-            wv->u.length.v >= 0) {
-            double w = wv->u.length.v;
+             wv->u.length.unit == NS_CSS_UNIT_NUMBER))
+            w = wv->u.length.v;
+        else if (wv && wv->kind == NS_CSS_V_CALC && !value_is_percent(wv))
+            w = length_resolve(wv, 0, -1);
+        if (w >= 0) {
             if (flex_box_is_border_box(box)) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(box->style, 0, &m, &pd, &bd);

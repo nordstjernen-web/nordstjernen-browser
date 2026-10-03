@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* A box that sizes itself to its content (flex, inline-block, float) counts a
+  child's `calc()` width. Wikipedia's "Checked" review indicator came out
+  20 px too narrow, its icon shrank to half width and the text ran into the
+  lock icon.
 * A grid item that spans a `1fr` row in a grid without a set height grows
   only that row, not the `min-content` rows it also spans. Wikipedia's
   Appearance sidebar spans the title, tab bar and article rows, and pushed
