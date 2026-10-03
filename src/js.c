@@ -61724,6 +61724,34 @@ ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
     ns_js_report_exception_at(js, ex, origin, 0, 0);
 }
 
+/* The location of a stack line: "at name (file:line:column)", or "at
+ * file:line:column" for a function without a name. */
+static char *
+ns_js_stack_line_location(const char *line, gsize n)
+{
+    while (n > 0 && (*line == ' ' || *line == '\t')) { line++; n--; }
+    if (n < 3 || strncmp(line, "at ", 3) != 0) return NULL;
+    line += 3;
+    n -= 3;
+    const char *open = n > 0 && line[n - 1] == ')' ? memchr(line, '(', n) : NULL;
+    if (open)
+        return g_strndup(open + 1, (gsize)(line + n - 1 - open - 1));
+    return g_strndup(line, n);
+}
+
+static gboolean
+ns_js_parse_location(const char *loc, char **file, int *line, int *col)
+{
+    const char *c2 = strrchr(loc, ':');
+    const char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
+    if (!c1 || !g_ascii_isdigit(c1[1]) || !g_ascii_isdigit(c2[1]))
+        return FALSE;
+    *line = atoi(c1 + 1);
+    *col = atoi(c2 + 1);
+    *file = g_strndup(loc, (gsize)(c1 - loc));
+    return TRUE;
+}
+
 static gboolean
 ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
 {
@@ -61735,20 +61763,9 @@ ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
     gboolean found = FALSE;
     for (const char *p = text; p && *p && !found; ) {
         const char *eol = strchr(p, '\n');
-        gsize n = eol ? (gsize)(eol - p) : strlen(p);
-        const char *open = memchr(p, '(', n);
-        if (open && n > 0 && p[n - 1] == ')') {
-            g_autofree char *loc = g_strndup(open + 1, (gsize)(p + n - 1 - open - 1));
-            char *c2 = strrchr(loc, ':');
-            char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
-            if (c1 && c2 && g_ascii_isdigit(c1[1]) && g_ascii_isdigit(c2[1])) {
-                *line = atoi(c1 + 1);
-                *col = atoi(c2 + 1);
-                *c1 = '\0';
-                *file = g_strdup(loc);
-                found = TRUE;
-            }
-        }
+        g_autofree char *loc = ns_js_stack_line_location(
+            p, eol ? (gsize)(eol - p) : strlen(p));
+        found = loc && ns_js_parse_location(loc, file, line, col);
         p = eol ? eol + 1 : NULL;
     }
     if (text) JS_FreeCString(ctx, text);
