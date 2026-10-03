@@ -4655,16 +4655,25 @@ ns_install_body_reflected_handlers(JSContext *ctx, JSValueConst wrapper)
     }
 }
 
+/* The page's own document object, the main realm's document: every realm
+ * sees that one object for the page's document node. */
+static JSValue
+ns_page_document_object(ns_js *js)
+{
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSValue global = JS_GetGlobalObject(main_ctx);
+    JSValue doc = JS_GetPropertyStr(main_ctx, global, "document");
+    JS_FreeValue(main_ctx, global);
+    return doc;
+}
+
 JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
 {
     if (!cnode) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
-    if (js && cnode == js->current_doc && !cnode->parent &&
-        ctx == js->main_realm_ctx) {
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue doc = JS_GetPropertyStr(ctx, global, "document");
-        JS_FreeValue(ctx, global);
+    if (js && cnode == js->ce_main_doc && !cnode->parent) {
+        JSValue doc = ns_page_document_object(js);
         if (!JS_IsUndefined(doc) && !JS_IsNull(doc))
             return doc;
         JS_FreeValue(ctx, doc);
