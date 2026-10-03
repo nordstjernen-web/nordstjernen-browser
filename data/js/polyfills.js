@@ -134,6 +134,14 @@
         });
     }
 
+    function idlSingletonBrand(proto, state) {
+        var isPrototypeOf = Object.prototype.isPrototypeOf;
+        return function (obj) {
+            if (!isPrototypeOf.call(proto, obj)) throw new TypeError('Illegal invocation');
+            return state;
+        };
+    }
+
     function idlHandlerState(state) {
         state.handlers = Object.create(null);
         return state;
@@ -2378,9 +2386,8 @@
 
     if (typeof Request === 'function' && typeof Response === 'function') {
         var caches = new WeakMap();
-        var cacheStorages = new WeakMap();
         var cacheOf = idlBrand(caches);
-        var cacheStorageOf = idlBrand(cacheStorages);
+        var cacheStorageOf;
 
         function cacheKey(request, ignoreSearch) {
             var url;
@@ -2577,9 +2584,8 @@
 
         idlExpose(Cache, 'Cache', null);
         idlExpose(CacheStorage, 'CacheStorage', null);
-        var cacheStorage = Object.create(CacheStorage.prototype);
-        cacheStorages.set(cacheStorage, { stores: new Map() });
-        try { global.caches = cacheStorage; } catch (e) {}
+        cacheStorageOf = idlSingletonBrand(CacheStorage.prototype, { stores: new Map() });
+        try { global.caches = Object.create(CacheStorage.prototype); } catch (e) {}
     }
 
     if (typeof Object.hasOwn !== 'function') {
@@ -3033,7 +3039,6 @@
         var cursors = new WeakMap();
         var keyRanges = new WeakMap();
         var idbRecords = new WeakMap();
-        var factories = new WeakMap();
         var requestOf = idlBrand(requests);
         var databaseOf = idlBrand(databases);
         var transactionOf = idlBrand(transactions);
@@ -3042,7 +3047,7 @@
         var cursorOf = idlBrand(cursors);
         var keyRangeOf = idlBrand(keyRanges);
         var recordOf = idlBrand(idbRecords);
-        var factoryOf = idlBrand(factories);
+        var factoryOf;
 
         function inRangeEncoded(encoded, range) {
             if (!range) return true;
@@ -4105,9 +4110,8 @@
         idlExpose(IDBCursorWithValue, 'IDBCursorWithValue', IDBCursor);
         idlExpose(IDBFactory, 'IDBFactory', null);
 
-        var indexedDBFactory = Object.create(IDBFactory.prototype);
-        factories.set(indexedDBFactory, {});
-        defineCtor('indexedDB', indexedDBFactory);
+        factoryOf = idlSingletonBrand(IDBFactory.prototype, {});
+        defineCtor('indexedDB', Object.create(IDBFactory.prototype));
     })();
 
     // Workers need DOMException too; QuickJS-ng has it built in, the
