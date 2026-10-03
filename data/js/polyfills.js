@@ -56,6 +56,16 @@
         };
     }
 
+    function idlAsync(self, brand, args, count, iface, member, body) {
+        try {
+            var state = brand(self);
+            idlNeed(args, count, iface, member);
+            return Promise.resolve(body(state));
+        } catch (e) {
+            return Promise.reject(e);
+        }
+    }
+
     function idlIllegalConstructor(iface) {
         return new TypeError("Failed to construct '" + iface + "': Illegal constructor");
     }
@@ -2367,7 +2377,10 @@
     defineCtor('DecompressionStream', DecompressionStream);
 
     if (typeof Request === 'function' && typeof Response === 'function') {
-        var cacheStores = new Map();
+        var caches = new WeakMap();
+        var cacheStorages = new WeakMap();
+        var cacheOf = idlBrand(caches);
+        var cacheStorageOf = idlBrand(cacheStorages);
 
         function cacheKey(request, ignoreSearch) {
             var url;
@@ -2391,11 +2404,9 @@
                     var it = h.entries(), e;
                     while (!(e = it.next()).done) out.push([e.value[0], e.value[1]]);
                 }
-            } catch (err) { /* tolerate */ }
+            } catch (err) {}
             return out;
         }
-
-        function NSCache() { this._entries = new Map(); }
 
         function requestMethod(request) {
             if (request && typeof request === 'object' && request.method)
@@ -2403,26 +2414,14 @@
             return 'GET';
         }
 
-        NSCache.prototype.put = function (request, response) {
-            if (requestMethod(request) !== 'GET')
-                return Promise.reject(new TypeError('Cache.put: only GET requests can be cached'));
-            if (response && response.bodyUsed)
-                return Promise.reject(new TypeError('Response body is already used'));
-            if (response && (response.status === 206))
-                return Promise.reject(new TypeError('Partial response (206) cannot be cached'));
-            var self = this, key = cacheKey(request);
-            var src = (response && typeof response.clone === 'function')
-                ? response.clone() : response;
-            return Promise.resolve(src.arrayBuffer()).then(function (ab) {
-                self._entries.set(key, {
-                    body: ab,
-                    status: response.status === undefined ? 200 : response.status,
-                    statusText: response.statusText || '',
-                    headers: headerPairs(response.headers),
-                    url: response.url || key
-                });
-            });
-        };
+        function queryOptions(options) {
+            options = options === undefined || options === null ? {} : Object(options);
+            return {
+                ignoreSearch: !!options.ignoreSearch,
+                ignoreMethod: !!options.ignoreMethod,
+                cacheName: options.cacheName === undefined ? undefined : String(options.cacheName)
+            };
+        }
 
         function entryToResponse(entry) {
             var resp = new Response(new Uint8Array(entry.body), {
@@ -2430,90 +2429,157 @@
                 statusText: entry.statusText,
                 headers: entry.headers
             });
-            try { resp.url = entry.url; } catch (e) { /* read-only? tolerate */ }
+            try { resp.url = entry.url; } catch (e) {}
             return resp;
         }
 
-        NSCache.prototype.match = function (request, options) {
-            options = options || {};
-            var entry = this._entries.get(cacheKey(request, options.ignoreSearch));
-            if (!entry && options.ignoreSearch) {
-                var want = cacheKey(request, true), it = this._entries.entries(), e;
-                while (!(e = it.next()).done) {
-                    var k = e.value[0], q = k.indexOf('?');
-                    if ((q >= 0 ? k.slice(0, q) : k) === want) { entry = e.value[1]; break; }
-                }
-            }
-            return Promise.resolve(entry ? entryToResponse(entry) : undefined);
-        };
-
-        NSCache.prototype.matchAll = function (request, options) {
-            if (request === undefined) {
-                var all = [];
-                this._entries.forEach(function (entry) { all.push(entryToResponse(entry)); });
-                return Promise.resolve(all);
-            }
-            return this.match(request, options).then(function (m) {
-                return m ? [m] : [];
+        function cacheMatches(entries, request, options) {
+            if (request === undefined) return Array.from(entries.keys());
+            if (!options.ignoreMethod && requestMethod(request) !== 'GET' &&
+                requestMethod(request) !== 'HEAD')
+                return [];
+            var want = cacheKey(request, options.ignoreSearch);
+            return Array.from(entries.keys()).filter(function (key) {
+                if (!options.ignoreSearch) return key === want;
+                var q = key.indexOf('?');
+                return (q >= 0 ? key.slice(0, q) : key) === want;
             });
-        };
+        }
 
-        NSCache.prototype.add = function (request) {
-            var self = this;
+        function cachePut(state, request, response) {
+            if (requestMethod(request) !== 'GET')
+                return Promise.reject(new TypeError("Failed to execute 'put' on 'Cache': Request method '" +
+                                                    requestMethod(request) + "' is unsupported"));
+            if (response === null || typeof response !== 'object' ||
+                typeof response.arrayBuffer !== 'function')
+                return Promise.reject(new TypeError("Failed to execute 'put' on 'Cache': parameter 2 is not of type 'Response'."));
+            if (response.bodyUsed)
+                return Promise.reject(new TypeError("Failed to execute 'put' on 'Cache': Response body is already used"));
+            if (response.status === 206)
+                return Promise.reject(new TypeError("Failed to execute 'put' on 'Cache': Partial response (status code 206) is unsupported"));
+            var key = cacheKey(request);
+            var src = typeof response.clone === 'function' ? response.clone() : response;
+            return Promise.resolve(src.arrayBuffer()).then(function (ab) {
+                state.entries.set(key, {
+                    body: ab,
+                    status: response.status === undefined ? 200 : response.status,
+                    statusText: response.statusText || '',
+                    headers: headerPairs(response.headers),
+                    url: response.url || ''
+                });
+            });
+        }
+
+        function cacheAdd(state, request) {
             return fetch(request).then(function (resp) {
                 if (!resp.ok)
-                    throw new TypeError('Request failed with status ' + resp.status);
-                return self.put(request, resp);
+                    throw new TypeError("Failed to execute 'add' on 'Cache': Request failed with status " + resp.status);
+                return cachePut(state, request, resp);
             });
-        };
+        }
 
-        NSCache.prototype.addAll = function (requests) {
-            var self = this;
-            return Promise.all(Array.prototype.map.call(requests, function (r) {
-                return self.add(r);
-            })).then(function () { return undefined; });
-        };
-
-        NSCache.prototype.delete = function (request, options) {
-            var key = cacheKey(request, options && options.ignoreSearch);
-            return Promise.resolve(this._entries.delete(key));
-        };
-
-        NSCache.prototype.keys = function () {
-            var reqs = [];
-            this._entries.forEach(function (entry, key) { reqs.push(new Request(key)); });
-            return Promise.resolve(reqs);
-        };
-
-        var cacheStorage = {
-            open: function (name) {
-                name = String(name);
-                var c = cacheStores.get(name);
-                if (!c) { c = new NSCache(); cacheStores.set(name, c); }
-                return Promise.resolve(c);
-            },
-            has: function (name) {
-                return Promise.resolve(cacheStores.has(String(name)));
-            },
-            delete: function (name) {
-                return Promise.resolve(cacheStores.delete(String(name)));
-            },
-            keys: function () {
-                return Promise.resolve(Array.from(cacheStores.keys()));
-            },
-            match: function (request, options) {
-                var stores = Array.from(cacheStores.values());
-                return (function next(i) {
-                    if (i >= stores.length) return Promise.resolve(undefined);
-                    return stores[i].match(request, options).then(function (m) {
-                        return m || next(i + 1);
-                    });
-                })(0);
+        class Cache {
+            constructor() { throw idlIllegalConstructor('Cache'); }
+            match(request, options = {}) {
+                return idlAsync(this, cacheOf, arguments, 1, 'Cache', 'match', function (state) {
+                    var keys = cacheMatches(state.entries, request, queryOptions(options));
+                    return keys.length ? entryToResponse(state.entries.get(keys[0])) : undefined;
+                });
             }
-        };
+            matchAll(request = undefined, options = {}) {
+                return idlAsync(this, cacheOf, arguments, 0, 'Cache', 'matchAll', function (state) {
+                    return cacheMatches(state.entries, request, queryOptions(options)).map(function (key) {
+                        return entryToResponse(state.entries.get(key));
+                    });
+                });
+            }
+            add(request) {
+                return idlAsync(this, cacheOf, arguments, 1, 'Cache', 'add', function (state) {
+                    return cacheAdd(state, request);
+                });
+            }
+            addAll(requests) {
+                return idlAsync(this, cacheOf, arguments, 1, 'Cache', 'addAll', function (state) {
+                    return Promise.all(Array.from(requests).map(function (request) {
+                        return cacheAdd(state, request);
+                    })).then(function () { return undefined; });
+                });
+            }
+            put(request, response) {
+                return idlAsync(this, cacheOf, arguments, 2, 'Cache', 'put', function (state) {
+                    return cachePut(state, request, response);
+                });
+            }
+            delete(request, options = {}) {
+                return idlAsync(this, cacheOf, arguments, 1, 'Cache', 'delete', function (state) {
+                    var keys = cacheMatches(state.entries, request, queryOptions(options));
+                    keys.forEach(function (key) { state.entries.delete(key); });
+                    return keys.length > 0;
+                });
+            }
+            keys(request = undefined, options = {}) {
+                return idlAsync(this, cacheOf, arguments, 0, 'Cache', 'keys', function (state) {
+                    return cacheMatches(state.entries, request, queryOptions(options)).map(function (key) {
+                        return new Request(key);
+                    });
+                });
+            }
+        }
 
-        try { global.caches = cacheStorage; } catch (e) { /* tolerate */ }
-        try { global.Cache = NSCache; } catch (e) { /* tolerate */ }
+        function newCache(entries) {
+            var cache = Object.create(Cache.prototype);
+            caches.set(cache, { entries: entries });
+            return cache;
+        }
+
+        class CacheStorage {
+            constructor() { throw idlIllegalConstructor('CacheStorage'); }
+            match(request, options = {}) {
+                return idlAsync(this, cacheStorageOf, arguments, 1, 'CacheStorage', 'match', function (state) {
+                    var opts = queryOptions(options);
+                    var names = opts.cacheName === undefined ? Array.from(state.stores.keys()) :
+                        (state.stores.has(opts.cacheName) ? [opts.cacheName] : []);
+                    for (var i = 0; i < names.length; i++) {
+                        var entries = state.stores.get(names[i]);
+                        var keys = cacheMatches(entries, request, opts);
+                        if (keys.length) return entryToResponse(entries.get(keys[0]));
+                    }
+                    return undefined;
+                });
+            }
+            has(cacheName) {
+                return idlAsync(this, cacheStorageOf, arguments, 1, 'CacheStorage', 'has', function (state) {
+                    return state.stores.has(String(cacheName));
+                });
+            }
+            open(cacheName) {
+                return idlAsync(this, cacheStorageOf, arguments, 1, 'CacheStorage', 'open', function (state) {
+                    var name = String(cacheName);
+                    var entries = state.stores.get(name);
+                    if (!entries) {
+                        entries = new Map();
+                        state.stores.set(name, entries);
+                    }
+                    return newCache(entries);
+                });
+            }
+            delete(cacheName) {
+                return idlAsync(this, cacheStorageOf, arguments, 1, 'CacheStorage', 'delete', function (state) {
+                    return state.stores.delete(String(cacheName));
+                });
+            }
+            keys() {
+                return idlAsync(this, cacheStorageOf, arguments, 0, 'CacheStorage', 'keys', function (state) {
+                    return Array.from(state.stores.keys());
+                });
+            }
+        }
+
+        idlExpose(Cache, 'Cache', null);
+        idlExpose(CacheStorage, 'CacheStorage', null);
+        var cacheStorage = Object.create(CacheStorage.prototype);
+        cacheStorages.set(cacheStorage, { stores: new Map() });
+        try { global.caches = cacheStorage; } catch (e) {}
     }
 
     if (typeof Object.hasOwn !== 'function') {
