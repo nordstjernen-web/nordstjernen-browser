@@ -15122,6 +15122,48 @@ ns_geometry_clone(JSContext *ctx, int kind, JSValueConst v)
     return out;
 }
 
+/* Whether v is an instance of one of the realm's interfaces: its prototype
+   is the prototype of an engine-made constructor that the global object
+   exposes under its name. Such objects are cloned only when serializable. */
+static gboolean
+ns_sc_is_platform_instance(JSContext *ctx, JSValueConst v)
+{
+    gboolean result = FALSE;
+    JSValue proto = JS_GetPrototype(ctx, v);
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        return FALSE;
+    }
+    JSValue ctor = JS_UNDEFINED, name = JS_UNDEFINED;
+    JSPropertyDescriptor d;
+    JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
+    int has = JS_GetOwnProperty(ctx, &d, proto, ctor_atom);
+    JS_FreeAtom(ctx, ctor_atom);
+    if (has > 0) {
+        if (!(d.flags & JS_PROP_GETSET)) ctor = JS_DupValue(ctx, d.value);
+        JS_FreeValue(ctx, d.value);
+        JS_FreeValue(ctx, d.getter);
+        JS_FreeValue(ctx, d.setter);
+    } else if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    if (JS_IsFunction(ctx, ctor) && JS_IsEngineFunction(ctor))
+        name = JS_GetPropertyStr(ctx, ctor, "name");
+    const char *n = JS_IsString(name) ? JS_ToCString(ctx, name) : NULL;
+    if (n && *n) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue exposed = JS_GetPropertyStr(ctx, global, n);
+        result = JS_IsStrictEqual(ctx, exposed, ctor);
+        JS_FreeValue(ctx, exposed);
+        JS_FreeValue(ctx, global);
+    }
+    if (n) JS_FreeCString(ctx, n);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, proto);
+    return result;
+}
+
 static JSValue
 ns_sc_clone_value(ns_sc *s, JSValueConst v)
 {
@@ -15139,6 +15181,10 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         ns_sc_memo_put(s, ptr, v);
         return JS_DupValue(ctx, v);
     }
+
+    /* Platform objects that are not serializable: nodes, and the engine's
+       host objects (ports must be transferred, not cloned). */
+    if (ns_ho_data(v) || ns_unwrap_element(v)) return ns_sc_fail(ctx);
 
     if (JS_IsArrayBuffer(v)) {
         JSValue clone = ns_sc_copy_array_buffer(s, v);
@@ -15394,6 +15440,8 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         if (!JS_IsException(platform)) ns_sc_memo_put(s, ptr, platform);
         return platform;
     }
+
+    if (ns_sc_is_platform_instance(ctx, v)) return ns_sc_fail(ctx);
 
     JSValue clone = JS_IsArray(v) ? JS_NewArray(ctx) : JS_NewObject(ctx);
     if (JS_IsException(clone)) return clone;
