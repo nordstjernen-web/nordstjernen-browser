@@ -342,6 +342,7 @@ struct ns_js {
     JSValue       proto_htmlunknownelement;
     JSValue       proto_svgelement;
     JSValue       proto_svgaelement;
+    JSValue       proto_mathmlelement;
     JSValue       proto_chardata;
     JSValue       proto_text;
     JSValue       proto_comment;

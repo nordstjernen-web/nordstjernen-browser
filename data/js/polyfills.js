@@ -2314,6 +2314,10 @@
     function TransformStream(transformer, writableStrategy, readableStrategy) {
         if (!(this instanceof TransformStream))
             return new TransformStream(transformer, writableStrategy, readableStrategy);
+        initTransformStream(this, transformer);
+    }
+
+    function initTransformStream(self, transformer) {
         var readable = new ReadableStream();
         var writable = new WritableStream();
         var controller = readable._controller;
@@ -2338,8 +2342,8 @@
             }
             controller.close();
         };
-        this.readable = readable;
-        this.writable = writable;
+        self.readable = readable;
+        self.writable = writable;
         if (typeof t.start === 'function') {
             try { t.start(transformCtl); } catch (e) { /* ignore */ }
         }
@@ -2347,23 +2351,22 @@
     defineCtor('TransformStream', TransformStream);
 
     function TextEncoderStream() {
-        if (!(this instanceof TextEncoderStream)) return new TextEncoderStream();
+        if (new.target === undefined) return new TextEncoderStream();
         var enc = new TextEncoder();
-        TransformStream.call(this, {
+        initTransformStream(this, {
             transform: function (chunk, controller) {
                 controller.enqueue(enc.encode(String(chunk == null ? '' : chunk)));
             }
         });
         Object.defineProperty(this, 'encoding', { value: 'utf-8', configurable: true });
     }
-    TextEncoderStream.prototype = Object.create(TransformStream.prototype);
-    TextEncoderStream.prototype.constructor = TextEncoderStream;
+    TextEncoderStream.__ndRealmProto = true;
     defineCtor('TextEncoderStream', TextEncoderStream);
 
     function TextDecoderStream(label, options) {
-        if (!(this instanceof TextDecoderStream)) return new TextDecoderStream(label, options);
+        if (new.target === undefined) return new TextDecoderStream(label, options);
         var dec = new TextDecoder(label || 'utf-8', options);
-        TransformStream.call(this, {
+        initTransformStream(this, {
             transform: function (chunk, controller) {
                 var out;
                 try { out = dec.decode(chunk, { stream: true }); }
@@ -2382,8 +2385,7 @@
             configurable: true
         });
     }
-    TextDecoderStream.prototype = Object.create(TransformStream.prototype);
-    TextDecoderStream.prototype.constructor = TextDecoderStream;
+    TextDecoderStream.__ndRealmProto = true;
     defineCtor('TextDecoderStream', TextDecoderStream);
 
     // Intl (ECMA-402) is implemented natively in C; see src/js_intl.c.
@@ -2424,19 +2426,17 @@
     }
 
     function CompressionStream(format) {
-        if (!(this instanceof CompressionStream)) return new CompressionStream(format);
-        TransformStream.call(this, zlibTransformer(format, false));
+        if (new.target === undefined) return new CompressionStream(format);
+        initTransformStream(this, zlibTransformer(format, false));
     }
-    CompressionStream.prototype = Object.create(TransformStream.prototype);
-    CompressionStream.prototype.constructor = CompressionStream;
+    CompressionStream.__ndRealmProto = true;
     defineCtor('CompressionStream', CompressionStream);
 
     function DecompressionStream(format) {
-        if (!(this instanceof DecompressionStream)) return new DecompressionStream(format);
-        TransformStream.call(this, zlibTransformer(format, true));
+        if (new.target === undefined) return new DecompressionStream(format);
+        initTransformStream(this, zlibTransformer(format, true));
     }
-    DecompressionStream.prototype = Object.create(TransformStream.prototype);
-    DecompressionStream.prototype.constructor = DecompressionStream;
+    DecompressionStream.__ndRealmProto = true;
     defineCtor('DecompressionStream', DecompressionStream);
 
     if (typeof Request === 'function' && typeof Response === 'function') {
