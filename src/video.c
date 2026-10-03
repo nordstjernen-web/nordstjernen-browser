@@ -728,6 +728,15 @@ ns_video_inherit_node_playback(ns_video *v, const ns_video *previous)
                    - (gint64)(v->cur_time * 1e6);
 }
 
+static void
+ns_video_release_node(ns_video_cache *cache, ns_video *v)
+{
+    ns_video_audio_stop(cache, v);
+    ns_video_helper_stop(cache, v);
+    v->playing = FALSE;
+    v->dom_node = NULL;
+}
+
 static gboolean ns_video_stream_growing(ns_video_cache *cache,
                                         const ns_video *v);
 
@@ -1860,6 +1869,8 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->mse_id = mse_id;
     if (mse_id && previous && previous->mse_id != mse_id)
         ns_video_inherit_node_playback(v, previous);
+    if (dom && previous && previous->dom_node == dom)
+        ns_video_release_node(cache, previous);
     g_hash_table_insert(cache->by_url, key, v);
     if (box) box->media->video = v;
     if (dom) ns_video_apply_node_state(cache, v, dom);

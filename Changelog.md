@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* A `<video>` that switches to a new source stops getting events from the old
+  one. After a YouTube ad the old stream kept sending its buffered range,
+  position and `ended` to the element, so the player saw the video stall,
+  stopped at 0:00 and reloaded it at 144p.
 * A page that registers one custom property with `@property` no longer
   makes every element that sets its own custom properties copy all the
   inherited ones. YouTube registers one and carries 1361 variables, so each
