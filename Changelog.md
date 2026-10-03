@@ -74,6 +74,49 @@ Changelog:
   against whichever document the event loop was in when it arrived,
   usually the page, so it failed with status 0; synchronous requests and
   `fetch()` were not affected.
+* The canvas, WebGL and geometry objects have the shape their interfaces
+  define. A 2D context carried its attributes, its methods and the
+  engine's bookkeeping as own properties, a gradient its stops and
+  `addColorStop`, an `ImageData` or a `TextMetrics` its values, an
+  `OffscreenCanvas` was an `HTMLCanvasElement`, a WebGL context carried
+  about 400 members and writable constants, a `DOMRect` and a `DOMMatrix`
+  their numbers, and `OffscreenCanvasRenderingContext2D`, `CanvasGradient`,
+  `CanvasPattern`, `ImageBitmap`, `DOMQuad` and the WebGL object
+  interfaces did not exist. `CanvasRenderingContext2D`,
+  `OffscreenCanvasRenderingContext2D`, `CanvasGradient`, `CanvasPattern`,
+  `ImageData`, `ImageBitmap`, `TextMetrics`, `Path2D`, `OffscreenCanvas`,
+  `WebGLRenderingContext`, `WebGL2RenderingContext`, `WebGLBuffer` and the
+  other WebGL objects, `DOMRect`, `DOMPoint`, `DOMQuad` and `DOMMatrix`
+  (and their read-only bases) are classes with their attributes and
+  methods on the prototypes, the constants on the interface and its
+  prototype as read-only, WebIDL's argument counts and lengths, and a
+  wrong receiver or too few arguments throwing `TypeError`. The objects
+  are made in the realm of their canvas, so a canvas in an iframe gives
+  the iframe's objects.
+* `canvas.getContext('2d')` returns the same context each time, `null`
+  once the canvas has another kind of context, and a resized canvas has a
+  fresh context state. The context's attributes validate as the HTML
+  standard says: an invalid value is ignored, `fillStyle`, `strokeStyle`
+  and `shadowColor` read back as `#rrggbb` or `rgba(r, g, b, a)`, `font`
+  reads back in pixels without a line height, and `color(srgb ...)` and
+  `color(display-p3 ...)` colors parse. `new ImageData()` works, `new
+  OffscreenCanvas()` is an `EventTarget` that resizes and converts to a
+  `Blob`, `CanvasPattern.setTransform()` exists, and `createImageData()`
+  and `getImageData()` throw `IndexSizeError` for an empty region.
+* `OffscreenCanvas` and its context, `ImageData`, `ImageBitmap`, `Path2D`,
+  `createImageBitmap()`, `DOMRect`, `DOMPoint`, `DOMQuad` and `DOMMatrix`
+  exist in workers, where an `OffscreenCanvas` draws. `structuredClone()`,
+  `postMessage()` and worker messages carry `ImageData`, `ImageBitmap` and
+  the geometry objects; the other canvas objects throw `DataCloneError`.
+* WebGL: `getAttachedShaders()`, `getIndexedParameter()`,
+  `getSamplerParameter()`, `getTransformFeedbackVarying()`,
+  `getUniformIndices()`, `invalidateSubFramebuffer()` and
+  `drawingBufferStorage()` exist, `stencilFuncSeparate()`,
+  `stencilOpSeparate()`, `stencilMaskSeparate()` and `sampleCoverage()`
+  call GL instead of doing nothing, `copyTexImage2D()` and
+  `copyTexSubImage2D()` work in WebGL 1, `drawingBufferWidth` follows a
+  resize, the stencil masks read back unsigned and `getContextAttributes()`
+  lists its members in dictionary order.
 
 1.0.27:
 ======
