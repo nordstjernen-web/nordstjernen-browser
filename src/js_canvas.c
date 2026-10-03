@@ -256,7 +256,7 @@ static guint8 *
 ns_blob_byte_array(JSContext *ctx, JSValueConst src, gsize *out_len)
 {
     *out_len = 0;
-    JSValue b = JS_GetPropertyStr(ctx, src, "_b");
+    JSValue b = JS_GetPropertyStr(ctx, src, "__ndBlobBytes");
     if (!JS_IsObject(b)) { JS_FreeValue(ctx, b); return NULL; }
     JSValue lv = JS_GetPropertyStr(ctx, b, "length");
     uint32_t len = 0;
@@ -383,7 +383,7 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, dv);
     gboolean is_blob = FALSE;
     if (!is_imagedata) {
-        JSValue bv = JS_GetPropertyStr(ctx, argv[0], "_b");
+        JSValue bv = JS_GetPropertyStr(ctx, argv[0], "__ndBlobBytes");
         is_blob = JS_IsObject(bv);
         JS_FreeValue(ctx, bv);
     }
