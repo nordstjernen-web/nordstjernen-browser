@@ -14374,7 +14374,6 @@ ns_window_current_document_for(JSContext *ctx, JSValueConst window)
 }
 
 static JSContext *ns_window_message_realm(JSContext *ctx, JSValueConst target);
-static JSValue ns_proto_of(JSContext *ctx, JSValueConst global, const char *ctor_name);
 
 static JSValue
 ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
