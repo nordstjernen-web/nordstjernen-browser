@@ -4972,80 +4972,191 @@ static const ns_instof_def ns_instof_table[] = {
     { "ShadowRoot",               NULL,                 NS_INSTOF_SHADOW },
 };
 
+/* NodeList and HTMLCollection are told apart by the kind of live collection. */
+static JSValue
+ns_instof_collection(JSContext *ctx, const ns_instof_def *d, JSValueConst v)
+{
+    if (d->special == NS_INSTOF_HTMLCOLLECTION)
+        return JS_NewBool(ctx, ns_live_collection_kind(v) == 1);
+    if (ns_live_collection_kind(v) == 0)
+        return JS_TRUE;
+    if (!JS_IsObject(v))
+        return JS_FALSE;
+    JSValue m = JS_GetPropertyStr(ctx, v, "__nsNodeList");
+    int hit = JS_ToBool(ctx, m);
+    JS_FreeValue(ctx, m);
+    return JS_NewBool(ctx, hit == 1);
+}
+
+/* Whether tag is one of the space-separated names in list. */
+static gboolean
+ns_instof_list_has(const char *list, const char *tag)
+{
+    size_t tlen = strlen(tag);
+    while (*list) {
+        while (*list == ' ') list++;
+        const char *tok = list;
+        while (*list && *list != ' ') list++;
+        if ((size_t)(list - tok) == tlen && strncmp(tok, tag, tlen) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* Whether node n is an element with one of the tags of the table entry. */
+static gboolean
+ns_instof_tag_match(const ns_instof_def *d, const ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT || !n->name || !d->tags)
+        return FALSE;
+    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
+        return FALSE;
+    return ns_instof_list_has(d->tags, n->name);
+}
+
+static gboolean
+ns_instof_is_shadow_host_attr(const ns_node *n)
+{
+    return n->kind == NS_NODE_ELEMENT &&
+           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+}
+
+/* The entries decided by the kind of the node alone. */
+static gboolean
+ns_instof_leaf_match(int special, const ns_node *n)
+{
+    switch (special) {
+    case NS_INSTOF_TEXT:
+        return n->kind == NS_NODE_TEXT;
+    case NS_INSTOF_COMMENT:
+        return n->kind == NS_NODE_COMMENT;
+    case NS_INSTOF_CHARDATA:
+        return n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT;
+    case NS_INSTOF_DOCTYPE:
+        return n->kind == NS_NODE_DOCTYPE;
+    default:
+        return FALSE;
+    }
+}
+
+/* The entries for elements, documents and document fragments. */
+static gboolean
+ns_instof_container_match(int special, const ns_node *n)
+{
+    switch (special) {
+    case NS_INSTOF_ELEMENT:
+        return n->kind == NS_NODE_ELEMENT;
+    case NS_INSTOF_DOCUMENT:
+        return n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT);
+    case NS_INSTOF_FRAGMENT:
+        return (n->flags & NS_NODE_FRAGMENT) != 0 ||
+               ns_instof_is_shadow_host_attr(n);
+    case NS_INSTOF_SHADOW:
+        return ns_instof_is_shadow_host_attr(n);
+    case NS_INSTOF_HTMLELEMENT:
+        return n->kind == NS_NODE_ELEMENT &&
+               !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+    default:
+        return FALSE;
+    }
+}
+
+/* Whether node n, the wrapper of an instance, is of the kind of the table
+ * entry d. */
+static gboolean
+ns_instof_node_match(const ns_instof_def *d, const ns_node *n)
+{
+    /* A shadow root is stored as an element but is a DocumentFragment. */
+    if (ns_node_is_shadow_root(n))
+        return d->special == NS_INSTOF_NODE ||
+               d->special == NS_INSTOF_FRAGMENT ||
+               d->special == NS_INSTOF_SHADOW;
+    if (d->special == NS_INSTOF_NODE)
+        return TRUE;
+    if (d->special == NS_INSTOF_TAG)
+        return ns_instof_tag_match(d, n);
+    return ns_instof_leaf_match(d->special, n) ||
+           ns_instof_container_match(d->special, n);
+}
+
+/* Whether ctor is the interface object the table entry belongs to. The
+ * [Symbol.hasInstance] of an interface object is inherited by the interfaces
+ * that extend it, and those are not told apart by node kind: Attr extends
+ * Node, HTMLUnknownElement extends HTMLElement, XMLDocument extends Document. */
+static gboolean
+ns_instof_is_entry_ctor(JSContext *ctx, JSValueConst ctor,
+                        const ns_instof_def *d)
+{
+    if (!JS_IsObject(ctor))
+        return FALSE;
+    JSValue nv = JS_GetPropertyStr(ctx, ctor, "name");
+    const char *name = JS_IsString(nv) ? JS_ToCString(ctx, nv) : NULL;
+    if (JS_IsException(nv))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    gboolean same = name && strcmp(name, d->ctor) == 0;
+    if (name) JS_FreeCString(ctx, name);
+    JS_FreeValue(ctx, nv);
+    return same;
+}
+
+/* OrdinaryHasInstance: whether the prototype of ctor is on the prototype
+ * chain of v. */
+static JSValue
+ns_instof_ordinary(JSContext *ctx, JSValueConst ctor, JSValueConst v)
+{
+    if (!JS_IsObject(v) || !JS_IsFunction(ctx, ctor))
+        return JS_FALSE;
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    if (!JS_IsObject(proto)) {
+        if (JS_IsException(proto))
+            return proto;
+        JS_FreeValue(ctx, proto);
+        return JS_ThrowTypeError(ctx,
+            "operand 'prototype' property is not an object");
+    }
+    JSValue cur = JS_DupValue(ctx, v);
+    gboolean hit = FALSE;
+    for (;;) {
+        JSValue next = JS_GetPrototype(ctx, cur);
+        JS_FreeValue(ctx, cur);
+        if (JS_IsException(next)) {
+            JS_FreeValue(ctx, proto);
+            return next;
+        }
+        if (!JS_IsObject(next))
+            break;
+        hit = JS_VALUE_GET_PTR(next) == JS_VALUE_GET_PTR(proto);
+        cur = next;
+        if (hit) {
+            JS_FreeValue(ctx, cur);
+            break;
+        }
+    }
+    JS_FreeValue(ctx, proto);
+    return JS_NewBool(ctx, hit);
+}
+
 static JSValue
 ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv, int magic)
 {
-    (void)this_val;
     if (argc < 1 || magic < 0 ||
         magic >= (int)G_N_ELEMENTS(ns_instof_table))
         return JS_FALSE;
     const ns_instof_def *d = &ns_instof_table[magic];
-    if (d->special == NS_INSTOF_HTMLCOLLECTION)
-        return JS_NewBool(ctx, ns_live_collection_kind(argv[0]) == 1);
-    if (d->special == NS_INSTOF_NODELIST) {
-        if (ns_live_collection_kind(argv[0]) == 0)
-            return JS_TRUE;
-        if (JS_IsObject(argv[0])) {
-            JSValue m = JS_GetPropertyStr(ctx, argv[0], "__nsNodeList");
-            int hit = JS_ToBool(ctx, m);
-            JS_FreeValue(ctx, m);
-            return JS_NewBool(ctx, hit == 1);
-        }
-        return JS_FALSE;
-    }
+    /* A built-in interface that extends the entry's is told by its prototype
+     * chain; a class of the page that extends one keeps matching by node
+     * kind. */
+    if (JS_IsEngineFunction(this_val) &&
+        !ns_instof_is_entry_ctor(ctx, this_val, d))
+        return ns_instof_ordinary(ctx, this_val, argv[0]);
+    if (d->special == NS_INSTOF_HTMLCOLLECTION ||
+        d->special == NS_INSTOF_NODELIST)
+        return ns_instof_collection(ctx, d, argv[0]);
     const ns_node *n = ns_unwrap_element(argv[0]);
-    if (!n) return JS_FALSE;
-    /* A shadow root is stored as an element but is a DocumentFragment. */
-    if (ns_node_is_shadow_root(n))
-        return JS_NewBool(ctx, d->special == NS_INSTOF_NODE ||
-                               d->special == NS_INSTOF_FRAGMENT ||
-                               d->special == NS_INSTOF_SHADOW);
-    switch (d->special) {
-    case NS_INSTOF_NODE:
-        return JS_NewBool(ctx, TRUE);
-    case NS_INSTOF_ELEMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT);
-    case NS_INSTOF_DOCUMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_DOCUMENT &&
-                               !(n->flags & NS_NODE_FRAGMENT));
-    case NS_INSTOF_FRAGMENT:
-        return JS_NewBool(ctx, (n->flags & NS_NODE_FRAGMENT) != 0 ||
-                               (n->kind == NS_NODE_ELEMENT &&
-                                ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL));
-    case NS_INSTOF_TEXT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_TEXT);
-    case NS_INSTOF_COMMENT:
-        return JS_NewBool(ctx, n->kind == NS_NODE_COMMENT);
-    case NS_INSTOF_CHARDATA:
-        return JS_NewBool(ctx, n->kind == NS_NODE_TEXT ||
-                               n->kind == NS_NODE_COMMENT);
-    case NS_INSTOF_DOCTYPE:
-        return JS_NewBool(ctx, n->kind == NS_NODE_DOCTYPE);
-    case NS_INSTOF_SHADOW:
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT &&
-                          ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL);
-    default:
-        break;
-    }
-    if (d->special == NS_INSTOF_HTMLELEMENT)
-        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT &&
-                          !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)));
-    if (n->kind != NS_NODE_ELEMENT || !n->name || !d->tags)
-        return JS_FALSE;
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
-        return JS_FALSE;
-    const char *s = d->tags;
-    size_t nlen = strlen(n->name);
-    while (*s) {
-        while (*s == ' ') s++;
-        const char *tok = s;
-        while (*s && *s != ' ') s++;
-        size_t tlen = (size_t)(s - tok);
-        if (tlen == nlen && strncmp(tok, n->name, tlen) == 0)
-            return JS_TRUE;
-    }
-    return JS_FALSE;
+    if (!n)
+        return ns_instof_ordinary(ctx, this_val, argv[0]);
+    return JS_NewBool(ctx, ns_instof_node_match(d, n));
 }
 
 static void
