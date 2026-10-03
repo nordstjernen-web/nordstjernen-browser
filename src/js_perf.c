@@ -85,11 +85,46 @@ ns_perf_realm_key(const ns_js *js, gconstpointer timeline)
 }
 
 static JSClassID ns_performance_class_id;
-static JSClassDef ns_performance_class = { .class_name = "Performance" };
 
 /* A window's performance object.  It remembers its realm, because frames
  * share the Performance interface (and so its methods) with the page while
- * each document keeps a timeline of its own. */
+ * each document keeps a timeline and a time origin of its own, and it holds
+ * the timing, navigation and eventCounts objects its getters return. */
+typedef struct ns_performance_data {
+    gconstpointer realm;
+    JSValue timing;
+    JSValue navigation;
+    JSValue event_counts;
+} ns_performance_data;
+
+static void
+ns_performance_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_performance_data *d = JS_GetOpaque(val, ns_performance_class_id);
+    if (!d) return;
+    JS_FreeValueRT(rt, d->timing);
+    JS_FreeValueRT(rt, d->navigation);
+    JS_FreeValueRT(rt, d->event_counts);
+    g_free(d);
+}
+
+static void
+ns_performance_gc_mark(JSRuntime *rt, JSValueConst val,
+                       JS_MarkFunc *mark_func)
+{
+    ns_performance_data *d = JS_GetOpaque(val, ns_performance_class_id);
+    if (!d) return;
+    JS_MarkValue(rt, d->timing, mark_func);
+    JS_MarkValue(rt, d->navigation, mark_func);
+    JS_MarkValue(rt, d->event_counts, mark_func);
+}
+
+static JSClassDef ns_performance_class = {
+    .class_name = "Performance",
+    .finalizer = ns_performance_finalizer,
+    .gc_mark = ns_performance_gc_mark,
+};
+
 JSValue
 ns_perf_new_performance_object(JSContext *ctx)
 {
@@ -98,18 +133,75 @@ ns_perf_new_performance_object(JSContext *ctx)
     if (!JS_IsRegisteredClass(rt, ns_performance_class_id))
         JS_NewClass(rt, ns_performance_class_id, &ns_performance_class);
     JSValue o = JS_NewObjectClass(ctx, ns_performance_class_id);
-    ns_js *js = js_from_ctx(ctx);
-    if (!JS_IsException(o) && ns_perf_realm_key(js, ctx))
-        JS_SetOpaque(o, ctx);
+    if (JS_IsException(o)) return o;
+    ns_performance_data *d = g_new0(ns_performance_data, 1);
+    d->realm = ns_perf_realm_key(js_from_ctx(ctx), ctx);
+    d->timing = JS_UNDEFINED;
+    d->navigation = JS_UNDEFINED;
+    d->event_counts = JS_UNDEFINED;
+    JS_SetOpaque(o, d);
     return o;
+}
+
+/* Hands the performance object perf its timing, navigation and
+ * eventCounts objects; takes the references. */
+void
+ns_perf_set_performance_objects(JSContext *ctx, JSValueConst perf,
+                                JSValue timing, JSValue navigation,
+                                JSValue event_counts)
+{
+    ns_performance_data *d = ns_performance_class_id
+        ? JS_GetOpaque(perf, ns_performance_class_id) : NULL;
+    if (!d) {
+        JS_FreeValue(ctx, timing);
+        JS_FreeValue(ctx, navigation);
+        JS_FreeValue(ctx, event_counts);
+        return;
+    }
+    JS_FreeValue(ctx, d->timing);
+    JS_FreeValue(ctx, d->navigation);
+    JS_FreeValue(ctx, d->event_counts);
+    d->timing = timing;
+    d->navigation = navigation;
+    d->event_counts = event_counts;
+}
+
+static ns_performance_data *
+ns_perf_data_of(JSValueConst this_val)
+{
+    return ns_performance_class_id
+        ? JS_GetOpaque(this_val, ns_performance_class_id) : NULL;
 }
 
 /* The timeline a performance method called on this_val reads. */
 static gconstpointer
 ns_perf_this_realm(const ns_js *js, JSValueConst this_val)
 {
-    return ns_perf_realm_key(js, ns_performance_class_id
-        ? JS_GetOpaque(this_val, ns_performance_class_id) : NULL);
+    ns_performance_data *d = ns_perf_data_of(this_val);
+    return ns_perf_realm_key(js, d ? d->realm : NULL);
+}
+
+JSValue
+ns_window_performance_time_origin_get(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_performance_data *d = ns_perf_data_of(this_val);
+    if (!d) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    return JS_NewFloat64(ctx, ns_js_time_origin_real_ms(js_from_ctx(ctx),
+                                                        d->realm));
+}
+
+JSValue
+ns_window_performance_object_get(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic)
+{
+    (void)argc; (void)argv;
+    ns_performance_data *d = ns_perf_data_of(this_val);
+    if (!d) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    JSValueConst v = magic == 0 ? d->timing
+                   : magic == 1 ? d->navigation : d->event_counts;
+    return JS_DupValue(ctx, v);
 }
 
 #define NS_TIMER_RESOLUTION_US 100
@@ -130,12 +222,92 @@ ns_perf_now_ms(const ns_js *js)
     return ns_perf_relative_ms(g_get_monotonic_time(), origin);
 }
 
+/* The time origin of a realm: a frame realm's or, while a frame's new
+ * document has no realm yet, its frame element's navigation start; the
+ * page's for every other realm. */
+gint64
+ns_js_time_origin_us(const ns_js *js, gconstpointer realm)
+{
+    if (!js) return 0;
+    const ns_realm_origin *o = js->realm_origins && realm
+        ? g_hash_table_lookup(js->realm_origins, realm) : NULL;
+    return o ? o->origin_us : js->time_origin_us;
+}
+
+double
+ns_js_time_origin_real_ms(const ns_js *js, gconstpointer realm)
+{
+    if (!js) return 0.0;
+    const ns_realm_origin *o = js->realm_origins && realm
+        ? g_hash_table_lookup(js->realm_origins, realm) : NULL;
+    return o ? o->origin_real_ms : js->time_origin_real_ms;
+}
+
+/* The current high resolution time of the realm ctx, as performance.now()
+ * and the event and frame timestamps there give it. */
+double
+ns_perf_realm_now_ms(JSContext *ctx)
+{
+    ns_js *js = js_from_ctx(ctx);
+    return ns_perf_relative_ms(g_get_monotonic_time(),
+                               ns_js_time_origin_us(js, ctx));
+}
+
+/* A frame starts navigating: its next document's clock starts now. */
+void
+ns_js_start_frame_clock(ns_js *js, gconstpointer frame)
+{
+    if (!js || !frame) return;
+    if (!js->realm_origins)
+        js->realm_origins = g_hash_table_new_full(g_direct_hash,
+                                                  g_direct_equal, NULL,
+                                                  g_free);
+    ns_realm_origin *o = g_new0(ns_realm_origin, 1);
+    o->origin_us = (g_get_monotonic_time() / NS_TIMER_RESOLUTION_US) *
+                   NS_TIMER_RESOLUTION_US;
+    o->origin_real_ms = floor((double)g_get_real_time() / 100.0) / 10.0;
+    g_hash_table_replace(js->realm_origins, (gpointer)frame, o);
+}
+
+/* A frame's document gets the realm ctx, which keeps the time origin of
+ * the navigation that brought the document, or starts its clock now. */
+void
+ns_js_adopt_frame_clock(ns_js *js, gconstpointer frame, JSContext *ctx)
+{
+    if (!js || !ctx) return;
+    ns_realm_origin *o = NULL;
+    if (frame && js->realm_origins &&
+        g_hash_table_steal_extended(js->realm_origins, frame, NULL,
+                                    (gpointer *)&o)) {
+        g_hash_table_replace(js->realm_origins, ctx, o);
+        return;
+    }
+    ns_js_start_frame_clock(js, ctx);
+}
+
+void
+ns_js_clear_frame_clocks(ns_js *js, gboolean destroy)
+{
+    if (!js || !js->realm_origins) return;
+    if (destroy) {
+        g_hash_table_destroy(js->realm_origins);
+        js->realm_origins = NULL;
+    } else {
+        g_hash_table_remove_all(js->realm_origins);
+    }
+}
+
+/* The current high resolution time of the window whose performance object
+ * this_val is. */
 JSValue
 ns_window_performance_now(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    return JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx)));
+    (void)argc; (void)argv;
+    ns_performance_data *d = ns_perf_data_of(this_val);
+    if (!d) return JS_ThrowTypeError(ctx, "Illegal invocation");
+    return JS_NewFloat64(ctx, ns_perf_relative_ms(g_get_monotonic_time(),
+        ns_js_time_origin_us(js_from_ctx(ctx), d->realm)));
 }
 
 static JSValue
@@ -391,9 +563,9 @@ ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
     if (!js || !js->perf_entries || !url || ns_perf_url_untimed(url)) return;
     if (js->perf_entries->len >= NS_PERF_ENTRY_CAP)
         g_ptr_array_remove_index(js->perf_entries, 0);
-    gint64 origin = js->time_origin_us;
     ns_perf_entry *e = g_new0(ns_perf_entry, 1);
     e->realm = ns_perf_realm_key(js, info->timeline);
+    gint64 origin = ns_js_time_origin_us(js, e->realm);
     e->name = g_strdup(url);
     e->type = g_strdup("resource");
     e->initiator_type = g_strdup(initiator ? initiator : "other");
@@ -919,8 +1091,10 @@ ns_window_performance_mark(JSContext *ctx, JSValueConst this_val,
 {
     ns_js *js = js_from_ctx(ctx);
     const char *name = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-    double t = ns_perf_now_ms(js);
-    ns_perf_push(js, ns_perf_this_realm(js, this_val), "mark", name, t, 0.0);
+    gconstpointer realm = ns_perf_this_realm(js, this_val);
+    double t = ns_perf_relative_ms(g_get_monotonic_time(),
+                                   ns_js_time_origin_us(js, realm));
+    ns_perf_push(js, realm, "mark", name, t, 0.0);
     JSValue r = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, r, "name",
                       JS_NewString(ctx, name ? name : ""));
@@ -980,7 +1154,8 @@ ns_window_performance_measure(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     gconstpointer realm = ns_perf_this_realm(js, this_val);
     const char *name = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
-    double end_time = ns_perf_now_ms(js);
+    double end_time = ns_perf_relative_ms(g_get_monotonic_time(),
+                                          ns_js_time_origin_us(js, realm));
     double start_time = 0.0;
     double resolved_end = end_time;
     JSValue start_v = argc > 1 ? argv[1] : JS_UNDEFINED;

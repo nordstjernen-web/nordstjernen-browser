@@ -13276,6 +13276,9 @@ ns_window_current_document_for(JSContext *ctx, JSValueConst window)
     return doc;
 }
 
+static JSContext *ns_window_message_realm(JSContext *ctx, JSValueConst target);
+static JSValue ns_proto_of(JSContext *ctx, JSValueConst global, const char *ctor_name);
+
 static JSValue
 ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -13283,6 +13286,17 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValueConst target = argv[0];
     JSValueConst ev = argv[1];
     ns_js *js = js_from_ctx(ctx);
+    /* The message event is created when the posted task runs, in the
+     * receiving window's realm: it is that window's MessageEvent and its
+     * time stamp is the delivery time on that window's clock. */
+    JSContext *realm = ns_window_message_realm(ctx, target);
+    JSValue realm_global = JS_GetGlobalObject(realm);
+    JSValue realm_proto = ns_proto_of(realm, realm_global, "MessageEvent");
+    if (JS_IsObject(realm_proto)) JS_SetPrototype(ctx, ev, realm_proto);
+    JS_FreeValue(realm, realm_proto);
+    JS_FreeValue(realm, realm_global);
+    JS_SetPropertyStr(ctx, ev, "timeStamp",
+                      JS_NewFloat64(ctx, ns_perf_realm_now_ms(realm)));
     JSValue forwarded = ns_window_forward_of(js, target);
     JSValue actual_target = JS_IsObject(forwarded)
         ? JS_DupValue(ctx, forwarded) : JS_DupValue(ctx, target);
@@ -27235,7 +27249,7 @@ ns_io_make_entry(JSContext *ctx, JSValueConst target,
     JS_SetPropertyStr(ctx, e, "isVisible",         JS_NewBool(ctx, intersecting));
     JS_SetPropertyStr(ctx, e, "intersectionRatio", JS_NewFloat64(ctx, ratio));
     JS_SetPropertyStr(ctx, e, "time",
-                      JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
+                      JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
     JS_SetPropertyStr(ctx, e, "boundingClientRect",
                       ns_io_make_rect(ctx, tx, ty, tw, th));
     JS_SetPropertyStr(ctx, e, "intersectionRect",
@@ -28263,7 +28277,7 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     int has_ts = JS_GetOwnProperty(ctx, NULL, ev, ts);
     if (has_ts == 0)
         JS_DefinePropertyValue(ctx, ev, ts,
-                               JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))),
+                               JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)),
                                JS_PROP_C_W_E);
     else if (has_ts < 0)
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -28333,7 +28347,7 @@ ns_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type));
     JS_FreeCString(ctx, type);
     JS_SetPropertyStr(ctx, ev, "timeStamp",
-                      JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
+                      JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
     JS_SetPropertyStr(ctx, ev, "target", JS_NULL);
     JS_SetPropertyStr(ctx, ev, "currentTarget", JS_NULL);
     JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
@@ -30351,7 +30365,6 @@ ns_js_run_animation_frame_internal(ns_js *js)
     js->raf_last_us = now_us;
     GArray *fired = js->raf_pending;
     js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
-    double ts_ms = ns_perf_relative_ms(now_us, js->time_origin_us);
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     js->callback_depth++;
@@ -30380,6 +30393,8 @@ ns_js_run_animation_frame_internal(ns_js *js)
                                                              "data-nd-frame-url"));
         }
         js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
+        double ts_ms = ns_perf_relative_ms(now_us,
+            ns_js_time_origin_us(js, callback_ctx));
         JSValue arg = JS_NewFloat64(callback_ctx, ts_ms);
         JSValue ret;
         if (e->video_frame) {
@@ -31101,7 +31116,7 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     ns_event_put(ctx, event, "layerX",  JS_NewFloat64(ctx, offset_x));
     ns_event_put(ctx, event, "layerY",  JS_NewFloat64(ctx, offset_y));
     ns_event_put(ctx, event, "timeStamp",
-                      JS_NewFloat64(ctx, ns_perf_now_ms(js)));
+                      JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
     int move_x = 0, move_y = 0;
     if (strcmp(type, "mousemove") == 0 || strcmp(type, "pointermove") == 0) {
         int slot = type[0] == 'p' ? 1 : 0;
@@ -45692,7 +45707,7 @@ ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, pv);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
-                      JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
+                      JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
     JS_SetPropertyStr(ctx, q, "totalVideoFrames",
                       JS_NewInt32(ctx, (int)(pos * 30.0)));
     JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, 0));
@@ -46592,7 +46607,17 @@ static const char ns_iframe_global_bootstrap[] =
 static JSValue
 ns_iframe_platform_names(JSContext *fctx, ns_js *js)
 {
-    if (!js->platform_globals) return JS_UNDEFINED;
+    if (!js->platform_globals) {
+        /* A frame made while the document is still being installed, before
+         * any of the page's scripts ran: every name the window has is the
+         * platform's. */
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx
+                                                 : js->ctx;
+        JSContext *saved = js->ctx;
+        js->ctx = main_ctx;
+        js->platform_globals = ns_js_snapshot_globals(js);
+        js->ctx = saved;
+    }
     JSValue names = JS_NewObjectProto(fctx, JS_NULL);
     GHashTableIter it;
     gpointer k;
@@ -47278,6 +47303,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
 
     }
 
+    ns_js_adopt_frame_clock(js, iframe, fctx);
     ns_realm_cloner *cloner = ns_realm_cloner_for(js, fctx);
     ns_realm_clone_class_protos(cloner);
     ns_realm_adopt_in_place(cloner, iframe_doc);
@@ -47705,25 +47731,6 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     return ns_iframe_cross_origin_window(ctx, win);
 }
 
-static void
-ns_collect_frames_walk(JSContext *ctx, const ns_node *n, JSValue arr,
-                       uint32_t *i, int depth)
-{
-    if (!n || depth >= 256) return;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
-             g_ascii_strcasecmp(c->name, "frame") == 0)) {
-            JSValue el = ns_make_element(ctx, c);
-            JS_SetPropertyUint32(ctx, arr, (*i)++,
-                                 ns_element_get_contentWindow(ctx, el));
-            JS_FreeValue(ctx, el);
-            continue;
-        }
-        ns_collect_frames_walk(ctx, c, arr, i, depth + 1);
-    }
-}
-
 static const ns_node *
 ns_window_find_child_frame(const ns_node *n, uint32_t *index,
                            const char *name, int depth)
@@ -47830,19 +47837,32 @@ ns_window_get_frames(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_GetGlobalObject(ctx);
 }
 
+static uint32_t
+ns_count_child_frames(const ns_node *n, int depth)
+{
+    uint32_t count = 0;
+    if (!n || depth >= 256) return 0;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
+             g_ascii_strcasecmp(c->name, "frame") == 0)) {
+            count++;
+            continue;
+        }
+        count += ns_count_child_frames(c, depth + 1);
+    }
+    return count;
+}
+
+/* window.length counts the child frames; it does not make their windows,
+ * which reading it while the document is installed used to do. */
 static JSValue
 ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
                      JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    JSValue arr = JS_NewArray(ctx);
-    uint32_t i = 0;
     ns_node *doc = ns_window_current_document_for(ctx, this_val);
-    if (doc)
-        ns_collect_frames_walk(ctx, doc, arr, &i, 0);
-    JSValue len = JS_GetPropertyStr(ctx, arr, "length");
-    JS_FreeValue(ctx, arr);
-    return len;
+    return JS_NewUint32(ctx, doc ? ns_count_child_frames(doc, 0) : 0);
 }
 
 static JSValue
@@ -52032,6 +52052,26 @@ ns_install_performance_prototype(JSContext *ctx, JSValueConst global)
                ns_window_performance_clearResourceTimings, 0);
     ns_bind_fn(ctx, proto, "setResourceTimingBufferSize", ns_event_noop, 1);
     ns_bind_fn(ctx, proto, "toJSON", ns_window_performance_toJSON, 0);
+    /* Each window's performance object answers with its own document's
+     * time origin and timing objects. */
+    JSAtom atom = JS_NewAtom(ctx, "timeOrigin");
+    JS_DefinePropertyGetSet(ctx, proto, atom,
+        JS_NewCFunction2(ctx, ns_window_performance_time_origin_get,
+                         "get timeOrigin", 0, JS_CFUNC_generic, 0),
+        JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+    static const char *const objects[] = { "timing", "navigation",
+                                           "eventCounts" };
+    for (int i = 0; i < 3; i++) {
+        char *getter_name = g_strconcat("get ", objects[i], NULL);
+        atom = JS_NewAtom(ctx, objects[i]);
+        JS_DefinePropertyGetSet(ctx, proto, atom,
+            JS_NewCFunctionMagic(ctx, ns_window_performance_object_get,
+                                 getter_name, 0, JS_CFUNC_generic_magic, i),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, atom);
+        g_free(getter_name);
+    }
     ns_set_tostring_tag(ctx, proto, "Performance");
     JS_FreeValue(ctx, proto);
 }
@@ -52044,8 +52084,7 @@ ns_make_performance_object(JSContext *ctx, ns_js *js,
     ns_install_performance_prototype(ctx, global);
     JSValue performance = ns_perf_new_performance_object(ctx);
     ns_obj_adopt_global_proto(ctx, performance, "Performance");
-    JS_SetPropertyStr(ctx, performance, "timeOrigin",
-                      JS_NewFloat64(ctx, js ? js->time_origin_real_ms : 0));
+    double origin_real_ms = ns_js_time_origin_real_ms(js, ctx);
 
     JSValue perf_timing = JS_NewObject(ctx);
     const struct { const char *k; double relative_ms; gboolean present; }
@@ -52070,22 +52109,21 @@ ns_make_performance_object(JSContext *ctx, ns_js *js,
         };
     for (gsize i = 0; i < G_N_ELEMENTS(timing_fields); i++) {
         gint64 value = timing_fields[i].present && js
-            ? (gint64)floor(js->time_origin_real_ms +
-                            timing_fields[i].relative_ms)
+            ? (gint64)floor(origin_real_ms + timing_fields[i].relative_ms)
             : 0;
         JS_SetPropertyStr(ctx, perf_timing, timing_fields[i].k,
                           JS_NewInt64(ctx, value));
     }
     ns_bind_fn(ctx, perf_timing, "toJSON", ns_own_data_props_toJSON, 0);
     ns_obj_adopt_global_proto(ctx, perf_timing, "PerformanceTiming");
-    JS_SetPropertyStr(ctx, performance, "timing", perf_timing);
 
     JSValue perf_nav = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, perf_nav, "type", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, perf_nav, "redirectCount", JS_NewInt32(ctx, 0));
     ns_bind_fn(ctx, perf_nav, "toJSON", ns_own_data_props_toJSON, 0);
     ns_obj_adopt_global_proto(ctx, perf_nav, "PerformanceNavigation");
-    JS_SetPropertyStr(ctx, performance, "navigation", perf_nav);
+    ns_perf_set_performance_objects(ctx, performance, perf_timing, perf_nav,
+                                    JS_NewObject(ctx));
 
     if (include_memory) {
         JSAtom atom = JS_NewAtom(ctx, "memory");
@@ -52096,7 +52134,6 @@ ns_make_performance_object(JSContext *ctx, ns_js *js,
                                 JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, atom);
     }
-    JS_SetPropertyStr(ctx, performance, "eventCounts", JS_NewObject(ctx));
     JS_FreeValue(ctx, global);
     return performance;
 }
@@ -57746,6 +57783,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_window_links_clear(js, FALSE);
     ns_js_drop_message_tasks(js);
     ns_realm_cloners_clear(js, FALSE);
+    ns_js_clear_frame_clocks(js, FALSE);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
     if (js->frame_urls)
@@ -58714,6 +58752,7 @@ ns_js_free(ns_js *js)
     ns_window_links_clear(js, TRUE);
     ns_js_drop_message_tasks(js);
     ns_realm_cloners_clear(js, TRUE);
+    ns_js_clear_frame_clocks(js, TRUE);
     JS_FreeValue(js->ctx, js->navigator_brand);
     js->navigator_brand = JS_UNDEFINED;
     if (js->message_tasks) {
@@ -61719,6 +61758,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     char *decoded = NULL;
     ns_response *resp = NULL;
 
+    ns_js_start_frame_clock(js, iframe);
     if (srcdoc && *srcdoc) {
         decoded = g_strdup(srcdoc);
         abs_url = g_strdup(origin);

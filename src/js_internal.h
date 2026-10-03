@@ -220,6 +220,9 @@ struct ns_js {
     GHashTable   *window_outwards;
     GQueue       *message_tasks;
     GHashTable   *realm_cloners;
+    /* Frame realms' time origins, by JSContext, and the navigation start
+     * of a frame element whose new document has no realm yet. */
+    GHashTable   *realm_origins;
     JSValue       navigator_brand;   /* WeakSet of the frame realms'
                                         navigators the Navigator getters
                                         accept */
@@ -691,6 +694,18 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
                              gboolean *was_set);
 
 double ns_perf_now_ms(const ns_js *js);
+/* A frame realm's own time origin (its document's start), the page's for
+ * every other realm. */
+typedef struct ns_realm_origin {
+    gint64 origin_us;
+    double origin_real_ms;
+} ns_realm_origin;
+gint64 ns_js_time_origin_us(const ns_js *js, gconstpointer realm);
+double ns_js_time_origin_real_ms(const ns_js *js, gconstpointer realm);
+double ns_perf_realm_now_ms(JSContext *ctx);
+void   ns_js_start_frame_clock(ns_js *js, gconstpointer frame);
+void   ns_js_adopt_frame_clock(ns_js *js, gconstpointer frame, JSContext *ctx);
+void   ns_js_clear_frame_clocks(ns_js *js, gboolean destroy);
 double ns_perf_relative_ms(gint64 now_us, gint64 origin_us);
 /* What a resource timing entry needs beyond its times and response.
  * timeline names the performance timeline that gets the entry: a frame
@@ -718,6 +733,15 @@ gboolean ns_perf_has_resource(ns_js *js, gconstpointer timeline,
                               const char *url, const char *initiator);
 void ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to);
 JSValue ns_perf_new_performance_object(JSContext *ctx);
+void    ns_perf_set_performance_objects(JSContext *ctx, JSValueConst perf,
+                                        JSValue timing, JSValue navigation,
+                                        JSValue event_counts);
+JSValue ns_window_performance_time_origin_get(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv);
+JSValue ns_window_performance_object_get(JSContext *ctx,
+                                         JSValueConst this_val, int argc,
+                                         JSValueConst *argv, int magic);
 void ns_perf_entry_free(gpointer p);
 JSValue ns_perf_supported_entry_types(JSContext *ctx);
 void ns_perf_install_entry_list(JSContext *ctx, JSValueConst global);
