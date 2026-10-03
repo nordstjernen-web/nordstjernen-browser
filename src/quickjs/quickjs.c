@@ -571,6 +571,8 @@ struct JSContext {
        - the prototype of Object.prototype is null (always true as it is immutable)
     */
     uint8_t std_array_prototype : 1;
+    /* C functions made while set are the embedder's own */
+    uint8_t host_functions : 1;
 
     JSShape *array_shape;   /* initial shape for Array objects */
     JSShape *arguments_shape;  /* shape for arguments objects */
@@ -1138,6 +1140,8 @@ struct JSObject {
     uint8_t is_uncatchable_error : 1; /* if true, error is not catchable */
     uint8_t tmp_mark : 1; /* used in JS_WriteObjectRec() */
     uint8_t is_HTMLDDA : 1; /* specific annex B IsHtmlDDA behavior */
+    uint8_t is_host_function : 1; /* a C function the embedder made (see
+                                     JS_SetHostFunctionMode) */
     uint16_t class_id; /* see JS_CLASS_x */
     /* byte offsets: 16/24 */
     JSShape *shape; /* prototype and property names + flag */
@@ -2940,6 +2944,8 @@ JSContext *JS_NewContext(JSRuntime *rt)
         JS_FreeContext(ctx);
         return NULL;
     }
+    /* What the embedder adds from here on is its own (JS_IsHostAccess). */
+    ctx->host_functions = true;
 
     return ctx;
 }
@@ -6544,6 +6550,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     if (JS_IsException(func_obj))
         return func_obj;
     p = JS_VALUE_GET_OBJ(func_obj);
+    p->is_host_function = ctx->host_functions;
     p->u.cfunc.realm = JS_DupContext(ctx);
     p->u.cfunc.c_function.generic = func;
     p->u.cfunc.length = length;
@@ -6716,6 +6723,7 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
         q->u.cfunc.cproto = p->u.cfunc.cproto;
         q->u.cfunc.magic = p->u.cfunc.magic;
         q->is_constructor = p->is_constructor;
+        q->is_host_function = p->is_host_function;
         return func_obj;
     }
     if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
@@ -6741,9 +6749,33 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
             dst->data[i] = js_dup(src->data[i]);
         JS_SetOpaqueInternal(func_obj, dst);
         JS_VALUE_GET_OBJ(func_obj)->is_constructor = p->is_constructor;
+        JS_VALUE_GET_OBJ(func_obj)->is_host_function = p->is_host_function;
         return func_obj;
     }
     return JS_UNDEFINED;
+}
+
+/* Functions made from now on in ctx are the embedder's own (JS_IsHostAccess). */
+void JS_SetHostFunctionMode(JSContext *ctx, bool on)
+{
+    ctx->host_functions = on;
+}
+
+/* Whether the property access now running is the embedder's: made from C
+   outside any script, by one of the embedder's C functions, or by engine
+   code compiled from hidden source. Page scripts and the built-ins they
+   call are not. */
+bool JS_IsHostAccess(JSContext *ctx)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    JSObject *f;
+
+    if (!sf || JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+        return true;
+    f = JS_VALUE_GET_OBJ(sf->cur_func);
+    if (js_class_has_bytecode(f->class_id))
+        return f->u.func.function_bytecode->is_engine_code;
+    return f->is_host_function;
 }
 
 int JS_GetClassCount(JSRuntime *rt)
@@ -6765,6 +6797,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
                                       JS_CLASS_C_FUNCTION_DATA);
     if (JS_IsException(func_obj))
         return func_obj;
+    JS_VALUE_GET_OBJ(func_obj)->is_host_function = ctx->host_functions;
     s = js_malloc(ctx, sizeof(*s) + data_len * sizeof(JSValue));
     if (!s) {
         JS_FreeValue(ctx, func_obj);
@@ -6799,7 +6832,13 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
 
 static JSContext *js_autoinit_get_realm(JSProperty *pr)
 {
-    return (JSContext *)(pr->u.init.realm_and_id & ~3);
+    return (JSContext *)(pr->u.init.realm_and_id & ~7);
+}
+
+/* Whether the embedder defined the property (JS_IsHostAccess). */
+static bool js_autoinit_is_host(JSProperty *pr)
+{
+    return (pr->u.init.realm_and_id & 4) != 0;
 }
 
 static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
@@ -6890,6 +6929,7 @@ JSValue JS_NewCClosure(JSContext *ctx, JSCClosure *func, const char *name,
         JS_CLASS_C_CLOSURE);
     if (JS_IsException(func_obj))
         return func_obj;
+    JS_VALUE_GET_OBJ(func_obj)->is_host_function = ctx->host_functions;
     s = js_malloc(ctx, sizeof(*s));
     if (!s) {
         JS_FreeValue(ctx, func_obj);
@@ -9322,8 +9362,12 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
 
     realm = js_autoinit_get_realm(pr);
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
-    /* 'func' shall not modify the object properties 'pr' */
+    /* 'func' shall not modify the object properties 'pr'; what it makes
+       belongs to whoever defined the property, whenever it is first used */
+    bool host_functions = realm->host_functions;
+    realm->host_functions = js_autoinit_is_host(pr);
     val = func(realm, p, prop, pr->u.init.opaque);
+    realm->host_functions = host_functions;
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = JS_UNDEFINED;
@@ -11125,6 +11169,14 @@ static int JS_SetPropertyInternal(JSContext *ctx, JSValueConst obj, JSAtom prop,
     return JS_SetPropertyInternal2(ctx, obj, prop, val, obj, flags);
 }
 
+/* [[Set]] of prop on obj with receiver as the object being assigned to, as
+   Reflect.set does it; takes val. */
+int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                           JSValue val, JSValueConst receiver, int flags)
+{
+    return JS_SetPropertyInternal2(ctx, obj, prop, val, receiver, flags);
+}
+
 int JS_SetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop, JSValue val)
 {
     return JS_SetPropertyInternal(ctx, this_obj, prop, val, JS_PROP_THROW);
@@ -11820,9 +11872,11 @@ static int JS_DefineAutoInitProperty(JSContext *ctx, JSValueConst this_obj,
     if (unlikely(!pr))
         return -1;
     pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx);
-    assert((pr->u.init.realm_and_id & 3) == 0);
+    assert((pr->u.init.realm_and_id & 7) == 0);
     assert(id <= 3);
     pr->u.init.realm_and_id |= id;
+    if (ctx->host_functions)
+        pr->u.init.realm_and_id |= 4;
     pr->u.init.opaque = opaque;
     return true;
 }

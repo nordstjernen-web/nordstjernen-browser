@@ -718,6 +718,10 @@ typedef struct JSEvalOptions {
 #define JS_INVALID_CLASS_ID 0
 JS_EXTERN JSClassID JS_NewClassID(JSRuntime *rt, JSClassID *pclass_id);
 JS_EXTERN int JS_GetClassCount(JSRuntime *rt);
+JS_EXTERN void JS_SetHostFunctionMode(JSContext *ctx, bool on);
+JS_EXTERN bool JS_IsHostAccess(JSContext *ctx);
+JS_EXTERN int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                                     JSValue val, JSValueConst receiver, int flags);
 /* Returns the class ID if `v` is an object, otherwise returns JS_INVALID_CLASS_ID. */
 JS_EXTERN JSClassID JS_GetClassID(JSValueConst v);
 JS_EXTERN int JS_NewClass(JSRuntime *rt, JSClassID class_id, const JSClassDef *class_def);
