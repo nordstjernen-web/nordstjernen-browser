@@ -1352,3 +1352,43 @@ ns_canvas_font_string(const char *css)
     g_free(canon);
     return g_string_free(out, FALSE);
 }
+
+static JSValue
+ns_imagedata_clone(JSContext *ctx, JSValueConst v)
+{
+    JSValue data = ns_hget(ctx, v, "data");
+    size_t off = 0, blen = 0, bpe = 0;
+    JSValue buf = JS_GetTypedArrayBuffer(ctx, data, &off, &blen, &bpe);
+    JS_FreeValue(ctx, data);
+    if (JS_IsException(buf)) return buf;
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
+    JSValue copy = base && off + blen <= total
+        ? ns_clamped_array(ctx, base + off, blen)
+        : JS_ThrowTypeError(ctx, "The ImageData's pixel buffer is detached");
+    JS_FreeValue(ctx, buf);
+    if (JS_IsException(copy)) return copy;
+    JSValue w = ns_hget(ctx, v, "width"), h = ns_hget(ctx, v, "height");
+    JSValue space = ns_hget(ctx, v, "colorSpace");
+    int32_t iw = 0, ih = 0;
+    JS_ToInt32(ctx, &iw, w);
+    JS_ToInt32(ctx, &ih, h);
+    const char *cs = JS_ToCString(ctx, space);
+    JSValue out = ns_imagedata_wrap(ctx, ctx, JS_UNDEFINED, iw, ih, copy, cs ? cs : "srgb");
+    if (cs) JS_FreeCString(ctx, cs);
+    JS_FreeValue(ctx, w);
+    JS_FreeValue(ctx, h);
+    JS_FreeValue(ctx, space);
+    return out;
+}
+
+JSValue
+ns_canvas_clone_object(JSContext *ctx, JSValueConst v)
+{
+    if (ns_hidden_is(v, NS_HK_IMAGEDATA)) return ns_imagedata_clone(ctx, v);
+    if (ns_image_bitmap_is(v)) return ns_image_bitmap_clone(ctx, v);
+    if (JS_GetOpaque(v, ns_hidden_class_id) || ns_value_is_path2d(v))
+        return ns_canvas_throw_dom(ctx, "DataCloneError",
+                                   "The object could not be cloned.");
+    return JS_UNDEFINED;
+}
