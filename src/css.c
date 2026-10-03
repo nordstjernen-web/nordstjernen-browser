@@ -30074,16 +30074,8 @@ append_text_children(const ns_node *n, GString *out, int depth)
 static int g_host_scope_counter;
 
 static char *
-style_host_scope_id(ns_node *style_el)
+shadow_root_host_scope_id(ns_node *root)
 {
-    ns_node *root = NULL;
-    for (ns_node *a = style_el; a; a = a->parent) {
-        if (a->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL) {
-            root = a;
-            break;
-        }
-    }
     if (!root || !root->parent) return NULL;
     ns_node *host = root->parent;
     const char *existing = ns_element_get_attr(host, NS_HOST_SCOPE_ATTR);
@@ -30092,6 +30084,16 @@ style_host_scope_id(ns_node *style_el)
     g_snprintf(buf, sizeof buf, "%d", ++g_host_scope_counter);
     ns_element_set_attr(host, NS_HOST_SCOPE_ATTR, buf);
     return g_strdup(buf);
+}
+
+static char *
+style_host_scope_id(ns_node *style_el)
+{
+    for (ns_node *a = style_el; a; a = a->parent)
+        if (a->kind == NS_NODE_ELEMENT &&
+            ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL)
+            return shadow_root_host_scope_id(a);
+    return NULL;
 }
 
 static char *
@@ -30400,6 +30402,20 @@ char *
 ns_css_style_element_text(ns_node *style)
 {
     return style_element_final_css(style);
+}
+
+char *
+ns_css_shadow_adopted_css(ns_node *root)
+{
+    const char *css = ns_element_get_attr(root, NS_ADOPTED_CSS_ATTR);
+    if (!css || !*css) return NULL;
+    char *host_id = shadow_root_host_scope_id(root);
+    if (!host_id) return NULL;
+    char *flat = css_flatten_nesting(css, (gssize)strlen(css));
+    char *scoped = scope_shadow_css(flat, host_id, FALSE);
+    g_free(flat);
+    g_free(host_id);
+    return scoped;
 }
 
 typedef struct {
