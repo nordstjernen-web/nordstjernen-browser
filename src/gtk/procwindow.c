@@ -2467,8 +2467,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_notebook_set_scrollable(GTK_NOTEBOOK(pw->notebook), TRUE);
     gtk_widget_set_hexpand(pw->notebook, TRUE);
     gtk_widget_set_vexpand(pw->notebook, TRUE);
-    g_signal_connect(pw->notebook, "switch-page",
-                     G_CALLBACK(on_switch_page), pw);
+    g_signal_connect_after(pw->notebook, "switch-page",
+                           G_CALLBACK(on_switch_page), pw);
 
     pw->status = gtk_label_new("");
     gtk_label_set_ellipsize(GTK_LABEL(pw->status), PANGO_ELLIPSIZE_MIDDLE);
