@@ -4517,6 +4517,26 @@ ns_foreign_kind_proto(ns_js *js, const ns_node *node)
 }
 
 static JSValue
+ns_html_kind_proto(ns_js *js, const ns_node *node)
+{
+    if (!node->name || !js->per_tag_protos) return js->proto_htmlelement;
+    gsize n = strlen(node->name);
+    gboolean lower_case = TRUE;
+    for (gsize i = 0; i < n; i++)
+        if (g_ascii_isupper(node->name[i])) lower_case = FALSE;
+    if (lower_case) {
+        JSValue *slot = g_hash_table_lookup(js->per_tag_protos, node->name);
+        if (slot) return *slot;
+        if (ns_html_tag_has_plain_interface(node->name))
+            return js->proto_htmlelement;
+    }
+    if (!ns_ce_name_valid(node->name) &&
+        JS_IsObject(js->proto_htmlunknownelement))
+        return js->proto_htmlunknownelement;
+    return js->proto_htmlelement;
+}
+
+static JSValue
 ns_node_kind_proto(ns_js *js, const ns_node *node)
 {
     if (!js || !js->dom_protos_set || !node) return JS_UNDEFINED;
@@ -4531,22 +4551,7 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
         }
         if (node->flags & NS_NODE_FOREIGN_NS)
             return ns_foreign_kind_proto(js, node);
-        if (node->name && js->per_tag_protos) {
-            char lower[32];
-            gsize n = strlen(node->name);
-            if (n < sizeof lower) {
-                for (gsize i = 0; i <= n; i++)
-                    lower[i] = g_ascii_tolower(node->name[i]);
-                JSValue *slot = g_hash_table_lookup(js->per_tag_protos, lower);
-                if (slot) return *slot;
-                if (ns_html_tag_has_plain_interface(lower))
-                    return js->proto_htmlelement;
-            }
-            if (!ns_ce_name_valid(node->name) &&
-                JS_IsObject(js->proto_htmlunknownelement))
-                return js->proto_htmlunknownelement;
-        }
-        return js->proto_htmlelement;
+        return ns_html_kind_proto(js, node);
     case NS_NODE_TEXT:
         return (node->flags & NS_NODE_CDATA) ? js->proto_cdata : js->proto_text;
     case NS_NODE_COMMENT:
