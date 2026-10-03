@@ -5,6 +5,7 @@
 
 #include "webgl.h"
 #include "js_classid.h"
+#include "js_internal.h"
 
 #if defined(NS_ENABLE_WEBGL)
 
@@ -496,36 +497,73 @@ argbool(JSContext *ctx, int argc, JSValueConst *argv, int i)
     return (i < argc) ? (JS_ToBool(ctx, argv[i]) ? TRUE : FALSE) : FALSE;
 }
 
+static JSClassID ns_webgl_obj_class_id;
+
+typedef struct ns_webgl_obj {
+    int    kind;
+    GLuint name;
+} ns_webgl_obj;
+
+static const struct { const char *kind; const char *iface; } wgl_object_kinds[] = {
+    { "buffer", "WebGLBuffer" }, { "framebuffer", "WebGLFramebuffer" },
+    { "program", "WebGLProgram" }, { "renderbuffer", "WebGLRenderbuffer" },
+    { "shader", "WebGLShader" }, { "texture", "WebGLTexture" },
+    { "query", "WebGLQuery" }, { "sampler", "WebGLSampler" },
+    { "sync", "WebGLSync" }, { "transformfeedback", "WebGLTransformFeedback" },
+    { "vertexarray", "WebGLVertexArrayObject" },
+    { "location", "WebGLUniformLocation" },
+};
+
+static void
+ns_webgl_obj_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    g_free(JS_GetOpaque(val, ns_webgl_obj_class_id));
+}
+
+static JSClassDef ns_webgl_obj_class = {
+    "WebGLObject",
+    .finalizer = ns_webgl_obj_finalizer,
+};
+
 static int
 wgl_name(JSContext *ctx, JSValueConst v)
 {
-    if (!JS_IsObject(v)) return 0;
-    JSValue p = JS_GetPropertyStr(ctx, v, "_n");
-    int32_t n = 0;
-    JS_ToInt32(ctx, &n, p);
-    JS_FreeValue(ctx, p);
-    return n;
+    (void)ctx;
+    ns_webgl_obj *o = JS_GetOpaque(v, ns_webgl_obj_class_id);
+    return o ? (int)o->name : 0;
 }
 
 static int
 wgl_loc(JSContext *ctx, JSValueConst v)
 {
-    if (!JS_IsObject(v)) return -1;
-    JSValue p = JS_GetPropertyStr(ctx, v, "_loc");
-    int32_t n = -1;
-    JS_ToInt32(ctx, &n, p);
-    JS_FreeValue(ctx, p);
-    return n;
+    (void)ctx;
+    ns_webgl_obj *o = JS_GetOpaque(v, ns_webgl_obj_class_id);
+    return o && o->kind == 11 ? (int)o->name : -1;
 }
 
 static JSValue
-wgl_wrap(JSContext *ctx, GLuint name, const char *kind)
+wgl_new_object(ns_webgl *g, JSContext *ctx, GLuint name, const char *kind)
+{
+    int k = 0;
+    while (k < 11 && strcmp(wgl_object_kinds[k].kind, kind) != 0) k++;
+    JSValue proto = ns_api_proto(ns_canvas_realm(ctx, g->canvas), wgl_object_kinds[k].iface);
+    JSValue o = JS_IsObject(proto)
+        ? JS_NewObjectProtoClass(ctx, proto, ns_webgl_obj_class_id)
+        : JS_NewObjectClass(ctx, ns_webgl_obj_class_id);
+    JS_FreeValue(ctx, proto);
+    ns_webgl_obj *d = g_new0(ns_webgl_obj, 1);
+    d->kind = k;
+    d->name = name;
+    JS_SetOpaque(o, d);
+    return o;
+}
+
+static JSValue
+wgl_wrap(ns_webgl *g, JSContext *ctx, GLuint name, const char *kind)
 {
     if (!name) return JS_NULL;
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "_n", JS_NewInt32(ctx, (int)name));
-    JS_SetPropertyStr(ctx, o, "_t", JS_NewString(ctx, kind));
-    return o;
+    return wgl_new_object(g, ctx, name, kind);
 }
 
 static JSValue
@@ -1481,7 +1519,7 @@ wgl_createShader(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     WGL_GET(0);
     GLuint s = glCreateShader((GLenum)argi(ctx, argc, argv, 0));
-    return wgl_wrap(ctx, s, "shader");
+    return wgl_wrap(g, ctx, s, "shader");
 }
 
 static JSValue
@@ -1578,7 +1616,7 @@ wgl_createProgram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 {
     (void)argc; (void)argv;
     WGL_GET(0);
-    return wgl_wrap(ctx, glCreateProgram(), "program");
+    return wgl_wrap(g, ctx, glCreateProgram(), "program");
 }
 
 static JSValue
@@ -1687,18 +1725,26 @@ wgl_getUniformLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         JS_FreeCString(ctx, name);
     }
     if (loc < 0) return JS_NULL;
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "_loc", JS_NewInt32(ctx, loc));
+    return wgl_new_object(g, ctx, (GLuint)loc, "location");
+}
+
+static JSValue
+wgl_new_info(ns_webgl *g, JSContext *ctx, int kind, const char *iface)
+{
+    JSContext *realm = ns_canvas_realm(ctx, g->canvas);
+    JSValue proto = ns_api_proto(realm, iface);
+    JSValue o = ns_hidden_new(realm, kind, proto);
+    JS_FreeValue(realm, proto);
     return o;
 }
 
 static JSValue
-wgl_active_info(JSContext *ctx, GLint size, GLenum type, const char *name)
+wgl_active_info(ns_webgl *g, JSContext *ctx, GLint size, GLenum type, const char *name)
 {
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "size", JS_NewInt32(ctx, size));
-    JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, (int)type));
-    JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name));
+    JSValue o = wgl_new_info(g, ctx, NS_HK_ACTIVEINFO, "WebGLActiveInfo");
+    ns_hset(ctx, o, "size", JS_NewInt32(ctx, size));
+    ns_hset(ctx, o, "type", JS_NewInt32(ctx, (int)type));
+    ns_hset(ctx, o, "name", JS_NewString(ctx, name));
     return o;
 }
 
@@ -1712,7 +1758,7 @@ wgl_active_var(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     GLenum type = 0;
     fn((GLuint)wgl_name(ctx, argv[0]), (GLuint)argi(ctx, argc, argv, 1),
        sizeof(name) - 1, NULL, &size, &type, name);
-    return wgl_active_info(ctx, size, type, name);
+    return wgl_active_info(g, ctx, size, type, name);
 }
 
 static JSValue wgl_getActiveAttrib(JSContext *c, JSValueConst t, int a, JSValueConst *v)
@@ -1730,10 +1776,10 @@ wgl_getShaderPrecisionFormat(JSContext *ctx, JSValueConst this_val,
     GLint range[2] = { 0, 0 };
     GLint precision = 0;
     glGetShaderPrecisionFormat(shader_type, precision_type, range, &precision);
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "rangeMin", JS_NewInt32(ctx, range[0]));
-    JS_SetPropertyStr(ctx, o, "rangeMax", JS_NewInt32(ctx, range[1]));
-    JS_SetPropertyStr(ctx, o, "precision", JS_NewInt32(ctx, precision));
+    JSValue o = wgl_new_info(g, ctx, NS_HK_PRECISION, "WebGLShaderPrecisionFormat");
+    ns_hset(ctx, o, "rangeMin", JS_NewInt32(ctx, range[0]));
+    ns_hset(ctx, o, "rangeMax", JS_NewInt32(ctx, range[1]));
+    ns_hset(ctx, o, "precision", JS_NewInt32(ctx, precision));
     return o;
 }
 
@@ -1744,7 +1790,7 @@ wgl_gen_obj(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
     WGL_GET(0);
     GLuint n = 0;
     gen(1, &n);
-    return wgl_wrap(ctx, n, kind);
+    return wgl_wrap(g, ctx, n, kind);
 }
 
 static JSValue
@@ -2598,7 +2644,7 @@ wgl_getVertexAttrib(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
         pname == GL_VERTEX_ATTRIB_ARRAY_NORMALIZED)
         return JS_NewBool(ctx, v);
     if (pname == GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING)
-        return v ? wgl_wrap(ctx, (GLuint)v, "buffer") : JS_NULL;
+        return v ? wgl_wrap(g, ctx, (GLuint)v, "buffer") : JS_NULL;
     return JS_NewInt32(ctx, v);
 }
 
@@ -3261,7 +3307,7 @@ wgl_getQuery(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     WGL_GET(0);
     GLint v = 0;
     glGetQueryiv((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1), &v);
-    return v ? wgl_wrap(ctx, (GLuint)v, "query") : JS_NULL;
+    return v ? wgl_wrap(g, ctx, (GLuint)v, "query") : JS_NULL;
 }
 
 static JSValue wgl_createTransformFeedback(JSContext *c, JSValueConst t, int a, JSValueConst *v)
@@ -3420,20 +3466,16 @@ wgl_fenceSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         g->syncs = g_hash_table_new(g_direct_hash, g_direct_equal);
     int id = ++g->next_sync;
     g_hash_table_insert(g->syncs, GINT_TO_POINTER(id), (gpointer)s);
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "_sync", JS_NewInt32(ctx, id));
-    return o;
+    return wgl_new_object(g, ctx, (GLuint)id, "sync");
 }
 
 static GLsync
 wgl_sync_lookup(JSContext *ctx, ns_webgl *g, JSValueConst v)
 {
-    if (!g->syncs || !JS_IsObject(v)) return NULL;
-    JSValue p = JS_GetPropertyStr(ctx, v, "_sync");
-    int32_t id = 0;
-    JS_ToInt32(ctx, &id, p);
-    JS_FreeValue(ctx, p);
-    return (GLsync)g_hash_table_lookup(g->syncs, GINT_TO_POINTER(id));
+    (void)ctx;
+    ns_webgl_obj *o = JS_GetOpaque(v, ns_webgl_obj_class_id);
+    if (!g->syncs || !o || o->kind != 8) return NULL;
+    return (GLsync)g_hash_table_lookup(g->syncs, GINT_TO_POINTER((int)o->name));
 }
 
 static JSValue
@@ -3448,15 +3490,11 @@ static JSValue
 wgl_deleteSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    if (argc < 1 || !g->syncs || !JS_IsObject(argv[0])) return JS_UNDEFINED;
-    JSValue p = JS_GetPropertyStr(ctx, argv[0], "_sync");
-    int32_t id = 0;
-    JS_ToInt32(ctx, &id, p);
-    JS_FreeValue(ctx, p);
-    GLsync s = (GLsync)g_hash_table_lookup(g->syncs, GINT_TO_POINTER(id));
+    if (argc < 1 || !g->syncs) return JS_UNDEFINED;
+    GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (s) {
         glDeleteSync(s);
-        g_hash_table_remove(g->syncs, GINT_TO_POINTER(id));
+        g_hash_table_remove(g->syncs, GINT_TO_POINTER(wgl_name(ctx, argv[0])));
     }
     return JS_UNDEFINED;
 }
@@ -3540,7 +3578,7 @@ wgl_getAttachedShaders(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     glGetAttachedShaders((GLuint)wgl_name(ctx, argv[0]), 16, &count, shaders);
     JSValue arr = JS_NewArray(ctx);
     for (GLsizei i = 0; i < count && i < 16; i++)
-        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, wgl_wrap(ctx, shaders[i], "shader"));
+        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, wgl_wrap(g, ctx, shaders[i], "shader"));
     return arr;
 }
 
@@ -3564,7 +3602,7 @@ wgl_getIndexedParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     case GL_UNIFORM_BUFFER_BINDING: {
         GLint name = 0;
         glGetIntegeri_v(target, index, &name);
-        return wgl_wrap(ctx, (GLuint)name, "buffer");
+        return wgl_wrap(g, ctx, (GLuint)name, "buffer");
     }
     case GL_TRANSFORM_FEEDBACK_BUFFER_START:
     case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
@@ -3620,7 +3658,7 @@ wgl_getTransformFeedbackVarying(JSContext *ctx, JSValueConst this_val, int argc,
     glGetTransformFeedbackVarying((GLuint)wgl_name(ctx, argv[0]),
                                   (GLuint)argi(ctx, argc, argv, 1),
                                   sizeof(name) - 1, NULL, &size, &type, name);
-    return wgl_active_info(ctx, size, type, name);
+    return wgl_active_info(g, ctx, size, type, name);
 }
 
 static JSValue
@@ -4430,7 +4468,7 @@ wgl_bind_accessors(JSContext *ctx, JSValueConst proto)
                         wgl_get_unpackColorSpace, wgl_set_unpackColorSpace);
 }
 
-void
+static void
 ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor, JSValueConst proto,
                            int version)
 {
@@ -4449,20 +4487,104 @@ ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor, JSValueConst proto
 }
 
 static JSValue
-wgl_new_context_object(JSContext *ctx, int version)
+wgl_new_context_object(JSContext *ctx, const ns_node *canvas, int version)
 {
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global,
-        version >= 2 ? "WebGL2RenderingContext" : "WebGLRenderingContext");
-    JS_FreeValue(ctx, global);
-    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
-                                      : JS_UNDEFINED;
-    JS_FreeValue(ctx, ctor);
+    JSContext *realm = ns_canvas_realm(ctx, canvas);
+    JSValue proto = ns_api_proto(realm, version >= 2 ? "WebGL2RenderingContext"
+                                                     : "WebGLRenderingContext");
     JSValue obj = JS_IsObject(proto)
-        ? JS_NewObjectProtoClass(ctx, proto, ns_webgl_class_id)
-        : JS_NewObjectClass(ctx, ns_webgl_class_id);
-    JS_FreeValue(ctx, proto);
+        ? JS_NewObjectProtoClass(realm, proto, ns_webgl_class_id)
+        : JS_NewObjectClass(realm, ns_webgl_class_id);
+    JS_FreeValue(realm, proto);
     return obj;
+}
+
+static const char *const wgl_interface_names[] = {
+    "WebGLObject", "WebGLBuffer", "WebGLFramebuffer", "WebGLProgram",
+    "WebGLRenderbuffer", "WebGLShader", "WebGLTexture", "WebGLQuery",
+    "WebGLSampler", "WebGLSync", "WebGLTransformFeedback",
+    "WebGLVertexArrayObject", "WebGLUniformLocation", "WebGLActiveInfo",
+    "WebGLShaderPrecisionFormat", "WebGLRenderingContext",
+    "WebGL2RenderingContext",
+};
+
+static JSValue
+wgl_illegal_constructor(JSContext *ctx, JSValueConst this_val, int argc,
+                        JSValueConst *argv, int magic)
+{
+    (void)argc; (void)argv;
+    if (JS_IsUndefined(this_val)) return JS_ThrowTypeError(ctx, "Illegal constructor");
+    return JS_ThrowTypeError(ctx, "Failed to construct '%s': Illegal constructor",
+                             wgl_interface_names[magic]);
+}
+
+static const struct { int kind; const char *names[3]; } wgl_info_fields[] = {
+    { NS_HK_ACTIVEINFO, { "name", "size", "type" } },
+    { NS_HK_PRECISION, { "precision", "rangeMax", "rangeMin" } },
+};
+
+static JSValue
+wgl_info_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
+             int magic)
+{
+    (void)argc; (void)argv;
+    int iface = magic >> 4;
+    if (!ns_hidden_is(this_val, wgl_info_fields[iface].kind))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    return ns_hget(ctx, this_val, wgl_info_fields[iface].names[magic & 15]);
+}
+
+static void
+wgl_define_info_getters(JSContext *ctx, JSValueConst proto, int iface)
+{
+    for (int i = 0; i < 3; i++) {
+        const char *name = wgl_info_fields[iface].names[i];
+        char *get_name = g_strconcat("get ", name, NULL);
+        JSAtom atom = JS_NewAtom(ctx, name);
+        JS_DefinePropertyGetSet(ctx, proto, atom,
+            JS_NewCFunctionMagic(ctx, wgl_info_get, get_name, 0, JS_CFUNC_generic_magic,
+                                 (iface << 4) | i),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, atom);
+        g_free(get_name);
+    }
+}
+
+static JSValue
+wgl_install_one(JSContext *ctx, JSValueConst global, int index, const char *parent,
+                JSValue *proto_out)
+{
+    const char *name = wgl_interface_names[index];
+    JSValue ctor = JS_NewCFunctionMagic(ctx, wgl_illegal_constructor, name, 0,
+                                        JS_CFUNC_constructor_or_func_magic, index);
+    *proto_out = ns_api_interface(ctx, global, name, JS_DupValue(ctx, ctor), parent);
+    return ctor;
+}
+
+void
+ns_webgl_install(JSContext *ctx, JSValueConst global)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    ns_new_class_id(&ns_webgl_obj_class_id);
+    if (!JS_IsRegisteredClass(rt, ns_webgl_obj_class_id))
+        JS_NewClass(rt, ns_webgl_obj_class_id, &ns_webgl_obj_class);
+    JSValue proto;
+    for (int i = 0; i <= 12; i++) {
+        JS_FreeValue(ctx, wgl_install_one(ctx, global, i, i >= 1 && i <= 11 ? "WebGLObject" : NULL,
+                                          &proto));
+        JS_FreeValue(ctx, proto);
+    }
+    for (int i = 0; i < 2; i++) {
+        JS_FreeValue(ctx, wgl_install_one(ctx, global, 13 + i, NULL, &proto));
+        wgl_define_info_getters(ctx, proto, i);
+        JS_FreeValue(ctx, proto);
+    }
+    for (int version = 1; version <= 2; version++) {
+        JSValue ctor = wgl_install_one(ctx, global, 14 + version, NULL, &proto);
+        ns_webgl_install_interface(ctx, ctor, proto, version);
+        JS_FreeValue(ctx, ctor);
+        JS_FreeValue(ctx, proto);
+    }
 }
 
 JSValue
@@ -4489,7 +4611,7 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     ns_webgl *g = ns_webgl_make(ctx, js, canvas, version, attrs);
     if (!g) return JS_NULL;
 
-    JSValue obj = wgl_new_context_object(ctx, version);
+    JSValue obj = wgl_new_context_object(ctx, canvas, version);
     if (JS_IsException(obj)) {
         ns_webgl_free(g);
         return JS_NULL;
@@ -4590,6 +4712,14 @@ ns_webgl_canvas_surface(const ns_node *canvas)
 
 #else /* !NS_ENABLE_WEBGL */
 
+static JSValue
+wgl_stub_constructor(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv, int magic)
+{
+    (void)this_val; (void)argc; (void)argv; (void)magic;
+    return JS_ThrowTypeError(ctx, "Illegal constructor");
+}
+
 JSValue
 ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
                      const ns_node *canvas, int version, JSValueConst attrs)
@@ -4600,10 +4730,14 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
 }
 
 void
-ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor, JSValueConst proto,
-                           int version)
+ns_webgl_install(JSContext *ctx, JSValueConst global)
 {
-    (void)ctx; (void)ctor; (void)proto; (void)version;
+    static const char *const names[2] = { "WebGLRenderingContext", "WebGL2RenderingContext" };
+    for (int i = 0; i < 2; i++) {
+        JSValue ctor = JS_NewCFunctionMagic(ctx, wgl_stub_constructor, names[i], 0,
+                                            JS_CFUNC_constructor_or_func_magic, i);
+        JS_FreeValue(ctx, ns_api_interface(ctx, global, names[i], ctor, NULL));
+    }
 }
 
 cairo_surface_t *

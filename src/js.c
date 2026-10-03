@@ -26437,22 +26437,9 @@ ns_worker_js_new(ns_worker_host *host)
         JS_SetPropertyStr(ctx, crypto, "subtle", subtle);
         JS_SetPropertyStr(ctx, global, "crypto", crypto);
     }
-    ns_bind_ctor(ctx, global, "WebGLRenderingContext",
-                 ns_illegal_constructor, 0);
-    ns_bind_ctor(ctx, global, "WebGL2RenderingContext",
-                 ns_illegal_constructor, 0);
-    {
-        JSValue gl1 = JS_GetPropertyStr(ctx, global, "WebGLRenderingContext");
-        JSValue gl2 = JS_GetPropertyStr(ctx, global, "WebGL2RenderingContext");
-        JSValue gl1p = JS_GetPropertyStr(ctx, gl1, "prototype");
-        JSValue gl2p = JS_GetPropertyStr(ctx, gl2, "prototype");
-        ns_webgl_install_interface(ctx, gl1, gl1p, 1);
-        ns_webgl_install_interface(ctx, gl2, gl2p, 2);
-        JS_FreeValue(ctx, gl1p);
-        JS_FreeValue(ctx, gl2p);
-        JS_FreeValue(ctx, gl1);
-        JS_FreeValue(ctx, gl2);
-    }
+    ns_webgl_install(ctx, global);
+    ns_canvas_register_classes(js->rt);
+    ns_canvas_install(ctx, global, FALSE);
 
     JS_SetPropertyStr(ctx, global, "self", JS_DupValue(ctx, global));
     JS_SetPropertyStr(ctx, global, "globalThis", JS_DupValue(ctx, global));
@@ -45002,6 +44989,12 @@ ns_js_node_realm_context(ns_js *js, const ns_node *node)
         ? g_hash_table_lookup(js->frame_contexts, frame) : NULL;
 }
 
+JSContext *
+ns_js_realm_for_node(ns_js *js, const ns_node *node)
+{
+    return ns_js_node_realm_context(js, node);
+}
+
 /* The frame element whose content document holds node, or NULL for the
  * page's own document (fallback content inside an <object> included). */
 static ns_node *
@@ -55135,10 +55128,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, custom_elements, "getName",     ns_ce_getName,     1);
     JS_SetPropertyStr(ctx, global, "customElements", custom_elements);
 
-    ns_canvas_register_image_bitmap_class(js->rt);
-    ns_bind_fn(ctx, global, "createImageBitmap", ns_window_create_image_bitmap, 1);
+    ns_canvas_register_classes(js->rt);
     ns_bind_ctor(ctx, global, "Image",           ns_window_image_ctor,           2);
-    ns_bind_ctor(ctx, global, "OffscreenCanvas", ns_window_offscreen_canvas_ctor, 2);
     ns_bind_ctor(ctx, global, "MediaError",       ns_illegal_constructor,          0);
     {
         static const ns_int_constant constants[] = {
@@ -55154,20 +55145,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "VTTCue",       ns_vtt_cue_ctor,        3);
     ns_bind_ctor(ctx, global, "ClipboardItem", ns_clipboard_item_ctor, 1);
     ns_bind_ctor(ctx, global, "CustomStateSet", ns_custom_state_set_ctor, 0);
-    {
-        ns_bind_ctor(ctx, global, "WebGLRenderingContext",
-                     ns_illegal_constructor, 0);
-        ns_bind_ctor(ctx, global, "WebGL2RenderingContext",
-                     ns_illegal_constructor, 0);
-        JSValue gl1 = JS_GetPropertyStr(ctx, global, "WebGLRenderingContext");
-        JSValue gl2 = JS_GetPropertyStr(ctx, global, "WebGL2RenderingContext");
-        JSValue gl1p = JS_GetPropertyStr(ctx, gl1, "prototype");
-        JSValue gl2p = JS_GetPropertyStr(ctx, gl2, "prototype");
-        ns_webgl_install_interface(ctx, gl1, gl1p, 1);
-        ns_webgl_install_interface(ctx, gl2, gl2p, 2);
-        JS_FreeValue(ctx, gl1p); JS_FreeValue(ctx, gl2p);
-        JS_FreeValue(ctx, gl1);  JS_FreeValue(ctx, gl2);
-    }
+    ns_webgl_install(ctx, global);
     ns_bind_ctor(ctx, global, "Audio",           ns_window_audio_ctor,           1);
     ns_bind_ctor(ctx, global, "AudioContext",    ns_audio_context_ctor,          1);
     {
@@ -55340,6 +55318,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                   event_base_ctors, G_N_ELEMENTS(event_base_ctors));
     ns_event_link_proto(ctx, global, "XMLHttpRequest", "EventTarget");
     ns_event_link_proto(ctx, global, "XMLHttpRequestUpload", "EventTarget");
+    ns_canvas_install(ctx, global, TRUE);
     ns_bind_ctor(ctx, global, "Document", ns_document_ctor, 0);
 
     {
@@ -55794,8 +55773,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_new_class_id(&ns_zlib_class_id);
     JS_NewClass(js->rt, ns_zlib_class_id, &ns_zlib_class);
     ns_bind_ctor(ctx, global, "WebSocket",      ns_window_websocket_ctor,    2);
-    ns_canvas_register_path2d_class(js->rt);
-    ns_bind_ctor(ctx, global, "Path2D",         ns_path2d_ctor,              1);
     {
         JSValue ws = JS_GetPropertyStr(ctx, global, "WebSocket");
         if (JS_IsObject(ws)) {
@@ -59332,8 +59309,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "ProcessingInstruction", 0 }, { "Attr", 0 },
         { "DocumentType", 0 },
         { "HTMLOptionsCollection", 0 }, { "HTMLAllCollection", 0 },
-        { "RadioNodeList", 0 }, { "TextMetrics", 0 },
-        { "CanvasRenderingContext2D", 0 }, { "ImageData", 4 },
+        { "RadioNodeList", 0 },
         { "ValidityState", 0 },
         { "DOMRect", 4 }, { "DOMRectReadOnly", 4 },
         { "DOMPoint", 4 }, { "DOMPointReadOnly", 4 },
