@@ -340,28 +340,50 @@
                 throw new TypeError("Header contains a character outside the ByteString range");
         return s;
     }
+    var hdrIterState = new WeakMap();
     var HDR_ITER_PROTO = Object.create(
         Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
     Object.defineProperty(HDR_ITER_PROTO, 'next', {
         configurable: true, enumerable: true, writable: true,
         value: function () {
-            var s = this._h, keys = Object.keys(s._m).sort();
-            if (this._i >= keys.length) return { value: undefined, done: true };
-            var k = keys[this._i++], v = s._m[k];
-            var out = this._k === 0 ? k : this._k === 1 ? v : [k, v];
+            var st = hdrIterState.get(this);
+            if (!st) throw new TypeError('Illegal invocation');
+            var entries = headersEntries(st.h);
+            if (st.i >= entries.length) return { value: undefined, done: true };
+            var e = entries[st.i++];
+            var out = st.k === 0 ? e[0] : st.k === 1 ? e[1] : [e[0], e[1]];
             return { value: out, done: false };
         }
     });
+    Object.defineProperty(HDR_ITER_PROTO, Symbol.toStringTag, {
+        value: 'Headers Iterator', configurable: true
+    });
     function headersIterator(h, kind) {
         var it = Object.create(HDR_ITER_PROTO);
-        it._h = h; it._i = 0; it._k = kind;
+        hdrIterState.set(it, { h: h, i: 0, k: kind });
         return it;
+    }
+    function headersMap(h) {
+        var m = h !== null && typeof h === 'object' ? h.__ndHeaderMap : undefined;
+        if (m === undefined) throw new TypeError('Illegal invocation');
+        return m;
+    }
+    function headersEntries(h) {
+        var m = headersMap(h), keys = Object.keys(m).sort(), out = [];
+        for (var i = 0; i < keys.length; i++) {
+            if (keys[i] === 'set-cookie') {
+                var cookies = h.__ndSetCookies;
+                for (var c = 0; c < cookies.length; c++) out.push([keys[i], cookies[c]]);
+            } else out.push([keys[i], m[keys[i]]]);
+        }
+        return out;
     }
 
     function Headers(init) {
         if (!(this instanceof Headers))
             throw new TypeError("Constructor Headers requires 'new'");
-        this._m = Object.create(null);
+        this.__ndHeaderMap = Object.create(null);
+        this.__ndSetCookies = [];
         if (init === undefined) return;
         if (init === null || (typeof init !== 'object' && typeof init !== 'function'))
             throw new TypeError("Failed to construct 'Headers': invalid init");
@@ -396,31 +418,59 @@
         for (var r = 0; r < rec.length; r++) self.append(rec[r][0], rec[r][1]);
     }
     Headers.prototype.append = function (k, v) {
+        var m = headersMap(this);
         var key = checkHeaderName(k);
         var val = checkHeaderValue(v);
-        if (this._m[key] != null) this._m[key] += ', ' + val;
-        else this._m[key] = val;
+        if (m[key] != null) m[key] += ', ' + val;
+        else m[key] = val;
+        if (key === 'set-cookie') this.__ndSetCookies.push(val);
     };
     Headers.prototype.set = function (k, v) {
-        this._m[checkHeaderName(k)] = checkHeaderValue(v);
+        var m = headersMap(this);
+        var key = checkHeaderName(k);
+        var val = checkHeaderValue(v);
+        m[key] = val;
+        if (key === 'set-cookie') this.__ndSetCookies = [val];
     };
     Headers.prototype.get = function (k) {
-        var v = this._m[checkHeaderName(k)];
+        var m = headersMap(this);
+        var v = m[checkHeaderName(k)];
         return v == null ? null : v;
     };
-    Headers.prototype.has = function (k) { return this._m[checkHeaderName(k)] != null; };
-    Headers.prototype.delete = function (k) { delete this._m[checkHeaderName(k)]; };
-    Headers.prototype.forEach = function (fn, thisArg) {
-        var keys = Object.keys(this._m).sort();
-        for (var i = 0; i < keys.length; i++)
-            fn.call(thisArg, this._m[keys[i]], keys[i], this);
+    Headers.prototype.has = function (k) {
+        var m = headersMap(this);
+        return m[checkHeaderName(k)] != null;
     };
-    Headers.prototype.keys = function () { return headersIterator(this, 0); };
-    Headers.prototype.values = function () { return headersIterator(this, 1); };
-    Headers.prototype.entries = function () { return headersIterator(this, 2); };
+    Headers.prototype.delete = function (k) {
+        var m = headersMap(this);
+        var key = checkHeaderName(k);
+        delete m[key];
+        if (key === 'set-cookie') this.__ndSetCookies = [];
+    };
+    Headers.prototype.forEach = function (fn) {
+        var thisArg = arguments[1];
+        headersMap(this);
+        if (typeof fn !== 'function')
+            throw new TypeError("Failed to execute 'forEach' on 'Headers': parameter 1 is not of type 'Function'.");
+        var entries = headersEntries(this);
+        for (var i = 0; i < entries.length; i++)
+            fn.call(thisArg, entries[i][1], entries[i][0], this);
+    };
+    Headers.prototype.getSetCookie = function () {
+        headersMap(this);
+        return this.__ndSetCookies.slice();
+    };
+    Headers.prototype.keys = function () { headersMap(this); return headersIterator(this, 0); };
+    Headers.prototype.values = function () { headersMap(this); return headersIterator(this, 1); };
+    Headers.prototype.entries = function () { headersMap(this); return headersIterator(this, 2); };
     if (typeof Symbol !== 'undefined' && Symbol.iterator) {
-        Headers.prototype[Symbol.iterator] = Headers.prototype.entries;
+        Object.defineProperty(Headers.prototype, Symbol.iterator, {
+            value: Headers.prototype.entries, writable: true, configurable: true
+        });
     }
+    Object.defineProperty(Headers.prototype, Symbol.toStringTag, {
+        value: 'Headers', configurable: true
+    });
     nativeize(Headers, 'Headers');
     try { Object.defineProperty(Headers, 'length', { value: 0 }); } catch (e) {}
     defineCtor('Headers', Headers);
@@ -1754,14 +1804,10 @@
             }
             return ndCreateObjectURL.apply(this, arguments);
         };
-        global.URL.revokeObjectURL = function () {
+        global.URL.revokeObjectURL = function (url) {
             return ndRevokeObjectURL.apply(this, arguments);
         };
-        try {
-            Object.defineProperty(global.URL, '__ndMediaSourceObjectURL', {
-                value: true, configurable: true
-            });
-        } catch (e) { global.URL.__ndMediaSourceObjectURL = true; }
+        global.URL.__ndMediaSourceObjectURL = true;
     }
 
     if (typeof global.URL === 'function' &&
@@ -6761,20 +6807,6 @@
         } catch (e) {}
     }
 
-    if (typeof Headers === 'function' && Headers.prototype &&
-        typeof Headers.prototype.getSetCookie !== 'function') {
-        defineMethod(Headers.prototype, 'getSetCookie', function () {
-            var out = [];
-            var m = this._m;
-            if (m) {
-                var keys = Object.keys(m);
-                for (var i = 0; i < keys.length; i++) {
-                    if (keys[i].toLowerCase() === 'set-cookie') out.push(m[keys[i]]);
-                }
-            }
-            return out;
-        });
-    }
 
     var doc = global.document;
     if (doc && doc.implementation) {

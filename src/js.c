@@ -965,7 +965,7 @@ static gboolean
 ns_js_value_is_url_search_params(JSContext *ctx, JSValueConst v)
 {
     if (!JS_IsObject(v) || JS_IsFunction(ctx, v)) return FALSE;
-    JSValue p = JS_GetPropertyStr(ctx, v, "_p");
+    JSValue p = JS_GetPropertyStr(ctx, v, "__ndPairs");
     gboolean is_arr = JS_IsArray(p);
     JS_FreeValue(ctx, p);
     if (!is_arr) return FALSE;
@@ -9455,7 +9455,7 @@ static void
 ns_js_fetch_collect_headers(JSContext *ctx, JSValueConst headers,
                             GPtrArray *extras, char **content_type)
 {
-    JSValue h_map = JS_IsObject(headers) ? JS_GetPropertyStr(ctx, headers, "_m")
+    JSValue h_map = JS_IsObject(headers) ? JS_GetPropertyStr(ctx, headers, "__ndHeaderMap")
                                          : JS_UNDEFINED;
     if (JS_IsException(h_map)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -18954,11 +18954,12 @@ static JSValue
 ns_url_get_searchParams_object(JSContext *ctx, const char *search);
 
 static JSValue
-ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init);
+ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init,
+                              JSValueConst proto);
 
 static JSValue
-ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv);
+ns_url_construct(JSContext *ctx, JSValueConst new_target,
+                 int argc, JSValueConst *argv);
 
 static JSValue
 ns_url_parts_to_js(JSContext *ctx, const char *href)
@@ -19021,9 +19022,10 @@ static JSValue
 ns_window_url_can_parse(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    (void)this_val;
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "URL.canParse: 1 argument required");
-    JSValue tmp = ns_window_url_ctor(ctx, this_val, argc, argv);
+    JSValue tmp = ns_url_construct(ctx, JS_UNDEFINED, argc, argv);
     if (JS_IsException(tmp)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_FALSE;
@@ -19036,9 +19038,10 @@ static JSValue
 ns_window_url_parse_static(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
+    (void)this_val;
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "URL.parse: 1 argument required");
-    JSValue tmp = ns_window_url_ctor(ctx, this_val, argc, argv);
+    JSValue tmp = ns_url_construct(ctx, JS_UNDEFINED, argc, argv);
     if (JS_IsException(tmp)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_NULL;
@@ -19075,10 +19078,9 @@ ns_usp_install_interface(JSContext *ctx)
 }
 
 static JSValue
-ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv)
+ns_url_construct(JSContext *ctx, JSValueConst new_target,
+                 int argc, JSValueConst *argv)
 {
-    (void)this_val;
     if (argc < 1) return JS_ThrowTypeError(ctx, "URL: requires a url string");
     size_t raw_len = 0;
     const char *raw = JS_ToCStringLen(ctx, &raw_len, argv[0]);
@@ -19142,65 +19144,48 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
     ns_js *jsx = js_from_ctx(ctx);
     if (jsx && !jsx->url_helper_set) {
         static const char *helper_src =
-            "(function(u){"
-            " var URLp = URL.prototype;"
-            " if (!URLp.__ndReady) {"
-            "   function nm(fn, n){ try { Object.defineProperty(fn, 'name',"
-            "     { value: n, configurable: true }); } catch(e) {} return fn; }"
-            "   function gettr(name){ return function(){ return this.__nd[name]; }; }"
-            "   function setComp(comp){ return function(v){"
-            "       var p = __ndUrlSet(this.__nd.href, comp, String(v));"
-            "       if (p) { this.__nd = p; this.__ndSync(); } }; }"
-            "   function accessor(name, setter){"
-            "     Object.defineProperty(URLp, name, { configurable: true,"
-            "       enumerable: true, get: nm(gettr(name), 'get ' + name),"
-            "       set: setter ? nm(setter, 'set ' + name) : undefined }); }"
-            "   accessor('href', function(v){"
-            "     var p = __ndUrlParts(String(v));"
-            "     if (!p) throw new TypeError('Invalid URL');"
-            "     this.__nd = p; this.__ndSync(); });"
-            "   accessor('origin', undefined);"
-            "   ['protocol','username','password','host','hostname','port',"
-            "    'pathname','search','hash'].forEach(function(n){"
-            "       accessor(n, setComp(n)); });"
-            "   Object.defineProperty(URLp, 'searchParams', { configurable: true,"
-            "     enumerable: true, get: nm(function(){"
-            "       if (!this.__nd) throw new TypeError('Illegal invocation');"
-            "       return this.__ndSP; }, 'get searchParams') });"
-            "   function method(name, fn){ Object.defineProperty(URLp, name,"
-            "     { configurable: true, enumerable: true, writable: true,"
-            "       value: nm(fn, name) }); }"
-            "   method('toString', function(){ return this.__nd.href; });"
-            "   method('toJSON',   function(){ return this.__nd.href; });"
-            "   Object.defineProperty(URLp, '__ndSync', { configurable: true,"
-            "     writable: true, value: function(){"
-            "       try { var sp = new URLSearchParams(this.__nd.search);"
-            "             if (this.__ndSP) { this.__ndSP._p = sp._p; }"
-            "             else { sp._owner = this;"
-            "               Object.defineProperty(this, '__ndSP', { value: sp,"
-            "                 configurable: true, writable: true }); } } catch(e) {} } });"
-            "   Object.defineProperty(URLp, '_setSearchRaw', { configurable: true,"
-            "     writable: true, value: function(v){"
-            "       var p = __ndUrlSet(this.__nd.href, 'search', String(v));"
-            "       if (p) { this.__nd = p; this.__ndSync(); } } });"
-            "   try { Object.defineProperty(URLp, Symbol.toStringTag,"
-            "     { value: 'URL', configurable: true }); } catch(e) {}"
-            "   Object.defineProperty(URLp, '__ndReady', { value: true });"
-            " }"
-            " var nd = {"
-            "   href: u.href, origin: u.origin,"
-            "   protocol: u.protocol, username: u.username, password: u.password,"
-            "   host: u.host, hostname: u.hostname, port: u.port,"
-            "   pathname: (u.pathname == null ? '' : u.pathname), search: u.search || '', hash: u.hash || ''"
-            " };"
-            " var inst = Object.create(URLp);"
-            " Object.defineProperty(inst, '__nd', { value: nd, configurable: true,"
-            "   writable: true });"
-            " inst.__ndSync();"
-            " return inst;"
-            "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<url-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+            "(function(urlParts, urlSet){ "
+            " return function(u, proto){ "
+            "  var URLp = URL.prototype; "
+            "  if (!URLp.__ndReady) { "
+            "    function nm(fn, n){ try { Object.defineProperty(fn, 'name', { value: n, configurable: true }); } catch(e) {} return fn; } "
+            "    function st(o){ var d = o !== null && typeof o === 'object' ? o.__nd : undefined; if (!d) throw new TypeError('Illegal invocation'); return d; } "
+            "    function gettr(name){ return function(){ return st(this)[name]; }; } "
+            "    function setComp(comp){ return function(v){ var d = st(this); var p = urlSet(d.href, comp, String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; } "
+            "    function accessor(name, setter){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, get: nm(gettr(name), 'get ' + name), set: setter ? nm(setter, 'set ' + name) : undefined }); } "
+            "    accessor('href', function(v){ st(this); var p = urlParts(String(v)); if (!p) throw new TypeError('Invalid URL'); this.__nd = p; this.__ndSync(); }); "
+            "    accessor('origin', undefined); "
+            "    ['protocol','username','password','host','hostname','port','pathname','search','hash'].forEach(function(n){ accessor(n, setComp(n)); }); "
+            "    Object.defineProperty(URLp, 'searchParams', { configurable: true, enumerable: true, get: nm(function(){ st(this); return this.__ndSP; }, 'get searchParams') }); "
+            "    function method(name, fn){ Object.defineProperty(URLp, name, { configurable: true, enumerable: true, writable: true, value: nm(fn, name) }); } "
+            "    method('toString', function(){ return st(this).href; }); "
+            "    method('toJSON', function(){ return st(this).href; }); "
+            "    URLp.__ndSync = function(){ try { var sp = new URLSearchParams(this.__nd.search); if (this.__ndSP) { this.__ndSP.__ndPairs = sp.__ndPairs; } else { sp.__ndOwner = this; this.__ndSP = sp; } } catch(e) {} }; "
+            "    URLp.__ndSetSearchRaw = function(v){ var p = urlSet(this.__nd.href, 'search', String(v)); if (p) { this.__nd = p; this.__ndSync(); } }; "
+            "    try { Object.defineProperty(URLp, Symbol.toStringTag, { value: 'URL', configurable: true }); } catch(e) {} "
+            "    URLp.__ndReady = true; "
+            "  } "
+            "  var nd = { href: u.href, origin: u.origin, protocol: u.protocol, username: u.username, password: u.password, host: u.host, hostname: u.hostname, port: u.port, pathname: (u.pathname == null ? '' : u.pathname), search: u.search || '', hash: u.hash || '' }; "
+            "  var inst = Object.create(proto || URLp); "
+            "  inst.__nd = nd; "
+            "  inst.__ndSync(); "
+            "  return inst; "
+            " }; "
+            "}) ";
+        JSValue factory = JS_Eval(ctx, helper_src, strlen(helper_src),
+                                  "<url-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+        JSValue h = JS_UNDEFINED;
+        if (!JS_IsException(factory)) {
+            JSValue parts_fn = JS_NewCFunction(ctx, ns_window_url_parts_internal,
+                                               "parts", 1);
+            JSValue set_fn = JS_NewCFunction(ctx, ns_window_url_set_internal,
+                                             "set", 3);
+            JSValueConst fargs[2] = { parts_fn, set_fn };
+            h = JS_Call(ctx, factory, JS_UNDEFINED, 2, fargs);
+            JS_FreeValue(ctx, parts_fn);
+            JS_FreeValue(ctx, set_fn);
+        }
+        JS_FreeValue(ctx, factory);
         if (!JS_IsException(h)) {
             jsx->url_helper = h;
             jsx->url_helper_set = 1;
@@ -19210,8 +19195,11 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (jsx && jsx->url_helper_set) {
-        JSValueConst args[1] = { obj };
-        JSValue r = JS_Call(ctx, jsx->url_helper, JS_UNDEFINED, 1, args);
+        JSValue new_proto = JS_IsObject(new_target)
+            ? JS_GetPropertyStr(ctx, new_target, "prototype") : JS_UNDEFINED;
+        JSValueConst args[2] = { obj, new_proto };
+        JSValue r = JS_Call(ctx, jsx->url_helper, JS_UNDEFINED, 2, args);
+        JS_FreeValue(ctx, new_proto);
         if (JS_IsException(r)) {
             JS_FreeValue(ctx, JS_GetException(ctx));
             JS_FreeValue(ctx, r);
@@ -19224,99 +19212,107 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
+ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'URL': Please use "
+            "the 'new' operator, this DOM object constructor cannot be "
+            "called as a function.");
+    return ns_url_construct(ctx, this_val, argc, argv);
+}
+
+static JSValue
+ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init,
+                              JSValueConst proto)
 {
     ns_js *jsx = js_from_ctx(ctx);
     if (jsx && !jsx->search_params_helper_set) {
         static const char *helper_src =
-            "(function(init){"
-            " var USPp = URLSearchParams.prototype;"
-            " if (!USPp.__ndReady) {"
-            "   function nm(fn,n){ try { Object.defineProperty(fn,'name',"
-            "     { value:n, configurable:true }); } catch(e){} return fn; }"
-            "   function fenc(s){ return encodeURIComponent(String(s))"
-            "     .replace(/[!~'()]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();})"
-            "     .replace(/%20/g,'+'); }"
-            "   function meth(name, fn){ Object.defineProperty(USPp, name,"
-            "     { configurable:true, enumerable:true, writable:true, value:nm(fn,name) }); }"
-            "   function req(n,c){ if (c < n) throw new TypeError(n+' arguments required'); }"
-            "   Object.defineProperty(USPp,'__notify',{configurable:true,writable:true,"
-            "     value:function(){ if (this._owner && this._owner._setSearchRaw) {"
-            "       var s=this.toString(); this._owner._setSearchRaw(s?'?'+s:''); } }});"
-            "   meth('toString', function(){ return this._p.map(function(p){return fenc(p[0])+'='+fenc(p[1]);}).join('&'); });"
-            "   meth('get', function(k){ req(1,arguments.length); k=String(k); for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k) return this._p[i][1]; return null; });"
-            "   meth('getAll', function(k){ req(1,arguments.length); k=String(k); var r=[]; for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k) r.push(this._p[i][1]); return r; });"
-            "   meth('has', function(k){ req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k&&(!hv||this._p[i][1]===vv)) return true; return false; });"
-            "   meth('set', function(k,v){ req(2,arguments.length); k=String(k); v=String(v); var found=false; var out=[]; for (var i=0;i<this._p.length;i++){ if(this._p[i][0]===k){ if(!found){out.push([k,v]);found=true;} } else out.push(this._p[i]); } if(!found) out.push([k,v]); this._p=out; this.__notify(); });"
-            "   meth('append', function(k,v){ req(2,arguments.length); this._p.push([String(k),String(v)]); this.__notify(); });"
-            "   meth('delete', function(k){ req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; this._p=this._p.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));}); this.__notify(); });"
-            "   meth('sort', function(){ this._p.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;}); this.__notify(); });"
-            "   meth('forEach', function(cb){ req(1,arguments.length); var th=arguments[1]; for (var i=0;i<this._p.length;i++) cb.call(th,this._p[i][1],this._p[i][0],this); });"
-            "   meth('keys', function*(){ for (var i=0;i<this._p.length;i++) yield this._p[i][0]; });"
-            "   meth('values', function*(){ for (var i=0;i<this._p.length;i++) yield this._p[i][1]; });"
-            "   meth('entries', function*(){ for (var i=0;i<this._p.length;i++) yield [this._p[i][0],this._p[i][1]]; });"
-            "   Object.defineProperty(USPp, Symbol.iterator, { configurable:true, writable:true, value:USPp.entries });"
-            "   Object.defineProperty(USPp,'size',{ configurable:true, enumerable:true, get:nm(function(){ return this._p.length; },'get size') });"
-            "   try { Object.defineProperty(USPp,Symbol.toStringTag,{ value:'URLSearchParams', configurable:true }); } catch(e){}"
-            "   Object.defineProperty(USPp,'__ndReady',{ value:true });"
-            " }"
-            " var pairs=[];"
-            " function usv(s){s=String(s);var o='',i;for(i=0;i<s.length;i++){var c=s.charCodeAt(i);if(c>=0xD800&&c<=0xDBFF){var d=i+1<s.length?s.charCodeAt(i+1):0;if(d>=0xDC00&&d<=0xDFFF){o+=s[i]+s[i+1];i++;}else o+='\\uFFFD';}else if(c>=0xDC00&&c<=0xDFFF){o+='\\uFFFD';}else{o+=s[i];}}return o;}"
-            " function add(k,v){pairs.push([usv(k),usv(v)]);}"
-            " function pdecode(s){"
-            "   s=String(s).replace(/\\+/g,' ');"
-            "   var out=[];"
-            "   for (var i=0;i<s.length;){"
-            "     if (s.charCodeAt(i)===37 && i+2<s.length && /^[0-9a-fA-F]{2}$/.test(s.substr(i+1,2))){"
-            "       out.push(parseInt(s.substr(i+1,2),16)); i+=3; continue;"
-            "     }"
-            "     var cp=s.codePointAt(i); i+=cp>65535?2:1;"
-            "     if (cp<128) out.push(cp);"
-            "     else if (cp<2048) out.push(192|(cp>>6),128|(cp&63));"
-            "     else if (cp<65536) out.push(224|(cp>>12),128|((cp>>6)&63),128|(cp&63));"
-            "     else out.push(240|(cp>>18),128|((cp>>12)&63),128|((cp>>6)&63),128|(cp&63));"
-            "   }"
-            "   return new TextDecoder('utf-8').decode(new Uint8Array(out));"
-            " }"
-            " function parse(q){"
-            "   if (q && q[0]==='?') q=q.slice(1);"
-            "   if (!q) return;"
-            "   var parts=String(q).split('&');"
-            "   for (var i=0;i<parts.length;i++){"
-            "     if (!parts[i]) continue;"
-            "     var eq=parts[i].indexOf('=');"
-            "     var k=eq<0?parts[i]:parts[i].slice(0,eq);"
-            "     var v=eq<0?'':parts[i].slice(eq+1);"
-            "     add(pdecode(k),pdecode(v));"
-            "   }"
-            " }"
-            " if (init == null) {"
-            " } else if (typeof init === 'string') {"
-            "   parse(init);"
-            " } else if (typeof init === 'object' && typeof Symbol !== 'undefined' && typeof init[Symbol.iterator] === 'function') {"
-            "   var it=init[Symbol.iterator](), step;"
-            "   while(!(step=it.next()).done){"
-            "     var p=step.value;"
-            "     if (p == null || typeof p[Symbol.iterator] !== 'function')"
-            "       throw new TypeError('Query pair must be iterable');"
-            "     var pa=[]; var pit=p[Symbol.iterator]();"
-            "     for (var ps;!(ps=pit.next()).done;) pa.push(ps.value);"
-            "     if (pa.length !== 2) throw new TypeError('Each query pair must be an iterable [name, value] tuple');"
-            "     add(pa[0],pa[1]);"
-            "   }"
-            " } else if (typeof init === 'object') {"
-            "   var ks=Object.keys(init);"
-            "   var rec=new Map();"
-            "   for (var oi=0;oi<ks.length;oi++) rec.set(usv(ks[oi]),usv(init[ks[oi]]));"
-            "   rec.forEach(function(v,k){pairs.push([k,v]);});"
-            " } else {"
-            "   parse(String(init));"
-            " }"
-            " var o = Object.create(URLSearchParams.prototype);"
-            " Object.defineProperty(o,'_p',{value:pairs,configurable:true,writable:true});"
-            " Object.defineProperty(o,'_owner',{value:null,configurable:true,writable:true});"
-            " return o;"
-            "})";
+            "(function(init, proto){ "
+            " var USPp = URLSearchParams.prototype; "
+            " if (!USPp.__ndReady) { "
+            "   function nm(fn,n){ try { Object.defineProperty(fn,'name',{ value:n, configurable:true }); } catch(e){} return fn; } "
+            "   function fenc(s){ return encodeURIComponent(String(s)).replace(/[!~'()]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();}).replace(/%20/g,'+'); } "
+            "   function chk(o){ var p = o !== null && typeof o === 'object' ? o.__ndPairs : undefined; if (!Array.isArray(p)) throw new TypeError('Illegal invocation'); return p; } "
+            "   function meth(name, fn){ Object.defineProperty(USPp, name, { configurable:true, enumerable:true, writable:true, value:nm(fn,name) }); } "
+            "   function req(n,c){ if (c < n) throw new TypeError(n+' arguments required'); } "
+            "   USPp.__ndNotify = function(){ var ow = this.__ndOwner; if (ow && ow.__ndSetSearchRaw) { var s = this.toString(); ow.__ndSetSearchRaw(s ? '?' + s : ''); } }; "
+            "   meth('toString', function(){ return chk(this).map(function(p){return fenc(p[0])+'='+fenc(p[1]);}).join('&'); }); "
+            "   meth('get', function(k){ var P = chk(this); req(1,arguments.length); k=String(k); for (var i=0;i<P.length;i++) if(P[i][0]===k) return P[i][1]; return null; }); "
+            "   meth('getAll', function(k){ var P = chk(this); req(1,arguments.length); k=String(k); var r=[]; for (var i=0;i<P.length;i++) if(P[i][0]===k) r.push(P[i][1]); return r; }); "
+            "   meth('has', function(k){ var P = chk(this); req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; for (var i=0;i<P.length;i++) if(P[i][0]===k&&(!hv||P[i][1]===vv)) return true; return false; }); "
+            "   meth('set', function(k,v){ var P = chk(this); req(2,arguments.length); k=String(k); v=String(v); var found=false; var out=[]; for (var i=0;i<P.length;i++){ if(P[i][0]===k){ if(!found){out.push([k,v]);found=true;} } else out.push(P[i]); } if(!found) out.push([k,v]); this.__ndPairs=out; this.__ndNotify(); }); "
+            "   meth('append', function(k,v){ var P = chk(this); req(2,arguments.length); P.push([String(k),String(v)]); this.__ndNotify(); }); "
+            "   meth('delete', function(k){ var P = chk(this); req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; this.__ndPairs=P.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));}); this.__ndNotify(); }); "
+            "   meth('sort', function(){ var P = chk(this); P.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;}); this.__ndNotify(); }); "
+            "   meth('forEach', function(cb){ var P = chk(this); req(1,arguments.length); if (typeof cb !== 'function') throw new TypeError(\"Failed to execute 'forEach' on 'URLSearchParams': parameter 1 is not of type 'Function'.\"); var th=arguments[1]; for (var i=0;i<P.length;i++) cb.call(th,P[i][1],P[i][0],this); }); "
+            "   function* walk(o, kind){ for (var i=0;i<o.__ndPairs.length;i++){ var e=o.__ndPairs[i]; yield kind===0?[e[0],e[1]]:kind===1?e[0]:e[1]; } } "
+            "   meth('keys', function(){ chk(this); return walk(this, 1); }); "
+            "   meth('values', function(){ chk(this); return walk(this, 2); }); "
+            "   meth('entries', function(){ chk(this); return walk(this, 0); }); "
+            "   Object.defineProperty(USPp, Symbol.iterator, { configurable:true, writable:true, value:USPp.entries }); "
+            "   Object.defineProperty(USPp,'size',{ configurable:true, enumerable:true, get:nm(function(){ return chk(this).length; },'get size') }); "
+            "   try { Object.defineProperty(USPp,Symbol.toStringTag,{ value:'URLSearchParams', configurable:true }); } catch(e){} "
+            "   USPp.__ndReady = true; "
+            " } "
+            " var pairs=[]; "
+            " function usv(s){s=String(s);var o='',i;for(i=0;i<s.length;i++){var c=s.charCodeAt(i);if(c>=0xD800&&c<=0xDBFF){var d=i+1<s.length?s.charCodeAt(i+1):0;if(d>=0xDC00&&d<=0xDFFF){o+=s[i]+s[i+1];i++;}else o+='�';}else if(c>=0xDC00&&c<=0xDFFF){o+='�';}else{o+=s[i];}}return o;} "
+            " function add(k,v){pairs.push([usv(k),usv(v)]);} "
+            " function pdecode(s){ "
+            "   s=String(s).replace(/\\+/g,' '); "
+            "   var out=[]; "
+            "   for (var i=0;i<s.length;){ "
+            "     if (s.charCodeAt(i)===37 && i+2<s.length && /^[0-9a-fA-F]{2}$/.test(s.substr(i+1,2))){ "
+            "       out.push(parseInt(s.substr(i+1,2),16)); i+=3; continue; "
+            "     } "
+            "     var cp=s.codePointAt(i); i+=cp>65535?2:1; "
+            "     if (cp<128) out.push(cp); "
+            "     else if (cp<2048) out.push(192|(cp>>6),128|(cp&63)); "
+            "     else if (cp<65536) out.push(224|(cp>>12),128|((cp>>6)&63),128|(cp&63)); "
+            "     else out.push(240|(cp>>18),128|((cp>>12)&63),128|((cp>>6)&63),128|(cp&63)); "
+            "   } "
+            "   return new TextDecoder('utf-8').decode(new Uint8Array(out)); "
+            " } "
+            " function parse(q){ "
+            "   if (q && q[0]==='?') q=q.slice(1); "
+            "   if (!q) return; "
+            "   var parts=String(q).split('&'); "
+            "   for (var i=0;i<parts.length;i++){ "
+            "     if (!parts[i]) continue; "
+            "     var eq=parts[i].indexOf('='); "
+            "     var k=eq<0?parts[i]:parts[i].slice(0,eq); "
+            "     var v=eq<0?'':parts[i].slice(eq+1); "
+            "     add(pdecode(k),pdecode(v)); "
+            "   } "
+            " } "
+            " if (init == null) { "
+            " } else if (typeof init === 'string') { "
+            "   parse(init); "
+            " } else if (typeof init === 'object' && typeof Symbol !== 'undefined' && typeof init[Symbol.iterator] === 'function') { "
+            "   var it=init[Symbol.iterator](), step; "
+            "   while(!(step=it.next()).done){ "
+            "     var p=step.value; "
+            "     if (p == null || typeof p[Symbol.iterator] !== 'function') "
+            "       throw new TypeError('Query pair must be iterable'); "
+            "     var pa=[]; var pit=p[Symbol.iterator](); "
+            "     for (var ps;!(ps=pit.next()).done;) pa.push(ps.value); "
+            "     if (pa.length !== 2) throw new TypeError('Each query pair must be an iterable [name, value] tuple'); "
+            "     add(pa[0],pa[1]); "
+            "   } "
+            " } else if (typeof init === 'object') { "
+            "   var ks=Object.keys(init); "
+            "   var rec=new Map(); "
+            "   for (var oi=0;oi<ks.length;oi++) rec.set(usv(ks[oi]),usv(init[ks[oi]])); "
+            "   rec.forEach(function(v,k){pairs.push([k,v]);}); "
+            " } else { "
+            "   parse(String(init)); "
+            " } "
+            " var o = Object.create(proto || URLSearchParams.prototype); "
+            " o.__ndPairs = pairs; "
+            " o.__ndOwner = null; "
+            " return o; "
+            "}) ";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
                             "<usp-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
@@ -19328,15 +19324,15 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
         }
     }
     if (!jsx || !jsx->search_params_helper_set) return JS_NewObject(ctx);
-    JSValueConst args[1] = { init };
-    return JS_Call(ctx, jsx->search_params_helper, JS_UNDEFINED, 1, args);
+    JSValueConst args[2] = { init, proto };
+    return JS_Call(ctx, jsx->search_params_helper, JS_UNDEFINED, 2, args);
 }
 
 static JSValue
 ns_url_get_searchParams_object(JSContext *ctx, const char *search)
 {
     JSValue arg = JS_NewString(ctx, search ? search : "");
-    JSValue obj = ns_url_get_searchParams_value(ctx, arg);
+    JSValue obj = ns_url_get_searchParams_value(ctx, arg, JS_UNDEFINED);
     JS_FreeValue(ctx, arg);
     if (JS_IsException(obj)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -19506,9 +19502,15 @@ static JSValue
 ns_window_usp_ctor(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
-    (void)this_val;
-    if (argc >= 1) return ns_url_get_searchParams_value(ctx, argv[0]);
-    return ns_url_get_searchParams_value(ctx, JS_UNDEFINED);
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'URLSearchParams': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
+    JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
+    JSValue obj = ns_url_get_searchParams_value(ctx,
+        argc >= 1 ? argv[0] : JS_UNDEFINED, proto);
+    JS_FreeValue(ctx, proto);
+    return obj;
 }
 
 static void ns_document_define_implementation_getter(JSContext *ctx,
@@ -26580,6 +26582,9 @@ ns_net_add_private_names(JSContext *ctx)
 {
     static const char *const names[] = {
         "__ndBlobBytes", "__ndBlobType", "__ndFileName", "__ndFileMtime",
+        "__ndHeaderMap", "__ndSetCookies", "__ndPairs", "__ndOwner",
+        "__ndNotify", "__ndReady", "__ndSync", "__ndSetSearchRaw", "__nd",
+        "__ndSP", "__ndMediaSourceObjectURL",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
@@ -27057,6 +27062,8 @@ ns_worker_js_new(ns_worker_host *host)
     JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
     ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 1);
     ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 1);
+    ns_bind_fn(ctx, url_ctor, "createObjectURL", ns_window_url_create_object, 1);
+    ns_bind_fn(ctx, url_ctor, "revokeObjectURL", ns_window_url_revoke_object, 1);
     JS_SetPropertyStr(ctx, global, "URL", url_ctor);
     ns_url_install_interface(ctx);
 
@@ -55728,8 +55735,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
-    ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
-    ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
