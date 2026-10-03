@@ -722,6 +722,9 @@ JS_EXTERN void JS_SetHostFunctionMode(JSContext *ctx, bool on);
 JS_EXTERN bool JS_IsHostAccess(JSContext *ctx);
 JS_EXTERN bool JS_IsHostCaller(JSContext *ctx);
 JS_EXTERN bool JS_IsEngineFunction(JSValueConst fn);
+JS_EXTERN JSValue JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
+                                              size_t *pbyte_offset,
+                                              size_t *pbyte_length);
 JS_EXTERN int JS_AddEnginePrivateName(JSContext *ctx, const char *name);
 JS_EXTERN void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj);
 JS_EXTERN int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
