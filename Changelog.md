@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* On macOS the sandboxed renderer can create its profile directories when
+  their parents do not exist yet, so history and IndexedDB work on a fresh
+  profile (before, every `indexedDB.open()` failed with `UnknownError`).
 * The fetcher looks for a bundled CA certificate file next to the browser
   through the executable path the app resolved at startup, instead of
   resolving that path a second time with its own copy of the code.
