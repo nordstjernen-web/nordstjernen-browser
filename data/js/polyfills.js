@@ -2421,13 +2421,15 @@
             return 'GET';
         }
 
-        function queryOptions(options) {
+        function queryOptions(options, multiCache) {
             options = options === undefined || options === null ? {} : Object(options);
-            return {
+            var query = {
                 ignoreSearch: !!options.ignoreSearch,
                 ignoreMethod: !!options.ignoreMethod,
-                cacheName: options.cacheName === undefined ? undefined : String(options.cacheName)
+                cacheName: undefined
             };
+            if (multiCache && options.cacheName !== undefined) query.cacheName = String(options.cacheName);
+            return query;
         }
 
         function entryToResponse(entry) {
@@ -2543,7 +2545,7 @@
             constructor() { throw idlIllegalConstructor('CacheStorage'); }
             match(request, options = {}) {
                 return idlAsync(this, cacheStorageOf, arguments, 1, 'CacheStorage', 'match', function (state) {
-                    var opts = queryOptions(options);
+                    var opts = queryOptions(options, true);
                     var names = opts.cacheName === undefined ? Array.from(state.stores.keys()) :
                         (state.stores.has(opts.cacheName) ? [opts.cacheName] : []);
                     for (var i = 0; i < names.length; i++) {
