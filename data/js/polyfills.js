@@ -3848,6 +3848,12 @@
             x /= len; y /= len; z /= len;
             var rad = deg * Math.PI / 180;
             var s = Math.sin(rad), c = Math.cos(rad), t = 1 - c;
+            if (x === 0 && y === 0)
+                return { m: [c, s * z, 0, 0, -s * z, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], is2D: true };
+            if (y === 0 && z === 0)
+                return { m: [1, 0, 0, 0, 0, c, s * x, 0, 0, -s * x, c, 0, 0, 0, 0, 1], is2D: false };
+            if (x === 0 && z === 0)
+                return { m: [c, 0, -s * y, 0, 0, 1, 0, 0, s * y, 0, c, 0, 0, 0, 0, 1], is2D: false };
             return {
                 m: [
                     t * x * x + c,     t * x * y + s * z, t * x * z - s * y, 0,
