@@ -7133,164 +7133,44 @@
             typeof global.CSSStyleSheet.prototype.replaceSync === 'function')
             return;
 
-        var hostSeq = 0;
-        function isIdentChar(c) {
-            return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
-                   c >= '0' && c <= '9' || c === '_' || c === '-';
+        function sheetText(s) {
+            var css = s.__cssText || '';
+            if (!s.__baseURL) return css;
+            return css.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/g, function (m, q, ref) {
+                try { return 'url("' + new URL(ref, s.__baseURL).href + '")'; } catch (e) { return m; }
+            });
         }
-        function rewriteHostTokens(css, id) {
-            var marker = '[data-nd-host="' + id + '"]';
-            var out = '';
-            for (var i = 0; i < css.length;) {
-                if (css.substr(i, 10).toLowerCase() === '::slotted(') {
-                    var j = i + 10, depth = 1, inner = j;
-                    for (; j < css.length && depth; j++) {
-                        if (css[j] === '(') depth++;
-                        else if (css[j] === ')') { depth--; if (!depth) break; }
-                    }
-                    out += marker + ' > ' + css.slice(inner, j);
-                    i = css[j] === ')' ? j + 1 : j;
-                    continue;
-                }
-                if (css.substr(i, 5).toLowerCase() === ':host') {
-                    if (css.substr(i + 5, 9).toLowerCase() === '-context(') {
-                        var j = i + 14, depth = 1;
-                        for (; j < css.length && depth; j++) {
-                            if (css[j] === '(') depth++;
-                            else if (css[j] === ')') depth--;
-                        }
-                        out += marker;
-                        i = j;
-                        continue;
-                    }
-                    if (css[i + 5] === '(') {
-                        var j = i + 6, depth = 1, inner = j;
-                        for (; j < css.length && depth; j++) {
-                            if (css[j] === '(') depth++;
-                            else if (css[j] === ')') { depth--; if (!depth) break; }
-                        }
-                        out += marker + css.slice(inner, j);
-                        i = css[j] === ')' ? j + 1 : j;
-                        continue;
-                    }
-                    var nc = css[i + 5];
-                    if (!nc || !isIdentChar(nc)) { out += marker; i += 5; continue; }
-                }
-                out += css[i];
-                i++;
+
+        function adoptIntoRoot(root, sheets) {
+            var css = [];
+            for (var i = 0; i < sheets.length; i++) {
+                var s = sheets[i];
+                if (!s || !(s instanceof CSSStyleSheet) || s.disabled) continue;
+                css.push(sheetText(s));
+                if (s.__roots.indexOf(root) < 0) s.__roots.push(root);
             }
-            return out;
-        }
-        function scanSegment(css, i, end) {
-            var quote = 0, paren = 0, bracket = 0;
-            for (; i < end; i++) {
-                var c = css[i];
-                if (quote) { if (c === '\\' && i + 1 < end) i++; else if (c === quote) quote = 0; }
-                else if (c === '"' || c === "'") quote = c;
-                else if (c === '/' && css[i + 1] === '*') {
-                    i += 2; while (i + 1 < end && !(css[i] === '*' && css[i + 1] === '/')) i++;
-                } else if (c === '(') paren++;
-                else if (c === ')') { if (paren) paren--; }
-                else if (c === '[') bracket++;
-                else if (c === ']') { if (bracket) bracket--; }
-                else if (!paren && !bracket && (c === '{' || c === ';' || c === '}')) return i;
-            }
-            return end;
-        }
-        function skipBlock(css, i, end) {
-            var depth = 0, quote = 0;
-            for (; i < end; i++) {
-                var c = css[i];
-                if (quote) { if (c === '\\' && i + 1 < end) i++; else if (c === quote) quote = 0; }
-                else if (c === '"' || c === "'") quote = c;
-                else if (c === '/' && css[i + 1] === '*') {
-                    i += 2; while (i + 1 < end && !(css[i] === '*' && css[i + 1] === '/')) i++;
-                } else if (c === '{') depth++;
-                else if (c === '}') { depth--; if (depth === 0) return i + 1; }
-            }
-            return end;
-        }
-        function splitTopComma(s) {
-            var res = [], depth = 0, bracket = 0, quote = 0, start = 0;
-            for (var i = 0; i < s.length; i++) {
-                var c = s[i];
-                if (quote) { if (c === '\\' && i + 1 < s.length) i++; else if (c === quote) quote = 0; }
-                else if (c === '"' || c === "'") quote = c;
-                else if (c === '(') depth++;
-                else if (c === ')') { if (depth) depth--; }
-                else if (c === '[') bracket++;
-                else if (c === ']') { if (bracket) bracket--; }
-                else if (c === ',' && !depth && !bracket) { res.push(s.slice(start, i)); start = i + 1; }
-            }
-            res.push(s.slice(start));
-            return res;
-        }
-        function scopeSelector(sel, id, marker) {
-            sel = sel.replace(/^\s+|\s+$/g, '');
-            if (!sel) return '';
-            if (sel.indexOf(':host') >= 0 || sel.indexOf('::slotted') >= 0)
-                return rewriteHostTokens(sel, id);
-            return marker + ' ' + sel;
-        }
-        function scopeRuleList(css, start, end, id, marker) {
-            var out = '', i = start;
-            while (i < end) {
-                while (i < end && /\s/.test(css[i])) i++;
-                if (i >= end) break;
-                if (css[i] === '/' && css[i + 1] === '*') {
-                    i += 2; while (i + 1 < end && !(css[i] === '*' && css[i + 1] === '/')) i++; i += 2; continue;
-                }
-                if (css[i] === '}') { i++; continue; }
-                if (css[i] === '@') {
-                    var seg = scanSegment(css, i, end), term = css[seg], prelude = css.slice(i, seg);
-                    if (term === '{') {
-                        var be = skipBlock(css, seg, end);
-                        if (/^@(media|supports|container|layer|scope)\b/i.test(prelude))
-                            out += prelude + '{' + scopeRuleList(css, seg + 1, be - 1, id, marker) + '}';
-                        else out += css.slice(i, be);
-                        i = be;
-                    } else { out += prelude; if (term === ';') { out += ';'; i = seg + 1; } else i = seg; }
-                    continue;
-                }
-                var seg2 = scanSegment(css, i, end);
-                if (css[seg2] !== '{') { i = (seg2 < end) ? seg2 + 1 : end; continue; }
-                var be2 = skipBlock(css, seg2, end);
-                var parts = splitTopComma(css.slice(i, seg2)), scoped = [];
-                for (var k = 0; k < parts.length; k++) {
-                    var sc = scopeSelector(parts[k], id, marker);
-                    if (sc) scoped.push(sc);
-                }
-                out += scoped.join(', ') + '{' + css.slice(seg2 + 1, be2 > seg2 ? be2 - 1 : seg2) + '}';
-                i = be2;
-            }
-            return out;
-        }
-        function scopeCss(css, id) {
-            if (!id) return css;
-            return scopeRuleList(css, 0, css.length, id, '[data-nd-host="' + id + '"]');
-        }
-        function hostScopeId(host) {
-            if (!host || typeof host.getAttribute !== 'function') return null;
-            var existing = host.getAttribute('data-nd-host');
-            if (existing) return existing;
-            var id = 'a' + (++hostSeq);
-            try { host.setAttribute('data-nd-host', id); } catch (e) { return null; }
-            return id;
+            if (typeof global.__ndAdoptCss === 'function')
+                global.__ndAdoptCss(root, css.join('\n'));
         }
 
         function applyText(sheet) {
-            var nodes = sheet.__nodes;
+            var nodes = sheet.__nodes, roots = sheet.__roots;
             for (var i = 0; i < nodes.length; i++) {
-                try {
-                    nodes[i].textContent =
-                        scopeCss(sheet.__cssText || '', nodes[i].__ndScopeId);
-                } catch (e) {}
+                try { nodes[i].textContent = sheetText(sheet); } catch (e) {}
             }
+            for (var j = 0; j < roots.length; j++)
+                adoptIntoRoot(roots[j], roots[j].adoptedStyleSheets);
         }
 
         function CSSStyleSheet(options) {
             this.__cssText = '';
             this.__nodes = [];
+            this.__roots = [];
+            this.__baseURL = null;
+            if (options && options.baseURL != null) {
+                try { this.__baseURL = new URL(String(options.baseURL), doc.baseURI).href; }
+                catch (e) { throw new DOMException('Invalid baseURL', 'NotAllowedError'); }
+            }
             this.__mediaText = (options && options.media) || '';
             this.title = null;
             this.ownerNode = null;
@@ -7325,18 +7205,16 @@
         });
 
         function materialize(target, sheets) {
-            var scopeId = (target === doc) ? null : hostScopeId(target.host);
-            var container = doc.head || doc.documentElement || doc.body;
+            var container = target.head || target.documentElement || target.body;
             var live = [];
             if (!container || typeof container.appendChild !== 'function')
                 return live;
             for (var i = 0; i < sheets.length; i++) {
                 var s = sheets[i];
                 if (!s || !(s instanceof CSSStyleSheet) || s.disabled) continue;
-                var el = doc.createElement('style');
+                var el = target.createElement('style');
                 el.setAttribute('data-adopted', '');
-                el.__ndScopeId = scopeId;
-                el.textContent = scopeCss(s.__cssText || '', scopeId);
+                el.textContent = sheetText(s);
                 container.appendChild(el);
                 s.__nodes.push(el);
                 live.push({ sheet: s, node: el });
@@ -7344,26 +7222,50 @@
             return live;
         }
 
+        function observedArray(arr, changed) {
+            ['push', 'pop', 'shift', 'unshift', 'splice'].forEach(function (m) {
+                Object.defineProperty(arr, m, {
+                    configurable: true, writable: true,
+                    value: function () {
+                        var r = Array.prototype[m].apply(this, arguments);
+                        changed(this);
+                        return r;
+                    }
+                });
+            });
+            return arr;
+        }
+
         function defineAdopted(target) {
             if (!target) return;
             var store = [];
             var live = [];
+            function release() {
+                for (var i = 0; i < live.length; i++) {
+                    var ent = live[i];
+                    var idx = ent.sheet.__nodes.indexOf(ent.node);
+                    if (idx >= 0) ent.sheet.__nodes.splice(idx, 1);
+                    if (ent.node.parentNode)
+                        ent.node.parentNode.removeChild(ent.node);
+                }
+                for (var j = 0; j < store.length; j++) {
+                    var roots = store[j] && store[j].__roots;
+                    var k = roots ? roots.indexOf(target) : -1;
+                    if (k >= 0) roots.splice(k, 1);
+                }
+                live = [];
+            }
+            function adopt(arr) {
+                release();
+                store = observedArray(arr, function (a) { adopt(Array.prototype.slice.call(a)); });
+                if (target.host) adoptIntoRoot(target, store);
+                else live = materialize(target, store);
+            }
             try {
                 Object.defineProperty(target, 'adoptedStyleSheets', {
                     configurable: true, enumerable: true,
                     get: function () { return store; },
-                    set: function (v) {
-                        var arr = v ? Array.prototype.slice.call(v) : [];
-                        for (var i = 0; i < live.length; i++) {
-                            var ent = live[i];
-                            var idx = ent.sheet.__nodes.indexOf(ent.node);
-                            if (idx >= 0) ent.sheet.__nodes.splice(idx, 1);
-                            if (ent.node.parentNode)
-                                ent.node.parentNode.removeChild(ent.node);
-                        }
-                        live = materialize(target, arr);
-                        store = arr;
-                    }
+                    set: function (v) { adopt(v ? Array.prototype.slice.call(v) : []); }
                 });
             } catch (e) {}
         }

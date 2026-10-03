@@ -704,6 +704,23 @@ collect_frame_children(ns_node *frame, const char *base_url,
 }
 
 static void
+collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
+{
+    if (root->kind != NS_NODE_ELEMENT) return;
+    char *css = ns_css_shadow_adopted_css(root);
+    if (!css) return;
+    if (css_has_viewport_media(css)) cc->media_seen = TRUE;
+    gboolean alone = !ns_css_syntax_is_self_contained(css, strlen(css));
+    if (alone || (cc->run_base && cc->run_base != base_url))
+        sheet_run_flush(cc);
+    g_string_append(cc->run, css);
+    g_string_append_c(cc->run, '\n');
+    cc->run_base = base_url;
+    if (alone) sheet_run_flush(cc);
+    g_free(css);
+}
+
+static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
@@ -801,6 +818,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_stylesheets_walk(c, base_url, cc, depth + 1);
+    collect_adopted_css(n, base_url, cc);
 }
 
 void

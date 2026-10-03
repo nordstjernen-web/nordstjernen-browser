@@ -928,6 +928,7 @@ gboolean           ns_css_supports_condition(const char *condition,
                                              gboolean allow_bare_declaration);
 ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
+char              *ns_css_shadow_adopted_css(ns_node *root);
 ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
                                                const char *base_url);
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,

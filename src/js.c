@@ -16220,6 +16220,29 @@ ns_window_matchMedia(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_nd_adopt_css(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2 || !JS_IsHostAccess(ctx)) return JS_UNDEFINED;
+    ns_node *root = ns_unwrap_element_mut(argv[0]);
+    if (!root || root->kind != NS_NODE_ELEMENT ||
+        !ns_element_get_attr(root, NS_SHADOW_ATTR))
+        return JS_UNDEFINED;
+    size_t len = 0;
+    const char *css = JS_ToCStringLen(ctx, &len, argv[1]);
+    if (!css) return JS_EXCEPTION;
+    if (len > 0)
+        ns_element_set_attr_len(root, NS_ADOPTED_CSS_ATTR, css, (gssize)len);
+    else
+        ns_element_remove_attr(root, NS_ADOPTED_CSS_ATTR);
+    JS_FreeCString(ctx, css);
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->mutated = TRUE;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_window_nd_media_serialize(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
@@ -27187,7 +27210,8 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndEventTargetMethods",
                                          "__ndIsEngineFunction",
                                          "__ndDispatchPath",
-                                         "__ndRealmProto" };
+                                         "__ndRealmProto",
+                                         "__ndAdoptCss" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
     ns_net_add_private_names(ctx);
@@ -56670,6 +56694,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "prompt",                ns_window_prompt,                 2);
     ns_bind_fn(ctx, global, "matchMedia",            ns_window_matchMedia,             1);
     ns_bind_fn(ctx, global, "__ndMediaListSerialize", ns_window_nd_media_serialize,    1);
+    ns_bind_fn(ctx, global, "__ndAdoptCss",          ns_window_nd_adopt_css,           2);
     ns_bind_fn(ctx, global, "getComputedStyle",      ns_window_getComputedStyle,       1);
     JS_DefinePropertyValueStr(ctx, global, "__ns_css_supported",
         JS_NewCFunction(ctx, ns_css_supported_property, "__ns_css_supported", 1),
