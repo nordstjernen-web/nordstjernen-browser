@@ -4159,6 +4159,761 @@
         defineCtor('DOMException', DomException);
     }
 
+    if (typeof global.Observable !== 'function' && typeof global.AbortController === 'function') {
+        var AbortControllerCtor = global.AbortController;
+        var AbortSignalCtor = global.AbortSignal;
+        var observables = new WeakMap();
+        var subscribers = new WeakMap();
+        var observableOf = idlBrand(observables);
+        var subscriberOf = idlBrand(subscribers);
+
+        function reportException(error) {
+            if (typeof global.reportError === 'function') {
+                global.reportError(error);
+                return;
+            }
+            setTimeout(function () { throw error; }, 0);
+        }
+
+        function requireCallback(value, iface, member, position) {
+            if (typeof value === 'function') return value;
+            throw new TypeError("Failed to execute '" + member + "' on '" + iface +
+                                "': The callback provided as parameter " + position + ' is not a function.');
+        }
+
+        function newObservable(callback) {
+            var observable = Object.create(Observable.prototype);
+            observables.set(observable, { callback: callback, subscriber: null });
+            return observable;
+        }
+
+        function isActive(subscriber) {
+            return !subscribers.get(subscriber).controller.signal.aborted;
+        }
+
+        function closeSubscription(subscriber, reason) {
+            var s = subscribers.get(subscriber);
+            if (s.controller.signal.aborted) return;
+            s.controller.abort(reason);
+            var teardowns = s.teardowns;
+            s.teardowns = [];
+            for (var i = teardowns.length - 1; i >= 0; i--) {
+                try { teardowns[i](); }
+                catch (e) { reportException(e); }
+            }
+        }
+
+        function subscriberNext(subscriber, value) {
+            if (!isActive(subscriber)) return;
+            var snapshot = subscribers.get(subscriber).observers.slice();
+            for (var i = 0; i < snapshot.length; i++) {
+                if (!isActive(subscriber)) return;
+                if (!snapshot[i].removed) snapshot[i].observer.next(value);
+            }
+        }
+
+        function finishObservers(subscriber) {
+            var s = subscribers.get(subscriber);
+            var snapshot = s.observers;
+            s.observers = [];
+            snapshot.forEach(function (entry) { entry.removed = true; });
+            return snapshot;
+        }
+
+        function subscriberError(subscriber, error) {
+            if (!isActive(subscriber)) {
+                reportException(error);
+                return;
+            }
+            var snapshot = finishObservers(subscriber);
+            closeSubscription(subscriber, error);
+            snapshot.forEach(function (entry) { entry.observer.error(error); });
+        }
+
+        function subscriberComplete(subscriber) {
+            if (!isActive(subscriber)) return;
+            var snapshot = finishObservers(subscriber);
+            closeSubscription(subscriber);
+            snapshot.forEach(function (entry) { entry.observer.complete(); });
+        }
+
+        function removeObserver(subscriber, entry, reason) {
+            if (entry.removed) return;
+            entry.removed = true;
+            var s = subscribers.get(subscriber);
+            var index = s.observers.indexOf(entry);
+            if (index >= 0) s.observers.splice(index, 1);
+            if (!s.observers.length) closeSubscription(subscriber, reason);
+        }
+
+        function subscribeTo(source, observer, signal) {
+            var o = observables.get(source);
+            var subscriber = o.subscriber;
+            var fresh = !subscriber || !isActive(subscriber);
+            if (fresh) {
+                subscriber = Object.create(Subscriber.prototype);
+                subscribers.set(subscriber, {
+                    observers: [], controller: new AbortControllerCtor(), teardowns: []
+                });
+                o.subscriber = subscriber;
+            }
+            var entry = { observer: observer, removed: false };
+            subscribers.get(subscriber).observers.push(entry);
+            if (signal) {
+                if (signal.aborted) {
+                    removeObserver(subscriber, entry, signal.reason);
+                } else {
+                    signal.addEventListener('abort', function () {
+                        removeObserver(subscriber, entry, signal.reason);
+                    }, { once: true });
+                }
+            }
+            if (!fresh) return;
+            try { o.callback.call(undefined, subscriber); }
+            catch (e) { subscriberError(subscriber, e); }
+        }
+
+        function observerCallback(source, name) {
+            var callback = source[name];
+            if (callback === undefined) return null;
+            if (typeof callback !== 'function')
+                throw new TypeError("Failed to execute 'subscribe' on 'Observable': The provided callback is not a function.");
+            return callback;
+        }
+
+        function toInternalObserver(observer) {
+            var next = null, error = null, complete = null;
+            if (typeof observer === 'function') {
+                next = observer;
+            } else if (observer === undefined || observer === null || typeof observer === 'object') {
+                var dict = observer === undefined || observer === null ? {} : observer;
+                complete = observerCallback(dict, 'complete');
+                error = observerCallback(dict, 'error');
+                next = observerCallback(dict, 'next');
+            } else {
+                throw new TypeError("Failed to execute 'subscribe' on 'Observable': The provided value is not of type '(ObserverCallback or Observer)'.");
+            }
+            return {
+                next: function (value) {
+                    if (!next) return;
+                    try { next(value); } catch (e) { reportException(e); }
+                },
+                error: function (value) {
+                    if (!error) { reportException(value); return; }
+                    try { error(value); } catch (e) { reportException(e); }
+                },
+                complete: function () {
+                    if (!complete) return;
+                    try { complete(); } catch (e) { reportException(e); }
+                }
+            };
+        }
+
+        function optionsSignal(options) {
+            if (options === undefined || options === null) return null;
+            if (typeof options !== 'object' && typeof options !== 'function')
+                throw new TypeError("The provided value is not of type 'SubscribeOptions'.");
+            var signal = options.signal;
+            if (signal === undefined) return null;
+            if (!(signal instanceof AbortSignalCtor))
+                throw new TypeError("Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'.");
+            return signal;
+        }
+
+        function forwarding(subscriber) {
+            return {
+                next: function (value) { subscriberNext(subscriber, value); },
+                error: function (error) { subscriberError(subscriber, error); },
+                complete: function () { subscriberComplete(subscriber); }
+            };
+        }
+
+        function getMethod(value, key) {
+            var method = value[key];
+            if (method === undefined || method === null) return undefined;
+            if (typeof method !== 'function')
+                throw new TypeError('The value is not iterable or observable.');
+            return method;
+        }
+
+        function isObject(value) {
+            return value !== null && (typeof value === 'object' || typeof value === 'function');
+        }
+
+        function asyncFromSync(iterator) {
+            return {
+                next: function () {
+                    var result = iterator.next();
+                    if (!isObject(result)) throw new TypeError('The iterator result is not an object.');
+                    return Promise.resolve(result.value).then(function (v) {
+                        return { value: v, done: result.done };
+                    });
+                },
+                return: function (reason) {
+                    var ret = iterator.return;
+                    return typeof ret === 'function' ? ret.call(iterator, reason) : undefined;
+                }
+            };
+        }
+
+        function fromAsyncIterable(value) {
+            return newObservable(function (subscriber) {
+                if (!isActive(subscriber)) return;
+                var method = getMethod(value, Symbol.asyncIterator);
+                var iterator;
+                if (method) {
+                    iterator = method.call(value);
+                    if (!isObject(iterator)) throw new TypeError('The async iterator is not an object.');
+                } else {
+                    var syncMethod = getMethod(value, Symbol.iterator);
+                    if (!syncMethod) throw new TypeError('The value is not iterable.');
+                    var syncIterator = syncMethod.call(value);
+                    if (!isObject(syncIterator)) throw new TypeError('The iterator is not an object.');
+                    iterator = asyncFromSync(syncIterator);
+                }
+                if (!isActive(subscriber)) return;
+                var next = null, nextFailure = null;
+                try { next = iterator.next; }
+                catch (e) { nextFailure = { error: e }; }
+                var closed = false;
+                subscriber.addTeardown(function () {
+                    if (closed) return;
+                    closed = true;
+                    var ret = iterator.return;
+                    if (typeof ret !== 'function') return;
+                    try {
+                        var result = ret.call(iterator, subscriber.signal.reason);
+                        if (result && typeof result.then === 'function') result.then(null, reportException);
+                    } catch (e) { reportException(e); }
+                });
+                function fail(e) {
+                    closed = true;
+                    subscriberError(subscriber, e);
+                }
+                function deliver(item) {
+                    try {
+                        if (!isObject(item)) throw new TypeError('The async iterator result is not an object.');
+                        if (item.done) {
+                            closed = true;
+                            subscriberComplete(subscriber);
+                            return;
+                        }
+                        subscriberNext(subscriber, item.value);
+                    } catch (e) {
+                        fail(e);
+                        return;
+                    }
+                    step();
+                }
+                function step() {
+                    if (!isActive(subscriber)) return;
+                    var pending;
+                    try {
+                        if (nextFailure) throw nextFailure.error;
+                        pending = Promise.resolve(next.call(iterator));
+                    } catch (e) { pending = Promise.reject(e); }
+                    pending.then(deliver, fail);
+                }
+                step();
+            });
+        }
+
+        function fromIterable(value) {
+            return newObservable(function (subscriber) {
+                if (!isActive(subscriber)) return;
+                var method = getMethod(value, Symbol.iterator);
+                var iterator = method.call(value);
+                if (!isObject(iterator)) throw new TypeError('The iterator is not an object.');
+                if (!isActive(subscriber)) return;
+                var next = iterator.next;
+                var done = false;
+                subscriber.addTeardown(function () {
+                    if (done) return;
+                    done = true;
+                    var ret = iterator.return;
+                    if (typeof ret === 'function') ret.call(iterator, subscriber.signal.reason);
+                });
+                while (isActive(subscriber)) {
+                    var item = next.call(iterator);
+                    if (!isObject(item)) throw new TypeError('The iterator result is not an object.');
+                    if (item.done) {
+                        done = true;
+                        subscriberComplete(subscriber);
+                        return;
+                    }
+                    subscriberNext(subscriber, item.value);
+                }
+            });
+        }
+
+        function fromPromise(promise) {
+            return newObservable(function (subscriber) {
+                promise.then(function (value) {
+                    subscriberNext(subscriber, value);
+                    subscriberComplete(subscriber);
+                }, function (error) {
+                    subscriberError(subscriber, error);
+                });
+            });
+        }
+
+        function toObservable(value) {
+            if (observables.has(value)) return value;
+            if (value === null || (typeof value !== 'object' && typeof value !== 'function'))
+                throw new TypeError('The value cannot be converted to an Observable.');
+            if (getMethod(value, Symbol.asyncIterator)) return fromAsyncIterable(value);
+            if (getMethod(value, Symbol.iterator)) return fromIterable(value);
+            if (value instanceof Promise) return fromPromise(value);
+            throw new TypeError('The value cannot be converted to an Observable.');
+        }
+
+        function promiseOperator(source, options, run) {
+            var outer;
+            try { outer = optionsSignal(options); }
+            catch (e) { return Promise.reject(e); }
+            return new Promise(function (resolve, reject) {
+                var controller = new AbortControllerCtor();
+                var signal = outer ? AbortSignalCtor.any([controller.signal, outer]) : controller.signal;
+                if (signal.aborted) {
+                    reject(signal.reason);
+                    return;
+                }
+                signal.addEventListener('abort', function () { reject(signal.reason); }, { once: true });
+                var settle = {
+                    resolve: function (value) { resolve(value); controller.abort(); },
+                    reject: function (error) { reject(error); controller.abort(error); }
+                };
+                subscribeTo(source, run(resolve, reject, settle), signal);
+            });
+        }
+
+        function operatorBody(source, subscriber, handlers) {
+            var observer = forwarding(subscriber);
+            Object.keys(handlers).forEach(function (key) { observer[key] = handlers[key]; });
+            subscribeTo(source, observer, subscriber.signal);
+        }
+
+        function callUser(subscriber, fn) {
+            try { return { value: fn.apply(undefined, Array.prototype.slice.call(arguments, 2)) }; }
+            catch (e) { subscriberError(subscriber, e); return null; }
+        }
+
+        function amountOf(value) {
+            value = Math.trunc(Number(value));
+            if (!isFinite(value)) return 0;
+            return value < 0 ? value + 18446744073709551616 : value;
+        }
+
+        class Subscriber {
+            constructor() { throw idlIllegalConstructor('Subscriber'); }
+            next(value) {
+                subscriberOf(this);
+                idlNeed(arguments, 1, 'Subscriber', 'next');
+                subscriberNext(this, value);
+            }
+            error(error) {
+                subscriberOf(this);
+                idlNeed(arguments, 1, 'Subscriber', 'error');
+                subscriberError(this, error);
+            }
+            complete() {
+                subscriberOf(this);
+                subscriberComplete(this);
+            }
+            addTeardown(teardown) {
+                var s = subscriberOf(this);
+                idlNeed(arguments, 1, 'Subscriber', 'addTeardown');
+                requireCallback(teardown, 'Subscriber', 'addTeardown', 1);
+                if (!isActive(this)) {
+                    try { teardown(); }
+                    catch (e) { reportException(e); }
+                    return;
+                }
+                s.teardowns.push(teardown);
+            }
+            get active() { subscriberOf(this); return isActive(this); }
+            get signal() { return subscriberOf(this).controller.signal; }
+        }
+
+        class Observable {
+            constructor(callback) {
+                idlNeedCtor(arguments, 1, 'Observable');
+                if (typeof callback !== 'function')
+                    throw new TypeError("Failed to construct 'Observable': The callback provided as parameter 1 is not a function.");
+                observables.set(this, { callback: callback });
+            }
+            static from(value) {
+                idlNeed(arguments, 1, 'Observable', 'from');
+                return toObservable(value);
+            }
+            subscribe(observer = {}, options = {}) {
+                observableOf(this);
+                subscribeTo(this, toInternalObserver(observer), optionsSignal(options));
+            }
+            takeUntil(notifier) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'takeUntil');
+                var source = this;
+                var notifierObservable = toObservable(notifier);
+                return newObservable(function (subscriber) {
+                    subscribeTo(notifierObservable, {
+                        next: function () { subscriberComplete(subscriber); },
+                        error: function () { subscriberComplete(subscriber); },
+                        complete: function () {}
+                    }, subscriber.signal);
+                    if (!isActive(subscriber)) return;
+                    subscribeTo(source, forwarding(subscriber), subscriber.signal);
+                });
+            }
+            map(mapper) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'map');
+                requireCallback(mapper, 'Observable', 'map', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var index = 0;
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            var r = callUser(subscriber, mapper, value, index++);
+                            if (r) subscriberNext(subscriber, r.value);
+                        }
+                    });
+                });
+            }
+            filter(predicate) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'filter');
+                requireCallback(predicate, 'Observable', 'filter', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var index = 0;
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            var r = callUser(subscriber, predicate, value, index++);
+                            if (r && r.value) subscriberNext(subscriber, value);
+                        }
+                    });
+                });
+            }
+            take(amount) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'take');
+                var count = amountOf(amount);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var remaining = count;
+                    if (remaining === 0) {
+                        subscriberComplete(subscriber);
+                        return;
+                    }
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            remaining--;
+                            subscriberNext(subscriber, value);
+                            if (remaining === 0) subscriberComplete(subscriber);
+                        }
+                    });
+                });
+            }
+            drop(amount) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'drop');
+                var count = amountOf(amount);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var remaining = count;
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            if (remaining > 0) remaining--;
+                            else subscriberNext(subscriber, value);
+                        }
+                    });
+                });
+            }
+            flatMap(mapper) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'flatMap');
+                requireCallback(mapper, 'Observable', 'flatMap', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var queue = [];
+                    var innerActive = false;
+                    var outerDone = false;
+                    var index = 0;
+                    function drain() {
+                        if (innerActive || !isActive(subscriber)) return;
+                        if (!queue.length) {
+                            if (outerDone) subscriberComplete(subscriber);
+                            return;
+                        }
+                        var inner = queue.shift();
+                        innerActive = true;
+                        subscribeTo(inner, {
+                            next: function (value) { subscriberNext(subscriber, value); },
+                            error: function (e) { subscriberError(subscriber, e); },
+                            complete: function () { innerActive = false; drain(); }
+                        }, subscriber.signal);
+                    }
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            var inner;
+                            try { inner = toObservable(mapper(value, index++)); }
+                            catch (e) { subscriberError(subscriber, e); return; }
+                            queue.push(inner);
+                            drain();
+                        },
+                        complete: function () {
+                            outerDone = true;
+                            drain();
+                        }
+                    });
+                });
+            }
+            switchMap(mapper) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'switchMap');
+                requireCallback(mapper, 'Observable', 'switchMap', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var innerController = null;
+                    var outerDone = false;
+                    var innerDone = true;
+                    var index = 0;
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            var inner;
+                            try { inner = toObservable(mapper(value, index++)); }
+                            catch (e) { subscriberError(subscriber, e); return; }
+                            if (innerController) innerController.abort();
+                            innerController = new AbortControllerCtor();
+                            innerDone = false;
+                            subscribeTo(inner, {
+                                next: function (v) { subscriberNext(subscriber, v); },
+                                error: function (e) { subscriberError(subscriber, e); },
+                                complete: function () {
+                                    innerDone = true;
+                                    if (outerDone) subscriberComplete(subscriber);
+                                }
+                            }, AbortSignalCtor.any([innerController.signal, subscriber.signal]));
+                        },
+                        complete: function () {
+                            outerDone = true;
+                            if (innerDone) subscriberComplete(subscriber);
+                        }
+                    });
+                });
+            }
+            inspect(inspectorUnion = {}) {
+                observableOf(this);
+                var inspector = {};
+                if (typeof inspectorUnion === 'function') {
+                    inspector.next = inspectorUnion;
+                } else if (inspectorUnion !== undefined && inspectorUnion !== null) {
+                    if (typeof inspectorUnion !== 'object')
+                        throw new TypeError("Failed to execute 'inspect' on 'Observable': The provided value is not of type '(ObserverCallback or ObservableInspector)'.");
+                    ['abort', 'complete', 'error', 'next', 'subscribe'].forEach(function (name) {
+                        var callback = inspectorUnion[name];
+                        if (callback === undefined) return;
+                        inspector[name] = requireCallback(callback, 'Observable', 'inspect', 1);
+                    });
+                }
+                var source = this;
+                return newObservable(function (subscriber) {
+                    var finished = false;
+                    if (inspector.subscribe && !callUser(subscriber, inspector.subscribe)) return;
+                    if (inspector.abort) {
+                        subscriber.signal.addEventListener('abort', function () {
+                            if (finished) return;
+                            try { inspector.abort(subscriber.signal.reason); }
+                            catch (e) { reportException(e); }
+                        }, { once: true });
+                    }
+                    operatorBody(source, subscriber, {
+                        next: function (value) {
+                            if (inspector.next && !callUser(subscriber, inspector.next, value)) return;
+                            subscriberNext(subscriber, value);
+                        },
+                        error: function (error) {
+                            finished = true;
+                            if (inspector.error && !callUser(subscriber, inspector.error, error)) return;
+                            subscriberError(subscriber, error);
+                        },
+                        complete: function () {
+                            finished = true;
+                            if (inspector.complete && !callUser(subscriber, inspector.complete)) return;
+                            subscriberComplete(subscriber);
+                        }
+                    });
+                });
+            }
+            catch(callback) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'catch');
+                requireCallback(callback, 'Observable', 'catch', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    operatorBody(source, subscriber, {
+                        error: function (error) {
+                            var inner;
+                            try { inner = toObservable(callback(error)); }
+                            catch (e) { subscriberError(subscriber, e); return; }
+                            subscribeTo(inner, forwarding(subscriber), subscriber.signal);
+                        }
+                    });
+                });
+            }
+            finally(callback) {
+                observableOf(this);
+                idlNeed(arguments, 1, 'Observable', 'finally');
+                requireCallback(callback, 'Observable', 'finally', 1);
+                var source = this;
+                return newObservable(function (subscriber) {
+                    subscriber.addTeardown(callback);
+                    subscribeTo(source, forwarding(subscriber), subscriber.signal);
+                });
+            }
+            toArray(options = {}) {
+                try { observableOf(this); } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject) {
+                    var values = [];
+                    return {
+                        next: function (value) { values.push(value); },
+                        error: reject,
+                        complete: function () { resolve(values); }
+                    };
+                });
+            }
+            forEach(callback, options = {}) {
+                try {
+                    observableOf(this);
+                    idlNeed(arguments, 1, 'Observable', 'forEach');
+                    requireCallback(callback, 'Observable', 'forEach', 1);
+                } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    var index = 0;
+                    return {
+                        next: function (value) {
+                            try { callback(value, index++); }
+                            catch (e) { settle.reject(e); }
+                        },
+                        error: reject,
+                        complete: function () { resolve(undefined); }
+                    };
+                });
+            }
+            every(predicate, options = {}) {
+                try {
+                    observableOf(this);
+                    idlNeed(arguments, 1, 'Observable', 'every');
+                    requireCallback(predicate, 'Observable', 'every', 1);
+                } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    var index = 0;
+                    return {
+                        next: function (value) {
+                            try { if (!predicate(value, index++)) settle.resolve(false); }
+                            catch (e) { settle.reject(e); }
+                        },
+                        error: reject,
+                        complete: function () { resolve(true); }
+                    };
+                });
+            }
+            first(options = {}) {
+                try { observableOf(this); } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    return {
+                        next: function (value) { settle.resolve(value); },
+                        error: reject,
+                        complete: function () {
+                            reject(new RangeError('No values in Observable'));
+                        }
+                    };
+                });
+            }
+            last(options = {}) {
+                try { observableOf(this); } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject) {
+                    var seen = false, last;
+                    return {
+                        next: function (value) { seen = true; last = value; },
+                        error: reject,
+                        complete: function () {
+                            if (seen) resolve(last);
+                            else reject(new RangeError('No values in Observable'));
+                        }
+                    };
+                });
+            }
+            find(predicate, options = {}) {
+                try {
+                    observableOf(this);
+                    idlNeed(arguments, 1, 'Observable', 'find');
+                    requireCallback(predicate, 'Observable', 'find', 1);
+                } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    var index = 0;
+                    return {
+                        next: function (value) {
+                            try { if (predicate(value, index++)) settle.resolve(value); }
+                            catch (e) { settle.reject(e); }
+                        },
+                        error: reject,
+                        complete: function () { resolve(undefined); }
+                    };
+                });
+            }
+            some(predicate, options = {}) {
+                try {
+                    observableOf(this);
+                    idlNeed(arguments, 1, 'Observable', 'some');
+                    requireCallback(predicate, 'Observable', 'some', 1);
+                } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    var index = 0;
+                    return {
+                        next: function (value) {
+                            try { if (predicate(value, index++)) settle.resolve(true); }
+                            catch (e) { settle.reject(e); }
+                        },
+                        error: reject,
+                        complete: function () { resolve(false); }
+                    };
+                });
+            }
+            reduce(reducer, initialValue = undefined, options = {}) {
+                var hasInitial = arguments.length >= 2;
+                try {
+                    observableOf(this);
+                    idlNeed(arguments, 1, 'Observable', 'reduce');
+                    requireCallback(reducer, 'Observable', 'reduce', 1);
+                } catch (e) { return Promise.reject(e); }
+                return promiseOperator(this, options, function (resolve, reject, settle) {
+                    var hasValue = hasInitial, accumulator = initialValue, index = hasInitial ? 0 : 1;
+                    return {
+                        next: function (value) {
+                            if (!hasValue) {
+                                hasValue = true;
+                                accumulator = value;
+                                return;
+                            }
+                            try { accumulator = reducer(accumulator, value, index++); }
+                            catch (e) { settle.reject(e); }
+                        },
+                        error: reject,
+                        complete: function () {
+                            if (hasValue) resolve(accumulator);
+                            else reject(new TypeError('Reduce of an empty Observable with no initial value'));
+                        }
+                    };
+                });
+            }
+        }
+
+        idlExpose(Subscriber, 'Subscriber', null);
+        idlExpose(Observable, 'Observable', null);
+    }
+
     /* WHATWG Geometry: DOMRect, DOMPoint, DOMQuad and the 3D DOMMatrix with CSS
      * transform-list parsing, as classes whose state lives in WeakMaps the page
      * cannot reach. CSS-3D pages (PolyCSS, cssQuake) project vertices through
@@ -5785,333 +6540,6 @@
         Object.defineProperty(global, 'trustedTypes', {
             value: factory, writable: false, configurable: true
         });
-    }
-
-    if (typeof global.Observable !== 'function') {
-        function Subscription() {
-            this.closed = false;
-            this._cleanup = null;
-        }
-        Subscription.prototype.unsubscribe = function () {
-            if (this.closed) return;
-            this.closed = true;
-            var cleanup = this._cleanup;
-            this._cleanup = null;
-            if (typeof cleanup === 'function') cleanup();
-            else if (cleanup && typeof cleanup.unsubscribe === 'function') cleanup.unsubscribe();
-        };
-        function Observable(subscriber) {
-            if (!(this instanceof Observable)) throw new TypeError('Observable requires new');
-            if (typeof subscriber !== 'function') throw new TypeError('subscriber must be a function');
-            this._subscriber = subscriber;
-        }
-        function observableFrom(value) {
-            if (value instanceof Observable) return value;
-            if (value && typeof Symbol.observable === 'symbol' &&
-                typeof value[Symbol.observable] === 'function')
-                return value[Symbol.observable]();
-            if (value && typeof value.then === 'function') {
-                return new Observable(function (observer) {
-                    var active = true;
-                    value.then(function (result) {
-                        if (!active) return;
-                        observer.next(result); observer.complete();
-                    }, function (error) { if (active) observer.error(error); });
-                    return function () { active = false; };
-                });
-            }
-            if (value && typeof value[Symbol.iterator] === 'function') {
-                return new Observable(function (observer) {
-                    try {
-                        for (var item of value) {
-                            if (observer.closed) break;
-                            observer.next(item);
-                        }
-                        if (!observer.closed) observer.complete();
-                    } catch (error) { observer.error(error); }
-                });
-            }
-            throw new TypeError('Value is not observable');
-        }
-        var OP = {};
-        defineMethod(OP, 'catch', function (handler) {
-            var source = this;
-            return new Observable(function (observer) {
-                var inner;
-                var outer = source.subscribe({
-                    next: function (value) { observer.next(value); },
-                    error: function (error) {
-                        try { inner = observableFrom(handler(error)).subscribe(observer); }
-                        catch (nextError) { observer.error(nextError); }
-                    },
-                    complete: function () { observer.complete(); }
-                });
-                return function () { outer.unsubscribe(); if (inner) inner.unsubscribe(); };
-            });
-        });
-        defineMethod(OP, 'drop', function (count) {
-            var source = this; count = Math.max(0, Number(count) || 0);
-            return new Observable(function (observer) {
-                var seen = 0;
-                return source.subscribe({
-                    next: function (value) { if (seen++ >= count) observer.next(value); },
-                    error: function (error) { observer.error(error); },
-                    complete: function () { observer.complete(); }
-                });
-            });
-        });
-        defineMethod(OP, 'every', function (predicate) {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var index = 0, sub;
-                sub = source.subscribe({
-                    next: function (value) {
-                        try { if (!predicate(value, index++)) { resolve(false); if (sub) sub.unsubscribe(); } }
-                        catch (error) { reject(error); if (sub) sub.unsubscribe(); }
-                    }, error: reject, complete: function () { resolve(true); }
-                });
-            });
-        });
-        defineMethod(OP, 'filter', function (predicate) {
-            var source = this;
-            return new Observable(function (observer) {
-                var index = 0;
-                return source.subscribe({
-                    next: function (value) {
-                        try { if (predicate(value, index++)) observer.next(value); }
-                        catch (error) { observer.error(error); }
-                    }, error: function (error) { observer.error(error); },
-                    complete: function () { observer.complete(); }
-                });
-            });
-        });
-        defineMethod(OP, 'finally', function (callback) {
-            var source = this;
-            return new Observable(function (observer) {
-                var sub = source.subscribe(observer);
-                return function () { try { sub.unsubscribe(); } finally { callback(); } };
-            });
-        });
-        defineMethod(OP, 'find', function (predicate) {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var index = 0, sub;
-                sub = source.subscribe({
-                    next: function (value) {
-                        try { if (predicate(value, index++)) { resolve(value); if (sub) sub.unsubscribe(); } }
-                        catch (error) { reject(error); if (sub) sub.unsubscribe(); }
-                    }, error: reject, complete: function () { resolve(undefined); }
-                });
-            });
-        });
-        defineMethod(OP, 'first', function () {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var found = false, sub;
-                sub = source.subscribe({
-                    next: function (value) { if (!found) { found = true; resolve(value); if (sub) sub.unsubscribe(); } },
-                    error: reject,
-                    complete: function () { if (!found) reject(new RangeError('Observable is empty')); }
-                });
-            });
-        });
-        defineMethod(OP, 'flatMap', function (mapper) {
-            var source = this;
-            return new Observable(function (observer) {
-                var inners = [], outerDone = false, index = 0;
-                function finish() { if (outerDone && inners.length === 0) observer.complete(); }
-                var outer = source.subscribe({
-                    next: function (value) {
-                        var inner;
-                        try { inner = observableFrom(mapper(value, index++)); }
-                        catch (error) { observer.error(error); return; }
-                        var sub = inner.subscribe({
-                            next: function (item) { observer.next(item); },
-                            error: function (error) { observer.error(error); },
-                            complete: function () { inners.splice(inners.indexOf(sub), 1); finish(); }
-                        });
-                        inners.push(sub);
-                    }, error: function (error) { observer.error(error); },
-                    complete: function () { outerDone = true; finish(); }
-                });
-                return function () { outer.unsubscribe(); inners.forEach(function (sub) { sub.unsubscribe(); }); };
-            });
-        });
-        defineMethod(OP, 'forEach', function (callback) {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var index = 0;
-                source.subscribe({
-                    next: function (value) { try { callback(value, index++); } catch (error) { reject(error); } },
-                    error: reject, complete: resolve
-                });
-            });
-        });
-        defineMethod(OP, 'inspect', function (inspector) {
-            var source = this; inspector = inspector || {};
-            return new Observable(function (observer) {
-                if (typeof inspector.subscribe === 'function') inspector.subscribe();
-                return source.subscribe({
-                    next: function (value) {
-                        if (typeof inspector.next === 'function') inspector.next(value);
-                        observer.next(value);
-                    }, error: function (error) {
-                        if (typeof inspector.error === 'function') inspector.error(error);
-                        observer.error(error);
-                    }, complete: function () {
-                        if (typeof inspector.complete === 'function') inspector.complete();
-                        observer.complete();
-                    }
-                });
-            });
-        });
-        defineMethod(OP, 'last', function () {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var found = false, last;
-                source.subscribe({
-                    next: function (value) { found = true; last = value; }, error: reject,
-                    complete: function () { found ? resolve(last) : reject(new RangeError('Observable is empty')); }
-                });
-            });
-        });
-        defineMethod(OP, 'map', function (mapper) {
-            var source = this;
-            return new Observable(function (observer) {
-                var index = 0;
-                return source.subscribe({
-                    next: function (value) {
-                        try { observer.next(mapper(value, index++)); }
-                        catch (error) { observer.error(error); }
-                    }, error: function (error) { observer.error(error); },
-                    complete: function () { observer.complete(); }
-                });
-            });
-        });
-        defineMethod(OP, 'reduce', function (reducer) {
-            var source = this, hasInitial = arguments.length > 1, initial = arguments[1];
-            return new Promise(function (resolve, reject) {
-                var hasValue = hasInitial, accumulator = initial, index = 0;
-                source.subscribe({
-                    next: function (value) {
-                        if (!hasValue) { hasValue = true; accumulator = value; return; }
-                        try { accumulator = reducer(accumulator, value, index++); }
-                        catch (error) { reject(error); }
-                    }, error: reject,
-                    complete: function () { hasValue ? resolve(accumulator) : reject(new TypeError('No initial value')); }
-                });
-            });
-        });
-        defineMethod(OP, 'some', function (predicate) {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var index = 0, sub;
-                sub = source.subscribe({
-                    next: function (value) {
-                        try { if (predicate(value, index++)) { resolve(true); if (sub) sub.unsubscribe(); } }
-                        catch (error) { reject(error); if (sub) sub.unsubscribe(); }
-                    }, error: reject, complete: function () { resolve(false); }
-                });
-            });
-        });
-        defineMethod(OP, 'subscribe', function (observer, options) {
-            if (typeof observer === 'function') observer = { next: observer };
-            observer = observer || {};
-            var subscription = new Subscription();
-            var sink = {
-                get closed() { return subscription.closed; },
-                next: function (value) {
-                    if (!subscription.closed && typeof observer.next === 'function') observer.next(value);
-                },
-                error: function (error) {
-                    if (subscription.closed) return;
-                    subscription.closed = true;
-                    if (typeof observer.error === 'function') observer.error(error);
-                    else setTimeout(function () { throw error; }, 0);
-                },
-                complete: function () {
-                    if (subscription.closed) return;
-                    subscription.closed = true;
-                    if (typeof observer.complete === 'function') observer.complete();
-                }
-            };
-            try { subscription._cleanup = this._subscriber(sink); }
-            catch (error) { sink.error(error); }
-            var signal = options && options.signal;
-            if (signal) {
-                if (signal.aborted) subscription.unsubscribe();
-                else signal.addEventListener('abort', function () { subscription.unsubscribe(); }, { once: true });
-            }
-            return subscription;
-        });
-        defineMethod(OP, 'switchMap', function (mapper) {
-            var source = this;
-            return new Observable(function (observer) {
-                var inner, outerDone = false, index = 0;
-                var outer = source.subscribe({
-                    next: function (value) {
-                        if (inner) inner.unsubscribe();
-                        try {
-                            inner = observableFrom(mapper(value, index++)).subscribe({
-                                next: function (item) { observer.next(item); },
-                                error: function (error) { observer.error(error); },
-                                complete: function () { inner = null; if (outerDone) observer.complete(); }
-                            });
-                        } catch (error) { observer.error(error); }
-                    }, error: function (error) { observer.error(error); },
-                    complete: function () { outerDone = true; if (!inner) observer.complete(); }
-                });
-                return function () { outer.unsubscribe(); if (inner) inner.unsubscribe(); };
-            });
-        });
-        defineMethod(OP, 'take', function (count) {
-            var source = this; count = Math.max(0, Number(count) || 0);
-            return new Observable(function (observer) {
-                if (count === 0) { observer.complete(); return; }
-                var seen = 0, sub;
-                sub = source.subscribe({
-                    next: function (value) {
-                        if (seen++ < count) observer.next(value);
-                        if (seen >= count) { observer.complete(); if (sub) sub.unsubscribe(); }
-                    }, error: function (error) { observer.error(error); },
-                    complete: function () { observer.complete(); }
-                });
-                return sub;
-            });
-        });
-        defineMethod(OP, 'takeUntil', function (notifier) {
-            var source = this;
-            return new Observable(function (observer) {
-                var sourceSub = source.subscribe(observer);
-                var notifierSub = observableFrom(notifier).subscribe({
-                    next: function () { sourceSub.unsubscribe(); observer.complete(); },
-                    error: function (error) { observer.error(error); }
-                });
-                return function () { sourceSub.unsubscribe(); notifierSub.unsubscribe(); };
-            });
-        });
-        defineMethod(OP, 'toArray', function () {
-            var source = this;
-            return new Promise(function (resolve, reject) {
-                var values = [];
-                source.subscribe({ next: function (value) { values.push(value); }, error: reject,
-                    complete: function () { resolve(values); } });
-            });
-        });
-        Object.defineProperty(OP, Symbol.toStringTag,
-            { value: 'Observable', configurable: true });
-        Object.defineProperty(OP, 'constructor',
-            { value: Observable, configurable: true, writable: true });
-        Object.defineProperty(Observable, 'prototype', { value: OP });
-        Object.defineProperty(Observable, 'from', {
-            value: nativeize(observableFrom, 'from'), configurable: true, writable: true
-        });
-        nativeize(Observable, 'Observable');
-        Object.getOwnPropertyNames(OP).forEach(function (name) {
-            if (name !== 'constructor' && typeof OP[name] === 'function')
-                nativeize(OP[name], name);
-        });
-        replaceCtor('Observable', Observable);
     }
 
     if (typeof global.scheduler === 'undefined') {
