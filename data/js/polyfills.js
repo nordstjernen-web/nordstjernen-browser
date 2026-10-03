@@ -4469,10 +4469,10 @@
         replaceCtor('TrustedTypePolicy', TrustedTypePolicy);
 
         var defaultPolicy = null;
-        var factoryBrand = new WeakSet();
-        function requireFactory(value) {
-            if (!factoryBrand.has(value)) throw new TypeError('Illegal invocation');
-        }
+        /* A private name, which a frame's copy of the factory keeps (ns_realm_clone_instance). */
+        var FactoryBrand = class extends (function (o) { return o; }) { #factory = true;
+            static require(o) { try { return o.#factory; } catch { throw new TypeError('Illegal invocation'); } } };
+        function requireFactory(value) { FactoryBrand.require(value); }
         function TrustedTypePolicyFactory() { throw new TypeError('Illegal constructor'); }
         nativeize(TrustedTypePolicyFactory, 'TrustedTypePolicyFactory');
         var factoryProto = TrustedTypePolicyFactory.prototype;
@@ -4538,7 +4538,7 @@
             { value: 'TrustedTypePolicyFactory', configurable: true });
         replaceCtor('TrustedTypePolicyFactory', TrustedTypePolicyFactory);
         var factory = Object.create(factoryProto);
-        factoryBrand.add(factory);
+        new FactoryBrand(factory);
         Object.defineProperty(global, 'trustedTypes', {
             value: factory, writable: false, configurable: true
         });

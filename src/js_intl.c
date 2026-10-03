@@ -259,7 +259,26 @@ static void
 intl_bind(JSContext *ctx, JSValueConst obj, const char *name,
           JSCFunction *fn, int argc)
 {
-    JS_SetPropertyStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc));
+    /* built-in functions are not enumerable (ECMA-262, ECMA-402) */
+    JS_DefinePropertyValueStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+static void
+intl_tag(JSContext *ctx, JSValueConst obj, const char *tag)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue sym_ctor = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue sym = JS_GetPropertyStr(ctx, sym_ctor, "toStringTag");
+    JSAtom atom = JS_ValueToAtom(ctx, sym);
+    if (atom != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, obj, atom, JS_NewString(ctx, tag),
+                               JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, atom);
+    }
+    JS_FreeValue(ctx, sym);
+    JS_FreeValue(ctx, sym_ctor);
+    JS_FreeValue(ctx, global);
 }
 
 typedef struct { const char *name; JSCFunction *fn; int argc; } intl_method;
@@ -274,10 +293,14 @@ intl_register(JSContext *ctx, JSValueConst intl, const char *name,
     JSValue proto = JS_NewObject(ctx);
     for (int i = 0; i < n_methods; i++)
         intl_bind(ctx, proto, methods[i].name, methods[i].fn, methods[i].argc);
+    char *tag = g_strconcat("Intl.", name, NULL);
+    intl_tag(ctx, proto, tag);
+    g_free(tag);
     JS_SetConstructor(ctx, func, proto);
     JS_FreeValue(ctx, proto);
     intl_bind(ctx, func, "supportedLocalesOf", intl_supportedLocalesOf, 1);
-    JS_SetPropertyStr(ctx, intl, name, JS_DupValue(ctx, func));
+    JS_DefinePropertyValueStr(ctx, intl, name, JS_DupValue(ctx, func),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return func;
 }
 
@@ -2381,7 +2404,7 @@ ns_js_intl_install(JSContext *ctx, JSValueConst global)
                       lf_m, G_N_ELEMENTS(lf_m)); JS_FreeValue(ctx, c);
     c = intl_register(ctx, intl, "RelativeTimeFormat", intl_rtf_ctor, 0,
                       rtf_m, G_N_ELEMENTS(rtf_m)); JS_FreeValue(ctx, c);
-    c = intl_register(ctx, intl, "DisplayNames", intl_dn_ctor, 0,
+    c = intl_register(ctx, intl, "DisplayNames", intl_dn_ctor, 2,
                       dn_m, G_N_ELEMENTS(dn_m)); JS_FreeValue(ctx, c);
     c = intl_register(ctx, intl, "DurationFormat", intl_df_ctor, 0,
                       df_m, G_N_ELEMENTS(df_m)); JS_FreeValue(ctx, c);
@@ -2393,7 +2416,9 @@ ns_js_intl_install(JSContext *ctx, JSValueConst global)
     intl_bind(ctx, intl, "getCanonicalLocales", intl_getCanonicalLocales, 1);
     intl_bind(ctx, intl, "supportedValuesOf", intl_supportedValuesOf, 1);
 
-    JS_SetPropertyStr(ctx, global, "Intl", intl);
+    intl_tag(ctx, intl, "Intl");
+    JS_DefinePropertyValueStr(ctx, global, "Intl", intl,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     intl_install_proto_hook(ctx, global, "Number", "toLocaleString",
                             intl_number_toLocaleString, 0);
