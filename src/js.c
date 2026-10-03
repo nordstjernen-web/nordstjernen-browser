@@ -411,6 +411,8 @@ static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
                                     const char *type);
 static JSValue ns_target_make_event(JSContext *ctx, JSValueConst target,
                                     const char *type);
+static void    ns_event_adopt_interface(JSContext *ctx, JSValueConst ev,
+                                        const char *iface);
 static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   JSValueConst this_obj, const char *type,
                                   JSValue event, gboolean window_like,
@@ -13606,6 +13608,7 @@ ns_offline_audio_startRendering(JSContext *ctx, JSValueConst this_val,
     JSValue oncomplete = JS_GetPropertyStr(ctx, this_val, "oncomplete");
     if (JS_IsFunction(ctx, oncomplete)) {
         JSValue ev = ns_event_new(ctx);
+        ns_event_adopt_interface(ctx, ev, "OfflineAudioCompletionEvent");
         JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "complete"));
         JS_SetPropertyStr(ctx, ev, "renderedBuffer", JS_DupValue(ctx, buf));
         JSValue r = JS_Call(ctx, oncomplete, this_val, 1, &ev);
@@ -16236,6 +16239,7 @@ ns_js_media_queries_reeval(ns_js *js)
         if (now == was) continue;
         JS_SetPropertyStr(ctx, mql, "matches", now ? JS_TRUE : JS_FALSE);
         JSValue ev = ns_target_make_event(ctx, mql, "change");
+        ns_event_adopt_interface(ctx, ev, "MediaQueryListEvent");
         JS_SetPropertyStr(ctx, ev, "matches", now ? JS_TRUE : JS_FALSE);
         JS_SetPropertyStr(ctx, ev, "media",
                           JS_GetPropertyStr(ctx, mql, "media"));
@@ -24153,6 +24157,7 @@ ns_js_ws_on_close(int code, const char *reason, gboolean clean,
     ns_js_budget_push(s->js, &bg);
     JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 3));
     JSValue ev = ns_js_ws_event(ctx, "close");
+    ns_event_adopt_interface(ctx, ev, "CloseEvent");
     JS_SetPropertyStr(ctx, ev, "code",     JS_NewInt32(ctx, code));
     JS_SetPropertyStr(ctx, ev, "reason",   JS_NewString(ctx, reason ? reason : ""));
     JS_SetPropertyStr(ctx, ev, "wasClean", JS_NewBool(ctx, clean));
@@ -24497,6 +24502,7 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     ns_js_budget_push(s->js, &bg);
     const char *type = (event && *event) ? event : "message";
     JSValue ev = ns_js_ws_event(ctx, type);
+    ns_event_adopt_interface(ctx, ev, "MessageEvent");
     JS_SetPropertyStr(ctx, ev, "data", JS_NewString(ctx, data ? data : ""));
     JS_SetPropertyStr(ctx, ev, "lastEventId",
                       JS_NewString(ctx, last_id ? last_id : ""));
