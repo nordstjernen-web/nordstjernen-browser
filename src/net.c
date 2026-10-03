@@ -4,6 +4,7 @@
  */
 
 #include "net.h"
+#include "about_style.h"
 #include "net_backend.h"
 #include "cache.h"
 #include "config.h"
@@ -2794,8 +2795,8 @@ about_logo_data_uri(void)
 static char *
 about_logo_markup(void)
 {
-    return g_strdup_printf("<img class=\"mark-img\" src=\"%s\" alt=\"\" "
-                           "aria-hidden=\"true\">",
+    return g_strdup_printf("<img class=\"mark-img\" src=\"%s\" "
+                           "alt=\"Nordstjernen\" aria-hidden=\"true\">",
                            about_logo_data_uri());
 }
 
@@ -2805,9 +2806,7 @@ about_splash_markup(void)
     char *uri = g_strconcat("data:image/gif;base64,", about_splash_gif_b64, NULL);
     char *markup = g_strdup_printf(
         "<img class=\"splash\" src=\"%s\" "
-        "alt=\"Nordstjernen " NS_VERSION " splash\" "
-        "style=\"display:block;width:940px;max-width:96%%;height:auto;"
-        "margin:2px auto 36px;border-radius:4px;\">",
+        "alt=\"Nordstjernen " NS_VERSION " splash\">",
         uri);
     g_free(uri);
     return markup;
@@ -2976,25 +2975,23 @@ build_about_markdown_page(const char *const *paths, const char *title,
     char *escaped = ns_html_escape_text(text);
     g_free(text);
     char *html = g_strconcat(
-        "<!doctype html><html><head>"
+        "<!doctype html><html lang=\"en\"><head>"
         "<meta charset=\"utf-8\">"
+        "<meta name=\"color-scheme\" content=\"light dark\">"
         "<title>", title, "</title>"
-        "<style>"
-        "body{font-family:system-ui,-apple-system,\"Segoe UI\","
-        "Helvetica,Arial,sans-serif;max-width:780px;margin:2em auto;"
-        "padding:0 24px;color:#111;line-height:1.5}"
-        "pre{white-space:pre-wrap;word-wrap:break-word;"
-        "font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace;"
-        "font-size:0.95em;background:#f7f7f9;border:1px solid #e3e3e8;"
-        "border-radius:6px;padding:1em 1.2em}"
-        ".nav{color:#666;font-size:0.9em;margin:0 0 1.5em 0}"
-        ".nav a{color:#3a63d0}"
-        "</style></head><body>"
-        "<p class=\"nav\"><a href=\"", back_href, "\">"
-        "&larr; ", back_label, "</a></p>"
+        "<style>" NS_ABOUT_BASE_CSS
+        ".wrap{max-width:860px;margin:0 auto;padding:28px 24px 56px}"
+        "h1{margin:22px 4px 20px;font-size:28px;letter-spacing:-.02em}"
+        ".card{padding:26px 30px}"
+        "pre{margin:0;white-space:pre-wrap;word-wrap:break-word;"
+        "font-family:var(--mono);font-size:13px;line-height:1.65;"
+        "color:var(--muted)}"
+        "</style></head><body><main class=\"wrap\">"
+        "<a class=\"crumb\" href=\"", back_href, "\">"
+        "&larr; ", back_label, "</a>"
         "<h1>", title, "</h1>"
-        "<pre>", escaped, "</pre>"
-        "</body></html>", NULL);
+        "<div class=\"card\"><pre>", escaped, "</pre></div>"
+        "</main></body></html>", NULL);
     g_free(escaped);
     return html;
 }
@@ -3033,6 +3030,49 @@ build_about_third_party(void)
                                      "THIRD-PARTY-LICENSES.md");
 }
 
+#define ERROR_ICON(paths) \
+    "<svg width=\"30\" height=\"30\" viewBox=\"0 0 16 16\" fill=\"none\" " \
+    "stroke=\"currentColor\" stroke-width=\"1.4\" " \
+    "stroke-linecap=\"round\" stroke-linejoin=\"round\">" paths "</svg>"
+
+#define ERROR_ICON_OFFLINE ERROR_ICON( \
+    "<path d=\"M1.75 6.25a9 9 0 0 1 12.5 0M4 8.75a5.75 5.75 0 0 1 8" \
+    " 0M6.25 11.1a2.5 2.5 0 0 1 3.5 0M2.75 2l10.5 12\"/>")
+
+#define ERROR_ICON_SEARCH ERROR_ICON( \
+    "<circle cx=\"7\" cy=\"7\" r=\"4.75\"/>" \
+    "<path d=\"M10.5 10.5 14 14\"/>")
+
+#define ERROR_ICON_BLOCKED ERROR_ICON( \
+    "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>" \
+    "<path d=\"M3.95 3.95l8.1 8.1\"/>")
+
+#define ERROR_ICON_CLOCK ERROR_ICON( \
+    "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>" \
+    "<path d=\"M8 4.75V8l2.25 1.5\"/>")
+
+#define ERROR_ICON_LOCK ERROR_ICON( \
+    "<rect x=\"3.25\" y=\"7\" width=\"9.5\" height=\"7\" rx=\"1.75\"/>" \
+    "<path d=\"M5.25 7V5.25a2.75 2.75 0 0 1 5.5 0V7\"/>")
+
+#define ERROR_ICON_LINK ERROR_ICON( \
+    "<path d=\"M6.75 9.25l2.5-2.5M7.25 4.5l1-1a2.47 2.47 0 0 1 3.5" \
+    " 3.5l-1 1M8.75 11.5l-1 1a2.47 2.47 0 0 1-3.5-3.5l1-1\"/>")
+
+#define ERROR_ICON_PAGE ERROR_ICON( \
+    "<path d=\"M4 1.75h4.75L12 5v9.25H4zM8.5 1.75V5.25H12M6.25" \
+    " 8.25l3.5 3.5M9.75 8.25l-3.5 3.5\"/>")
+
+#define ERROR_ICON_SERVER ERROR_ICON( \
+    "<rect x=\"2.75\" y=\"2.75\" width=\"10.5\" height=\"4.25\"" \
+    " rx=\"1.25\"/>" \
+    "<rect x=\"2.75\" y=\"9\" width=\"10.5\" height=\"4.25\"" \
+    " rx=\"1.25\"/>" \
+    "<path d=\"M5 4.9h.5M5 11.1h.5\"/>")
+
+#define ERROR_ICON_ALERT ERROR_ICON( \
+    "<path d=\"M8 2.25 14.25 13.25H1.75zM8 6.5v3M8 11.4v.1\"/>")
+
 typedef struct ns_error_info {
     const char *icon;
     const char *title;
@@ -3044,134 +3084,134 @@ static const ns_error_info *
 classify_error(long status, const char *transport_error, gboolean is_file_url)
 {
     static const ns_error_info NO_NETWORK = {
-        "📡",
+        ERROR_ICON_OFFLINE,
         "Can't reach the network",
         "Can't reach the network",
         "Nordstjernen couldn't connect to any server. Your device may be "
         "offline, or a firewall is blocking outbound traffic."
     };
     static const ns_error_info DNS = {
-        "🔍",
+        ERROR_ICON_SEARCH,
         "Server address not found",
         "Server address not found",
         "Nordstjernen couldn't look up the host name. The address may be "
         "mistyped, or your DNS resolver isn't responding."
     };
     static const ns_error_info REFUSED = {
-        "🚫",
+        ERROR_ICON_BLOCKED,
         "Server refused the connection",
         "Server refused the connection",
         "The host is reachable but no service is listening on that port, "
         "or it actively closed the connection."
     };
     static const ns_error_info TIMEOUT = {
-        "⌛",
+        ERROR_ICON_CLOCK,
         "The connection timed out",
         "The connection timed out",
         "The server didn't respond within the allowed time. It may be "
         "overloaded or temporarily unreachable."
     };
     static const ns_error_info TLS = {
-        "🔒",
+        ERROR_ICON_LOCK,
         "Secure connection failed",
         "Secure connection failed",
         "Nordstjernen couldn't establish a trustworthy TLS connection. "
         "The certificate may be invalid, expired, or self-signed."
     };
     static const ns_error_info BAD_URL = {
-        "📝",
+        ERROR_ICON_LINK,
         "That address looks malformed",
         "That address looks malformed",
         "The URL couldn't be parsed. Check for typos, missing slashes, "
         "or an unsupported scheme."
     };
     static const ns_error_info HTTP_404 = {
-        "🗺",
+        ERROR_ICON_PAGE,
         "Page not found",
         "Page not found",
         "The server is reachable, but it has no resource at that URL. "
         "The link may be outdated or the page may have moved."
     };
     static const ns_error_info HTTP_410 = {
-        "🪦",
+        ERROR_ICON_PAGE,
         "This page is gone",
         "This page is gone",
         "The server is telling us the resource has been permanently removed."
     };
     static const ns_error_info HTTP_401 = {
-        "🔐",
+        ERROR_ICON_LOCK,
         "Authentication required",
         "Authentication required",
         "The server needs credentials Nordstjernen doesn't have. Sign in "
         "elsewhere first, or try a different URL."
     };
     static const ns_error_info HTTP_403 = {
-        "🚪",
+        ERROR_ICON_BLOCKED,
         "Access denied",
         "Access denied",
         "The server understood the request but refused to share this "
         "resource with us."
     };
     static const ns_error_info HTTP_429 = {
-        "🌊",
+        ERROR_ICON_CLOCK,
         "Too many requests",
         "Too many requests",
         "The server is throttling us. Wait a moment and try again."
     };
     static const ns_error_info HTTP_500 = {
-        "💥",
+        ERROR_ICON_SERVER,
         "Server error",
         "Server error",
         "The server hit an internal error processing this request. "
         "Nothing to do on our end — try again later."
     };
     static const ns_error_info HTTP_502 = {
-        "🪢",
+        ERROR_ICON_SERVER,
         "Bad gateway",
         "Bad gateway",
         "An upstream server returned an invalid response. The site's "
         "infrastructure may be misconfigured."
     };
     static const ns_error_info HTTP_503 = {
-        "🛠",
+        ERROR_ICON_SERVER,
         "Service unavailable",
         "Service unavailable",
         "The server is temporarily refusing requests, usually because it "
         "is overloaded or down for maintenance."
     };
     static const ns_error_info HTTP_504 = {
-        "⏱",
+        ERROR_ICON_CLOCK,
         "Gateway timeout",
         "Gateway timeout",
         "An upstream server didn't answer in time."
     };
     static const ns_error_info HTTP_GENERIC_4XX = {
-        "⚠",
+        ERROR_ICON_ALERT,
         "Request rejected",
         "Request rejected",
         "The server didn't accept this request."
     };
     static const ns_error_info HTTP_GENERIC_5XX = {
-        "⚠",
+        ERROR_ICON_SERVER,
         "Server error",
         "Server error",
         "The server reported a failure handling this request."
     };
     static const ns_error_info GENERIC = {
-        "⚠",
+        ERROR_ICON_ALERT,
         "Couldn't load page",
         "Couldn't load page",
         "Something went wrong fetching this URL."
     };
     static const ns_error_info FILE_MISSING = {
-        "📄",
+        ERROR_ICON_PAGE,
         "File not found",
         "File not found",
         "There is nothing at that path. The file may have been moved, "
         "renamed or deleted."
     };
     static const ns_error_info FILE_DENIED = {
-        "🔒",
+        ERROR_ICON_LOCK,
         "Cannot read that file",
         "Cannot read that file",
         "The file exists but this account is not allowed to read it."
@@ -3258,52 +3298,31 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<title>");
     g_string_append(out, esc_title);
     g_string_append(out, " — Nordstjernen</title>"
-        "<style>"
-        "body{font-family:system-ui,-apple-system,\"Segoe UI\","
-        "Helvetica,Arial,sans-serif;background:#f5f5f8;color:#1b1b22;"
-        "margin:0;padding:0;min-height:100vh;"
-        "display:flex;align-items:center;justify-content:center}"
-        ".card{background:#fff;border:1px solid #e3e3e8;border-radius:10px;"
-        "box-shadow:0 4px 24px rgba(0,0,0,0.06);padding:36px 40px;"
-        "max-width:640px;margin:32px 16px;line-height:1.5}"
-        ".icon{font-size:48px;line-height:1;margin-bottom:14px}"
-        "h1{font-size:22px;margin:0 0 12px 0;color:#1b1b22}"
-        "p.summary{font-size:16px;color:#33333d;margin:0 0 16px 0}"
-        ".url{font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace;"
-        "background:#f0f0f4;border:1px solid #e3e3e8;border-radius:6px;"
-        "padding:8px 12px;font-size:13px;color:#444;overflow-wrap:anywhere;"
-        "margin:0 0 16px 0}"
-        ".detail{font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace;"
-        "font-size:12px;color:#666;margin:0 0 24px 0;"
-        "overflow-wrap:anywhere}"
-        ".actions{display:flex;gap:10px;flex-wrap:wrap}"
-        ".btn{display:inline-block;padding:9px 16px;border-radius:6px;"
-        "text-decoration:none;font-size:14px;font-weight:500;"
-        "border:1px solid transparent;cursor:pointer;"
-        "font-family:inherit}"
-        ".btn.primary{background:#3a63d0;color:#fff;border-color:#3a63d0}"
-        ".btn.primary:hover{background:#2f55c2}"
-        ".btn.secondary{background:#fff;color:#1b1b22;"
-        "border-color:#d0d0d8}"
-        ".btn.secondary:hover{background:#f5f5f8}"
-        ".tips{margin-top:24px;padding-top:18px;border-top:1px solid #ececf0;"
-        "color:#555;font-size:13px}"
-        ".tips ul{margin:8px 0 0 0;padding-left:20px}"
-        ".tips li{margin:3px 0}"
-        "@media (prefers-color-scheme: dark){"
-        "body{background:#101218;color:#e6e8ec}"
-        ".card{background:#1d2027;border-color:#2a2e36;"
-        "box-shadow:0 4px 24px rgba(0,0,0,0.4)}"
-        "h1{color:#e6e8ec}"
-        "p.summary{color:#c3c9d4}"
-        ".url{background:#14161b;border-color:#2a2e36;color:#aab2c0}"
-        ".detail{color:#8b93a1}"
-        ".btn.secondary{background:#2a2e36;color:#e6e8ec;border-color:#3a3f49}"
-        ".btn.secondary:hover{background:#333842}"
-        ".tips{border-top-color:#2a2e36;color:#9aa3b2}"
-        "}"
+        "<meta name=\"color-scheme\" content=\"light dark\">"
+        "<style>" NS_ABOUT_BASE_CSS
+        "body{display:flex;align-items:center;justify-content:center;"
+        "min-height:100vh;padding:32px 18px}"
+        ".card{width:100%;max-width:600px;padding:36px 38px 30px}"
+        ".icon{display:flex;align-items:center;justify-content:center;"
+        "width:64px;height:64px;margin-bottom:20px;border-radius:20px;"
+        "background:var(--accent-soft);color:var(--accent)}"
+        "h1{margin:0 0 10px;font-size:24px;letter-spacing:-.01em;"
+        "line-height:1.25}"
+        "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
+        ".url{margin:0 0 10px;padding:10px 14px;border-radius:12px;"
+        "background:var(--field);font-family:var(--mono);font-size:13px;"
+        "color:var(--muted);overflow-wrap:anywhere}"
+        ".detail{margin:0 0 22px;font-family:var(--mono);font-size:12px;"
+        "color:var(--faint);overflow-wrap:anywhere}"
+        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}"
+        ".tips{margin-top:26px;padding-top:20px;"
+        "border-top:1px solid var(--line);"
+        "color:var(--muted);font-size:13.5px}"
+        ".tips strong{color:var(--text)}"
+        ".tips ul{margin:8px 0 0;padding-left:20px}"
+        ".tips li{margin:4px 0}"
         "</style></head><body>"
-        "<div class=\"card\">"
+        "<main class=\"card\">"
         "<div class=\"icon\">");
     g_string_append(out, info->icon);
     g_string_append(out, "</div>"
@@ -3328,9 +3347,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         g_string_append(out, "\">Try again</a>");
     }
     g_string_append(out,
-        "<button class=\"btn secondary\" "
+        "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn secondary\" href=\"about:start\">Start page</a>"
+        "<a class=\"btn\" href=\"about:start\">New Tab</a>"
         "</div>"
         "<div class=\"tips\">"
         "<strong>What to try:</strong>"
@@ -3350,7 +3369,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "</ul>"
         "</div>"
-        "</div></body></html>");
+        "</main></body></html>");
 
     g_free(esc_url);
     g_free(esc_title);
@@ -4224,80 +4243,112 @@ static const char k_about_start_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>Home</title>"
-    "<style>\n"
-    "html, body { background:#ffffff; color:#111418;"
-    " font-family: system-ui, -apple-system, \"Segoe UI\","
-    " Helvetica, Arial, sans-serif; margin:0; padding:0; min-height:100%; }\n"
-    ".wrap { max-width: 760px; margin: 0 auto; padding: 34px 24px 32px;"
-    " box-sizing:border-box; }\n"
-    ".head { text-align:center; margin-bottom:18px; }\n"
-    ".mark { display:block; width:58px; height:58px; line-height:58px;"
-    " margin:0 auto 12px; border:1px solid #d9dee7; border-radius:14px;"
-    " background:#f6f8fb; color:#1b2a4a; font-weight:700;"
-    " font-size:1.7em; text-align:center; }\n"
-    ".mark-img { display:block; width:58px; height:58px;"
-    " margin:0 auto 12px; border-radius:14px; object-fit:cover; }\n"
-    ".hgroup { display:block; text-align:center; }\n"
-    ".title { font-size: 1.5em; font-weight: 600; line-height:1.2; }\n"
-    ".tagline { color:#5b6470; font-style: italic; font-size: 0.84em;"
-    " margin:4px auto 0; line-height:1.25; max-width:36em; }\n"
-    ".intro { color:#4b5563; text-align:center; line-height:1.5;"
-    " margin:0 auto 22px; max-width:620px; }\n"
-    ".search { display:flex; gap:10px; margin:0 0 18px; }\n"
-    ".search input { flex:1 1 auto; border:1px solid #c9cfd9;"
-    " background:#ffffff; color:#111418; border-radius:10px;"
-    " padding:13px 16px; font:inherit; font-size:1.03em; outline:none; }\n"
-    ".search input:focus { border-color:#2d6cf6; }\n"
-    ".search button { border:0; background:#2d6cf6; color:#fff;"
-    " border-radius:10px; padding:13px 22px; font:inherit; font-weight:600;"
-    " cursor:pointer; }\n"
-    ".search button:hover { background:#2560d8; }\n"
-    ".links { text-align:center; color:#6b7280; font-size:0.86em;"
-    " line-height:1.7; }\n"
-    ".links a { color:#2d6cf6; margin:0 8px; }\n"
-    "@media (max-width:560px) { .wrap { padding:24px 24px 28px; }"
-    " .head { margin-bottom:18px; }"
-    " .mark { width:48px; height:48px; line-height:48px; font-size:1.4em;"
-    " margin-bottom:10px; }"
-    " .mark-img { width:48px; height:48px; margin-bottom:10px; }"
-    " .title { font-size:1.28em; }"
-    " .tagline { display:none; }"
-    " .intro { display:none; }"
-    " .search { flex-direction:column; gap:8px; }"
-    " .search button { width:100%; }"
-    " .links a { display:inline-block; margin:0 5px 4px; } }\n"
-    "@media (prefers-color-scheme: dark) {"
-    " html, body { background:#16181d; color:#e6e8ec; }"
-    " .mark { border-color:#343841; background:#20232a; color:#cfd6e4; }"
-    " .tagline { color:#9aa3b2; }"
-    " .intro { color:#aab2c0; }"
-    " .search input { background:#20232a; border-color:#343841;"
-    " color:#e6e8ec; }"
-    " .links { color:#8b93a1; } }\n"
+    "<title>New Tab</title>"
+    "<style>\n" NS_ABOUT_BASE_CSS
+    "html,body{height:100%}\n"
+    "body{background:radial-gradient(1100px 520px at 50% -140px,"
+    "rgba(83,130,255,.22),transparent),"
+    "radial-gradient(700px 380px at 85% 0,rgba(40,190,200,.12),transparent),"
+    "var(--bg)}\n"
+    ".ntp{max-width:720px;margin:0 auto;padding:13vh 24px 40px;"
+    "display:flex;flex-direction:column;align-items:center}\n"
+    ".brand{display:flex;flex-direction:column;align-items:center;"
+    "gap:14px;margin-bottom:30px}\n"
+    ".mark-img{display:block;width:76px;height:76px;border-radius:20px;"
+    "box-shadow:0 10px 30px rgba(20,40,110,.28)}\n"
+    ".brand h1{margin:0;font-size:34px;font-weight:700;"
+    "letter-spacing:-.02em;line-height:1.1}\n"
+    ".tagline{margin:-6px 0 0;color:var(--muted);font-size:14px}\n"
+    ".search{display:flex;align-items:center;gap:12px;width:100%;"
+    "height:58px;padding:0 7px 0 22px;border-radius:999px;"
+    "background:var(--card);border:1px solid var(--line);"
+    "box-shadow:var(--shadow)}\n"
+    ".search:focus-within{border-color:var(--accent);"
+    "box-shadow:0 0 0 4px var(--accent-soft),var(--shadow)}\n"
+    ".search svg{flex:0 0 auto;color:var(--faint)}\n"
+    ".search input{flex:1 1 auto;min-width:0;height:100%;border:0;"
+    "outline:0;background:transparent;color:var(--text);font:inherit;"
+    "font-size:17px}\n"
+    ".search button{flex:0 0 auto;display:flex;align-items:center;"
+    "justify-content:center;width:44px;height:44px;border:0;"
+    "border-radius:50%;background:var(--accent);color:var(--accent-ink);"
+    "cursor:pointer}\n"
+    ".search button svg{color:var(--accent-ink)}\n"
+    ".search button:hover{filter:brightness(1.08)}\n"
+    ".tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;"
+    "width:100%;margin-top:34px}\n"
+    ".tile{display:flex;flex-direction:column;align-items:center;gap:10px;"
+    "padding:18px 8px 16px;border-radius:var(--radius);"
+    "background:var(--card);border:1px solid var(--line);"
+    "box-shadow:var(--shadow);color:var(--text);font-size:14px;"
+    "font-weight:600}\n"
+    ".tile:hover{text-decoration:none;border-color:var(--accent)}\n"
+    ".ic{display:flex;align-items:center;justify-content:center;"
+    "width:44px;height:44px;border-radius:50%;"
+    "background:var(--accent-soft);color:var(--accent)}\n"
+    ".foot{margin-top:40px;color:var(--faint);font-size:13px}\n"
+    ".foot a{color:var(--muted);margin:0 8px}\n"
+    "@media (prefers-color-scheme:dark){body{background:"
+    "radial-gradient(1100px 520px at 50% -140px,rgba(70,110,255,.28),"
+    "transparent),radial-gradient(700px 380px at 85% 0,"
+    "rgba(40,190,200,.10),transparent),var(--bg)}}\n"
+    "@media (max-width:560px){.ntp{padding-top:7vh}"
+    ".tiles{grid-template-columns:repeat(2,1fr)}"
+    ".brand h1{font-size:28px}}\n"
     "</style></head>"
-    "<body><main class=\"wrap\">"
-    "__ND_SPLASH__"
-    "<form class=\"search\" id=\"dsearch\">"
+    "<body><main class=\"ntp\">"
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen</h1>"
+    "<p class=\"tagline\">__ND_TAGLINE__</p></div>"
+    "<form class=\"search\" id=\"dsearch\" role=\"search\">"
+    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
+    " stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\">"
+    "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
-    " aria-label=\"Search the web\""
-    " size=\"__ND_SEARCH_SIZE__\""
-    " placeholder=\"Search (__ND_SEARCH_NAME__):\">"
-    "<button type=\"submit\">Search</button>"
-    "</form>"
-    "<p class=\"links\">"
-    "<a href=\"about:history\">History</a>"
-    "<a href=\"about:license\">License</a>"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
-    "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
-    "</p>"
+    " aria-label=\"Search the web or enter an address\""
+    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
+    "<button type=\"submit\" aria-label=\"Search\">"
+    "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
+    " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
+    " stroke-linejoin=\"round\"><path d=\"M3 8h9.5M8.5 4l4 4-4 4\"/></svg>"
+    "</button></form>"
+    "<nav class=\"tiles\">"
+    "<a class=\"tile\" href=\"about:history\"><span class=\"ic\">"
+    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
+    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
+    " stroke-linejoin=\"round\"><circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
+    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg></span>History</a>"
+    "<a class=\"tile\" href=\"about:settings\"><span class=\"ic\">"
+    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
+    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\">"
+    "<path d=\"M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5\"/>"
+    "<circle cx=\"10.75\" cy=\"4.5\" r=\"1.5\"/>"
+    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg></span>Settings</a>"
+    "<a class=\"tile\" href=\"about:nordstjernen\"><span class=\"ic\">"
+    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\""
+    " fill=\"currentColor\">"
+    "<path d=\"M8 1.5l1.35 4.15L13.5 7l-4.15 1.35L8 12.5 6.65 8.35 2.5 7"
+    "l4.15-1.35z\"/></svg></span>About</a>"
+    "<a class=\"tile\" href=\"https://nordstjernen.org\"><span class=\"ic\">"
+    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
+    " stroke=\"currentColor\" stroke-width=\"1.5\"><circle cx=\"8\" cy=\"8\""
+    " r=\"5.75\"/><ellipse cx=\"8\" cy=\"8\" rx=\"2.4\" ry=\"5.75\"/>"
+    "<path d=\"M2.5 8h11\"/></svg></span>nordstjernen.org</a>"
+    "</nav>"
+    "<p class=\"foot\"><a href=\"about:license\">License</a>"
+    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a></p>"
     "</main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
     "var dsearch=document.getElementById('dsearch');\n"
     "var sq=document.getElementById('sq');\n"
+    "function addressFor(s){\n"
+    " if(/^(https?|file|about|view-source):/i.test(s)) return s;\n"
+    " if(!/\\s/.test(s)&&/^(localhost|[^\\s.\\/:]+(\\.[^\\s.\\/:]+)+)"
+    "(:\\d+)?(\\/.*)?$/i.test(s)) return 'https://'+s;\n"
+    " return null;}\n"
     "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
+    " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
     " window.location.href=searchUrl.indexOf('%s')>=0\n"
     "  ? searchUrl.replace('%s',encodeURIComponent(s))\n"
     "  : searchUrl+encodeURIComponent(s);});\n"
@@ -4310,190 +4361,213 @@ static const char k_about_nordstjernen_template[] =
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
     "<title>About Nordstjernen</title>"
-    "<style>\n"
-    "html, body { background:#ffffff; color:#111418;"
-    " font-family: system-ui, -apple-system, \"Segoe UI\","
-    " Helvetica, Arial, sans-serif; margin:0; padding:0; min-height:100%; }\n"
-    ".wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 32px;"
-    " box-sizing:border-box; }\n"
-    ".head { text-align:center; margin-bottom:22px; }\n"
-    ".mark-img { display:block; width:104px; height:104px;"
-    " margin:0 auto 16px; border-radius:22px; object-fit:cover; }\n"
-    ".title { font-size: 1.7em; font-weight: 600; line-height:1.15; }\n"
-    ".ver { color:#6b7280; font-size:0.92em; margin-top:5px; }\n"
-    ".intro { color:#4b5563; text-align:center; line-height:1.55;"
-    " margin:0 auto 18px; max-width:560px; }\n"
-    ".intro b { color:#111418; }\n"
-    ".license { max-width:560px; margin:24px auto 8px;"
-    " border-top:1px solid #e6e9ef; padding-top:22px; }\n"
-    ".license h2 { font-size:1.02em; font-weight:600; margin:0 0 8px;"
-    " text-align:center; }\n"
-    ".license p { color:#4b5563; line-height:1.55; font-size:0.92em;"
-    " margin:0 auto 10px; text-align:center; }\n"
-    ".license .third { color:#6b7280; font-size:0.86em; }\n"
-    ".docs { list-style:none; margin:16px auto 0; padding:0;"
-    " max-width:400px; }\n"
-    ".docs li { margin:0 0 8px; }\n"
-    ".docs a { color:#2d6cf6; font-weight:600; font-size:0.95em;"
-    " text-decoration:none; }\n"
-    ".docs a:hover { text-decoration:underline; }\n"
-    ".diag { max-width:560px; margin:26px auto 0; text-align:left;"
-    " border-top:1px solid #e6e9ef; padding-top:20px; }\n"
-    ".diag h3 { font-size:0.72em; text-transform:uppercase;"
-    " letter-spacing:0.05em; color:#8a94a3; font-weight:700;"
-    " margin:18px 0 6px; }\n"
-    ".diag h3:first-child { margin-top:0; }\n"
-    ".drow { display:flex; justify-content:space-between; gap:18px;"
-    " padding:5px 0; border-bottom:1px solid #f0f2f5; font-size:0.85em; }\n"
-    ".dk { color:#4b5563; flex:0 0 auto; }\n"
-    ".dv { color:#111418; text-align:right; word-break:break-word;"
-    " font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace; }\n"
-    ".dv.on { color:#137a3f; font-family:inherit; }\n"
-    ".dv.off { color:#9aa3af; font-family:inherit; }\n"
-    ".copy { text-align:center; color:#6b7280; font-size:0.85em;"
-    " margin:26px 0 14px; }\n"
-    ".links { text-align:center; color:#6b7280; font-size:0.86em;"
-    " line-height:1.7; }\n"
-    ".links a { color:#2d6cf6; margin:0 8px; }\n"
-    "@media (max-width:560px) { .wrap { padding:28px 22px; }"
-    " .mark-img { width:84px; height:84px; }"
-    " .title { font-size:1.42em; }"
-    " .drow { font-size:0.8em; }"
-    " .links a { display:inline-block; margin:0 5px 4px; } }\n"
-    "@media (prefers-color-scheme: dark) {"
-    " html, body { background:#16181d; color:#e6e8ec; }"
-    " .ver, .copy, .links, .license .third { color:#8b93a1; }"
-    " .intro, .license p, .dk { color:#aab2c0; }"
-    " .intro b, .dv { color:#e6e8ec; }"
-    " .license, .diag { border-top-color:#2a2e36; }"
-    " .drow { border-bottom-color:#23262d; }"
-    " .diag h3 { color:#79818f; }"
-    " .dv.on { color:#4ac97e; }"
-    " .dv.off { color:#6b7480; } }\n"
+    "<style>\n" NS_ABOUT_BASE_CSS
+    ".wrap{max-width:760px;margin:0 auto;padding:28px 24px 48px}\n"
+    ".top{margin-bottom:22px}\n"
+    ".splash{display:block;width:100%;height:auto;border-radius:var(--radius);"
+    "border:1px solid var(--line);box-shadow:var(--shadow)}\n"
+    ".head{display:flex;align-items:center;gap:18px;margin:28px 4px 26px}\n"
+    ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
+    "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
+    ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
+    "line-height:1.15}\n"
+    ".head p{margin:2px 0 0;color:var(--muted)}\n"
+    ".ver{display:inline-block;margin-left:10px;padding:3px 10px;"
+    "border-radius:999px;background:var(--accent-soft);color:var(--accent);"
+    "font-size:13px;font-weight:700;vertical-align:middle;letter-spacing:0}\n"
+    ".card{padding:22px 24px;margin-bottom:16px}\n"
+    ".card h2{margin:0 0 8px;font-size:17px}\n"
+    ".card p{margin:0 0 10px;color:var(--muted);font-size:14px}\n"
+    ".card p b{color:var(--text)}\n"
+    ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}\n"
+    ".diag h3{margin:20px 0 6px;font-size:12px;font-weight:700;"
+    "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n"
+    ".diag h3:first-child{margin-top:0}\n"
+    ".drow{display:flex;justify-content:space-between;gap:20px;"
+    "padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}\n"
+    ".drow:last-child{border-bottom:0}\n"
+    ".dk{color:var(--muted);flex:0 0 auto}\n"
+    ".dv{color:var(--text);text-align:right;word-break:break-word;"
+    "font-family:var(--mono);font-size:12.5px}\n"
+    ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
+    "padding:1px 10px;border-radius:999px}\n"
+    ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
+    ".dv.off{color:var(--faint);background:var(--field)}\n"
+    ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
+    "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
+    ".foot a{color:var(--muted);margin-left:14px}\n"
+    "@media (max-width:560px){.head{flex-direction:column;"
+    "align-items:flex-start}.drow{font-size:12.5px}}\n"
     "</style></head>"
     "<body><main class=\"wrap\">"
-    "<div class=\"head\">"
-    "__ND_LOGO_MARK__"
-    "<div class=\"title\">Nordstjernen</div>"
-    "<div class=\"ver\">Version " NS_VERSION "</div>"
-    "</div>"
-    "<p class=\"intro\">A web browser implemented in C.</p>"
-    "<section class=\"license\">"
+    "<div class=\"top\"><a class=\"crumb\" href=\"about:start\">"
+    "\xe2\x86\x90 New Tab</a></div>"
+    "__ND_SPLASH__"
+    "<div class=\"head\">__ND_LOGO_MARK__<div>"
+    "<h1>Nordstjernen<span class=\"ver\">" NS_VERSION "</span></h1>"
+    "<p>A web browser implemented in C.</p></div></div>"
+    "<section class=\"card\">"
     "<h2>License</h2>"
     "<p>Nordstjernen is distributed under the <b>Nordstjernen Source "
     "License v1.0 (NSL-1.0)</b>, \xc2\xa9 2026 Andreas R\xc3\xb8sdal.</p>"
-    "<p class=\"third\">It bundles third-party open-source software under "
-    "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses \xe2"
-    "\x80\x94 including lexbor, QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
+    "<p>It bundles third-party open-source software under "
+    "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses, "
+    "including lexbor, QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
     "libcurl, OpenSSL, uchardet, libwebp, libpsl, SQLite and zlib. Each "
     "component\xe2\x80\x99s copyright notice and full license text is "
-    "reproduced in the notices below.</p>"
-    "<ul class=\"docs\">"
-    "<li><a href=\"about:license\">Nordstjernen Source License (NSL-1.0)"
-    " \xe2\x86\x92</a></li>"
-    "<li><a href=\"about:third-party\">Third-party software notices \xe2"
-    "\x86\x92</a></li>"
-    "</ul>"
+    "reproduced in the notices.</p>"
+    "<div class=\"actions\">"
+    "<a class=\"btn\" href=\"about:license\">Nordstjernen Source License</a>"
+    "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
+    "</div>"
     "</section>"
-    "__ND_DIAG__"
-    "<p class=\"copy\">Nordstjernen Web Browser \xc2\xa9 2026 "
-    "Andreas R\xc3\xb8sdal</p>"
-    "<p class=\"links\">"
-    "<a href=\"about:start\">\xe2\x86\x90 Start</a>"
-    "<a href=\"about:license\">License</a>"
+    "<section class=\"card\">__ND_DIAG__</section>"
+    "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
+    "Andreas R\xc3\xb8sdal</span><span>"
     "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
     "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
-    "</p>"
+    "</span></div>"
     "</main></body></html>";
+
+#define SETTINGS_NAV_ICON(paths) \
+    "<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" " \
+    "stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" " \
+    "stroke-linejoin=\"round\">" paths "</svg>"
+
+#define SETTINGS_SWITCH(id, label, desc) \
+    "<label class=\"row\"><span class=\"txt\">" \
+    "<span class=\"lbl\">" label "</span>" \
+    "<span class=\"desc\">" desc "</span></span>" \
+    "<span class=\"sw\"><input type=\"checkbox\" id=\"" id "\">" \
+    "<span></span></span></label>"
 
 static const char k_about_settings_html[] =
 "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
 "<meta name=\"color-scheme\" content=\"light dark\">\n"
 "<title>Settings</title>\n"
-"<style>\n"
-"html,body{margin:0;background:#f4f6f9;color:#16202e;font-family:system-ui,"
-"-apple-system,\"Segoe UI\",Helvetica,Arial,sans-serif;min-height:100%}\n"
-".bar{display:flex;align-items:center;gap:12px;padding:11px 18px;"
-"background:#1b2a4a;color:#fff;position:sticky;top:0;z-index:5}\n"
-".brand{font-weight:700;font-size:1.12em}\n"
-"main{max-width:680px;margin:0 auto;padding:18px}\n"
-".card{background:#fff;border-radius:12px;padding:18px 20px;margin:0 0 14px;"
-"box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
-"h2{font-size:1.1em;margin:.1em 0 .7em}\n"
-".field{display:flex;flex-direction:column;gap:6px;font-size:.84em;"
-"color:#5b6470;font-weight:600;margin:0 0 14px}\n"
-".field:last-child{margin-bottom:0}\n"
-"input,select{font:inherit;color:#16202e;border:1px solid #ccd3de;"
-"border-radius:8px;padding:9px 11px;background:#fff;font-weight:400}\n"
-"input:focus,select:focus{outline:2px solid #2d6cf6;outline-offset:-1px;"
-"border-color:#2d6cf6}\n"
-".toggle{display:flex;align-items:center;gap:10px;font-size:.92em;"
-"color:#27313f;font-weight:500;margin:0 0 12px;cursor:pointer}\n"
-".toggle:last-child{margin-bottom:0}\n"
-".toggle input{width:18px;height:18px;accent-color:#2d6cf6;margin:0}\n"
-"button{font:inherit;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;"
-"background:#2d6cf6;color:#fff;font-weight:600}\n"
-"button.ghost{background:#e7ebf2;color:#16202e}\n"
-"button:hover{filter:brightness(1.05)}\n"
-".row{display:flex;align-items:center;gap:12px;margin-top:6px}\n"
-".spacer{flex:1 1 auto}\n"
-".note{color:#8a93a3;font-size:.85em;text-align:center;margin-top:14px}\n"
-".ok{color:#1a8a4a;font-weight:600}\n"
+"<style>\n" NS_ABOUT_BASE_CSS
+".layout{display:flex;gap:32px;max-width:980px;margin:0 auto;"
+"padding:36px 28px 60px}\n"
+".side{flex:0 0 200px;position:sticky;top:36px;align-self:flex-start}\n"
+".side h1{margin:0 0 18px 12px;font-size:24px;letter-spacing:-.02em}\n"
+".side a{display:flex;align-items:center;gap:10px;height:38px;"
+"padding:0 12px;border-radius:999px;color:var(--muted);font-size:14px;"
+"font-weight:600}\n"
+".side a:hover{background:var(--field);color:var(--text);"
+"text-decoration:none}\n"
+".side svg{color:var(--accent)}\n"
+"main{flex:1 1 auto;min-width:0}\n"
+"section{margin:0 0 26px}\n"
+"section h2{margin:0 0 10px 6px;font-size:15px;font-weight:700}\n"
+".card{padding:6px 22px}\n"
+".row{display:flex;align-items:center;justify-content:space-between;"
+"gap:20px;padding:14px 0;cursor:pointer}\n"
+".card > * + *{border-top:1px solid var(--line)}\n"
+".txt{display:flex;flex-direction:column;gap:2px;min-width:0}\n"
+".lbl{font-size:14.5px;font-weight:600}\n"
+".desc{font-size:13px;color:var(--muted)}\n"
+".field{display:flex;flex-direction:column;gap:8px;padding:14px 0}\n"
+"input[type=text],select{width:100%;padding:9px 12px;"
+"border-radius:12px;border:1px solid var(--line);background:var(--field);"
+"color:var(--text);font:inherit;font-size:14px;outline:none}\n"
+"input[type=text]:focus,select:focus{border-color:var(--accent);"
+"box-shadow:0 0 0 3px var(--accent-soft)}\n"
+".sw{position:relative;flex:0 0 auto;width:42px;height:24px}\n"
+".sw input{position:absolute;opacity:0;width:0;height:0;margin:0}\n"
+".sw span{position:absolute;top:0;left:0;right:0;bottom:0;"
+"border-radius:999px;background:rgba(120,128,145,.35);"
+"transition:background .18s}\n"
+".sw span::after{content:\"\";position:absolute;top:3px;left:3px;"
+"width:18px;height:18px;border-radius:50%;background:#fff;"
+"box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .18s}\n"
+".sw input:checked + span{background:var(--accent)}\n"
+".sw input:checked + span::after{left:21px}\n"
+".sw input:focus-visible + span{box-shadow:0 0 0 3px var(--accent-soft)}\n"
+".danger-row{display:flex;align-items:center;justify-content:space-between;"
+"gap:20px;padding:16px 0}\n"
 "#custom_wrap[hidden]{display:none}\n"
-"@media (prefers-color-scheme: dark){\n"
-"html,body{background:#16181d;color:#e6e8ec}\n"
-".bar{background:#10131a}\n"
-".card{background:#1d2027;box-shadow:0 1px 3px rgba(0,0,0,.4)}\n"
-".field{color:#9aa3b2}\n"
-"input,select{background:#14161b;border-color:#343841;color:#e6e8ec}\n"
-".toggle{color:#d3d8e0}\n"
-"button.ghost{background:#2a2e36;color:#e6e8ec}\n"
-".note{color:#79818f}\n"
-".ok{color:#4ac97e}\n"
-"}\n"
+".toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);"
+"padding:10px 18px;border-radius:999px;background:var(--text);"
+"color:var(--bg);font-size:13.5px;font-weight:600;"
+"box-shadow:0 8px 24px rgba(0,0,0,.2);opacity:0;transition:opacity .2s}\n"
+".toast.show{opacity:1}\n"
+"@media (max-width:760px){.layout{flex-direction:column;gap:8px;"
+"padding:24px 18px 48px}.side{position:static}"
+".side a{display:none}}\n"
 "</style></head><body>\n"
-"<header class=\"bar\"><div class=\"brand\">\xe2\x9a\x99 Settings</div></header>\n"
+"<div class=\"layout\">\n"
+"<nav class=\"side\"><h1>Settings</h1>"
+"<a href=\"#general\">" SETTINGS_NAV_ICON(
+    "<path d=\"M2.25 7.5 8 2.5l5.75 5\"/>"
+    "<path d=\"M3.75 6.5v7h8.5v-7\"/>")
+    "General</a>"
+"<a href=\"#privacy\">" SETTINGS_NAV_ICON(
+    "<path d=\"M8 1.75 13.25 3.75v4c0 3.25-2.25 5.5-5.25 6.5"
+    "-3-1-5.25-3.25-5.25-6.5v-4z\"/>")
+    "Privacy</a>"
+"<a href=\"#content\">" SETTINGS_NAV_ICON(
+    "<rect x=\"2.25\" y=\"2.75\" width=\"11.5\" height=\"10.5\""
+    " rx=\"2\"/><path d=\"M2.25 6h11.5\"/>")
+    "Content</a>"
+"<a href=\"#data\">" SETTINGS_NAV_ICON(
+    "<path d=\"M3.25 4.5h9.5M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.75h5.8l.6-8.75\"/>")
+    "Browsing data</a></nav>\n"
 "<main>\n"
-"<section class=\"card\"><h2>General</h2>"
-"<label class=\"field\">Home page<input id=\"home_url\" type=\"text\"></label>"
-"<label class=\"field\">Search engine<select id=\"search_pick\"></select></label>"
-"<label class=\"field\" id=\"custom_wrap\">Custom search URL"
-"<input id=\"search_engine\" type=\"text\" "
+"<section id=\"general\"><h2>General</h2><div class=\"card\">"
+"<label class=\"field\"><span class=\"lbl\">Home page</span>"
+"<input id=\"home_url\" type=\"text\" spellcheck=\"false\"></label>"
+"<label class=\"field\"><span class=\"lbl\">Search engine</span>"
+"<select id=\"search_pick\"></select></label>"
+"<label class=\"field\" id=\"custom_wrap\"><span class=\"lbl\">"
+"Custom search URL</span>"
+"<input id=\"search_engine\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com/?q=%s\"></label>"
-"</section>\n"
-"<section class=\"card\"><h2>Privacy</h2>"
-"<label class=\"field\">Cookies<select id=\"cookie_policy\">"
+"</div></section>\n"
+"<section id=\"privacy\"><h2>Privacy</h2><div class=\"card\">"
+"<label class=\"field\"><span class=\"lbl\">Cookies</span>"
+"<select id=\"cookie_policy\">"
 "<option value=\"0\">Accept all cookies</option>"
 "<option value=\"1\">Block third-party cookies</option>"
-"<option value=\"2\">Block all cookies</option></select></label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"do_not_track\">"
-"Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"global_privacy_control\">"
-"Send Global Privacy Control (GPC)</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"strip_tracking_params\">"
-"Strip tracking parameters from links</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"https_first\">"
-"Try HTTPS first on every site</label>"
-"</section>\n"
-"<section class=\"card\"><h2>Content</h2>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"images_enabled\">"
-"Load images</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"javascript_enabled\">"
-"Enable JavaScript</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"webgl_enabled\">"
-"Enable WebGL</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"local_storage_enabled\">"
-"Enable local storage</label>"
-"<label class=\"toggle\"><input type=\"checkbox\" id=\"cache_enabled\">"
-"Enable cache</label>"
-"</section>\n"
-"<div class=\"row\">"
-"<button id=\"clear\" class=\"ghost\">Clear all browsing data</button>"
-"<span class=\"spacer\"></span><span id=\"status\"></span>"
-"<button id=\"save\">Save</button></div>\n"
-"<p class=\"note\">Changes apply to newly opened pages.</p>\n"
-"</main>\n"
+"<option value=\"2\">Block all cookies</option></select></label>\n"
+SETTINGS_SWITCH("do_not_track",
+    "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d",
+    "Ask every site not to track you.")
+SETTINGS_SWITCH("global_privacy_control",
+    "Send Global Privacy Control",
+    "Tell sites not to sell or share your data.")
+SETTINGS_SWITCH("strip_tracking_params",
+    "Strip tracking parameters",
+    "Remove utm_ and similar tags from links you open.")
+SETTINGS_SWITCH("https_first",
+    "HTTPS first",
+    "Try a secure connection before plain HTTP on every site.")
+"</div></section>\n"
+"<section id=\"content\"><h2>Content</h2><div class=\"card\">\n"
+SETTINGS_SWITCH("images_enabled",
+    "Load images",
+    "Show pictures on web pages.")
+SETTINGS_SWITCH("javascript_enabled",
+    "JavaScript",
+    "Run scripts that pages need for interactive features.")
+SETTINGS_SWITCH("webgl_enabled",
+    "WebGL",
+    "Allow 3D graphics in the canvas element.")
+SETTINGS_SWITCH("local_storage_enabled",
+    "Local storage",
+    "Let sites keep data on this device.")
+SETTINGS_SWITCH("cache_enabled",
+    "Cache",
+    "Keep copies of pages and files to load them faster.")
+"</div></section>\n"
+"<section id=\"data\"><h2>Browsing data</h2><div class=\"card\">"
+"<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
+"Clear all browsing data</span><span class=\"desc\">History, cookies, "
+"cache and site storage on this device.</span></span>"
+"<button id=\"clear\" class=\"btn danger\">Clear data</button></div>"
+"</div></section>\n"
+"</main></div>\n"
+"<div class=\"toast\" id=\"status\" role=\"status\"></div>\n"
 "<script>\n"
 "function $(i){return document.getElementById(i);}\n"
 "function enc(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+'='+"
@@ -4504,6 +4578,14 @@ static const char k_about_settings_html[] =
 "{n:'Bing',u:'https://www.bing.com/search?q=%s'},"
 "{n:'Brave',u:'https://search.brave.com/search?q=%s'},"
 "{n:'Wikipedia',u:'https://en.wikipedia.org/w/index.php?search=%s'}];\n"
+"var toggles=['do_not_track','global_privacy_control',"
+"'strip_tracking_params','https_first','images_enabled',"
+"'javascript_enabled','webgl_enabled','local_storage_enabled',"
+"'cache_enabled'];\n"
+"var loaded=false,toastTimer=0;\n"
+"function toast(t){var s=$('status');s.textContent=t;s.className='toast show';"
+"clearTimeout(toastTimer);toastTimer=setTimeout(function(){"
+"s.className='toast';},1800);}\n"
 "function buildPick(cur){var sel=$('search_pick');sel.textContent='';"
 "var matched=false;engines.forEach(function(e){var o=document.createElement("
 "'option');o.value=e.u;o.textContent=e.n;if(e.u===cur){o.selected=true;"
@@ -4512,38 +4594,30 @@ static const char k_about_settings_html[] =
 "oc.textContent='Custom\\u2026';if(!matched)oc.selected=true;"
 "sel.appendChild(oc);"
 "$('custom_wrap').hidden=matched;}\n"
-"$('search_pick')&&($('search_pick').onchange=function(){"
-"var v=this.value;if(v==='custom'){$('custom_wrap').hidden=false;}"
-"else{$('custom_wrap').hidden=true;$('search_engine').value=v;}});\n"
 "function load(){fetch('about:settings-data').then(function(r){"
 "return r.json();}).then(function(c){"
 "$('home_url').value=c.home_url||'';"
 "$('search_engine').value=c.search_engine||'';buildPick(c.search_engine||'');"
 "$('cookie_policy').value=''+(c.cookie_policy||0);"
-"['do_not_track','global_privacy_control','strip_tracking_params',"
-"'https_first','images_enabled','javascript_enabled','webgl_enabled',"
-"'local_storage_enabled',"
-"'cache_enabled'].forEach(function(k){$(k).checked=!!c[k];});});}\n"
+"toggles.forEach(function(k){$(k).checked=!!c[k];});loaded=true;});}\n"
 "function bv(id){return $(id).checked?'1':'0';}\n"
-"function save(){var se=$('search_pick').value;"
+"function save(){if(!loaded)return;var se=$('search_pick').value;"
 "if(se!=='custom')$('search_engine').value=se;"
+"var o={home_url:$('home_url').value,search_engine:$('search_engine').value,"
+"cookie_policy:$('cookie_policy').value};"
+"toggles.forEach(function(k){o[k]=bv(k);});"
 "fetch('about:settings-save',{method:'POST',headers:{'Content-Type':"
-"'application/x-www-form-urlencoded'},body:enc({"
-"home_url:$('home_url').value,search_engine:$('search_engine').value,"
-"cookie_policy:$('cookie_policy').value,do_not_track:bv('do_not_track'),"
-"global_privacy_control:bv('global_privacy_control'),"
-"strip_tracking_params:bv('strip_tracking_params'),"
-"https_first:bv('https_first'),images_enabled:bv('images_enabled'),"
-"javascript_enabled:bv('javascript_enabled'),"
-"webgl_enabled:bv('webgl_enabled'),"
-"local_storage_enabled:bv('local_storage_enabled'),"
-"cache_enabled:bv('cache_enabled')})}).then(function(){"
-"$('status').textContent='Saved.';$('status').className='ok';"
-"setTimeout(function(){$('status').textContent='';},2500);});}\n"
-"function clearData(){var b=$('clear');b.disabled=true;"
+"'application/x-www-form-urlencoded'},body:enc(o)}).then(function(){"
+"toast('Saved. Applies to newly opened pages.');});}\n"
+"$('search_pick').onchange=function(){"
+"var v=this.value;$('custom_wrap').hidden=v!=='custom';"
+"if(v!=='custom'){$('search_engine').value=v;save();}};\n"
+"['home_url','search_engine','cookie_policy'].forEach(function(k){"
+"$(k).onchange=save;});\n"
+"toggles.forEach(function(k){$(k).onchange=save;});\n"
+"$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
-"b.textContent='Browsing data cleared';});}\n"
-"$('save').onclick=save;$('clear').onclick=clearData;\n"
+"b.textContent='Cleared';toast('Browsing data cleared');});};\n"
 "load();\n"
 "</script></body></html>";
 
@@ -4738,16 +4812,6 @@ synthesize_about_response(const char *url, const char *top_url,
                                            esc_name);
         g_free(esc_name);
         g_free(with_search);
-        glong ph_len = g_utf8_strlen(search_name, -1) + 10;
-        if (ph_len < 20) ph_len = 20;
-        if (ph_len > 80) ph_len = 80;
-        char *size_val = g_strdup_printf("%ld", ph_len);
-        char *with_size = about_substitute(with_name,
-                                           "__ND_SEARCH_SIZE__",
-                                           size_val);
-        g_free(size_val);
-        g_free(with_name);
-        with_name = with_size;
         g_string_free(esc_engine, TRUE);
         g_free(engine_host);
         char *logo_markup = about_logo_markup();
@@ -4756,14 +4820,9 @@ synthesize_about_response(const char *url, const char *top_url,
                                            logo_markup);
         g_free(logo_markup);
         g_free(with_name);
-        char *splash_markup = about_splash_markup();
-        char *with_splash = about_substitute(with_logo, "__ND_SPLASH__",
-                                             splash_markup);
-        g_free(splash_markup);
-        g_free(with_logo);
-        char *body = about_substitute(with_splash, "__ND_TAGLINE__",
+        char *body = about_substitute(with_logo, "__ND_TAGLINE__",
                                       about_start_tagline());
-        g_free(with_splash);
+        g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
@@ -4773,9 +4832,14 @@ synthesize_about_response(const char *url, const char *top_url,
                                            "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
         char *diag = about_diagnostics_html();
-        char *body = about_substitute(with_logo, "__ND_DIAG__", diag);
+        char *with_diag = about_substitute(with_logo, "__ND_DIAG__", diag);
         g_free(diag);
         g_free(with_logo);
+        char *splash_markup = about_splash_markup();
+        char *body = about_substitute(with_diag, "__ND_SPLASH__",
+                                      splash_markup);
+        g_free(splash_markup);
+        g_free(with_diag);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
