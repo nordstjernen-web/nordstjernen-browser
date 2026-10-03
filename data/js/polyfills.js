@@ -4469,15 +4469,10 @@
         replaceCtor('TrustedTypePolicy', TrustedTypePolicy);
 
         var defaultPolicy = null;
-        /* The factory's brand is a private name, which a frame's own copy
-         * of the factory carries over (ns_realm_clone_instance). */
-        var FactoryBrand = class extends (function (o) { return o; }) {
-            #factory;
-            static has(o) { return o !== null && typeof o === 'object' && #factory in o; }
-        };
-        function requireFactory(value) {
-            if (!FactoryBrand.has(value)) throw new TypeError('Illegal invocation');
-        }
+        /* A private name, which a frame's copy of the factory keeps (ns_realm_clone_instance). */
+        var FactoryBrand = class extends (function (o) { return o; }) { #factory = true;
+            static require(o) { try { return o.#factory; } catch { throw new TypeError('Illegal invocation'); } } };
+        function requireFactory(value) { FactoryBrand.require(value); }
         function TrustedTypePolicyFactory() { throw new TypeError('Illegal constructor'); }
         nativeize(TrustedTypePolicyFactory, 'TrustedTypePolicyFactory');
         var factoryProto = TrustedTypePolicyFactory.prototype;
