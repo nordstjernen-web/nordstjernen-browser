@@ -27168,7 +27168,8 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndAdoptWindowEventOps",
                                          "__ndEventTargetMethods",
                                          "__ndIsEngineFunction",
-                                         "__ndDispatchPath" };
+                                         "__ndDispatchPath",
+                                         "__ndRealmProto" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
     ns_net_add_private_names(ctx);
@@ -49422,6 +49423,18 @@ ns_realm_forwarder_for(ns_realm_cloner *rc, JSValueConst v, gboolean ctor)
     return out;
 }
 
+/* Whether the JS layer made constructor ctor so that the copies of it in the
+ * frames get a prototype of their own: its instances are not tested against
+ * the prototype of the realm that made them (__ndRealmProto). */
+static gboolean
+ns_realm_ctor_owns_proto(ns_realm_cloner *rc, JSValueConst ctor)
+{
+    JSValue marker = JS_GetPropertyStr(rc->src, ctor, "__ndRealmProto");
+    gboolean owns = JS_ToBool(rc->src, marker) > 0;
+    JS_FreeValue(rc->src, marker);
+    return owns;
+}
+
 static void
 ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
                             JSAtom atom, gboolean is_proto, int depth)
@@ -49439,7 +49452,8 @@ ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst ou
         getter = ns_realm_clone(rc, desc.getter, depth + 1);
         setter = ns_realm_clone(rc, desc.setter, depth + 1);
         flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
-    } else if (is_proto && JS_IsObject(desc.value)) {
+    } else if (is_proto && JS_IsObject(desc.value) &&
+               !ns_realm_ctor_owns_proto(rc, v)) {
         /* The JS layer's own checks (instanceof against its closure's
          * interface) only accept its own prototype, so an interface the
          * JS layer implements keeps it: the frame's constructor is new,
