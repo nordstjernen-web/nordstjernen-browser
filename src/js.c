@@ -48067,8 +48067,6 @@ ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
     JS_FreePropertyEnum(rc->src, tab, len);
 }
 
-static JSValue ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth);
-
 /* Whether a JS-implemented function is an interface object: one with an
  * interface prototype of its own, or a capitalised name. A method or an
  * accessor function is not one, whatever its [[Construct]] says. */
