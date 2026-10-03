@@ -332,6 +332,39 @@ render_collect_containers(const ns_box *b, GHashTable *map, guint64 *sig)
         render_collect_containers(ch, map, sig);
 }
 
+static const ns_node *g_cq_prev_doc;
+static double g_cq_prev_width;
+static GHashTable *g_cq_prev_map;
+
+static GHashTable *
+render_cq_predicted_map(const ns_node *doc, double viewport_width,
+                        gboolean want_cq)
+{
+    if (!want_cq || !g_cq_prev_map || g_cq_prev_doc != doc ||
+        g_cq_prev_width != viewport_width)
+        return NULL;
+    return g_cq_prev_map;
+}
+
+static gboolean
+render_cq_settled(GHashTable *predicted, GHashTable *measured)
+{
+    return predicted && ns_css_container_maps_equal(predicted, measured);
+}
+
+static void
+render_cq_remember(const ns_node *doc, double viewport_width,
+                   const ns_box *layout, gboolean want_cq)
+{
+    g_clear_pointer(&g_cq_prev_map, g_hash_table_destroy);
+    g_cq_prev_doc = NULL;
+    if (!want_cq) return;
+    g_cq_prev_map = ns_css_container_map_new();
+    render_collect_containers(layout, g_cq_prev_map, NULL);
+    g_cq_prev_doc = doc;
+    g_cq_prev_width = viewport_width;
+}
+
 static gboolean
 render_dom_uses_container_units(const ns_node *root)
 {
@@ -342,6 +375,21 @@ render_dom_uses_container_units(const ns_node *root)
         if (ns_css_text_has_container_units(style, -1)) return TRUE;
     }
     return FALSE;
+}
+
+static gboolean
+render_cq_wanted(const ns_render_ctx *c, gboolean *uses_units)
+{
+    gboolean units = render_dom_uses_container_units(c->doc);
+    gboolean want = units;
+    for (guint i = 0; i < c->n_sheets; i++) {
+        if (ns_css_stylesheet_has_container_units(c->sheets[i]))
+            units = want = TRUE;
+        if (ns_css_stylesheet_has_container_rules(c->sheets[i]))
+            want = TRUE;
+    }
+    *uses_units = units;
+    return want;
 }
 
 static void
@@ -550,7 +598,13 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         cache_selectors = ns_css_stylesheet_has_container_rules(c->sheets[i]) ||
                           ns_css_stylesheet_has_container_units(c->sheets[i]);
     if (cache_selectors) ns_css_selector_cache_begin();
+    gboolean uses_cq_units = FALSE;
+    gboolean want_cq = render_cq_wanted(c, &uses_cq_units);
+    GHashTable *predicted =
+        render_cq_predicted_map(c->doc, viewport_width, want_cq);
+    ns_css_set_container_map(predicted);
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->sheet_docs, c->n_sheets);
+    ns_css_set_container_map(NULL);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 
     render_style_pass(c, styles);
@@ -569,15 +623,6 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         profile->layout1_us = t3 - t2;
     }
 
-    gboolean uses_cq_units = render_dom_uses_container_units(c->doc);
-    gboolean want_cq = uses_cq_units;
-    for (guint i = 0; i < c->n_sheets; i++) {
-        if (ns_css_stylesheet_has_container_units(c->sheets[i]))
-            uses_cq_units = want_cq = TRUE;
-        if (ns_css_stylesheet_has_container_rules(c->sheets[i]))
-            want_cq = TRUE;
-    }
-
     GHashTable *containers = ns_css_container_map_new();
     guint64 container_sig = 0;
     gint64 tc0 = profile ? g_get_monotonic_time() : 0;
@@ -589,7 +634,10 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         profile->containers = n_containers;
     }
     int container_passes = uses_cq_units ? 3 : 1;
-    for (int pass = 0; pass < container_passes && n_containers > 0; pass++) {
+    gboolean stale = predicted != NULL;
+    if (render_cq_settled(predicted, containers)) container_passes = 0;
+    for (int pass = 0; pass < container_passes && (n_containers > 0 || stale);
+         pass++) {
         if (profile) {
             profile->container_pass = TRUE;
             profile->container_passes++;
@@ -601,7 +649,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         gint64 t5 = profile ? g_get_monotonic_time() : 0;
         gboolean container_features_used = ns_css_container_features_used();
         ns_css_set_container_map(NULL);
-        if (!container_features_used ||
+        if ((!container_features_used && !stale) ||
             render_style_tables_equal(styles, styles2)) {
             if (profile) profile->css2_us += t5 - t4;
             g_hash_table_destroy(styles2);
@@ -625,6 +673,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         g_hash_table_destroy(styles);
         layout = layout2;
         styles = styles2;
+        stale = FALSE;
         if (pass + 1 < container_passes) {
             g_hash_table_remove_all(containers);
             gint64 tr0 = profile ? g_get_monotonic_time() : 0;
@@ -641,6 +690,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         }
     }
     g_hash_table_destroy(containers);
+    render_cq_remember(c->doc, viewport_width, layout, want_cq);
     if (cache_selectors) ns_css_selector_cache_end();
     ns_css_set_focus_node(NULL);
     ns_css_set_hover_node(NULL);
