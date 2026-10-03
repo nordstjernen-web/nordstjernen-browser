@@ -429,6 +429,32 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
+static cairo_surface_t *
+ns_canvas_surface_copy(cairo_surface_t *src, int w, int h)
+{
+    cairo_surface_t *copy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(copy);
+        return NULL;
+    }
+    cairo_t *cr = cairo_create(copy);
+    cairo_set_source_surface(cr, src, 0, 0);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    return copy;
+}
+
+static void
+ns_canvas_state_clear_surface(ns_canvas_state *st)
+{
+    if (!st || !st->surf) return;
+    cairo_t *clear = cairo_create(st->surf);
+    cairo_set_operator(clear, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(clear);
+    cairo_destroy(clear);
+}
+
 JSValue
 ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
@@ -442,24 +468,11 @@ ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     int w = cairo_image_surface_get_width(src);
     int h = cairo_image_surface_get_height(src);
     if (w <= 0 || h <= 0) return JS_NULL;
-    cairo_surface_t *copy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(copy);
-        return JS_NULL;
-    }
-    cairo_t *cr = cairo_create(copy);
-    cairo_set_source_surface(cr, src, 0, 0);
-    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    cairo_paint(cr);
-    cairo_destroy(cr);
+    cairo_surface_t *copy = ns_canvas_surface_copy(src, w, h);
+    if (!copy) return JS_NULL;
     ns_canvas_state *st = js->canvas_states
         ? g_hash_table_lookup(js->canvas_states, el) : NULL;
-    if (st && st->surf) {
-        cairo_t *clear = cairo_create(st->surf);
-        cairo_set_operator(clear, CAIRO_OPERATOR_CLEAR);
-        cairo_paint(clear);
-        cairo_destroy(clear);
-    }
+    ns_canvas_state_clear_surface(st);
     return ns_image_bitmap_make(ctx, copy, w, h, !st || st->origin_clean);
 }
 
@@ -3194,6 +3207,50 @@ ns_canvas_get_webgl(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_nod
 }
 
 static JSValue
+ns_canvas_get_webgpu(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_node *el,
+                     JSValueConst canvas_obj)
+{
+#ifdef ND_HAVE_WEBGPU
+    if (!st->context_kind || st->context_kind == 3) {
+        JSValue gpu = ns_webgpu_get_context(ctx, js, canvas_obj, el);
+        if (!JS_IsNull(gpu)) st->context_kind = 3;
+        return gpu;
+    }
+#else
+    (void)ctx; (void)js; (void)st; (void)el; (void)canvas_obj;
+#endif
+    return JS_NULL;
+}
+
+static JSValue
+ns_canvas_get_unknown(JSContext *ctx, gboolean offscreen, ns_canvas_ctx_type type)
+{
+    if (!offscreen || type == NS_CTX_BITMAP) return JS_NULL;
+    return JS_ThrowTypeError(ctx,
+        "Failed to execute 'getContext' on 'OffscreenCanvas': The provided "
+        "value is not a valid enum value of type OffscreenRenderingContextId.");
+}
+
+static JSValue
+ns_canvas_get_by_type(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_node *el,
+                      JSValueConst canvas_obj, gboolean offscreen,
+                      ns_canvas_ctx_type type, JSValueConst options)
+{
+    switch (type) {
+    case NS_CTX_2D:
+        return ns_canvas_get_2d(ctx, js, st, el, canvas_obj, offscreen, options);
+    case NS_CTX_WEBGL:
+        return ns_canvas_get_webgl(ctx, js, st, el, canvas_obj, 1, options);
+    case NS_CTX_WEBGL2:
+        return ns_canvas_get_webgl(ctx, js, st, el, canvas_obj, 2, options);
+    case NS_CTX_WEBGPU:
+        return ns_canvas_get_webgpu(ctx, js, st, el, canvas_obj);
+    default:
+        return ns_canvas_get_unknown(ctx, offscreen, type);
+    }
+}
+
+static JSValue
 ns_canvas_get_context(JSContext *ctx, const ns_node *el, JSValueConst canvas_obj,
                       gboolean offscreen, int argc, JSValueConst *argv)
 {
@@ -3204,28 +3261,7 @@ ns_canvas_get_context(JSContext *ctx, const ns_node *el, JSValueConst canvas_obj
     ns_canvas_ctx_type type = ns_canvas_ctx_type_of(ctx, argv[0], &threw);
     if (threw) return JS_EXCEPTION;
     JSValueConst options = argc >= 2 ? argv[1] : JS_UNDEFINED;
-    switch (type) {
-    case NS_CTX_2D:
-        return ns_canvas_get_2d(ctx, js, st, el, canvas_obj, offscreen, options);
-    case NS_CTX_WEBGL:
-        return ns_canvas_get_webgl(ctx, js, st, el, canvas_obj, 1, options);
-    case NS_CTX_WEBGL2:
-        return ns_canvas_get_webgl(ctx, js, st, el, canvas_obj, 2, options);
-    case NS_CTX_WEBGPU:
-#ifdef ND_HAVE_WEBGPU
-        if (!st->context_kind || st->context_kind == 3) {
-            JSValue gpu = ns_webgpu_get_context(ctx, js, canvas_obj, el);
-            if (!JS_IsNull(gpu)) st->context_kind = 3;
-            return gpu;
-        }
-#endif
-        return JS_NULL;
-    default:
-        if (!offscreen || type == NS_CTX_BITMAP) return JS_NULL;
-        return JS_ThrowTypeError(ctx,
-            "Failed to execute 'getContext' on 'OffscreenCanvas': The provided "
-            "value is not a valid enum value of type OffscreenRenderingContextId.");
-    }
+    return ns_canvas_get_by_type(ctx, js, st, el, canvas_obj, offscreen, type, options);
 }
 
 JSValue
