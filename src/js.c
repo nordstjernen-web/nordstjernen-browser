@@ -49493,6 +49493,21 @@ ns_realm_clone_prototype(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
     JS_FreeValue(rc->src, proto);
 }
 
+/* The empty object that becomes the realm's copy of v when v is a namespace
+ * object or the named properties object of the window, whose prototype chain
+ * must run through the realm's own prototypes; JS_UNDEFINED for the objects
+ * that stay shared. */
+static JSValue
+ns_realm_new_shell(ns_realm_cloner *rc, JSValueConst v)
+{
+    JSClassID cls = JS_GetClassID(v);
+    if (ns_window_named_class_id && cls == ns_window_named_class_id)
+        return JS_NewObjectClass(rc->dst, ns_window_named_class_id);
+    if (cls != 1 || !ns_realm_object_is_shape(rc, v))
+        return JS_UNDEFINED;
+    return JS_NewObjectProto(rc->dst, JS_NULL);
+}
+
 static JSValue
 ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth)
 {
@@ -49508,9 +49523,8 @@ ns_realm_clone(ns_realm_cloner *rc, JSValueConst v, int depth)
     if (JS_IsUndefined(out)) {
         if (JS_IsFunction(rc->src, v))
             return ns_realm_clone_js_function(rc, v, depth);
-        if (JS_GetClassID(v) != 1 || !ns_realm_object_is_shape(rc, v))
-            return JS_DupValue(rc->dst, v);
-        out = JS_NewObjectProto(rc->dst, JS_NULL);
+        out = ns_realm_new_shell(rc, v);
+        if (JS_IsUndefined(out)) return JS_DupValue(rc->dst, v);
     }
     ns_realm_cloner_put(rc, v, out);
     ns_realm_clone_prototype(rc, v, out, depth);
