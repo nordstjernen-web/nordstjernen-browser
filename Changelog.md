@@ -3,6 +3,35 @@ Changelog:
 
 1.0.28:
 ======
+* The fetcher looks for a bundled CA certificate file next to the browser
+  through the executable path the app resolved at startup, instead of
+  resolving that path a second time with its own copy of the code.
+* The built-in pages share one modern style with light and dark colours.
+  about:start is a new-tab page with the Nordstjernen mark, a large search
+  field that also opens typed addresses, and shortcuts to History,
+  Settings, About and nordstjernen.org; the release splash moves to the
+  top of about:nordstjernen. about:settings has a section list, a short
+  description under each option and switches that save as soon as they
+  change. about:history groups visits by day and has a filter box, error
+  pages use drawn icons instead of emoji, and the license pages match.
+* The browser window has a new, flatter look that follows the light or
+  dark desktop theme. The old toolbar stayed light with black text on a
+  dark desktop, and the active tab drew white text on a near-white tab.
+  Tabs now sit in the title bar at full width, and the selected tab joins
+  the toolbar below it. The toolbar has round icon buttons drawn for
+  Nordstjernen (Back, Forward, Reload, Home, Bookmarks, Downloads, Menu),
+  Reload turns into Stop while a page loads, and each tab shows a spinner
+  while its page loads, so the address bar no longer jumps when loading
+  starts. The address bar is a rounded field with a lock or warning icon,
+  the Nordstjernen mark on built-in pages and a star that bookmarks the
+  page. Private tabs and the toolbar above them are tinted purple, the zoom
+  level is a pill next to the address, and the find bar, status bubble and
+  window buttons are rounded to match. Print stays in the menu and on
+  Ctrl+P, and tabs shrink when many are open.
+* Switching tabs updates the tab strip, the address bar, the window title
+  and the Back and Forward buttons for the tab you switch to. The shell
+  read the current tab before GTK had changed it, so after a click on a
+  tab, Ctrl+Tab or Ctrl+Page Down these kept showing the tab you left.
 * Content too wide for a centred line starts at the line's start and
   overflows the end edge, as CSS Text says, instead of being centred with its
   start cut off. reCAPTCHA's image challenge showed every tile one column off
