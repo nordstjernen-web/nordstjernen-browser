@@ -26446,10 +26446,8 @@ ns_worker_js_new(ns_worker_host *host)
         JSValue gl2 = JS_GetPropertyStr(ctx, global, "WebGL2RenderingContext");
         JSValue gl1p = JS_GetPropertyStr(ctx, gl1, "prototype");
         JSValue gl2p = JS_GetPropertyStr(ctx, gl2, "prototype");
-        ns_webgl_install_constants(ctx, gl1,  1);
-        ns_webgl_install_constants(ctx, gl1p, 1);
-        ns_webgl_install_constants(ctx, gl2,  2);
-        ns_webgl_install_constants(ctx, gl2p, 2);
+        ns_webgl_install_interface(ctx, gl1, gl1p, 1);
+        ns_webgl_install_interface(ctx, gl2, gl2p, 2);
         JS_FreeValue(ctx, gl1p);
         JS_FreeValue(ctx, gl2p);
         JS_FreeValue(ctx, gl1);
@@ -55165,10 +55163,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JSValue gl2 = JS_GetPropertyStr(ctx, global, "WebGL2RenderingContext");
         JSValue gl1p = JS_GetPropertyStr(ctx, gl1, "prototype");
         JSValue gl2p = JS_GetPropertyStr(ctx, gl2, "prototype");
-        ns_webgl_install_constants(ctx, gl1,  1);
-        ns_webgl_install_constants(ctx, gl1p, 1);
-        ns_webgl_install_constants(ctx, gl2,  2);
-        ns_webgl_install_constants(ctx, gl2p, 2);
+        ns_webgl_install_interface(ctx, gl1, gl1p, 1);
+        ns_webgl_install_interface(ctx, gl2, gl2p, 2);
         JS_FreeValue(ctx, gl1p); JS_FreeValue(ctx, gl2p);
         JS_FreeValue(ctx, gl1);  JS_FreeValue(ctx, gl2);
     }

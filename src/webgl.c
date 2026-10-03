@@ -45,6 +45,7 @@ typedef struct ns_webgl {
     ns_js         *js;
     JSContext     *ctx;
     JSValue        js_obj;
+    JSValue        canvas_obj;
     const ns_node *canvas;
     int            version;
     ns_gl_context *gl;
@@ -62,6 +63,8 @@ typedef struct ns_webgl {
     size_t         readback_len;
     gboolean       dirty;
     gboolean       repaint_queued;
+    GLenum         injected_error;
+    gboolean       drawing_p3, unpack_p3;
     gboolean       unpack_flip_y;
     gboolean       premultiply;
     gboolean       premultiplied_alpha;
@@ -320,12 +323,6 @@ ns_webgl_sync_size(ns_webgl *g)
     glViewport(0, 0, w, h);
     wgl_mark_dirty(g);
     if (g->surf) { cairo_surface_destroy(g->surf); g->surf = NULL; }
-    if (!JS_IsUndefined(g->js_obj)) {
-        JS_SetPropertyStr(g->ctx, g->js_obj, "drawingBufferWidth",
-                          JS_NewInt32(g->ctx, w));
-        JS_SetPropertyStr(g->ctx, g->js_obj, "drawingBufferHeight",
-                          JS_NewInt32(g->ctx, h));
-    }
 }
 
 static gboolean
@@ -359,6 +356,7 @@ ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
     g->version = version;
     g->gl = gl;
     g->js_obj = JS_UNDEFINED;
+    g->canvas_obj = JS_UNDEFINED;
     g->alpha     = ns_webgl_attr(ctx, attrs, "alpha", TRUE);
     g->depth     = ns_webgl_attr(ctx, attrs, "depth", TRUE);
     g->stencil   = ns_webgl_attr(ctx, attrs, "stencil", FALSE);
@@ -429,17 +427,25 @@ ns_webgl_free(ns_webgl *g)
 static void
 ns_webgl_finalizer(JSRuntime *rt, JSValue val)
 {
-    (void)rt;
     ns_webgl *g = JS_GetOpaque(val, ns_webgl_class_id);
     if (!g) return;
     if (g_webgl_by_node)
         g_hash_table_remove(g_webgl_by_node, g->canvas);
+    JS_FreeValueRT(rt, g->canvas_obj);
     ns_webgl_free(g);
+}
+
+static void
+ns_webgl_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_webgl *g = JS_GetOpaque(val, ns_webgl_class_id);
+    if (g) JS_MarkValue(rt, g->canvas_obj, mark_func);
 }
 
 static JSClassDef ns_webgl_class = {
     "WebGLRenderingContext",
     .finalizer = ns_webgl_finalizer,
+    .gc_mark = ns_webgl_gc_mark,
 };
 
 static ns_webgl *
@@ -452,6 +458,20 @@ wgl_cur(JSContext *ctx, JSValueConst this_val)
     ns_webgl_sync_size(g);
     wgl_bind_current_targets(g);
     return g;
+}
+
+static ns_webgl *
+wgl_brand(JSContext *ctx, JSValueConst this_val)
+{
+    ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
+    if (!g) JS_ThrowTypeError(ctx, "Illegal invocation");
+    return g;
+}
+
+static JSValue
+wgl_no_context(JSContext *ctx, JSValueConst this_val)
+{
+    return wgl_brand(ctx, this_val) ? JS_UNDEFINED : JS_EXCEPTION;
 }
 
 static int
@@ -939,7 +959,7 @@ wgl_flip_safe(ns_webgl *g, int w, int h, int format, int type,
 
 #define WGL_GET(name) \
     ns_webgl *g = wgl_cur(ctx, this_val); \
-    if (!g) return JS_UNDEFINED; \
+    if (!g) return wgl_no_context(ctx, this_val); \
     (void)g; (void)name; (void)argc; (void)argv
 
 static JSValue
@@ -1203,7 +1223,12 @@ wgl_getError(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
 {
     (void)argc; (void)argv;
     WGL_GET(0);
-    return JS_NewInt32(ctx, (int)glGetError());
+    GLenum err = glGetError();
+    if (g->injected_error) {
+        if (err == GL_NO_ERROR) err = g->injected_error;
+        g->injected_error = GL_NO_ERROR;
+    }
+    return JS_NewInt32(ctx, (int)err);
 }
 
 static GLint
@@ -1334,6 +1359,14 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     }
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
         return JS_NewInt32(ctx, 0);
+    case GL_STENCIL_WRITEMASK:
+    case GL_STENCIL_BACK_WRITEMASK:
+    case GL_STENCIL_VALUE_MASK:
+    case GL_STENCIL_BACK_VALUE_MASK: {
+        GLint mask = 0;
+        glGetIntegerv(pname, &mask);
+        return JS_NewUint32(ctx, (uint32_t)mask);
+    }
     case NS_UNPACK_FLIP_Y_WEBGL:
         return JS_NewBool(ctx, g->unpack_flip_y);
     case NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL:
@@ -1366,25 +1399,28 @@ static JSValue
 wgl_getContextAttributes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
     JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "alpha", JS_NewBool(ctx, g ? g->alpha : TRUE));
-    JS_SetPropertyStr(ctx, o, "depth", JS_NewBool(ctx, g ? g->depth : TRUE));
-    JS_SetPropertyStr(ctx, o, "stencil", JS_NewBool(ctx, g ? g->stencil : FALSE));
-    JS_SetPropertyStr(ctx, o, "antialias", JS_NewBool(ctx, g ? g->antialias : TRUE));
-    JS_SetPropertyStr(ctx, o, "premultipliedAlpha",
-                      JS_NewBool(ctx, g ? g->premultiplied_alpha : TRUE));
-    JS_SetPropertyStr(ctx, o, "preserveDrawingBuffer", JS_NewBool(ctx, g ? g->preserve : FALSE));
-    JS_SetPropertyStr(ctx, o, "powerPreference", JS_NewString(ctx, "default"));
-    JS_SetPropertyStr(ctx, o, "failIfMajorPerformanceCaveat", JS_FALSE);
+    JS_SetPropertyStr(ctx, o, "alpha", JS_NewBool(ctx, g->alpha));
+    JS_SetPropertyStr(ctx, o, "antialias", JS_NewBool(ctx, g->antialias));
+    JS_SetPropertyStr(ctx, o, "depth", JS_NewBool(ctx, g->depth));
     JS_SetPropertyStr(ctx, o, "desynchronized", JS_FALSE);
+    JS_SetPropertyStr(ctx, o, "failIfMajorPerformanceCaveat", JS_FALSE);
+    JS_SetPropertyStr(ctx, o, "powerPreference", JS_NewString(ctx, "default"));
+    JS_SetPropertyStr(ctx, o, "premultipliedAlpha",
+                      JS_NewBool(ctx, g->premultiplied_alpha));
+    JS_SetPropertyStr(ctx, o, "preserveDrawingBuffer", JS_NewBool(ctx, g->preserve));
+    JS_SetPropertyStr(ctx, o, "stencil", JS_NewBool(ctx, g->stencil));
+    JS_SetPropertyStr(ctx, o, "xrCompatible", JS_FALSE);
     return o;
 }
 
 static JSValue
 wgl_isContextLost(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
+    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
     return JS_NewBool(ctx, FALSE);
 }
 
@@ -1400,7 +1436,8 @@ static const char *const wgl_supported_extensions[] = {
 static JSValue
 wgl_getSupportedExtensions(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
+    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
     JSValue arr = JS_NewArray(ctx);
     for (int i = 0; wgl_supported_extensions[i]; i++)
         JS_SetPropertyUint32(ctx, arr, (uint32_t)i,
@@ -1411,7 +1448,7 @@ wgl_getSupportedExtensions(JSContext *ctx, JSValueConst this_val, int argc, JSVa
 static JSValue
 wgl_getExtension(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)this_val;
+    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
     if (argc < 1) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
@@ -1656,6 +1693,16 @@ wgl_getUniformLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
 }
 
 static JSValue
+wgl_active_info(JSContext *ctx, GLint size, GLenum type, const char *name)
+{
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "size", JS_NewInt32(ctx, size));
+    JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, (int)type));
+    JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name));
+    return o;
+}
+
+static JSValue
 wgl_active_var(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
                void (*fn)(GLuint, GLuint, GLsizei, GLsizei *, GLint *, GLenum *, GLchar *))
 {
@@ -1665,11 +1712,7 @@ wgl_active_var(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     GLenum type = 0;
     fn((GLuint)wgl_name(ctx, argv[0]), (GLuint)argi(ctx, argc, argv, 1),
        sizeof(name) - 1, NULL, &size, &type, name);
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "size", JS_NewInt32(ctx, size));
-    JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, (int)type));
-    JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name));
-    return o;
+    return wgl_active_info(ctx, size, type, name);
 }
 
 static JSValue wgl_getActiveAttrib(JSContext *c, JSValueConst t, int a, JSValueConst *v)
@@ -3453,16 +3496,218 @@ wgl_getSyncParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueCon
 }
 
 static JSValue
-wgl_noop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+wgl_sampleCoverage(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    WGL_GET(0);
+    glSampleCoverage((float)argd(ctx, argc, argv, 0),
+                     argbool(ctx, argc, argv, 1) ? GL_TRUE : GL_FALSE);
     return JS_UNDEFINED;
 }
 
-static void
-bindf(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc)
+static JSValue
+wgl_stencilFuncSeparate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    JS_SetPropertyStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc));
+    WGL_GET(0);
+    glStencilFuncSeparate((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1),
+                          argi(ctx, argc, argv, 2), (GLuint)argi(ctx, argc, argv, 3));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_stencilOpSeparate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    glStencilOpSeparate((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1),
+                        (GLenum)argi(ctx, argc, argv, 2), (GLenum)argi(ctx, argc, argv, 3));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_stencilMaskSeparate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    glStencilMaskSeparate((GLenum)argi(ctx, argc, argv, 0), (GLuint)argi(ctx, argc, argv, 1));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_getAttachedShaders(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    if (argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
+    GLuint shaders[16];
+    GLsizei count = 0;
+    glGetAttachedShaders((GLuint)wgl_name(ctx, argv[0]), 16, &count, shaders);
+    JSValue arr = JS_NewArray(ctx);
+    for (GLsizei i = 0; i < count && i < 16; i++)
+        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, wgl_wrap(ctx, shaders[i], "shader"));
+    return arr;
+}
+
+static JSValue
+wgl_compressed_unsupported(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    WGL_GET(0);
+    g->injected_error = GL_INVALID_ENUM;
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_getIndexedParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    GLuint index = (GLuint)argi(ctx, argc, argv, 1);
+    switch (target) {
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+    case GL_UNIFORM_BUFFER_BINDING: {
+        GLint name = 0;
+        glGetIntegeri_v(target, index, &name);
+        return wgl_wrap(ctx, (GLuint)name, "buffer");
+    }
+    case GL_TRANSFORM_FEEDBACK_BUFFER_START:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
+    case GL_UNIFORM_BUFFER_START:
+    case GL_UNIFORM_BUFFER_SIZE: {
+        GLint64 v = 0;
+        glGetInteger64i_v(target, index, &v);
+        return JS_NewInt64(ctx, v);
+    }
+    default:
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_NULL;
+    }
+}
+
+static JSValue
+wgl_getSamplerParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    GLuint sampler = (GLuint)wgl_name(ctx, argv[0]);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
+    switch (pname) {
+    case GL_TEXTURE_MAX_LOD:
+    case GL_TEXTURE_MIN_LOD: {
+        GLfloat f = 0;
+        glGetSamplerParameterfv(sampler, pname, &f);
+        return JS_NewFloat64(ctx, f);
+    }
+    case GL_TEXTURE_COMPARE_FUNC:
+    case GL_TEXTURE_COMPARE_MODE:
+    case GL_TEXTURE_MAG_FILTER:
+    case GL_TEXTURE_MIN_FILTER:
+    case GL_TEXTURE_WRAP_R:
+    case GL_TEXTURE_WRAP_S:
+    case GL_TEXTURE_WRAP_T: {
+        GLint v = 0;
+        glGetSamplerParameteriv(sampler, pname, &v);
+        return JS_NewInt32(ctx, v);
+    }
+    default:
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_NULL;
+    }
+}
+
+static JSValue
+wgl_getTransformFeedbackVarying(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    char name[256] = { 0 };
+    GLint size = 0;
+    GLenum type = 0;
+    glGetTransformFeedbackVarying((GLuint)wgl_name(ctx, argv[0]),
+                                  (GLuint)argi(ctx, argc, argv, 1),
+                                  sizeof(name) - 1, NULL, &size, &type, name);
+    return wgl_active_info(ctx, size, type, name);
+}
+
+static JSValue
+wgl_getUniformIndices(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    if (argc < 2 || !JS_IsObject(argv[1])) return JS_NULL;
+    JSValue lv = JS_GetPropertyStr(ctx, argv[1], "length");
+    uint32_t n = 0;
+    JS_ToUint32(ctx, &n, lv);
+    JS_FreeValue(ctx, lv);
+    if (n == 0 || n > 4096) return JS_NewArray(ctx);
+    char **names = g_new0(char *, n);
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue e = JS_GetPropertyUint32(ctx, argv[1], i);
+        const char *str = JS_ToCString(ctx, e);
+        names[i] = g_strdup(str ? str : "");
+        if (str) JS_FreeCString(ctx, str);
+        JS_FreeValue(ctx, e);
+    }
+    GLuint *indices = g_new0(GLuint, n);
+    glGetUniformIndices((GLuint)wgl_name(ctx, argv[0]), (GLsizei)n,
+                        (const GLchar *const *)names, indices);
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < n; i++) {
+        JS_SetPropertyUint32(ctx, arr, i, JS_NewUint32(ctx, indices[i]));
+        g_free(names[i]);
+    }
+    g_free(names);
+    g_free(indices);
+    return arr;
+}
+
+static JSValue
+wgl_invalidateSubFramebuffer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    GLint att[16];
+    int n = (argc >= 2) ? wgl_ints(ctx, argv[1], att, 16) : 0;
+    if (n > 0)
+        glInvalidateSubFramebuffer((GLenum)argi(ctx, argc, argv, 0), n, (const GLenum *)att,
+                                   argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3),
+                                   argi(ctx, argc, argv, 4), argi(ctx, argc, argv, 5));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_drawingBufferStorage(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    GLenum format = (GLenum)argi(ctx, argc, argv, 0);
+    int w = argi(ctx, argc, argv, 1);
+    int h = argi(ctx, argc, argv, 2);
+    if (format != GL_RGBA8 && format != GL_RGB8) {
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_UNDEFINED;
+    }
+    if (w <= 0 || h <= 0 || w > 8192 || h > 8192) {
+        g->injected_error = GL_INVALID_VALUE;
+        return JS_UNDEFINED;
+    }
+    g->w = w;
+    g->h = h;
+    ns_webgl_alloc_storage(g, w, h);
+    glViewport(0, 0, w, h);
+    wgl_mark_dirty(g);
+    if (g->surf) { cairo_surface_destroy(g->surf); g->surf = NULL; }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_makeXRCompatible(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
+    JSValue resolvers[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
+    if (JS_IsException(promise)) return promise;
+    JSValue err = JS_NewError(ctx);
+    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "InvalidStateError"));
+    JS_SetPropertyStr(ctx, err, "message",
+                      JS_NewString(ctx, "No XR device is available."));
+    JS_FreeValue(ctx, JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &err));
+    JS_FreeValue(ctx, err);
+    JS_FreeValue(ctx, resolvers[0]);
+    JS_FreeValue(ctx, resolvers[1]);
+    return promise;
 }
 
 static void
@@ -3471,426 +3716,753 @@ set_const(JSContext *ctx, JSValueConst obj, const char *name, int value)
     JS_SetPropertyStr(ctx, obj, name, JS_NewInt32(ctx, value));
 }
 
-#define K(n) set_const(ctx, obj, #n, GL_##n)
+typedef struct ns_gl_constant {
+    const char *name;
+    int64_t     value;
+} ns_gl_constant;
 
-static void wgl_set_constants(JSContext *ctx, JSValueConst obj);
-static void wgl_set_constants2(JSContext *ctx, JSValueConst obj);
+static const ns_gl_constant wgl_constants[] = {
+    { "ACTIVE_ATTRIBUTES", 0x8B89 }, { "ACTIVE_TEXTURE", 0x84E0 },
+    { "ACTIVE_UNIFORMS", 0x8B86 }, { "ALIASED_LINE_WIDTH_RANGE", 0x846E },
+    { "ALIASED_POINT_SIZE_RANGE", 0x846D }, { "ALPHA", 0x1906 },
+    { "ALPHA_BITS", 0xD55 }, { "ALWAYS", 0x207 }, { "ARRAY_BUFFER", 0x8892 },
+    { "ARRAY_BUFFER_BINDING", 0x8894 }, { "ATTACHED_SHADERS", 0x8B85 },
+    { "BACK", 0x405 }, { "BLEND", 0xBE2 }, { "BLEND_COLOR", 0x8005 },
+    { "BLEND_DST_ALPHA", 0x80CA }, { "BLEND_DST_RGB", 0x80C8 },
+    { "BLEND_EQUATION", 0x8009 }, { "BLEND_EQUATION_ALPHA", 0x883D },
+    { "BLEND_EQUATION_RGB", 0x8009 }, { "BLEND_SRC_ALPHA", 0x80CB },
+    { "BLEND_SRC_RGB", 0x80C9 }, { "BLUE_BITS", 0xD54 }, { "BOOL", 0x8B56 },
+    { "BOOL_VEC2", 0x8B57 }, { "BOOL_VEC3", 0x8B58 }, { "BOOL_VEC4", 0x8B59 },
+    { "BROWSER_DEFAULT_WEBGL", 0x9244 }, { "BUFFER_SIZE", 0x8764 },
+    { "BUFFER_USAGE", 0x8765 }, { "BYTE", 0x1400 }, { "CCW", 0x901 },
+    { "CLAMP_TO_EDGE", 0x812F }, { "COLOR_ATTACHMENT0", 0x8CE0 },
+    { "COLOR_BUFFER_BIT", 0x4000 }, { "COLOR_CLEAR_VALUE", 0xC22 },
+    { "COLOR_WRITEMASK", 0xC23 }, { "COMPILE_STATUS", 0x8B81 },
+    { "COMPRESSED_TEXTURE_FORMATS", 0x86A3 }, { "CONSTANT_ALPHA", 0x8003 },
+    { "CONSTANT_COLOR", 0x8001 }, { "CONTEXT_LOST_WEBGL", 0x9242 },
+    { "CULL_FACE", 0xB44 }, { "CULL_FACE_MODE", 0xB45 },
+    { "CURRENT_PROGRAM", 0x8B8D }, { "CURRENT_VERTEX_ATTRIB", 0x8626 },
+    { "CW", 0x900 }, { "DECR", 0x1E03 }, { "DECR_WRAP", 0x8508 },
+    { "DELETE_STATUS", 0x8B80 }, { "DEPTH_ATTACHMENT", 0x8D00 },
+    { "DEPTH_BITS", 0xD56 }, { "DEPTH_BUFFER_BIT", 0x100 },
+    { "DEPTH_CLEAR_VALUE", 0xB73 }, { "DEPTH_COMPONENT", 0x1902 },
+    { "DEPTH_COMPONENT16", 0x81A5 }, { "DEPTH_FUNC", 0xB74 },
+    { "DEPTH_RANGE", 0xB70 }, { "DEPTH_STENCIL", 0x84F9 },
+    { "DEPTH_STENCIL_ATTACHMENT", 0x821A }, { "DEPTH_TEST", 0xB71 },
+    { "DEPTH_WRITEMASK", 0xB72 }, { "DITHER", 0xBD0 },
+    { "DONT_CARE", 0x1100 }, { "DST_ALPHA", 0x304 }, { "DST_COLOR", 0x306 },
+    { "DYNAMIC_DRAW", 0x88E8 }, { "ELEMENT_ARRAY_BUFFER", 0x8893 },
+    { "ELEMENT_ARRAY_BUFFER_BINDING", 0x8895 }, { "EQUAL", 0x202 },
+    { "FASTEST", 0x1101 }, { "FLOAT", 0x1406 }, { "FLOAT_MAT2", 0x8B5A },
+    { "FLOAT_MAT3", 0x8B5B }, { "FLOAT_MAT4", 0x8B5C },
+    { "FLOAT_VEC2", 0x8B50 }, { "FLOAT_VEC3", 0x8B51 },
+    { "FLOAT_VEC4", 0x8B52 }, { "FRAGMENT_SHADER", 0x8B30 },
+    { "FRAMEBUFFER", 0x8D40 },
+    { "FRAMEBUFFER_ATTACHMENT_OBJECT_NAME", 0x8CD1 },
+    { "FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE", 0x8CD0 },
+    { "FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE", 0x8CD3 },
+    { "FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL", 0x8CD2 },
+    { "FRAMEBUFFER_BINDING", 0x8CA6 }, { "FRAMEBUFFER_COMPLETE", 0x8CD5 },
+    { "FRAMEBUFFER_INCOMPLETE_ATTACHMENT", 0x8CD6 },
+    { "FRAMEBUFFER_INCOMPLETE_DIMENSIONS", 0x8CD9 },
+    { "FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT", 0x8CD7 },
+    { "FRAMEBUFFER_UNSUPPORTED", 0x8CDD }, { "FRONT", 0x404 },
+    { "FRONT_AND_BACK", 0x408 }, { "FRONT_FACE", 0xB46 },
+    { "FUNC_ADD", 0x8006 }, { "FUNC_REVERSE_SUBTRACT", 0x800B },
+    { "FUNC_SUBTRACT", 0x800A }, { "GENERATE_MIPMAP_HINT", 0x8192 },
+    { "GEQUAL", 0x206 }, { "GREATER", 0x204 }, { "GREEN_BITS", 0xD53 },
+    { "HIGH_FLOAT", 0x8DF2 }, { "HIGH_INT", 0x8DF5 },
+    { "IMPLEMENTATION_COLOR_READ_FORMAT", 0x8B9B },
+    { "IMPLEMENTATION_COLOR_READ_TYPE", 0x8B9A }, { "INCR", 0x1E02 },
+    { "INCR_WRAP", 0x8507 }, { "INT", 0x1404 }, { "INT_VEC2", 0x8B53 },
+    { "INT_VEC3", 0x8B54 }, { "INT_VEC4", 0x8B55 }, { "INVALID_ENUM", 0x500 },
+    { "INVALID_FRAMEBUFFER_OPERATION", 0x506 },
+    { "INVALID_OPERATION", 0x502 }, { "INVALID_VALUE", 0x501 },
+    { "INVERT", 0x150A }, { "KEEP", 0x1E00 }, { "LEQUAL", 0x203 },
+    { "LESS", 0x201 }, { "LINEAR", 0x2601 },
+    { "LINEAR_MIPMAP_LINEAR", 0x2703 }, { "LINEAR_MIPMAP_NEAREST", 0x2701 },
+    { "LINES", 1 }, { "LINE_LOOP", 2 }, { "LINE_STRIP", 3 },
+    { "LINE_WIDTH", 0xB21 }, { "LINK_STATUS", 0x8B82 },
+    { "LOW_FLOAT", 0x8DF0 }, { "LOW_INT", 0x8DF3 }, { "LUMINANCE", 0x1909 },
+    { "LUMINANCE_ALPHA", 0x190A },
+    { "MAX_COMBINED_TEXTURE_IMAGE_UNITS", 0x8B4D },
+    { "MAX_CUBE_MAP_TEXTURE_SIZE", 0x851C },
+    { "MAX_FRAGMENT_UNIFORM_VECTORS", 0x8DFD },
+    { "MAX_RENDERBUFFER_SIZE", 0x84E8 },
+    { "MAX_TEXTURE_IMAGE_UNITS", 0x8872 }, { "MAX_TEXTURE_SIZE", 0xD33 },
+    { "MAX_VARYING_VECTORS", 0x8DFC }, { "MAX_VERTEX_ATTRIBS", 0x8869 },
+    { "MAX_VERTEX_TEXTURE_IMAGE_UNITS", 0x8B4C },
+    { "MAX_VERTEX_UNIFORM_VECTORS", 0x8DFB }, { "MAX_VIEWPORT_DIMS", 0xD3A },
+    { "MEDIUM_FLOAT", 0x8DF1 }, { "MEDIUM_INT", 0x8DF4 },
+    { "MIRRORED_REPEAT", 0x8370 }, { "NEAREST", 0x2600 },
+    { "NEAREST_MIPMAP_LINEAR", 0x2702 }, { "NEAREST_MIPMAP_NEAREST", 0x2700 },
+    { "NEVER", 0x200 }, { "NICEST", 0x1102 }, { "NONE", 0 },
+    { "NOTEQUAL", 0x205 }, { "NO_ERROR", 0 }, { "ONE", 1 },
+    { "ONE_MINUS_CONSTANT_ALPHA", 0x8004 },
+    { "ONE_MINUS_CONSTANT_COLOR", 0x8002 }, { "ONE_MINUS_DST_ALPHA", 0x305 },
+    { "ONE_MINUS_DST_COLOR", 0x307 }, { "ONE_MINUS_SRC_ALPHA", 0x303 },
+    { "ONE_MINUS_SRC_COLOR", 0x301 }, { "OUT_OF_MEMORY", 0x505 },
+    { "PACK_ALIGNMENT", 0xD05 }, { "POINTS", 0 },
+    { "POLYGON_OFFSET_FACTOR", 0x8038 }, { "POLYGON_OFFSET_FILL", 0x8037 },
+    { "POLYGON_OFFSET_UNITS", 0x2A00 }, { "RED_BITS", 0xD52 },
+    { "RENDERBUFFER", 0x8D41 }, { "RENDERBUFFER_ALPHA_SIZE", 0x8D53 },
+    { "RENDERBUFFER_BINDING", 0x8CA7 }, { "RENDERBUFFER_BLUE_SIZE", 0x8D52 },
+    { "RENDERBUFFER_DEPTH_SIZE", 0x8D54 },
+    { "RENDERBUFFER_GREEN_SIZE", 0x8D51 }, { "RENDERBUFFER_HEIGHT", 0x8D43 },
+    { "RENDERBUFFER_INTERNAL_FORMAT", 0x8D44 },
+    { "RENDERBUFFER_RED_SIZE", 0x8D50 },
+    { "RENDERBUFFER_STENCIL_SIZE", 0x8D55 }, { "RENDERBUFFER_WIDTH", 0x8D42 },
+    { "RENDERER", 0x1F01 }, { "REPEAT", 0x2901 }, { "REPLACE", 0x1E01 },
+    { "RGB", 0x1907 }, { "RGB565", 0x8D62 }, { "RGB5_A1", 0x8057 },
+    { "RGB8", 0x8051 }, { "RGBA", 0x1908 }, { "RGBA4", 0x8056 },
+    { "RGBA8", 0x8058 }, { "SAMPLER_2D", 0x8B5E }, { "SAMPLER_CUBE", 0x8B60 },
+    { "SAMPLES", 0x80A9 }, { "SAMPLE_ALPHA_TO_COVERAGE", 0x809E },
+    { "SAMPLE_BUFFERS", 0x80A8 }, { "SAMPLE_COVERAGE", 0x80A0 },
+    { "SAMPLE_COVERAGE_INVERT", 0x80AB }, { "SAMPLE_COVERAGE_VALUE", 0x80AA },
+    { "SCISSOR_BOX", 0xC10 }, { "SCISSOR_TEST", 0xC11 },
+    { "SHADER_TYPE", 0x8B4F }, { "SHADING_LANGUAGE_VERSION", 0x8B8C },
+    { "SHORT", 0x1402 }, { "SRC_ALPHA", 0x302 },
+    { "SRC_ALPHA_SATURATE", 0x308 }, { "SRC_COLOR", 0x300 },
+    { "STATIC_DRAW", 0x88E4 }, { "STENCIL_ATTACHMENT", 0x8D20 },
+    { "STENCIL_BACK_FAIL", 0x8801 }, { "STENCIL_BACK_FUNC", 0x8800 },
+    { "STENCIL_BACK_PASS_DEPTH_FAIL", 0x8802 },
+    { "STENCIL_BACK_PASS_DEPTH_PASS", 0x8803 },
+    { "STENCIL_BACK_REF", 0x8CA3 }, { "STENCIL_BACK_VALUE_MASK", 0x8CA4 },
+    { "STENCIL_BACK_WRITEMASK", 0x8CA5 }, { "STENCIL_BITS", 0xD57 },
+    { "STENCIL_BUFFER_BIT", 0x400 }, { "STENCIL_CLEAR_VALUE", 0xB91 },
+    { "STENCIL_FAIL", 0xB94 }, { "STENCIL_FUNC", 0xB92 },
+    { "STENCIL_INDEX8", 0x8D48 }, { "STENCIL_PASS_DEPTH_FAIL", 0xB95 },
+    { "STENCIL_PASS_DEPTH_PASS", 0xB96 }, { "STENCIL_REF", 0xB97 },
+    { "STENCIL_TEST", 0xB90 }, { "STENCIL_VALUE_MASK", 0xB93 },
+    { "STENCIL_WRITEMASK", 0xB98 }, { "STREAM_DRAW", 0x88E0 },
+    { "SUBPIXEL_BITS", 0xD50 }, { "TEXTURE", 0x1702 }, { "TEXTURE0", 0x84C0 },
+    { "TEXTURE1", 0x84C1 }, { "TEXTURE10", 0x84CA }, { "TEXTURE11", 0x84CB },
+    { "TEXTURE12", 0x84CC }, { "TEXTURE13", 0x84CD }, { "TEXTURE14", 0x84CE },
+    { "TEXTURE15", 0x84CF }, { "TEXTURE16", 0x84D0 }, { "TEXTURE17", 0x84D1 },
+    { "TEXTURE18", 0x84D2 }, { "TEXTURE19", 0x84D3 }, { "TEXTURE2", 0x84C2 },
+    { "TEXTURE20", 0x84D4 }, { "TEXTURE21", 0x84D5 }, { "TEXTURE22", 0x84D6 },
+    { "TEXTURE23", 0x84D7 }, { "TEXTURE24", 0x84D8 }, { "TEXTURE25", 0x84D9 },
+    { "TEXTURE26", 0x84DA }, { "TEXTURE27", 0x84DB }, { "TEXTURE28", 0x84DC },
+    { "TEXTURE29", 0x84DD }, { "TEXTURE3", 0x84C3 }, { "TEXTURE30", 0x84DE },
+    { "TEXTURE31", 0x84DF }, { "TEXTURE4", 0x84C4 }, { "TEXTURE5", 0x84C5 },
+    { "TEXTURE6", 0x84C6 }, { "TEXTURE7", 0x84C7 }, { "TEXTURE8", 0x84C8 },
+    { "TEXTURE9", 0x84C9 }, { "TEXTURE_2D", 0xDE1 },
+    { "TEXTURE_BINDING_2D", 0x8069 }, { "TEXTURE_BINDING_CUBE_MAP", 0x8514 },
+    { "TEXTURE_CUBE_MAP", 0x8513 }, { "TEXTURE_CUBE_MAP_NEGATIVE_X", 0x8516 },
+    { "TEXTURE_CUBE_MAP_NEGATIVE_Y", 0x8518 },
+    { "TEXTURE_CUBE_MAP_NEGATIVE_Z", 0x851A },
+    { "TEXTURE_CUBE_MAP_POSITIVE_X", 0x8515 },
+    { "TEXTURE_CUBE_MAP_POSITIVE_Y", 0x8517 },
+    { "TEXTURE_CUBE_MAP_POSITIVE_Z", 0x8519 },
+    { "TEXTURE_MAG_FILTER", 0x2800 }, { "TEXTURE_MIN_FILTER", 0x2801 },
+    { "TEXTURE_WRAP_S", 0x2802 }, { "TEXTURE_WRAP_T", 0x2803 },
+    { "TRIANGLES", 4 }, { "TRIANGLE_FAN", 6 }, { "TRIANGLE_STRIP", 5 },
+    { "UNPACK_ALIGNMENT", 0xCF5 },
+    { "UNPACK_COLORSPACE_CONVERSION_WEBGL", 0x9243 },
+    { "UNPACK_FLIP_Y_WEBGL", 0x9240 },
+    { "UNPACK_PREMULTIPLY_ALPHA_WEBGL", 0x9241 }, { "UNSIGNED_BYTE", 0x1401 },
+    { "UNSIGNED_INT", 0x1405 }, { "UNSIGNED_SHORT", 0x1403 },
+    { "UNSIGNED_SHORT_4_4_4_4", 0x8033 },
+    { "UNSIGNED_SHORT_5_5_5_1", 0x8034 }, { "UNSIGNED_SHORT_5_6_5", 0x8363 },
+    { "VALIDATE_STATUS", 0x8B83 }, { "VENDOR", 0x1F00 },
+    { "VERSION", 0x1F02 }, { "VERTEX_ATTRIB_ARRAY_BUFFER_BINDING", 0x889F },
+    { "VERTEX_ATTRIB_ARRAY_ENABLED", 0x8622 },
+    { "VERTEX_ATTRIB_ARRAY_NORMALIZED", 0x886A },
+    { "VERTEX_ATTRIB_ARRAY_POINTER", 0x8645 },
+    { "VERTEX_ATTRIB_ARRAY_SIZE", 0x8623 },
+    { "VERTEX_ATTRIB_ARRAY_STRIDE", 0x8624 },
+    { "VERTEX_ATTRIB_ARRAY_TYPE", 0x8625 }, { "VERTEX_SHADER", 0x8B31 },
+    { "VIEWPORT", 0xBA2 }, { "ZERO", 0 },
+};
+
+static const ns_gl_constant wgl2_constants[] = {
+    { "ACTIVE_UNIFORM_BLOCKS", 0x8A36 }, { "ALREADY_SIGNALED", 0x911A },
+    { "ANY_SAMPLES_PASSED", 0x8C2F },
+    { "ANY_SAMPLES_PASSED_CONSERVATIVE", 0x8D6A }, { "COLOR", 0x1800 },
+    { "COLOR_ATTACHMENT1", 0x8CE1 }, { "COLOR_ATTACHMENT10", 0x8CEA },
+    { "COLOR_ATTACHMENT11", 0x8CEB }, { "COLOR_ATTACHMENT12", 0x8CEC },
+    { "COLOR_ATTACHMENT13", 0x8CED }, { "COLOR_ATTACHMENT14", 0x8CEE },
+    { "COLOR_ATTACHMENT15", 0x8CEF }, { "COLOR_ATTACHMENT2", 0x8CE2 },
+    { "COLOR_ATTACHMENT3", 0x8CE3 }, { "COLOR_ATTACHMENT4", 0x8CE4 },
+    { "COLOR_ATTACHMENT5", 0x8CE5 }, { "COLOR_ATTACHMENT6", 0x8CE6 },
+    { "COLOR_ATTACHMENT7", 0x8CE7 }, { "COLOR_ATTACHMENT8", 0x8CE8 },
+    { "COLOR_ATTACHMENT9", 0x8CE9 }, { "COMPARE_REF_TO_TEXTURE", 0x884E },
+    { "CONDITION_SATISFIED", 0x911C }, { "COPY_READ_BUFFER", 0x8F36 },
+    { "COPY_READ_BUFFER_BINDING", 0x8F36 }, { "COPY_WRITE_BUFFER", 0x8F37 },
+    { "COPY_WRITE_BUFFER_BINDING", 0x8F37 }, { "CURRENT_QUERY", 0x8865 },
+    { "DEPTH", 0x1801 }, { "DEPTH24_STENCIL8", 0x88F0 },
+    { "DEPTH32F_STENCIL8", 0x8CAD }, { "DEPTH_COMPONENT24", 0x81A6 },
+    { "DEPTH_COMPONENT32F", 0x8CAC }, { "DRAW_BUFFER0", 0x8825 },
+    { "DRAW_BUFFER1", 0x8826 }, { "DRAW_BUFFER10", 0x882F },
+    { "DRAW_BUFFER11", 0x8830 }, { "DRAW_BUFFER12", 0x8831 },
+    { "DRAW_BUFFER13", 0x8832 }, { "DRAW_BUFFER14", 0x8833 },
+    { "DRAW_BUFFER15", 0x8834 }, { "DRAW_BUFFER2", 0x8827 },
+    { "DRAW_BUFFER3", 0x8828 }, { "DRAW_BUFFER4", 0x8829 },
+    { "DRAW_BUFFER5", 0x882A }, { "DRAW_BUFFER6", 0x882B },
+    { "DRAW_BUFFER7", 0x882C }, { "DRAW_BUFFER8", 0x882D },
+    { "DRAW_BUFFER9", 0x882E }, { "DRAW_FRAMEBUFFER", 0x8CA9 },
+    { "DRAW_FRAMEBUFFER_BINDING", 0x8CA6 }, { "DYNAMIC_COPY", 0x88EA },
+    { "DYNAMIC_READ", 0x88E9 }, { "FLOAT_32_UNSIGNED_INT_24_8_REV", 0x8DAD },
+    { "FLOAT_MAT2x3", 0x8B65 }, { "FLOAT_MAT2x4", 0x8B66 },
+    { "FLOAT_MAT3x2", 0x8B67 }, { "FLOAT_MAT3x4", 0x8B68 },
+    { "FLOAT_MAT4x2", 0x8B69 }, { "FLOAT_MAT4x3", 0x8B6A },
+    { "FRAGMENT_SHADER_DERIVATIVE_HINT", 0x8B8B },
+    { "FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE", 0x8215 },
+    { "FRAMEBUFFER_ATTACHMENT_BLUE_SIZE", 0x8214 },
+    { "FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING", 0x8210 },
+    { "FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE", 0x8211 },
+    { "FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE", 0x8216 },
+    { "FRAMEBUFFER_ATTACHMENT_GREEN_SIZE", 0x8213 },
+    { "FRAMEBUFFER_ATTACHMENT_RED_SIZE", 0x8212 },
+    { "FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE", 0x8217 },
+    { "FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER", 0x8CD4 },
+    { "FRAMEBUFFER_DEFAULT", 0x8218 },
+    { "FRAMEBUFFER_INCOMPLETE_MULTISAMPLE", 0x8D56 },
+    { "HALF_FLOAT", 0x140B }, { "INTERLEAVED_ATTRIBS", 0x8C8C },
+    { "INT_2_10_10_10_REV", 0x8D9F }, { "INT_SAMPLER_2D", 0x8DCA },
+    { "INT_SAMPLER_2D_ARRAY", 0x8DCF }, { "INT_SAMPLER_3D", 0x8DCB },
+    { "INT_SAMPLER_CUBE", 0x8DCC }, { "INVALID_INDEX", 0xFFFFFFFF },
+    { "MAX", 0x8008 }, { "MAX_3D_TEXTURE_SIZE", 0x8073 },
+    { "MAX_ARRAY_TEXTURE_LAYERS", 0x88FF },
+    { "MAX_CLIENT_WAIT_TIMEOUT_WEBGL", 0x9247 },
+    { "MAX_COLOR_ATTACHMENTS", 0x8CDF },
+    { "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS", 0x8A33 },
+    { "MAX_COMBINED_UNIFORM_BLOCKS", 0x8A2E },
+    { "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS", 0x8A31 },
+    { "MAX_DRAW_BUFFERS", 0x8824 }, { "MAX_ELEMENTS_INDICES", 0x80E9 },
+    { "MAX_ELEMENTS_VERTICES", 0x80E8 }, { "MAX_ELEMENT_INDEX", 0x8D6B },
+    { "MAX_FRAGMENT_INPUT_COMPONENTS", 0x9125 },
+    { "MAX_FRAGMENT_UNIFORM_BLOCKS", 0x8A2D },
+    { "MAX_FRAGMENT_UNIFORM_COMPONENTS", 0x8B49 },
+    { "MAX_PROGRAM_TEXEL_OFFSET", 0x8905 }, { "MAX_SAMPLES", 0x8D57 },
+    { "MAX_SERVER_WAIT_TIMEOUT", 0x9111 }, { "MAX_TEXTURE_LOD_BIAS", 0x84FD },
+    { "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS", 0x8C8A },
+    { "MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS", 0x8C8B },
+    { "MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS", 0x8C80 },
+    { "MAX_UNIFORM_BLOCK_SIZE", 0x8A30 },
+    { "MAX_UNIFORM_BUFFER_BINDINGS", 0x8A2F },
+    { "MAX_VARYING_COMPONENTS", 0x8B4B },
+    { "MAX_VERTEX_OUTPUT_COMPONENTS", 0x9122 },
+    { "MAX_VERTEX_UNIFORM_BLOCKS", 0x8A2B },
+    { "MAX_VERTEX_UNIFORM_COMPONENTS", 0x8B4A }, { "MIN", 0x8007 },
+    { "MIN_PROGRAM_TEXEL_OFFSET", 0x8904 }, { "OBJECT_TYPE", 0x9112 },
+    { "PACK_ROW_LENGTH", 0xD02 }, { "PACK_SKIP_PIXELS", 0xD04 },
+    { "PACK_SKIP_ROWS", 0xD03 }, { "PIXEL_PACK_BUFFER", 0x88EB },
+    { "PIXEL_PACK_BUFFER_BINDING", 0x88ED },
+    { "PIXEL_UNPACK_BUFFER", 0x88EC },
+    { "PIXEL_UNPACK_BUFFER_BINDING", 0x88EF }, { "QUERY_RESULT", 0x8866 },
+    { "QUERY_RESULT_AVAILABLE", 0x8867 }, { "R11F_G11F_B10F", 0x8C3A },
+    { "R16F", 0x822D }, { "R16I", 0x8233 }, { "R16UI", 0x8234 },
+    { "R32F", 0x822E }, { "R32I", 0x8235 }, { "R32UI", 0x8236 },
+    { "R8", 0x8229 }, { "R8I", 0x8231 }, { "R8UI", 0x8232 },
+    { "R8_SNORM", 0x8F94 }, { "RASTERIZER_DISCARD", 0x8C89 },
+    { "READ_BUFFER", 0xC02 }, { "READ_FRAMEBUFFER", 0x8CA8 },
+    { "READ_FRAMEBUFFER_BINDING", 0x8CAA }, { "RED", 0x1903 },
+    { "RED_INTEGER", 0x8D94 }, { "RENDERBUFFER_SAMPLES", 0x8CAB },
+    { "RG", 0x8227 }, { "RG16F", 0x822F }, { "RG16I", 0x8239 },
+    { "RG16UI", 0x823A }, { "RG32F", 0x8230 }, { "RG32I", 0x823B },
+    { "RG32UI", 0x823C }, { "RG8", 0x822B }, { "RG8I", 0x8237 },
+    { "RG8UI", 0x8238 }, { "RG8_SNORM", 0x8F95 }, { "RGB10_A2", 0x8059 },
+    { "RGB10_A2UI", 0x906F }, { "RGB16F", 0x881B }, { "RGB16I", 0x8D89 },
+    { "RGB16UI", 0x8D77 }, { "RGB32F", 0x8815 }, { "RGB32I", 0x8D83 },
+    { "RGB32UI", 0x8D71 }, { "RGB8I", 0x8D8F }, { "RGB8UI", 0x8D7D },
+    { "RGB8_SNORM", 0x8F96 }, { "RGB9_E5", 0x8C3D }, { "RGBA16F", 0x881A },
+    { "RGBA16I", 0x8D88 }, { "RGBA16UI", 0x8D76 }, { "RGBA32F", 0x8814 },
+    { "RGBA32I", 0x8D82 }, { "RGBA32UI", 0x8D70 }, { "RGBA8I", 0x8D8E },
+    { "RGBA8UI", 0x8D7C }, { "RGBA8_SNORM", 0x8F97 },
+    { "RGBA_INTEGER", 0x8D99 }, { "RGB_INTEGER", 0x8D98 },
+    { "RG_INTEGER", 0x8228 }, { "SAMPLER_2D_ARRAY", 0x8DC1 },
+    { "SAMPLER_2D_ARRAY_SHADOW", 0x8DC4 }, { "SAMPLER_2D_SHADOW", 0x8B62 },
+    { "SAMPLER_3D", 0x8B5F }, { "SAMPLER_BINDING", 0x8919 },
+    { "SAMPLER_CUBE_SHADOW", 0x8DC5 }, { "SEPARATE_ATTRIBS", 0x8C8D },
+    { "SIGNALED", 0x9119 }, { "SIGNED_NORMALIZED", 0x8F9C },
+    { "SRGB", 0x8C40 }, { "SRGB8", 0x8C41 }, { "SRGB8_ALPHA8", 0x8C43 },
+    { "STATIC_COPY", 0x88E6 }, { "STATIC_READ", 0x88E5 },
+    { "STENCIL", 0x1802 }, { "STREAM_COPY", 0x88E2 },
+    { "STREAM_READ", 0x88E1 }, { "SYNC_CONDITION", 0x9113 },
+    { "SYNC_FENCE", 0x9116 }, { "SYNC_FLAGS", 0x9115 },
+    { "SYNC_FLUSH_COMMANDS_BIT", 1 },
+    { "SYNC_GPU_COMMANDS_COMPLETE", 0x9117 }, { "SYNC_STATUS", 0x9114 },
+    { "TEXTURE_2D_ARRAY", 0x8C1A }, { "TEXTURE_3D", 0x806F },
+    { "TEXTURE_BASE_LEVEL", 0x813C }, { "TEXTURE_BINDING_2D_ARRAY", 0x8C1D },
+    { "TEXTURE_BINDING_3D", 0x806A }, { "TEXTURE_COMPARE_FUNC", 0x884D },
+    { "TEXTURE_COMPARE_MODE", 0x884C },
+    { "TEXTURE_IMMUTABLE_FORMAT", 0x912F },
+    { "TEXTURE_IMMUTABLE_LEVELS", 0x82DF }, { "TEXTURE_MAX_LEVEL", 0x813D },
+    { "TEXTURE_MAX_LOD", 0x813B }, { "TEXTURE_MIN_LOD", 0x813A },
+    { "TEXTURE_WRAP_R", 0x8072 }, { "TIMEOUT_EXPIRED", 0x911B },
+    { "TIMEOUT_IGNORED", -1 }, { "TRANSFORM_FEEDBACK", 0x8E22 },
+    { "TRANSFORM_FEEDBACK_ACTIVE", 0x8E24 },
+    { "TRANSFORM_FEEDBACK_BINDING", 0x8E25 },
+    { "TRANSFORM_FEEDBACK_BUFFER", 0x8C8E },
+    { "TRANSFORM_FEEDBACK_BUFFER_BINDING", 0x8C8F },
+    { "TRANSFORM_FEEDBACK_BUFFER_MODE", 0x8C7F },
+    { "TRANSFORM_FEEDBACK_BUFFER_SIZE", 0x8C85 },
+    { "TRANSFORM_FEEDBACK_BUFFER_START", 0x8C84 },
+    { "TRANSFORM_FEEDBACK_PAUSED", 0x8E23 },
+    { "TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN", 0x8C88 },
+    { "TRANSFORM_FEEDBACK_VARYINGS", 0x8C83 },
+    { "UNIFORM_ARRAY_STRIDE", 0x8A3C },
+    { "UNIFORM_BLOCK_ACTIVE_UNIFORMS", 0x8A42 },
+    { "UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES", 0x8A43 },
+    { "UNIFORM_BLOCK_BINDING", 0x8A3F },
+    { "UNIFORM_BLOCK_DATA_SIZE", 0x8A40 }, { "UNIFORM_BLOCK_INDEX", 0x8A3A },
+    { "UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER", 0x8A46 },
+    { "UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER", 0x8A44 },
+    { "UNIFORM_BUFFER", 0x8A11 }, { "UNIFORM_BUFFER_BINDING", 0x8A28 },
+    { "UNIFORM_BUFFER_OFFSET_ALIGNMENT", 0x8A34 },
+    { "UNIFORM_BUFFER_SIZE", 0x8A2A }, { "UNIFORM_BUFFER_START", 0x8A29 },
+    { "UNIFORM_IS_ROW_MAJOR", 0x8A3E }, { "UNIFORM_MATRIX_STRIDE", 0x8A3D },
+    { "UNIFORM_OFFSET", 0x8A3B }, { "UNIFORM_SIZE", 0x8A38 },
+    { "UNIFORM_TYPE", 0x8A37 }, { "UNPACK_IMAGE_HEIGHT", 0x806E },
+    { "UNPACK_ROW_LENGTH", 0xCF2 }, { "UNPACK_SKIP_IMAGES", 0x806D },
+    { "UNPACK_SKIP_PIXELS", 0xCF4 }, { "UNPACK_SKIP_ROWS", 0xCF3 },
+    { "UNSIGNALED", 0x9118 }, { "UNSIGNED_INT_10F_11F_11F_REV", 0x8C3B },
+    { "UNSIGNED_INT_24_8", 0x84FA },
+    { "UNSIGNED_INT_2_10_10_10_REV", 0x8368 },
+    { "UNSIGNED_INT_5_9_9_9_REV", 0x8C3E },
+    { "UNSIGNED_INT_SAMPLER_2D", 0x8DD2 },
+    { "UNSIGNED_INT_SAMPLER_2D_ARRAY", 0x8DD7 },
+    { "UNSIGNED_INT_SAMPLER_3D", 0x8DD3 },
+    { "UNSIGNED_INT_SAMPLER_CUBE", 0x8DD4 }, { "UNSIGNED_INT_VEC2", 0x8DC6 },
+    { "UNSIGNED_INT_VEC3", 0x8DC7 }, { "UNSIGNED_INT_VEC4", 0x8DC8 },
+    { "UNSIGNED_NORMALIZED", 0x8C17 }, { "VERTEX_ARRAY_BINDING", 0x85B5 },
+    { "VERTEX_ATTRIB_ARRAY_DIVISOR", 0x88FE },
+    { "VERTEX_ATTRIB_ARRAY_INTEGER", 0x88FD }, { "WAIT_FAILED", 0x911D },
+};
+
+static void
+wgl_define_constants(JSContext *ctx, JSValueConst obj,
+                     const ns_gl_constant *table, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+        JS_DefinePropertyValueStr(ctx, obj, table[i].name,
+                                  JS_NewInt64(ctx, table[i].value),
+                                  JS_PROP_ENUMERABLE);
+}
+
+typedef struct ns_gl_method {
+    const char  *name;
+    JSCFunction *fn;
+    int          length;
+} ns_gl_method;
+
+static const ns_gl_method wgl_methods[] = {
+    { "getContextAttributes", wgl_getContextAttributes, 0 },
+    { "isContextLost", wgl_isContextLost, 0 },
+    { "getSupportedExtensions", wgl_getSupportedExtensions, 0 },
+    { "getExtension", wgl_getExtension, 1 },
+    { "getParameter", wgl_getParameter, 1 },
+    { "getError", wgl_getError, 0 },
+    { "clearColor", wgl_clearColor, 4 },
+    { "clearDepth", wgl_clearDepth, 1 },
+    { "clearStencil", wgl_clearStencil, 1 },
+    { "clear", wgl_clear, 1 },
+    { "viewport", wgl_viewport, 4 },
+    { "scissor", wgl_scissor, 4 },
+    { "enable", wgl_enable, 1 },
+    { "disable", wgl_disable, 1 },
+    { "isEnabled", wgl_isEnabled, 1 },
+    { "depthFunc", wgl_depthFunc, 1 },
+    { "depthMask", wgl_depthMask, 1 },
+    { "depthRange", wgl_depthRange, 2 },
+    { "colorMask", wgl_colorMask, 4 },
+    { "stencilMask", wgl_stencilMask, 1 },
+    { "stencilFunc", wgl_stencilFunc, 3 },
+    { "stencilOp", wgl_stencilOp, 3 },
+    { "blendFunc", wgl_blendFunc, 2 },
+    { "blendFuncSeparate", wgl_blendFuncSeparate, 4 },
+    { "blendEquation", wgl_blendEquation, 1 },
+    { "blendEquationSeparate", wgl_blendEquationSeparate, 2 },
+    { "blendColor", wgl_blendColor, 4 },
+    { "cullFace", wgl_cullFace, 1 },
+    { "frontFace", wgl_frontFace, 1 },
+    { "lineWidth", wgl_lineWidth, 1 },
+    { "polygonOffset", wgl_polygonOffset, 2 },
+    { "hint", wgl_hint, 2 },
+    { "finish", wgl_finish, 0 },
+    { "flush", wgl_flush, 0 },
+    { "pixelStorei", wgl_pixelStorei, 2 },
+    { "sampleCoverage", wgl_sampleCoverage, 2 },
+    { "stencilFuncSeparate", wgl_stencilFuncSeparate, 4 },
+    { "stencilOpSeparate", wgl_stencilOpSeparate, 4 },
+    { "stencilMaskSeparate", wgl_stencilMaskSeparate, 2 },
+    { "activeTexture", wgl_activeTexture, 1 },
+    { "createShader", wgl_createShader, 1 },
+    { "deleteShader", wgl_deleteShader, 1 },
+    { "shaderSource", wgl_shaderSource, 2 },
+    { "compileShader", wgl_compileShader, 1 },
+    { "getShaderParameter", wgl_getShaderParameter, 2 },
+    { "getShaderInfoLog", wgl_getShaderInfoLog, 1 },
+    { "getShaderSource", wgl_getShaderSource, 1 },
+    { "createProgram", wgl_createProgram, 0 },
+    { "deleteProgram", wgl_deleteProgram, 1 },
+    { "attachShader", wgl_attachShader, 2 },
+    { "detachShader", wgl_detachShader, 2 },
+    { "linkProgram", wgl_linkProgram, 1 },
+    { "validateProgram", wgl_validateProgram, 1 },
+    { "useProgram", wgl_useProgram, 1 },
+    { "getProgramParameter", wgl_getProgramParameter, 2 },
+    { "getProgramInfoLog", wgl_getProgramInfoLog, 1 },
+    { "bindAttribLocation", wgl_bindAttribLocation, 3 },
+    { "getAttribLocation", wgl_getAttribLocation, 2 },
+    { "getUniformLocation", wgl_getUniformLocation, 2 },
+    { "getActiveAttrib", wgl_getActiveAttrib, 2 },
+    { "getShaderPrecisionFormat", wgl_getShaderPrecisionFormat, 2 },
+    { "getActiveUniform", wgl_getActiveUniform, 2 },
+    { "createBuffer", wgl_createBuffer, 0 },
+    { "deleteBuffer", wgl_deleteBuffer, 1 },
+    { "bindBuffer", wgl_bindBuffer, 2 },
+    { "bufferData", wgl_bufferData, 3 },
+    { "bufferSubData", wgl_bufferSubData, 3 },
+    { "enableVertexAttribArray", wgl_enableVertexAttribArray, 1 },
+    { "disableVertexAttribArray", wgl_disableVertexAttribArray, 1 },
+    { "vertexAttribPointer", wgl_vertexAttribPointer, 6 },
+    { "vertexAttrib1f", wgl_vertexAttrib1f, 2 },
+    { "vertexAttrib2f", wgl_vertexAttrib2f, 3 },
+    { "vertexAttrib3f", wgl_vertexAttrib3f, 4 },
+    { "vertexAttrib4f", wgl_vertexAttrib4f, 5 },
+    { "uniform1f", wgl_uniform1f, 2 },
+    { "uniform2f", wgl_uniform2f, 3 },
+    { "uniform3f", wgl_uniform3f, 4 },
+    { "uniform4f", wgl_uniform4f, 5 },
+    { "uniform1i", wgl_uniform1i, 2 },
+    { "uniform2i", wgl_uniform2i, 3 },
+    { "uniform3i", wgl_uniform3i, 4 },
+    { "uniform4i", wgl_uniform4i, 5 },
+    { "uniform1fv", wgl_uniform1fv, 2 },
+    { "uniform2fv", wgl_uniform2fv, 2 },
+    { "uniform3fv", wgl_uniform3fv, 2 },
+    { "uniform4fv", wgl_uniform4fv, 2 },
+    { "uniform1iv", wgl_uniform1iv, 2 },
+    { "uniform2iv", wgl_uniform2iv, 2 },
+    { "uniform3iv", wgl_uniform3iv, 2 },
+    { "uniform4iv", wgl_uniform4iv, 2 },
+    { "uniformMatrix2fv", wgl_uniformMatrix2fv, 3 },
+    { "uniformMatrix3fv", wgl_uniformMatrix3fv, 3 },
+    { "uniformMatrix4fv", wgl_uniformMatrix4fv, 3 },
+    { "drawArrays", wgl_drawArrays, 3 },
+    { "drawElements", wgl_drawElements, 4 },
+    { "createTexture", wgl_createTexture, 0 },
+    { "deleteTexture", wgl_deleteTexture, 1 },
+    { "bindTexture", wgl_bindTexture, 2 },
+    { "texParameteri", wgl_texParameteri, 3 },
+    { "texParameterf", wgl_texParameterf, 3 },
+    { "generateMipmap", wgl_generateMipmap, 1 },
+    { "texImage2D", wgl_texImage2D, 6 },
+    { "texSubImage2D", wgl_texSubImage2D, 7 },
+    { "createFramebuffer", wgl_createFramebuffer, 0 },
+    { "deleteFramebuffer", wgl_deleteFramebuffer, 1 },
+    { "bindFramebuffer", wgl_bindFramebuffer, 2 },
+    { "framebufferTexture2D", wgl_framebufferTexture2D, 5 },
+    { "framebufferRenderbuffer", wgl_framebufferRenderbuffer, 4 },
+    { "checkFramebufferStatus", wgl_checkFramebufferStatus, 1 },
+    { "createRenderbuffer", wgl_createRenderbuffer, 0 },
+    { "deleteRenderbuffer", wgl_deleteRenderbuffer, 1 },
+    { "bindRenderbuffer", wgl_bindRenderbuffer, 2 },
+    { "renderbufferStorage", wgl_renderbufferStorage, 4 },
+    { "readPixels", wgl_readPixels, 7 },
+    { "isBuffer", wgl_isBuffer, 1 },
+    { "isProgram", wgl_isProgram, 1 },
+    { "isShader", wgl_isShader, 1 },
+    { "isTexture", wgl_isTexture, 1 },
+    { "isFramebuffer", wgl_isFramebuffer, 1 },
+    { "isRenderbuffer", wgl_isRenderbuffer, 1 },
+    { "getBufferParameter", wgl_getBufferParameter, 2 },
+    { "getTexParameter", wgl_getTexParameter, 2 },
+    { "getRenderbufferParameter", wgl_getRenderbufferParameter, 2 },
+    { "getFramebufferAttachmentParameter", wgl_getFramebufferAttachmentParameter, 3 },
+    { "getVertexAttrib", wgl_getVertexAttrib, 2 },
+    { "getVertexAttribOffset", wgl_getVertexAttribOffset, 2 },
+    { "getUniform", wgl_getUniform, 2 },
+    { "vertexAttrib1fv", wgl_vertexAttrib1fv, 2 },
+    { "vertexAttrib2fv", wgl_vertexAttrib2fv, 2 },
+    { "vertexAttrib3fv", wgl_vertexAttrib3fv, 2 },
+    { "vertexAttrib4fv", wgl_vertexAttrib4fv, 2 },
+    { "compressedTexImage2D", wgl_compressed_unsupported, 7 },
+    { "compressedTexSubImage2D", wgl_compressed_unsupported, 8 },
+    { "getAttachedShaders", wgl_getAttachedShaders, 1 },
+    { "drawingBufferStorage", wgl_drawingBufferStorage, 3 },
+    { "makeXRCompatible", wgl_makeXRCompatible, 0 },
+    { "copyTexImage2D", wgl_copyTexImage2D, 8 },
+    { "copyTexSubImage2D", wgl_copyTexSubImage2D, 8 },
+};
+
+static const ns_gl_method wgl2_methods[] = {
+    { "createVertexArray", wgl_createVertexArray, 0 },
+    { "deleteVertexArray", wgl_deleteVertexArray, 1 },
+    { "bindVertexArray", wgl_bindVertexArray, 1 },
+    { "isVertexArray", wgl_isVertexArray, 1 },
+    { "drawArraysInstanced", wgl_drawArraysInstanced, 4 },
+    { "drawElementsInstanced", wgl_drawElementsInstanced, 5 },
+    { "vertexAttribDivisor", wgl_vertexAttribDivisor, 2 },
+    { "drawBuffers", wgl_drawBuffers, 1 },
+    { "vertexAttribIPointer", wgl_vertexAttribIPointer, 5 },
+    { "uniform1ui", wgl_uniform1ui, 2 },
+    { "uniform2ui", wgl_uniform2ui, 3 },
+    { "uniform3ui", wgl_uniform3ui, 4 },
+    { "uniform4ui", wgl_uniform4ui, 5 },
+    { "uniform1uiv", wgl_uniform1uiv, 2 },
+    { "uniform2uiv", wgl_uniform2uiv, 2 },
+    { "uniform3uiv", wgl_uniform3uiv, 2 },
+    { "uniform4uiv", wgl_uniform4uiv, 2 },
+    { "uniformMatrix2x3fv", wgl_uniformMatrix2x3fv, 3 },
+    { "uniformMatrix3x2fv", wgl_uniformMatrix3x2fv, 3 },
+    { "uniformMatrix2x4fv", wgl_uniformMatrix2x4fv, 3 },
+    { "uniformMatrix4x2fv", wgl_uniformMatrix4x2fv, 3 },
+    { "uniformMatrix3x4fv", wgl_uniformMatrix3x4fv, 3 },
+    { "uniformMatrix4x3fv", wgl_uniformMatrix4x3fv, 3 },
+    { "texStorage2D", wgl_texStorage2D, 5 },
+    { "renderbufferStorageMultisample", wgl_renderbufferStorageMultisample, 5 },
+    { "blitFramebuffer", wgl_blitFramebuffer, 10 },
+    { "framebufferTextureLayer", wgl_framebufferTextureLayer, 5 },
+    { "invalidateFramebuffer", wgl_invalidateFramebuffer, 2 },
+    { "readBuffer", wgl_readBuffer, 1 },
+    { "copyBufferSubData", wgl_copyBufferSubData, 5 },
+    { "getBufferSubData", wgl_getBufferSubData, 3 },
+    { "clearBufferfv", wgl_clearBuffer_fv, 3 },
+    { "clearBufferiv", wgl_clearBuffer_iv, 3 },
+    { "clearBufferuiv", wgl_clearBuffer_uiv, 3 },
+    { "clearBufferfi", wgl_clearBufferfi, 4 },
+    { "createSampler", wgl_createSampler, 0 },
+    { "deleteSampler", wgl_deleteSampler, 1 },
+    { "bindSampler", wgl_bindSampler, 2 },
+    { "samplerParameteri", wgl_samplerParameteri, 3 },
+    { "samplerParameterf", wgl_samplerParameterf, 3 },
+    { "isSampler", wgl_isSampler, 1 },
+    { "getUniformBlockIndex", wgl_getUniformBlockIndex, 2 },
+    { "uniformBlockBinding", wgl_uniformBlockBinding, 3 },
+    { "bindBufferBase", wgl_bindBufferBase, 3 },
+    { "bindBufferRange", wgl_bindBufferRange, 5 },
+    { "copyTexSubImage3D", wgl_copyTexSubImage3D, 9 },
+    { "drawRangeElements", wgl_drawRangeElements, 6 },
+    { "vertexAttribI4i", wgl_vertexAttribI4i, 5 },
+    { "vertexAttribI4ui", wgl_vertexAttribI4ui, 5 },
+    { "vertexAttribI4iv", wgl_vertexAttribI4iv, 2 },
+    { "vertexAttribI4uiv", wgl_vertexAttribI4uiv, 2 },
+    { "getFragDataLocation", wgl_getFragDataLocation, 2 },
+    { "getInternalformatParameter", wgl_getInternalformatParameter, 3 },
+    { "texImage3D", wgl_texImage3D, 10 },
+    { "texSubImage3D", wgl_texSubImage3D, 11 },
+    { "texStorage3D", wgl_texStorage3D, 6 },
+    { "createQuery", wgl_createQuery, 0 },
+    { "deleteQuery", wgl_deleteQuery, 1 },
+    { "isQuery", wgl_isQuery, 1 },
+    { "beginQuery", wgl_beginQuery, 2 },
+    { "endQuery", wgl_endQuery, 1 },
+    { "getQuery", wgl_getQuery, 2 },
+    { "getQueryParameter", wgl_getQueryParameter, 2 },
+    { "createTransformFeedback", wgl_createTransformFeedback, 0 },
+    { "deleteTransformFeedback", wgl_deleteTransformFeedback, 1 },
+    { "isTransformFeedback", wgl_isTransformFeedback, 1 },
+    { "bindTransformFeedback", wgl_bindTransformFeedback, 2 },
+    { "beginTransformFeedback", wgl_beginTransformFeedback, 1 },
+    { "endTransformFeedback", wgl_endTransformFeedback, 0 },
+    { "pauseTransformFeedback", wgl_pauseTransformFeedback, 0 },
+    { "resumeTransformFeedback", wgl_resumeTransformFeedback, 0 },
+    { "transformFeedbackVaryings", wgl_transformFeedbackVaryings, 3 },
+    { "getActiveUniforms", wgl_getActiveUniforms, 3 },
+    { "getActiveUniformBlockParameter", wgl_getActiveUniformBlockParameter, 3 },
+    { "getActiveUniformBlockName", wgl_getActiveUniformBlockName, 2 },
+    { "fenceSync", wgl_fenceSync, 2 },
+    { "isSync", wgl_isSync, 1 },
+    { "deleteSync", wgl_deleteSync, 1 },
+    { "clientWaitSync", wgl_clientWaitSync, 3 },
+    { "waitSync", wgl_waitSync, 3 },
+    { "getSyncParameter", wgl_getSyncParameter, 2 },
+    { "compressedTexImage3D", wgl_compressed_unsupported, 8 },
+    { "compressedTexSubImage3D", wgl_compressed_unsupported, 10 },
+    { "getIndexedParameter", wgl_getIndexedParameter, 2 },
+    { "getSamplerParameter", wgl_getSamplerParameter, 2 },
+    { "getTransformFeedbackVarying", wgl_getTransformFeedbackVarying, 2 },
+    { "getUniformIndices", wgl_getUniformIndices, 2 },
+    { "invalidateSubFramebuffer", wgl_invalidateSubFramebuffer, 6 },
+};
+
+#define WGL_V2_METHODS 0x4000
+
+static JSValue
+wgl_dispatch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
+             int magic)
+{
+    const ns_gl_method *m = magic >= WGL_V2_METHODS
+        ? &wgl2_methods[magic - WGL_V2_METHODS] : &wgl_methods[magic];
+    if (argc < m->length) {
+        ns_webgl *g = wgl_brand(ctx, this_val);
+        if (!g) return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx,
+            "Failed to execute '%s' on '%s': %d argument%s required, but only %d present.",
+            m->name, g->version >= 2 ? "WebGL2RenderingContext" : "WebGLRenderingContext",
+            m->length, m->length == 1 ? "" : "s", argc);
+    }
+    return m->fn(ctx, this_val, argc, argv);
+}
+
+static void
+wgl_bind_methods(JSContext *ctx, JSValueConst proto, const ns_gl_method *table,
+                 size_t count, int magic_base)
+{
+    for (size_t i = 0; i < count; i++)
+        JS_SetPropertyStr(ctx, proto, table[i].name,
+            JS_NewCFunctionMagic(ctx, wgl_dispatch, table[i].name, table[i].length,
+                                 JS_CFUNC_generic_magic, magic_base + (int)i));
+}
+
+static JSValue
+wgl_get_canvas(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    return g ? JS_DupValue(ctx, g->canvas_obj) : JS_EXCEPTION;
+}
+
+static ns_webgl *
+wgl_synced(JSContext *ctx, JSValueConst this_val)
+{
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (g && g->gl) {
+        ns_gl_context_make_current(g->gl);
+        ns_webgl_sync_size(g);
+    }
+    return g;
+}
+
+static JSValue
+wgl_get_drawingBufferWidth(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_synced(ctx, this_val);
+    return g ? JS_NewInt32(ctx, g->w) : JS_EXCEPTION;
+}
+
+static JSValue
+wgl_get_drawingBufferHeight(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_synced(ctx, this_val);
+    return g ? JS_NewInt32(ctx, g->h) : JS_EXCEPTION;
+}
+
+static JSValue
+wgl_get_drawingBufferFormat(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    return g ? JS_NewInt32(ctx, g->alpha ? GL_RGBA8 : GL_RGB8) : JS_EXCEPTION;
+}
+
+static JSValue
+wgl_get_drawingBufferColorSpace(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
+    return JS_NewString(ctx, g->drawing_p3 ? "display-p3" : "srgb");
+}
+
+static JSValue
+wgl_get_unpackColorSpace(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
+    return JS_NewString(ctx, g->unpack_p3 ? "display-p3" : "srgb");
+}
+
+static JSValue
+wgl_set_color_space(JSContext *ctx, JSValueConst this_val, JSValueConst v,
+                    gboolean drawing)
+{
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
+    const char *str = JS_ToCString(ctx, v);
+    if (!str) return JS_EXCEPTION;
+    gboolean *slot = drawing ? &g->drawing_p3 : &g->unpack_p3;
+    if (strcmp(str, "srgb") == 0) *slot = FALSE;
+    else if (strcmp(str, "display-p3") == 0) *slot = TRUE;
+    JS_FreeCString(ctx, str);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_set_drawingBufferColorSpace(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_set_color_space(ctx, this_val, argc > 0 ? argv[0] : JS_UNDEFINED, TRUE);
+}
+
+static JSValue
+wgl_set_unpackColorSpace(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_set_color_space(ctx, this_val, argc > 0 ? argv[0] : JS_UNDEFINED, FALSE);
+}
+
+static void
+wgl_define_accessor(JSContext *ctx, JSValueConst proto, const char *name,
+                    JSCFunction *getter, JSCFunction *setter)
+{
+    char *get_name = g_strconcat("get ", name, NULL);
+    char *set_name = g_strconcat("set ", name, NULL);
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JS_DefinePropertyGetSet(ctx, proto, atom,
+        JS_NewCFunction2(ctx, getter, get_name, 0, JS_CFUNC_generic, 0),
+        setter ? JS_NewCFunction2(ctx, setter, set_name, 1, JS_CFUNC_generic, 0)
+               : JS_UNDEFINED,
+        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+    g_free(get_name);
+    g_free(set_name);
+}
+
+static void
+wgl_bind_accessors(JSContext *ctx, JSValueConst proto)
+{
+    wgl_define_accessor(ctx, proto, "canvas", wgl_get_canvas, NULL);
+    wgl_define_accessor(ctx, proto, "drawingBufferWidth",
+                        wgl_get_drawingBufferWidth, NULL);
+    wgl_define_accessor(ctx, proto, "drawingBufferHeight",
+                        wgl_get_drawingBufferHeight, NULL);
+    wgl_define_accessor(ctx, proto, "drawingBufferFormat",
+                        wgl_get_drawingBufferFormat, NULL);
+    wgl_define_accessor(ctx, proto, "drawingBufferColorSpace",
+                        wgl_get_drawingBufferColorSpace,
+                        wgl_set_drawingBufferColorSpace);
+    wgl_define_accessor(ctx, proto, "unpackColorSpace",
+                        wgl_get_unpackColorSpace, wgl_set_unpackColorSpace);
+}
 
 void
-ns_webgl_install_constants(JSContext *ctx, JSValueConst obj, int version)
+ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor, JSValueConst proto,
+                           int version)
 {
-    wgl_set_constants(ctx, obj);
-    if (version >= 2) wgl_set_constants2(ctx, obj);
-}
-
-static void
-wgl_set_constants(JSContext *ctx, JSValueConst obj)
-{
-    K(DEPTH_BUFFER_BIT); K(STENCIL_BUFFER_BIT); K(COLOR_BUFFER_BIT);
-    K(POINTS); K(LINES); K(LINE_LOOP); K(LINE_STRIP);
-    K(TRIANGLES); K(TRIANGLE_STRIP); K(TRIANGLE_FAN);
-    K(ZERO); K(ONE); K(SRC_COLOR); K(ONE_MINUS_SRC_COLOR);
-    K(SRC_ALPHA); K(ONE_MINUS_SRC_ALPHA); K(DST_ALPHA); K(ONE_MINUS_DST_ALPHA);
-    K(DST_COLOR); K(ONE_MINUS_DST_COLOR); K(SRC_ALPHA_SATURATE);
-    K(CONSTANT_COLOR); K(ONE_MINUS_CONSTANT_COLOR);
-    K(CONSTANT_ALPHA); K(ONE_MINUS_CONSTANT_ALPHA);
-    K(FUNC_ADD); K(FUNC_SUBTRACT); K(FUNC_REVERSE_SUBTRACT);
-    K(BLEND_EQUATION); K(BLEND_EQUATION_RGB); K(BLEND_EQUATION_ALPHA);
-    K(BLEND_DST_RGB); K(BLEND_SRC_RGB); K(BLEND_DST_ALPHA); K(BLEND_SRC_ALPHA);
-    K(BLEND_COLOR); K(BLEND);
-    K(DEPTH_FUNC); K(DEPTH_RANGE); K(DEPTH_WRITEMASK);
-    K(STENCIL_FUNC); K(STENCIL_REF); K(STENCIL_VALUE_MASK);
-    K(STENCIL_FAIL); K(STENCIL_PASS_DEPTH_FAIL); K(STENCIL_PASS_DEPTH_PASS);
-    K(STENCIL_BACK_FUNC); K(STENCIL_BACK_REF); K(STENCIL_BACK_VALUE_MASK);
-    K(STENCIL_BACK_FAIL); K(STENCIL_BACK_PASS_DEPTH_FAIL);
-    K(STENCIL_BACK_PASS_DEPTH_PASS); K(STENCIL_WRITEMASK);
-    K(STENCIL_BACK_WRITEMASK); K(COLOR_WRITEMASK);
-    K(DEPTH_TEST); K(STENCIL_TEST); K(DITHER); K(CULL_FACE);
-    K(POLYGON_OFFSET_FILL); K(SAMPLE_ALPHA_TO_COVERAGE); K(SAMPLE_COVERAGE);
-    K(LINE_WIDTH); K(POLYGON_OFFSET_FACTOR); K(POLYGON_OFFSET_UNITS);
-    K(SAMPLE_COVERAGE_VALUE); K(SAMPLE_COVERAGE_INVERT);
-    K(SCISSOR_TEST);
-    K(NEVER); K(LESS); K(EQUAL); K(LEQUAL); K(GREATER); K(NOTEQUAL);
-    K(GEQUAL); K(ALWAYS);
-    K(FRONT); K(BACK); K(FRONT_AND_BACK); K(CW); K(CCW);
-    K(KEEP); K(REPLACE); K(INCR); K(DECR); K(INVERT);
-    K(INCR_WRAP); K(DECR_WRAP);
-    K(BYTE); K(UNSIGNED_BYTE); K(SHORT); K(UNSIGNED_SHORT);
-    K(INT); K(UNSIGNED_INT); K(FLOAT);
-    K(UNSIGNED_SHORT_4_4_4_4); K(UNSIGNED_SHORT_5_5_5_1); K(UNSIGNED_SHORT_5_6_5);
-    K(DEPTH_COMPONENT); K(DEPTH_COMPONENT16); K(DEPTH_STENCIL);
-    K(ALPHA); K(RGB); K(RGBA); K(LUMINANCE); K(LUMINANCE_ALPHA);
-    K(RGBA4); K(RGB5_A1); K(RGB565); K(STENCIL_INDEX8);
-    K(FRAGMENT_SHADER); K(VERTEX_SHADER);
-    K(COMPILE_STATUS); K(LINK_STATUS); K(VALIDATE_STATUS); K(DELETE_STATUS);
-    K(SHADER_TYPE); K(ATTACHED_SHADERS); K(ACTIVE_UNIFORMS); K(ACTIVE_ATTRIBUTES);
-    K(SHADER_SOURCE_LENGTH); K(INFO_LOG_LENGTH);
-    K(CURRENT_PROGRAM);
-    K(ARRAY_BUFFER); K(ELEMENT_ARRAY_BUFFER);
-    K(ARRAY_BUFFER_BINDING); K(ELEMENT_ARRAY_BUFFER_BINDING);
-    K(STREAM_DRAW); K(STATIC_DRAW); K(DYNAMIC_DRAW);
-    K(BUFFER_SIZE); K(BUFFER_USAGE);
-    K(TEXTURE_2D); K(TEXTURE); K(TEXTURE_CUBE_MAP);
-    K(TEXTURE_CUBE_MAP_POSITIVE_X); K(TEXTURE_CUBE_MAP_NEGATIVE_X);
-    K(TEXTURE_CUBE_MAP_POSITIVE_Y); K(TEXTURE_CUBE_MAP_NEGATIVE_Y);
-    K(TEXTURE_CUBE_MAP_POSITIVE_Z); K(TEXTURE_CUBE_MAP_NEGATIVE_Z);
-    K(ACTIVE_TEXTURE);
-    K(TEXTURE_BINDING_2D); K(TEXTURE_BINDING_CUBE_MAP);
-    for (int i = 0; i < 32; i++) {
-        char name[16];
-        g_snprintf(name, sizeof(name), "TEXTURE%d", i);
-        set_const(ctx, obj, name, (int)(GL_TEXTURE0 + i));
+    wgl_define_constants(ctx, ctor, wgl_constants, G_N_ELEMENTS(wgl_constants));
+    wgl_define_constants(ctx, proto, wgl_constants, G_N_ELEMENTS(wgl_constants));
+    wgl_bind_methods(ctx, proto, wgl_methods, G_N_ELEMENTS(wgl_methods), 0);
+    if (version >= 2) {
+        wgl_define_constants(ctx, ctor, wgl2_constants,
+                             G_N_ELEMENTS(wgl2_constants));
+        wgl_define_constants(ctx, proto, wgl2_constants,
+                             G_N_ELEMENTS(wgl2_constants));
+        wgl_bind_methods(ctx, proto, wgl2_methods, G_N_ELEMENTS(wgl2_methods),
+                         WGL_V2_METHODS);
     }
-    K(TEXTURE_MAG_FILTER); K(TEXTURE_MIN_FILTER);
-    K(TEXTURE_WRAP_S); K(TEXTURE_WRAP_T);
-    K(NEAREST); K(LINEAR);
-    K(NEAREST_MIPMAP_NEAREST); K(LINEAR_MIPMAP_NEAREST);
-    K(NEAREST_MIPMAP_LINEAR); K(LINEAR_MIPMAP_LINEAR);
-    K(REPEAT); K(CLAMP_TO_EDGE); K(MIRRORED_REPEAT);
-    K(FLOAT_VEC2); K(FLOAT_VEC3); K(FLOAT_VEC4);
-    K(INT_VEC2); K(INT_VEC3); K(INT_VEC4);
-    K(BOOL); K(BOOL_VEC2); K(BOOL_VEC3); K(BOOL_VEC4);
-    K(FLOAT_MAT2); K(FLOAT_MAT3); K(FLOAT_MAT4);
-    K(SAMPLER_2D); K(SAMPLER_CUBE);
-    K(VENDOR); K(RENDERER); K(VERSION); K(SHADING_LANGUAGE_VERSION);
-    K(NO_ERROR); K(INVALID_ENUM); K(INVALID_VALUE); K(INVALID_OPERATION);
-    K(OUT_OF_MEMORY); K(INVALID_FRAMEBUFFER_OPERATION);
-    K(FRAMEBUFFER); K(RENDERBUFFER);
-    K(COLOR_ATTACHMENT0); K(DEPTH_ATTACHMENT); K(STENCIL_ATTACHMENT);
-    K(FRAMEBUFFER_COMPLETE); K(FRAMEBUFFER_BINDING); K(RENDERBUFFER_BINDING);
-    K(MAX_RENDERBUFFER_SIZE);
-    K(GENERATE_MIPMAP_HINT); K(DONT_CARE); K(FASTEST); K(NICEST);
-    K(MAX_TEXTURE_SIZE); K(MAX_VERTEX_ATTRIBS); K(MAX_TEXTURE_IMAGE_UNITS);
-    K(MAX_COMBINED_TEXTURE_IMAGE_UNITS); K(MAX_CUBE_MAP_TEXTURE_SIZE);
-    K(MAX_VERTEX_TEXTURE_IMAGE_UNITS); K(MAX_VARYING_VECTORS);
-    K(MAX_VERTEX_UNIFORM_VECTORS); K(MAX_FRAGMENT_UNIFORM_VECTORS);
-    K(MAX_VIEWPORT_DIMS);
-    K(VIEWPORT); K(SCISSOR_BOX); K(COLOR_CLEAR_VALUE);
-    K(DEPTH_CLEAR_VALUE); K(BLEND_COLOR);
-    K(UNPACK_ALIGNMENT); K(PACK_ALIGNMENT);
-    K(CURRENT_VERTEX_ATTRIB); K(VERTEX_ATTRIB_ARRAY_ENABLED);
-    K(VERTEX_ATTRIB_ARRAY_SIZE); K(VERTEX_ATTRIB_ARRAY_STRIDE);
-    K(VERTEX_ATTRIB_ARRAY_TYPE); K(VERTEX_ATTRIB_ARRAY_NORMALIZED);
-    K(VERTEX_ATTRIB_ARRAY_POINTER); K(VERTEX_ATTRIB_ARRAY_BUFFER_BINDING);
-    K(FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE); K(FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
-    K(FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL);
-    K(FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE);
-
-    set_const(ctx, obj, "DEPTH_STENCIL_ATTACHMENT", 0x821A);
-    set_const(ctx, obj, "UNPACK_FLIP_Y_WEBGL", NS_UNPACK_FLIP_Y_WEBGL);
-    set_const(ctx, obj, "UNPACK_PREMULTIPLY_ALPHA_WEBGL", NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL);
-    set_const(ctx, obj, "CONTEXT_LOST_WEBGL", NS_CONTEXT_LOST_WEBGL);
-    set_const(ctx, obj, "UNPACK_COLORSPACE_CONVERSION_WEBGL", NS_UNPACK_COLORSPACE_CONVERSION_WEBGL);
-    set_const(ctx, obj, "BROWSER_DEFAULT_WEBGL", NS_BROWSER_DEFAULT_WEBGL);
+    wgl_bind_accessors(ctx, proto);
 }
 
-#undef K
-
-#define K(n) set_const(ctx, obj, #n, (int)GL_##n)
-
-static void
-wgl_set_constants2(JSContext *ctx, JSValueConst obj)
+static JSValue
+wgl_new_context_object(JSContext *ctx, int version)
 {
-    K(RED); K(RG); K(RGB8); K(RGBA8); K(SRGB8); K(SRGB8_ALPHA8);
-    K(RGB10_A2); K(R8); K(RG8);
-    K(R16F); K(RG16F); K(RGBA16F); K(R32F); K(RG32F); K(RGBA32F);
-    K(R11F_G11F_B10F); K(RGB16F); K(RGB32F);
-    K(R8UI); K(RG8UI); K(RGBA8UI); K(R32UI); K(RGBA32UI);
-    K(R32I); K(RGBA32I);
-    K(RED_INTEGER); K(RG_INTEGER); K(RGB_INTEGER); K(RGBA_INTEGER);
-    K(HALF_FLOAT); K(UNSIGNED_INT_24_8); K(UNSIGNED_INT_2_10_10_10_REV);
-    K(FLOAT_32_UNSIGNED_INT_24_8_REV);
-    K(DEPTH_COMPONENT24); K(DEPTH_COMPONENT32F);
-    K(DEPTH24_STENCIL8); K(DEPTH32F_STENCIL8);
-    K(PIXEL_PACK_BUFFER); K(PIXEL_UNPACK_BUFFER); K(UNIFORM_BUFFER);
-    K(TRANSFORM_FEEDBACK_BUFFER); K(COPY_READ_BUFFER); K(COPY_WRITE_BUFFER);
-    K(STATIC_READ); K(DYNAMIC_READ); K(STREAM_READ);
-    K(STATIC_COPY); K(DYNAMIC_COPY); K(STREAM_COPY);
-    K(READ_FRAMEBUFFER); K(DRAW_FRAMEBUFFER);
-    K(MAX_SAMPLES); K(MAX_COLOR_ATTACHMENTS); K(MAX_DRAW_BUFFERS);
-    K(TEXTURE_3D); K(TEXTURE_2D_ARRAY); K(TEXTURE_WRAP_R);
-    K(TEXTURE_MIN_LOD); K(TEXTURE_MAX_LOD); K(TEXTURE_BASE_LEVEL);
-    K(TEXTURE_MAX_LEVEL); K(TEXTURE_COMPARE_MODE); K(TEXTURE_COMPARE_FUNC);
-    K(SAMPLER_3D); K(SAMPLER_2D_ARRAY); K(SAMPLER_2D_SHADOW);
-    K(UNSIGNED_INT_VEC2); K(UNSIGNED_INT_VEC3); K(UNSIGNED_INT_VEC4);
-    K(FLOAT_MAT2x3); K(FLOAT_MAT2x4); K(FLOAT_MAT3x2);
-    K(FLOAT_MAT3x4); K(FLOAT_MAT4x2); K(FLOAT_MAT4x3);
-    K(MIN); K(MAX);
-    K(VERTEX_ARRAY_BINDING);
-    K(MAX_3D_TEXTURE_SIZE); K(MAX_ARRAY_TEXTURE_LAYERS);
-    K(MAX_ELEMENTS_VERTICES); K(MAX_ELEMENTS_INDICES);
-    K(MAX_VERTEX_UNIFORM_BLOCKS); K(MAX_FRAGMENT_UNIFORM_BLOCKS);
-    K(MAX_UNIFORM_BUFFER_BINDINGS); K(UNIFORM_BUFFER_OFFSET_ALIGNMENT);
-    K(MAX_VERTEX_OUTPUT_COMPONENTS); K(MAX_FRAGMENT_INPUT_COMPONENTS);
-    K(COLOR); K(DEPTH); K(STENCIL);
-
-    for (int i = 1; i <= 15; i++) {
-        char name[32];
-        g_snprintf(name, sizeof(name), "COLOR_ATTACHMENT%d", i);
-        set_const(ctx, obj, name, (int)(GL_COLOR_ATTACHMENT0 + i));
-        g_snprintf(name, sizeof(name), "DRAW_BUFFER%d", i);
-        set_const(ctx, obj, name, (int)(GL_DRAW_BUFFER0 + i));
-    }
-    set_const(ctx, obj, "DRAW_BUFFER0", (int)GL_DRAW_BUFFER0);
-    JS_SetPropertyStr(ctx, obj, "INVALID_INDEX",
-                      JS_NewUint32(ctx, GL_INVALID_INDEX));
-
-    K(ANY_SAMPLES_PASSED); K(ANY_SAMPLES_PASSED_CONSERVATIVE);
-    K(TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN);
-    K(QUERY_RESULT); K(QUERY_RESULT_AVAILABLE); K(CURRENT_QUERY);
-    K(TRANSFORM_FEEDBACK); K(INTERLEAVED_ATTRIBS); K(SEPARATE_ATTRIBS);
-    K(RASTERIZER_DISCARD); K(TRANSFORM_FEEDBACK_VARYINGS);
-    K(TRANSFORM_FEEDBACK_BUFFER_MODE); K(TRANSFORM_FEEDBACK_ACTIVE);
-    K(TRANSFORM_FEEDBACK_PAUSED);
-    K(SYNC_GPU_COMMANDS_COMPLETE); K(SYNC_FLUSH_COMMANDS_BIT);
-    K(ALREADY_SIGNALED); K(TIMEOUT_EXPIRED); K(CONDITION_SATISFIED);
-    K(WAIT_FAILED); K(SYNC_STATUS); K(SIGNALED); K(UNSIGNALED);
-    K(OBJECT_TYPE); K(SYNC_CONDITION); K(SYNC_FENCE); K(SYNC_FLAGS);
-    K(UNIFORM_BLOCK_ACTIVE_UNIFORMS); K(UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES);
-    K(UNIFORM_BLOCK_BINDING); K(UNIFORM_BLOCK_DATA_SIZE); K(UNIFORM_BLOCK_INDEX);
-    K(UNIFORM_TYPE); K(UNIFORM_SIZE); K(UNIFORM_OFFSET);
-    K(UNIFORM_ARRAY_STRIDE); K(UNIFORM_MATRIX_STRIDE); K(UNIFORM_IS_ROW_MAJOR);
-    K(SAMPLES); K(NUM_SAMPLE_COUNTS);
-    K(COMPARE_REF_TO_TEXTURE); K(MAX_SAMPLES);
-}
-
-#undef K
-
-static void
-wgl_bind_methods(JSContext *ctx, JSValueConst obj)
-{
-    bindf(ctx, obj, "getContextAttributes", wgl_getContextAttributes, 0);
-    bindf(ctx, obj, "isContextLost", wgl_isContextLost, 0);
-    bindf(ctx, obj, "getSupportedExtensions", wgl_getSupportedExtensions, 0);
-    bindf(ctx, obj, "getExtension", wgl_getExtension, 1);
-    bindf(ctx, obj, "getParameter", wgl_getParameter, 1);
-    bindf(ctx, obj, "getError", wgl_getError, 0);
-
-    bindf(ctx, obj, "clearColor", wgl_clearColor, 4);
-    bindf(ctx, obj, "clearDepth", wgl_clearDepth, 1);
-    bindf(ctx, obj, "clearStencil", wgl_clearStencil, 1);
-    bindf(ctx, obj, "clear", wgl_clear, 1);
-    bindf(ctx, obj, "viewport", wgl_viewport, 4);
-    bindf(ctx, obj, "scissor", wgl_scissor, 4);
-    bindf(ctx, obj, "enable", wgl_enable, 1);
-    bindf(ctx, obj, "disable", wgl_disable, 1);
-    bindf(ctx, obj, "isEnabled", wgl_isEnabled, 1);
-    bindf(ctx, obj, "depthFunc", wgl_depthFunc, 1);
-    bindf(ctx, obj, "depthMask", wgl_depthMask, 1);
-    bindf(ctx, obj, "depthRange", wgl_depthRange, 2);
-    bindf(ctx, obj, "colorMask", wgl_colorMask, 4);
-    bindf(ctx, obj, "stencilMask", wgl_stencilMask, 1);
-    bindf(ctx, obj, "stencilFunc", wgl_stencilFunc, 3);
-    bindf(ctx, obj, "stencilOp", wgl_stencilOp, 3);
-    bindf(ctx, obj, "blendFunc", wgl_blendFunc, 2);
-    bindf(ctx, obj, "blendFuncSeparate", wgl_blendFuncSeparate, 4);
-    bindf(ctx, obj, "blendEquation", wgl_blendEquation, 1);
-    bindf(ctx, obj, "blendEquationSeparate", wgl_blendEquationSeparate, 2);
-    bindf(ctx, obj, "blendColor", wgl_blendColor, 4);
-    bindf(ctx, obj, "cullFace", wgl_cullFace, 1);
-    bindf(ctx, obj, "frontFace", wgl_frontFace, 1);
-    bindf(ctx, obj, "lineWidth", wgl_lineWidth, 1);
-    bindf(ctx, obj, "polygonOffset", wgl_polygonOffset, 2);
-    bindf(ctx, obj, "hint", wgl_hint, 2);
-    bindf(ctx, obj, "finish", wgl_finish, 0);
-    bindf(ctx, obj, "flush", wgl_flush, 0);
-    bindf(ctx, obj, "pixelStorei", wgl_pixelStorei, 2);
-    bindf(ctx, obj, "sampleCoverage", wgl_noop, 2);
-    bindf(ctx, obj, "stencilFuncSeparate", wgl_noop, 4);
-    bindf(ctx, obj, "stencilOpSeparate", wgl_noop, 4);
-    bindf(ctx, obj, "stencilMaskSeparate", wgl_noop, 2);
-
-    bindf(ctx, obj, "activeTexture", wgl_activeTexture, 1);
-    bindf(ctx, obj, "createShader", wgl_createShader, 1);
-    bindf(ctx, obj, "deleteShader", wgl_deleteShader, 1);
-    bindf(ctx, obj, "shaderSource", wgl_shaderSource, 2);
-    bindf(ctx, obj, "compileShader", wgl_compileShader, 1);
-    bindf(ctx, obj, "getShaderParameter", wgl_getShaderParameter, 2);
-    bindf(ctx, obj, "getShaderInfoLog", wgl_getShaderInfoLog, 1);
-    bindf(ctx, obj, "getShaderSource", wgl_getShaderSource, 1);
-    bindf(ctx, obj, "createProgram", wgl_createProgram, 0);
-    bindf(ctx, obj, "deleteProgram", wgl_deleteProgram, 1);
-    bindf(ctx, obj, "attachShader", wgl_attachShader, 2);
-    bindf(ctx, obj, "detachShader", wgl_detachShader, 2);
-    bindf(ctx, obj, "linkProgram", wgl_linkProgram, 1);
-    bindf(ctx, obj, "validateProgram", wgl_validateProgram, 1);
-    bindf(ctx, obj, "useProgram", wgl_useProgram, 1);
-    bindf(ctx, obj, "getProgramParameter", wgl_getProgramParameter, 2);
-    bindf(ctx, obj, "getProgramInfoLog", wgl_getProgramInfoLog, 1);
-    bindf(ctx, obj, "bindAttribLocation", wgl_bindAttribLocation, 3);
-    bindf(ctx, obj, "getAttribLocation", wgl_getAttribLocation, 2);
-    bindf(ctx, obj, "getUniformLocation", wgl_getUniformLocation, 2);
-    bindf(ctx, obj, "getActiveAttrib", wgl_getActiveAttrib, 2);
-    bindf(ctx, obj, "getShaderPrecisionFormat", wgl_getShaderPrecisionFormat, 2);
-    bindf(ctx, obj, "getActiveUniform", wgl_getActiveUniform, 2);
-
-    bindf(ctx, obj, "createBuffer", wgl_createBuffer, 0);
-    bindf(ctx, obj, "deleteBuffer", wgl_deleteBuffer, 1);
-    bindf(ctx, obj, "bindBuffer", wgl_bindBuffer, 2);
-    bindf(ctx, obj, "bufferData", wgl_bufferData, 3);
-    bindf(ctx, obj, "bufferSubData", wgl_bufferSubData, 3);
-
-    bindf(ctx, obj, "enableVertexAttribArray", wgl_enableVertexAttribArray, 1);
-    bindf(ctx, obj, "disableVertexAttribArray", wgl_disableVertexAttribArray, 1);
-    bindf(ctx, obj, "vertexAttribPointer", wgl_vertexAttribPointer, 6);
-    bindf(ctx, obj, "vertexAttrib1f", wgl_vertexAttrib1f, 2);
-    bindf(ctx, obj, "vertexAttrib2f", wgl_vertexAttrib2f, 3);
-    bindf(ctx, obj, "vertexAttrib3f", wgl_vertexAttrib3f, 4);
-    bindf(ctx, obj, "vertexAttrib4f", wgl_vertexAttrib4f, 5);
-
-    bindf(ctx, obj, "uniform1f", wgl_uniform1f, 2);
-    bindf(ctx, obj, "uniform2f", wgl_uniform2f, 3);
-    bindf(ctx, obj, "uniform3f", wgl_uniform3f, 4);
-    bindf(ctx, obj, "uniform4f", wgl_uniform4f, 5);
-    bindf(ctx, obj, "uniform1i", wgl_uniform1i, 2);
-    bindf(ctx, obj, "uniform2i", wgl_uniform2i, 3);
-    bindf(ctx, obj, "uniform3i", wgl_uniform3i, 4);
-    bindf(ctx, obj, "uniform4i", wgl_uniform4i, 5);
-    bindf(ctx, obj, "uniform1fv", wgl_uniform1fv, 2);
-    bindf(ctx, obj, "uniform2fv", wgl_uniform2fv, 2);
-    bindf(ctx, obj, "uniform3fv", wgl_uniform3fv, 2);
-    bindf(ctx, obj, "uniform4fv", wgl_uniform4fv, 2);
-    bindf(ctx, obj, "uniform1iv", wgl_uniform1iv, 2);
-    bindf(ctx, obj, "uniform2iv", wgl_uniform2iv, 2);
-    bindf(ctx, obj, "uniform3iv", wgl_uniform3iv, 2);
-    bindf(ctx, obj, "uniform4iv", wgl_uniform4iv, 2);
-    bindf(ctx, obj, "uniformMatrix2fv", wgl_uniformMatrix2fv, 3);
-    bindf(ctx, obj, "uniformMatrix3fv", wgl_uniformMatrix3fv, 3);
-    bindf(ctx, obj, "uniformMatrix4fv", wgl_uniformMatrix4fv, 3);
-
-    bindf(ctx, obj, "drawArrays", wgl_drawArrays, 3);
-    bindf(ctx, obj, "drawElements", wgl_drawElements, 4);
-
-    bindf(ctx, obj, "createTexture", wgl_createTexture, 0);
-    bindf(ctx, obj, "deleteTexture", wgl_deleteTexture, 1);
-    bindf(ctx, obj, "bindTexture", wgl_bindTexture, 2);
-    bindf(ctx, obj, "texParameteri", wgl_texParameteri, 3);
-    bindf(ctx, obj, "texParameterf", wgl_texParameterf, 3);
-    bindf(ctx, obj, "generateMipmap", wgl_generateMipmap, 1);
-    bindf(ctx, obj, "texImage2D", wgl_texImage2D, 9);
-    bindf(ctx, obj, "texSubImage2D", wgl_texSubImage2D, 9);
-
-    bindf(ctx, obj, "createFramebuffer", wgl_createFramebuffer, 0);
-    bindf(ctx, obj, "deleteFramebuffer", wgl_deleteFramebuffer, 1);
-    bindf(ctx, obj, "bindFramebuffer", wgl_bindFramebuffer, 2);
-    bindf(ctx, obj, "framebufferTexture2D", wgl_framebufferTexture2D, 5);
-    bindf(ctx, obj, "framebufferRenderbuffer", wgl_framebufferRenderbuffer, 4);
-    bindf(ctx, obj, "checkFramebufferStatus", wgl_checkFramebufferStatus, 1);
-    bindf(ctx, obj, "createRenderbuffer", wgl_createRenderbuffer, 0);
-    bindf(ctx, obj, "deleteRenderbuffer", wgl_deleteRenderbuffer, 1);
-    bindf(ctx, obj, "bindRenderbuffer", wgl_bindRenderbuffer, 2);
-    bindf(ctx, obj, "renderbufferStorage", wgl_renderbufferStorage, 4);
-    bindf(ctx, obj, "readPixels", wgl_readPixels, 7);
-
-    bindf(ctx, obj, "isBuffer", wgl_isBuffer, 1);
-    bindf(ctx, obj, "isProgram", wgl_isProgram, 1);
-    bindf(ctx, obj, "isShader", wgl_isShader, 1);
-    bindf(ctx, obj, "isTexture", wgl_isTexture, 1);
-    bindf(ctx, obj, "isFramebuffer", wgl_isFramebuffer, 1);
-    bindf(ctx, obj, "isRenderbuffer", wgl_isRenderbuffer, 1);
-    bindf(ctx, obj, "getBufferParameter", wgl_getBufferParameter, 2);
-    bindf(ctx, obj, "getTexParameter", wgl_getTexParameter, 2);
-    bindf(ctx, obj, "getRenderbufferParameter", wgl_getRenderbufferParameter, 2);
-    bindf(ctx, obj, "getFramebufferAttachmentParameter",
-          wgl_getFramebufferAttachmentParameter, 3);
-    bindf(ctx, obj, "getVertexAttrib", wgl_getVertexAttrib, 2);
-    bindf(ctx, obj, "getVertexAttribOffset", wgl_getVertexAttribOffset, 2);
-    bindf(ctx, obj, "getUniform", wgl_getUniform, 2);
-    bindf(ctx, obj, "vertexAttrib1fv", wgl_vertexAttrib1fv, 2);
-    bindf(ctx, obj, "vertexAttrib2fv", wgl_vertexAttrib2fv, 2);
-    bindf(ctx, obj, "vertexAttrib3fv", wgl_vertexAttrib3fv, 2);
-    bindf(ctx, obj, "vertexAttrib4fv", wgl_vertexAttrib4fv, 2);
-}
-
-static void
-wgl_bind_methods2(JSContext *ctx, JSValueConst obj)
-{
-    bindf(ctx, obj, "createVertexArray", wgl_createVertexArray, 0);
-    bindf(ctx, obj, "deleteVertexArray", wgl_deleteVertexArray, 1);
-    bindf(ctx, obj, "bindVertexArray", wgl_bindVertexArray, 1);
-    bindf(ctx, obj, "isVertexArray", wgl_isVertexArray, 1);
-    bindf(ctx, obj, "drawArraysInstanced", wgl_drawArraysInstanced, 4);
-    bindf(ctx, obj, "drawElementsInstanced", wgl_drawElementsInstanced, 5);
-    bindf(ctx, obj, "vertexAttribDivisor", wgl_vertexAttribDivisor, 2);
-    bindf(ctx, obj, "drawBuffers", wgl_drawBuffers, 1);
-    bindf(ctx, obj, "vertexAttribIPointer", wgl_vertexAttribIPointer, 5);
-    bindf(ctx, obj, "uniform1ui", wgl_uniform1ui, 2);
-    bindf(ctx, obj, "uniform2ui", wgl_uniform2ui, 3);
-    bindf(ctx, obj, "uniform3ui", wgl_uniform3ui, 4);
-    bindf(ctx, obj, "uniform4ui", wgl_uniform4ui, 5);
-    bindf(ctx, obj, "uniform1uiv", wgl_uniform1uiv, 2);
-    bindf(ctx, obj, "uniform2uiv", wgl_uniform2uiv, 2);
-    bindf(ctx, obj, "uniform3uiv", wgl_uniform3uiv, 2);
-    bindf(ctx, obj, "uniform4uiv", wgl_uniform4uiv, 2);
-    bindf(ctx, obj, "uniformMatrix2x3fv", wgl_uniformMatrix2x3fv, 3);
-    bindf(ctx, obj, "uniformMatrix3x2fv", wgl_uniformMatrix3x2fv, 3);
-    bindf(ctx, obj, "uniformMatrix2x4fv", wgl_uniformMatrix2x4fv, 3);
-    bindf(ctx, obj, "uniformMatrix4x2fv", wgl_uniformMatrix4x2fv, 3);
-    bindf(ctx, obj, "uniformMatrix3x4fv", wgl_uniformMatrix3x4fv, 3);
-    bindf(ctx, obj, "uniformMatrix4x3fv", wgl_uniformMatrix4x3fv, 3);
-    bindf(ctx, obj, "texStorage2D", wgl_texStorage2D, 5);
-    bindf(ctx, obj, "renderbufferStorageMultisample",
-          wgl_renderbufferStorageMultisample, 5);
-    bindf(ctx, obj, "blitFramebuffer", wgl_blitFramebuffer, 10);
-    bindf(ctx, obj, "framebufferTextureLayer", wgl_framebufferTextureLayer, 5);
-    bindf(ctx, obj, "invalidateFramebuffer", wgl_invalidateFramebuffer, 2);
-    bindf(ctx, obj, "readBuffer", wgl_readBuffer, 1);
-    bindf(ctx, obj, "copyBufferSubData", wgl_copyBufferSubData, 5);
-    bindf(ctx, obj, "getBufferSubData", wgl_getBufferSubData, 5);
-    bindf(ctx, obj, "clearBufferfv", wgl_clearBuffer_fv, 3);
-    bindf(ctx, obj, "clearBufferiv", wgl_clearBuffer_iv, 3);
-    bindf(ctx, obj, "clearBufferuiv", wgl_clearBuffer_uiv, 3);
-    bindf(ctx, obj, "clearBufferfi", wgl_clearBufferfi, 4);
-    bindf(ctx, obj, "createSampler", wgl_createSampler, 0);
-    bindf(ctx, obj, "deleteSampler", wgl_deleteSampler, 1);
-    bindf(ctx, obj, "bindSampler", wgl_bindSampler, 2);
-    bindf(ctx, obj, "samplerParameteri", wgl_samplerParameteri, 3);
-    bindf(ctx, obj, "samplerParameterf", wgl_samplerParameterf, 3);
-    bindf(ctx, obj, "isSampler", wgl_isSampler, 1);
-    bindf(ctx, obj, "getUniformBlockIndex", wgl_getUniformBlockIndex, 2);
-    bindf(ctx, obj, "uniformBlockBinding", wgl_uniformBlockBinding, 3);
-    bindf(ctx, obj, "bindBufferBase", wgl_bindBufferBase, 3);
-    bindf(ctx, obj, "bindBufferRange", wgl_bindBufferRange, 5);
-
-    bindf(ctx, obj, "copyTexImage2D", wgl_copyTexImage2D, 8);
-    bindf(ctx, obj, "copyTexSubImage2D", wgl_copyTexSubImage2D, 8);
-    bindf(ctx, obj, "copyTexSubImage3D", wgl_copyTexSubImage3D, 9);
-    bindf(ctx, obj, "drawRangeElements", wgl_drawRangeElements, 6);
-    bindf(ctx, obj, "vertexAttribI4i", wgl_vertexAttribI4i, 5);
-    bindf(ctx, obj, "vertexAttribI4ui", wgl_vertexAttribI4ui, 5);
-    bindf(ctx, obj, "vertexAttribI4iv", wgl_vertexAttribI4iv, 2);
-    bindf(ctx, obj, "vertexAttribI4uiv", wgl_vertexAttribI4uiv, 2);
-    bindf(ctx, obj, "getFragDataLocation", wgl_getFragDataLocation, 2);
-    bindf(ctx, obj, "getInternalformatParameter", wgl_getInternalformatParameter, 3);
-    bindf(ctx, obj, "texImage3D", wgl_texImage3D, 10);
-    bindf(ctx, obj, "texSubImage3D", wgl_texSubImage3D, 11);
-    bindf(ctx, obj, "texStorage3D", wgl_texStorage3D, 6);
-    bindf(ctx, obj, "createQuery", wgl_createQuery, 0);
-    bindf(ctx, obj, "deleteQuery", wgl_deleteQuery, 1);
-    bindf(ctx, obj, "isQuery", wgl_isQuery, 1);
-    bindf(ctx, obj, "beginQuery", wgl_beginQuery, 2);
-    bindf(ctx, obj, "endQuery", wgl_endQuery, 1);
-    bindf(ctx, obj, "getQuery", wgl_getQuery, 2);
-    bindf(ctx, obj, "getQueryParameter", wgl_getQueryParameter, 2);
-    bindf(ctx, obj, "createTransformFeedback", wgl_createTransformFeedback, 0);
-    bindf(ctx, obj, "deleteTransformFeedback", wgl_deleteTransformFeedback, 1);
-    bindf(ctx, obj, "isTransformFeedback", wgl_isTransformFeedback, 1);
-    bindf(ctx, obj, "bindTransformFeedback", wgl_bindTransformFeedback, 2);
-    bindf(ctx, obj, "beginTransformFeedback", wgl_beginTransformFeedback, 1);
-    bindf(ctx, obj, "endTransformFeedback", wgl_endTransformFeedback, 0);
-    bindf(ctx, obj, "pauseTransformFeedback", wgl_pauseTransformFeedback, 0);
-    bindf(ctx, obj, "resumeTransformFeedback", wgl_resumeTransformFeedback, 0);
-    bindf(ctx, obj, "transformFeedbackVaryings", wgl_transformFeedbackVaryings, 3);
-    bindf(ctx, obj, "getActiveUniforms", wgl_getActiveUniforms, 3);
-    bindf(ctx, obj, "getActiveUniformBlockParameter",
-          wgl_getActiveUniformBlockParameter, 3);
-    bindf(ctx, obj, "getActiveUniformBlockName", wgl_getActiveUniformBlockName, 2);
-    bindf(ctx, obj, "fenceSync", wgl_fenceSync, 2);
-    bindf(ctx, obj, "isSync", wgl_isSync, 1);
-    bindf(ctx, obj, "deleteSync", wgl_deleteSync, 1);
-    bindf(ctx, obj, "clientWaitSync", wgl_clientWaitSync, 3);
-    bindf(ctx, obj, "waitSync", wgl_waitSync, 3);
-    bindf(ctx, obj, "getSyncParameter", wgl_getSyncParameter, 2);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global,
+        version >= 2 ? "WebGL2RenderingContext" : "WebGLRenderingContext");
+    JS_FreeValue(ctx, global);
+    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
+                                      : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    JSValue obj = JS_IsObject(proto)
+        ? JS_NewObjectProtoClass(ctx, proto, ns_webgl_class_id)
+        : JS_NewObjectClass(ctx, ns_webgl_class_id);
+    JS_FreeValue(ctx, proto);
+    return obj;
 }
 
 JSValue
@@ -3917,7 +4489,7 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     ns_webgl *g = ns_webgl_make(ctx, js, canvas, version, attrs);
     if (!g) return JS_NULL;
 
-    JSValue obj = JS_NewObjectClass(ctx, ns_webgl_class_id);
+    JSValue obj = wgl_new_context_object(ctx, version);
     if (JS_IsException(obj)) {
         ns_webgl_free(g);
         return JS_NULL;
@@ -3925,16 +4497,7 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     JS_SetOpaque(obj, g);
     g->ctx = ctx;
     g->js_obj = obj;
-
-    JS_SetPropertyStr(ctx, obj, "canvas", JS_DupValue(ctx, canvas_obj));
-    JS_SetPropertyStr(ctx, obj, "drawingBufferWidth", JS_NewInt32(ctx, g->w));
-    JS_SetPropertyStr(ctx, obj, "drawingBufferHeight", JS_NewInt32(ctx, g->h));
-    wgl_set_constants(ctx, obj);
-    wgl_bind_methods(ctx, obj);
-    if (version >= 2) {
-        wgl_set_constants2(ctx, obj);
-        wgl_bind_methods2(ctx, obj);
-    }
+    g->canvas_obj = JS_DupValue(ctx, canvas_obj);
 
     g_hash_table_insert(g_webgl_by_node, (gpointer)canvas, g);
     return obj;
@@ -4037,9 +4600,10 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
 }
 
 void
-ns_webgl_install_constants(JSContext *ctx, JSValueConst obj, int version)
+ns_webgl_install_interface(JSContext *ctx, JSValueConst ctor, JSValueConst proto,
+                           int version)
 {
-    (void)ctx; (void)obj; (void)version;
+    (void)ctx; (void)ctor; (void)proto; (void)version;
 }
 
 cairo_surface_t *
