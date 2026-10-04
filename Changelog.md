@@ -52,6 +52,17 @@ Changelog:
     the `:active`/`:hover`/`:focus` element.
   - Media elements only send engine-issued tokens to the audio helper, and
     long chains of safe-browsing "continue" prefixes no longer recurse.
+  - Titles and URLs with invalid UTF-8 can no longer inject markup into
+    about:history. An iframe's internal realm document and window are no
+    longer reachable as properties of the iframe element, so a
+    cross-origin frame's DOM stays out of the embedding page's reach.
+  - Extension content-script natives are removed from the page even when
+    the content script fails; `DecompressionStream` output per chunk is
+    capped at 256 MiB; assigning to read-only accessors such as
+    `element.dataset` no longer crashes; error reports copy the file name
+    before running the thrown value's `toString()`; orphaned nodes are not
+    swept while page script is still on the stack, and freed nodes are
+    dropped from video-frame callbacks and the pending fullscreen target.
 * The shell and helpers trust the sandboxed renderer less: media helper
   commands with line breaks or over-long lines are refused, saved pages
   are not copied through symlinks, cursor names are limited to CSS
