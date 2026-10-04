@@ -1199,8 +1199,14 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
     case NS_PROC_EVT_DOWNLOAD:
         if (text && *text) {
             char **parts = g_strsplit(text, "\t", 2);
-            pw_start_download(pw, parts[0],
-                              parts[1] && *parts[1] ? parts[1] : NULL);
+            const char *page_url = ns_proc_view_url(v);
+            gboolean local_target =
+                g_ascii_strncasecmp(parts[0], "file:", 5) == 0;
+            gboolean local_page =
+                page_url && g_ascii_strncasecmp(page_url, "file:", 5) == 0;
+            if (!local_target || local_page)
+                pw_start_download(pw, parts[0],
+                                  parts[1] && *parts[1] ? parts[1] : NULL);
             g_strfreev(parts);
         }
         break;
