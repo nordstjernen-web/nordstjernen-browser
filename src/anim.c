@@ -958,10 +958,11 @@ anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
     if (!a || !dom || !style) return;
     if (a->now_us == 0 || g_hash_table_size(a->active) == 0) a->now_us = now_us;
     now_us = a->now_us;
+    ns_anim_state *s = g_hash_table_lookup(a->states, dom);
+    if (s && s->prev_style == style && !state_is_active(s)) return;
     ns_css_anim_list tv, av;
     ns_css_anim_effective(style, FALSE, &tv);
     ns_css_anim_effective(style, TRUE, &av);
-    ns_anim_state *s = g_hash_table_lookup(a->states, dom);
     if (!s) {
         if (tv.n == 0 && av.n == 0) {
             ns_css_anim_list_clear(&tv);
