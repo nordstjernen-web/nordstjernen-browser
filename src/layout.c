@@ -5692,20 +5692,6 @@ ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
     if (stretched) ns_pango_layout_context_changed(layout);
 }
 
-static double inline_atomic_measure_basis(const ns_box *ab);
-
-static void
-inline_layout_atomics_prepare(ns_box *box, const ns_style *parent_style)
-{
-    if (!box->inline_atomics) return;
-    for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
-        ns_box *ab =
-            g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-        if (inline_atomic_needs_layout(ab))
-            layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
-    }
-}
-
 static double
 inline_line_height(const ns_style *parent_style)
 {
@@ -6124,7 +6110,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
-    inline_layout_atomics_prepare(box, parent_style);
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
