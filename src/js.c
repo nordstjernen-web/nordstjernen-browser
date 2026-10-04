@@ -62114,10 +62114,12 @@ ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
 {
     if (!js || !js->ctx || js->in_error_report) return FALSE;
     if (js->worker_host) return ns_worker_report_exception(js, ex);
+    char *file = g_strdup(filename);
     char *message = ns_js_exception_message(js->ctx, ex);
-    gboolean prevented = ns_js_report_error_event(js, message, filename,
+    gboolean prevented = ns_js_report_error_event(js, message, file,
                                                   lineno, colno, ex);
     g_free(message);
+    g_free(file);
     return prevented;
 }
 
