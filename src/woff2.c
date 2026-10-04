@@ -1,4 +1,4 @@
-/* Nordstjernen — WOFF2 web font decoder: Brotli stream, glyf/loca and hmtx transforms. */
+/* Nordstjernen: WOFF2 web font decoder: Brotli stream, glyf/loca and hmtx transforms. */
 
 #include "woff2.h"
 
