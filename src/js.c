@@ -50098,6 +50098,10 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     *out_window = JS_NULL;
     *out_location = JS_NULL;
     *out_history = JS_NULL;
+    g_autofree char *initial_url_copy = g_strdup(initial_url);
+    g_autofree char *doc_url_copy = g_strdup(doc_url);
+    initial_url = initial_url_copy;
+    doc_url = doc_url_copy;
     JSContext *fctx = reuse;
     if (!fctx) {
         fctx = JS_NewContext(js->rt);
@@ -50347,8 +50351,12 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
     }
     gboolean is_xml = (doc->flags & NS_NODE_XML_DOC) != 0;
     const char *mime = is_xml ? "application/xml" : "text/html";
-    JSValue cd = ns_make_realm_document(ctx, doc, url, cs, mime, is_xml, FALSE);
-    ns_frame_document_show_url(ctx, cd, shown);
+    g_autofree char *url_copy = g_strdup(url);
+    g_autofree char *cs_copy = g_strdup(cs);
+    g_autofree char *shown_copy = g_strdup(shown);
+    JSValue cd = ns_make_realm_document(ctx, doc, url_copy, cs_copy, mime,
+                                        is_xml, FALSE);
+    ns_frame_document_show_url(ctx, cd, shown_copy);
     if (JS_IsObject(cd))
         JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
