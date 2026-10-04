@@ -21,6 +21,8 @@
 #define ns_pango_attr_insert_hyphens_new                  pango_attr_insert_hyphens_new
 #define ns_pango_attr_language_new                        pango_attr_language_new
 #define ns_pango_attr_letter_spacing_new                  pango_attr_letter_spacing_new
+#define ns_pango_attr_line_height_new_absolute            pango_attr_line_height_new_absolute
+#define ns_pango_attr_list_copy                           pango_attr_list_copy
 #define ns_pango_attr_list_insert                         pango_attr_list_insert
 #define ns_pango_attr_list_new                            pango_attr_list_new
 #define ns_pango_attr_list_unref                          pango_attr_list_unref
@@ -92,6 +94,7 @@
 #define ns_pango_layout_get_pixel_extents                 pango_layout_get_pixel_extents
 #define ns_pango_layout_get_pixel_size                    pango_layout_get_pixel_size
 #define ns_pango_layout_get_size                          pango_layout_get_size
+#define ns_pango_layout_get_text                          pango_layout_get_text
 #define ns_pango_layout_get_width                         pango_layout_get_width
 #define ns_pango_layout_index_to_line_x                   pango_layout_index_to_line_x
 #define ns_pango_layout_index_to_pos                      pango_layout_index_to_pos
@@ -112,7 +115,6 @@
 #define ns_pango_layout_set_height                        pango_layout_set_height
 #define ns_pango_layout_set_indent                        pango_layout_set_indent
 #define ns_pango_layout_set_justify                       pango_layout_set_justify
-#define ns_pango_layout_set_line_spacing                  pango_layout_set_line_spacing
 #define ns_pango_layout_set_tabs                          pango_layout_set_tabs
 #define ns_pango_layout_set_text                          pango_layout_set_text
 #define ns_pango_layout_set_width                         pango_layout_set_width
