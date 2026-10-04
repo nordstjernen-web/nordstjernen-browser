@@ -18227,10 +18227,13 @@ ns_css_sizes_resolve(const char *sizes)
 
 static gboolean supports_expr(const char **pp, const char *end, int depth);
 
+static __thread int g_supports_parse_depth;
+
 gboolean
 ns_css_supports_declaration(const char *property, const char *value)
 {
-    if (!property || !value) return FALSE;
+    if (!property || !value || g_supports_parse_depth >= NS_CSS_MAX_AT_NESTING)
+        return FALSE;
     char *property_copy = g_strdup(property);
     char *value_copy = g_strdup(value);
     property = g_strstrip(property_copy);
@@ -18253,7 +18256,9 @@ ns_css_supports_declaration(const char *property, const char *value)
         return FALSE;
     }
     char *css = g_strdup_printf("x{%s:%s}", property, value);
+    g_supports_parse_depth++;
     ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, -1);
+    g_supports_parse_depth--;
     g_free(css);
     gboolean ok = FALSE;
     if (sh && sh->rules && sh->rules->len > 0) {
