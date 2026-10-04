@@ -597,6 +597,8 @@ decode_vorbis(const unsigned char *bytes, size_t n,
         long got = ov_read_float(&vf, &chans, 4096, &bitstream);
         if (got == 0) break;
         if (got < 0) continue;
+        vorbis_info *link = ov_info(&vf, bitstream);
+        if (!link || link->channels != ch) continue;
         size_t add = (size_t)got * (size_t)ch;
         if (len + add > cap) {
             size_t want = cap ? cap : (size_t)rate * (size_t)ch;
