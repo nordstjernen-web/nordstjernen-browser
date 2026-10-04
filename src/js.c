@@ -22758,6 +22758,7 @@ ns_blob_entry_free(gpointer p)
 }
 
 static GPtrArray *g_blob_js_registry = NULL;
+static GMutex     g_blob_js_registry_lock;
 
 static ns_blob_entry *
 ns_blob_entry_new_for_object(JSContext *ctx, JSValueConst obj)
@@ -22783,36 +22784,56 @@ ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
 {
     (void)user_data;
     if (out_type) *out_type = NULL;
-    if (!g_blob_js_registry || !url) return NULL;
-    for (guint i = 0; i < g_blob_js_registry->len; i++) {
+    if (!url) return NULL;
+    GBytes *found = NULL;
+    g_mutex_lock(&g_blob_js_registry_lock);
+    for (guint i = 0; g_blob_js_registry && i < g_blob_js_registry->len; i++) {
         ns_js *js = g_ptr_array_index(g_blob_js_registry, i);
         if (!js || !js->blob_urls) continue;
         ns_blob_entry *e = g_hash_table_lookup(js->blob_urls, url);
         if (e) {
             if (out_type) *out_type = e->type ? g_strdup(e->type) : NULL;
-            return e->bytes ? g_bytes_ref(e->bytes) : NULL;
+            found = e->bytes ? g_bytes_ref(e->bytes) : NULL;
+            break;
         }
     }
-    return NULL;
+    g_mutex_unlock(&g_blob_js_registry_lock);
+    return found;
 }
 
 static void
 ns_js_blob_registry_add(ns_js *js)
 {
     if (!js) return;
-    if (!g_blob_js_registry) {
+    g_mutex_lock(&g_blob_js_registry_lock);
+    gboolean install = !g_blob_js_registry;
+    if (install)
         g_blob_js_registry = g_ptr_array_new();
-        ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
-    }
     if (!g_ptr_array_find(g_blob_js_registry, js, NULL))
         g_ptr_array_add(g_blob_js_registry, js);
+    g_mutex_unlock(&g_blob_js_registry_lock);
+    if (install)
+        ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
 }
 
 static void
 ns_js_blob_registry_remove(ns_js *js)
 {
+    g_mutex_lock(&g_blob_js_registry_lock);
     if (g_blob_js_registry && js)
         g_ptr_array_remove_fast(g_blob_js_registry, js);
+    g_mutex_unlock(&g_blob_js_registry_lock);
+}
+
+static void
+ns_js_blob_urls_put(ns_js *js, const char *url, ns_blob_entry *entry)
+{
+    g_mutex_lock(&g_blob_js_registry_lock);
+    if (!js->blob_urls)
+        js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, ns_blob_entry_free);
+    g_hash_table_replace(js->blob_urls, g_strdup(url), entry);
+    g_mutex_unlock(&g_blob_js_registry_lock);
 }
 
 static JSValue
@@ -22829,13 +22850,8 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
     g_free(origin);
     g_free(uuid);
 
-    if (js && argc >= 1 && JS_IsObject(argv[0])) {
-        if (!js->blob_urls)
-            js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                  g_free, ns_blob_entry_free);
-        g_hash_table_replace(js->blob_urls, g_strdup(url),
-                             ns_blob_entry_new_for_object(ctx, argv[0]));
-    }
+    if (js && argc >= 1 && JS_IsObject(argv[0]))
+        ns_js_blob_urls_put(js, url, ns_blob_entry_new_for_object(ctx, argv[0]));
     JSValue ret = JS_NewString(ctx, url);
     g_free(url);
     return ret;
@@ -22855,11 +22871,7 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, url);
         return JS_FALSE;
     }
-    if (!js->blob_urls)
-        js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                              g_free, ns_blob_entry_free);
-    g_hash_table_replace(js->blob_urls, g_strdup(url),
-                         ns_blob_entry_new_for_object(ctx, argv[1]));
+    ns_js_blob_urls_put(js, url, ns_blob_entry_new_for_object(ctx, argv[1]));
     js->mutated = TRUE;
     JS_FreeCString(ctx, url);
     return JS_TRUE;
@@ -22874,7 +22886,9 @@ ns_window_url_revoke_object(JSContext *ctx, JSValueConst this_val,
     if (js && js->blob_urls && argc >= 1) {
         const char *url = JS_ToCString(ctx, argv[0]);
         if (url) {
+            g_mutex_lock(&g_blob_js_registry_lock);
             g_hash_table_remove(js->blob_urls, url);
+            g_mutex_unlock(&g_blob_js_registry_lock);
             JS_FreeCString(ctx, url);
         }
     }
