@@ -63055,7 +63055,7 @@ static void
 ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
 {
     if (!js || !n || ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
-    const char *src = ns_element_get_attr(n, "src");
+    g_autofree char *src = g_strdup(ns_element_get_attr(n, "src"));
     ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
     if (!src && ns_script_source_is_empty(n)) {
         n->flags |= NS_NODE_NOT_PARSER_INSERTED;
@@ -63064,7 +63064,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     }
     if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n))
         return;
-    const char *nonce = ns_element_get_attr(n, "nonce");
+    g_autofree char *nonce = g_strdup(ns_element_get_attr(n, "nonce"));
     const char *integrity = ns_element_get_attr(n, "integrity");
     gboolean is_module = ns_script_type_is_module(n);
     if (src && !*src) {
