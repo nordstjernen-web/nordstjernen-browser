@@ -148,6 +148,7 @@ typedef struct ns_box {
     gboolean has_flex_main;
     gboolean is_rendered_legend;
     gboolean inline_split_tail;
+    double margin_top_through;
     double paint_top, paint_bottom;
     ns_edges margin, padding, border;
 

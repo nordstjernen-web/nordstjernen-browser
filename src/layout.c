@@ -7104,6 +7104,9 @@ box_establishes_bfc(const ns_box *box)
         style_is_flex_container(box->style) ||
         style_is_grid_container(box->style))
         return TRUE;
+    if (style_is_flex_container(box->parent->style) ||
+        style_is_grid_container(box->parent->style))
+        return TRUE;
     if (box->is_rendered_legend ||
         ns_node_is_element_named(box->dom, "fieldset"))
         return TRUE;
@@ -7244,6 +7247,13 @@ floats_advance_to_readable_width(const GArray *floats, double cw,
         moved = TRUE;
     }
 }
+
+typedef struct margin_above {
+    const ns_box *box;
+    double collapsed;
+} margin_above;
+
+static __thread margin_above g_margin_above;
 
 typedef struct inherited_floats {
     const ns_box *box;
@@ -12602,6 +12612,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     inline_runs_join_splits(box);
     edges_from_style(box->style, parent_content_width,
                      &box->margin, &box->padding, &box->border);
+    box->margin_top_through = 0;
 
     const ns_css_value *wv  = box->style ? box->style->values[NS_CSS_WIDTH]     : NULL;
     const ns_css_value *mxw = box->style ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
@@ -12771,6 +12782,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     }
     double cursor_y = inner_y;
     double prev_margin_bottom = 0;
+    double top_through = 0;
+    double outer_margin = g_margin_above.box == box ? g_margin_above.collapsed
+                                                    : box->margin.top;
     gboolean collapse_top_with_parent =
         box->padding.top == 0 && box->border.top == 0 &&
         !box_establishes_bfc(box);
@@ -12964,9 +12978,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                              &c->margin, &c->padding, &c->border);
             double mt = c->margin.top;
             double gap = collapsed_margin(mt, prev_margin_bottom);
-            if (collapse_top_with_parent && cursor_y == inner_y) {
-                gap = collapsed_margin(box->margin.top, gap) - box->margin.top;
+            double c_margin_above = gap;
+            gboolean collapses_through_top =
+                collapse_top_with_parent && cursor_y == inner_y;
+            if (collapses_through_top) {
+                c_margin_above = collapsed_margin(outer_margin, gap);
+                gap = c_margin_above - outer_margin;
                 floats_shift_placed(floats, gap);
+                top_through = gap;
             }
             cursor_y += gap;
             if (clr) {
@@ -12987,10 +13006,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->x = inner_x + left_off;
             c->y = cursor_y - mt;
             inherited_floats outer_floats = g_inherited_floats;
+            margin_above outer_above = g_margin_above;
             if (lines_wrap_floats)
                 g_inherited_floats = (inherited_floats){ c, floats, inner_x, cw };
+            g_margin_above = (margin_above){ c, c_margin_above };
             layout_box(c, cw_avail, child_inherited);
             g_inherited_floats = outer_floats;
+            g_margin_above = outer_above;
             if (box_establishes_bfc(c) && cw_avail > 0) {
                 double span_l = 0, span_r = 0;
                 double c_h = c->content_height +
@@ -13027,10 +13049,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             collect_escaping_floats(c, floats, 0);
             if (empty_block_collapses_through(c, clr)) {
                 cursor_y -= gap;
+                if (collapses_through_top) top_through = 0;
                 prev_margin_bottom = collapsed_margin(
                     collapsed_margin(prev_margin_bottom, mt),
                     c->margin.bottom);
             } else {
+                cursor_y += c->margin_top_through;
+                if (collapses_through_top) top_through += c->margin_top_through;
                 cursor_y += c->content_height +
                             c->padding.top + c->padding.bottom +
                             c->border.top + c->border.bottom;
@@ -13090,6 +13115,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             else if ((keyword_is(ta, "right") || keyword_is(ta, "end") || self_right) && outer < cw)
                 shift_box_tree(c, inner_x + (cw - outer) - c->x, 0);
         }
+    }
+    if (top_through != 0) {
+        box->margin.top += top_through;
+        box->margin_top_through = top_through;
+        inner_y += top_through;
     }
     if (collapse_bottom_with_parent) {
         box->margin.bottom = collapsed_margin(box->margin.bottom,
