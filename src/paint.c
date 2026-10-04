@@ -3996,19 +3996,20 @@ ns_paint_inline_word_range(const ns_box *b, gsize byte,
     int n_attrs = 0;
     const NsPangoLogAttr *attrs =
         ns_pango_layout_get_log_attrs_readonly(layout, &n_attrs);
+    const char *text = ns_pango_layout_get_text(layout);
     gboolean ok = FALSE;
-    if (attrs && n_attrs > 1) {
-        long here = g_utf8_pointer_to_offset(b->text, b->text + byte);
+    if (attrs && n_attrs > 1 && text && strlen(text) == tlen) {
+        long here = g_utf8_pointer_to_offset(text, text + byte);
         if (here < 0) here = 0;
         if (here > n_attrs - 1) here = n_attrs - 1;
         int s = (int)here, e = (int)here;
         while (s > 0 && !attrs[s].is_word_start) s--;
         while (e < n_attrs - 1 && !attrs[e].is_word_end) e++;
         if (e > s) {
-            const char *sp = g_utf8_offset_to_pointer(b->text, s);
-            const char *ep = g_utf8_offset_to_pointer(b->text, e);
-            if (out_start) *out_start = (gsize)(sp - b->text);
-            if (out_end)   *out_end   = (gsize)(ep - b->text);
+            const char *sp = g_utf8_offset_to_pointer(text, s);
+            const char *ep = g_utf8_offset_to_pointer(text, e);
+            if (out_start) *out_start = (gsize)(sp - text);
+            if (out_end)   *out_end   = (gsize)(ep - text);
             ok = TRUE;
         }
     }
