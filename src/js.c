@@ -48831,34 +48831,6 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     return root;
 }
 
-static JSValue
-ns_js_doc_enter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
-    if (!js->doc_stack)
-        js->doc_stack = g_array_new(FALSE, FALSE, sizeof(gpointer));
-    gpointer prev = js->current_doc;
-    g_array_append_val(js->doc_stack, prev);
-    ns_node *root = (argc >= 1) ? ns_unwrap_element_mut(argv[0]) : NULL;
-    if (root) js->current_doc = root;
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    if (js && js->doc_stack && js->doc_stack->len > 0) {
-        js->current_doc = g_array_index(js->doc_stack, gpointer,
-                                        js->doc_stack->len - 1);
-        g_array_set_size(js->doc_stack, js->doc_stack->len - 1);
-    }
-    return JS_UNDEFINED;
-}
-
 static const char ns_iframe_scope_bootstrap[] =
     "(function(realWin, iframeDoc, initialURL, sandbox, docURL){"
     "  var url = initialURL || 'about:blank';"
@@ -56964,8 +56936,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptPointer",        ns_wpt_pointer,                   6);
     ns_bind_fn(ctx, global, "__nsWptKey",            ns_wpt_key,                       4);
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
-    ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
-    ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
@@ -61867,10 +61837,6 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->resize_observers, TRUE);
         js->resize_observers = NULL;
-    }
-    if (js->doc_stack) {
-        g_array_free(js->doc_stack, TRUE);
-        js->doc_stack = NULL;
     }
     if (js->ce_registry) {
         g_hash_table_destroy(js->ce_registry);
