@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* The title bar always shows the browser name. "Nordstjernen Browser" sits
+  centred in the window, moves to the right edge once the tabs reach the
+  middle, and shortens to "Nordstjernen" when the full name no longer fits.
+* The Nordstjernen "N" logo is back at the right end of the toolbar; clicking
+  it opens nordstjernen.org.
 
 1.0.28:
 ======

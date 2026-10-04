@@ -3,6 +3,7 @@
 #include "procwindow.h"
 #include <glib/gstdio.h>
 #include "procview.h"
+#include "titlerow.h"
 #include "i18n.h"
 #include "rproc_http.h"
 #include "rproc_inproc.h"
@@ -152,7 +153,18 @@ install_chrome_css(void)
         "  background: @ns_strip;"
         "}"
         "headerbar > windowhandle { min-height: 42px; }"
-        "headerbar > windowhandle > box { padding: 0 8px; }"
+        "headerbar > windowhandle > box { padding: 0 8px; border-spacing: 0; }"
+        "headerbar > windowhandle > box > box.start,"
+        "headerbar > windowhandle > box > box.end { margin: 0; }"
+        ".ns-brand-title {"
+        "  font-size: 13px;"
+        "  font-weight: bold;"
+        "  letter-spacing: 0.02em;"
+        "  color: alpha(currentColor, 0.72);"
+        "}"
+        "headerbar:backdrop .ns-brand-title {"
+        "  color: alpha(currentColor, 0.5);"
+        "}"
         "headerbar windowcontrols button {"
         "  min-width: 24px;"
         "  min-height: 24px;"
@@ -267,6 +279,10 @@ install_chrome_css(void)
         ".ns-toolbar menubutton.ns-nav-button > button:active,"
         ".ns-toolbar menubutton.ns-nav-button > button:checked {"
         "  background-color: alpha(currentColor, 0.14);"
+        "}"
+        ".ns-toolbar button.ns-nav-button.ns-logo {"
+        "  margin-left: 4px;"
+        "  -gtk-icon-size: 22px;"
         "}"
         ".ns-toolbar button.ns-nav-button:disabled {"
         "  background: none;"
@@ -1474,6 +1490,15 @@ on_home_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+on_logo_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    NsProcView *v = current_view(ud);
+    if (v)
+        ns_proc_view_load(v, "https://nordstjernen.org");
+}
+
+static void
 on_address_icon_press(GtkEntry *entry, GtkEntryIconPosition pos, gpointer ud)
 {
     (void)entry;
@@ -2372,10 +2397,9 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_add_controller(pw->window, winkeys);
 
     pw->header = gtk_header_bar_new();
-    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(pw->header), TRUE);
+    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(pw->header), FALSE);
     pw->tabstrip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_add_css_class(pw->tabstrip, "ns-tabstrip");
-    gtk_widget_set_hexpand(pw->tabstrip, TRUE);
     pw->newtab_btn =
         gtk_button_new_from_icon_name("nordstjernen-new-tab-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);
@@ -2388,9 +2412,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
     if (ns_rproc_single_process_enabled())
         gtk_widget_set_visible(pw->newtab_btn, FALSE);
-    gtk_header_bar_pack_start(GTK_HEADER_BAR(pw->header), pw->tabstrip);
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(pw->header),
-                                    gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+                                    ns_title_row_new(pw->tabstrip));
     gtk_window_set_titlebar(GTK_WINDOW(pw->window), pw->header);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -2512,6 +2535,11 @@ proc_window_new(GtkApplication *app, const char *home_url)
     set_accessible_label(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
 
+    GtkWidget *logo = toolbar_button("nordstjernen",
+                                     ns_i18n("Visit nordstjernen.org"),
+                                     G_CALLBACK(on_logo_clicked), pw);
+    gtk_widget_add_css_class(logo, "ns-logo");
+
     gtk_box_append(GTK_BOX(pw->toolbar), pw->back);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->forward);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->reload);
@@ -2521,6 +2549,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(pw->toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(pw->toolbar), downloads);
     gtk_box_append(GTK_BOX(pw->toolbar), menu_button);
+    gtk_box_append(GTK_BOX(pw->toolbar), logo);
     gtk_box_append(GTK_BOX(vbox), pw->toolbar);
 
     pw->notebook = gtk_notebook_new();
