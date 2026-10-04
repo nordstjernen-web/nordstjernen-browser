@@ -4,7 +4,7 @@
 (musl) with `abuild`. It produces a minimal package: the `nordstjernen`,
 `nordstjernen-renderer`, `nordstjernen-audio` and `nordstjernen-video`
 binaries plus icons, the desktop file, the
-i18n catalogues and the license — **nothing is bundled**. Every runtime
+i18n catalogues and the license texts — **nothing is bundled**. Every runtime
 library (GTK 4, libcurl, OpenSSL, libwebp, libavif, FFmpeg, poppler-glib, …)
 is resolved from Alpine system packages, and `abuild`'s `tracedeps` derives
 the `depends=` automatically from the linked shared objects, so the
@@ -20,19 +20,25 @@ GitHub names the archive root after the repository, so the tarball unpacks
 to `nordstjernen-browser-$pkgver` rather than `$pkgname-$pkgver`; the
 APKBUILD sets `builddir` accordingly.
 
-## License — important
+## License
 
-Nordstjernen is released under the **Nordstjernen Source License v1.0**
-(`License.md`), a Functional-Source-License-style *source-available*
-license with a "Competing Use" restriction (it converts to MIT only on
-the tenth anniversary of each release). This is **not** an OSI-approved
-or free-software license.
+Nordstjernen is **dual-licensed**: each recipient may take it under
+**either** the **Nordstjernen Source License v1.0** (`License.md`) **or**
+the **GNU General Public License version 3** (`COPYING`), at their
+option. The APKBUILD declares this as
+`license="LicenseRef-NSL-1.0 OR GPL-3.0-only"` and installs both texts to
+`/usr/share/licenses/$pkgname/`.
 
-Alpine's official `aports` (main/community/testing) require free /
-OSI-approved licenses, so Nordstjernen **cannot be accepted into the
-official Alpine repositories as-is**. This APKBUILD is therefore intended
-for a **personal / custom Alpine repository**. Official inclusion would
-require relicensing the project under an OSI-approved license first.
+NSL-1.0 on its own is a Functional-Source-License-style
+*source-available* license with a "Competing Use" restriction and is not
+OSI-approved. The GPL-3.0 is, so the package is free software under that
+option, and the bundled third-party code (see `THIRD-PARTY-LICENSES.md`)
+keeps its own GPL-3-compatible licenses. Alpine's official `aports`
+(main/community/testing) require free / OSI-approved licenses; the
+GPL-3.0 option meets that, so Nordstjernen can be proposed for `aports`
+through the normal merge-request review (see below). Until it is
+accepted, the same APKBUILD builds for a **personal / custom Alpine
+repository**.
 
 ## Build and install locally (custom repo)
 
@@ -68,15 +74,17 @@ The `source=` URL points at the GitHub release tarball
 auto-generated archive checksums are not guaranteed stable forever; if a
 checksum mismatch appears, re-run `abuild checksum`.
 
-## Submitting to official aports (only after relicensing)
+## Submitting to official aports
 
-If the project is relicensed under an OSI-approved license, the steps to
-propose it for `aports` would be:
+To propose it for `aports`:
 
 1. Fork <https://gitlab.alpinelinux.org/alpine/aports>.
-2. Add the APKBUILD under `community/nordstjernen/APKBUILD` (new packages
+2. Add the APKBUILD under `testing/nordstjernen/APKBUILD` (new packages
    start in `testing/`, then move to `community/` after review).
-3. Replace `license="custom"` with the correct SPDX identifier.
+3. Keep `license="LicenseRef-NSL-1.0 OR GPL-3.0-only"` and the
+   `package()` lines that install `License.md` and `COPYING` under
+   `/usr/share/licenses/$pkgname/`, and say in the merge request that the
+   package is distributed under the GPL-3.0 option.
 4. Verify it builds in a clean chroot with `abuild rootbld` and passes
    `apkbuild-lint` / `apkbuild-shellcheck`.
 5. Commit with the message `testing/nordstjernen: new aport` and open a
