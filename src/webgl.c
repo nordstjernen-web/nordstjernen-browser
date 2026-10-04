@@ -3630,11 +3630,14 @@ static JSValue
 wgl_clientWaitSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLbitfield flags = (GLbitfield)argi(ctx, argc, argv, 1);
+    double timeout = argd(ctx, argc, argv, 2);
+    GLuint64 ns = !(timeout > 0) ? 0
+                : timeout >= 18446744073709551616.0 ? UINT64_MAX
+                : (GLuint64)timeout;
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (!s) return JS_NewInt32(ctx, (int)GL_WAIT_FAILED);
-    double timeout = argd(ctx, argc, argv, 2);
-    GLenum r = glClientWaitSync(s, (GLbitfield)argi(ctx, argc, argv, 1),
-                                (GLuint64)timeout);
+    GLenum r = glClientWaitSync(s, flags, ns);
     return JS_NewInt32(ctx, (int)r);
 }
 
@@ -3642,9 +3645,10 @@ static JSValue
 wgl_waitSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLbitfield flags = (GLbitfield)argi(ctx, argc, argv, 1);
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (s)
-        glWaitSync(s, (GLbitfield)argi(ctx, argc, argv, 1), GL_TIMEOUT_IGNORED);
+        glWaitSync(s, flags, GL_TIMEOUT_IGNORED);
     return JS_UNDEFINED;
 }
 
@@ -3652,11 +3656,12 @@ static JSValue
 wgl_getSyncParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (!s) return JS_NULL;
     GLint v = 0;
     GLsizei len = 0;
-    glGetSynciv(s, (GLenum)argi(ctx, argc, argv, 1), 1, &len, &v);
+    glGetSynciv(s, pname, 1, &len, &v);
     return JS_NewInt32(ctx, v);
 }
 
