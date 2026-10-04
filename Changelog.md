@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* Loading a frame no longer measures the whole JavaScript heap. The frame's
+  `performance` object needs to know whether the parent has
+  `performance.memory`, and reading it to find out walked every object of
+  the runtime.
 * Event dispatch no longer walks every listener of the page after each
   target it visits to clear out removed listeners when none was removed.
 * Dispatching an event no longer searches the document. Looking up the
