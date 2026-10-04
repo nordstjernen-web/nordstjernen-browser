@@ -10998,6 +10998,29 @@ grid_extend_with_auto_tracks(ns_css_tracks *tracks, int from, int to,
     if (to > from) tracks->n = to;
 }
 
+static double
+box_inset_definite_height(const ns_box *box)
+{
+    if (!box->style || !style_is_absolute_or_fixed(box->style) ||
+        box->content_height <= 0)
+        return -1;
+    const ns_css_value *top = box->style->values[NS_CSS_TOP];
+    const ns_css_value *bottom = box->style->values[NS_CSS_BOTTOM];
+    if (!top || length_is_auto(top) || !bottom || length_is_auto(bottom))
+        return -1;
+    return box->content_height;
+}
+
+static double
+grid_row_basis(const ns_box *box, double cw)
+{
+    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        return clamp_height_minmax_px(box->style,
+                                      resolve_used_height(box, hv, cw, -1));
+    return box_inset_definite_height(box);
+}
+
 static void
 layout_grid(ns_box *box, double cw,
             double inner_x, double inner_y,
@@ -11025,12 +11048,7 @@ layout_grid(ns_box *box, double cw,
 
     double col_gap = gap_px(box->style ? box->style->values[NS_CSS_COLUMN_GAP] : NULL,
                             box->style ? box->style->values[NS_CSS_GAP] : NULL, cw);
-    const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
-    double row_basis = (hv_box && (hv_box->kind == NS_CSS_V_LENGTH ||
-                                   hv_box->kind == NS_CSS_V_CALC))
-        ? clamp_height_minmax_px(box->style,
-                                 resolve_used_height(box, hv_box, cw, -1))
-        : -1;
+    double row_basis = grid_row_basis(box, cw);
     double row_gap = gap_px(
         box->style ? box->style->values[NS_CSS_ROW_GAP] : NULL,
         box->style ? box->style->values[NS_CSS_GAP] : NULL,
