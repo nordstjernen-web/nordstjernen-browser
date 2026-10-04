@@ -23808,10 +23808,21 @@ static __thread struct {
     char *value;
 } g_inline_get_memo[INLINE_GET_MEMO];
 static __thread guint g_inline_get_next;
+static __thread double g_inline_get_vw, g_inline_get_vh;
 
 static gboolean
 inline_get_memo_hit(const char *style, const char *prop, char **out)
 {
+    if (g_inline_get_vw != g_viewport_w || g_inline_get_vh != g_viewport_h) {
+        for (guint i = 0; i < INLINE_GET_MEMO; i++) {
+            g_clear_pointer(&g_inline_get_memo[i].style, g_free);
+            g_clear_pointer(&g_inline_get_memo[i].prop, g_free);
+            g_clear_pointer(&g_inline_get_memo[i].value, g_free);
+        }
+        g_inline_get_vw = g_viewport_w;
+        g_inline_get_vh = g_viewport_h;
+        return FALSE;
+    }
     for (guint i = 0; i < INLINE_GET_MEMO; i++)
         if (g_inline_get_memo[i].style &&
             strcmp(g_inline_get_memo[i].prop, prop) == 0 &&
@@ -24007,10 +24018,21 @@ static __thread struct {
     char *out;
 } g_inline_serialize_memo[INLINE_SERIALIZE_MEMO];
 static __thread guint g_inline_serialize_next;
+static __thread double g_inline_serialize_vw, g_inline_serialize_vh;
 
 static char *
 inline_serialize_memo_hit(const char *key)
 {
+    if (g_inline_serialize_vw != g_viewport_w ||
+        g_inline_serialize_vh != g_viewport_h) {
+        for (guint i = 0; i < INLINE_SERIALIZE_MEMO; i++) {
+            g_clear_pointer(&g_inline_serialize_memo[i].in, g_free);
+            g_clear_pointer(&g_inline_serialize_memo[i].out, g_free);
+        }
+        g_inline_serialize_vw = g_viewport_w;
+        g_inline_serialize_vh = g_viewport_h;
+        return NULL;
+    }
     for (guint i = 0; i < INLINE_SERIALIZE_MEMO; i++)
         if (g_inline_serialize_memo[i].in &&
             strcmp(g_inline_serialize_memo[i].in, key) == 0)
@@ -24939,6 +24961,8 @@ ns_style_free(ns_style *s)
     ns_style_free(s->marker);
     ns_style_free(s->backdrop);
     ns_style_free(s->file_selector_button);
+    ns_style_free(s->hidden_before);
+    ns_style_free(s->hidden_after);
     if (s->vars) ns_var_map_unref(s->vars);
     if (g_style_pool_n < (int)G_N_ELEMENTS(g_style_pool))
         g_style_pool[g_style_pool_n++] = s;
@@ -29758,6 +29782,8 @@ ns_style_clone_shared(const ns_style *s)
     c->backdrop     = ns_style_clone_shared(s->backdrop);
     c->file_selector_button = ns_style_clone_shared(
         s->file_selector_button);
+    c->hidden_before = ns_style_clone_shared(s->hidden_before);
+    c->hidden_after  = ns_style_clone_shared(s->hidden_after);
     c->vars = ns_style_vars_clone(s->vars);
     return c;
 }
@@ -30411,9 +30437,12 @@ cascade_walk(ns_node *node,
                 compute_registered_vars(ps, s, *root_px);
                 gboolean keep = TRUE;
                 if (pe == NS_CSS_PE_BEFORE || pe == NS_CSS_PE_AFTER)
-                    keep = ps->values[NS_CSS_CONTENT] != NULL &&
-                           !ns_display_is_none(ns_css_display_of(ps));
-                if (keep) {
+                    keep = ps->values[NS_CSS_CONTENT] != NULL;
+                if (keep && (pe == NS_CSS_PE_BEFORE || pe == NS_CSS_PE_AFTER) &&
+                    ns_display_is_none(ns_css_display_of(ps))) {
+                    if (pe == NS_CSS_PE_BEFORE) s->hidden_before = ps;
+                    else                        s->hidden_after  = ps;
+                } else if (keep) {
                     if (pe == NS_CSS_PE_BEFORE)            s->before       = ps;
                     else if (pe == NS_CSS_PE_AFTER)        s->after        = ps;
                     else if (pe == NS_CSS_PE_FIRST_LETTER) s->first_letter = ps;

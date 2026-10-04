@@ -1010,6 +1010,8 @@ typedef struct ns_style {
     struct ns_style *marker;
     struct ns_style *backdrop;
     struct ns_style *file_selector_button;
+    struct ns_style *hidden_before;
+    struct ns_style *hidden_after;
     guint64 share_id;
     int   ref;
     guint32 currentcolor_bits;

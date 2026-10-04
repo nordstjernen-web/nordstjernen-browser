@@ -30,7 +30,9 @@ ns_css_set_device_size(double w, double h)
 void
 ns_css_set_device_pixel_ratio(double dppx)
 {
-    if (dppx > 0 && isfinite(dppx)) g_mq_dppx = dppx;
+    if (!(dppx > 0 && isfinite(dppx)) || dppx == g_mq_dppx) return;
+    g_mq_dppx = dppx;
+    ns_css_stylesheet_cache_drop();
 }
 
 double
