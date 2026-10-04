@@ -231,7 +231,7 @@ first four (it must spawn renderer subprocesses):
 
 `ProcessDynamicCodePolicy` (no writable-executable memory) is not
 applied. The renderer legitimately needs executable memory: the GPU
-driver behind WebGL compiles shaders, and a `js_engine=v8` build JITs.
+driver behind WebGL compiles shaders.
 Earlier releases listed it here, but the call passed policy 7, which is
 `ProcessControlFlowGuardPolicy` and cannot be enabled after start, and
 the "ASLR" call passed policy 0, `ProcessDEPPolicy`, which is always on

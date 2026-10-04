@@ -1,7 +1,7 @@
 # QuickJS or quickjs-ng
 
-The QuickJS binding (`-Djs_engine=quickjs`, the default) runs on one of two
-QuickJS engines, picked at configure time with the `quickjs` option:
+The JavaScript binding runs on one of two QuickJS engines, picked at configure
+time with the `quickjs` option:
 
 ```sh
 meson setup builddir                          # default: in-tree quickjs-ng fork
@@ -10,8 +10,7 @@ meson setup builddir -Dquickjs=quickjs        # Fabrice Bellard's original Quick
 ```
 
 An existing build directory switches with
-`meson configure builddir -Dquickjs=quickjs`. The option is ignored by
-`-Djs_engine=v8`.
+`meson configure builddir -Dquickjs=quickjs`.
 
 | | `quickjs-ng` (default) | `quickjs` |
 |---|---|---|
