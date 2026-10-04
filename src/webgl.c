@@ -226,6 +226,7 @@ wgl_readback_buffer(ns_webgl *g, size_t need)
     if (need <= g->readback_len) return g->readback;
     uint8_t *p = g_try_realloc(g->readback, need);
     if (!p) return NULL;
+    memset(p + g->readback_len, 0, need - g->readback_len);
     g->readback = p;
     g->readback_len = need;
     return p;
@@ -4663,6 +4664,41 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     return obj;
 }
 
+typedef struct wgl_pack_state {
+    gboolean extended;
+    GLint    align, row_length, skip_rows, skip_pixels, pack_buffer;
+} wgl_pack_state;
+
+static void
+wgl_pack_tight(wgl_pack_state *s)
+{
+    s->extended = epoxy_is_desktop_gl() || epoxy_gl_version() >= 30;
+    s->align = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &s->align);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    if (!s->extended) return;
+    s->row_length = s->skip_rows = s->skip_pixels = s->pack_buffer = 0;
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &s->row_length);
+    glGetIntegerv(GL_PACK_SKIP_ROWS, &s->skip_rows);
+    glGetIntegerv(GL_PACK_SKIP_PIXELS, &s->skip_pixels);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &s->pack_buffer);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    if (s->pack_buffer) glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+}
+
+static void
+wgl_pack_restore(const wgl_pack_state *s)
+{
+    glPixelStorei(GL_PACK_ALIGNMENT, s->align);
+    if (!s->extended) return;
+    glPixelStorei(GL_PACK_ROW_LENGTH, s->row_length);
+    glPixelStorei(GL_PACK_SKIP_ROWS, s->skip_rows);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, s->skip_pixels);
+    if (s->pack_buffer) glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)s->pack_buffer);
+}
+
 cairo_surface_t *
 ns_webgl_canvas_surface(const ns_node *canvas)
 {
@@ -4702,8 +4738,10 @@ ns_webgl_canvas_surface(const ns_node *canvas)
 
     uint8_t *rgba = wgl_readback_buffer(g, (size_t)w * (size_t)h * 4);
     if (!rgba) return g->surf;
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    wgl_pack_state pack;
+    wgl_pack_tight(&pack);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    wgl_pack_restore(&pack);
 
     for (int y = 0; y < h; y++) {
         const uint8_t *src = rgba + (size_t)(h - 1 - y) * (size_t)w * 4;
