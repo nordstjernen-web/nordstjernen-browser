@@ -3,6 +3,12 @@ Changelog:
 
 1.0.29:
 ======
+* Restyles after a DOM change are much faster on pages whose elements
+  declare `transition`. Every element that had ever been checked for a
+  transition was restyled on every relayout, with its whole subtree, even
+  when nothing was animating; now only elements whose style an animation
+  or transition actually changed are. Speedometer's Complex-DOM suites run
+  two to five times faster (Svelte-Complex-DOM 748 ms to 244 ms).
 * The title bar always shows the browser name. "Nordstjernen Browser" sits
   centred in the window, moves to the right edge once the tabs reach the
   middle, and shortens to "Nordstjernen" when the full name no longer fits.
