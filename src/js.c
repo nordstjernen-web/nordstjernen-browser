@@ -43524,10 +43524,6 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!el || !js) return JS_UNDEFINED;
-    ns_js_flush_layout(js);
-    if (!js->layout_root) return JS_UNDEFINED;
-    ns_box *target = (ns_box *)ns_box_find_by_dom(js->layout_root, el);
-    if (!target) return JS_UNDEFINED;
 
     char *block = NULL;
     char *inline_align = NULL;
@@ -43540,6 +43536,16 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1 && JS_IsBool(argv[0]) && !JS_ToBool(ctx, argv[0]))
         block_mode = "end";
 
+    el = ns_unwrap_element(this_val);
+    ns_js_flush_layout(js);
+    ns_box *target = el && js->layout_root
+        ? (ns_box *)ns_box_find_by_dom(js->layout_root, el) : NULL;
+    if (!target) {
+        g_free(block);
+        g_free(inline_align);
+        return JS_UNDEFINED;
+    }
+
     double target_x, target_y, target_w, target_h;
     ns_box_border_box(target, &target_x, &target_y, &target_w, &target_h);
     gboolean changed = FALSE;
@@ -43550,6 +43556,7 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         if (position && strcmp(position, "fixed") == 0)
             fixed = TRUE;
     }
+    GPtrArray *scrolled = g_ptr_array_new();
     for (ns_box *p = target->parent; p; p = p->parent) {
         if (!p->scrolls || (p->scroll_max_x <= 0 && p->scroll_max_y <= 0))
             continue;
@@ -43601,20 +43608,25 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
             p->scroll_x = next_x;
             p->scroll_y = next_y;
             changed = TRUE;
-            if (p->dom) {
-                ns_js_dispatch_event(js, p->dom, "scroll", NULL);
-                ns_js_queue_scrollend(js, p->dom);
-            }
+            if (p->dom) g_ptr_array_add(scrolled, (gpointer)p->dom);
         }
     }
+    double view_x = target_x;
+    double view_y = target_y;
+    for (ns_box *p = target->parent; p; p = p->parent) {
+        view_x -= p->scroll_x;
+        view_y -= p->scroll_y;
+    }
+    for (guint i = 0; i < scrolled->len; i++) {
+        const ns_node *dom = g_ptr_array_index(scrolled, i);
+        ns_js_dispatch_event(js, dom, "scroll", NULL);
+        ns_js_queue_scrollend(js, dom);
+    }
+    g_ptr_array_free(scrolled, TRUE);
 
     if (!fixed) {
-        double x = target_x;
-        double y = target_y;
-        for (ns_box *p = target->parent; p; p = p->parent) {
-            x -= p->scroll_x;
-            y -= p->scroll_y;
-        }
+        double x = view_x;
+        double y = view_y;
         double vw = ns_css_viewport_w();
         double vh = ns_css_viewport_h();
         double sx = ns_window_scroll_prop(ctx, "scrollX");
