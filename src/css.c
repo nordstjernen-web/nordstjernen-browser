@@ -7400,17 +7400,19 @@ res_unit_factor(const char *unit, double *factor)
     return TRUE;
 }
 
-static gboolean res_eval_sum(const char **pp, const char *end, res_term *out);
+static gboolean res_eval_sum(const char **pp, const char *end, res_term *out,
+                             int depth);
 
 static gboolean
-res_eval_atom(const char **pp, const char *end, res_term *out)
+res_eval_atom(const char **pp, const char *end, res_term *out, int depth)
 {
+    if (depth > NS_CALC_MAX_DEPTH) return FALSE;
     const char *p = *pp;
     while (p < end && is_ws(*p)) p++;
     if (p >= end) return FALSE;
     if (*p == '(') {
         p++;
-        if (!res_eval_sum(&p, end, out)) return FALSE;
+        if (!res_eval_sum(&p, end, out, depth + 1)) return FALSE;
         while (p < end && is_ws(*p)) p++;
         if (p >= end || *p != ')') return FALSE;
         *pp = p + 1;
@@ -7433,7 +7435,7 @@ res_eval_atom(const char **pp, const char *end, res_term *out)
                           g_ascii_strcasecmp(name, "abs") == 0;
             if (g_ascii_strcasecmp(name, "calc") == 0) {
                 const char *inner = p + 1;
-                ok = res_eval_sum(&inner, close, out);
+                ok = res_eval_sum(&inner, close, out, depth + 1);
             } else if (g_ascii_strcasecmp(name, "sign") == 0) {
                 char *arg = g_strndup(p + 1, (gsize)(close - p - 1));
                 double px = 0, pct = 0;
@@ -7478,16 +7480,16 @@ res_eval_atom(const char **pp, const char *end, res_term *out)
 }
 
 static gboolean
-res_eval_product(const char **pp, const char *end, res_term *out)
+res_eval_product(const char **pp, const char *end, res_term *out, int depth)
 {
-    if (!res_eval_atom(pp, end, out)) return FALSE;
+    if (!res_eval_atom(pp, end, out, depth)) return FALSE;
     while (TRUE) {
         const char *p = *pp;
         while (p < end && is_ws(*p)) p++;
         if (p >= end || (*p != '*' && *p != '/')) break;
         char op = *p++;
         res_term rhs;
-        if (!res_eval_atom(&p, end, &rhs)) return FALSE;
+        if (!res_eval_atom(&p, end, &rhs, depth)) return FALSE;
         if (op == '*') {
             if (out->resolution && rhs.resolution) return FALSE;
             out->resolution = out->resolution || rhs.resolution;
@@ -7504,9 +7506,9 @@ res_eval_product(const char **pp, const char *end, res_term *out)
 }
 
 static gboolean
-res_eval_sum(const char **pp, const char *end, res_term *out)
+res_eval_sum(const char **pp, const char *end, res_term *out, int depth)
 {
-    if (!res_eval_product(pp, end, out)) return FALSE;
+    if (!res_eval_product(pp, end, out, depth)) return FALSE;
     while (TRUE) {
         const char *p = *pp;
         while (p < end && is_ws(*p)) p++;
@@ -7515,7 +7517,7 @@ res_eval_sum(const char **pp, const char *end, res_term *out)
         if (!(p + 1 < end && is_ws(p[1]))) return FALSE;
         p++;
         res_term rhs;
-        if (!res_eval_product(&p, end, &rhs)) return FALSE;
+        if (!res_eval_product(&p, end, &rhs, depth)) return FALSE;
         if (out->resolution != rhs.resolution) return FALSE;
         out->value = op == '+' ? out->value + rhs.value : out->value - rhs.value;
         out->known = out->known && rhs.known;
@@ -7531,7 +7533,7 @@ image_set_resolution_canonical(const char *tok, gboolean computed)
         const char *p = tok;
         const char *end = tok + strlen(tok);
         res_term t = { 0 };
-        if (!res_eval_atom(&p, end, &t) || !t.resolution) return NULL;
+        if (!res_eval_atom(&p, end, &t, 0) || !t.resolution) return NULL;
         while (p < end && is_ws(*p)) p++;
         if (p < end) return NULL;
         if (!t.known) return g_strdup(tok);
