@@ -32207,7 +32207,9 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
     JSValue global = JS_GetGlobalObject(ctx);
+    ns_window_named_resolving++;
     JSValue handler = JS_GetPropertyStr(ctx, global, prop_name);
+    ns_window_named_resolving--;
     if (JS_IsException(handler)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         handler = JS_UNDEFINED;
