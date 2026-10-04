@@ -110,14 +110,24 @@ ns_idb_hash_string(const char *input)
     return g_compute_checksum_for_string(G_CHECKSUM_SHA256, input, -1);
 }
 
+static const char *
+ns_idb_partition(JSContext *ctx)
+{
+    ns_js *js = JS_GetContextOpaque(ctx);
+    const char *partition = ns_js_storage_partition(js);
+    if (!partition || !*partition || strcmp(partition, "null") == 0 ||
+        g_str_has_prefix(partition, "opaque://"))
+        return NULL;
+    return partition;
+}
+
 static char *
 ns_idb_partition_dir(JSContext *ctx)
 {
     const ns_config *cfg = ns_config_get();
     if (cfg && cfg->private_mode) return NULL;
-    ns_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = ns_js_storage_partition(js);
-    if (!partition || !*partition) return NULL;
+    const char *partition = ns_idb_partition(ctx);
+    if (!partition) return NULL;
     g_autofree char *hash = ns_idb_hash_string(partition);
     char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
                                  "indexeddb", hash, NULL);
@@ -228,9 +238,8 @@ ns_idb_schema(sqlite3 *db)
 static char *
 ns_idb_cache_key(JSContext *ctx, const char *name)
 {
-    ns_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = ns_js_storage_partition(js);
-    if (!partition || !*partition || !name || !*name) return NULL;
+    const char *partition = ns_idb_partition(ctx);
+    if (!partition || !name || !*name) return NULL;
     return g_strdup_printf("%s\x1f%s", partition, name);
 }
 
