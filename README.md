@@ -26,7 +26,7 @@ that are non-goals by design: `embed`/`object` plugins, `frame`/`frameset`,
 **Security.** Each tab's engine runs in its own sandboxed process (seccomp +
 Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary. No JIT.
 
-**Minimalism.** The core engine is about 185,000 lines of project C and
+**Minimalism.** The core engine is about 210,000 lines of project C and
 headers, excluding vendored libraries and generated assets — small enough for
 one person to read and audit end-to-end.
 
@@ -41,6 +41,7 @@ for the GPL-licensed sibling project.
 |----------|----------|
 | Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
 | Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
+| Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-browser/packages) on GitHub Packages (Maven) |
 | Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-browser/tags) |
 
 Windows 10 or later is required (the GTK 4 frontend links
@@ -63,14 +64,15 @@ DirectComposition). Every other platform builds from source — see
   Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL), custom elements including customized
   built-ins (`is=` / `{extends}`), and the `Navigation` API for single-page
-  routing. The engine binding is a build-time seam: an experimental **V8
+  routing, plus Web Workers, IndexedDB (over SQLite), WebSocket and
+  `EventSource`. The engine binding is a build-time seam: an experimental **V8
   backend** (`-Djs_engine=v8`, external V8 monolith, never vendored) runs page
   scripts with live core DOM bindings while QuickJS stays the default — see
   [docs/V8.md](docs/V8.md). The QuickJS itself is selectable too: the in-tree
   quickjs-ng fork by default, or Fabrice Bellard's original QuickJS with
   `-Dquickjs=quickjs` — see [docs/quickjs.md](docs/quickjs.md).
-- **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked libcurl
-  provides it — HSTS, CSP, subresource-integrity checks, partitioned cookies,
+- **Networking** over HTTP/2 with libcurl — HSTS, CSP, subresource-integrity
+  checks, partitioned cookies,
   speculative subresource loading, request coalescing and a `Vary`-aware HTTP
   cache. An in-tree **libnghttp2** transport backend is selectable at build
   time (`-Dhttp_backend=nghttp2`), with **HTTP/3 over QUIC** via ngtcp2 +
@@ -78,7 +80,8 @@ DirectComposition). Every other platform builds from source — see
   independent transports cross-check each other. See
   [docs/http-backends.md](docs/http-backends.md).
 - **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and lossy
-  WebP; libwebp handles animated WebP; ICO and SVG are rendered in-engine,
+  WebP; libwebp handles lossless and animated WebP; ICO and SVG are rendered
+  in-engine,
   with optional AVIF and inline PDF support.
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and, when FFmpeg's libav is
@@ -110,8 +113,13 @@ DirectComposition). Every other platform builds from source — see
 - **Privacy** — no telemetry or update pings, standards-compliant client
   hints, local-only safe browsing, partitioned cookies and a `--private`
   session mode.
-- **UI** — tabs, bookmarks, find-in-page, save-to-PDF, JS console, settings,
-  headless mode, and a C embedding API.
+- **UI** — tabs, bookmarks, history, downloads, find-in-page, printing and
+  save-to-PDF, a JavaScript console, settings, headless mode, and a C
+  embedding API ([docs/Embedding.md](docs/Embedding.md)). The interface is
+  translated into 40 languages and follows the operating-system language
+  ([docs/i18n.md](docs/i18n.md)).
+- **Extensions** — initial support for simple, page-facing WebExtensions
+  ([docs/extensions.md](docs/extensions.md)).
 - **Java/JVM** — `org.nordstjernen.Nordstjernen` drives fetch / parse / layout
   / script / render from Java over a JNI bridge, or `RemoteBrowser` /
   `RemotePage` drive a separate renderer process so an engine crash can't take
