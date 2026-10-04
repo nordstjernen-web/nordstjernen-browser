@@ -5852,6 +5852,8 @@ inline_box_measure_cacheable(const ns_box *box)
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
 static double measure_max_content_width(ns_box *box, const ns_style *parent_style);
 static double flex_gap_of(const ns_style *s, double basis);
+static double flex_grow_of(const ns_box *c);
+static double flex_shrink_of(const ns_box *c);
 static gboolean flex_wraps(const ns_style *s);
 static double width_contribution_keyword_limits(ns_box *box, double w,
                                                 const ns_style *parent_style,
@@ -7611,6 +7613,23 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
 }
 
 static double
+definite_width_limit(const ns_box *box, const ns_css_value *v)
+{
+    if (!v || !(v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC) ||
+        value_is_percent(v))
+        return -1;
+    double limit = length_resolve(v, 0, -1);
+    if (limit < 0) return -1;
+    if (flex_box_is_border_box(box)) {
+        ns_edges m = {0}, pd = {0}, bd = {0};
+        edges_from_style(box->style, 0, &m, &pd, &bd);
+        limit -= pd.left + pd.right + bd.left + bd.right;
+        if (limit < 0) limit = 0;
+    }
+    return limit;
+}
+
+static double
 width_contribution_keyword_limits(ns_box *box, double w,
                                   const ns_style *parent_style,
                                   gboolean max_content)
@@ -7619,6 +7638,10 @@ width_contribution_keyword_limits(ns_box *box, double w,
         return w;
     const ns_css_value *mxw = box->style->values[NS_CSS_MAX_WIDTH];
     const ns_css_value *mnw = box->style->values[NS_CSS_MIN_WIDTH];
+    double max_limit = definite_width_limit(box, mxw);
+    if (max_limit >= 0 && w > max_limit) w = max_limit;
+    double min_limit = definite_width_limit(box, mnw);
+    if (min_limit >= 0 && w < min_limit) w = min_limit;
     if (size_keyword_is_intrinsic(mxw)) {
         gboolean use_max = keyword_is(mxw, "max-content") ||
                            (max_content && keyword_is(mxw, "fit-content"));
@@ -7802,6 +7825,31 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
 }
 
 static double
+flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
+{
+    if (!c->style || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
+        return measure_min_width(c, child_style);
+    const ns_style *s = c->style;
+    double min_content = measure_min_content_width(c, child_style);
+    double preferred = definite_width_limit(c, s->values[NS_CSS_WIDTH]);
+    double contribution = MAX(min_content, preferred);
+    const ns_css_value *bv = s->values[NS_CSS_FLEX_BASIS];
+    double base = definite_width_limit(c, bv);
+    if (base < 0 && (!bv || keyword_is(bv, "auto"))) base = preferred;
+    if (base >= 0) {
+        if (flex_grow_of(c) <= 0 && contribution > base) contribution = base;
+        if (flex_shrink_of(c) <= 0 && contribution < base) contribution = base;
+    }
+    double max_main = definite_width_limit(c, s->values[NS_CSS_MAX_WIDTH]);
+    if (max_main >= 0 && contribution > max_main) contribution = max_main;
+    double min_main = definite_width_limit(c, s->values[NS_CSS_MIN_WIDTH]);
+    if (min_main < 0 && !overflow_establishes_bfc(s))
+        min_main = preferred >= 0 ? MIN(min_content, preferred) : min_content;
+    if (min_main >= 0 && contribution < min_main) contribution = min_main;
+    return contribution;
+}
+
+static double
 measure_min_content_width(ns_box *box, const ns_style *parent_style)
 {
     if (box->kind == NS_BOX_INLINE || box->kind == NS_BOX_IMAGE ||
@@ -7859,7 +7907,9 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
     double row_sum = 0;
     int items = 0;
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
-        double w = measure_min_width(c, child_style);
+        double w = single_line_row
+            ? flex_row_item_min_contribution(c, child_style)
+            : measure_min_width(c, child_style);
         double outer = w;
         if (c->style) {
             ns_edges m = {0}, pd = {0}, bd = {0};
