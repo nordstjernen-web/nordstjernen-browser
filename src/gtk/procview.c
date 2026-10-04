@@ -1769,8 +1769,13 @@ worker_main(gpointer data)
                 ns_rproc_http_export(v->proc, req->url) == 0) {
                 GFile *src = g_file_new_for_path(req->url);
                 GFile *dst = g_file_new_for_path(req->export_dest);
-                ok = g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL,
-                                 NULL, NULL, NULL);
+                if (g_file_query_file_type(src,
+                                           G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                           NULL) == G_FILE_TYPE_REGULAR)
+                    ok = g_file_copy(src, dst,
+                                     G_FILE_COPY_OVERWRITE |
+                                         G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                                     NULL, NULL, NULL, NULL);
                 g_object_unref(src);
                 g_object_unref(dst);
             }
