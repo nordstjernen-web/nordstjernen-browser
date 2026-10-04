@@ -53508,6 +53508,8 @@ ns_ce_reclaim_shadowed_props(JSContext *ctx, JSValueConst elem)
     JS_FreePropertyEnum(ctx, tab, len);
 }
 
+static JSValue ns_ce_observed_attributes(JSContext *ctx, JSValueConst klass);
+
 static void
 ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
 {
@@ -53554,7 +53556,7 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
 
     ns_ce_reclaim_shadowed_props(ctx, elem);
 
-    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    JSValue observed = ns_ce_observed_attributes(ctx, klass);
     if (JS_IsArray(observed)) {
         JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
         int32_t len = 0; JS_ToInt32(ctx, &len, len_v);
@@ -53740,7 +53742,7 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
     JSValue klass = JS_GetPropertyStr(ctx, elem, "__nd_ce_class");
     if (!JS_IsObject(klass)) { JS_FreeValue(ctx, klass); return; }
 
-    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    JSValue observed = ns_ce_observed_attributes(ctx, klass);
     gboolean watched = FALSE;
     if (JS_IsArray(observed)) {
         JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
@@ -53770,6 +53772,50 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
         js->ce_in_attr_callback--;
     }
     JS_FreeValue(ctx, klass);
+}
+
+static int
+ns_ce_capture_observed_attributes(JSContext *ctx, JSValueConst klass)
+{
+    JSValue proto = JS_GetPropertyStr(ctx, klass, "prototype");
+    JSValue acc = JS_IsObject(proto)
+        ? JS_GetPropertyStr(ctx, proto, "attributeChangedCallback")
+        : JS_UNDEFINED;
+    gboolean observes = JS_IsFunction(ctx, acc);
+    JS_FreeValue(ctx, acc);
+    JS_FreeValue(ctx, proto);
+    if (!observes) return 0;
+    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    if (JS_IsException(observed)) return -1;
+    JSValue names = JS_NewArray(ctx);
+    if (JS_IsArray(observed)) {
+        JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
+        int32_t len = 0;
+        JS_ToInt32(ctx, &len, len_v);
+        JS_FreeValue(ctx, len_v);
+        for (int32_t i = 0; i < len; i++) {
+            JSValue name = JS_ToString(ctx, JS_GetPropertyUint32(ctx, observed, i));
+            if (JS_IsException(name)) {
+                JS_FreeValue(ctx, names);
+                JS_FreeValue(ctx, observed);
+                return -1;
+            }
+            JS_SetPropertyUint32(ctx, names, (uint32_t)i, name);
+        }
+    }
+    JS_FreeValue(ctx, observed);
+    JS_DefinePropertyValueStr(ctx, klass, "__nd_ce_observed", names,
+                              JS_PROP_CONFIGURABLE);
+    return 0;
+}
+
+static JSValue
+ns_ce_observed_attributes(JSContext *ctx, JSValueConst klass)
+{
+    JSValue cached = JS_GetPropertyStr(ctx, klass, "__nd_ce_observed");
+    if (JS_IsArray(cached)) return cached;
+    JS_FreeValue(ctx, cached);
+    return JS_GetPropertyStr(ctx, klass, "observedAttributes");
 }
 
 static JSValue
@@ -53812,6 +53858,10 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
             if (e) JS_FreeCString(ctx, e);
         }
         JS_FreeValue(ctx, ext);
+    }
+    if (ns_ce_capture_observed_attributes(ctx, argv[1]) < 0) {
+        g_free(name);
+        return JS_EXCEPTION;
     }
     if (!js->ce_registry)
         js->ce_registry = g_hash_table_new_full(g_str_hash, g_str_equal,
