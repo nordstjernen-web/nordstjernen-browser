@@ -72,17 +72,15 @@ DirectComposition). Every other platform builds from source — see
   quickjs-ng fork by default, or Fabrice Bellard's original QuickJS with
   `-Dquickjs=quickjs` — see [docs/quickjs.md](docs/quickjs.md).
 - **Networking** over HTTP/2 with libcurl — HSTS, CSP, subresource-integrity
-  checks, partitioned cookies,
-  speculative subresource loading, request coalescing and a `Vary`-aware HTTP
-  cache. An in-tree **libnghttp2** transport backend is selectable at build
+  checks, partitioned cookies, speculative subresource loading, request
+  coalescing and a `Vary`-aware HTTP cache. An in-tree **libnghttp2** transport backend is selectable at build
   time (`-Dhttp_backend=nghttp2`), with **HTTP/3 over QUIC** via ngtcp2 +
   nghttp3 + gnutls when present. Both backends fetch byte-identically, so the
   independent transports cross-check each other. See
   [docs/http-backends.md](docs/http-backends.md).
 - **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and lossy
   WebP; libwebp handles lossless and animated WebP; ICO and SVG are rendered
-  in-engine,
-  with optional AVIF and inline PDF support.
+  in-engine, with optional AVIF and inline PDF support.
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and, when FFmpeg's libav is
   present at build time, **WebM** (VP9/VP8 + Opus/Vorbis). MSE/`blob:`
