@@ -12,6 +12,9 @@
 
 #include "net.h"
 #include "paint.h"
+#ifdef NS_HAVE_WOFF2
+#include "woff2.h"
+#endif
 
 #ifdef NS_HAVE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
@@ -368,12 +371,14 @@ ns_font_install_file(const char *path, const char *css_family)
     if (!path) return;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
     FcFontSet *app_fonts = FcConfigGetFonts(NULL, FcSetApplication);
-    if (css_family && *css_family && app_fonts) {
-        int count = 1;
-        for (int face = 0; face < count; face++) {
-            FcPattern *pat = FcFreeTypeQuery((const FcChar8 *)path, face, NULL,
-                                             &count);
-            if (!pat) break;
+    FcFontSet *faces = css_family && *css_family && app_fonts
+        ? FcFontSetCreate() : NULL;
+    if (faces) {
+        int count = 0;
+        FcFreeTypeQueryAll((const FcChar8 *)path, -1, NULL, &count, faces);
+        for (int i = 0; i < faces->nfont; i++) {
+            FcPattern *pat = faces->fonts[i];
+            faces->fonts[i] = NULL;
             FcChar8 *internal = NULL;
             if (FcPatternGetString(pat, FC_FAMILY, 0, &internal) == FcResultMatch &&
                 internal &&
@@ -387,6 +392,8 @@ ns_font_install_file(const char *path, const char *css_family)
             if (!FcFontSetAdd(app_fonts, pat))
                 FcPatternDestroy(pat);
         }
+        faces->nfont = 0;
+        FcFontSetDestroy(faces);
     }
 #ifdef NS_HAVE_PANGOFC
     NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
@@ -431,6 +438,20 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
             gboolean cff = FALSE;
             converted = ns_font_woff_to_sfnt(resp->body->data,
                                              resp->body->len, &clen, &cff);
+            if (converted) {
+                write_data = converted;
+                write_len = clen;
+                forced_ext = cff ? ".otf" : ".ttf";
+            }
+        }
+#endif
+#ifdef NS_HAVE_WOFF2
+        if (!converted &&
+            ns_woff2_is_woff2(resp->body->data, resp->body->len)) {
+            gsize clen = 0;
+            gboolean cff = FALSE;
+            converted = ns_woff2_to_sfnt(resp->body->data, resp->body->len,
+                                         &clen, &cff);
             if (converted) {
                 write_data = converted;
                 write_len = clen;

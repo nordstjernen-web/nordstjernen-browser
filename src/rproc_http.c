@@ -90,6 +90,7 @@ struct ns_rproc_http {
     size_t         map_size;
     int            max_w;
     int            max_h;
+    int            dpr_milli;
     void          *inproc_conn;
 };
 
@@ -478,6 +479,19 @@ ns_rproc_http_spawn_shm_ex(const char *renderer_path, int max_width,
     return spawn_common(renderer_path, max_width, max_height, 1, private_mode);
 }
 
+void
+ns_rproc_http_set_device_pixel_ratio(ns_rproc_http *r, double dpr)
+{
+    if (r && dpr > 0)
+        r->dpr_milli = (int)(dpr * 1000.0 + 0.5);
+}
+
+static int
+device_pixel_ratio_milli(const ns_rproc_http *r)
+{
+    return r->dpr_milli > 0 ? r->dpr_milli : 1000;
+}
+
 int
 ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                    int viewport_height, int settle_ms, ns_rproc_http_page *out)
@@ -499,12 +513,14 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     if (!ue)
         return -1;
     char *json = NULL;
+    int dpr = device_pixel_ratio_milli(r);
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
-                      "\"user_activated\":%d}",
+                      "\"user_activated\":%d,\"dpr\":%d.%03d}",
                       ue, viewport_width, viewport_height, settle_ms,
-                      history ? 1 : 0, user_activated ? 1 : 0);
+                      history ? 1 : 0, user_activated ? 1 : 0,
+                      dpr / 1000, dpr % 1000);
     free(ue);
     if (jn < 0)
         return -1;
@@ -559,6 +575,92 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
                      int scroll_y, double scale, int caret_active,
                      ns_rproc_http_frame *out)
 {
+    return ns_rproc_http_render_wheel(r, width, height, scroll_x, scroll_y,
+                                      scale, caret_active, NULL, out);
+}
+
+static int
+render_request_json(const ns_rproc_http *r, char *json, size_t cap, int width,
+                    int height, int scroll_x, int scroll_y, double scale,
+                    int caret_active, const ns_rproc_http_wheel *wheel)
+{
+    int scale_milli = (int)(scale * 1000.0 + 0.5);
+    int dpr = device_pixel_ratio_milli(r);
+    int jn = snprintf(json, cap,
+                      "{\"width\":%d,\"height\":%d,\"scroll_x\":%d,"
+                      "\"scroll_y\":%d,\"scale\":%d.%03d,\"caret\":%d,"
+                      "\"dpr\":%d.%03d",
+                      width, height, scroll_x, scroll_y,
+                      scale_milli / 1000, scale_milli % 1000,
+                      caret_active ? 1 : 0, dpr / 1000, dpr % 1000);
+    if (wheel && (wheel->dx || wheel->dy))
+        jn += snprintf(json + jn, cap - (size_t)jn,
+                       ",\"wheel_x\":%d,\"wheel_y\":%d,"
+                       "\"wheel_dx\":%d,\"wheel_dy\":%d",
+                       wheel->x, wheel->y, wheel->dx, wheel->dy);
+    jn += snprintf(json + jn, cap - (size_t)jn, "}");
+    return jn;
+}
+
+static char *
+head_field_dup(const char *v)
+{
+    return v[0] ? strdup(v) : NULL;
+}
+
+static void
+frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
+{
+    out->ok = 1;
+    out->animating = (head->x_anim & 1) != 0;
+    out->caret_blinking = (head->x_anim & 2) != 0;
+    out->page_w = (int)head->x_page_w;
+    out->page_h = (int)head->x_page_h;
+    out->scroll_y = (int)head->x_scroll_y;
+    out->scroll_x = (int)head->x_scroll_x;
+    out->render_rc = (int)head->x_render_rc;
+    out->nav = head_field_dup(head->x_nav);
+    out->webgl = head_field_dup(head->x_webgl);
+    out->camera = head_field_dup(head->x_camera);
+    out->download = head_field_dup(head->x_download);
+    out->audio = head_field_dup(head->x_audio);
+    out->window_action = head_field_dup(head->x_window_action);
+    out->clipboard = head->x_clipboard > 0;
+}
+
+static int
+frame_head_fits(const ns_rproc_http *r, const http_head *head)
+{
+    if (head->x_w < 1 || head->x_w > r->max_w ||
+        head->x_h < 1 || head->x_h > r->max_h ||
+        head->x_stride < head->x_w * 4 || head->x_stride > (long)r->max_w * 4)
+        return 0;
+    return r->shm || (uint64_t)head->content_length >=
+                     (uint64_t)head->x_stride * (uint64_t)head->x_h;
+}
+
+static int
+render_read_reply(ns_rproc_http *r, http_head *head)
+{
+    if (http_read_head(&r->conn, head) != 0)
+        return -1;
+    if (head->content_length < 0 || (size_t)head->content_length > r->rxcap) {
+        if (head->content_length > 0)
+            http_skip_body(&r->conn, head->content_length);
+        return -1;
+    }
+    if (head->content_length &&
+        http_read_body(&r->conn, head->content_length, r->rxbuf) != 0)
+        return -1;
+    return 0;
+}
+
+int
+ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
+                           int scroll_x, int scroll_y, double scale,
+                           int caret_active, const ns_rproc_http_wheel *wheel,
+                           ns_rproc_http_frame *out)
+{
     if (!r || !out)
         return -1;
     memset(out, 0, sizeof *out);
@@ -569,76 +671,29 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         height = r->max_h;
     if (!(scale > 0))
         scale = 1.0;
-    int scale_milli = (int)(scale * 1000.0 + 0.5);
-    char json[192];
-    int jn = snprintf(json, sizeof json,
-                      "{\"width\":%d,\"height\":%d,\"scroll_x\":%d,"
-                      "\"scroll_y\":%d,\"scale\":%d.%03d,\"caret\":%d}",
-                      width, height, scroll_x, scroll_y,
-                      scale_milli / 1000, scale_milli % 1000,
-                      caret_active ? 1 : 0);
+    char json[320];
+    int jn = render_request_json(r, json, sizeof json, width, height,
+                                 scroll_x, scroll_y, scale, caret_active,
+                                 wheel);
     if (http_write_request(r->wfd, "POST", "/render", "application/json",
                            json, (size_t)jn) != 0)
         return -1;
 
     http_head head;
-    if (http_read_head(&r->conn, &head) != 0)
-        return -1;
-    if (head.content_length < 0 || (size_t)head.content_length > r->rxcap) {
-        if (head.content_length > 0)
-            http_skip_body(&r->conn, head.content_length);
-        return -1;
-    }
-    if (head.content_length &&
-        http_read_body(&r->conn, head.content_length, r->rxbuf) != 0)
+    if (render_read_reply(r, &head) != 0)
         return -1;
     if (head.x_unchanged > 0) {
-        out->ok = 1;
+        frame_fill_from_head(out, &head);
         out->unchanged = 1;
-        out->animating = (head.x_anim & 1) != 0;
-        out->caret_blinking = (head.x_anim & 2) != 0;
-        out->page_w = (int)head.x_page_w;
-        out->page_h = (int)head.x_page_h;
-        out->scroll_y = (int)head.x_scroll_y;
-        out->scroll_x = (int)head.x_scroll_x;
-        out->render_rc = (int)head.x_render_rc;
-        out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
-        out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
-        out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
-        out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
-        out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
-        out->window_action = head.x_window_action[0]
-            ? strdup(head.x_window_action) : NULL;
-        out->clipboard = head.x_clipboard > 0;
         return 0;
     }
-    if (head.x_w < 1 || head.x_w > r->max_w ||
-        head.x_h < 1 || head.x_h > r->max_h ||
-        head.x_stride < head.x_w * 4 || head.x_stride > (long)r->max_w * 4)
+    if (!frame_head_fits(r, &head))
         return -1;
-    if (!r->shm && (uint64_t)head.content_length <
-            (uint64_t)head.x_stride * (uint64_t)head.x_h)
-        return -1;
-    out->ok = 1;
+    frame_fill_from_head(out, &head);
     out->width = (int)head.x_w;
     out->height = (int)head.x_h;
     out->stride = (int)head.x_stride;
-    out->animating = (head.x_anim & 1) != 0;
-    out->caret_blinking = (head.x_anim & 2) != 0;
-    out->page_w = (int)head.x_page_w;
-    out->page_h = (int)head.x_page_h;
-    out->scroll_y = (int)head.x_scroll_y;
-    out->scroll_x = (int)head.x_scroll_x;
-    out->render_rc = (int)head.x_render_rc;
     out->pixels = r->shm ? r->map : r->rxbuf;
-    out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
-    out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
-    out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
-    out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
-    out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
-    out->window_action = head.x_window_action[0]
-        ? strdup(head.x_window_action) : NULL;
-    out->clipboard = head.x_clipboard > 0;
     return 0;
 }
 
@@ -1046,8 +1101,10 @@ ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
         memset(out, 0, sizeof *out);
     if (!r)
         return -1;
-    char json[64];
-    snprintf(json, sizeof json, "{\"width\":%d,\"height\":%d}", width, height);
+    char json[96];
+    int dpr = device_pixel_ratio_milli(r);
+    snprintf(json, sizeof json, "{\"width\":%d,\"height\":%d,\"dpr\":%d.%03d}",
+             width, height, dpr / 1000, dpr % 1000);
     char *body = request(r, "/viewport", json);
     if (!body)
         return -1;

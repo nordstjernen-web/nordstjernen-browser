@@ -68,6 +68,11 @@ void ns_paint_register_font_oracle(void);
 void ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *style);
 int ns_paint_pango_font_size(double size_px);
 
+/* The shared Pango context for measuring and painting page text: unhinted
+ * metrics and fractional glyph positions, so text is as wide as in other
+ * browsers and the measured and painted widths agree. */
+NsPangoContext *ns_paint_text_context(void);
+
 void ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
                          const ns_box *box);
 void ns_paint_apply_font_features(NsPangoAttrList *attrs, const ns_style *style,
@@ -81,6 +86,7 @@ NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 
 double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);
+#define NS_CSS_LINE_HEIGHT_KEY "ns-css-line-height"
 void ns_paint_apply_css_line_spacing(NsPangoLayout *layout,
                                      const ns_style *style);
 void ns_paint_start_align_overflow(NsPangoLayout *layout);

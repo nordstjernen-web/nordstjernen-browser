@@ -53684,6 +53684,7 @@ ns_ce_reclaim_shadowed_props(JSContext *ctx, JSValueConst elem)
     JS_FreePropertyEnum(ctx, tab, len);
 }
 
+static JSValue ns_ce_observed_attributes(JSContext *ctx, JSValueConst klass);
 static void ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth);
 
 static void
@@ -53735,7 +53736,7 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass_arg,
 
     ns_ce_reclaim_shadowed_props(ctx, elem);
 
-    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    JSValue observed = ns_ce_observed_attributes(ctx, klass);
     if (JS_IsArray(observed)) {
         JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
         int32_t len = 0; JS_ToInt32(ctx, &len, len_v);
@@ -53923,7 +53924,7 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
     JSValue klass = JS_GetPropertyStr(ctx, elem, "__nd_ce_class");
     if (!JS_IsObject(klass)) { JS_FreeValue(ctx, klass); return; }
 
-    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    JSValue observed = ns_ce_observed_attributes(ctx, klass);
     gboolean watched = FALSE;
     if (JS_IsArray(observed)) {
         JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
@@ -53953,6 +53954,50 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
         js->ce_in_attr_callback--;
     }
     JS_FreeValue(ctx, klass);
+}
+
+static int
+ns_ce_capture_observed_attributes(JSContext *ctx, JSValueConst klass)
+{
+    JSValue proto = JS_GetPropertyStr(ctx, klass, "prototype");
+    JSValue acc = JS_IsObject(proto)
+        ? JS_GetPropertyStr(ctx, proto, "attributeChangedCallback")
+        : JS_UNDEFINED;
+    gboolean observes = JS_IsFunction(ctx, acc);
+    JS_FreeValue(ctx, acc);
+    JS_FreeValue(ctx, proto);
+    if (!observes) return 0;
+    JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
+    if (JS_IsException(observed)) return -1;
+    JSValue names = JS_NewArray(ctx);
+    if (JS_IsArray(observed)) {
+        JSValue len_v = JS_GetPropertyStr(ctx, observed, "length");
+        int32_t len = 0;
+        JS_ToInt32(ctx, &len, len_v);
+        JS_FreeValue(ctx, len_v);
+        for (int32_t i = 0; i < len; i++) {
+            JSValue name = JS_ToString(ctx, JS_GetPropertyUint32(ctx, observed, i));
+            if (JS_IsException(name)) {
+                JS_FreeValue(ctx, names);
+                JS_FreeValue(ctx, observed);
+                return -1;
+            }
+            JS_SetPropertyUint32(ctx, names, (uint32_t)i, name);
+        }
+    }
+    JS_FreeValue(ctx, observed);
+    JS_DefinePropertyValueStr(ctx, klass, "__nd_ce_observed", names,
+                              JS_PROP_CONFIGURABLE);
+    return 0;
+}
+
+static JSValue
+ns_ce_observed_attributes(JSContext *ctx, JSValueConst klass)
+{
+    JSValue cached = JS_GetPropertyStr(ctx, klass, "__nd_ce_observed");
+    if (JS_IsArray(cached)) return cached;
+    JS_FreeValue(ctx, cached);
+    return JS_GetPropertyStr(ctx, klass, "observedAttributes");
 }
 
 static JSValue
@@ -53995,6 +54040,10 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
             if (e) JS_FreeCString(ctx, e);
         }
         JS_FreeValue(ctx, ext);
+    }
+    if (ns_ce_capture_observed_attributes(ctx, argv[1]) < 0) {
+        g_free(name);
+        return JS_EXCEPTION;
     }
     if (!js->ce_registry)
         js->ce_registry = g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -54154,6 +54203,8 @@ ns_js_sync_window_metrics(ns_js *js)
     JS_SetPropertyStr(ctx, global, "innerHeight", JS_NewInt32(ctx, vh));
     JS_SetPropertyStr(ctx, global, "outerWidth",  JS_NewInt32(ctx, ow));
     JS_SetPropertyStr(ctx, global, "outerHeight", JS_NewInt32(ctx, oh));
+    JS_SetPropertyStr(ctx, global, "devicePixelRatio",
+                      JS_NewFloat64(ctx, ns_css_device_pixel_ratio()));
     JS_FreeValue(ctx, global);
 }
 
@@ -54187,6 +54238,12 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
     JS_FreeValue(ctx, global);
     js->in_scroll_dispatch = FALSE;
     ns_observer_schedule_tick(js);
+}
+
+void
+ns_js_reeval_media_queries(ns_js *js)
+{
+    ns_js_media_queries_reeval(js);
 }
 
 void
@@ -56894,7 +56951,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewInt32(ctx, 0));
     ns_js_sync_window_metrics(js);
-    JS_SetPropertyStr(ctx, global, "devicePixelRatio", JS_NewFloat64(ctx, 1.0));
+
     static const ns_fn_def window_noops[] = {
         { "close", 0 }, { "blur", 0 },
         { "moveTo", 2 }, { "moveBy", 2 },
