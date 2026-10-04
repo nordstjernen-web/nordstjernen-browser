@@ -5,6 +5,7 @@
 
 #include "dom.h"
 
+#include "css.h"
 #include "datetime.h"
 
 #include <errno.h>
@@ -1060,6 +1061,7 @@ ns_node_free(ns_node *node)
         g_ptr_array_set_size(stack, stack->len - 1);
         if (cur->js_invalidate)
             cur->js_invalidate(cur);
+        ns_css_forget_node(cur);
         if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
         ns_class_set_clear(cur);

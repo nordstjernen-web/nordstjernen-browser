@@ -258,6 +258,16 @@ ns_css_set_fullscreen_node(const ns_node *node)
     return prev;
 }
 
+void
+ns_css_forget_node(const ns_node *node)
+{
+    if (g_css_focus_node == node) g_css_focus_node = NULL;
+    if (g_css_focus_visible_node == node) g_css_focus_visible_node = NULL;
+    if (g_css_hover_node == node) g_css_hover_node = NULL;
+    if (g_css_active_node == node) g_css_active_node = NULL;
+    if (g_css_fullscreen_node == node) g_css_fullscreen_node = NULL;
+}
+
 static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_DISPLAY]              = "display",
     [NS_CSS_COLOR]                = "color",
