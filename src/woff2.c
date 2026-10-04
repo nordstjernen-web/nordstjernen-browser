@@ -193,6 +193,9 @@ triplet_decode(w2_reader *glyphs, const guint8 *flags, guint32 n_points,
         }
         x += dx;
         y += dy;
+        if (x < G_MININT16 || x > G_MAXINT16 || y < G_MININT16 ||
+            y > G_MAXINT16)
+            return FALSE;
         out[i].x = x;
         out[i].y = y;
         out[i].on_curve = !(flags[i] & 0x80);
@@ -503,8 +506,22 @@ table_checksum(const guint8 *p, gsize len)
     return sum;
 }
 
+static gboolean
+sfnt_size(const w2_table *tables, guint16 n, gsize *out_size)
+{
+    gsize total = 12 + (gsize)n * 16;
+    for (guint16 i = 0; i < n; i++) {
+        total += (tables[i].data_len + 3) & ~(gsize)3;
+        if (total > W2_MAX_OUTPUT)
+            return FALSE;
+    }
+    *out_size = total;
+    return TRUE;
+}
+
 static guint8 *
-assemble_sfnt(guint32 flavor, w2_table *tables, guint16 n, gsize *out_len)
+assemble_sfnt(guint32 flavor, w2_table *tables, guint16 n, gsize size,
+              gsize *out_len)
 {
     w2_table **order = g_new(w2_table *, n);
     for (guint16 i = 0; i < n; i++)
@@ -516,7 +533,7 @@ assemble_sfnt(guint32 flavor, w2_table *tables, guint16 n, gsize *out_len)
         selector++;
     guint16 range = (guint16)((1u << selector) * 16);
 
-    GByteArray *out = g_byte_array_new();
+    GByteArray *out = g_byte_array_sized_new((guint)size);
     put_u32(out, flavor);
     put_u16(out, n);
     put_u16(out, range);
@@ -687,8 +704,10 @@ ns_woff2_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
         decoded != stream_total)
         goto out;
 
-    if (reconstruct_tables(stream, tables, num_tables)) {
-        sfnt = assemble_sfnt(flavor, tables, num_tables, out_len);
+    gsize size = 0;
+    if (reconstruct_tables(stream, tables, num_tables) &&
+        sfnt_size(tables, num_tables, &size)) {
+        sfnt = assemble_sfnt(flavor, tables, num_tables, size, out_len);
         if (out_cff)
             *out_cff = flavor == W2_TAG('O', 'T', 'T', 'O');
     }
