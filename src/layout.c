@@ -10789,6 +10789,9 @@ grid_resolve_pos(const ns_style *st, ns_css_prop shorthand,
 }
 
 #define NS_GRID_ROWS_MAX 4096
+#define NS_GRID_NESTING_MAX 64
+
+static int g_grid_nesting;
 
 typedef gboolean grid_occupancy_row[NS_CSS_TRACKS_MAX];
 
@@ -12578,8 +12581,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         }
     }
 
-    if (style_is_grid_container(box->style)) {
+    if (style_is_grid_container(box->style) &&
+        g_grid_nesting < NS_GRID_NESTING_MAX) {
+        g_grid_nesting++;
         layout_grid(box, cw, inner_x, inner_y, child_inherited, &cursor_y);
+        g_grid_nesting--;
         goto flex_done;
     }
 
