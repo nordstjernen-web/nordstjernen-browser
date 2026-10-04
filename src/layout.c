@@ -13248,26 +13248,63 @@ box_outer_bottom(const ns_box *b)
            b->margin.bottom;
 }
 
+typedef struct static_abs_target {
+    const ns_node *node;
+    guint          rank;
+    GHashTable    *ancestors;
+} static_abs_target;
+
+static gboolean
+static_abs_y_visit_other(const ns_box *b, const static_abs_target *t,
+                         double *out)
+{
+    guint rb = g_node_order ? GPOINTER_TO_UINT(
+        g_hash_table_lookup(g_node_order, (gpointer)b->dom)) : 0;
+    gboolean ranked = rb && t->rank;
+    if (ranked ? t->rank < rb : node_precedes(t->node, b->dom)) return FALSE;
+    if (style_is_absolute_or_fixed(b->style)) return FALSE;
+    if (ranked ? rb < t->rank : node_precedes(b->dom, t->node)) {
+        double bottom = box_outer_bottom(b);
+        if (bottom > *out) *out = bottom;
+    }
+    return TRUE;
+}
+
+static gboolean
+static_abs_y_visit(const ns_box *b, const static_abs_target *t, double *out)
+{
+    if (!b->dom || b->dom == t->node) return TRUE;
+    if (!g_hash_table_contains(t->ancestors, b->dom))
+        return static_abs_y_visit_other(b, t, out);
+    if (!style_is_absolute_or_fixed(b->style)) {
+        double edge = b->y + b->margin.top + b->border.top + b->padding.top;
+        if (edge > *out) *out = edge;
+    }
+    return TRUE;
+}
+
+static void
+static_abs_y_walk_from(const ns_box *b, const static_abs_target *t, double *out)
+{
+    if (!static_abs_y_visit(b, t, out)) return;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        static_abs_y_walk_from(c, t, out);
+}
+
 static void
 static_abs_y_walk(const ns_box *b, const ns_node *target, double *out)
 {
     if (!b || !target || !out) return;
-    if (b->dom && b->dom != target && !node_is_ancestor_of(b->dom, target)) {
-        if (node_precedes(target, b->dom)) return;
-        if (style_is_absolute_or_fixed(b->style)) return;
-        if (node_precedes(b->dom, target) &&
-            !style_is_absolute_or_fixed(b->style)) {
-            double bottom = box_outer_bottom(b);
-            if (bottom > *out) *out = bottom;
-        }
-    }
-    if (b->dom && b->dom != target && node_is_ancestor_of(b->dom, target) &&
-        !style_is_absolute_or_fixed(b->style)) {
-        double edge = b->y + b->margin.top + b->border.top + b->padding.top;
-        if (edge > *out) *out = edge;
-    }
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        static_abs_y_walk(c, target, out);
+    static_abs_target t = {
+        .node = target,
+        .rank = g_node_order ? GPOINTER_TO_UINT(
+            g_hash_table_lookup(g_node_order, (gpointer)target)) : 0,
+        .ancestors = g_hash_table_new(g_direct_hash, g_direct_equal),
+    };
+    for (const ns_node *p = target->parent; p; p = p->parent)
+        g_hash_table_add(t.ancestors, (gpointer)p);
+    static_abs_y_walk_from(b, &t, out);
+    g_hash_table_destroy(t.ancestors);
 }
 
 static double
