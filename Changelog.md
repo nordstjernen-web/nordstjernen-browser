@@ -361,6 +361,11 @@ Changelog:
 
 1.0.28:
 ======
+* Scrolling no longer waits behind the page's own work. While a page is
+  animating, the window asked the renderer for a page tick every frame and
+  put those requests ahead of everything else, so the frames that carry the
+  wheel movement waited behind them; while the user scrolls it now asks for
+  frames, which run the page's work at a lower rate themselves.
 * `Map` and `Set` with number keys are fast again. Small integers hashed to a
   handful of buckets, so a `Set` of a few thousand numbers searched long
   chains on every `add`/`has`/`set` (100,000 operations took about 180 ms,

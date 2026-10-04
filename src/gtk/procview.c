@@ -2121,6 +2121,13 @@ wheel_animation_idle(const NsProcView *v)
 }
 
 static gboolean
+pv_wheel_scrolling(const NsProcView *v)
+{
+    return v->hover_after_scroll_id != 0 || !wheel_animation_idle(v) ||
+           v->wheel_pend_x != 0 || v->wheel_pend_y != 0;
+}
+
+static gboolean
 wheel_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
     (void)widget;
@@ -2271,7 +2278,7 @@ anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     if (v->last_anim_frame_us > 0 && now - v->last_anim_frame_us < interval)
         return G_SOURCE_CONTINUE;
     v->last_anim_frame_us = now;
-    if (v->page_animating)
+    if (v->page_animating && !pv_wheel_scrolling(v))
         request_tick(v);
     else
         request_render(v);
