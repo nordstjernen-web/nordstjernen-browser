@@ -10644,8 +10644,9 @@ static gboolean is_font_ligatures_value(const char *s);
 static gboolean is_font_feature_settings_value(const char *s);
 static gboolean is_font_variation_settings_value(const char *s);
 
-static ns_tval_type css_time_product(const char **pp, const char *e);
-static ns_tval_type css_time_factor(const char **pp, const char *e);
+static ns_tval_type css_time_sum_depth(const char *s, const char *e, int depth);
+static ns_tval_type css_time_product(const char **pp, const char *e, int depth);
+static ns_tval_type css_time_factor(const char **pp, const char *e, int depth);
 
 static gboolean
 css_tv_name_is(const char *s, gsize n, const char *lit)
@@ -10654,7 +10655,8 @@ css_tv_name_is(const char *s, gsize n, const char *lit)
 }
 
 static ns_tval_type
-css_time_func(const char *name, gsize nlen, const char *s, const char *e)
+css_time_func(const char *name, gsize nlen, const char *s, const char *e,
+              int nest)
 {
     const char *starts[8], *ends[8];
     int n = 0, depth = 0;
@@ -10669,7 +10671,8 @@ css_time_func(const char *name, gsize nlen, const char *s, const char *e)
         }
     }
     ns_tval_type at[8];
-    for (int i = 0; i < n; i++) at[i] = css_time_sum(starts[i], ends[i]);
+    for (int i = 0; i < n; i++)
+        at[i] = css_time_sum_depth(starts[i], ends[i], nest + 1);
 
     if (css_tv_name_is(name, nlen, "calc"))
         return n == 1 ? at[0] : TVT_INVALID;
@@ -10724,7 +10727,7 @@ css_time_func(const char *name, gsize nlen, const char *s, const char *e)
 }
 
 static ns_tval_type
-css_time_factor(const char **pp, const char *e)
+css_time_factor(const char **pp, const char *e, int depth)
 {
     const char *p = *pp;
     while (p < e && is_ws(*p)) p++;
@@ -10732,7 +10735,7 @@ css_time_factor(const char **pp, const char *e)
     if (*p == '(') {
         const char *close = match_close_paren(p + 1, e);
         if (!close) { *pp = e; return TVT_INVALID; }
-        ns_tval_type t = css_time_sum(p + 1, close);
+        ns_tval_type t = css_time_sum_depth(p + 1, close, depth + 1);
         *pp = close + 1;
         return t;
     }
@@ -10743,7 +10746,7 @@ css_time_factor(const char **pp, const char *e)
         if (p < e && *p == '(') {
             const char *close = match_close_paren(p + 1, e);
             if (!close) { *pp = e; return TVT_INVALID; }
-            ns_tval_type t = css_time_func(id, nlen, p + 1, close);
+            ns_tval_type t = css_time_func(id, nlen, p + 1, close, depth);
             *pp = close + 1;
             return t;
         }
@@ -10770,10 +10773,10 @@ css_time_factor(const char **pp, const char *e)
 }
 
 static ns_tval_type
-css_time_product(const char **pp, const char *e)
+css_time_product(const char **pp, const char *e, int depth)
 {
     const char *p = *pp;
-    ns_tval_type acc = css_time_factor(&p, e);
+    ns_tval_type acc = css_time_factor(&p, e, depth);
     if (acc == TVT_INVALID) { *pp = p; return TVT_INVALID; }
     for (;;) {
         const char *q = p;
@@ -10781,7 +10784,7 @@ css_time_product(const char **pp, const char *e)
         if (q >= e || (*q != '*' && *q != '/')) { p = q; break; }
         char op = *q++;
         const char *r = q;
-        ns_tval_type rhs = css_time_factor(&r, e);
+        ns_tval_type rhs = css_time_factor(&r, e, depth);
         if (rhs == TVT_INVALID) { *pp = r; return TVT_INVALID; }
         if (op == '*') {
             if (acc == TVT_NUMBER && rhs == TVT_NUMBER) acc = TVT_NUMBER;
@@ -10799,12 +10802,13 @@ css_time_product(const char **pp, const char *e)
 }
 
 static ns_tval_type
-css_time_sum(const char *s, const char *e)
+css_time_sum_depth(const char *s, const char *e, int depth)
 {
+    if (depth > NS_CALC_MAX_DEPTH) return TVT_INVALID;
     const char *p = s;
     while (p < e && is_ws(*p)) p++;
     if (p >= e) return TVT_INVALID;
-    ns_tval_type acc = css_time_product(&p, e);
+    ns_tval_type acc = css_time_product(&p, e, depth);
     if (acc == TVT_INVALID) return TVT_INVALID;
     for (;;) {
         while (p < e && is_ws(*p)) p++;
@@ -10812,10 +10816,16 @@ css_time_sum(const char *s, const char *e)
         char op = *p;
         if (op != '+' && op != '-') return TVT_INVALID;
         p++;
-        ns_tval_type rhs = css_time_product(&p, e);
+        ns_tval_type rhs = css_time_product(&p, e, depth);
         if (rhs == TVT_INVALID || rhs != acc) return TVT_INVALID;
     }
     return acc;
+}
+
+static ns_tval_type
+css_time_sum(const char *s, const char *e)
+{
+    return css_time_sum_depth(s, e, 0);
 }
 
 static ns_css_value *
