@@ -51454,17 +51454,25 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (new_body->parent) ns_js_record_move_removal(js, new_body);
     if (old_body && old_body != root) {
-        ns_node *reference = old_body->next_sibling;
-        ns_node *old_prev = old_body->prev_sibling;
         if (js) {
             ns_node_iters_pre_remove(js, old_body);
             ns_ce_disconnect_subtree(js, old_body);
         }
-        ns_node_remove(old_body);
-        if (js) {
-            g_hash_table_add(js->orphan_nodes, old_body);
-            ns_js_record_child_change(js, root, NULL, old_body,
-                                      old_prev, reference);
+        new_body = ns_unwrap_element_mut(value);
+        if (!new_body ||
+            ns_node_is_shadow_including_inclusive_ancestor(new_body, root))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                                          "Document.body cannot be inserted");
+        ns_node *reference = NULL;
+        if (old_body->parent == root) {
+            reference = old_body->next_sibling;
+            ns_node *old_prev = old_body->prev_sibling;
+            ns_node_remove(old_body);
+            if (js) {
+                g_hash_table_add(js->orphan_nodes, old_body);
+                ns_js_record_child_change(js, root, NULL, old_body,
+                                          old_prev, reference);
+            }
         }
         if (reference)
             ns_element_insert_before_single(js, root, new_body, reference);
