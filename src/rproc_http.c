@@ -383,8 +383,7 @@ spawn_inproc(int max_width, int max_height)
         max_width > 32768 || max_height > 32768)
         return NULL;
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
-    unsigned char *fb = g_atomic_rc_box_alloc(size);
-    memset(fb, 0xff, size);
+    unsigned char *fb = g_atomic_rc_box_alloc0(size);
     ns_rproc_http *r = calloc(1, sizeof *r);
     if (!r) {
         g_atomic_rc_box_release(fb);
@@ -596,8 +595,10 @@ render_request_json(const ns_rproc_http *r, char *json, size_t cap, int width,
     if (wheel && (wheel->dx || wheel->dy))
         jn += snprintf(json + jn, cap - (size_t)jn,
                        ",\"wheel_x\":%d,\"wheel_y\":%d,"
-                       "\"wheel_dx\":%d,\"wheel_dy\":%d",
-                       wheel->x, wheel->y, wheel->dx, wheel->dy);
+                       "\"wheel_dx\":%d,\"wheel_dy\":%d,"
+                       "\"wheel_viewport\":%d",
+                       wheel->x, wheel->y, wheel->dx, wheel->dy,
+                       wheel->viewport ? 1 : 0);
     jn += snprintf(json + jn, cap - (size_t)jn, "}");
     return jn;
 }
@@ -614,6 +615,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->ok = 1;
     out->animating = (head->x_anim & 1) != 0;
     out->caret_blinking = (head->x_anim & 2) != 0;
+    out->wheel_snapped = (head->x_anim & 4) != 0;
     out->page_w = (int)head->x_page_w;
     out->page_h = (int)head->x_page_h;
     out->scroll_y = (int)head->x_scroll_y;
@@ -629,10 +631,11 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
 }
 
 static int
-frame_head_fits(const ns_rproc_http *r, const http_head *head)
+frame_head_fits(const ns_rproc_http *r, const http_head *head, int width,
+                int height)
 {
-    if (head->x_w < 1 || head->x_w > r->max_w ||
-        head->x_h < 1 || head->x_h > r->max_h ||
+    if (head->x_w < 1 || head->x_w > r->max_w || head->x_w > width ||
+        head->x_h < 1 || head->x_h > r->max_h || head->x_h > height ||
         head->x_stride < head->x_w * 4 || head->x_stride > (long)r->max_w * 4)
         return 0;
     return r->shm || (uint64_t)head->content_length >=
@@ -687,7 +690,7 @@ ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
         out->unchanged = 1;
         return 0;
     }
-    if (!frame_head_fits(r, &head))
+    if (!frame_head_fits(r, &head, width, height))
         return -1;
     frame_fill_from_head(out, &head);
     out->width = (int)head.x_w;

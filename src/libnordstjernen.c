@@ -77,6 +77,7 @@ struct ns_browser {
     gint64          load_delay_deadline_us;
     GHashTable     *img_requested;
     gboolean        dirty;
+    double          dppx;
     gboolean        cascade_dirty;
     gboolean        relaying;
     char           *pending_nav;
@@ -1223,6 +1224,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 
     ns_browser *b = g_new0(ns_browser, 1);
     b->pending_scroll_x = -1;
+    b->dppx = ns_css_device_pixel_ratio();
     b->doc = doc;
     b->doc_charset = doc_charset;
     b->doc_language = doc_language;
@@ -1887,9 +1889,9 @@ int
 ns_browser_set_device_pixel_ratio(ns_browser *browser, double dppx)
 {
     if (!(dppx > 0)) return -1;
-    if (dppx == ns_css_device_pixel_ratio()) return 0;
     ns_css_set_device_pixel_ratio(dppx);
-    if (!browser || !browser->doc) return 0;
+    if (!browser || !browser->doc || browser->dppx == dppx) return 0;
+    browser->dppx = dppx;
     if (browser->js) {
         ns_js_sync_window_metrics(browser->js);
         ns_js_reeval_media_queries(browser->js);
@@ -2458,6 +2460,14 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 int
 ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
 {
+    return ns_browser_scroll_at_full(browser, x, y, dx, dy, NULL);
+}
+
+int
+ns_browser_scroll_at_full(ns_browser *browser, int x, int y, int dx, int dy,
+                          int *out_snapped)
+{
+    if (out_snapped) *out_snapped = 0;
     if (!browser || !browser->layout) return 0;
 
     ns_box *box = ns_box_hit_scrollable(browser->layout, (double)x, (double)y);
@@ -2479,7 +2489,11 @@ ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
     }
 
     if (consumed) {
+        double moved_x = box->scroll_x, moved_y = box->scroll_y;
         ns_box_scroll_snap_from(box, prev_x, prev_y);
+        if (out_snapped)
+            *out_snapped = box->scroll_x != moved_x ||
+                           box->scroll_y != moved_y;
         if (browser->js && box->dom)
             ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
     }

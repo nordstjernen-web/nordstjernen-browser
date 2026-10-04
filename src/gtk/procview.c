@@ -143,6 +143,7 @@ typedef struct {
     double           fallback_y;
     gboolean         animating;
     gboolean         caret_blinking;
+    gboolean         wheel_snapped;
     gboolean         frame_unchanged;
     int              requested_scroll_y, requested_scroll_x;
     int              find_total, find_current, find_scroll_y;
@@ -300,6 +301,7 @@ struct NsProcView {
     int         last_vp_w, last_vp_h;
     double      last_vp_dpr;
     double      wheel_left_x, wheel_left_y;
+    gboolean    wheel_viewport;
     double      wheel_pend_x, wheel_pend_y;
     double      fling_vx, fling_vy;
     guint       wheel_tick_id;
@@ -1616,6 +1618,7 @@ worker_main(gpointer data)
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
                 res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
+                res->wheel_snapped = fr.wheel_snapped ? TRUE : FALSE;
                 res->pw = fr.page_w;
                 res->ph = fr.page_h;
                 res->requested_scroll_y = fr.scroll_y;
@@ -2075,6 +2078,7 @@ start_render(NsProcView *v)
         v->wheel_pend_y -= req->wheel.dy;
         req->wheel.x = v->scroll_x + (int)(v->pointer_x / s);
         req->wheel.y = v->scroll_y + (int)(v->pointer_y / s);
+        req->wheel.viewport = v->wheel_viewport;
     }
     push_req(v, req);
 }
@@ -2192,6 +2196,7 @@ scroll_view_to(NsProcView *v, double x, double y)
     x = CLAMP(x, 0, MAX(max_x, 0));
     y = CLAMP(y, 0, MAX(max_y, 0));
     v->fling_vx = v->fling_vy = 0;
+    v->wheel_viewport = TRUE;
     v->wheel_left_x += x - scroll_target_x(v);
     v->wheel_left_y += y - scroll_target_y(v);
     arm_wheel_animation(v);
@@ -3044,6 +3049,8 @@ on_result(gpointer data)
         }
     } else if (res->type == RES_FRAME) {
         gboolean current = res->seq == v->render_seq;
+        if (res->ok && res->wheel_snapped)
+            stop_wheel_animation(v);
         if (current && res->ok) {
             v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;
@@ -3644,6 +3651,7 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
     }
     double s = cur_scale(v);
     v->fling_vx = v->fling_vy = 0;
+    v->wheel_viewport = FALSE;
     if (gtk_event_controller_scroll_get_unit(ctrl) == GDK_SCROLL_UNIT_SURFACE) {
         queue_wheel_scroll(v, dx / s, dy / s);
         return TRUE;
@@ -3658,13 +3666,15 @@ static void
 on_scroll_decelerate(GtkEventControllerScroll *ctrl, double vel_x,
                      double vel_y, gpointer data)
 {
-    (void)ctrl;
     NsProcView *v = data;
-    if (!v->opened)
+    if (!v->opened ||
+        (gtk_event_controller_get_current_event_state(
+             GTK_EVENT_CONTROLLER(ctrl)) & GDK_CONTROL_MASK))
         return;
     double s = cur_scale(v);
     v->fling_vx = vel_x / s;
     v->fling_vy = vel_y / s;
+    v->wheel_viewport = FALSE;
     arm_wheel_animation(v);
 }
 

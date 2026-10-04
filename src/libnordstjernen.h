@@ -167,6 +167,8 @@ int ns_browser_hover(ns_browser *browser, int x, int y);
  * nested scroller consumed the scroll (the caller should re-render), 0 if none
  * applied so the caller should scroll the root viewport instead. */
 int ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy);
+int ns_browser_scroll_at_full(ns_browser *browser, int x, int y, int dx,
+                              int dy, int *out_snapped);
 
 /* Mouse-driven scrollbar interaction for nested overflow containers, in page
  * coordinates (CSS px). _press begins a drag if (x,y) lands on a scroll
