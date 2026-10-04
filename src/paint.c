@@ -554,6 +554,60 @@ border_wedge_apex(const double a0[2], const double a1[2],
     *out_y = a0[1] + t * day;
 }
 
+static double
+snap_device_x(cairo_t *cr, double x)
+{
+    double y = 0;
+    cairo_user_to_device(cr, &x, &y);
+    x = round(x);
+    cairo_device_to_user(cr, &x, &y);
+    return x;
+}
+
+static double
+snap_device_y(cairo_t *cr, double y)
+{
+    double x = 0;
+    cairo_user_to_device(cr, &x, &y);
+    y = round(y);
+    cairo_device_to_user(cr, &x, &y);
+    return y;
+}
+
+static double
+snap_inner_edge(cairo_t *cr, double outer, double inner, double width,
+                double inward, gboolean vertical)
+{
+    if (width <= 0) return outer;
+    double snapped = vertical ? snap_device_y(cr, inner) : snap_device_x(cr, inner);
+    double dx = 1, dy = 1;
+    cairo_device_to_user_distance(cr, &dx, &dy);
+    double device_px = fabs(vertical ? dy : dx);
+    if ((snapped - outer) * inward < device_px * 0.5)
+        snapped = outer + inward * device_px;
+    return snapped;
+}
+
+static void
+snap_border_edges(cairo_t *cr, double *l, double *t, double *r, double *b,
+                  double *il, double *it, double *ir, double *ib,
+                  const ns_box *box)
+{
+    cairo_matrix_t m;
+    cairo_get_matrix(cr, &m);
+    if (m.xy != 0 || m.yx != 0) return;
+    *l = snap_device_x(cr, *l);
+    *r = snap_device_x(cr, *r);
+    *t = snap_device_y(cr, *t);
+    *b = snap_device_y(cr, *b);
+    *il = snap_inner_edge(cr, *l, *il, box->border.left, 1, FALSE);
+    *ir = snap_inner_edge(cr, *r, *ir, box->border.right, -1, FALSE);
+    *it = snap_inner_edge(cr, *t, *it, box->border.top, 1, TRUE);
+    *ib = snap_inner_edge(cr, *b, *ib, box->border.bottom, -1, TRUE);
+    if (*ir < *il) *ir = *il;
+    if (*ib < *it) *ib = *it;
+}
+
 static gboolean
 paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
                            double x, double y, double w, double h,
@@ -1624,6 +1678,22 @@ paint_block(cairo_t *cr, const ns_box *b)
               border_x + b->border.left / 2.0, border_y,
               border_x + b->border.left / 2.0, border_y + border_h },
         };
+        double edge_l = border_x, edge_t = border_y;
+        double edge_r = border_x + border_w, edge_b = border_y + border_h;
+        double inner_x = edge_l + b->border.left;
+        double inner_y = edge_t + b->border.top;
+        double inner_r = MAX(inner_x, edge_r - b->border.right);
+        double inner_b = MAX(inner_y, edge_b - b->border.bottom);
+        snap_border_edges(cr, &edge_l, &edge_t, &edge_r, &edge_b,
+                          &inner_x, &inner_y, &inner_r, &inner_b, b);
+        const double outer_corner[4][2] = {
+            { edge_l, edge_t }, { edge_r, edge_t },
+            { edge_r, edge_b }, { edge_l, edge_b },
+        };
+        const double inner_corner[4][2] = {
+            { inner_x, inner_y }, { inner_r, inner_y },
+            { inner_r, inner_b }, { inner_x, inner_b },
+        };
         for (int i = 0; !drew_uniform && i < 4; i++) {
             if (sides[i].w <= 0) continue;
             const ns_css_value *bs = sides[i].style;
@@ -1634,7 +1704,19 @@ paint_block(cairo_t *cr, const ns_box *b)
             rgba c = rgba_of(sides[i].col ? sides[i].col
                                           : (s ? s->values[NS_CSS_COLOR] : NULL),
                              0, 0, 0, 1);
+            if (c.a <= 0) continue;
             set_source_rgba(cr, c);
+            if (strcmp(bs->u.keyword, "solid") == 0) {
+                int next = (i + 1) % 4;
+                cairo_new_path(cr);
+                cairo_move_to(cr, outer_corner[i][0], outer_corner[i][1]);
+                cairo_line_to(cr, outer_corner[next][0], outer_corner[next][1]);
+                cairo_line_to(cr, inner_corner[next][0], inner_corner[next][1]);
+                cairo_line_to(cr, inner_corner[i][0], inner_corner[i][1]);
+                cairo_close_path(cr);
+                cairo_fill(cr);
+                continue;
+            }
             cairo_set_line_width(cr, sides[i].w);
             cairo_save(cr);
             if (strcmp(bs->u.keyword, "dashed") == 0) {
