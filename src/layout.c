@@ -3374,6 +3374,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 const char *rows_attr = ns_element_get_attr(n, "rows");
                 int row_lines = rows_attr ? atoi(rows_attr) : 2;
                 if (row_lines < 1) row_lines = 1;
+                if (row_lines > 1000) row_lines = 1000;
                 for (int r = 0; r < row_lines; r++) {
                     if (r) g_string_append(ctx->out, "\xe2\x80\xa8");
                     g_string_append(ctx->out, "\xc2\xa0");
