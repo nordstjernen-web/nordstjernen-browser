@@ -195,6 +195,7 @@ struct ns_js {
     GHashTable   *js_image_loads;
     GHashTable   *orphan_nodes;
     GPtrArray    *listeners;
+    GHashTable   *listener_index;
     GHashTable   *pinned_wrappers_set;
     GPtrArray    *attr_wrappers;
     GHashTable   *attribute_maps;
