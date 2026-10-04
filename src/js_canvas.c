@@ -1511,13 +1511,14 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         stack = JS_NewArray(ctx);
         ns_hset(ctx, this_val, "_stateStack", JS_DupValue(ctx, stack));
     }
-    JSValue snap = JS_NewObject(ctx);
+    JSValue snap = JS_NewObjectProto(ctx, JS_NULL);
     for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
         JSValue v = ns_hget(ctx, this_val, ns_ctx_savable_props[i]);
-        JS_SetPropertyStr(ctx, snap, ns_ctx_savable_props[i], v);
+        JS_DefinePropertyValueStr(ctx, snap, ns_ctx_savable_props[i], v,
+                                  JS_PROP_C_W_E);
     }
     uint32_t n = ns_js_array_length(ctx, stack);
-    JS_SetPropertyUint32(ctx, stack, n, snap);
+    JS_DefinePropertyValueUint32(ctx, stack, n, snap, JS_PROP_C_W_E);
     JS_FreeValue(ctx, stack);
     return JS_UNDEFINED;
 }
