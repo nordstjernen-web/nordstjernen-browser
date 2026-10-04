@@ -5834,6 +5834,8 @@ inline_box_measure_cacheable(const ns_box *box)
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
 static double measure_max_content_width(ns_box *box, const ns_style *parent_style);
+static double flex_gap_of(const ns_style *s, double basis);
+static gboolean flex_wraps(const ns_style *s);
 static double width_contribution_keyword_limits(ns_box *box, double w,
                                                 const ns_style *parent_style,
                                                 gboolean max_content);
@@ -7258,12 +7260,61 @@ inline_atomic_measure_basis(const ns_box *box)
     return basis;
 }
 
+static gboolean
+grid_flows_by_column(const ns_style *s)
+{
+    const ns_css_value *fv = s ? s->values[NS_CSS_GRID_AUTO_FLOW] : NULL;
+    return fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword &&
+           strstr(fv->u.keyword, "column") != NULL;
+}
+
+static int
+grid_explicit_row_count(const ns_style *s)
+{
+    const ns_css_value *rv = s ? s->values[NS_CSS_GRID_TEMPLATE_ROWS] : NULL;
+    if (!rv || rv->kind != NS_CSS_V_TRACKS || rv->u.tracks.subgrid ||
+        rv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE)
+        return 1;
+    return rv->u.tracks.n > 1 ? rv->u.tracks.n : 1;
+}
+
+static double
+grid_column_flow_width(ns_box *box, const ns_style *child_style,
+                       gboolean min_content)
+{
+    int rows = grid_explicit_row_count(box->style);
+    double sum = 0, column = 0;
+    int in_column = 0, columns = 0;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        double w = min_content ? measure_min_width(c, child_style)
+                               : measure_natural_width(c, child_style);
+        if (c->style) {
+            ns_edges m = {0}, pd = {0}, bd = {0};
+            edges_from_style(c->style, 0, &m, &pd, &bd);
+            w += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
+        }
+        if (w > column) column = w;
+        if (++in_column == rows) {
+            sum += column;
+            column = 0;
+            in_column = 0;
+            columns++;
+        }
+    }
+    if (in_column > 0) {
+        sum += column;
+        columns++;
+    }
+    if (columns == 0) return -1;
+    return sum + flex_gap_of(box->style, 0) * (columns - 1);
+}
+
 static double
 grid_natural_width(ns_box *box, const ns_style *child_style)
 {
-    const ns_css_value *fv = box->style->values[NS_CSS_GRID_AUTO_FLOW];
-    if (fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword &&
-        strstr(fv->u.keyword, "column")) return -1;
+    if (grid_flows_by_column(box->style))
+        return grid_column_flow_width(box, child_style, FALSE);
     const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
     if (!cv || cv->kind != NS_CSS_V_TRACKS || cv->u.tracks.n <= 0 ||
         cv->u.tracks.subgrid ||
@@ -7638,6 +7689,10 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             ns_vertical_measure(box, parent_style, &thickness, &length);
             return thickness;
         }
+        const ns_css_value *ws = parent_style
+            ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL;
+        if (keyword_is(ws, "nowrap") || keyword_is(ws, "pre"))
+            return measure_natural_width(box, parent_style);
         gboolean cacheable = inline_box_measure_cacheable(box);
         if (cacheable && box->inline_min_cache_valid &&
             box->inline_min_cache_style == parent_style)
@@ -7741,6 +7796,11 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
+    if (box->style && style_is_grid_container(box->style) &&
+        grid_flows_by_column(box->style)) {
+        double gw = grid_column_flow_width(box, parent_style, TRUE);
+        if (gw >= 0) return gw;
+    }
     if (box->style && style_is_grid_container(box->style)) {
         const ns_css_value *cv =
             box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
@@ -7776,7 +7836,12 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         }
     }
     const ns_style *child_style = box->style ? box->style : parent_style;
+    gboolean single_line_row = style_is_flex_container(box->style) &&
+        strncmp(flex_direction_of(box->style), "row", 3) == 0 &&
+        !flex_wraps(box->style);
     double max_child = 0;
+    double row_sum = 0;
+    int items = 0;
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
         double w = measure_min_width(c, child_style);
         double outer = w;
@@ -7786,8 +7851,14 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
             outer += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
         }
         if (outer > max_child) max_child = outer;
+        row_sum += outer;
+        items++;
     }
-    return max_child;
+    if (!single_line_row)
+        return max_child;
+    if (items > 1)
+        row_sum += flex_gap_of(box->style, 0) * (items - 1);
+    return row_sum;
 }
 
 static gboolean
