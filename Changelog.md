@@ -11,6 +11,12 @@ Changelog:
 
 1.0.28:
 ======
+* A column flex container with `min-height` and no `height` is as tall as
+  its content again; the minimum was used as the height, so the items were
+  shrunk to fit it and the rest of the page was laid out over them
+  (DuckDuckGo's comparison page drew its table over the introduction).
+  `overflow: clip` on a flex item no longer lets it shrink below its
+  content, since it does not make a scroll container.
 * Relayouts of pages with container queries are about 17% faster when the
   containers keep their size (measured on a 6,000 element page relaid out
   after each style write): the selector match cache that serves the second

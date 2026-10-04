@@ -6631,6 +6631,22 @@ box_clips_children(const ns_box *b)
 }
 
 static gboolean
+overflow_kw_scroll_container(const char *ov)
+{
+    return overflow_kw_clips(ov) && g_ascii_strcasecmp(ov, "clip") != 0;
+}
+
+static gboolean
+box_is_scroll_container(const ns_box *b)
+{
+    if (!box_clips_children(b)) return FALSE;
+    return overflow_kw_scroll_container(
+               overflow_axis_keyword(b->style, NS_CSS_OVERFLOW_X)) ||
+           overflow_kw_scroll_container(
+               overflow_axis_keyword(b->style, NS_CSS_OVERFLOW_Y));
+}
+
+static gboolean
 box_padding_contains(const ns_box *b, double x, double y)
 {
     double x0 = b->x + b->margin.left + b->border.left;
@@ -8799,7 +8815,7 @@ flex_item_min_main(ns_box *c, double cw, const ns_style *inherited)
         double mn = flex_item_keyword_width(c, mnw, cw, inherited);
         return mn > 0 ? mn : 0;
     }
-    if (box_clips_children(c)) return 0;
+    if (box_is_scroll_container(c)) return 0;
     double mn = measure_min_content_width(c, inherited ? inherited : c->style);
     if (mn < 0) mn = 0;
     const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
@@ -9691,7 +9707,7 @@ flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
         double stretch = flex_item_stretch_main_height(c, pct_basis);
         return stretch > 0 ? stretch : 0;
     }
-    if (box_clips_children(c)) return 0;
+    if (box_is_scroll_container(c)) return 0;
     const ns_css_value *hv = c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
         !(value_is_percent(hv) && pct_basis < 0)) {
@@ -9804,6 +9820,12 @@ flex_item_outer_width(const ns_box *c)
         + c->margin.left + c->margin.right;
 }
 
+static double
+definite_height_at_least(double h, double min_h)
+{
+    return h >= 0 && min_h > h ? min_h : h;
+}
+
 static void
 layout_flex_column(ns_box *box, double cw,
                    double inner_x, double inner_y,
@@ -9853,7 +9875,7 @@ layout_flex_column(ns_box *box, double cw,
         if (max_h >= 0) max_h = MAX(max_h - vex, 0);
     }
     double percentage_basis_h = explicit_h;
-    if (min_h > explicit_h) explicit_h = min_h;
+    explicit_h = definite_height_at_least(explicit_h, min_h);
     if (max_h >= 0 && explicit_h > max_h) explicit_h = max_h;
 
     double line_limit = explicit_h > 0 ? explicit_h : max_h;
