@@ -15193,11 +15193,11 @@ ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
 {
     JSContext *ctx = s->ctx;
     if (ns_sc_buffer_detached(ctx, src)) return ns_sc_fail(ctx);
-    size_t size = 0;
-    uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
     JSValue resizable = JS_GetPropertyStr(ctx, src, "resizable");
     gboolean is_resizable = JS_ToBool(ctx, resizable) > 0;
     JS_FreeValue(ctx, resizable);
+    size_t size = 0;
+    uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
     if (!is_resizable) return JS_NewArrayBufferCopy(ctx, bytes, size);
     JSValue opts = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, opts, "maxByteLength",
@@ -15209,6 +15209,7 @@ ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
     if (JS_IsException(clone)) return clone;
     size_t clone_size = 0;
     uint8_t *dst = JS_GetArrayBuffer(ctx, &clone_size, clone);
+    bytes = JS_GetArrayBuffer(ctx, &size, src);
     if (dst && bytes && clone_size >= size) memcpy(dst, bytes, size);
     return clone;
 }
