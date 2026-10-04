@@ -2053,8 +2053,8 @@ ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
         w = size.ratio * k;
         h = k;
     }
-    if (w <= 0) w = NS_SVG_DEFAULT_DIM_PX;
-    if (h <= 0) h = NS_SVG_DEFAULT_DIM_PX;
+    if (!isfinite(w) || w <= 0) w = NS_SVG_DEFAULT_DIM_PX;
+    if (!isfinite(h) || h <= 0) h = NS_SVG_DEFAULT_DIM_PX;
     if (w > NS_SVG_MAX_DIM_PX || h > NS_SVG_MAX_DIM_PX) {
         double s = (double)NS_SVG_MAX_DIM_PX / MAX(w, h);
         w *= s; h *= s;
