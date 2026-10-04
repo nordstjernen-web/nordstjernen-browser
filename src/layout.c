@@ -4881,7 +4881,8 @@ append_display_contents_children(ns_box *block, const ns_node *n,
     if (contents_before)
         box_append_child(block, contents_before);
 
-    const ns_node *c = n->first_child;
+    const ns_node *shadow_root = layout_shadow_root(n);
+    const ns_node *c = shadow_root ? shadow_root->first_child : n->first_child;
     while (c) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             tag_is_non_rendering(c->name)) {
