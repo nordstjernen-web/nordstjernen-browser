@@ -268,7 +268,7 @@ them large:
    App Store terms are widely read as incompatible with the GPL family
    (LGPL is more arguable when dynamically linked and relinkable — a legal
    question to clear). Nordstjernen itself is dual-licensed **NSL-1.0 or
-   GPL-3.0**; the GPL-3.0 option is generally considered incompatible
+   GPL-3.0-or-later**; the GPL option is generally considered incompatible
    with the App Store terms for the same reason, so a store build by the
    copyright holder would rely on the **NSL-1.0** (or commercial) terms,
    not the GPL. Confirm that NSL-1.0 permits store distribution; the

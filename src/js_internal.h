@@ -1,7 +1,7 @@
 /* Nordstjernen — internal JS engine declarations shared between
  * js.c and js_canvas.c. Not a public API.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #ifndef NS_JS_INTERNAL_H

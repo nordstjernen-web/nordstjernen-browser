@@ -24,18 +24,18 @@ APKBUILD sets `builddir` accordingly.
 
 Nordstjernen is **dual-licensed**: each recipient may take it under
 **either** the **Nordstjernen Source License v1.0** (`License.md`) **or**
-the **GNU General Public License version 3** (`COPYING`), at their
+the **GNU General Public License version 3 or later** (`COPYING`), at their
 option. The APKBUILD declares this as
-`license="LicenseRef-NSL-1.0 OR GPL-3.0-only"` and installs both texts to
+`license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"` and installs both texts to
 `/usr/share/licenses/$pkgname/`.
 
 NSL-1.0 on its own is a Functional-Source-License-style
 *source-available* license with a "Competing Use" restriction and is not
-OSI-approved. The GPL-3.0 is, so the package is free software under that
+OSI-approved. The GPL is, so the package is free software under that
 option, and the bundled third-party code (see `THIRD-PARTY-LICENSES.md`)
 keeps its own GPL-3-compatible licenses. Alpine's official `aports`
 (main/community/testing) require free / OSI-approved licenses; the
-GPL-3.0 option meets that, so Nordstjernen can be proposed for `aports`
+GPL option meets that, so Nordstjernen can be proposed for `aports`
 through the normal merge-request review (see below). Until it is
 accepted, the same APKBUILD builds for a **personal / custom Alpine
 repository**.
@@ -81,10 +81,10 @@ To propose it for `aports`:
 1. Fork <https://gitlab.alpinelinux.org/alpine/aports>.
 2. Add the APKBUILD under `testing/nordstjernen/APKBUILD` (new packages
    start in `testing/`, then move to `community/` after review).
-3. Keep `license="LicenseRef-NSL-1.0 OR GPL-3.0-only"` and the
+3. Keep `license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"` and the
    `package()` lines that install `License.md` and `COPYING` under
    `/usr/share/licenses/$pkgname/`, and say in the merge request that the
-   package is distributed under the GPL-3.0 option.
+   package is distributed under the GPL option.
 4. Verify it builds in a clean chroot with `abuild rootbld` and passes
    `apkbuild-lint` / `apkbuild-shellcheck`.
 5. Commit with the message `testing/nordstjernen: new aport` and open a

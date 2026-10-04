@@ -181,10 +181,10 @@ through a meson wrap).
 ## License
 
 Nordstjernen is dual-licensed: use it under **either** the Nordstjernen
-Source License v1.0 **or** the GNU General Public License version 3, at your
-option (`LicenseRef-NSL-1.0 OR GPL-3.0-only`).
+Source License v1.0 **or** the GNU General Public License version 3 or later,
+at your option (`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`).
 
-- **GPL-3.0** — free software: use, modify and redistribute it for any
+- **GPL-3.0-or-later** — free software: use, modify and redistribute it for any
   purpose, provided derivative works are also released under the GPL. See
   [COPYING](COPYING).
 - **NSL-1.0** — use, modify and redistribute freely, except as a competing

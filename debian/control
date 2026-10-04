@@ -53,5 +53,5 @@ Description: small, hand-written web browser
   * No telemetry: it does not phone home and does not track the user.
  .
  Nordstjernen is dual-licensed under the GNU General Public License version 3
- or the Nordstjernen Source License v1.0, at the recipient's option; Debian
- distributes it under the GPL-3.
+ or later or the Nordstjernen Source License v1.0, at the recipient's option;
+ Debian distributes it under the GPL-3+.

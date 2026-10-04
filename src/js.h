@@ -1,7 +1,7 @@
 /* Nordstjernen — JavaScript engine contract, implemented by the QuickJS
  * binding (src/js.c, default) or the experimental V8 backend (src/js_v8.cc).
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #ifndef NS_JS_H

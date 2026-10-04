@@ -1,6 +1,6 @@
 /* Nordstjernen — libcurl-backed async fetcher.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #include "net.h"
@@ -4430,7 +4430,8 @@ static const char k_about_nordstjernen_template[] =
     "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
     "you may use, modify and redistribute it under either the "
     "<b>Nordstjernen Source License v1.0 (NSL-1.0)</b> or the "
-    "<b>GNU General Public License, version\xc2\xa0" "3 (GPL-3.0)</b>, "
+    "<b>GNU General Public License, version\xc2\xa0" "3 or later "
+    "(GPL-3.0-or-later)</b>, "
     "at your option. It comes with ABSOLUTELY NO WARRANTY.</p>"
     "<p>It bundles third-party open-source software under "
     "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses, "

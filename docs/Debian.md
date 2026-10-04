@@ -10,8 +10,8 @@ root. For the plain build-from-source instructions (any distro) see
 
 Nordstjernen is **dual-licensed**: each recipient may take it under
 **either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
-**GNU General Public License version 3 (GPL-3.0)**, at their option (SPDX
-`LicenseRef-NSL-1.0 OR GPL-3.0-only`; the texts are `License.md` and
+**GNU General Public License version 3 or later (GPL-3.0-or-later)**, at their option (SPDX
+`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`; the texts are `License.md` and
 `COPYING` at the repository root). Four sources — `src/css_media.c`,
 `src/svg.c`, `src/svg.h` and `src/webaudio.c` — are GPL-3.0-or-later
 only.
@@ -21,9 +21,9 @@ Free Software Guidelines
 (DFSG)](https://www.debian.org/social_contract#guidelines). NSL-1.0 on
 its own does not: its **"Competing Use"** restriction and its limit of
 education and research use to **non-commercial** contexts both violate
-DFSG §6 ("No Discrimination Against Fields of Endeavor"). The GPL-3.0,
+DFSG §6 ("No Discrimination Against Fields of Endeavor"). The GPL,
 however, is DFSG-free, and a dual license needs only one DFSG-free
-option: Debian distributes the package under the GPL-3.0 and recipients
+option: Debian distributes the package under the GPL and recipients
 keep the choice. The bundled third-party code (see
 `THIRD-PARTY-LICENSES.md`) keeps its own free, GPL-3-compatible licenses.
 **Nordstjernen can therefore go into Debian `main`**, through the usual
@@ -37,7 +37,7 @@ There are two paths, in order of effort:
    Debian and every Debian derivative (Ubuntu, Mint, …). This is the
    practical channel until the package is in the archive, and is
    documented below.
-2. **Debian `main`.** The GPL-3.0 option qualifies the package for
+2. **Debian `main`.** The GPL option qualifies the package for
    `main`. It still needs a Debian Developer to sponsor and upload it, an
    ITP bug, and FTP-master review of `debian/copyright`. The `debian/`
    tree here targets `main` (`Section: web`). Once in Debian, derivatives
@@ -47,7 +47,7 @@ There are two paths, in order of effort:
 > Neither `non-free` nor `contrib` is the right home. `non-free` is for
 > software with no DFSG-free license option, and `contrib` for DFSG-free
 > software that *depends on* something outside `main`. Nordstjernen is
-> DFSG-free under the GPL-3.0 option and its build and runtime
+> DFSG-free under the GPL option and its build and runtime
 > dependencies are in `main`.
 
 The rest of this document covers building the `.deb` and shipping it
@@ -59,7 +59,7 @@ through paths (1) and (2).
 debian/
 ├── changelog       # version history; top entry sets the package version
 ├── control         # Section: web (main), build-deps, binary package
-├── copyright       # DEP-5; GPL-3 or NSL-1.0, plus bundled-engine licenses
+├── copyright       # DEP-5; GPL-3+ or NSL-1.0, plus bundled-engine licenses
 ├── rules           # dh sequencer; configures meson with ai disabled
 ├── source/format   # 3.0 (quilt)
 └── watch           # tracks upstream GitHub tags
@@ -68,7 +68,7 @@ debian/
 Key choices:
 
 * **`Section: web`** — the package targets `main`, distributed under the
-  GPL-3.0 option of the dual license.
+  GPL option of the dual license.
 * **`debian/rules`** is a minimal `dh` file. Hardening is on via
   `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
   meson build already enables PIE, stack protector, and FORTIFY itself.
@@ -77,7 +77,7 @@ Key choices:
   cannot be cloned — text shapes through the system Pango instead) and
   `-Dwebgpu=disabled` (wgpu-native is not packaged).
 * **`debian/copyright`** is DEP-5. `Files: *` declares
-  `License: GPL-3 or NSL-1.0`, with a `GPL-3` stanza pointing at
+  `License: GPL-3+ or NSL-1.0`, with a `GPL-3+` stanza pointing at
   `/usr/share/common-licenses/GPL-3` and an `NSL-1.0` stanza for the
   alternative. It also spells out the free licenses of the in-tree
   engines (lexbor — Apache-2.0; QuickJS — Expat; WAMR — Apache-2.0) and
@@ -189,9 +189,9 @@ With a Debian Developer willing to sponsor it:
        reportbug --email <you> wnpp
 
    Title it `ITP: nordstjernen -- small, hand-written web browser` and
-   give the license as `GPL-3 or NSL-1.0` (SPDX
-   `LicenseRef-NSL-1.0 OR GPL-3.0-only`), noting that Debian distributes
-   it under the GPL-3 option and that it targets `main`.
+   give the license as `GPL-3+ or NSL-1.0` (SPDX
+   `LicenseRef-NSL-1.0 OR GPL-3.0-or-later`), noting that Debian distributes
+   it under the GPL-3+ option and that it targets `main`.
 
 2. **Polish the source package.** Build cleanly in `sbuild`, get
    `lintian` quiet, and make sure `debian/copyright` is complete and

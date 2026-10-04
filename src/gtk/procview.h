@@ -1,6 +1,6 @@
 /* Nordstjernen — GTK view backed by the out-of-process renderer (thin client).
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #ifndef NORDSTJERNEN_GTK_PROCVIEW_H
