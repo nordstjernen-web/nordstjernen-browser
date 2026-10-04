@@ -9,8 +9,10 @@ release bundles, you are entitled by the LGPL terms to replace them
 with modified versions; the binary will continue to function with any
 ABI-compatible replacement.
 
-The Nordstjernen source code itself is not open-source. See `README.md`
-for the project's own license terms.
+The Nordstjernen source code itself is dual-licensed under the
+Nordstjernen Source License v1.0 or the GNU General Public License
+version 3, at your option. See `License.md` and `COPYING` for the
+project's own license terms.
 
 ---
 

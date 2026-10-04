@@ -96,7 +96,13 @@ publishing {
                         name = 'Nordstjernen Source License v1.0'
                         url = 'https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-browser/main/License.md'
                         distribution = 'repo'
-                        comments = 'LicenseRef-NSL-1.0'
+                        comments = 'LicenseRef-NSL-1.0; dual-licensed, at your option, with GPL-3.0-only'
+                    }
+                    license {
+                        name = 'GNU General Public License, version 3'
+                        url = 'https://www.gnu.org/licenses/gpl-3.0.txt'
+                        distribution = 'repo'
+                        comments = 'GPL-3.0-only; dual-licensed, at your option, with LicenseRef-NSL-1.0'
                     }
                 }
                 developers {

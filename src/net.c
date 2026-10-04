@@ -1,6 +1,6 @@
 /* Nordstjernen — libcurl-backed async fetcher.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
  */
 
 #include "net.h"
@@ -3009,9 +3009,27 @@ build_about_license(void)
         "License.md",
         NULL,
     };
-    return build_about_markdown_page(paths, "Nordstjernen Source License",
+    return build_about_markdown_page(paths, "Nordstjernen License",
                                      "about:nordstjernen", "About Nordstjernen",
                                      "License.md");
+}
+
+static char *
+build_about_gpl(void)
+{
+    static const char *const paths[] = {
+        "nordstjernen/COPYING",
+        "share/nordstjernen/COPYING",
+        "../share/nordstjernen/COPYING",
+        "../../../COPYING",
+        "../../COPYING",
+        "COPYING",
+        NULL,
+    };
+    return build_about_markdown_page(paths,
+                                     "GNU General Public License, version 3",
+                                     "about:nordstjernen", "About Nordstjernen",
+                                     "COPYING");
 }
 
 static char *
@@ -4409,8 +4427,11 @@ static const char k_about_nordstjernen_template[] =
     "<p>A web browser implemented in C.</p></div></div>"
     "<section class=\"card\">"
     "<h2>License</h2>"
-    "<p>Nordstjernen is distributed under the <b>Nordstjernen Source "
-    "License v1.0 (NSL-1.0)</b>, \xc2\xa9 2026 Andreas R\xc3\xb8sdal.</p>"
+    "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
+    "you may use, modify and redistribute it under either the "
+    "<b>Nordstjernen Source License v1.0 (NSL-1.0)</b> or the "
+    "<b>GNU General Public License, version\xc2\xa0" "3 (GPL-3.0)</b>, "
+    "at your option. It comes with ABSOLUTELY NO WARRANTY.</p>"
     "<p>It bundles third-party open-source software under "
     "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses, "
     "including lexbor, QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
@@ -4419,6 +4440,7 @@ static const char k_about_nordstjernen_template[] =
     "reproduced in the notices.</p>"
     "<div class=\"actions\">"
     "<a class=\"btn\" href=\"about:license\">Nordstjernen Source License</a>"
+    "<a class=\"btn\" href=\"about:gpl\">GNU GPL v3</a>"
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
@@ -4879,6 +4901,10 @@ synthesize_about_response(const char *url, const char *top_url,
                             (guint)strlen(body));
     } else if (g_str_equal(what, "license") || g_str_equal(what, "licence")) {
         char *body = build_about_license();
+        g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
+        g_free(body);
+    } else if (g_str_equal(what, "gpl") || g_str_equal(what, "copying")) {
+        char *body = build_about_gpl();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "third-party") ||

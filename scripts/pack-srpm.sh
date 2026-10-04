@@ -48,7 +48,7 @@ Version:        ${RPMVERSION}
 Release:        1%{?dist}
 Summary:        Nordstjernen Web Navigator — a small, hand-written web browser
 
-License:        LicenseRef-NSL-1.0
+License:        LicenseRef-NSL-1.0 OR GPL-3.0-only
 URL:            https://nordstjernen.org
 Source0:        ${SLUG}.tar.gz
 
@@ -83,7 +83,7 @@ Requires:       libcurl
 Requires:       uchardet
 
 %description
-Nordstjernen is a small, source-available web browser written in C with
+Nordstjernen is a small, free software web browser written in C with
 GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
 JavaScript glue are written from scratch — no third-party browser
 engine is used. SVG images are rendered in-engine.
@@ -117,6 +117,7 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 
 %files
 %license %{_datadir}/%{name}/License.md
+%license %{_datadir}/%{name}/COPYING
 %doc README.md
 %{_bindir}/nordstjernen
 %{_bindir}/nordstjernen-renderer

@@ -3,12 +3,10 @@
 #
 # Copyright 2026 Andreas Røsdal
 #
-# The Nordstjernen Source License v1.0 (NSL-1.0) is source-available but
-# NOT an OSI-approved / free license: it forbids "Competing Use" and limits
-# some purposes to non-commercial use. It is therefore tagged SUSE-NonFree
-# and this package belongs in a non-free repository (a home: project or
-# openSUSE's non-free area), never in openSUSE:Factory. NSL-1.0 converts to
-# the MIT license ten years after each release.
+# Nordstjernen is dual-licensed under the Nordstjernen Source License v1.0
+# (NSL-1.0) or the GNU General Public License version 3, at the recipient's
+# option. The GPL-3.0 option is a free, OSI-approved license, so the package
+# can be distributed under it, including in openSUSE:Factory.
 #
 
 
@@ -16,7 +14,7 @@ Name:           nordstjernen
 Version:        1.0.27
 Release:        0
 Summary:        Small, hand-written GTK web browser
-License:        SUSE-NonFree
+License:        LicenseRef-NSL-1.0 OR GPL-3.0-only
 Group:          Productivity/Networking/Web/Browsers
 URL:            https://nordstjernen.org
 
@@ -103,6 +101,7 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 %files
 %doc README.md
 %license %{_datadir}/nordstjernen/License.md
+%license %{_datadir}/nordstjernen/COPYING
 %{_bindir}/nordstjernen
 %{_bindir}/nordstjernen-renderer
 %{_bindir}/nordstjernen-audio

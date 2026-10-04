@@ -77,7 +77,7 @@ pkgrel=0
 pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
-license="custom"
+license="LicenseRef-NSL-1.0 OR GPL-3.0-only"
 depends="gtk4.0 libepoxy libcurl uchardet sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3${AUDIO_DEP}${WEBM_DEP}"
 options="!check !tracedeps !strip"
 source=""
@@ -101,6 +101,8 @@ package() {
 		"\$pkgdir/usr/share/applications/org.nordstjernen.WebBrowser.desktop"
 	install -Dm644 "${STAGE}/License.md" \\
 		"\$pkgdir/usr/share/nordstjernen/License.md"
+	install -Dm644 "${STAGE}/COPYING" \\
+		"\$pkgdir/usr/share/nordstjernen/COPYING"
 	install -Dm644 "${STAGE}/README.md" \\
 		"\$pkgdir/usr/share/doc/nordstjernen/README.md"
 	install -Dm644 "${STAGE}/THIRD-PARTY-LICENSES.md" \\

@@ -1,6 +1,6 @@
 /* Nordstjernen — stock-Pango names for the fork's renamed API.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
  */
 
 #ifndef NS_PANGO_NAMES_H

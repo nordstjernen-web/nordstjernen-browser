@@ -15,6 +15,7 @@ def licenseAssetsDir = layout.buildDirectory.dir('generated/license-assets').get
 def syncLicenseAssets = tasks.register('syncLicenseAssets', Sync) {
     from(rootProject.projectDir.parentFile) {
         include 'License.md'
+        include 'COPYING'
         include 'THIRD-PARTY-LICENSES.md'
     }
     into licenseAssetsDir

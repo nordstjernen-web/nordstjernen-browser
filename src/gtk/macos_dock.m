@@ -1,6 +1,6 @@
 /* Nordstjernen — set the macOS Dock icon when running unbundled.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
  */
 #import <AppKit/AppKit.h>
 

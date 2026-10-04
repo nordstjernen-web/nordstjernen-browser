@@ -43,6 +43,7 @@ cp "$STAGE/nordstjernen-renderer" "$RPMTOP/SOURCES/"
 cp "$ROOT/data/nordstjernen.desktop" "$RPMTOP/SOURCES/"
 cp "$ROOT/README.md" "$RPMTOP/SOURCES/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$RPMTOP/SOURCES/"
+cp "$ROOT/License.md" "$ROOT/COPYING" "$RPMTOP/SOURCES/"
 
 # WebGPU: when pack-linux staged libwgpu_native.so, the binaries link it by its
 # bare soname (DT_NEEDED=libwgpu_native.so), so the RPM must ship it under
@@ -83,7 +84,7 @@ Version:        ${RPMVERSION}
 Release:        1%{?dist}
 Summary:        Nordstjernen Web Navigator — a small, hand-written web browser
 
-License:        Proprietary
+License:        LicenseRef-NSL-1.0 OR GPL-3.0-only
 URL:            https://nordstjernen.org
 BuildArch:      ${ARCH}
 
@@ -93,6 +94,8 @@ Source2:        nordstjernen.desktop
 Source3:        README.md
 Source4:        THIRD-PARTY-LICENSES.md
 Source5:        nordstjernen-renderer
+Source8:        License.md
+Source9:        COPYING
 ${AUDIO_SOURCE}
 ${WGPU_SOURCE}
 
@@ -104,7 +107,7 @@ ${WGPU_EXCLUDE}
 %global __os_install_post %{nil}
 
 %description
-Nordstjernen is a small, source-available web browser written in C with
+Nordstjernen is a small, free software web browser written in C with
 GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
 JavaScript glue are written from scratch — no third-party browser
 engine is used. SVG images are rendered in-engine.
@@ -121,6 +124,7 @@ install -dm755 %{buildroot}%{_bindir}
 install -dm755 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
 install -dm755 %{buildroot}%{_datadir}/applications
 install -dm755 %{buildroot}%{_docdir}/nordstjernen
+install -dm755 %{buildroot}%{_datadir}/nordstjernen
 
 install -m755 %{SOURCE0} %{buildroot}%{_bindir}/nordstjernen
 install -m755 %{SOURCE5} %{buildroot}%{_bindir}/nordstjernen-renderer
@@ -131,10 +135,14 @@ chmod 644 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/nordstjernen*
 install -m644 %{SOURCE2} %{buildroot}%{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 install -m644 %{SOURCE3} %{buildroot}%{_docdir}/nordstjernen/
 install -m644 %{SOURCE4} %{buildroot}%{_docdir}/nordstjernen/
+install -m644 %{SOURCE8} %{buildroot}%{_datadir}/nordstjernen/
+install -m644 %{SOURCE9} %{buildroot}%{_datadir}/nordstjernen/
 ${AUDIO_INSTALL}
 ${WGPU_INSTALL}
 
 %files
+%license %{_datadir}/nordstjernen/License.md
+%license %{_datadir}/nordstjernen/COPYING
 %{_bindir}/nordstjernen
 %{_bindir}/nordstjernen-renderer
 %{_datadir}/icons/hicolor/scalable/apps/nordstjernen*

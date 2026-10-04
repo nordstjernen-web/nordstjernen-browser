@@ -38,6 +38,7 @@ cp "$ROOT/data/nordstjernen.desktop" "$STAGE/data/" 2>/dev/null || true
 cp "$ROOT/README.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/License.md" "$STAGE/" 2>/dev/null || true
+cp "$ROOT/COPYING" "$STAGE/" 2>/dev/null || true
 
 case "$OS" in
     freebsd)

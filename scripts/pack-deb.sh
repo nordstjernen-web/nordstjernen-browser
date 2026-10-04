@@ -57,9 +57,10 @@ done
 # (otherwise the taskbar/dock icon is blank).
 install -m644 "$ROOT/data/nordstjernen.desktop" \
     "$PKGROOT/usr/share/applications/org.nordstjernen.WebBrowser.desktop"
-# about:license reads this at ../share/nordstjernen/License.md relative to the
-# binary (/usr/bin -> /usr/share/nordstjernen).
+# about:license and about:gpl read these at ../share/nordstjernen/ relative to
+# the binary (/usr/bin -> /usr/share/nordstjernen).
 install -m644 "$ROOT/License.md" "$PKGROOT/usr/share/nordstjernen/License.md"
+install -m644 "$ROOT/COPYING" "$PKGROOT/usr/share/nordstjernen/COPYING"
 install -m644 "$ROOT/README.md" "$PKGROOT/usr/share/doc/nordstjernen/"
 install -m644 "$ROOT/THIRD-PARTY-LICENSES.md" "$PKGROOT/usr/share/doc/nordstjernen/"
 install -m644 "$ROOT/License.md" "$PKGROOT/usr/share/doc/nordstjernen/copyright"
@@ -216,7 +217,7 @@ Section: web
 Priority: optional
 Homepage: https://nordstjernen.org
 Description: Nordstjernen Web Navigator — a small, hand-written web browser
- Nordstjernen is a small, source-available web browser written in C with
+ Nordstjernen is a small, free software web browser written in C with
  GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
  JavaScript glue are written from scratch — no third-party browser engine
  is used. SVG images are rendered in-engine.

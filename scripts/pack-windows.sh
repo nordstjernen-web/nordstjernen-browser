@@ -202,10 +202,11 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         "$APP/share/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
-# Per-application data: license text. The browser reads it relative to
+# Per-application data: license texts. The browser reads them relative to
 # the exe at runtime (see src/net.c::about_read_first).
 mkdir -p "$APP/share/nordstjernen"
 cp "$ROOT/License.md" "$APP/share/nordstjernen/"
+cp "$ROOT/COPYING" "$APP/share/nordstjernen/"
 
 # Third-party copyright + license notices required by the libraries we ship.
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$OUT/"

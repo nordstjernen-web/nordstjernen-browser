@@ -1,5 +1,5 @@
 Source: nordstjernen
-Section: non-free/web
+Section: web
 Priority: optional
 Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 Build-Depends:
@@ -52,7 +52,6 @@ Description: small, hand-written web browser
   * WebGL 1/2 over OpenGL ES, switchable off in Settings.
   * No telemetry: it does not phone home and does not track the user.
  .
- This package is in the non-free component because the Nordstjernen Source
- License (NSL-1.0) restricts competing commercial use and is therefore not
- DFSG-free. The license converts to the MIT license ten years after each
- release.
+ Nordstjernen is dual-licensed under the GNU General Public License version 3
+ or the Nordstjernen Source License v1.0, at the recipient's option; Debian
+ distributes it under the GPL-3.

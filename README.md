@@ -180,10 +180,20 @@ through a meson wrap).
 
 ## License
 
-Nordstjernen Source License v1.0 — use, modify and redistribute freely,
-except as a competing browser; each release becomes MIT after ten years.
-See [License.md](License.md). Commercial licenses by agreement. It is
-inspired by the [Functional Source License](https://fsl.software/).
+Nordstjernen is dual-licensed: use it under **either** the Nordstjernen
+Source License v1.0 **or** the GNU General Public License version 3, at your
+option (`LicenseRef-NSL-1.0 OR GPL-3.0-only`).
+
+- **GPL-3.0** — free software: use, modify and redistribute it for any
+  purpose, provided derivative works are also released under the GPL. See
+  [COPYING](COPYING).
+- **NSL-1.0** — use, modify and redistribute freely, except as a competing
+  browser; each release becomes MIT after ten years. It is inspired by the
+  [Functional Source License](https://fsl.software/).
+
+See [License.md](License.md) for the full terms. Commercial licenses by
+agreement. Bundled third-party components keep their own licenses
+([THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
 
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal ·
 [Join the Discord](https://discord.gg/4W959nW5vF)
