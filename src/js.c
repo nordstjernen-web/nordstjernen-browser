@@ -49929,6 +49929,26 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
     JS_FreeValue(rc->dst, nav);
 }
 
+static gboolean
+ns_obj_has_defined_own_prop(JSContext *ctx, JSValueConst obj, const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    if (has == 0) return FALSE;
+    gboolean defined = (desc.flags & JS_PROP_GETSET) ||
+                       !JS_IsUndefined(desc.value);
+    JS_FreeValue(ctx, desc.value);
+    JS_FreeValue(ctx, desc.getter);
+    JS_FreeValue(ctx, desc.setter);
+    return defined;
+}
+
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                              JSValueConst iframe_doc,
@@ -50037,11 +50057,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (ok) {
         JSValue parent_performance =
             JS_GetPropertyStr(fctx, parent_global, "performance");
-        JSValue parent_memory = JS_IsObject(parent_performance)
-            ? JS_GetPropertyStr(fctx, parent_performance, "memory")
-            : JS_UNDEFINED;
-        gboolean include_memory = !JS_IsUndefined(parent_memory);
-        JS_FreeValue(fctx, parent_memory);
+        gboolean include_memory = JS_IsObject(parent_performance) &&
+            ns_obj_has_defined_own_prop(fctx, parent_performance, "memory");
         JS_FreeValue(fctx, parent_performance);
         JS_SetPropertyStr(fctx, fg, "performance",
                           ns_make_performance_object(fctx, js,
