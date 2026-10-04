@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* Event listeners are indexed by their target. Dispatching an event to a
+  node, dispatching to the window, and checking for a duplicate in
+  addEventListener each walked every listener of the page; they now look
+  only at the target's own listeners.
 * IntersectionObserver entries are only built for targets whose
   intersection changed. Every relayout built a full entry with three
   DOMRects for every observed target and dropped most of them.
