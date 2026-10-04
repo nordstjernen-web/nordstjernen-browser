@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* Relayouts skip the transition and animation check for elements whose
+  style was reused unchanged and that have nothing running. An element with
+  `transition: all` compared every transitionable property on every
+  relayout.
 * Restyles after a DOM change are much faster on pages whose elements
   declare `transition`. Every element that had ever been checked for a
   transition was restyled on every relayout, with its whole subtree, even
