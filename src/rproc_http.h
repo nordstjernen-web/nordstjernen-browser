@@ -78,6 +78,9 @@ typedef void *(*ns_rproc_inproc_attach_fn)(int ctrl_r, int ctrl_w,
                                            unsigned char *fb, int max_w,
                                            int max_h);
 void ns_rproc_http_set_inproc(ns_rproc_inproc_attach_fn attach);
+/* Device pixel ratio (browser zoom times screen scale) sent with every
+   later open, viewport and render request; 1.0 until set. */
+void ns_rproc_http_set_device_pixel_ratio(ns_rproc_http *r, double dpr);
 int  ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                         int viewport_height, int settle_ms,
                         ns_rproc_http_page *out);
@@ -92,6 +95,21 @@ int  ns_rproc_http_open_ex(ns_rproc_http *r, const char *url,
 int  ns_rproc_http_render(ns_rproc_http *r, int width, int height,
                           int scroll_x, int scroll_y, double scale,
                           int caret_active, ns_rproc_http_frame *out);
+
+/* A wheel or touchpad scroll of (dx, dy) CSS pixels at document point
+   (x, y). The renderer gives it to the scroll container under the point,
+   or else to the viewport, before it paints; a viewport move comes back as
+   the frame's scroll_x / scroll_y. */
+typedef struct ns_rproc_http_wheel {
+    int x, y;
+    int dx, dy;
+} ns_rproc_http_wheel;
+
+int  ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
+                                int scroll_x, int scroll_y, double scale,
+                                int caret_active,
+                                const ns_rproc_http_wheel *wheel,
+                                ns_rproc_http_frame *out);
 int  ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out);
 void ns_rproc_http_tick_clear(ns_rproc_http_tick *out);
 char *ns_rproc_http_link_at(ns_rproc_http *r, int x, int y);

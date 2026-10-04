@@ -1082,10 +1082,11 @@ font_family_map_generic(const char *token)
 {
     char *lo = g_ascii_strdown(token, -1);
     char *ret = NULL;
-    if (strcmp(lo, "system-ui") == 0 ||
-        strcmp(lo, "ui-sans-serif") == 0 ||
-        strcmp(lo, "ui-rounded") == 0 ||
-        strcmp(lo, "sans-serif") == 0)
+    if (strcmp(lo, "system-ui") == 0)
+        ret = g_strdup("system-ui");
+    else if (strcmp(lo, "ui-sans-serif") == 0 ||
+             strcmp(lo, "ui-rounded") == 0 ||
+             strcmp(lo, "sans-serif") == 0)
         ret = g_strdup("sans-serif");
     else if (strcmp(lo, "ui-serif") == 0 ||
              strcmp(lo, "serif") == 0)
@@ -1112,13 +1113,13 @@ font_family_substitute(const char *token)
 {
     char *lo = g_ascii_strdown(token, -1);
     char *ret = NULL;
-    if (strcmp(lo, "arial") == 0 ||
-        strcmp(lo, "helvetica") == 0 ||
-        strcmp(lo, "segoe ui") == 0 ||
-        g_str_has_prefix(lo, "roboto") ||
-        g_str_has_prefix(lo, "sf pro") ||
-        g_str_has_prefix(lo, "sfpro") ||
-        g_str_has_prefix(lo, "optimistic text"))
+    if (g_str_has_prefix(lo, "sf pro") || g_str_has_prefix(lo, "sfpro"))
+        ret = g_strdup("system-ui");
+    else if (strcmp(lo, "arial") == 0 ||
+             strcmp(lo, "helvetica") == 0 ||
+             strcmp(lo, "segoe ui") == 0 ||
+             g_str_has_prefix(lo, "roboto") ||
+             g_str_has_prefix(lo, "optimistic text"))
         ret = g_strdup("sans-serif");
     g_free(lo);
     return ret;
@@ -1127,6 +1128,35 @@ font_family_substitute(const char *token)
 static gboolean (*g_font_available_cb)(const char *family);
 static guint64 (*g_font_generation_cb)(void);
 static guint g_font_oracle_serial;
+
+static const char *
+platform_family_for_generic(const char *generic)
+{
+#ifdef __APPLE__
+    static const char *const families[][2] = {
+        { "system-ui",  "System Font" },
+        { "sans-serif", "Helvetica" },
+        { "serif",      "Times" },
+        { "monospace",  "Menlo" },
+        { "cursive",    "Apple Chancery" },
+        { "fantasy",    "Papyrus" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(families); i++)
+        if (strcmp(generic, families[i][0]) == 0 &&
+            g_font_available_cb && g_font_available_cb(families[i][1]))
+            return families[i][1];
+#endif
+    if (strcmp(generic, "system-ui") == 0)
+        return platform_family_for_generic("sans-serif");
+    return generic;
+}
+
+static gboolean
+platform_has_system_font(void)
+{
+    return strcmp(platform_family_for_generic("system-ui"),
+                  platform_family_for_generic("sans-serif")) != 0;
+}
 
 void
 ns_css_set_font_available_cb(gboolean (*cb)(const char *family))
@@ -1221,7 +1251,11 @@ font_family_resolve(const char *css_family)
             gboolean system_alias = strcmp(lo, "-apple-system") == 0 ||
                                     strcmp(lo, "blinkmacsystemfont") == 0;
             g_free(lo);
-            if (system_alias) {
+            if (system_alias && platform_has_system_font()) {
+                g_free(token);
+                g_free(fallback);
+                return g_strdup("system-ui");
+            } else if (system_alias) {
                 if (!fallback) fallback = g_strdup("sans-serif");
             } else if (!skip) {
                 char *mapped = font_family_map_generic(token);
@@ -1276,7 +1310,9 @@ ns_css_font_family_for_pango(const char *css_family)
     }
     const char *hit = g_hash_table_lookup(memo, css_family);
     if (hit) return g_strdup(hit);
-    char *resolved = font_family_resolve(css_family);
+    char *generic = font_family_resolve(css_family);
+    char *resolved = g_strdup(platform_family_for_generic(generic));
+    g_free(generic);
     g_hash_table_insert(memo, g_strdup(css_family), g_strdup(resolved));
     return resolved;
 }
@@ -17095,6 +17131,24 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "flex") == 0) {
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            if (wide) {
+                static const ns_css_prop flex_longhands[] = {
+                    NS_CSS_FLEX_GROW, NS_CSS_FLEX_SHRINK, NS_CSS_FLEX_BASIS,
+                };
+                for (gsize i = 0; i < G_N_ELEMENTS(flex_longhands); i++) {
+                    ns_css_decl d = {
+                        .prop = flex_longhands[i],
+                        .value = i == 0 ? wide : ns_css_value_dup(wide),
+                        .important = important,
+                    };
+                    g_array_append_val(decls_out, d);
+                }
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
             double grow = 0, shrink = 1;
@@ -23203,6 +23257,40 @@ css_inline_value_canonical(const char *prop, char *value)
     return value;
 }
 
+#define INLINE_DECL_SHEETS_MAX 4096
+
+static __thread GHashTable *g_inline_decl_sheets;
+static __thread double g_inline_decl_sheets_vw, g_inline_decl_sheets_vh;
+
+static const ns_css_stylesheet *
+inline_declaration_sheet(const char *name, const char *value)
+{
+    if (!g_inline_decl_sheets)
+        g_inline_decl_sheets = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free,
+            (GDestroyNotify)ns_css_stylesheet_free);
+    if (g_inline_decl_sheets_vw != g_viewport_w ||
+        g_inline_decl_sheets_vh != g_viewport_h ||
+        g_hash_table_size(g_inline_decl_sheets) >= INLINE_DECL_SHEETS_MAX) {
+        g_hash_table_remove_all(g_inline_decl_sheets);
+        g_inline_decl_sheets_vw = g_viewport_w;
+        g_inline_decl_sheets_vh = g_viewport_h;
+    }
+    char *declaration = g_strdup_printf("*{%s:%s}", name, value);
+    ns_css_stylesheet *sheet = g_hash_table_lookup(g_inline_decl_sheets,
+                                                   declaration);
+    if (sheet) {
+        g_free(declaration);
+        return sheet;
+    }
+    sheet = ns_css_stylesheet_parse(declaration, -1);
+    if (sheet)
+        g_hash_table_insert(g_inline_decl_sheets, declaration, sheet);
+    else
+        g_free(declaration);
+    return sheet;
+}
+
 static char *
 inline_expanded_value(const char *name, const char *value, int prop,
                       gboolean *important)
@@ -23225,9 +23313,7 @@ inline_expanded_value(const char *name, const char *value, int prop,
         if (result != image) g_free(image);
         return result;
     }
-    char *declaration = g_strdup_printf("*{%s:%s}", name, value);
-    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(declaration, -1);
-    g_free(declaration);
+    const ns_css_stylesheet *sheet = inline_declaration_sheet(name, value);
     char *result = NULL;
     if (sheet) {
         for (guint ri = 0; ri < sheet->rules->len; ri++) {
@@ -23241,7 +23327,6 @@ inline_expanded_value(const char *name, const char *value, int prop,
                 *important = decl->important;
             }
         }
-        ns_css_stylesheet_free(sheet);
     }
     return result;
 }
@@ -23715,24 +23800,64 @@ inline_grid_value(const char *style, gboolean full)
     return r;
 }
 
+#define INLINE_GET_MEMO 32
+
+static __thread struct {
+    char *style;
+    char *prop;
+    char *value;
+} g_inline_get_memo[INLINE_GET_MEMO];
+static __thread guint g_inline_get_next;
+
+static gboolean
+inline_get_memo_hit(const char *style, const char *prop, char **out)
+{
+    for (guint i = 0; i < INLINE_GET_MEMO; i++)
+        if (g_inline_get_memo[i].style &&
+            strcmp(g_inline_get_memo[i].prop, prop) == 0 &&
+            strcmp(g_inline_get_memo[i].style, style) == 0) {
+            *out = g_strdup(g_inline_get_memo[i].value);
+            return TRUE;
+        }
+    return FALSE;
+}
+
+static char *
+inline_get_memo_keep(const char *style, const char *prop, char *value)
+{
+    guint slot = g_inline_get_next++ % INLINE_GET_MEMO;
+    g_free(g_inline_get_memo[slot].style);
+    g_free(g_inline_get_memo[slot].prop);
+    g_free(g_inline_get_memo[slot].value);
+    g_inline_get_memo[slot].style = g_strdup(style);
+    g_inline_get_memo[slot].prop = g_strdup(prop);
+    g_inline_get_memo[slot].value = g_strdup(value);
+    return value;
+}
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
     if (!style || !prop) return NULL;
+    char *hit = NULL;
+    if (inline_get_memo_hit(style, prop, &hit)) return hit;
     if (g_ascii_strcasecmp(prop, "all") == 0)
-        return inline_all_value(style);
+        return inline_get_memo_keep(style, prop, inline_all_value(style));
     if (inline_quad_ids(prop))
-        return inline_quad_value(style, prop, NULL);
+        return inline_get_memo_keep(style, prop,
+                                    inline_quad_value(style, prop, NULL));
     if (g_ascii_strcasecmp(prop, "overflow") == 0)
-        return inline_pair_value(style, NS_CSS_OVERFLOW_X,
-                                 NS_CSS_OVERFLOW_Y, NULL);
+        return inline_get_memo_keep(style, prop,
+            inline_pair_value(style, NS_CSS_OVERFLOW_X, NS_CSS_OVERFLOW_Y,
+                              NULL));
     if (g_ascii_strcasecmp(prop, "font") == 0) {
         char *font_all = inline_all_value_for(style, "font");
-        if (font_all) return font_all;
+        if (font_all) return inline_get_memo_keep(style, prop, font_all);
     }
     if (g_ascii_strcasecmp(prop, "animation") == 0 ||
         g_ascii_strcasecmp(prop, "transition") == 0)
-        return inline_anim_shorthand_value(style, prop[0] == 'a');
+        return inline_get_memo_keep(style, prop,
+            inline_anim_shorthand_value(style, prop[0] == 'a'));
     if (g_ascii_strcasecmp(prop, "list-style") == 0) {
         char *type = ns_inline_style_get(style, "list-style-type");
         char *pos = ns_inline_style_get(style, "list-style-position");
@@ -23746,7 +23871,7 @@ ns_inline_style_get(const char *style, const char *prop)
         g_free(type);
         g_free(pos);
         g_free(img);
-        return r;
+        return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "animation-range") == 0) {
         char *st = ns_inline_style_get(style, "animation-range-start");
@@ -23754,11 +23879,11 @@ ns_inline_style_get(const char *style, const char *prop)
         char *r = st && en ? ns_css_animation_range_serialize(st, en) : NULL;
         g_free(st);
         g_free(en);
-        return r;
+        return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "background") == 0) {
         char *r = inline_background_value(style, NULL);
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "background-position") == 0) {
         char *xs = ns_inline_style_get(style, "background-position-x");
@@ -23766,17 +23891,17 @@ ns_inline_style_get(const char *style, const char *prop)
         char *r = xs && ys ? bg_position_zip(xs, ys) : NULL;
         g_free(xs);
         g_free(ys);
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if ((g_ascii_strcasecmp(prop, "grid") == 0 ||
          g_ascii_strcasecmp(prop, "grid-template") == 0) &&
         !strstr(style, "var(")) {
         char *r = inline_grid_value(style, prop[4] == '\0');
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if (ns_css_prop_id(prop) < 0 && ns_css_named_property_supported(prop)) {
         char *all = inline_all_value(style);
-        if (all) return all;
+        if (all) return inline_get_memo_keep(style, prop, all);
     }
     int pid = ns_css_prop_id(prop);
     gsize plen = strlen(prop);
@@ -23839,9 +23964,11 @@ ns_inline_style_get(const char *style, const char *prop)
         p = term == ';' ? vend + 1 : vend;
     }
 
-    if (winner) return css_inline_value_canonical(prop, winner);
+    if (winner)
+        return inline_get_memo_keep(style, prop,
+                                    css_inline_value_canonical(prop, winner));
 
-    return NULL;
+    return inline_get_memo_keep(style, prop, NULL);
 }
 
 typedef struct {
@@ -23873,9 +24000,40 @@ inline_decl_find(GPtrArray *decls, const char *name)
     return NULL;
 }
 
+#define INLINE_SERIALIZE_MEMO 16
+
+static __thread struct {
+    char *in;
+    char *out;
+} g_inline_serialize_memo[INLINE_SERIALIZE_MEMO];
+static __thread guint g_inline_serialize_next;
+
+static char *
+inline_serialize_memo_hit(const char *key)
+{
+    for (guint i = 0; i < INLINE_SERIALIZE_MEMO; i++)
+        if (g_inline_serialize_memo[i].in &&
+            strcmp(g_inline_serialize_memo[i].in, key) == 0)
+            return g_strdup(g_inline_serialize_memo[i].out);
+    return NULL;
+}
+
+static char *
+inline_serialize_memo_keep(const char *key, char *out)
+{
+    guint slot = g_inline_serialize_next++ % INLINE_SERIALIZE_MEMO;
+    g_free(g_inline_serialize_memo[slot].in);
+    g_free(g_inline_serialize_memo[slot].out);
+    g_inline_serialize_memo[slot].in = g_strdup(key);
+    g_inline_serialize_memo[slot].out = g_strdup(out);
+    return out;
+}
+
 char *
 ns_inline_style_serialize(const char *style)
 {
+    char *hit = inline_serialize_memo_hit(style ? style : "");
+    if (hit) return hit;
     GPtrArray *decls = g_ptr_array_new_with_free_func(inline_decl_free);
     const char *p = style ? style : "";
     const char *end = p + strlen(p);
@@ -24164,7 +24322,8 @@ ns_inline_style_serialize(const char *style)
     g_free(list_value);
     g_free(background_value);
     g_ptr_array_free(decls, TRUE);
-    return g_string_free(out, FALSE);
+    return inline_serialize_memo_keep(style ? style : "",
+                                      g_string_free(out, FALSE));
 }
 
 gboolean
@@ -27082,6 +27241,7 @@ static const char *kUa =
     "border-top-color: #b8b8b8; border-right-color: #b8b8b8; "
     "border-bottom-color: #b8b8b8; border-left-color: #b8b8b8; }\n"
     "input, select, textarea { color: FieldText; }\n"
+    "input::placeholder, textarea::placeholder { color: #757575; }\n"
     "button { color: ButtonText; }\n"
     "input, button, textarea { letter-spacing: initial; "
     "word-spacing: initial; line-height: initial; }\n"
@@ -30251,7 +30411,8 @@ cascade_walk(ns_node *node,
                 compute_registered_vars(ps, s, *root_px);
                 gboolean keep = TRUE;
                 if (pe == NS_CSS_PE_BEFORE || pe == NS_CSS_PE_AFTER)
-                    keep = ps->values[NS_CSS_CONTENT] != NULL;
+                    keep = ps->values[NS_CSS_CONTENT] != NULL &&
+                           !ns_display_is_none(ns_css_display_of(ps));
                 if (keep) {
                     if (pe == NS_CSS_PE_BEFORE)            s->before       = ps;
                     else if (pe == NS_CSS_PE_AFTER)        s->after        = ps;

@@ -20,6 +20,11 @@
 #endif
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
+#define NS_PV_WHEEL_STEP_PX    100.0
+#define NS_PV_WHEEL_TAU_MS     45.0
+#define NS_PV_FLING_TAU_MS     400.0
+#define NS_PV_FLING_STOP_PX_S  20.0
+#define NS_PV_HOVER_AFTER_SCROLL_MS 150
 #define NS_PROC_HELPER_LINE_MAX 4096
 
 #ifndef G_OS_WIN32
@@ -44,7 +49,7 @@ pv_settle_ms(void)
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
-    REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL, REQ_SCROLLBAR,
+    REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON, REQ_VIDEO_EVENT,
     REQ_TICK, REQ_PRINT, REQ_QUIT
 } ReqType;
@@ -66,6 +71,9 @@ typedef struct {
     int     vh;
     int     w, h, sx, sy;
     double  scale;
+    double  dpr;
+    double  raster;
+    ns_rproc_http_wheel wheel;
     int     x, y;
     int     dx, dy;
     int     mods;
@@ -93,7 +101,7 @@ typedef struct {
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES, RES_SCROLL,
+    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES,
     RES_SCROLLBAR, RES_TICK, RES_PRINT
 } ResType;
 
@@ -115,6 +123,7 @@ typedef struct {
     char            *window_action;
     char            *clipboard;
     cairo_surface_t *surface;
+    double           surface_scale;
     gboolean         surface_borrowed;
     char            *href;
     char            *cursor;
@@ -202,6 +211,9 @@ struct NsProcView {
     gboolean    opened;
 
     cairo_surface_t *frame;
+    double           frame_scale;
+    gulong           surface_scale_handler;
+    GdkSurface      *scale_surface;
     cairo_surface_t *stage[2];
     int              stage_next;
 
@@ -278,6 +290,14 @@ struct NsProcView {
     int         load_seq, render_seq, link_seq, click_seq, viewport_seq;
     int         key_seq, select_seq, hover_seq;
     int         last_vp_w, last_vp_h;
+    double      last_vp_dpr;
+    double      wheel_left_x, wheel_left_y;
+    double      wheel_pend_x, wheel_pend_y;
+    double      fling_vx, fling_vy;
+    guint       wheel_tick_id;
+    gint64      wheel_last_us;
+    gboolean    adopting_scroll;
+    guint       hover_after_scroll_id;
     double      drag_start_x, drag_start_y;
     double      pointer_x, pointer_y;
     gboolean    drag_anchored;
@@ -1061,6 +1081,8 @@ pv_vring_unmap(NsProcView *v)
 }
 
 static void request_render(NsProcView *v);
+static gboolean maybe_update_viewport(NsProcView *v);
+static void request_hover(NsProcView *v, int x, int y);
 static void print_run(NsProcView *v, GPtrArray *pages,
                       const ns_print_setup *setup, double raster_scale);
 static void request_tick(NsProcView *v);
@@ -1531,6 +1553,8 @@ worker_main(gpointer data)
             pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                      NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
                                      v->private_mode));
+        if (v->proc && req->dpr > 0)
+            ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
 
         if (req->type == REQ_LOAD) {
             Res *res = g_new0(Res, 1);
@@ -1548,6 +1572,8 @@ worker_main(gpointer data)
                 pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                          NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
                                          v->private_mode));
+                if (v->proc)
+                    ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
                 rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
                                              req->vh, settle, req->history,
                                              req->user_activated, &pg)
@@ -1573,8 +1599,10 @@ worker_main(gpointer data)
             res->seq = req->seq;
             ns_rproc_http_frame fr;
             gboolean rendered = v->proc &&
-                ns_rproc_http_render(v->proc, req->w, req->h, req->sx, req->sy,
-                                req->scale, req->caret_active, &fr) == 0 &&
+                ns_rproc_http_render_wheel(v->proc, req->w, req->h, req->sx,
+                                           req->sy, req->scale,
+                                           req->caret_active, &req->wheel,
+                                           &fr) == 0 &&
                 fr.ok;
             if (rendered) {
                 res->ok = TRUE;
@@ -1588,6 +1616,11 @@ worker_main(gpointer data)
                 if (!fr.unchanged) {
                     res->surface = stage_fill(v, fr.pixels, fr.width,
                                               fr.height, fr.stride);
+                    res->surface_scale = req->raster > 0 ? req->raster : 1.0;
+                    if (res->surface)
+                        cairo_surface_set_device_scale(res->surface,
+                                                       res->surface_scale,
+                                                       res->surface_scale);
                     res->surface_borrowed = FALSE;
                 }
                 if (fr.nav) {
@@ -1717,18 +1750,6 @@ worker_main(gpointer data)
                 res->ok = ns_rproc_http_hover_full(v->proc, req->x, req->y,
                                                    &res->href,
                                                    &res->cursor) == 1;
-            post(res);
-        } else if (req->type == REQ_SCROLL) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_SCROLL;
-            res->seq = req->seq;
-            res->ok = v->proc
-                ? ns_rproc_http_scroll(v->proc, req->x, req->y,
-                                       req->dx, req->dy)
-                : 0;
-            res->fallback_x = req->fallback_x;
-            res->fallback_y = req->fallback_y;
             post(res);
         } else if (req->type == REQ_SCROLLBAR) {
             Res *res = g_new0(Res, 1);
@@ -1913,6 +1934,48 @@ cur_scale(NsProcView *v)
     return v->scale > 0.0 ? v->scale : 1.0;
 }
 
+static double
+device_scale(NsProcView *v)
+{
+    GtkNative *native = v->area ? gtk_widget_get_native(v->area) : NULL;
+    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+    double s = surface ? gdk_surface_get_scale(surface) : 0.0;
+    if (!(s > 0.0) && v->area)
+        s = gtk_widget_get_scale_factor(v->area);
+    return s >= 1.0 && s <= 8.0 ? s : 1.0;
+}
+
+static double
+raster_scale(NsProcView *v)
+{
+    double s = device_scale(v);
+    double fit_w = (double)NS_PROC_MAX_WIDTH / viewport_w(v);
+    double fit_h = (double)NS_PROC_MAX_HEIGHT / viewport_h(v);
+    if (fit_w < s) s = fit_w;
+    if (fit_h < s) s = fit_h;
+    return s > 0.0 ? s : 1.0;
+}
+
+static double
+page_dpr(NsProcView *v)
+{
+    return cur_scale(v) * device_scale(v);
+}
+
+static int
+css_viewport_w(NsProcView *v)
+{
+    int w = (int)lround(viewport_w(v) / cur_scale(v));
+    return w > 0 ? w : 1;
+}
+
+static int
+css_viewport_h(NsProcView *v)
+{
+    int h = (int)lround(viewport_h(v) / cur_scale(v));
+    return h > 0 ? h : 1;
+}
+
 
 static void
 configure_adjustments(NsProcView *v)
@@ -1943,7 +2006,7 @@ on_adj_changed(GtkAdjustment *adj, gpointer data)
         return;
     v->scroll_x = (int)gtk_adjustment_get_value(v->hadj);
     v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
-    if (v->opened)
+    if (v->opened && !v->adopting_scroll)
         request_render(v);
 }
 
@@ -1985,13 +2048,181 @@ start_render(NsProcView *v)
     Req *req = g_new0(Req, 1);
     req->type = REQ_RENDER;
     req->seq = ++v->render_seq;
-    req->w = viewport_w(v);
-    req->h = viewport_h(v);
+    req->raster = raster_scale(v);
+    req->w = (int)ceil(viewport_w(v) * req->raster);
+    req->h = (int)ceil(viewport_h(v) * req->raster);
     req->sx = v->scroll_x;
     req->sy = v->scroll_y;
-    req->scale = cur_scale(v);
+    req->scale = cur_scale(v) * req->raster;
+    req->dpr = page_dpr(v);
     req->caret_active = gtk_widget_has_focus(v->area);
+    req->wheel.dx = (int)v->wheel_pend_x;
+    req->wheel.dy = (int)v->wheel_pend_y;
+    if (req->wheel.dx || req->wheel.dy) {
+        double s = cur_scale(v);
+        v->wheel_pend_x -= req->wheel.dx;
+        v->wheel_pend_y -= req->wheel.dy;
+        req->wheel.x = v->scroll_x + (int)(v->pointer_x / s);
+        req->wheel.y = v->scroll_y + (int)(v->pointer_y / s);
+    }
     push_req(v, req);
+}
+
+static gboolean
+hover_after_scroll(gpointer data)
+{
+    NsProcView *v = data;
+    v->hover_after_scroll_id = 0;
+    if (v->closed || !v->opened)
+        return G_SOURCE_REMOVE;
+    if (gtk_widget_contains(v->area, v->pointer_x, v->pointer_y)) {
+        double s = cur_scale(v);
+        request_hover(v, v->scroll_x + (int)(v->pointer_x / s),
+                      v->scroll_y + (int)(v->pointer_y / s));
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static void
+queue_wheel_scroll(NsProcView *v, double dx, double dy)
+{
+    if (!v->opened)
+        return;
+    if (v->hover_after_scroll_id)
+        g_source_remove(v->hover_after_scroll_id);
+    v->hover_after_scroll_id =
+        g_timeout_add(NS_PV_HOVER_AFTER_SCROLL_MS, hover_after_scroll, v);
+    v->wheel_pend_x += dx;
+    v->wheel_pend_y += dy;
+    if (fabs(v->wheel_pend_x) >= 1.0 || fabs(v->wheel_pend_y) >= 1.0)
+        request_render(v);
+}
+
+static gboolean
+wheel_animation_idle(const NsProcView *v)
+{
+    return v->wheel_left_x == 0 && v->wheel_left_y == 0 &&
+           v->fling_vx == 0 && v->fling_vy == 0;
+}
+
+static gboolean
+wheel_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
+{
+    (void)widget;
+    NsProcView *v = data;
+    if (v->closed || !v->opened || wheel_animation_idle(v)) {
+        v->wheel_tick_id = 0;
+        v->wheel_last_us = 0;
+        return G_SOURCE_REMOVE;
+    }
+    gint64 now = gdk_frame_clock_get_frame_time(clock);
+    double dt_ms = v->wheel_last_us > 0
+        ? (double)(now - v->wheel_last_us) / 1000.0 : 1000.0 / 60.0;
+    dt_ms = CLAMP(dt_ms, 1.0, 100.0);
+    v->wheel_last_us = now;
+
+    double share = 1.0 - exp(-dt_ms / NS_PV_WHEEL_TAU_MS);
+    double mx = v->wheel_left_x * share;
+    double my = v->wheel_left_y * share;
+    if (fabs(v->wheel_left_x - mx) < 0.5) mx = v->wheel_left_x;
+    if (fabs(v->wheel_left_y - my) < 0.5) my = v->wheel_left_y;
+    v->wheel_left_x -= mx;
+    v->wheel_left_y -= my;
+
+    mx += v->fling_vx * dt_ms / 1000.0;
+    my += v->fling_vy * dt_ms / 1000.0;
+    double decay = exp(-dt_ms / NS_PV_FLING_TAU_MS);
+    v->fling_vx *= decay;
+    v->fling_vy *= decay;
+    if (hypot(v->fling_vx, v->fling_vy) < NS_PV_FLING_STOP_PX_S)
+        v->fling_vx = v->fling_vy = 0;
+
+    queue_wheel_scroll(v, mx, my);
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+arm_wheel_animation(NsProcView *v)
+{
+    if (v->wheel_tick_id || !v->area || wheel_animation_idle(v))
+        return;
+    v->wheel_last_us = 0;
+    v->wheel_tick_id = gtk_widget_add_tick_callback(v->area, wheel_tick, v,
+                                                    NULL);
+}
+
+static void
+stop_wheel_animation(NsProcView *v)
+{
+    v->wheel_left_x = v->wheel_left_y = 0;
+    v->wheel_pend_x = v->wheel_pend_y = 0;
+    v->fling_vx = v->fling_vy = 0;
+}
+
+static double
+scroll_target_x(const NsProcView *v)
+{
+    return v->scroll_x + v->wheel_pend_x + v->wheel_left_x;
+}
+
+static double
+scroll_target_y(const NsProcView *v)
+{
+    return v->scroll_y + v->wheel_pend_y + v->wheel_left_y;
+}
+
+static void
+scroll_view_to(NsProcView *v, double x, double y)
+{
+    double max_x = gtk_adjustment_get_upper(v->hadj) -
+                   gtk_adjustment_get_page_size(v->hadj);
+    double max_y = gtk_adjustment_get_upper(v->vadj) -
+                   gtk_adjustment_get_page_size(v->vadj);
+    x = CLAMP(x, 0, MAX(max_x, 0));
+    y = CLAMP(y, 0, MAX(max_y, 0));
+    v->fling_vx = v->fling_vy = 0;
+    v->wheel_left_x += x - scroll_target_x(v);
+    v->wheel_left_y += y - scroll_target_y(v);
+    arm_wheel_animation(v);
+}
+
+static void
+on_device_scale_changed(GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)object;
+    (void)pspec;
+    NsProcView *v = data;
+    if (v->closed || !v->opened)
+        return;
+    if (!maybe_update_viewport(v))
+        request_render(v);
+}
+
+static void
+on_area_realize(GtkWidget *area, gpointer data)
+{
+    NsProcView *v = data;
+    GtkNative *native = gtk_widget_get_native(area);
+    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+    if (!surface || surface == v->scale_surface)
+        return;
+    if (v->scale_surface && v->surface_scale_handler)
+        g_signal_handler_disconnect(v->scale_surface, v->surface_scale_handler);
+    v->scale_surface = surface;
+    v->surface_scale_handler =
+        g_signal_connect(surface, "notify::scale",
+                         G_CALLBACK(on_device_scale_changed), v);
+}
+
+static void
+on_area_unrealize(GtkWidget *area, gpointer data)
+{
+    (void)area;
+    NsProcView *v = data;
+    if (v->scale_surface && v->surface_scale_handler)
+        g_signal_handler_disconnect(v->scale_surface, v->surface_scale_handler);
+    v->scale_surface = NULL;
+    v->surface_scale_handler = 0;
 }
 
 static void
@@ -2339,6 +2570,7 @@ start_viewport(NsProcView *v, int width, int height)
     req->seq = ++v->viewport_seq;
     req->vw = width;
     req->vh = height;
+    req->dpr = page_dpr(v);
     push_req(v, req);
 }
 
@@ -2347,16 +2579,18 @@ maybe_update_viewport(NsProcView *v)
 {
     if (!v->opened)
         return FALSE;
-    int w = viewport_w(v);
-    int h = viewport_h(v);
-    if (w <= 1 || h <= 1)
+    if (viewport_w(v) <= 1 || viewport_h(v) <= 1)
         return FALSE;
-    if (w == v->last_vp_w && h == v->last_vp_h)
+    int w = css_viewport_w(v);
+    int h = css_viewport_h(v);
+    double dpr = page_dpr(v);
+    if (w == v->last_vp_w && h == v->last_vp_h && dpr == v->last_vp_dpr)
         return FALSE;
     v->vid_rect_valid = FALSE;
     gtk_widget_queue_draw(v->area);
     v->last_vp_w = w;
     v->last_vp_h = h;
+    v->last_vp_dpr = dpr;
     start_viewport(v, w, h);
     return TRUE;
 }
@@ -2414,6 +2648,7 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     v->opened = FALSE;
     v->page_animating = FALSE;
     v->caret_blinking = FALSE;
+    stop_wheel_animation(v);
     disarm_anim(v);
     if (v->frame)
         cairo_surface_destroy(v->frame);
@@ -2436,15 +2671,17 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
         v->deferred_user_activated = user_activated;
         return;
     }
-    v->last_vp_w = vw;
-    v->last_vp_h = vh;
+    v->last_vp_w = css_viewport_w(v);
+    v->last_vp_h = css_viewport_h(v);
+    v->last_vp_dpr = page_dpr(v);
 
     Req *req = g_new0(Req, 1);
     req->type = REQ_LOAD;
     req->seq = seq;
     req->url = g_strdup(url);
-    req->vw = vw;
-    req->vh = vh;
+    req->vw = v->last_vp_w;
+    req->vh = v->last_vp_h;
+    req->dpr = v->last_vp_dpr;
     req->history = history;
     req->user_activated = user_activated;
     push_req(v, req);
@@ -2597,7 +2834,7 @@ set_zoom(NsProcView *v, double scale)
     char percent[16];
     g_snprintf(percent, sizeof percent, "%d", permille / 10);
     post_emit(v, NS_PROC_EVT_ZOOM, percent);
-    if (v->opened) {
+    if (v->opened && !maybe_update_viewport(v)) {
         configure_adjustments(v);
         request_render(v);
     }
@@ -2809,6 +3046,7 @@ on_result(gpointer data)
                 gtk_widget_queue_draw(v->area);
             }
             if (res->requested_scroll_y >= 0 || res->requested_scroll_x >= 0) {
+                v->adopting_scroll = TRUE;
                 configure_adjustments(v);
                 if (res->requested_scroll_y >= 0)
                     gtk_adjustment_set_value(v->vadj,
@@ -2816,12 +3054,16 @@ on_result(gpointer data)
                 if (res->requested_scroll_x >= 0)
                     gtk_adjustment_set_value(v->hadj,
                                              res->requested_scroll_x);
+                v->adopting_scroll = FALSE;
+                v->scroll_x = (int)gtk_adjustment_get_value(v->hadj);
+                v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
             }
         }
         if (current && res->ok && res->surface) {
             if (v->frame)
                 cairo_surface_destroy(v->frame);
             v->frame = res->surface;
+            v->frame_scale = res->surface_scale;
             res->surface = NULL;
             v->render_restarts = 0;
             gtk_widget_queue_draw(v->area);
@@ -2891,10 +3133,8 @@ on_result(gpointer data)
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             ns_proc_view_load(v, res->href);
         } else {
-            if (res->fallback_scroll && !res->prevented) {
-                gtk_adjustment_set_value(v->hadj, res->fallback_x);
-                gtk_adjustment_set_value(v->vadj, res->fallback_y);
-            }
+            if (res->fallback_scroll && !res->prevented)
+                scroll_view_to(v, res->fallback_x, res->fallback_y);
             request_render(v);
         }
     } else if (res->type == RES_CLICK) {
@@ -2968,17 +3208,6 @@ on_result(gpointer data)
     } else if (res->type == RES_DROPFILES) {
         if (res->ok)
             request_render(v);
-    } else if (res->type == RES_SCROLL) {
-        if (res->ok)
-            request_render(v);
-        else {
-            gtk_adjustment_set_value(
-                v->hadj,
-                gtk_adjustment_get_value(v->hadj) + res->fallback_x * 60.0);
-            gtk_adjustment_set_value(
-                v->vadj,
-                gtk_adjustment_get_value(v->vadj) + res->fallback_y * 60.0);
-        }
     } else if (res->type == RES_SCROLLBAR) {
         if (res->kind == 0) {
             gboolean still = v->sb_probe;
@@ -3267,9 +3496,10 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 {
     (void)area;
     NsProcView *v = data;
+    double fs = v->frame_scale > 0 ? v->frame_scale : 1.0;
     gboolean covers = v->frame &&
-        cairo_image_surface_get_width(v->frame) >= width &&
-        cairo_image_surface_get_height(v->frame) >= height;
+        cairo_image_surface_get_width(v->frame) / fs >= width - 0.5 &&
+        cairo_image_surface_get_height(v->frame) / fs >= height - 0.5;
     if (!covers) {
         cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
         cairo_rectangle(cr, 0, 0, width, height);
@@ -3278,6 +3508,7 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     if (v->vring && v->vid_rect_valid) {
         gboolean frame_drawn = FALSE;
         cairo_save(cr);
+        cairo_scale(cr, 1.0 / fs, 1.0 / fs);
         cairo_rectangle(cr, v->vid_clip_x, v->vid_clip_y,
                         v->vid_clip_w, v->vid_clip_h);
         cairo_clip(cr);
@@ -3398,24 +3629,30 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
             ns_proc_view_zoom_out(v);
         return TRUE;
     }
-    if (v->proc) {
-        double s = cur_scale(v);
-        Req *req = g_new0(Req, 1);
-        req->type = REQ_SCROLL;
-        req->x = v->scroll_x + (int)(v->pointer_x / s);
-        req->y = v->scroll_y + (int)(v->pointer_y / s);
-        req->dx = (int)(dx * 60.0 / s);
-        req->dy = (int)(dy * 60.0 / s);
-        req->fallback_x = dx;
-        req->fallback_y = dy;
-        push_req(v, req);
+    double s = cur_scale(v);
+    v->fling_vx = v->fling_vy = 0;
+    if (gtk_event_controller_scroll_get_unit(ctrl) == GDK_SCROLL_UNIT_SURFACE) {
+        queue_wheel_scroll(v, dx / s, dy / s);
         return TRUE;
     }
-    gtk_adjustment_set_value(v->hadj,
-                             gtk_adjustment_get_value(v->hadj) + dx * 60.0);
-    gtk_adjustment_set_value(v->vadj,
-                             gtk_adjustment_get_value(v->vadj) + dy * 60.0);
+    v->wheel_left_x += dx * NS_PV_WHEEL_STEP_PX / s;
+    v->wheel_left_y += dy * NS_PV_WHEEL_STEP_PX / s;
+    arm_wheel_animation(v);
     return TRUE;
+}
+
+static void
+on_scroll_decelerate(GtkEventControllerScroll *ctrl, double vel_x,
+                     double vel_y, gpointer data)
+{
+    (void)ctrl;
+    NsProcView *v = data;
+    if (!v->opened)
+        return;
+    double s = cur_scale(v);
+    v->fling_vx = vel_x / s;
+    v->fling_vy = vel_y / s;
+    arm_wheel_animation(v);
 }
 
 typedef struct {
@@ -3933,9 +4170,11 @@ on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
 {
     (void)ctrl;
     NsProcView *v = data;
+    if (fabs(x - v->pointer_x) < 0.01 && fabs(y - v->pointer_y) < 0.01)
+        return;
     v->pointer_x = x;
     v->pointer_y = y;
-    if (v->opened) {
+    if (v->opened && !v->hover_after_scroll_id) {
         double s = cur_scale(v);
         int px = v->scroll_x + (int)(x / s);
         int py = v->scroll_y + (int)(y / s);
@@ -4101,8 +4340,8 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     double line = 60.0;
     double page = viewport_h(v) / cur_scale(v) - line;
     if (page < line) page = line;
-    double vy = gtk_adjustment_get_value(v->vadj);
-    double vx = gtk_adjustment_get_value(v->hadj);
+    double vy = scroll_target_y(v);
+    double vx = scroll_target_x(v);
     double tx = vx, ty = vy;
     switch (keyval) {
     case GDK_KEY_Tab:
@@ -4141,6 +4380,10 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     v->closed = TRUE;
     g_clear_object(&v->im);
     disarm_anim(v);
+    if (v->hover_after_scroll_id) {
+        g_source_remove(v->hover_after_scroll_id);
+        v->hover_after_scroll_id = 0;
+    }
     if (v->console_poll_id) {
         g_source_remove(v->console_poll_id);
         v->console_poll_id = 0;
@@ -4616,6 +4859,10 @@ ns_proc_view_new(void)
     g_signal_connect(v->area, "resize", G_CALLBACK(on_resize), v);
     g_signal_connect(v->area, "notify::has-focus",
                      G_CALLBACK(on_area_focus_notify), v);
+    g_signal_connect(v->area, "notify::scale-factor",
+                     G_CALLBACK(on_device_scale_changed), v);
+    g_signal_connect(v->area, "realize", G_CALLBACK(on_area_realize), v);
+    g_signal_connect(v->area, "unrealize", G_CALLBACK(on_area_unrealize), v);
 
     GtkWidget *grid = gtk_grid_new();
     v->vscroll =
@@ -4672,9 +4919,11 @@ ns_proc_view_new(void)
     g_signal_connect(motion, "motion", G_CALLBACK(on_motion), v);
     gtk_widget_add_controller(v->area, motion);
 
-    GtkEventController *scroll =
-        gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    GtkEventController *scroll = gtk_event_controller_scroll_new(
+        GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES |
+        GTK_EVENT_CONTROLLER_SCROLL_KINETIC);
     g_signal_connect(scroll, "scroll", G_CALLBACK(on_scroll), v);
+    g_signal_connect(scroll, "decelerate", G_CALLBACK(on_scroll_decelerate), v);
     gtk_widget_add_controller(v->area, scroll);
 
     GtkEventController *key = gtk_event_controller_key_new();

@@ -6902,6 +6902,8 @@ ns_js_sync_window_metrics(ns_js *js)
                 v8::Number::New(iso, vw)).Check();
     global->Set(scope.ctx, ns_v8_str(iso, "outerHeight"),
                 v8::Number::New(iso, vh)).Check();
+    global->Set(scope.ctx, ns_v8_str(iso, "devicePixelRatio"),
+                v8::Number::New(iso, ns_css_device_pixel_ratio())).Check();
     v8::Local<v8::Object> screen = v8::Object::New(iso);
     screen->Set(scope.ctx, ns_v8_str(iso, "width"),
                 v8::Number::New(iso, vw)).Check();
@@ -6912,6 +6914,12 @@ ns_js_sync_window_metrics(ns_js *js)
     screen->Set(scope.ctx, ns_v8_str(iso, "availHeight"),
                 v8::Number::New(iso, vh)).Check();
     global->Set(scope.ctx, ns_v8_str(iso, "screen"), screen).Check();
+}
+
+void
+ns_js_reeval_media_queries(ns_js *js)
+{
+    (void)js;
 }
 
 void

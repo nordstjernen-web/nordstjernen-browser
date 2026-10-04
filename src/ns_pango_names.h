@@ -21,6 +21,8 @@
 #define ns_pango_attr_insert_hyphens_new                  pango_attr_insert_hyphens_new
 #define ns_pango_attr_language_new                        pango_attr_language_new
 #define ns_pango_attr_letter_spacing_new                  pango_attr_letter_spacing_new
+#define ns_pango_attr_line_height_new_absolute            pango_attr_line_height_new_absolute
+#define ns_pango_attr_list_copy                           pango_attr_list_copy
 #define ns_pango_attr_list_insert                         pango_attr_list_insert
 #define ns_pango_attr_list_new                            pango_attr_list_new
 #define ns_pango_attr_list_to_string                      pango_attr_list_to_string
@@ -41,6 +43,7 @@
 #define ns_pango_attr_weight_new                          pango_attr_weight_new
 #define ns_pango_cairo_context_get_font_options           pango_cairo_context_get_font_options
 #define ns_pango_cairo_context_set_font_options           pango_cairo_context_set_font_options
+#define ns_pango_cairo_context_set_resolution             pango_cairo_context_set_resolution
 #define ns_pango_cairo_create_layout                      pango_cairo_create_layout
 #define ns_pango_cairo_font_map_get_default               pango_cairo_font_map_get_default
 #define ns_pango_cairo_layout_path                        pango_cairo_layout_path
@@ -51,6 +54,7 @@
 #define ns_pango_context_get_metrics                      pango_context_get_metrics
 #define ns_pango_context_get_serial                       pango_context_get_serial
 #define ns_pango_context_set_base_dir                     pango_context_set_base_dir
+#define ns_pango_context_set_round_glyph_positions        pango_context_set_round_glyph_positions
 #define NS_PANGO_DIRECTION_LTR                            PANGO_DIRECTION_LTR
 #define NS_PANGO_DIRECTION_NEUTRAL                        PANGO_DIRECTION_NEUTRAL
 #define NS_PANGO_DIRECTION_RTL                            PANGO_DIRECTION_RTL
@@ -67,7 +71,6 @@
 #define ns_pango_font_description_new                     pango_font_description_new
 #define ns_pango_font_description_set_absolute_size       pango_font_description_set_absolute_size
 #define ns_pango_font_description_set_family              pango_font_description_set_family
-#define ns_pango_font_description_set_size                pango_font_description_set_size
 #define ns_pango_font_description_set_stretch             pango_font_description_set_stretch
 #define ns_pango_font_description_set_style               pango_font_description_set_style
 #define ns_pango_font_description_set_variations          pango_font_description_set_variations
@@ -79,6 +82,7 @@
 #define ns_pango_font_metrics_get_approximate_char_width  pango_font_metrics_get_approximate_char_width
 #define ns_pango_font_metrics_get_ascent                  pango_font_metrics_get_ascent
 #define ns_pango_font_metrics_get_descent                 pango_font_metrics_get_descent
+#define ns_pango_font_metrics_get_height                  pango_font_metrics_get_height
 #define ns_pango_font_metrics_unref                       pango_font_metrics_unref
 #define ns_pango_get_log_attrs                            pango_get_log_attrs
 #define NS_PANGO_IS_FC_FONT_MAP                           PANGO_IS_FC_FONT_MAP
@@ -113,6 +117,7 @@
 #define ns_pango_layout_index_to_pos                      pango_layout_index_to_pos
 #define ns_pango_layout_iter_free                         pango_layout_iter_free
 #define ns_pango_layout_iter_get_baseline                 pango_layout_iter_get_baseline
+#define ns_pango_layout_iter_get_index                    pango_layout_iter_get_index
 #define ns_pango_layout_iter_get_line_extents             pango_layout_iter_get_line_extents
 #define ns_pango_layout_iter_get_line_readonly            pango_layout_iter_get_line_readonly
 #define ns_pango_layout_iter_next_line                    pango_layout_iter_next_line
@@ -127,7 +132,6 @@
 #define ns_pango_layout_set_height                        pango_layout_set_height
 #define ns_pango_layout_set_indent                        pango_layout_set_indent
 #define ns_pango_layout_set_justify                       pango_layout_set_justify
-#define ns_pango_layout_set_line_spacing                  pango_layout_set_line_spacing
 #define ns_pango_layout_set_tabs                          pango_layout_set_tabs
 #define ns_pango_layout_set_text                          pango_layout_set_text
 #define ns_pango_layout_set_width                         pango_layout_set_width

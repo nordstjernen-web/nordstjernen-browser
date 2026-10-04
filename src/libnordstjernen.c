@@ -1884,6 +1884,21 @@ ns_browser_set_viewport(ns_browser *browser, int css_width, double css_height)
 }
 
 int
+ns_browser_set_device_pixel_ratio(ns_browser *browser, double dppx)
+{
+    if (!(dppx > 0)) return -1;
+    if (dppx == ns_css_device_pixel_ratio()) return 0;
+    ns_css_set_device_pixel_ratio(dppx);
+    if (!browser || !browser->doc) return 0;
+    if (browser->js) {
+        ns_js_sync_window_metrics(browser->js);
+        ns_js_reeval_media_queries(browser->js);
+    }
+    browser_relayout(browser);
+    return 1;
+}
+
+int
 ns_browser_set_viewport_width(ns_browser *browser, int css_width)
 {
     return ns_browser_set_viewport(browser, css_width,
@@ -2123,8 +2138,8 @@ browser_node_is_hyperlink(const ns_node *n)
            ns_node_is_element_named(n, "area");
 }
 
-char *
-ns_browser_link_at(ns_browser *browser, int x, int y)
+static char *
+browser_link_near(ns_browser *browser, int x, int y, int probes)
 {
     if (!browser || !browser->layout) return NULL;
 
@@ -2134,7 +2149,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         { 0, -kR }, { 0, kR }, { -kR, 0 }, { kR, 0 },
         { -kR, -kR }, { kR, -kR }, { -kR, kR }, { kR, kR },
     };
-    for (int i = 0; i < (int)(sizeof probe / sizeof probe[0]); i++) {
+    for (int i = 0; i < probes; i++) {
         int px = x + probe[i][0], py = y + probe[i][1];
         const char *href = ns_box_hit_link(browser->layout,
                                            (double)px, (double)py);
@@ -2147,6 +2162,18 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         if (href && *href) return browser_resolve_navigation(browser, href);
     }
     return NULL;
+}
+
+char *
+ns_browser_link_at(ns_browser *browser, int x, int y)
+{
+    return browser_link_near(browser, x, y, 9);
+}
+
+char *
+ns_browser_link_under(ns_browser *browser, int x, int y)
+{
+    return browser_link_near(browser, x, y, 1);
 }
 
 char *

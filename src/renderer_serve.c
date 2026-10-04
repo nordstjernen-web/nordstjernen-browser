@@ -44,6 +44,22 @@ struct ns_renderer_session {
     char          *post_ct;
 };
 
+static double
+request_device_pixel_ratio(const char *body)
+{
+    double dpr = 0;
+    json_get_double(body, "dpr", &dpr);
+    return dpr >= 0.25 && dpr <= 8.0 ? dpr : 0;
+}
+
+static void
+session_apply_device_pixel_ratio(ns_renderer_session *s, const char *body)
+{
+    double dpr = request_device_pixel_ratio(body);
+    if (dpr > 0 && ns_browser_set_device_pixel_ratio(s->cur, dpr) > 0)
+        s->frame_valid = 0;
+}
+
 static void
 session_bfcache_park_or_close(ns_renderer_session *s, ns_browser *b)
 {
@@ -305,9 +321,10 @@ session_animating(const struct ns_renderer_session *s)
 }
 
 static void
-session_note_scroll(struct ns_renderer_session *s, long sx, long sy)
+session_note_scroll(struct ns_renderer_session *s, long sx, long sy,
+                    gboolean wheel)
 {
-    if (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy))
+    if (wheel || (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy)))
         s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
 }
 
@@ -365,6 +382,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         json_get_long(body, "user_activated", &user_activated);
         int vw = clamp((int)w, 1, s->max_w);
         int vh = clamp((int)h, 1, s->max_h);
+        double dpr = request_device_pixel_ratio(body);
+        if (dpr > 0)
+            ns_browser_set_device_pixel_ratio(NULL, dpr);
         ns_browser *restored = (history && url)
             ? session_bfcache_take(s, url) : NULL;
         char *referrer = (!history && s->cur) ? ns_browser_url(s->cur) : NULL;
@@ -507,13 +527,17 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int vw = clamp((int)w, 1, s->max_w);
         int vh = clamp((int)h, 1, s->max_h);
         int stride = vw * 4;
+        session_apply_device_pixel_ratio(s, body);
         if (!s->cur) {
             http_write_response(ctrl_w, 200, "application/octet-stream",
                                 "X-W: 0\r\nX-H: 0\r\nX-Stride: 0\r\n"
                                 "X-Anim: 0\r\n", NULL, 0);
             return 0;
         }
-        session_note_scroll(s, sx, sy);
+        long wheel_x = 0, wheel_y = 0, wheel_dx = 0, wheel_dy = 0;
+        json_get_long(body, "wheel_dx", &wheel_dx);
+        json_get_long(body, "wheel_dy", &wheel_dy);
+        session_note_scroll(s, sx, sy, wheel_dx || wheel_dy);
         int ticked = s->frame_valid ? session_tick(s) : 0;
         int requested_scroll_x = -1;
         int requested_scroll_y = -1;
@@ -534,6 +558,21 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             if (requested_scroll_x > max_scroll_x)
                 requested_scroll_x = max_scroll_x;
             sx = requested_scroll_x;
+        }
+        if (wheel_dx || wheel_dy) {
+            json_get_long(body, "wheel_x", &wheel_x);
+            json_get_long(body, "wheel_y", &wheel_y);
+            if (ns_browser_scroll_at(s->cur, (int)wheel_x, (int)wheel_y,
+                                     (int)wheel_dx, (int)wheel_dy)) {
+                s->frame_valid = 0;
+            } else {
+                int max_x = page_w - (int)ceil((double)vw / scale);
+                int max_y = page_h - (int)ceil((double)vh / scale);
+                long nx = clamp((int)(sx + wheel_dx), 0, max_x > 0 ? max_x : 0);
+                long ny = clamp((int)(sy + wheel_dy), 0, max_y > 0 ? max_y : 0);
+                if (nx != sx) requested_scroll_x = (int)(sx = nx);
+                if (ny != sy) requested_scroll_y = (int)(sy = ny);
+            }
         }
         int snap_x = (int)sx, snap_y = (int)sy;
         if (ns_browser_snap_document(s->cur, (double)vw / scale,
@@ -764,7 +803,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int changed = s->cur ? ns_browser_hover(s->cur, (int)x, (int)y) : 0;
         if (changed > 0)
             s->frame_valid = 0;
-        char *href = s->cur ? ns_browser_link_at(s->cur, (int)x, (int)y)
+        char *href = s->cur ? ns_browser_link_under(s->cur, (int)x, (int)y)
                             : NULL;
         char *cursor = s->cur ? ns_browser_cursor_at(s->cur, (int)x, (int)y)
                               : NULL;
@@ -909,6 +948,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int vh = clamp((int)h, 1, s->max_h);
         int pw = 0, ph = 0, ok = 0;
         s->frame_valid = 0;
+        session_apply_device_pixel_ratio(s, body);
         if (s->cur && ns_browser_set_viewport(s->cur, vw, vh) == 0) {
             ns_browser_window_action_applied(s->cur);
             ns_browser_page_size(s->cur, &pw, &ph);

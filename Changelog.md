@@ -3,6 +3,101 @@ Changelog:
 
 1.0.29:
 ======
+* Pages are drawn at the screen's real pixel density. On a Retina or other
+  HiDPI display the renderer used to paint at one device pixel per CSS pixel
+  and the window stretched the frame, so text and images were blurry. The
+  frame is now rendered at the window's scale factor (2x on a Retina Mac,
+  fractional scales on Linux) and shown pixel for pixel, re-rendering when
+  the window moves to a screen with another scale. `devicePixelRatio`,
+  `resolution` and `-webkit-device-pixel-ratio` media queries and `srcset`
+  report the real ratio, so pages pick their sharp images. The renderer
+  framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
+  windows are no longer cut off at 2560 CSS pixels.
+* Text flows around floats like in other browsers: a paragraph next to a
+  floated figure keeps its full width and only its lines beside the float
+  are shortened, so text returns to the full width below the float. The
+  whole paragraph used to be narrowed for its entire height, which made
+  Wikipedia articles about 50% taller than in Chrome. Floats also no longer
+  get their top margin twice, and a float before a block whose top margin
+  collapses through the parent moves down with that margin.
+* Absolutely positioned and `display: none` table rows are taken out of the
+  table. Wikipedia hides collapsed table rows that way, and they used to
+  stay in the grid at full height.
+* Definite `min-width` and `max-width` limit a box's min- and max-content
+  width, and the flex items of a single-line row contribute their min-content
+  width as the flex spec describes (clamped by their flex base size when
+  they cannot grow or shrink). A centered flex column holding a heading with
+  `max-width` no longer stretches to the full width.
+* Lit and other web components that define their reactive properties in an
+  `observedAttributes` getter work: `customElements.define` now reads
+  `observedAttributes` once at definition time, as the spec says, instead of
+  after the first element was constructed. Lit components on MDN never
+  re-rendered, so every dropdown menu in MDN's header stayed open.
+* A `display: contents` shadow host lays out its shadow tree, so content
+  assigned to a hidden `<slot>` is not drawn.
+* `visibility: hidden` hides `::before`/`::after` text, and in flex and grid
+  containers those pseudo-elements become their own items. Stack Overflow's
+  menu labels ("About", "Active") were drawn twice.
+* Percentage widths of inline-blocks resolve against the line's containing
+  block during layout. The real layout sized them correctly and then laid
+  them out again against their own content width, so a `width: 50%`
+  inline-block came out a few pixels wide (apple.com's region picker showed
+  "..").
+* `display: none` on `::before` and `::after` removes the pseudo-element,
+  as when another rule sets its `content`.
+* `::placeholder` honours `opacity` and `visibility`, and keeps the default
+  grey (#757575) when a rule changes other properties. GitHub's sign-up
+  field drew its hidden placeholder in black on top of its label.
+* Reading an element's inline style from script is much faster:
+  `style[i]`, `style.length`, `getPropertyValue()` and
+  `getPropertyPriority()` no longer re-serialize and re-parse the whole
+  `style` attribute on every call. bbc.com/news loads in about 6 s of CPU
+  instead of 33 s; in the desktop browser it used to pass the renderer's
+  30-second reply timeout, restart, and never finish loading.
+* Scrolling is smooth. Touchpad deltas are applied 1:1 (they were multiplied
+  by 60, so a small swipe jumped hundreds of pixels), the scroll continues
+  with momentum after the fingers lift, mouse-wheel notches and the arrow,
+  Page Up/Down, space, Home and End keys glide to their target, and each
+  scroll rides on the next frame request instead of a separate round trip.
+  The browser no longer re-runs a hover hit test after every frame while
+  the pointer is still (GTK repeats the last motion event), and holds hover
+  updates until scrolling stops; hovering tests only the exact point under
+  the pointer. Scrolling Wikipedia went from about 9 to about 55 frames per
+  second on a 2x display. Wheel and touchpad scrolling also lets the
+  renderer delay page timers and relayouts while the gesture lasts, as it
+  already did when the scroll position came from the browser window.
+* A single-line row flex container is as wide as the sum of its items'
+  min-content widths, not its widest item, when it is squeezed. GitHub's
+  header menu shrank below its content and the buttons ran into each other.
+  Text under `white-space: nowrap` or `pre` is never measured as if it could
+  wrap, including text with letter or word spacing.
+* A `grid-auto-flow: column` grid is as wide as the sum of its columns, so
+  button rows like apple.com's "Learn more / Buy" are no longer cut off.
+* Paint order follows stacking contexts: an element with a positive
+  `z-index` inside a positioned `z-index: auto` box is painted above later
+  positioned siblings, and flex and grid items with a `z-index` are lifted
+  even without `position`. apple.com's hero headline and buttons were
+  hidden under the hero image.
+* Text uses the same fonts and widths as Chrome on macOS. `sans-serif` is
+  Helvetica (it was Verdana, about 14% wider, so text wrapped earlier and
+  overflowed its boxes), `serif` is Times, `monospace` Menlo, `cursive`
+  Apple Chancery, and `system-ui`, `-apple-system` and `BlinkMacSystemFont`
+  the San Francisco system font. Glyph advances are no longer rounded to
+  whole pixels, and font sizes reach HarfBuzz as CSS pixels, so San
+  Francisco gets the same optical size and tracking as in Chrome; measured
+  string widths now agree with Chrome to a tenth of a pixel. `line-height:
+  normal` comes from the font's own ascent, descent and line gap.
+* WOFF2 web fonts load on systems whose FreeType was built without Brotli,
+  such as Homebrew's on macOS. Those fonts used to fail silently and pages
+  fell back to a default face (GitHub's Mona Sans showed as Verdana). The
+  new in-tree decoder `src/woff2.c` unpacks the Brotli stream and rebuilds
+  the transformed `glyf`, `loca` and `hmtx` tables over libbrotlidec.
+* Every named instance and the variable pattern of a web font are now
+  registered under its CSS family, so a variable font such as Mona Sans
+  renders at the requested weight instead of its first instance.
+* Zoom reflows the page like other browsers: at 150% the page is laid out
+  for a viewport 1.5 times narrower instead of being magnified and cut off
+  at the right edge.
 * Security audit of the engine, shell and helpers. Fixed memory-safety
   bugs that web content could reach:
   - Out-of-bounds reads and writes: WebGL texture uploads sized for the
@@ -160,6 +255,57 @@ Changelog:
   middle, and shortens to "Nordstjernen" when the full name no longer fits.
 * The Nordstjernen "N" logo is back at the right end of the toolbar; clicking
   it opens nordstjernen.org.
+
+* `flex: unset`, `flex: inherit` and the other CSS-wide keywords reset all
+  three flex longhands. `flex-basis` kept its old value, so GitHub's
+  security section drew its screenshot as an 18px wide sliver.
+* Auto margins work in wrapping flex containers (`flex-wrap: wrap`): free
+  space on each line goes to the items' `auto` margins, and `margin-top` or
+  `margin-bottom: auto` aligns an item in its line. MDN's Baseline box
+  showed the browser icons next to the label instead of at the right edge.
+* Links, labels and summaries with `display: inline-block` are laid out as
+  inline blocks, with their vertical padding, instead of as plain text.
+  MDN's table of contents links were 19px tall instead of 32px. Inline
+  blocks and images with a horizontal margin are no longer moved right by
+  that margin a second time.
+* Margins collapse as in other browsers. When a first child's top margin
+  collapses through its parent, the parent's box now starts below that
+  margin, so its background and border no longer cover it. A top margin
+  also collapses with the margin above the parent, and flex and grid items
+  keep their children's margins inside. The root element keeps its
+  children's margins too, while `<body>` lets its last child's bottom
+  margin collapse through it. MDN's page header was 16px shorter than in
+  Chrome.
+* Grid sizing: `minmax()` tracks keep their minimum when a grid with
+  flexible columns is too narrow (MDN's three columns overflowed the
+  window), a stretched grid item stops at its `max-height`, and `0fr` or
+  `0.5fr` rows in a grid without a fixed height get that fraction of their
+  content. The `grid-template-rows: 0fr` accordions on github.com showed
+  every closed panel open. Flex and grid items with `overflow: hidden` now
+  clip their content even when they are zero pixels tall.
+* Each line box takes the `line-height` of every inline element on it, as
+  CSS describes. A `<span>` with a larger font or line height inside a
+  paragraph made its lines taller when drawn but not in the layout, so the
+  text overlapped the next block; GitHub's feature descriptions were 9px
+  short. A line made only of smaller text keeps the paragraph's line height.
+
+* A box shadow without blur is drawn only outside its box. A shadow
+  shifted sideways also showed a strip inside the box on the opposite
+  edge, so MDN's table of contents links had a grey line on both sides.
+
+* Solid borders whose sides have different colours meet in a diagonal
+  mitre, as in other browsers, so CSS triangles drawn with transparent side
+  borders show as triangles. Stack Overflow's "More" dropdown arrow was a
+  black bar.
+
+* An absolutely positioned `::before` or `::after` with `content: ""`
+  no longer draws its borders and background a second time around an empty
+  line of text next to the element.
+
+* A box with `aspect-ratio` and an explicit `min-height` (or one that
+  scrolls vertically) takes the height from its ratio even when its content
+  is taller, as the spec's automatic minimum size describes. Content still
+  grows such a box when `min-height` is `auto`.
 
 1.0.28:
 ======
