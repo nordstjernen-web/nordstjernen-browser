@@ -30142,7 +30142,8 @@ cascade_walk(ns_node *node,
                 compute_registered_vars(ps, s, *root_px);
                 gboolean keep = TRUE;
                 if (pe == NS_CSS_PE_BEFORE || pe == NS_CSS_PE_AFTER)
-                    keep = ps->values[NS_CSS_CONTENT] != NULL;
+                    keep = ps->values[NS_CSS_CONTENT] != NULL &&
+                           !ns_display_is_none(ns_css_display_of(ps));
                 if (keep) {
                     if (pe == NS_CSS_PE_BEFORE)            s->before       = ps;
                     else if (pe == NS_CSS_PE_AFTER)        s->after        = ps;
