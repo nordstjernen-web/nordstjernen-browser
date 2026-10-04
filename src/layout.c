@@ -1255,6 +1255,7 @@ static GHashTable  *g_abs_ph_set;
 static GHashTable  *g_abs_static;
 static GHashTable  *g_abs_seen;
 static const ns_node *g_inline_skip_node;
+static int          g_inline_collect_depth;
 
 static void *
 collect_peek_image(const char *src)
@@ -2902,7 +2903,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 
     if (ctx->atomics && n != g_form_control_inline &&
         is_atomic_inline(n, ctx->styles)) {
+        int saved_collect_depth = g_inline_collect_depth;
+        g_inline_collect_depth = depth + 1;
         ns_box *sub = build_block(n, ctx->styles);
+        g_inline_collect_depth = saved_collect_depth;
         if (sub) {
             ns_atomic_raw rec = { .start = ctx->out->len, .box = sub };
             g_string_append(ctx->out, "\xef\xbf\xbc");
@@ -3730,7 +3734,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         }
     }
     for (const ns_node *n = first; n && n != last_excl; n = n->next_sibling)
-        collect_walk(n, &ctx, 0);
+        collect_walk(n, &ctx, g_inline_collect_depth);
 
     int ws_mode = first ? white_space_mode(first, styles) : NS_WS_COLLAPSE;
     gboolean preformatted = ws_mode == NS_WS_PRESERVE;
