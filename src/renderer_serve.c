@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define NS_BFCACHE_MAX 4
-#define NS_SCROLL_ACTIVE_US   150000
+#define NS_SCROLL_ACTIVE_US   250000
 #define NS_SCROLL_TICK_GAP_US 250000
 
 struct ns_renderer_session {
@@ -305,10 +305,16 @@ session_animating(const struct ns_renderer_session *s)
 }
 
 static void
+session_note_scroll_input(struct ns_renderer_session *s)
+{
+    s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
+}
+
+static void
 session_note_scroll(struct ns_renderer_session *s, long sx, long sy)
 {
     if (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy))
-        s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
+        session_note_scroll_input(s);
 }
 
 int
@@ -788,6 +794,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     }
 
     if (strcmp(head->path, "/scroll") == 0) {
+        session_note_scroll_input(s);
         long x = 0, y = 0, dx = 0, dy = 0;
         json_get_long(body, "x", &x);
         json_get_long(body, "y", &y);
