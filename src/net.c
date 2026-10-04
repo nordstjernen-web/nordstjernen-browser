@@ -1529,6 +1529,34 @@ ns_net_cookies_for_request(const char *url)
     return ns_cookie_collect(url, TRUE);
 }
 
+static gboolean
+ns_cookie_jar_has_httponly(const char *jar_path, const char *domain,
+                           const char *path, const char *name, gint64 now)
+{
+    char *contents = NULL;
+    if (!jar_path || !g_file_get_contents(jar_path, &contents, NULL, NULL))
+        return FALSE;
+    gboolean found = FALSE;
+    char **lines = g_strsplit(contents, "\n", -1);
+    for (int i = 0; lines[i] && !found; i++) {
+        if (!g_str_has_prefix(lines[i], "#HttpOnly_")) continue;
+        char **f = g_strsplit(lines[i] + strlen("#HttpOnly_"), "\t", 7);
+        int nf = 0;
+        while (f[nf]) nf++;
+        if (nf >= 7) {
+            gint64 expiry = g_ascii_strtoll(f[4], NULL, 10);
+            found = g_ascii_strcasecmp(f[0], domain) == 0 &&
+                    strcmp(f[2], path) == 0 &&
+                    strcmp(f[5], name) == 0 &&
+                    (expiry == 0 || expiry >= now);
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    g_free(contents);
+    return found;
+}
+
 static void
 ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
 {
@@ -1662,6 +1690,14 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
         ? ns_net_cookie_path_for_partition(site)
         : ns_net_cookie_js_path_for_partition(site);
     g_autofree char *name_dup = g_strndup(name, name_len);
+    if (!from_http) {
+        g_autofree char *http_jar_path = ns_net_cookie_path_for_partition(site);
+        if (ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
+                                       name_dup, now)) {
+            g_free(file_domain); g_free(domain_attr); g_free(path_attr);
+            return;
+        }
+    }
 
     char *contents = NULL;
     g_file_get_contents(jar_path, &contents, NULL, NULL);
