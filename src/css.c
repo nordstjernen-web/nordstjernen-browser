@@ -24415,8 +24415,10 @@ ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el)
 
 static __thread guint64 g_sel_match_ops;
 static __thread int      g_sel_match_depth;
+static __thread int      g_sel_chain_depth;
 
 #define NS_SEL_MATCH_BUDGET 8000000ull
+#define NS_SEL_MATCH_MAX_CHAIN 1024
 
 typedef enum css_chain_result {
     CSS_CHAIN_MATCHES,
@@ -24432,9 +24434,14 @@ static css_chain_result
 match_compound_then_chain(const ns_css_selector *sel, int idx,
                           const ns_node *el)
 {
+    if (g_sel_chain_depth >= NS_SEL_MATCH_MAX_CHAIN)
+        return CSS_CHAIN_FAILS_COMPLETELY;
     if (!match_simple(g_ptr_array_index(sel->compounds, idx), el))
         return CSS_CHAIN_FAILS_LOCALLY;
-    return match_complex_chain(sel, idx, el);
+    g_sel_chain_depth++;
+    css_chain_result r = match_complex_chain(sel, idx, el);
+    g_sel_chain_depth--;
+    return r;
 }
 
 static css_chain_result
