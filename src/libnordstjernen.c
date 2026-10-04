@@ -796,9 +796,14 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
 {
     ns_browser *b = ud;
     if (!b || !url || !*url) return;
-    char *abs = browser_resolve_navigation(b, url);
+    char *abs = ns_url_resolve(b->base_url, url);
+    const char *target = abs ? abs : url;
+    if (!browser_allows_navigation_url(b, target)) {
+        g_free(abs);
+        return;
+    }
     g_free(b->pending_download);
-    b->pending_download = g_strdup_printf("%s\t%s", abs ? abs : url,
+    b->pending_download = g_strdup_printf("%s\t%s", target,
                                           filename ? filename : "");
     g_free(abs);
 }
