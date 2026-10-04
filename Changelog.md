@@ -13,6 +13,18 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* A single-line row flex container is as wide as the sum of its items'
+  min-content widths, not its widest item, when it is squeezed. GitHub's
+  header menu shrank below its content and the buttons ran into each other.
+  Text under `white-space: nowrap` or `pre` is never measured as if it could
+  wrap, including text with letter or word spacing.
+* A `grid-auto-flow: column` grid is as wide as the sum of its columns, so
+  button rows like apple.com's "Learn more / Buy" are no longer cut off.
+* Paint order follows stacking contexts: an element with a positive
+  `z-index` inside a positioned `z-index: auto` box is painted above later
+  positioned siblings, and flex and grid items with a `z-index` are lifted
+  even without `position`. apple.com's hero headline and buttons were
+  hidden under the hero image.
 * Text uses the same fonts and widths as Chrome on macOS. `sans-serif` is
   Helvetica (it was Verdana, about 14% wider, so text wrapped earlier and
   overflowed its boxes), `serif` is Times, `monospace` Menlo, `cursive`
