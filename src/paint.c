@@ -2046,47 +2046,62 @@ ns_style_is_nowrap(const ns_style *style)
             strcmp(ws->u.keyword, "pre") == 0);
 }
 
+static double
+normal_line_height_from_metrics(const ns_style *s, const char *family,
+                                double font_size)
+{
+    ns_css_font_metrics m = { 0 };
+    gboolean italic = s &&
+        (keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
+         keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique"));
+    int weight = ns_css_font_weight_number(
+        s ? s->values[NS_CSS_FONT_WEIGHT] : NULL, 400);
+    ns_paint_font_metrics(family, font_size, weight, italic, &m);
+    return m.line_px;
+}
+
+static double
+normal_line_height_fallback(const char *family, double font_size)
+{
+    static const struct {
+        const char *name;
+        double factor;
+        gboolean rounded;
+    } known[] = {
+        { "Arial", 1.1, FALSE },
+        { "Helvetica", 1.1, FALSE },
+        { "Times New Roman", 1.125, FALSE },
+        { "Times", 1.125, FALSE },
+        { "serif", 1.125, FALSE },
+        { "Menlo", 1.164, TRUE },
+        { "System Font", 1.19, TRUE },
+    };
+    char *resolved = family ? ns_css_font_family_for_pango(family) : NULL;
+    double factor = 1.2;
+    gboolean rounded = FALSE;
+    for (gsize i = 0; resolved && i < G_N_ELEMENTS(known); i++) {
+        if (g_ascii_strcasecmp(resolved, known[i].name) != 0) continue;
+        factor = known[i].factor;
+        rounded = known[i].rounded;
+        break;
+    }
+    g_free(resolved);
+    return rounded ? round(font_size * factor) : ceil(font_size * factor);
+}
+
 double
 ns_paint_normal_line_height_px(const ns_style *s)
 {
     double font_size = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
-    double factor = 1.2;
-    const ns_css_value *family = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
+    const ns_css_value *fv = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
+    const char *family = fv && fv->kind == NS_CSS_V_KEYWORD ? fv->u.keyword
+                                                            : NULL;
     if (font_size > 0) {
-        ns_css_font_metrics m = { 0 };
-        gboolean italic = s &&
-            (keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
-             keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique"));
-        ns_paint_font_metrics(family && family->kind == NS_CSS_V_KEYWORD
-                                  ? family->u.keyword : "sans-serif",
-                              font_size,
-                              ns_css_font_weight_number(
-                                  s ? s->values[NS_CSS_FONT_WEIGHT] : NULL, 400),
-                              italic, &m);
-        if (m.line_px > 0) return m.line_px;
+        double line = normal_line_height_from_metrics(
+            s, family ? family : "sans-serif", font_size);
+        if (line > 0) return line;
     }
-    if (family && family->kind == NS_CSS_V_KEYWORD && family->u.keyword) {
-        char *resolved = ns_css_font_family_for_pango(family->u.keyword);
-        gboolean rounded = FALSE;
-        if (g_ascii_strcasecmp(resolved, "Arial") == 0 ||
-            g_ascii_strcasecmp(resolved, "Helvetica") == 0)
-            factor = 1.1;
-        else if (g_ascii_strcasecmp(resolved, "Times New Roman") == 0 ||
-                 g_ascii_strcasecmp(resolved, "Times") == 0 ||
-                 g_ascii_strcasecmp(resolved, "serif") == 0)
-            factor = 1.125;
-        else if (g_ascii_strcasecmp(resolved, "Menlo") == 0) {
-            factor = 1.164;
-            rounded = TRUE;
-        } else if (g_ascii_strcasecmp(resolved, "System Font") == 0) {
-            factor = 1.19;
-            rounded = TRUE;
-        }
-        g_free(resolved);
-        if (rounded)
-            return round(font_size * factor);
-    }
-    return ceil(font_size * factor);
+    return normal_line_height_fallback(family, font_size);
 }
 
 double

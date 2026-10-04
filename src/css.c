@@ -23800,8 +23800,6 @@ inline_grid_value(const char *style, gboolean full)
     return r;
 }
 
-static char *inline_style_get_uncached(const char *style, const char *prop);
-
 #define INLINE_GET_MEMO 32
 
 static __thread struct {
@@ -23811,16 +23809,22 @@ static __thread struct {
 } g_inline_get_memo[INLINE_GET_MEMO];
 static __thread guint g_inline_get_next;
 
-char *
-ns_inline_style_get(const char *style, const char *prop)
+static gboolean
+inline_get_memo_hit(const char *style, const char *prop, char **out)
 {
-    if (!style || !prop) return NULL;
     for (guint i = 0; i < INLINE_GET_MEMO; i++)
         if (g_inline_get_memo[i].style &&
             strcmp(g_inline_get_memo[i].prop, prop) == 0 &&
-            strcmp(g_inline_get_memo[i].style, style) == 0)
-            return g_strdup(g_inline_get_memo[i].value);
-    char *value = inline_style_get_uncached(style, prop);
+            strcmp(g_inline_get_memo[i].style, style) == 0) {
+            *out = g_strdup(g_inline_get_memo[i].value);
+            return TRUE;
+        }
+    return FALSE;
+}
+
+static char *
+inline_get_memo_keep(const char *style, const char *prop, char *value)
+{
     guint slot = g_inline_get_next++ % INLINE_GET_MEMO;
     g_free(g_inline_get_memo[slot].style);
     g_free(g_inline_get_memo[slot].prop);
@@ -23831,23 +23835,29 @@ ns_inline_style_get(const char *style, const char *prop)
     return value;
 }
 
-static char *
-inline_style_get_uncached(const char *style, const char *prop)
+char *
+ns_inline_style_get(const char *style, const char *prop)
 {
+    if (!style || !prop) return NULL;
+    char *hit = NULL;
+    if (inline_get_memo_hit(style, prop, &hit)) return hit;
     if (g_ascii_strcasecmp(prop, "all") == 0)
-        return inline_all_value(style);
+        return inline_get_memo_keep(style, prop, inline_all_value(style));
     if (inline_quad_ids(prop))
-        return inline_quad_value(style, prop, NULL);
+        return inline_get_memo_keep(style, prop,
+                                    inline_quad_value(style, prop, NULL));
     if (g_ascii_strcasecmp(prop, "overflow") == 0)
-        return inline_pair_value(style, NS_CSS_OVERFLOW_X,
-                                 NS_CSS_OVERFLOW_Y, NULL);
+        return inline_get_memo_keep(style, prop,
+            inline_pair_value(style, NS_CSS_OVERFLOW_X, NS_CSS_OVERFLOW_Y,
+                              NULL));
     if (g_ascii_strcasecmp(prop, "font") == 0) {
         char *font_all = inline_all_value_for(style, "font");
-        if (font_all) return font_all;
+        if (font_all) return inline_get_memo_keep(style, prop, font_all);
     }
     if (g_ascii_strcasecmp(prop, "animation") == 0 ||
         g_ascii_strcasecmp(prop, "transition") == 0)
-        return inline_anim_shorthand_value(style, prop[0] == 'a');
+        return inline_get_memo_keep(style, prop,
+            inline_anim_shorthand_value(style, prop[0] == 'a'));
     if (g_ascii_strcasecmp(prop, "list-style") == 0) {
         char *type = ns_inline_style_get(style, "list-style-type");
         char *pos = ns_inline_style_get(style, "list-style-position");
@@ -23861,7 +23871,7 @@ inline_style_get_uncached(const char *style, const char *prop)
         g_free(type);
         g_free(pos);
         g_free(img);
-        return r;
+        return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "animation-range") == 0) {
         char *st = ns_inline_style_get(style, "animation-range-start");
@@ -23869,11 +23879,11 @@ inline_style_get_uncached(const char *style, const char *prop)
         char *r = st && en ? ns_css_animation_range_serialize(st, en) : NULL;
         g_free(st);
         g_free(en);
-        return r;
+        return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "background") == 0) {
         char *r = inline_background_value(style, NULL);
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if (g_ascii_strcasecmp(prop, "background-position") == 0) {
         char *xs = ns_inline_style_get(style, "background-position-x");
@@ -23881,17 +23891,17 @@ inline_style_get_uncached(const char *style, const char *prop)
         char *r = xs && ys ? bg_position_zip(xs, ys) : NULL;
         g_free(xs);
         g_free(ys);
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if ((g_ascii_strcasecmp(prop, "grid") == 0 ||
          g_ascii_strcasecmp(prop, "grid-template") == 0) &&
         !strstr(style, "var(")) {
         char *r = inline_grid_value(style, prop[4] == '\0');
-        if (r) return r;
+        if (r) return inline_get_memo_keep(style, prop, r);
     }
     if (ns_css_prop_id(prop) < 0 && ns_css_named_property_supported(prop)) {
         char *all = inline_all_value(style);
-        if (all) return all;
+        if (all) return inline_get_memo_keep(style, prop, all);
     }
     int pid = ns_css_prop_id(prop);
     gsize plen = strlen(prop);
@@ -23954,9 +23964,11 @@ inline_style_get_uncached(const char *style, const char *prop)
         p = term == ';' ? vend + 1 : vend;
     }
 
-    if (winner) return css_inline_value_canonical(prop, winner);
+    if (winner)
+        return inline_get_memo_keep(style, prop,
+                                    css_inline_value_canonical(prop, winner));
 
-    return NULL;
+    return inline_get_memo_keep(style, prop, NULL);
 }
 
 typedef struct {
@@ -23988,8 +24000,6 @@ inline_decl_find(GPtrArray *decls, const char *name)
     return NULL;
 }
 
-static char *inline_style_serialize_uncached(const char *style);
-
 #define INLINE_SERIALIZE_MEMO 16
 
 static __thread struct {
@@ -23998,15 +24008,19 @@ static __thread struct {
 } g_inline_serialize_memo[INLINE_SERIALIZE_MEMO];
 static __thread guint g_inline_serialize_next;
 
-char *
-ns_inline_style_serialize(const char *style)
+static char *
+inline_serialize_memo_hit(const char *key)
 {
-    const char *key = style ? style : "";
     for (guint i = 0; i < INLINE_SERIALIZE_MEMO; i++)
         if (g_inline_serialize_memo[i].in &&
             strcmp(g_inline_serialize_memo[i].in, key) == 0)
             return g_strdup(g_inline_serialize_memo[i].out);
-    char *out = inline_style_serialize_uncached(style);
+    return NULL;
+}
+
+static char *
+inline_serialize_memo_keep(const char *key, char *out)
+{
     guint slot = g_inline_serialize_next++ % INLINE_SERIALIZE_MEMO;
     g_free(g_inline_serialize_memo[slot].in);
     g_free(g_inline_serialize_memo[slot].out);
@@ -24015,9 +24029,11 @@ ns_inline_style_serialize(const char *style)
     return out;
 }
 
-static char *
-inline_style_serialize_uncached(const char *style)
+char *
+ns_inline_style_serialize(const char *style)
 {
+    char *hit = inline_serialize_memo_hit(style ? style : "");
+    if (hit) return hit;
     GPtrArray *decls = g_ptr_array_new_with_free_func(inline_decl_free);
     const char *p = style ? style : "";
     const char *end = p + strlen(p);
@@ -24306,7 +24322,8 @@ inline_style_serialize_uncached(const char *style)
     g_free(list_value);
     g_free(background_value);
     g_ptr_array_free(decls, TRUE);
-    return g_string_free(out, FALSE);
+    return inline_serialize_memo_keep(style ? style : "",
+                                      g_string_free(out, FALSE));
 }
 
 gboolean
