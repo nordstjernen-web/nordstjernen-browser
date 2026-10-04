@@ -404,11 +404,18 @@ static void
 fill_outer_shadow(cairo_t *cr, double ox, double oy, double ow, double oh,
                   double ix, double iy, double iw, double ih, corner_radii radii)
 {
-    rounded_rect_path(cr, ox, oy, ow, oh, radii);
+    double x0 = MIN(ox, ix) - 1, y0 = MIN(oy, iy) - 1;
+    double x1 = MAX(ox + ow, ix + iw) + 1, y1 = MAX(oy + oh, iy + ih) + 1;
+    cairo_save(cr);
+    cairo_new_path(cr);
+    cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
     rounded_rect_path(cr, ix, iy, iw, ih, radii);
     cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-    cairo_fill(cr);
+    cairo_clip(cr);
     cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+    rounded_rect_path(cr, ox, oy, ow, oh, radii);
+    cairo_fill(cr);
+    cairo_restore(cr);
 }
 
 static void box_blur_argb(guchar *data, int stride, int w, int h, int radius);
