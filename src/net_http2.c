@@ -1037,6 +1037,16 @@ ns_h2_hdr_is_reserved(const char *lname, size_t len)
     return FALSE;
 }
 
+static const char *
+ns_h2_request_method(const ns_hop_req *req)
+{
+    if (!req->method || !*req->method)
+        return "GET";
+    if (strpbrk(req->method, "\r\n"))
+        return (req->body && req->body_len > 0) ? "POST" : "GET";
+    return req->method;
+}
+
 static gboolean
 ns_h2_conn_make_session(ns_conn *conn)
 {
@@ -1073,8 +1083,7 @@ ns_h2_submit_locked(ns_conn *conn, ns_h2 *c)
 {
     GPtrArray *owned = g_ptr_array_new_with_free_func(g_free);
     GArray *nva = g_array_new(FALSE, FALSE, sizeof(nghttp2_nv));
-    const char *method = (c->req->method && *c->req->method) ? c->req->method
-                                                             : "GET";
+    const char *method = ns_h2_request_method(c->req);
     ns_h2_add_nv(nva, ":method", method);
     ns_h2_add_nv(nva, ":scheme", c->scheme);
     ns_h2_add_nv(nva, ":authority", c->authority);
@@ -1305,8 +1314,7 @@ static gboolean
 ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
 {
     GString *reqs = g_string_new(NULL);
-    const char *method = (c->req->method && *c->req->method) ? c->req->method
-                                                             : "GET";
+    const char *method = ns_h2_request_method(c->req);
     g_string_append_printf(reqs, "%s %s HTTP/1.1\r\n", method, path);
     g_string_append_printf(reqs, "Host: %s\r\n", authority);
     if (c->req->user_agent)
@@ -2533,8 +2541,7 @@ ns_h3_perform(const ns_hop_req *req, ns_write_ctx *wctx, ns_header_ctx *hctx,
             break;
         }
         if (!h.h3_setup && ngtcp2_conn_get_handshake_completed(h.conn)) {
-            const char *method = (req->method && *req->method) ? req->method
-                                                               : "GET";
+            const char *method = ns_h2_request_method(req);
             if (!ns_h3_setup(&h, authority, path, method)) {
                 h.failed = TRUE;
                 break;
