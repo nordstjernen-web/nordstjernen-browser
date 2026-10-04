@@ -134,7 +134,8 @@ char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 char *ns_browser_click(ns_browser *browser, int x, int y, int mods);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);
 
-/* Dispatch a keyboard event into the page's JS (kind 0 = keydown, 1 = keyup),
+/* Dispatch a keyboard event into the page's JS (kind 0 = keydown, 1 = keyup,
+ * 2 = committed text, 3 = keypress, 4 = paste key as clipboard text),
  * targeting the focused element or, if none, <body>. key/code are the DOM
  * KeyboardEvent.key / .code strings, keycode the legacy keyCode; mods is bit0
  * shift, bit1 ctrl, bit2 alt, bit3 meta. Pending JS work is pumped and the page
@@ -218,6 +219,17 @@ char *ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
  * its native context menu and re-render), 0 otherwise. */
 int ns_browser_contextmenu(ns_browser *browser, int x, int y);
 
+/* Like ns_browser_contextmenu, and when the page lets the menu open over an
+ * editable field, focuses that field and sets *out_edit to its
+ * NS_BROWSER_EDIT_* state (0 elsewhere). */
+enum {
+    NS_BROWSER_EDIT_FIELD     = 1,
+    NS_BROWSER_EDIT_WRITABLE  = 2,
+    NS_BROWSER_EDIT_SELECTION = 4,
+};
+int ns_browser_contextmenu_full(ns_browser *browser, int x, int y,
+                                int *out_edit);
+
 /* Find-in-page. query is the search text (NULL/empty clears the search and its
  * highlight). case_sensitive is 0/1. direction selects the match: 0 = search
  * from from_y (a document-space CSS-pixel scroll offset) downward, 1 = next
@@ -232,8 +244,10 @@ int ns_browser_find(ns_browser *browser, const char *query, int case_sensitive,
                     int *out_current, int *out_y);
 
 /* Drive page text selection at page coordinates (CSS px). kind: 0 anchor (drag
- * start), 1 extend (drag move), 2 clear, 3 select-all, 4 get selected text.
- * For kind 4 returns the selected text (newly allocated, free with free()),
+ * start), 1 extend (drag move), 2 clear, 3 select-all, 4 get selected text,
+ * 7 cut the focused field's selection. While an editable field has focus,
+ * select-all and get selected text act on the field instead of the page.
+ * For kinds 4 and 7 returns the text (newly allocated, free with free()),
  * otherwise NULL. The selection highlight is painted by ns_browser_render_*. */
 char *ns_browser_select(ns_browser *browser, int kind, int x, int y);
 

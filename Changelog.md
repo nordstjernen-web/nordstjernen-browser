@@ -3,6 +3,17 @@ Changelog:
 
 1.0.29:
 ======
+* Clipboard in text fields: paste with Ctrl+V, Shift+Insert or Cmd+V on
+  macOS, and from a new right-click menu on inputs, textareas and
+  contenteditable elements (Cut, Copy, Paste, Select All). Ctrl+X cuts and
+  Ctrl+C, Ctrl+Insert and Select All act on the focused field's text
+  instead of the page. Pasting fires a cancelable `paste` ClipboardEvent
+  whose `clipboardData` holds the text, honours `readonly` and `maxlength`,
+  and turns line breaks into spaces in single-line inputs. Password fields
+  cannot be copied or cut. `beforeinput`/`input` are now InputEvents with
+  `inputType` and `data` for typing, deleting, pasting and cutting, and
+  `DataTransfer` treats the `text` and `url` formats as `text/plain` and
+  `text/uri-list`.
 * Pages are drawn at the screen's real pixel density. On a Retina or other
   HiDPI display the renderer used to paint at one device pixel per CSS pixel
   and the window stretched the frame, so text and images were blurry. The

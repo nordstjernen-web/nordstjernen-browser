@@ -1271,9 +1271,11 @@ ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,
 }
 
 void
-ns_rproc_http_contextmenu(ns_rproc_http *r, int x, int y, int *out_prevented)
+ns_rproc_http_contextmenu(ns_rproc_http *r, int x, int y, int *out_prevented,
+                          int *out_edit)
 {
     if (out_prevented) *out_prevented = 0;
+    if (out_edit) *out_edit = 0;
     if (!r)
         return;
     char json[48];
@@ -1281,9 +1283,11 @@ ns_rproc_http_contextmenu(ns_rproc_http *r, int x, int y, int *out_prevented)
     char *body = request(r, "/contextmenu", json);
     if (!body)
         return;
-    long pv = 0;
+    long pv = 0, edit = 0;
     json_get_long(body, "prevented", &pv);
+    json_get_long(body, "edit", &edit);
     if (out_prevented) *out_prevented = (int)pv;
+    if (out_edit) *out_edit = (int)edit;
     free(body);
 }
 

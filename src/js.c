@@ -30698,6 +30698,8 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "mousewheel", "WheelEvent" },
         { "keydown", "KeyboardEvent" }, { "keyup", "KeyboardEvent" },
         { "keypress", "KeyboardEvent" },
+        { "copy", "ClipboardEvent" }, { "cut", "ClipboardEvent" },
+        { "paste", "ClipboardEvent" },
         { "touchstart", "TouchEvent" }, { "touchmove", "TouchEvent" },
         { "touchend", "TouchEvent" }, { "touchcancel", "TouchEvent" },
         { "drag", "DragEvent" }, { "dragstart", "DragEvent" },
@@ -30793,12 +30795,12 @@ ns_event_type_is_composed(const char *type)
 {
     static const char *const composed_types[] = {
         "auxclick", "beforeinput", "blur", "click", "compositionend",
-        "compositionstart", "compositionupdate", "contextmenu", "dblclick",
-        "focus", "focusin", "focusout", "input", "keydown", "keypress",
-        "keyup", "mousedown", "mousemove", "mouseout", "mouseover",
-        "mouseup", "pointercancel", "pointerdown", "pointermove",
-        "pointerout", "pointerover", "pointerup", "touchcancel",
-        "touchend", "touchmove", "touchstart", "wheel",
+        "compositionstart", "compositionupdate", "contextmenu", "copy", "cut",
+        "dblclick", "focus", "focusin", "focusout", "input", "keydown",
+        "keypress", "keyup", "mousedown", "mousemove", "mouseout",
+        "mouseover", "mouseup", "paste", "pointercancel", "pointerdown",
+        "pointermove", "pointerout", "pointerover", "pointerup",
+        "touchcancel", "touchend", "touchmove", "touchstart", "wheel",
     };
     for (gsize i = 0; type && i < G_N_ELEMENTS(composed_types); i++)
         if (strcmp(type, composed_types[i]) == 0) return TRUE;
@@ -31668,6 +31670,7 @@ ns_install_drag_event_support(JSContext *ctx)
     static const char *src =
         "(function(global){"
         "function lowerType(t){return String(t||'').toLowerCase();}"
+        "function dataFormat(t){t=lowerType(t);return t==='text'?'text/plain':t==='url'?'text/uri-list':t;}"
         "function DataTransferItem(){"
         "var kind=arguments[0],type=arguments[1],data=arguments[2];"
         "Object.defineProperties(this,{_kind:{value:kind},_type:{value:type},_data:{value:data,writable:true}});"
@@ -31711,16 +31714,16 @@ ns_install_drag_event_support(JSContext *ctx)
         "},enumerable:true},files:{get:function(){return this._files;},enumerable:true}});"
         "DataTransfer.prototype.clearData=function(type){"
         "if(arguments.length===0){for(var i=this._items.length-1;i>=0;i--)if(this._items[i].kind==='string')this._items.splice(i,1);return;}"
-        "type=lowerType(type);"
+        "type=dataFormat(type);"
         "for(var j=this._items.length-1;j>=0;j--){if(this._items[j].kind==='string'&&this._items[j].type===type)this._items.splice(j,1);}"
         "};"
         "DataTransfer.prototype.getData=function(type){"
-        "type=lowerType(type);"
+        "type=dataFormat(type);"
         "for(var i=0;i<this._items.length;i++){var it=this._items[i];if(it.kind==='string'&&it.type===type)return String(it._data);}"
         "return '';"
         "};"
         "DataTransfer.prototype.setData=function(type,data){"
-        "type=lowerType(type);"
+        "type=dataFormat(type);"
         "for(var i=this._items.length-1;i>=0;i--){if(this._items[i].kind==='string'&&this._items[i].type===type)this._items.splice(i,1);}"
         "this._items.push(makeItem('string',type,String(data)));"
         "};"
@@ -33548,6 +33551,30 @@ ns_js_dispatch_key_event(ns_js *js, const ns_node *target, const char *type,
                                          default_prevented);
 }
 
+gboolean
+ns_js_dispatch_input_event(ns_js *js, const ns_node *target, const char *type,
+                           const char *input_type, const char *data,
+                           gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !target || !type) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, target);
+    ns_event_adopt_interface(ctx, event, "InputEvent");
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "cancelable",
+                      JS_NewBool(ctx, strcmp(type, "beforeinput") == 0));
+    JS_SetPropertyStr(ctx, event, "inputType",
+                      JS_NewString(ctx, input_type ? input_type : ""));
+    JS_SetPropertyStr(ctx, event, "data",
+                      data ? JS_NewString(ctx, data) : JS_NULL);
+    JS_SetPropertyStr(ctx, event, "isComposing", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "dataTransfer", JS_NULL);
+    return ns_js_dispatch_built_event(js, target, type, event,
+                                      default_prevented);
+}
+
 static void
 ns_event_put(JSContext *ctx, JSValueConst event, const char *name, JSValue value)
 {
@@ -33679,24 +33706,73 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
                                       default_prevented);
 }
 
-ns_js_drag_session *
-ns_js_drag_session_new(ns_js *js)
+static JSValue
+ns_js_new_data_transfer(JSContext *ctx)
 {
-    if (!js || !js->ctx || js->halted) return NULL;
-    JSContext *ctx = js->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ctor = JS_GetPropertyStr(ctx, global, "DataTransfer");
     JS_FreeValue(ctx, global);
     if (!JS_IsFunction(ctx, ctor)) {
         JS_FreeValue(ctx, ctor);
-        return NULL;
+        return JS_NULL;
     }
     JSValue dt = JS_CallConstructor(ctx, ctor, 0, NULL);
     JS_FreeValue(ctx, ctor);
     if (JS_IsException(dt)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
-        return NULL;
+        return JS_NULL;
     }
+    return dt;
+}
+
+static void
+ns_js_data_transfer_set(JSContext *ctx, JSValueConst dt, const char *type,
+                        const char *data)
+{
+    JSValue fn = JS_GetPropertyStr(ctx, dt, "setData");
+    if (!JS_IsFunction(ctx, fn)) {
+        JS_FreeValue(ctx, fn);
+        return;
+    }
+    JSValue args[2] = {
+        JS_NewString(ctx, type),
+        JS_NewString(ctx, data ? data : ""),
+    };
+    JSValue ret = JS_Call(ctx, fn, dt, 2, args);
+    if (JS_IsException(ret))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    JS_FreeValue(ctx, fn);
+}
+
+gboolean
+ns_js_dispatch_clipboard_event(ns_js *js, const ns_node *target,
+                               const char *type, const char *text,
+                               gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !target || !type) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue data = ns_js_new_data_transfer(ctx);
+    if (text && JS_IsObject(data))
+        ns_js_data_transfer_set(ctx, data, "text/plain", text);
+    JSValue event = ns_make_event(ctx, type, target);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "clipboardData", data);
+    return ns_js_dispatch_built_event(js, target, type, event,
+                                      default_prevented);
+}
+
+ns_js_drag_session *
+ns_js_drag_session_new(ns_js *js)
+{
+    if (!js || !js->ctx || js->halted) return NULL;
+    JSValue dt = ns_js_new_data_transfer(js->ctx);
+    if (!JS_IsObject(dt)) return NULL;
     ns_js_drag_session *session = g_new0(ns_js_drag_session, 1);
     session->js = js;
     session->data_transfer = dt;
@@ -33717,23 +33793,8 @@ ns_js_drag_session_set_data(ns_js_drag_session *session,
                             const char *type, const char *data)
 {
     if (!session || !session->js || !session->js->ctx || !type) return;
-    JSContext *ctx = session->js->ctx;
-    JSValue fn = JS_GetPropertyStr(ctx, session->data_transfer, "setData");
-    if (!JS_IsFunction(ctx, fn)) {
-        JS_FreeValue(ctx, fn);
-        return;
-    }
-    JSValue args[2] = {
-        JS_NewString(ctx, type),
-        JS_NewString(ctx, data ? data : ""),
-    };
-    JSValue ret = JS_Call(ctx, fn, session->data_transfer, 2, args);
-    if (JS_IsException(ret))
-        JS_FreeValue(ctx, JS_GetException(ctx));
-    JS_FreeValue(ctx, ret);
-    JS_FreeValue(ctx, args[0]);
-    JS_FreeValue(ctx, args[1]);
-    JS_FreeValue(ctx, fn);
+    ns_js_data_transfer_set(session->js->ctx, session->data_transfer, type,
+                            data);
 }
 
 static JSValue
