@@ -25642,14 +25642,16 @@ match_cmp(gconstpointer a_, gconstpointer b_)
     return a->decl_order < b->decl_order ? -1 : 1;
 }
 
+#define CSS_GATHER_DESTS_MAX (NS_CSS_PE_FILE_SELECTOR_BUTTON + 1)
+
 typedef struct css_rule_match_accum {
     guint epoch;
     int layer_order;
-    gboolean any[9];
-    int spec_a[9];
-    int spec_b[9];
-    int spec_c[9];
-    int scope_order[9];
+    gboolean any[CSS_GATHER_DESTS_MAX];
+    int spec_a[CSS_GATHER_DESTS_MAX];
+    int spec_b[CSS_GATHER_DESTS_MAX];
+    int spec_c[CSS_GATHER_DESTS_MAX];
+    int scope_order[CSS_GATHER_DESTS_MAX];
 } css_rule_match_accum;
 
 static __thread css_candidate *g_cand_pool = NULL;
@@ -25879,7 +25881,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         g_rule_match_epoch = 1;
     }
 
-    int dest_of_pe[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    int dest_of_pe[CSS_GATHER_DESTS_MAX];
     for (gsize i = 0; i < G_N_ELEMENTS(dest_of_pe); i++) dest_of_pe[i] = -1;
     for (guint dd = 0; dd < n_dests; dd++)
         if ((gsize)dests[dd].pe < G_N_ELEMENTS(dest_of_pe))
