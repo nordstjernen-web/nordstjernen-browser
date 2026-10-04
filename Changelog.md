@@ -119,6 +119,12 @@ Changelog:
   MDN's table of contents links were 19px tall instead of 32px. Inline
   blocks and images with a horizontal margin are no longer moved right by
   that margin a second time.
+* Margins collapse as in other browsers. When a first child's top margin
+  collapses through its parent, the parent's box now starts below that
+  margin, so its background and border no longer cover it. A top margin
+  also collapses with the margin above the parent, and flex and grid items
+  keep their children's margins inside. MDN's page header was 16px shorter
+  than in Chrome.
 
 1.0.28:
 ======
