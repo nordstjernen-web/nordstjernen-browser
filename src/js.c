@@ -47890,23 +47890,41 @@ ns_media_src_is_mp3(const char *url)
     return FALSE;
 }
 
+static gboolean
+ns_media_token_valid(const char *token)
+{
+    if (!token || token[0] != 'a' || !token[1] || strlen(token) > 11)
+        return FALSE;
+    for (const char *p = token + 1; *p; p++)
+        if (!g_ascii_isdigit(*p)) return FALSE;
+    return TRUE;
+}
+
+static char *
+ns_media_existing_token(JSContext *ctx, JSValueConst el)
+{
+    JSValue tv = JS_GetPropertyStr(ctx, el, "_nd_audio_token");
+    char *token = NULL;
+    if (JS_IsString(tv)) {
+        const char *s = JS_ToCString(ctx, tv);
+        if (ns_media_token_valid(s)) token = g_strdup(s);
+        if (s) JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, tv);
+    return token;
+}
+
 static char *
 ns_media_token(JSContext *ctx, ns_node *node)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js || !node) return NULL;
     JSValue v = ns_make_element(ctx, node);
-    JSValue tv = JS_GetPropertyStr(ctx, v, "_nd_audio_token");
-    char *token = NULL;
-    if (JS_IsString(tv)) {
-        const char *s = JS_ToCString(ctx, tv);
-        token = g_strdup(s);
-        JS_FreeCString(ctx, s);
-    } else {
+    char *token = ns_media_existing_token(ctx, v);
+    if (!token) {
         token = g_strdup_printf("a%u", ++js->next_audio_token);
         JS_SetPropertyStr(ctx, v, "_nd_audio_token", JS_NewString(ctx, token));
     }
-    JS_FreeValue(ctx, tv);
     JS_FreeValue(ctx, v);
     return token;
 }
@@ -48261,16 +48279,12 @@ ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
     gboolean handled = js->media_seek_cb &&
         js->media_seek_cb(el, t, js->media_seek_user_data);
     if (!handled && js->audio_cb) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) {
-                ns_js_emit_audio(js, "seek %s %.3f", token, t);
-                handled = TRUE;
-                JS_FreeCString(ctx, token);
-            }
+        char *token = ns_media_existing_token(ctx, this_val);
+        if (token) {
+            ns_js_emit_audio(js, "seek %s %.3f", token, t);
+            handled = TRUE;
+            g_free(token);
         }
-        JS_FreeValue(ctx, tv);
     }
     JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, t));
     if (handled) {
@@ -48354,12 +48368,11 @@ ns_media_pause(JSContext *ctx, JSValueConst this_val,
     ns_node *el = ns_unwrap_element_mut(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (el && js) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) { ns_js_emit_audio(js, "pause %s", token); JS_FreeCString(ctx, token); }
+        char *token = ns_media_existing_token(ctx, this_val);
+        if (token) {
+            ns_js_emit_audio(js, "pause %s", token);
+            g_free(token);
         }
-        JS_FreeValue(ctx, tv);
         ns_js_dispatch_event(js, el, "pause", NULL);
         if (js->media_play_cb)
             js->media_play_cb(el, FALSE, js->media_play_user_data);
