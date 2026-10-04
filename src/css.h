@@ -1191,6 +1191,7 @@ void ns_css_set_focus_visible_node(const ns_node *node);
 const ns_node *ns_css_set_hover_node(const ns_node *node);
 const ns_node *ns_css_set_active_node(const ns_node *node);
 const ns_node *ns_css_set_fullscreen_node(const ns_node *node);
+void ns_css_forget_node(const ns_node *node);
 
 void ns_css_mark_visited(const char *abs_url);
 void ns_css_set_doc_base(const char *base_url);
