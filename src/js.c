@@ -29677,6 +29677,8 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
     *ratio = 0;
     *out_intersecting = FALSE;
     ns_io_root_rect(ctx, o, layout_root, rx, ry, rw, rh);
+    ns_js *js = js_from_ctx(ctx);
+    if (js) layout_root = js->layout_root;
     double margin_top = o->margin_top.percentage
         ? o->margin_top.value * *rw / 100.0 : o->margin_top.value;
     double margin_right = o->margin_right.percentage
@@ -29837,12 +29839,23 @@ ns_intersection_observers_tick(ns_js *js)
     for (guint oi = 0; oi < js->intersection_observers->len; oi++) {
         ns_io_observer *o = g_ptr_array_index(js->intersection_observers, oi);
         if (!o || o->disconnected || !o->targets) continue;
+        JSValue self = JS_DupValue(ctx, o->wrapper);
         JSValue entries = JS_UNDEFINED;
         guint n_entries = 0;
         for (guint i = 0; i < o->targets->len; i++) {
-            ns_io_target *t = &g_array_index(o->targets, ns_io_target, i);
+            ns_io_target t = g_array_index(o->targets, ns_io_target, i);
+            t.wrapper = JS_DupValue(ctx, t.wrapper);
             JSValue entry;
-            gboolean changed = ns_io_evaluate_one(ctx, o, t, &entry);
+            gboolean changed = ns_io_evaluate_one(ctx, o, &t, &entry);
+            if (i < o->targets->len) {
+                ns_io_target *slot = &g_array_index(o->targets, ns_io_target, i);
+                if (JS_VALUE_GET_PTR(slot->wrapper) == JS_VALUE_GET_PTR(t.wrapper)) {
+                    slot->last_intersecting = t.last_intersecting;
+                    slot->last_ratio = t.last_ratio;
+                    slot->has_fired = t.has_fired;
+                }
+            }
+            JS_FreeValue(ctx, t.wrapper);
             if (changed) {
                 if (JS_IsUndefined(entries)) entries = JS_NewArray(ctx);
                 JS_SetPropertyUint32(ctx, entries, n_entries++, entry);
@@ -29856,6 +29869,7 @@ ns_intersection_observers_tick(ns_js *js)
         } else if (!JS_IsUndefined(entries)) {
             JS_FreeValue(ctx, entries);
         }
+        JS_FreeValue(ctx, self);
     }
     js->observer_ticking = FALSE;
 }
