@@ -43306,7 +43306,7 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
         ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
         if (g.node[0])
             ns_js_dispatch_focus_event(js, old, "focusout",
-                                       same_doc ? el : NULL);
+                                       same_doc ? g.node[1] : NULL);
         if (js->focused_node) goto out;
     }
     if (!same_doc) {
@@ -43324,9 +43324,10 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
     ns_js_update_focus_visible(js);
     js->focus_nav_start = NULL;
-    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? old : NULL);
+    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? g.node[0] : NULL);
     if (g.node[1])
-        ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+        ns_js_dispatch_focus_event(js, el, "focusin",
+                                   same_doc ? g.node[0] : NULL);
 out:
     js->focus_guard = g.prev;
 }
@@ -47609,12 +47610,12 @@ static JSValue
 ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tbl = ns_unwrap_element_mut(this_val);
     if (!tbl) return JS_NULL;
     GPtrArray *rows = g_ptr_array_new();
     ns_collect_descendants_named(tbl, "tr", rows);
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)rows->len) idx = (int32_t)rows->len;
     ns_node *new_tr = ns_node_new_element(g_strdup("tr"));
     ns_js *_j = js_from_ctx(ctx);
@@ -47682,6 +47683,8 @@ static JSValue
 ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tr = ns_unwrap_element_mut(this_val);
     if (!tr) return JS_NULL;
     GPtrArray *cells = g_ptr_array_new();
@@ -47691,8 +47694,6 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
              g_ascii_strcasecmp(c->name, "th") == 0))
             g_ptr_array_add(cells, c);
     }
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)cells->len) idx = (int32_t)cells->len;
     ns_node *cell = ns_node_new_element(g_strdup("td"));
     ns_js *_j = js_from_ctx(ctx);
