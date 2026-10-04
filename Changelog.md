@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* Blurred box shadows are drawn once and reused. Every frame blurred every
+  visible shadow again, three passes over a fresh surface each; the blurred
+  surfaces are now kept, keyed by size, corner radii, blur and colour, up to
+  32 MB.
 * Loading a frame no longer measures the whole JavaScript heap. The frame's
   `performance` object needs to know whether the parent has
   `performance.memory`, and reading it to find out walked every object of
