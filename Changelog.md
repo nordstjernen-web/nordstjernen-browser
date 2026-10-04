@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* Large blurred box shadows paint up to 250 times faster. A blurred rounded
+  rectangle is the same along its straight middle, so the blur now runs on a
+  copy with the middle cut short and the uniform row and column are
+  repeated back to full size. TodoMVC's 550 by 6000 pixel list shadow took
+  300 ms per paint and now takes about 1 ms. The pixels are unchanged.
 * Blurred box shadows are drawn once and reused. Every frame blurred every
   visible shadow again, three passes over a fresh surface each; the blurred
   surfaces are now kept, keyed by size, corner radii, blur and colour, up to

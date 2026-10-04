@@ -452,7 +452,8 @@ blurred_shadow_surface_new(const shadow_blur_key *k, int pad,
 }
 
 static cairo_surface_t *
-blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h)
+blurred_shadow_cached(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
+                      gboolean keep_large)
 {
     if (g_shadow_blur_cache) {
         cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
@@ -462,7 +463,8 @@ blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h
     if (!surf) return NULL;
     gsize bytes = (gsize)cairo_image_surface_get_stride(surf) *
                   (gsize)cairo_image_surface_get_height(surf);
-    if (bytes > NS_SHADOW_BLUR_ENTRY_BYTES) return surf;
+    if (bytes > NS_SHADOW_BLUR_ENTRY_BYTES && !keep_large) return surf;
+    if (bytes > NS_SHADOW_BLUR_CACHE_BYTES) return surf;
     if (!g_shadow_blur_cache)
         g_shadow_blur_cache = g_hash_table_new_full(
             shadow_blur_key_hash, shadow_blur_key_equal, g_free,
@@ -475,6 +477,127 @@ blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h
                         cairo_surface_reference(surf));
     g_shadow_blur_cache_bytes += bytes;
     return surf;
+}
+
+static int
+shadow_band_excess(double len, int pad, int radius, double start_r, double end_r)
+{
+    int first = (int)ceil(pad + start_r) + radius * 3 + 1;
+    int last = (int)floor(pad + len - end_r) - radius * 3 - 1;
+    int uniform = last - first;
+    return uniform > 1 ? uniform - 1 : 0;
+}
+
+static gboolean
+shadow_radii_fit(const shadow_blur_key *k)
+{
+    const corner_radii *c = &k->radii;
+    const double sums[4] = { c->tl + c->tr, c->trv + c->brv,
+                             c->br + c->bl, c->tlv + c->blv };
+    const double lens[4] = { k->sw, k->sh, k->sw, k->sh };
+    for (int i = 0; i < 4; i++)
+        if (sums[i] > 0 && lens[i] / sums[i] < 1.0) return FALSE;
+    return TRUE;
+}
+
+static double
+shadow_corner_w(double w, double h)
+{
+    return w > 0 && h > 0 ? w : 0;
+}
+
+static double
+shadow_corner_h(double w, double h)
+{
+    return w > 0 && h > 0 ? h : 0;
+}
+
+static gboolean
+shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
+             int *mid_x, int *mid_y)
+{
+    *dx = *dy = 0;
+    if (!(k->sw > 0) || !(k->sh > 0) || !shadow_radii_fit(k)) return FALSE;
+    const corner_radii *c = &k->radii;
+    double left_r = MAX(shadow_corner_w(c->tl, c->tlv),
+                        shadow_corner_w(c->bl, c->blv));
+    double right_r = MAX(shadow_corner_w(c->tr, c->trv),
+                         shadow_corner_w(c->br, c->brv));
+    double top_r = MAX(shadow_corner_h(c->tl, c->tlv),
+                       shadow_corner_h(c->tr, c->trv));
+    double bottom_r = MAX(shadow_corner_h(c->bl, c->blv),
+                          shadow_corner_h(c->br, c->brv));
+    *dx = shadow_band_excess(k->sw, pad, k->radius, left_r, right_r);
+    *dy = shadow_band_excess(k->sh, pad, k->radius, top_r, bottom_r);
+    *mid_x = (int)ceil(pad + left_r) + k->radius * 3 + 1;
+    *mid_y = (int)ceil(pad + top_r) + k->radius * 3 + 1;
+    return *dx > 0 || *dy > 0;
+}
+
+static cairo_surface_t *
+shadow_expand_bands(cairo_surface_t *small, int surf_w, int surf_h,
+                    int dx, int dy, int mid_x, int mid_y)
+{
+    cairo_surface_t *full =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
+    if (cairo_surface_status(full) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(full);
+        return NULL;
+    }
+    cairo_surface_flush(full);
+    const guchar *src = cairo_image_surface_get_data(small);
+    int src_stride = cairo_image_surface_get_stride(small);
+    guchar *dst = cairo_image_surface_get_data(full);
+    int dst_stride = cairo_image_surface_get_stride(full);
+    gsize head = (gsize)(mid_x + 1) * 4;
+    gsize tail = (gsize)(surf_w - mid_x - 1 - dx) * 4;
+    for (int y = 0; y < surf_h; y++) {
+        int sy = y <= mid_y ? y : (y <= mid_y + dy ? mid_y : y - dy);
+        guchar *row = dst + (gsize)y * dst_stride;
+        if (y > mid_y && y <= mid_y + dy) {
+            memcpy(row, dst + (gsize)mid_y * dst_stride, (gsize)surf_w * 4);
+            continue;
+        }
+        const guchar *srow = src + (gsize)sy * src_stride;
+        memcpy(row, srow, head);
+        const guchar *mid = srow + (gsize)mid_x * 4;
+        for (int x = 0; x < dx; x++) memcpy(row + head + (gsize)x * 4, mid, 4);
+        memcpy(row + head + (gsize)dx * 4, srow + head, tail);
+    }
+    cairo_surface_mark_dirty(full);
+    return full;
+}
+
+static cairo_surface_t *
+blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h)
+{
+    int dx, dy, mid_x, mid_y;
+    if (!shadow_bands(k, pad, &dx, &dy, &mid_x, &mid_y))
+        return blurred_shadow_cached(k, pad, surf_w, surf_h, FALSE);
+    if (g_shadow_blur_cache) {
+        cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
+        if (hit) return cairo_surface_reference(hit);
+    }
+    shadow_blur_key small_key = *k;
+    small_key.sw -= dx;
+    small_key.sh -= dy;
+    cairo_surface_t *small = blurred_shadow_cached(&small_key, pad, surf_w - dx,
+                                                   surf_h - dy, TRUE);
+    if (!small) return NULL;
+    cairo_surface_t *full = shadow_expand_bands(small, surf_w, surf_h,
+                                                dx, dy, mid_x, mid_y);
+    cairo_surface_destroy(small);
+    if (!full) return NULL;
+    gsize bytes = (gsize)cairo_image_surface_get_stride(full) * (gsize)surf_h;
+    if (bytes > NS_SHADOW_BLUR_ENTRY_BYTES) return full;
+    if (g_shadow_blur_cache_bytes + bytes > NS_SHADOW_BLUR_CACHE_BYTES) {
+        g_hash_table_remove_all(g_shadow_blur_cache);
+        g_shadow_blur_cache_bytes = 0;
+    }
+    g_hash_table_insert(g_shadow_blur_cache, g_memdup2(k, sizeof *k),
+                        cairo_surface_reference(full));
+    g_shadow_blur_cache_bytes += bytes;
+    return full;
 }
 
 static void
