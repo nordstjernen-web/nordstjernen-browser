@@ -35523,6 +35523,7 @@ ns_attr_state_attach(JSContext *ctx, JSValueConst entry, ns_js_attr *state,
                      ns_node *owner)
 {
     if (!state || !owner || state->owner == owner) return;
+    if (state->owner) ns_attr_state_detach(state);
     state->js = js_from_ctx(ctx);
     state->owner = owner;
     state->pinned = JS_DupValue(ctx, entry);
@@ -35557,11 +35558,12 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
     state->pinned = JS_UNDEFINED;
     JS_SetOpaque(entry, state);
     ns_attr_apply_proto(ctx, entry);
-    JS_DefinePropertyValueStr(ctx, entry, "name", JS_NewString(ctx, name),
+    JS_DefinePropertyValueStr(ctx, entry, "name", JS_NewString(ctx, state->name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, entry, "nodeName", JS_NewString(ctx, name),
+    JS_DefinePropertyValueStr(ctx, entry, "nodeName", JS_NewString(ctx, state->name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, entry, "localName", JS_NewString(ctx, local),
+    JS_DefinePropertyValueStr(ctx, entry, "localName",
+                              JS_NewString(ctx, state->local_name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     ns_attr_define_value_accessor(ctx, entry, "value");
     ns_attr_define_value_accessor(ctx, entry, "nodeValue");
@@ -35570,11 +35572,11 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
     JS_DefinePropertyValueStr(ctx, entry, "nodeType", JS_NewInt32(ctx, 2),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "namespaceURI",
-                              a && a->namespace_uri ? JS_NewString(ctx, a->namespace_uri)
-                                                    : JS_NULL,
+                              state->namespace_uri
+                                  ? JS_NewString(ctx, state->namespace_uri) : JS_NULL,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "prefix",
-                              a && a->prefix ? JS_NewString(ctx, a->prefix) : JS_NULL,
+                              state->prefix ? JS_NewString(ctx, state->prefix) : JS_NULL,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "specified", JS_TRUE,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
@@ -35583,7 +35585,7 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
         g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         JS_SetPropertyStr(ctx, entry, "baseURI",
             JS_NewString(ctx, base && *base ? base : "about:blank"));
-        const char *aval = a && a->value ? a->value : "";
+        const char *aval = state->value ? state->value : "";
         JSValue kids = JS_NewArray(ctx);
         if (*aval) {
             ns_node *tn = ns_node_new_text(g_strdup(aval));
