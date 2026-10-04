@@ -16510,13 +16510,13 @@ ns_history_navigate(JSContext *ctx, int delta)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
     ns_history_ensure_stack(js);
-    int n = (int)js->history_entries->len;
-    int target = js->history_pos + delta;
+    gint64 n = js->history_entries->len;
+    gint64 target = (gint64)js->history_pos + delta;
     if (target < 0 || target > n - 1 || target == js->history_pos)
         return JS_UNDEFINED;
 
-    js->history_pos = target;
-    ns_history_entry *e = g_ptr_array_index(js->history_entries, target);
+    js->history_pos = (int)target;
+    ns_history_entry *e = g_ptr_array_index(js->history_entries, (guint)target);
     if (e->url) {
         g_free(js->current_url);
         js->current_url = g_strdup(e->url);
@@ -16554,12 +16554,8 @@ ns_history_go(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
     (void)this_val;
-    int delta = 0;
-    if (argc >= 1) {
-        double d = 0;
-        JS_ToFloat64(ctx, &d, argv[0]);
-        delta = (int)d;
-    }
+    int32_t delta = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &delta, argv[0]);
     return ns_history_navigate(ctx, delta);
 }
 
