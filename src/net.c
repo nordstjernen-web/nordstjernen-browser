@@ -4806,7 +4806,15 @@ about_start_tagline(void)
 static gboolean
 about_request_from_chrome(const char *top_url)
 {
-    return !top_url || !*top_url || g_str_has_prefix(top_url, "about:");
+    if (!top_url || !*top_url) return TRUE;
+    if (!g_str_has_prefix(top_url, "about:")) return FALSE;
+    const char *page = top_url + strlen("about:");
+    gsize page_len = strcspn(page, "?#");
+    if (page_len == 5 && g_ascii_strncasecmp(page, "blank", 5) == 0)
+        return FALSE;
+    if (page_len == 6 && g_ascii_strncasecmp(page, "srcdoc", 6) == 0)
+        return FALSE;
+    return TRUE;
 }
 
 static gboolean
@@ -5105,9 +5113,8 @@ synthesize_view_source_response(const char *url, const char *top_url,
     if (!g_str_has_prefix(url, prefix)) return FALSE;
     const char *inner = url + sizeof prefix - 1;
     resp->final_url = g_strdup(url);
-    gboolean from_chrome = !top_url || !*top_url ||
-        g_str_has_prefix(top_url, prefix) ||
-        g_str_has_prefix(top_url, "about:");
+    gboolean from_chrome = about_request_from_chrome(top_url) ||
+        g_str_has_prefix(top_url, prefix);
     gboolean inner_allowed =
         g_str_has_prefix(inner, "http:") ||
         g_str_has_prefix(inner, "https:") ||
