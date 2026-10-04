@@ -1,0 +1,103 @@
+name: java-publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish nordstjernen-java for
+        required: true
+
+concurrency:
+  group: java-publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  publish:
+    name: Publish org.nordstjernen:nordstjernen-java to GitHub Packages
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install engine build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            ccache clang make cmake pkg-config meson ninja-build \
+            libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
+            libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev ca-certificates \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.8.0'
+
+      - name: Check the tag matches the Java version
+        run: |
+          POM_VERSION=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' java/pom.xml | head -1)
+          echo "tag=$TAG pom=$POM_VERSION"
+          [ "${TAG#v}" = "$POM_VERSION" ]
+
+      - name: Build native libraries (engine + JNI bridge)
+        run: CC="ccache clang" java/scripts/build-native.sh
+
+      - name: Build jar
+        working-directory: java
+        run: gradle build --no-daemon --stacktrace
+
+      - name: Smoke test (run example via the bundled jar)
+        run: |
+          set -o pipefail
+          JAR=$(ls java/build/libs/nordstjernen-java-*.jar \
+                | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
+          mkdir -p out
+          javac -cp "$JAR" -d out java/examples/Example.java
+          java -Djava.awt.headless=true -cp "$JAR:out" Example about:start | tee smoke.txt
+          grep -q Nordstjernen smoke.txt
+
+      - name: Publish to GitHub Packages
+        working-directory: java
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/github-packages.gradle" <<'EOF'
+          allprojects {
+              pluginManager.withPlugin('maven-publish') {
+                  extensions.configure(org.gradle.api.publish.PublishingExtension) { publishing ->
+                      publishing.repositories.maven {
+                          name = 'GitHubPackages'
+                          url = uri("https://maven.pkg.github.com/${System.getenv('GITHUB_REPOSITORY')}")
+                          credentials {
+                              username = System.getenv('GITHUB_ACTOR')
+                              password = System.getenv('GITHUB_TOKEN')
+                          }
+                      }
+                  }
+              }
+          }
+          EOF
+          gradle --no-daemon --stacktrace --init-script "$RUNNER_TEMP/github-packages.gradle" \
+            publishAllPublicationsToGitHubPackagesRepository
