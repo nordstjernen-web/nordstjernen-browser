@@ -1373,6 +1373,30 @@ ns_js_frame_scope_enter(ns_js *js, JSContext *realm, ns_node *frame,
     js->current_url = g_strdup(frame_url ? frame_url : "");
 }
 
+static ns_node *
+ns_js_frame_of_realm(ns_js *js, JSContext *realm)
+{
+    if (!js || !realm || !js->frame_contexts) return NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        if (value == realm) return key;
+    return NULL;
+}
+
+static const char *
+ns_js_realm_url(ns_js *js, JSContext *realm)
+{
+    if (!js || !realm) return NULL;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (realm == main_ctx) return ns_js_top_url(js);
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
+    const char *url = frame ? ns_element_get_attr(frame, "data-nd-frame-url")
+                            : NULL;
+    return url && *url ? url : NULL;
+}
+
 static void
 ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
 {
@@ -1389,17 +1413,7 @@ ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
         js->top_url_slot = NULL;
         return;
     }
-    if (!js->frame_contexts || g_hash_table_size(js->frame_contexts) == 0)
-        return;
-    ns_node *frame = NULL;
-    GHashTableIter it;
-    gpointer key, value;
-    g_hash_table_iter_init(&it, js->frame_contexts);
-    while (g_hash_table_iter_next(&it, &key, &value))
-        if (value == realm) {
-            frame = key;
-            break;
-        }
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
     if (!frame) return;
     ns_js_frame_scope_enter(js, realm, frame, scope);
 }
@@ -9916,37 +9930,11 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
 }
 
 static char *
-ns_js_fetch_base_from_this(JSContext *ctx, JSValueConst this_val)
+ns_js_fetch_base_url(JSContext *ctx)
 {
-    if (!JS_IsObject(this_val)) return NULL;
-    JSValue loc = JS_GetPropertyStr(ctx, this_val, "location");
-    if (JS_IsException(loc)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return NULL;
-    }
-    if (JS_IsUndefined(loc) || JS_IsNull(loc)) {
-        JS_FreeValue(ctx, loc);
-        return NULL;
-    }
-    JSValue href = JS_GetPropertyStr(ctx, loc, "href");
-    char *out = NULL;
-    if (!JS_IsException(href) && !JS_IsUndefined(href) && !JS_IsNull(href)) {
-        const char *s = JS_ToCString(ctx, href);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    } else if (JS_IsException(href)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, href);
-    if (!out) {
-        const char *s = JS_ToCString(ctx, loc);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, loc);
-    return out;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || ctx == js->ctx) return NULL;
+    return g_strdup(ns_js_realm_url(js, ctx));
 }
 
 static JSValue
@@ -10006,7 +9994,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_autofree char *method = NULL;
     g_autofree char *body = NULL;
     g_autofree char *content_type = NULL;
-    g_autofree char *base_url = ns_js_fetch_base_from_this(ctx, this_val);
+    g_autofree char *base_url = ns_js_fetch_base_url(ctx);
     gsize body_len = 0;
     GPtrArray *extras = g_ptr_array_new_with_free_func(g_free);
     gboolean init_has_headers = argc >= 2 && JS_IsObject(argv[1]) &&
@@ -14497,26 +14485,6 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
     return out;
 }
 
-static char *
-ns_window_url_of(JSContext *ctx, JSValueConst win)
-{
-    JSValue loc = JS_GetPropertyStr(ctx, win, "location");
-    char *out = NULL;
-    if (JS_IsObject(loc)) {
-        JSValue hv = JS_GetPropertyStr(ctx, loc, "href");
-        if (JS_IsString(hv)) {
-            const char *s = JS_ToCString(ctx, hv);
-            if (s) {
-                out = g_strdup(s);
-                JS_FreeCString(ctx, s);
-            }
-        }
-        JS_FreeValue(ctx, hv);
-    }
-    JS_FreeValue(ctx, loc);
-    return out;
-}
-
 static void
 ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
 {
@@ -14624,7 +14592,8 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     if (JS_IsFunction(ctx, deliver)) {
         ns_budget_guard bg = {0};
         ns_js_budget_push(js, &bg);
-        g_autofree char *realm_url = ns_window_url_of(ctx, actual_target);
+        g_autofree char *realm_url =
+            g_strdup(ns_js_realm_url(js, JS_GetFunctionRealm(ctx, deliver)));
         ns_frame_url fu;
         gboolean swap_url = js && realm_url && *realm_url;
         if (swap_url) ns_frame_url_enter(js, &fu, realm_url);
