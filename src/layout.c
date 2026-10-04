@@ -6048,6 +6048,7 @@ static void
 inline_insert_line_height(NsPangoAttrList *list, double px, guint start,
                           guint end)
 {
+    px = CLAMP(px, 0.0, (double)G_MAXINT16);
     NsPangoAttribute *a = ns_pango_attr_line_height_new_absolute(
         (int)lround(px * NS_PANGO_SCALE));
     a->start_index = start;
@@ -7619,7 +7620,7 @@ double_cmp(gconstpointer a, gconstpointer b)
 
 static void
 floats_inherit(GArray *floats, const inherited_floats *from, double inner_x,
-               double cw)
+               double cw, double from_y)
 {
     const GArray *src = from->floats;
     if (!src || src->len == 0) return;
@@ -7627,6 +7628,7 @@ floats_inherit(GArray *floats, const inherited_floats *from, double inner_x,
                                       src->len * 2);
     for (guint i = 0; i < src->len; i++) {
         const float_ref *f = &g_array_index(src, float_ref, i);
+        if (f->bottom <= from_y) continue;
         g_array_append_val(edges, f->top);
         g_array_append_val(edges, f->bottom);
     }
@@ -7634,7 +7636,7 @@ floats_inherit(GArray *floats, const inherited_floats *from, double inner_x,
     for (guint i = 0; i + 1 < edges->len; i++) {
         double top = g_array_index(edges, double, i);
         double bottom = g_array_index(edges, double, i + 1);
-        if (bottom <= top) continue;
+        if (bottom <= top || bottom <= from_y) continue;
         double l = 0, r = 0;
         floats_offsets_at(src, top, &l, &r);
         double left_in = from->inner_x + l - inner_x;
@@ -8470,7 +8472,7 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
             box, box->style ? box->style : parent_style, TRUE);
     if (box->style && style_is_grid_container(box->style) &&
         grid_flows_by_column(box->style)) {
-        double gw = grid_column_flow_width(box, parent_style, TRUE);
+        double gw = grid_column_flow_width(box, box->style, TRUE);
         if (gw >= 0) return gw;
     }
     if (box->style && style_is_grid_container(box->style)) {
@@ -13196,6 +13198,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double cursor_y = inner_y;
     double prev_margin_bottom = 0;
     double top_through = 0;
+    double float_shift = 0;
     double outer_margin = g_margin_above.box == box ? g_margin_above.collapsed
                                                     : box->margin.top;
     gboolean collapse_top_with_parent =
@@ -13263,7 +13266,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
 
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
     if (g_inherited_floats.box == box)
-        floats_inherit(floats, &g_inherited_floats, inner_x, cw);
+        floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
     double inline_line_top = -1;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
@@ -13400,7 +13403,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             if (collapses_through_top) {
                 c_margin_above = collapsed_margin(outer_margin, gap);
                 gap = c_margin_above - outer_margin;
-                floats_shift_placed(floats, gap);
+                floats_shift_placed(floats, gap - float_shift);
+                float_shift = gap;
                 top_through = gap;
             }
             cursor_y += gap;
@@ -13410,7 +13414,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             double left_off = 0, right_off = 0;
             gboolean lines_wrap_floats = c->kind == NS_BOX_BLOCK &&
-                                         floats->len > 0 &&
+                                         floats_max_bottom(floats) > cursor_y &&
                                          !box_establishes_bfc(c);
             if (!lines_wrap_floats) {
                 floats_offsets_at(floats, cursor_y, &left_off, &right_off);

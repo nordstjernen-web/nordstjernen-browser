@@ -31,6 +31,15 @@ Changelog:
     viewport resizes; `getComputedStyle()` on a `display: none`
     `::before`/`::after` returns its real values.
   - A crafted WOFF2 file can no longer decode to a font of over 64 MB.
+  - A float in the first paragraph of a block whose top margin collapses
+    through (common in blog posts: `<p><img style="float:left"></p>`) no
+    longer drops below the text beside it, and blocks below every float
+    no longer rebuild the float bands (pages with many floats laid out up
+    to seven times slower).
+  - `<hr>` beside a float stops at the float's edge again (UA
+    `overflow: hidden`, as in other browsers); column-flow grids measure
+    their min-content with their own font; very large `line-height`
+    values no longer overflow to a zero-height paragraph.
   - Each tab in single-process mode no longer commits its whole
     framebuffer up front, and the shell rejects frames larger than it
     asked for.
