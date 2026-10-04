@@ -6186,8 +6186,11 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
                 else i++;
             }
         }
-        g_free(cur_top);
-        cur_top = NULL;
+        if (ns_fetch_is_navigation(cur_top, extra_headers) &&
+            g_ascii_strcasecmp(cur_method, "GET") == 0) {
+            g_free(cur_top);
+            cur_top = NULL;
+        }
         g_free(cur_url);
         cur_url = next;
         hops++;
