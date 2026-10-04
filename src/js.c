@@ -38743,8 +38743,9 @@ ns_js_compute_validity(const ns_node *n,
         owned_value = opt ? ns_option_value_dup(opt) : g_strdup("");
         value = owned_value ? owned_value : "";
     } else {
-        value = ns_input_used_value(n);
-        if (!value) value = "";
+        const char *used = ns_input_used_value(n);
+        owned_value = g_strdup(used ? used : "");
+        value = owned_value;
     }
     gboolean needs_mutable = is_textarea ||
         (is_input && !ns_node_is_radio(n) &&
@@ -38775,7 +38776,7 @@ ns_js_compute_validity(const ns_node *n,
                  !ns_input_value_to_number(type, value, NULL))
             *type_mismatch = TRUE;
     }
-    const char *pat = ns_element_get_attr(n, "pattern");
+    g_autofree char *pat = g_strdup(ns_element_get_attr(n, "pattern"));
     if (is_input && ns_input_type_supports_text_constraints(type) && pat) {
         gboolean split_email = type &&
             g_ascii_strcasecmp(type, "email") == 0 &&
