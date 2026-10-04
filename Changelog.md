@@ -13,6 +13,9 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* `::placeholder` honours `opacity` and `visibility`, and keeps the default
+  grey (#757575) when a rule changes other properties. GitHub's sign-up
+  field drew its hidden placeholder in black on top of its label.
 * Reading an element's inline style from script is much faster:
   `style[i]`, `style.length`, `getPropertyValue()` and
   `getPropertyPriority()` no longer re-serialize and re-parse the whole

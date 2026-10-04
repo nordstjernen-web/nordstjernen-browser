@@ -2147,6 +2147,14 @@ emit_control_text_style(GArray *attrs, const ns_style *s,
         }
     }
     if (disabled) { cr = cg = cb = 0x82; ca = 255; have_color = TRUE; }
+    if (phs) {
+        const ns_css_value *ov = phs->values[NS_CSS_OPACITY];
+        if (ov && ov->kind == NS_CSS_V_LENGTH)
+            ca = (guint8)lround(ca * CLAMP(ov->u.length.v, 0.0, 1.0));
+        if (keyword_is(phs->values[NS_CSS_VISIBILITY], "hidden") ||
+            keyword_is(phs->values[NS_CSS_VISIBILITY], "collapse"))
+            ca = 0;
+    }
     if (have_color) {
         ns_inline_attr a = {
             .kind = NS_INLINE_COLOR,
