@@ -107,6 +107,10 @@ Changelog:
 * The Nordstjernen "N" logo is back at the right end of the toolbar; clicking
   it opens nordstjernen.org.
 
+* `flex: unset`, `flex: inherit` and the other CSS-wide keywords reset all
+  three flex longhands. `flex-basis` kept its old value, so GitHub's
+  security section drew its screenshot as an 18px wide sliver.
+
 1.0.28:
 ======
 * Relayouts of pages with container queries are about 17% faster when the

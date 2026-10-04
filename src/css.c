@@ -16967,6 +16967,24 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "flex") == 0) {
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            if (wide) {
+                static const ns_css_prop flex_longhands[] = {
+                    NS_CSS_FLEX_GROW, NS_CSS_FLEX_SHRINK, NS_CSS_FLEX_BASIS,
+                };
+                for (gsize i = 0; i < G_N_ELEMENTS(flex_longhands); i++) {
+                    ns_css_decl d = {
+                        .prop = flex_longhands[i],
+                        .value = i == 0 ? wide : ns_css_value_dup(wide),
+                        .important = important,
+                    };
+                    g_array_append_val(decls_out, d);
+                }
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
             double grow = 0, shrink = 1;
