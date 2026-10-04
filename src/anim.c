@@ -1677,7 +1677,7 @@ run_info(const ns_anim_state *s, const ns_anim_run *r, gint64 now_us,
     out->node = s->node;
     out->prop = NS_ANIM_KEYFRAME_PROP;
     out->run = r->index;
-    out->name = r->is_script ? NULL : r->name;
+    out->name = r->is_script ? NULL : g_intern_string(r->name);
     out->duration_ms = r->duration_ms;
     out->delay_ms = r->delay_ms;
     out->iterations = r->iterations;
@@ -1712,6 +1712,7 @@ ns_anim_visit(ns_anim *a, const ns_node *node, ns_anim_visit_cb cb,
 {
     if (!a || !cb) return;
     gint64 now = anim_now(a);
+    GArray *infos = g_array_new(FALSE, FALSE, sizeof(ns_anim_info));
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, a->states);
@@ -1726,7 +1727,7 @@ ns_anim_visit(ns_anim *a, const ns_node *node, ns_anim_visit_cb cb,
                 ns_anim_run *r = runs->pdata[i];
                 if (!run_in_effect(r)) continue;
                 run_info(s, r, now, &info);
-                cb(&info, user);
+                g_array_append_val(infos, info);
             }
         }
         if (s->chans)
@@ -1734,9 +1735,12 @@ ns_anim_visit(ns_anim *a, const ns_node *node, ns_anim_visit_cb cb,
                 ns_anim_chan *ch = s->chans->pdata[i];
                 if (!ch->active) continue;
                 chan_info(s, ch, now, &info);
-                cb(&info, user);
+                g_array_append_val(infos, info);
             }
     }
+    for (guint i = 0; i < infos->len; i++)
+        cb(&g_array_index(infos, ns_anim_info, i), user);
+    g_array_free(infos, TRUE);
 }
 
 static ns_anim_run *
@@ -1833,6 +1837,20 @@ ns_anim_script_start(ns_anim *a, const ns_node *node,
     return TRUE;
 }
 
+static GArray *
+anim_decls_ref(const GArray *decls)
+{
+    if (!decls) return NULL;
+    GArray *out = g_array_sized_new(FALSE, FALSE, sizeof(ns_css_decl),
+                                    decls->len);
+    for (guint i = 0; i < decls->len; i++) {
+        ns_css_decl d = g_array_index(decls, ns_css_decl, i);
+        d.value = ns_css_value_dup(d.value);
+        g_array_append_val(out, d);
+    }
+    return out;
+}
+
 void
 ns_anim_keyframes_visit(ns_anim *a, const ns_node *node, int prop,
                         ns_anim_keyframe_cb cb, gpointer user)
@@ -1842,14 +1860,23 @@ ns_anim_keyframes_visit(ns_anim *a, const ns_node *node, int prop,
     if (!s) return;
     ns_anim_run *r = run_for(s, prop);
     if (!r || !r->name || !r->stops) return;
+    GArray *stops = g_array_sized_new(FALSE, TRUE, sizeof(ns_anim_kf_stop),
+                                      r->stops->len);
+    GPtrArray *easings = g_ptr_array_new_with_free_func(g_free);
     for (guint i = 0; i < r->stops->len; i++) {
         const ns_anim_kf_stop *st = &g_array_index(r->stops, ns_anim_kf_stop, i);
         ns_css_timing tm;
         if (!stop_timing(st, &tm)) tm = r->timing;
-        char *easing = ns_css_timing_serialize(&tm);
-        cb(st->pct / 100.0, easing, st->decls, user);
-        g_free(easing);
+        ns_anim_kf_stop copy = { st->pct, anim_decls_ref(st->decls) };
+        g_array_append_val(stops, copy);
+        g_ptr_array_add(easings, ns_css_timing_serialize(&tm));
     }
+    for (guint i = 0; i < stops->len; i++) {
+        const ns_anim_kf_stop *st = &g_array_index(stops, ns_anim_kf_stop, i);
+        cb(st->pct / 100.0, g_ptr_array_index(easings, i), st->decls, user);
+    }
+    g_ptr_array_free(easings, TRUE);
+    anim_stops_free(stops);
 }
 
 gboolean
