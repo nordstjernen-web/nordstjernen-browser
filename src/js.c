@@ -65444,6 +65444,26 @@ ns_js_lifecycle_has_blockers(ns_js *js)
         (js->load_delay_cb && js->load_delay_cb(js->load_delay_user_data));
 }
 
+static void
+ns_js_run_content_script(ns_js *js, const char *src)
+{
+    static const char *const natives[] = {
+        "__nd_ext_manifest", "__nd_ext_base", "__nd_ext_sread",
+        "__nd_ext_swrite", "__nd_ext_platform", "__nd_ext_uilang",
+    };
+    char *result = ns_js_eval_source(js, src, "content-script");
+    g_free(result);
+    if (!js || !js->ctx) return;
+    JSValue global = JS_GetGlobalObject(js->ctx);
+    for (gsize i = 0; i < G_N_ELEMENTS(natives); i++) {
+        JSAtom atom = JS_NewAtom(js->ctx, natives[i]);
+        if (JS_DeleteProperty(js->ctx, global, atom, 0) < 0)
+            JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+        JS_FreeAtom(js->ctx, atom);
+    }
+    JS_FreeValue(js->ctx, global);
+}
+
 static gboolean
 ns_js_lifecycle_tick(gpointer data)
 {
@@ -65528,11 +65548,8 @@ ns_js_lifecycle_tick(gpointer data)
         ns_ext_content_scripts_for_url(js->ctx, global,
                                        js->lifecycle_origin, FALSE);
     JS_FreeValue(js->ctx, global);
-    if (content_script) {
-        char *result = ns_js_eval_source(js, content_script,
-                                         "content-script");
-        g_free(result);
-    }
+    if (content_script)
+        ns_js_run_content_script(js, content_script);
     if (ns_js_profile_enabled())
         g_printerr("[profile] js lifecycle total=%.1fms\n",
                    (g_get_monotonic_time() - js->lifecycle_start_us) / 1000.0);
@@ -65606,7 +65623,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
                                            base_url && *base_url ? base_url : NULL,
                                            TRUE);
         JS_FreeValue(js->ctx, global);
-        if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
+        if (cs) ns_js_run_content_script(js, cs);
     }
     ns_js_schedule_static_iframes(js, doc);
     ns_js_track_document_images(js, doc, 0);
