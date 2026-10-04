@@ -20,6 +20,7 @@
 #endif
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
+#define NS_PROC_HELPER_LINE_MAX 4096
 
 #ifndef G_OS_WIN32
 #include <sys/mman.h>
@@ -843,8 +844,15 @@ pv_helper_open_url(const char *cmd)
 }
 
 static gboolean
+pv_helper_line_ok(const char *cmd)
+{
+    return strlen(cmd) < NS_PROC_HELPER_LINE_MAX - 1 && !strpbrk(cmd, "\r\n");
+}
+
+static gboolean
 pv_audio_command_allowed(NsProcView *v, const char *cmd)
 {
+    if (!pv_helper_line_ok(cmd)) return FALSE;
     const char *url = pv_helper_open_url(cmd);
     return !url || pv_audio_url_allowed(v, url);
 }
@@ -852,6 +860,7 @@ pv_audio_command_allowed(NsProcView *v, const char *cmd)
 static gboolean
 pv_video_command_allowed(const char *cmd)
 {
+    if (!pv_helper_line_ok(cmd)) return FALSE;
     const char *url = pv_helper_open_url(cmd);
     return !url || pv_stream_url_allowed(url, "msvideo");
 }
