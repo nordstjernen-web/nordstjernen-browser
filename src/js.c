@@ -63890,6 +63890,45 @@ ns_js_purge_subtree_pending_iframes(ns_js *js, ns_node *root)
     }
 }
 
+static gboolean
+ns_js_node_in_tree(const ns_node *n, const ns_node *root)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p == root) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_js_purge_subtree_script_refs(ns_js *js, ns_node *root)
+{
+    if (!js || !root) return;
+    GPtrArray *queues[] = {
+        js->deferred_script_roots,
+        js->async_script_roots,
+    };
+    for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
+        if (!queues[q]) continue;
+        guint i = 0;
+        while (i < queues[q]->len) {
+            if (ns_js_node_in_tree(g_ptr_array_index(queues[q], i), root))
+                g_ptr_array_remove_index(queues[q], i);
+            else
+                i++;
+        }
+    }
+    if (js->lifecycle_tasks) {
+        guint i = 0;
+        while (i < js->lifecycle_tasks->len) {
+            ns_script_task *task =
+                &g_array_index(js->lifecycle_tasks, ns_script_task, i);
+            if (ns_js_node_in_tree(task->node, root))
+                g_array_remove_index(js->lifecycle_tasks, i);
+            else
+                i++;
+        }
+    }
+}
+
 static void
 ns_js_sweep_orphans(ns_js *js)
 {
@@ -63915,6 +63954,7 @@ ns_js_sweep_orphans(ns_js *js)
         g_hash_table_remove(js->orphan_nodes, r);
         ns_js_purge_subtree_rafs(js, r);
         ns_js_purge_subtree_pending_iframes(js, r);
+        ns_js_purge_subtree_script_refs(js, r);
         ns_node_free(r);
     }
     g_ptr_array_free(to_free, TRUE);
