@@ -988,7 +988,7 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeContextMenu(JNIEnv *env,
     if (!page || !page->renderer)
         return JNI_FALSE;
     int prevented = 0;
-    ns_rproc_http_contextmenu(page->renderer, x, y, &prevented);
+    ns_rproc_http_contextmenu(page->renderer, x, y, &prevented, NULL);
     return prevented ? JNI_TRUE : JNI_FALSE;
 }
 

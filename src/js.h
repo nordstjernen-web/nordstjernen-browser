@@ -221,6 +221,13 @@ gboolean ns_js_dispatch_key_event_full(ns_js *js, const ns_node *target,
                                        gboolean shift, gboolean ctrl,
                                        gboolean alt,   gboolean meta,
                                        gboolean *default_prevented);
+gboolean ns_js_dispatch_input_event(ns_js *js, const ns_node *target,
+                                    const char *type, const char *input_type,
+                                    const char *data,
+                                    gboolean *default_prevented);
+gboolean ns_js_dispatch_clipboard_event(ns_js *js, const ns_node *target,
+                                        const char *type, const char *text,
+                                        gboolean *default_prevented);
 
 gboolean ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target,
                                     const char *type,

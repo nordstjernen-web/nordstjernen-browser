@@ -2228,6 +2228,80 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     return NULL;
 }
 
+static gsize
+browser_utf8_boundary(const char *s, gsize off)
+{
+    gsize len = s ? strlen(s) : 0;
+    if (off >= len)
+        return len;
+    while (off > 0 && (((unsigned char)s[off] & 0xc0) == 0x80))
+        off--;
+    return off;
+}
+
+static ns_node *
+browser_focused_field(ns_browser *b)
+{
+    const ns_node *f = b->js ? ns_js_focused_node(b->js) : NULL;
+    return ns_node_is_editable(f) ? (ns_node *)f : NULL;
+}
+
+static gboolean
+browser_field_writable(const ns_node *field)
+{
+    if (!ns_node_is_editable(field)) return FALSE;
+    if (ns_node_is_contenteditable_host(field)) return TRUE;
+    return !ns_element_get_attr(field, "readonly") &&
+           !ns_element_get_attr(field, "disabled");
+}
+
+static gboolean
+browser_field_copyable(const ns_node *field)
+{
+    if (!ns_node_is_element_named(field, "input")) return TRUE;
+    const char *type = ns_element_get_attr(field, "type");
+    return !type || g_ascii_strcasecmp(type, "password") != 0;
+}
+
+static gboolean
+browser_field_selection(ns_browser *b, const ns_node *field, gsize *lo,
+                        gsize *hi)
+{
+    const char *cur = ns_node_editable_value(field);
+    gsize caret = browser_utf8_boundary(cur, b->caret_byte);
+    gsize anchor = browser_utf8_boundary(cur, b->sel_anchor_byte);
+    *lo = MIN(caret, anchor);
+    *hi = MAX(caret, anchor);
+    return *lo < *hi;
+}
+
+static char *
+browser_field_selected_text(ns_browser *b, const ns_node *field)
+{
+    gsize lo, hi;
+    if (!browser_field_selection(b, field, &lo, &hi) ||
+        !browser_field_copyable(field))
+        return NULL;
+    return g_strndup(ns_node_editable_value(field) + lo, hi - lo);
+}
+
+static int
+browser_field_edit_state(ns_browser *b, const ns_node *field)
+{
+    gsize lo, hi;
+    int state = NS_BROWSER_EDIT_FIELD;
+    if (browser_field_writable(field))
+        state |= NS_BROWSER_EDIT_WRITABLE;
+    if (browser_field_selection(b, field, &lo, &hi) &&
+        browser_field_copyable(field))
+        state |= NS_BROWSER_EDIT_SELECTION;
+    return state;
+}
+
+static void browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
+                                  gsize del_end, const char *insert,
+                                  const char *input_type);
+
 static void
 browser_sync_js_selection(ns_browser *browser)
 {
@@ -2246,10 +2320,44 @@ browser_sync_js_selection(ns_browser *browser)
     g_free(text);
 }
 
+static void
+browser_field_select_all(ns_browser *b, const ns_node *field)
+{
+    b->sel_anchor_byte = 0;
+    b->caret_byte = strlen(ns_node_editable_value(field));
+    browser_relayout(b);
+    b->dirty = FALSE;
+}
+
+static char *
+browser_field_cut(ns_browser *b, ns_node *field)
+{
+    gsize lo, hi;
+    char *text = browser_field_writable(field)
+               ? browser_field_selected_text(b, field) : NULL;
+    if (!text) return NULL;
+    browser_field_selection(b, field, &lo, &hi);
+    browser_input_replace(b, field, lo, hi, NULL, "deleteByCut");
+    browser_relayout(b);
+    b->dirty = FALSE;
+    return text;
+}
+
+static char *
+browser_copy_text(ns_browser *b)
+{
+    ns_node *field = browser_focused_field(b);
+    gsize lo, hi;
+    if (field && browser_field_selection(b, field, &lo, &hi))
+        return browser_field_selected_text(b, field);
+    return ns_selection_collect_text(b->layout, &b->selection);
+}
+
 char *
 ns_browser_select(ns_browser *browser, int kind, int x, int y)
 {
     if (!browser || !browser->layout) return NULL;
+    ns_node *field = browser_focused_field(browser);
     switch (kind) {
     case 0: ns_selection_anchor_at(&browser->selection, browser->layout,
                                    (double)x, (double)y); break;
@@ -2257,10 +2365,14 @@ ns_browser_select(ns_browser *browser, int kind, int x, int y)
                                    (double)x, (double)y);
             browser->selection_dragged = TRUE; break;
     case 2: ns_selection_clear(&browser->selection); break;
-    case 3: ns_selection_select_all(&browser->selection, browser->layout);
+    case 3: if (field) {
+                browser_field_select_all(browser, field);
+                return NULL;
+            }
+            ns_selection_select_all(&browser->selection, browser->layout);
             break;
-    case 4: return ns_selection_collect_text(browser->layout,
-                                             &browser->selection);
+    case 4: return browser_copy_text(browser);
+    case 7: return field ? browser_field_cut(browser, field) : NULL;
     case 5: ns_selection_select_word_at(&browser->selection, browser->layout,
                                         (double)x, (double)y);
             browser->selection_dragged = TRUE; break;
@@ -2560,9 +2672,31 @@ ns_browser_eval(ns_browser *browser, const char *src)
     return res;
 }
 
-int
-ns_browser_contextmenu(ns_browser *browser, int x, int y)
+static int
+browser_context_field(ns_browser *browser, int x, int y)
 {
+    if (!browser->layout) return 0;
+    const ns_node *form = ns_box_hit_form_dom(browser->layout, (double)x,
+                                              (double)y);
+    const ns_node *field = ns_node_is_editable(form) ? form : NULL;
+    for (const ns_node *n = browser_hit_node(browser, x, y); n && !field;
+         n = n->parent)
+        if (ns_node_is_contenteditable_host(n)) field = n;
+    if (!field) return 0;
+    if (ns_js_focused_node(browser->js) != field) {
+        ns_js_set_focus(browser->js, field);
+        browser->dirty = TRUE;
+        if (ns_js_focused_node(browser->js) != field) return 0;
+        browser->caret_byte = strlen(ns_node_editable_value(field));
+        browser->sel_anchor_byte = browser->caret_byte;
+    }
+    return browser_field_edit_state(browser, field);
+}
+
+int
+ns_browser_contextmenu_full(ns_browser *browser, int x, int y, int *out_edit)
+{
+    if (out_edit) *out_edit = 0;
     if (!browser || !browser->layout || !browser->js) return 0;
     const ns_node *node = browser_hit_node(browser, x, y);
     if (!node) return 0;
@@ -2574,13 +2708,26 @@ ns_browser_contextmenu(ns_browser *browser, int x, int y)
                                2, 0, FALSE, FALSE, FALSE, FALSE, NULL,
                                &prevented);
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    if (browser->dirty) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+    }
+    int edit = prevented ? 0 : browser_context_field(browser, x, y);
+    if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     if (browser->dirty) {
         browser_relayout(browser);
         browser->dirty = FALSE;
     }
+    if (out_edit) *out_edit = edit;
     return prevented ? 1 : 0;
+}
+
+int
+ns_browser_contextmenu(ns_browser *browser, int x, int y)
+{
+    return ns_browser_contextmenu_full(browser, x, y, NULL);
 }
 
 char *
@@ -2946,9 +3093,6 @@ ns_is_dropdown_select(const ns_node *n)
     return TRUE;
 }
 
-static void browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
-                                  gsize del_end, const char *insert);
-
 static gboolean
 browser_datalist_click(ns_browser *browser, const ns_node *node)
 {
@@ -2965,7 +3109,7 @@ browser_datalist_click(ns_browser *browser, const ns_node *node)
     char *val = (ov && *ov) ? g_strdup(ov) : ns_option_label_dup(option);
     const char *cur = ns_node_editable_value(inp);
     browser_input_replace(browser, inp, 0, cur ? strlen(cur) : 0,
-                          val ? val : "");
+                          val ? val : "", "insertReplacementText");
     gboolean p = FALSE;
     ns_js_dispatch_event(browser->js, inp, "change", &p);
     ns_js_consume_mutated(browser->js);
@@ -3171,7 +3315,8 @@ ns_browser_click(ns_browser *browser, int x, int y, int mods)
 
 static void
 browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
-                      gsize del_end, const char *insert)
+                      gsize del_end, const char *insert,
+                      const char *input_type)
 {
     const char *cur = ns_node_editable_value(node);
     if (!cur) return;
@@ -3186,9 +3331,12 @@ browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
     if (ins_len) g_string_append_len(s, insert, (gssize)ins_len);
     g_string_append_len(s, cur + del_end, (gssize)(cur_len - del_end));
 
+    const char *data = strcmp(input_type, "insertLineBreak") == 0 ? NULL
+                                                                   : insert;
     if (b->js) {
         gboolean prevented = FALSE;
-        ns_js_dispatch_event(b->js, node, "beforeinput", &prevented);
+        ns_js_dispatch_input_event(b->js, node, "beforeinput", input_type,
+                                   data, &prevented);
         if (prevented || ns_js_focused_node(b->js) != node) {
             g_string_free(s, TRUE);
             return;
@@ -3199,7 +3347,8 @@ browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
     b->sel_anchor_byte = b->caret_byte;
     g_string_free(s, TRUE);
     if (b->js) {
-        ns_js_dispatch_event(b->js, node, "input", NULL);
+        ns_js_dispatch_input_event(b->js, node, "input", input_type, data,
+                                   NULL);
         (void)ns_js_consume_mutated(b->js);
     }
 }
@@ -3231,20 +3380,24 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
         return FALSE;
     }
     if (strcmp(key, "Backspace") == 0) {
-        if (has_sel) browser_input_replace(b, node, sel_lo, sel_hi, NULL);
+        if (has_sel)
+            browser_input_replace(b, node, sel_lo, sel_hi, NULL,
+                                  "deleteContentBackward");
         else if (b->caret_byte > 0) {
             const char *prev = g_utf8_prev_char(cur + b->caret_byte);
             browser_input_replace(b, node, (gsize)(prev - cur), b->caret_byte,
-                                  NULL);
+                                  NULL, "deleteContentBackward");
         }
         return TRUE;
     }
     if (strcmp(key, "Delete") == 0) {
-        if (has_sel) browser_input_replace(b, node, sel_lo, sel_hi, NULL);
+        if (has_sel)
+            browser_input_replace(b, node, sel_lo, sel_hi, NULL,
+                                  "deleteContentForward");
         else if (b->caret_byte < cur_len) {
             const char *nxt = g_utf8_next_char(cur + b->caret_byte);
             browser_input_replace(b, node, b->caret_byte, (gsize)(nxt - cur),
-                                  NULL);
+                                  NULL, "deleteContentForward");
         }
         return TRUE;
     }
@@ -3274,7 +3427,8 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
     }
     if (strcmp(key, "Enter") == 0) {
         if (multiline) {
-            browser_input_replace(b, node, sel_lo, sel_hi, "\n");
+            browser_input_replace(b, node, sel_lo, sel_hi, "\n",
+                                  "insertLineBreak");
             return TRUE;
         }
         browser_submit_form(b, node);
@@ -3282,7 +3436,7 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
     }
     if (g_utf8_strlen(key, -1) == 1 &&
         !g_unichar_iscntrl(g_utf8_get_char(key))) {
-        browser_input_replace(b, node, sel_lo, sel_hi, key);
+        browser_input_replace(b, node, sel_lo, sel_hi, key, "insertText");
         return TRUE;
     }
     return FALSE;
@@ -3364,6 +3518,63 @@ browser_select_key(ns_browser *browser, ns_node *select, const char *key,
     return FALSE;
 }
 
+static char *
+browser_paste_text_for(const ns_node *field, const char *text, gsize lo,
+                       gsize hi)
+{
+    gboolean multiline = ns_node_is_element_named(field, "textarea") ||
+                         ns_node_is_contenteditable_host(field);
+    gsize len = strlen(text);
+    if (!multiline)
+        while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r'))
+            len--;
+    GString *out = g_string_sized_new(len);
+    for (gsize i = 0; i < len; i++) {
+        char c = text[i];
+        if (c == '\r') {
+            if (i + 1 < len && text[i + 1] == '\n') i++;
+            c = '\n';
+        }
+        g_string_append_c(out, c == '\n' && !multiline ? ' ' : c);
+    }
+    const char *maxlength = ns_node_is_contenteditable_host(field)
+                          ? NULL : ns_element_get_attr(field, "maxlength");
+    char *end = NULL;
+    long max = maxlength ? strtol(maxlength, &end, 10) : -1;
+    if (maxlength && end != maxlength && max >= 0) {
+        const char *cur = ns_node_editable_value(field);
+        glong kept = g_utf8_strlen(cur, (gssize)lo) +
+                     g_utf8_strlen(cur + hi, -1);
+        glong room = max > kept ? max - kept : 0;
+        if (g_utf8_strlen(out->str, -1) > room)
+            g_string_truncate(out, (gsize)(g_utf8_offset_to_pointer(out->str,
+                                                                    room) -
+                                           out->str));
+    }
+    return g_string_free(out, FALSE);
+}
+
+static void
+browser_paste(ns_browser *browser, const ns_node *target, const char *text)
+{
+    gboolean prevented = FALSE;
+    ns_js_dispatch_clipboard_event(browser->js, target, "paste", text,
+                                   &prevented);
+    if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    ns_node *field = browser_focused_field(browser);
+    if (prevented || !browser_field_writable(field)) return;
+    gsize lo, hi;
+    browser_field_selection(browser, field, &lo, &hi);
+    char *insert = browser_paste_text_for(field, text, lo, hi);
+    if (*insert) {
+        browser_input_replace(browser, field, lo, hi, insert,
+                              "insertFromPaste");
+        browser->datalist_suppressed = FALSE;
+        browser->dirty = TRUE;
+    }
+    g_free(insert);
+}
+
 char *
 ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                     const char *code, int keycode, int mods,
@@ -3394,10 +3605,14 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                        ? browser->sel_anchor_byte : browser->caret_byte;
             gsize hi = browser->sel_anchor_byte < browser->caret_byte
                        ? browser->caret_byte : browser->sel_anchor_byte;
-            browser_input_replace(browser, (ns_node *)f, lo, hi, key);
+            browser_input_replace(browser, (ns_node *)f, lo, hi, key,
+                                  "insertText");
             browser->datalist_suppressed = FALSE;
             browser->dirty = TRUE;
         }
+    } else if (kind == 4) {
+        if (key && *key && g_utf8_validate(key, -1, NULL))
+            browser_paste(browser, target, key);
     } else {
         gboolean prevented = FALSE;
         ns_js_dispatch_key_event_full(browser->js, target,
@@ -3544,17 +3759,6 @@ int
 ns_browser_caret_blinking(ns_browser *browser)
 {
     return browser && browser->caret_blink_active ? 1 : 0;
-}
-
-static gsize
-browser_utf8_boundary(const char *s, gsize off)
-{
-    gsize len = s ? strlen(s) : 0;
-    if (off >= len)
-        return len;
-    while (off > 0 && (((unsigned char)s[off] & 0xc0) == 0x80))
-        off--;
-    return off;
 }
 
 char *

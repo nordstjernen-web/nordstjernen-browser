@@ -410,21 +410,28 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             double x = 0, y = 0;
             if (sscanf(a + 7, "%d %lf , %lf", &kind, &x, &y) != 3) continue;
             char *text = ns_rproc_http_select(r, kind, (int)x, (int)y);
-            if (kind == 4)
+            if (kind == 4 || kind == 7)
                 fprintf(stdout, "act-select: %s\n", text ? text : "");
             g_free(text);
         } else if (g_str_has_prefix(a, "rightclick ")) {
             double x = 0, y = 0;
             if (sscanf(a + 11, "%lf , %lf", &x, &y) != 2) continue;
-            int prevented = 0;
-            ns_rproc_http_contextmenu(r, (int)x, (int)y, &prevented);
-            fprintf(stderr, "[headless] rightclick %g,%g prevented=%d\n",
-                    x, y, prevented);
+            int prevented = 0, edit = 0;
+            ns_rproc_http_contextmenu(r, (int)x, (int)y, &prevented, &edit);
+            fprintf(stderr,
+                    "[headless] rightclick %g,%g prevented=%d edit=%d\n",
+                    x, y, prevented, edit);
         } else if (g_str_has_prefix(a, "type ")) {
             const char *text = a + 5;
             fprintf(stderr, "[headless] type \"%s\"\n", text);
             char *h = ns_rproc_http_key(r, 2, text, "", 0, 0);
             g_free(h);
+        } else if (g_str_has_prefix(a, "paste ")) {
+            char *text = g_strcompress(a + 6);
+            fprintf(stderr, "[headless] paste \"%s\"\n", a + 6);
+            char *h = ns_rproc_http_key(r, 4, text, "", 0, 0);
+            g_free(h);
+            g_free(text);
         } else if (g_str_has_prefix(a, "key ")) {
             const char *name = g_strstrip(a + 4);
             fprintf(stderr, "[headless] key %s\n", name);

@@ -3,6 +3,7 @@
 #include "procview.h"
 #include "i18n.h"
 
+#include "libnordstjernen.h"
 #include "proc_limits.h"
 #include "../print.h"
 #include "rproc_http.h"
@@ -26,6 +27,12 @@
 #define NS_PV_FLING_STOP_PX_S  20.0
 #define NS_PV_HOVER_AFTER_SCROLL_MS 150
 #define NS_PROC_HELPER_LINE_MAX 4096
+
+#ifdef __APPLE__
+#define NS_PROC_PRIMARY_MASK (GDK_CONTROL_MASK | GDK_META_MASK)
+#else
+#define NS_PROC_PRIMARY_MASK GDK_CONTROL_MASK
+#endif
 
 #ifndef G_OS_WIN32
 #include <sys/mman.h>
@@ -130,6 +137,7 @@ typedef struct {
     LinkAct          action;
     int              kind;
     int              prevented;
+    int              edit;
     int              fallback_scroll;
     double           fallback_x;
     double           fallback_y;
@@ -1686,7 +1694,8 @@ worker_main(gpointer data)
                                                          req->y, &res->cursor);
             else if (v->proc && req->action == ACT_CONTEXT) {
                 int prevented = 0;
-                ns_rproc_http_contextmenu(v->proc, req->x, req->y, &prevented);
+                ns_rproc_http_contextmenu(v->proc, req->x, req->y, &prevented,
+                                          &res->edit);
                 res->prevented = prevented;
                 if (!prevented)
                     res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
@@ -1735,8 +1744,10 @@ worker_main(gpointer data)
         } else if (req->type == REQ_SELECT) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
-            res->type = (req->kind == 4) ? RES_COPY : RES_SELECT;
+            res->type = (req->kind == 4 || req->kind == 7) ? RES_COPY
+                                                           : RES_SELECT;
             res->seq = req->seq;
+            res->kind = req->kind;
             res->href = v->proc
                 ? ns_rproc_http_select(v->proc, req->kind, req->x, req->y)
                 : NULL;
@@ -2281,7 +2292,7 @@ disarm_anim(NsProcView *v)
 }
 
 static void start_link(NsProcView *v, int x, int y, LinkAct action);
-static void show_context_menu(NsProcView *v, const char *href);
+static void show_context_menu(NsProcView *v, const char *href, int edit);
 static void build_search_bar(NsProcView *v);
 static void console_append(NsProcView *v, const char *text);
 static void console_set_open(NsProcView *v, gboolean open);
@@ -3126,6 +3137,8 @@ on_result(gpointer data)
                                    res->href);
             post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Copied selection"));
         }
+        if (res->kind == 7)
+            request_render(v);
     } else if (res->type == RES_KEY) {
         if (res->seq != v->key_seq)
             goto done;
@@ -3153,10 +3166,10 @@ on_result(gpointer data)
         gboolean navigated = FALSE;
         GtkWidget *area = v->area;
         if (res->action == ACT_CONTEXT) {
-            if (res->prevented)
+            if (res->prevented || res->edit)
                 request_render(v);
-            else
-                show_context_menu(v, res->href);
+            if (!res->prevented)
+                show_context_menu(v, res->href, res->edit);
             if (v->link_pending) {
                 v->link_pending = FALSE;
                 LinkAct a = v->link_pending_action;
@@ -3799,6 +3812,64 @@ view_save(NsProcView *v, gboolean pdf)
     g_free(name);
 }
 
+typedef enum {
+    EDIT_NONE, EDIT_CUT, EDIT_COPY, EDIT_PASTE, EDIT_SELECT_ALL
+} EditOp;
+
+static void
+on_paste_text_ready(GObject *src, GAsyncResult *res, gpointer data)
+{
+    NsProcView *v = data;
+    char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, NULL);
+    if (text && *text && v->opened)
+        start_key_text(v, 4, text);
+    g_free(text);
+    pv_unref(v);
+}
+
+static void
+paste_clipboard(NsProcView *v)
+{
+    if (!v->opened || !v->area)
+        return;
+    gdk_clipboard_read_text_async(gtk_widget_get_clipboard(v->area), NULL,
+                                  on_paste_text_ready, pv_ref(v));
+}
+
+static EditOp
+edit_op_for_key(guint keyval, GdkModifierType state)
+{
+    GdkModifierType mods = state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK |
+                                    GDK_ALT_MASK | GDK_META_MASK);
+    if (keyval == GDK_KEY_Insert || keyval == GDK_KEY_KP_Insert) {
+        if (mods == GDK_SHIFT_MASK)   return EDIT_PASTE;
+        if (mods == GDK_CONTROL_MASK) return EDIT_COPY;
+        return EDIT_NONE;
+    }
+    if (!(mods & NS_PROC_PRIMARY_MASK) ||
+        (mods & ~(NS_PROC_PRIMARY_MASK | GDK_SHIFT_MASK)))
+        return EDIT_NONE;
+    switch (gdk_keyval_to_lower(keyval)) {
+    case GDK_KEY_x: return EDIT_CUT;
+    case GDK_KEY_c: return EDIT_COPY;
+    case GDK_KEY_v: return EDIT_PASTE;
+    case GDK_KEY_a: return EDIT_SELECT_ALL;
+    default:        return EDIT_NONE;
+    }
+}
+
+static void
+run_edit_op(NsProcView *v, EditOp op)
+{
+    switch (op) {
+    case EDIT_CUT:        start_select(v, 7, 0, 0); break;
+    case EDIT_COPY:       start_select(v, 4, 0, 0); break;
+    case EDIT_PASTE:      paste_clipboard(v); break;
+    case EDIT_SELECT_ALL: start_select(v, 3, 0, 0); break;
+    case EDIT_NONE:       break;
+    }
+}
+
 static void
 ctx_set_clipboard(NsProcView *v, const char *text, const char *status)
 {
@@ -3855,8 +3926,16 @@ on_ctx_copy_link(GSimpleAction *a, GVariant *p, gpointer ud)
 }
 
 static void
+on_ctx_cut(GSimpleAction *a, GVariant *p, gpointer ud)
+{ (void)a; (void)p; run_edit_op(ud, EDIT_CUT); }
+
+static void
 on_ctx_copy_sel(GSimpleAction *a, GVariant *p, gpointer ud)
-{ (void)a; (void)p; start_select(ud, 4, 0, 0); }
+{ (void)a; (void)p; run_edit_op(ud, EDIT_COPY); }
+
+static void
+on_ctx_paste(GSimpleAction *a, GVariant *p, gpointer ud)
+{ (void)a; (void)p; run_edit_op(ud, EDIT_PASTE); }
 
 static void
 on_ctx_select_all(GSimpleAction *a, GVariant *p, gpointer ud)
@@ -3913,7 +3992,9 @@ ctx_install_actions(NsProcView *v)
         { "open-link",   on_ctx_open_link,   NULL, NULL, NULL, {0} },
         { "open-newtab", on_ctx_open_newtab, NULL, NULL, NULL, {0} },
         { "copy-link",   on_ctx_copy_link,   NULL, NULL, NULL, {0} },
+        { "cut",         on_ctx_cut,         NULL, NULL, NULL, {0} },
         { "copy-sel",    on_ctx_copy_sel,    NULL, NULL, NULL, {0} },
+        { "paste",       on_ctx_paste,       NULL, NULL, NULL, {0} },
         { "select-all",  on_ctx_select_all,  NULL, NULL, NULL, {0} },
         { "save-pdf",    on_ctx_save_pdf,    NULL, NULL, NULL, {0} },
         { "save-png",    on_ctx_save_png,    NULL, NULL, NULL, {0} },
@@ -3949,12 +4030,32 @@ ns_popover_menu_fit(GtkWidget *popover)
     g_signal_connect(popover, "map", G_CALLBACK(on_popover_menu_mapped), NULL);
 }
 
-static void
-show_context_menu(NsProcView *v, const char *href)
+static GMenu *
+ctx_field_menu(NsProcView *v, int edit)
 {
-    g_free(v->ctx_link);
-    v->ctx_link = (href && *href) ? g_strdup(href) : NULL;
+    gboolean selected = (edit & NS_BROWSER_EDIT_SELECTION) != 0;
+    gboolean writable = (edit & NS_BROWSER_EDIT_WRITABLE) != 0;
+    ctx_action_enable(v, "cut", writable && selected);
+    ctx_action_enable(v, "copy-sel", selected);
+    ctx_action_enable(v, "paste", writable);
 
+    GMenu *menu = g_menu_new();
+    GMenu *clip = g_menu_new();
+    g_menu_append(clip, ns_i18n("Cut"), "ctx.cut");
+    g_menu_append(clip, ns_i18n("Copy"), "ctx.copy-sel");
+    g_menu_append(clip, ns_i18n("Paste"), "ctx.paste");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(clip));
+    g_object_unref(clip);
+    GMenu *all = g_menu_new();
+    g_menu_append(all, ns_i18n("Select All"), "ctx.select-all");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(all));
+    g_object_unref(all);
+    return menu;
+}
+
+static GMenu *
+ctx_page_menu(NsProcView *v)
+{
     ctx_action_enable(v, "back", ns_proc_view_can_back(v));
     ctx_action_enable(v, "forward", ns_proc_view_can_forward(v));
     ctx_action_enable(v, "open-link", v->ctx_link != NULL);
@@ -3991,7 +4092,17 @@ show_context_menu(NsProcView *v, const char *href)
     g_menu_append(page, ns_i18n("Save Page as Image…"), "ctx.save-png");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(page));
     g_object_unref(page);
+    return menu;
+}
 
+static void
+show_context_menu(NsProcView *v, const char *href, int edit)
+{
+    g_free(v->ctx_link);
+    v->ctx_link = (href && *href) ? g_strdup(href) : NULL;
+
+    GMenu *menu = (edit & NS_BROWSER_EDIT_FIELD) ? ctx_field_menu(v, edit)
+                                                 : ctx_page_menu(v);
     if (v->ctx_popover)
         gtk_widget_unparent(v->ctx_popover);
     v->ctx_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
@@ -4263,17 +4374,6 @@ on_drag_end(GtkGestureDrag *g, double ox, double oy, gpointer data)
     }
 }
 
-static void
-on_paste_text_ready(GObject *src, GAsyncResult *res, gpointer data)
-{
-    NsProcView *v = data;
-    char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, NULL);
-    if (text && *text && v->opened)
-        start_key_text(v, 2, text);
-    g_free(text);
-    pv_unref(v);
-}
-
 static gboolean
 on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
        GdkModifierType state, gpointer data)
@@ -4292,6 +4392,12 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         console_set_open(v, !v->console_open);
         return TRUE;
     }
+    EditOp edit = edit_op_for_key(keyval, state);
+    if (edit != EDIT_NONE) {
+        start_key(v, 0, keyval, state);
+        run_edit_op(v, edit);
+        return TRUE;
+    }
     gunichar uc = gdk_keyval_to_unicode(keyval);
     if (uc && uc != ' ' && !g_unichar_iscntrl(uc) &&
         !(state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_META_MASK))) {
@@ -4302,15 +4408,6 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     if (state & GDK_CONTROL_MASK) {
         start_key(v, 0, keyval, state);
         switch (keyval) {
-        case GDK_KEY_c:
-        case GDK_KEY_C:          start_select(v, 4, 0, 0); return TRUE;
-        case GDK_KEY_v:
-        case GDK_KEY_V:
-            gdk_clipboard_read_text_async(gtk_widget_get_clipboard(v->area),
-                                          NULL, on_paste_text_ready, pv_ref(v));
-            return TRUE;
-        case GDK_KEY_a:
-        case GDK_KEY_A:          start_select(v, 3, 0, 0); return TRUE;
         case GDK_KEY_plus:
         case GDK_KEY_equal:
         case GDK_KEY_KP_Add:      ns_proc_view_zoom_in(v); return TRUE;
