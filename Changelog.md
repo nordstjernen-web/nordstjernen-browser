@@ -14,6 +14,26 @@ Changelog:
   `inputType` and `data` for typing, deleting, pasting and cutting, and
   `DataTransfer` treats the `text` and `url` formats as `text/plain` and
   `text/uri-list`.
+* Fixes for the HiDPI, layout and smooth-scrolling changes:
+  - Keyboard scrolling (arrows, Page Up/Down, Space, Home/End) moves the
+    page again instead of the scroll container under the mouse pointer.
+  - On scroll-snapping pages one wheel notch or key press moves one snap
+    point; the eased scroll used to skip about a dozen sections.
+  - Zooming out below about 35% no longer lays the page out narrower and
+    shorter than the window.
+  - A page restored with Back after the window moved to a screen with a
+    different pixel density picks up the new density, `resolution` media
+    queries re-apply when the density changes, and out-of-range device
+    pixel ratios are clamped instead of ignored.
+  - Absolutely positioned children of 3D-transformed elements are drawn
+    inside the transformed element again.
+  - `vw`/`vh` inline styles read back from `element.style` follow
+    viewport resizes; `getComputedStyle()` on a `display: none`
+    `::before`/`::after` returns its real values.
+  - A crafted WOFF2 file can no longer decode to a font of over 64 MB.
+  - Each tab in single-process mode no longer commits its whole
+    framebuffer up front, and the shell rejects frames larger than it
+    asked for.
 * Pages are drawn at the screen's real pixel density. On a Retina or other
   HiDPI display the renderer used to paint at one device pixel per CSS pixel
   and the window stretched the frame, so text and images were blurry. The

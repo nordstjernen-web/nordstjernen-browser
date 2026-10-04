@@ -5,6 +5,7 @@
 #include "renderer_serve.h"
 #include "libnordstjernen.h"
 #include "print.h"
+#include "proc_limits.h"
 #include "net.h"
 #include "image.h"
 #include "texture.h"
@@ -49,7 +50,7 @@ request_device_pixel_ratio(const char *body)
 {
     double dpr = 0;
     json_get_double(body, "dpr", &dpr);
-    return dpr >= 0.25 && dpr <= 8.0 ? dpr : 0;
+    return dpr > 0 && isfinite(dpr) ? CLAMP(dpr, 0.25, 40.0) : 0;
 }
 
 static void
@@ -148,6 +149,13 @@ clamp(int v, int lo, int hi)
     if (v > hi)
         return hi;
     return v;
+}
+
+static int
+css_viewport_extent(long css_px, int max_device_px)
+{
+    long max_css_px = (long)(max_device_px / NS_PROC_ZOOM_MIN);
+    return (int)CLAMP(css_px, 1, max_css_px);
 }
 
 static void
@@ -380,8 +388,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         json_get_long(body, "settle_ms", &settle);
         json_get_long(body, "history", &history);
         json_get_long(body, "user_activated", &user_activated);
-        int vw = clamp((int)w, 1, s->max_w);
-        int vh = clamp((int)h, 1, s->max_h);
+        int vw = css_viewport_extent(w, s->max_w);
+        int vh = css_viewport_extent(h, s->max_h);
         double dpr = request_device_pixel_ratio(body);
         if (dpr > 0)
             ns_browser_set_device_pixel_ratio(NULL, dpr);
@@ -400,6 +408,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         ns_net_log_clear();
         if (restored) {
             ns_browser_bfcache_restore(restored, vw, (double)vh);
+            if (dpr > 0)
+                ns_browser_set_device_pixel_ratio(restored, dpr);
             s->cur = restored;
         } else if (url && s->post_body && s->post_url &&
             strcmp(url, s->post_url) == 0)
@@ -559,11 +569,16 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 requested_scroll_x = max_scroll_x;
             sx = requested_scroll_x;
         }
+        int wheel_snapped = 0;
         if (wheel_dx || wheel_dy) {
+            long wheel_viewport = 0;
             json_get_long(body, "wheel_x", &wheel_x);
             json_get_long(body, "wheel_y", &wheel_y);
-            if (ns_browser_scroll_at(s->cur, (int)wheel_x, (int)wheel_y,
-                                     (int)wheel_dx, (int)wheel_dy)) {
+            json_get_long(body, "wheel_viewport", &wheel_viewport);
+            if (!wheel_viewport &&
+                ns_browser_scroll_at_full(s->cur, (int)wheel_x, (int)wheel_y,
+                                          (int)wheel_dx, (int)wheel_dy,
+                                          &wheel_snapped)) {
                 s->frame_valid = 0;
             } else {
                 int max_x = page_w - (int)ceil((double)vw / scale);
@@ -587,6 +602,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 sy = snap_y;
                 requested_scroll_y = snap_y;
             }
+            if (wheel_dx || wheel_dy)
+                wheel_snapped = 1;
         }
         int caret_changed =
             ns_browser_set_caret_blink_active(s->cur, caret != 0);
@@ -641,6 +658,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 if (*p == '\r' || *p == '\n') *p = ' ';
         int animating = session_animating(s) ? 1 : 0;
         if (ns_browser_caret_blinking(s->cur)) animating |= 2;
+        if (wheel_snapped) animating |= 4;
         int clipboard_pending = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
         char hdrs[32768];
         int hn = snprintf(hdrs, sizeof hdrs,
@@ -944,8 +962,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         long w = 0, h = 0;
         json_get_long(body, "width", &w);
         json_get_long(body, "height", &h);
-        int vw = clamp((int)w, 1, s->max_w);
-        int vh = clamp((int)h, 1, s->max_h);
+        int vw = css_viewport_extent(w, s->max_w);
+        int vh = css_viewport_extent(h, s->max_h);
         int pw = 0, ph = 0, ok = 0;
         s->frame_valid = 0;
         session_apply_device_pixel_ratio(s, body);
