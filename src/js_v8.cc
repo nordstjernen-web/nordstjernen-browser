@@ -7057,6 +7057,84 @@ ns_js_dispatch_key_event_full(ns_js *js, const ns_node *target,
 }
 
 gboolean
+ns_js_dispatch_input_event(ns_js *js, const ns_node *target, const char *type,
+                           const char *input_type, const char *data,
+                           gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !type || js->pump_depth) return FALSE;
+    ns_v8_scope scope(js);
+    ns_v8_pump_guard guard(js);
+    v8::Isolate *iso = js->isolate;
+    v8::Local<v8::Object> ev = ns_v8_make_event(js, type);
+    ev->Set(scope.ctx, ns_v8_str(iso, "cancelable"),
+            v8::Boolean::New(iso, strcmp(type, "beforeinput") == 0)).Check();
+    ev->Set(scope.ctx, ns_v8_str(iso, "inputType"),
+            ns_v8_str(iso, input_type)).Check();
+    ev->Set(scope.ctx, ns_v8_str(iso, "data"),
+            data ? v8::Local<v8::Value>(ns_v8_str(iso, data))
+                 : v8::Local<v8::Value>(v8::Null(iso))).Check();
+    ev->Set(scope.ctx, ns_v8_str(iso, "isComposing"),
+            v8::Boolean::New(iso, false)).Check();
+    ns_node *node = target && target->kind != NS_NODE_DOCUMENT
+                        ? (ns_node *)target
+                        : NULL;
+    if (!node) {
+        ns_v8_fire(js, type, ev);
+        return TRUE;
+    }
+    return ns_v8_dom_dispatch_obj(js, node, type, ev, default_prevented);
+}
+
+void ns_v8_clipboard_get_data(const v8::FunctionCallbackInfo<v8::Value> &info)
+{
+    v8::Isolate *iso = info.GetIsolate();
+    std::string format = info.Length() > 0 ? ns_v8_utf8(iso, info[0]) : "";
+    for (char &c : format) c = g_ascii_tolower(c);
+    if (format == "text" || format == "text/plain")
+        info.GetReturnValue().Set(info.Data());
+    else
+        info.GetReturnValue().Set(ns_v8_str(iso, ""));
+}
+
+gboolean
+ns_js_dispatch_clipboard_event(ns_js *js, const ns_node *target,
+                               const char *type, const char *text,
+                               gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !type || js->pump_depth) return FALSE;
+    ns_v8_scope scope(js);
+    ns_v8_pump_guard guard(js);
+    v8::Isolate *iso = js->isolate;
+    v8::Local<v8::Object> ev = ns_v8_make_event(js, type);
+    v8::Local<v8::Object> data = v8::Object::New(iso);
+    v8::Local<v8::Array> types = v8::Array::New(iso, 0);
+    if (text)
+        types->Set(scope.ctx, 0, ns_v8_str(iso, "text/plain")).Check();
+    data->Set(scope.ctx, ns_v8_str(iso, "types"), types).Check();
+    data->Set(scope.ctx, ns_v8_str(iso, "getData"),
+              v8::Function::New(scope.ctx, ns_v8_clipboard_get_data,
+                                ns_v8_str(iso, text))
+                  .ToLocalChecked()).Check();
+    data->Set(scope.ctx, ns_v8_str(iso, "setData"),
+              v8::Function::New(scope.ctx, ns_v8_noop_cb).ToLocalChecked())
+        .Check();
+    data->Set(scope.ctx, ns_v8_str(iso, "clearData"),
+              v8::Function::New(scope.ctx, ns_v8_noop_cb).ToLocalChecked())
+        .Check();
+    ev->Set(scope.ctx, ns_v8_str(iso, "clipboardData"), data).Check();
+    ns_node *node = target && target->kind != NS_NODE_DOCUMENT
+                        ? (ns_node *)target
+                        : NULL;
+    if (!node) {
+        ns_v8_fire(js, type, ev);
+        return TRUE;
+    }
+    return ns_v8_dom_dispatch_obj(js, node, type, ev, default_prevented);
+}
+
+gboolean
 ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
                            double client_x, double client_y, double page_x,
                            double page_y, int button, int buttons,
