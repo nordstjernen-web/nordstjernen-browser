@@ -4403,11 +4403,13 @@ static gboolean
 ns_listener_signal_aborted(ns_js *js, const ns_listener *l)
 {
     if (!js || !l || !JS_IsObject(l->signal)) return FALSE;
+    JSValue signal = JS_DupValue(js->ctx, l->signal);
     JSValue ab = js->listener_atoms_set
-        ? JS_GetProperty(js->ctx, l->signal, js->atom_aborted)
-        : JS_GetPropertyStr(js->ctx, l->signal, "aborted");
+        ? JS_GetProperty(js->ctx, signal, js->atom_aborted)
+        : JS_GetPropertyStr(js->ctx, signal, "aborted");
     gboolean aborted = JS_ToBool(js->ctx, ab);
     JS_FreeValue(js->ctx, ab);
+    JS_FreeValue(js->ctx, signal);
     return aborted;
 }
 
@@ -9052,10 +9054,13 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     }
     ns_js *_js = js_from_ctx(ctx);
     GPtrArray *own = ns_listeners_of(_js, n);
+    _js->listener_snapshots++;
     for (guint i = 0; own && i < own->len; i++) {
         ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
-        if (ns_listener_signal_aborted(_js, ex)) {
+        gboolean aborted = ns_listener_signal_aborted(_js, ex);
+        if (ns_listener_is_tombstoned(ex)) continue;
+        if (aborted) {
             ns_listener_tombstone(ctx, ex);
             continue;
         }
@@ -9063,11 +9068,13 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
+            _js->listener_snapshots--;
             JS_FreeValue(ctx, signal);
             JS_FreeCString(ctx, type);
             return JS_UNDEFINED;
         }
     }
+    _js->listener_snapshots--;
     if (!passive_set && ns_event_type_is_passive_default(type) &&
         _js->current_doc) {
         ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
@@ -32577,16 +32584,19 @@ static gboolean
 ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
 {
     if (!js || !js->listeners || !type) return FALSE;
-    for (guint i = 0; i < js->listeners->len; i++) {
+    gboolean found = FALSE;
+    js->listener_snapshots++;
+    for (guint i = 0; !found && i < js->listeners->len; i++) {
         ns_listener *l = g_ptr_array_index(js->listeners, i);
         if (ns_listener_is_tombstoned(l) || l->passive) continue;
         if (!l->type || strcmp(l->type, type) != 0) continue;
         if (ns_listener_signal_aborted(js, l)) continue;
-        if (l->window_level) return TRUE;
-        for (const ns_node *cur = target; cur; cur = cur->parent)
-            if (l->target == cur) return TRUE;
+        if (l->window_level) found = TRUE;
+        for (const ns_node *cur = target; !found && cur; cur = cur->parent)
+            if (l->target == cur) found = TRUE;
     }
-    return FALSE;
+    js->listener_snapshots--;
+    return found;
 }
 
 static gboolean
@@ -59203,16 +59213,12 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
     }
     ns_js *_js = js_from_ctx(ctx);
     GPtrArray *own = ns_listeners_of(_js, target);
+    _js->listener_snapshots++;
     for (guint i = 0; own && i < own->len; i++) {
         ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
-        JSValue held_signal = JS_DupValue(ctx, ex->signal);
         gboolean aborted = ns_listener_signal_aborted(_js, ex);
-        JS_FreeValue(ctx, held_signal);
-        if (i >= _js->listeners->len ||
-            g_ptr_array_index(_js->listeners, i) != ex ||
-            ns_listener_is_tombstoned(ex))
-            continue;
+        if (ns_listener_is_tombstoned(ex)) continue;
         if (aborted) {
             ns_listener_tombstone(ctx, ex);
             continue;
@@ -59222,11 +59228,13 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
+            _js->listener_snapshots--;
             JS_FreeValue(ctx, signal);
             JS_FreeCString(ctx, type);
             return JS_UNDEFINED;
         }
     }
+    _js->listener_snapshots--;
     if (!passive_set && ns_event_type_is_passive_default(type))
         passive = TRUE;
     ns_listener *l = g_new0(ns_listener, 1);
