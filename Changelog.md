@@ -125,6 +125,13 @@ Changelog:
   also collapses with the margin above the parent, and flex and grid items
   keep their children's margins inside. MDN's page header was 16px shorter
   than in Chrome.
+* Grid sizing: `minmax()` tracks keep their minimum when a grid with
+  flexible columns is too narrow (MDN's three columns overflowed the
+  window), a stretched grid item stops at its `max-height`, and `0fr` or
+  `0.5fr` rows in a grid without a fixed height get that fraction of their
+  content. The `grid-template-rows: 0fr` accordions on github.com showed
+  every closed panel open. Flex and grid items with `overflow: hidden` now
+  clip their content even when they are zero pixels tall.
 
 1.0.28:
 ======
