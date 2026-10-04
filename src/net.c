@@ -5591,16 +5591,20 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (synthesize_file_response(url, top_url, resp))
         return resp;
 
-    char *hsts_upgraded = ns_net_hsts_upgrade(url);
-    if (hsts_upgraded) url = hsts_upgraded;
-
+    char *hsts_upgraded = NULL;
     char *idn_ascii = ns_url_to_ascii(url);
     if (idn_ascii && strcmp(idn_ascii, url) != 0) {
-        g_free(hsts_upgraded);
         hsts_upgraded = idn_ascii;
         url = hsts_upgraded;
     } else {
         g_free(idn_ascii);
+    }
+
+    char *https_url = ns_net_hsts_upgrade(url);
+    if (https_url) {
+        g_free(hsts_upgraded);
+        hsts_upgraded = https_url;
+        url = hsts_upgraded;
     }
 
     gboolean request_http = ns_url_is_http_or_https(url);
