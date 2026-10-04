@@ -85,6 +85,12 @@ Changelog:
 
 1.0.28:
 ======
+* Scrolling stays smooth on pages that react to it. While the user scrolls,
+  frames are painted from the current layout and the page's timers, scroll
+  events and relayouts run at most every 250 ms (longer when they are slow);
+  before, every frame waited for them, and a page that restyles its header
+  on scroll, as Google's results page does, dropped to a few frames per
+  second. The page sees the final scroll position as soon as the user stops.
 * A grid that gets its height from `top` and `bottom` (absolutely positioned,
   no `height`) sizes its `fr` rows from that height; they were 0 px tall, so
   the items collapsed or took their content height (the picture mosaic at
