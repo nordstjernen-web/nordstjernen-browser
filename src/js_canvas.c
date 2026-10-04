@@ -1163,7 +1163,8 @@ ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
                 row[x * 4 + 3] = na;
             }
         }
-        int radius = (int)(st->shadow_blur * 0.5 + 0.5);
+        double half_blur = st->shadow_blur * 0.5 + 0.5;
+        int radius = half_blur < 64 ? (int)half_blur : 64;
         if (radius > 0)
             ns_box_blur_argb(data, sw, sh, stride, radius);
         cairo_surface_mark_dirty(off);
@@ -1267,13 +1268,13 @@ JSValue
 ns_ctx_clearRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
+    double x = ns_arg_d(ctx, argv[0]), y = ns_arg_d(ctx, argv[1]);
+    double w = ns_arg_d(ctx, argv[2]), h = ns_arg_d(ctx, argv[3]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
-    cairo_rectangle(st->cr,
-        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
-        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
+    cairo_rectangle(st->cr, x, y, w, h);
     cairo_fill(st->cr);
     cairo_restore(st->cr);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
@@ -1302,8 +1303,9 @@ JSValue
 ns_ctx_moveTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
+    double x = ns_arg_d(ctx, argv[0]), y = ns_arg_d(ctx, argv[1]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_move_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) cairo_move_to(st->cr, x, y);
     return JS_UNDEFINED;
 }
 
@@ -1311,8 +1313,9 @@ JSValue
 ns_ctx_lineTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
+    double x = ns_arg_d(ctx, argv[0]), y = ns_arg_d(ctx, argv[1]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_line_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) cairo_line_to(st->cr, x, y);
     return JS_UNDEFINED;
 }
 
@@ -1340,11 +1343,10 @@ JSValue
 ns_ctx_rect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
+    double x = ns_arg_d(ctx, argv[0]), y = ns_arg_d(ctx, argv[1]);
+    double w = ns_arg_d(ctx, argv[2]), h = ns_arg_d(ctx, argv[3]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st)
-        cairo_rectangle(st->cr,
-            ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
-            ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
+    if (st) cairo_rectangle(st->cr, x, y, w, h);
     return JS_UNDEFINED;
 }
 
@@ -1511,13 +1513,14 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         stack = JS_NewArray(ctx);
         ns_hset(ctx, this_val, "_stateStack", JS_DupValue(ctx, stack));
     }
-    JSValue snap = JS_NewObject(ctx);
+    JSValue snap = JS_NewObjectProto(ctx, JS_NULL);
     for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
         JSValue v = ns_hget(ctx, this_val, ns_ctx_savable_props[i]);
-        JS_SetPropertyStr(ctx, snap, ns_ctx_savable_props[i], v);
+        JS_DefinePropertyValueStr(ctx, snap, ns_ctx_savable_props[i], v,
+                                  JS_PROP_C_W_E);
     }
     uint32_t n = ns_js_array_length(ctx, stack);
-    JS_SetPropertyUint32(ctx, stack, n, snap);
+    JS_DefinePropertyValueUint32(ctx, stack, n, snap, JS_PROP_C_W_E);
     JS_FreeValue(ctx, stack);
     return JS_UNDEFINED;
 }
@@ -1550,8 +1553,9 @@ JSValue
 ns_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
+    double tx = ns_arg_d(ctx, argv[0]), ty = ns_arg_d(ctx, argv[1]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_translate(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) cairo_translate(st->cr, tx, ty);
     return JS_UNDEFINED;
 }
 
@@ -1559,8 +1563,9 @@ JSValue
 ns_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
+    double sx = ns_arg_d(ctx, argv[0]), sy = ns_arg_d(ctx, argv[1]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_scale(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    if (st) cairo_scale(st->cr, sx, sy);
     return JS_UNDEFINED;
 }
 
@@ -1568,8 +1573,9 @@ JSValue
 ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 1) return JS_UNDEFINED;
+    double angle = ns_arg_d(ctx, argv[0]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_rotate(st->cr, ns_arg_d(ctx, argv[0]));
+    if (st) cairo_rotate(st->cr, angle);
     return JS_UNDEFINED;
 }
 
@@ -1788,11 +1794,11 @@ ns_ctx_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     if (argc < 6) return JS_UNDEFINED;
+    double x1 = ns_arg_d(ctx, argv[0]), y1 = ns_arg_d(ctx, argv[1]);
+    double x2 = ns_arg_d(ctx, argv[2]), y2 = ns_arg_d(ctx, argv[3]);
+    double x3 = ns_arg_d(ctx, argv[4]), y3 = ns_arg_d(ctx, argv[5]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (st) cairo_curve_to(st->cr,
-        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
-        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
-        ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
+    if (st) cairo_curve_to(st->cr, x1, y1, x2, y2, x3, y3);
     return JS_UNDEFINED;
 }
 

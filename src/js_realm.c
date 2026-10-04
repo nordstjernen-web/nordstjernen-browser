@@ -127,6 +127,7 @@ ns_shadowrealm_importValue(JSContext *ctx, JSValueConst this_val,
     if (!r) return JS_EXCEPTION;
     JSValue resolving[2];
     JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) return promise;
     JSValue err = JS_NewError(ctx);
     JS_SetPropertyStr(ctx, err, "message",
         JS_NewString(ctx, "ShadowRealm.prototype.importValue is not supported"));

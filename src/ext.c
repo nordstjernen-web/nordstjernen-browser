@@ -285,13 +285,13 @@ ns_ext_js_uilang(JSContext *ctx, JSValueConst this_val,
 }
 
 static const char ns_ext_shim_prelude[] =
-";(function(){"
-"var M=globalThis.__nd_ext_manifest,B=globalThis.__nd_ext_base,"
-"SR=globalThis.__nd_ext_sread,SW=globalThis.__nd_ext_swrite,"
-"PL=globalThis.__nd_ext_platform,UL=globalThis.__nd_ext_uilang;"
-"delete globalThis.__nd_ext_manifest;delete globalThis.__nd_ext_base;"
-"delete globalThis.__nd_ext_sread;delete globalThis.__nd_ext_swrite;"
-"delete globalThis.__nd_ext_platform;delete globalThis.__nd_ext_uilang;"
+";(function(G){"
+"var M=G.__nd_ext_manifest,B=G.__nd_ext_base,"
+"SR=G.__nd_ext_sread,SW=G.__nd_ext_swrite,"
+"PL=G.__nd_ext_platform,UL=G.__nd_ext_uilang;"
+"delete G.__nd_ext_manifest;delete G.__nd_ext_base;"
+"delete G.__nd_ext_sread;delete G.__nd_ext_swrite;"
+"delete G.__nd_ext_platform;delete G.__nd_ext_uilang;"
 "function area(id,name){"
 "function rd(){try{return JSON.parse(SR(id,name))||{};}catch(e){return{};}}"
 "function wr(o){return SW(id,name,JSON.stringify(o));}"
@@ -329,7 +329,7 @@ static const char ns_ext_shim_prelude[] =
 "storage:{local:area(id,'local'),sync:area(id,'sync'),managed:area(id,'managed')}};"
 "}\n";
 
-static const char ns_ext_shim_epilogue[] = "})();\n";
+static const char ns_ext_shim_epilogue[] = "})(this);\n";
 
 static char *
 ns_ext_js_string(JSContext *ctx, JSValueConst obj, const char *key)

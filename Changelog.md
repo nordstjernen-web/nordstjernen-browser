@@ -96,11 +96,147 @@ Changelog:
 * Zoom reflows the page like other browsers: at 150% the page is laid out
   for a viewport 1.5 times narrower instead of being magnified and cut off
   at the right edge.
+* Security audit of the engine, shell and helpers. Fixed memory-safety
+  bugs that web content could reach:
+  - Out-of-bounds reads and writes: WebGL texture uploads sized for the
+    wrong pixel format or ignoring the unpack state; a grid
+    `repeat(auto-fill, ...)` track count past the stored tracks; CSS
+    per-rule match arrays one slot short for `::file-selector-button`;
+    `container-name` lists of 16+ names; word selection over text with
+    lone surrogates; Ogg Vorbis links and libav frames whose channel
+    layout changes mid-stream in the audio helper; shared-memory video
+    geometry re-read after it was validated in the shell.
+  - Use-after-free when page script runs in the middle of an operation:
+    custom element upgrades and `whenDefined`, `replaceChildren` and
+    template `innerHTML`, radio groups, inline event handlers,
+    `addEventListener` with an AbortSignal getter, EventSource dispatch,
+    structured clone and worker messages over resized or detached
+    buffers, `getAnimations()`/`getKeyframes()`, performance entries and
+    observers, IndexedDB handles, canvas state and paths, WebAssembly
+    memory buffers passed to `transfer()`, WebCrypto ECDH peer keys,
+    scrollbar and headless hit-testing, and queued scripts or document
+    index entries for removed nodes.
+  - Stack exhaustion from deep nesting: `:nth-child(of ...)`, selector
+    chains, `@supports`, `@container`, `image-set()`, time values,
+    `random-item()`, nested grids and inline runs. CSS nesting can no
+    longer expand a small stylesheet into gigabytes of selectors.
+  - Integer overflow and runaway sizes: textarea rows, fitted input
+    columns, multicol splits, animation delays, SVG arcs and sizes, PDF
+    page rasters, print spans, Web Audio and microphone buffers.
+* More fixes from the security audit:
+  - `fetch()` and message delivery take the requesting document from the
+    engine, not from `this.location`, which a page could forge to reach
+    about: pages, local files or another site's cookies.
+  - Engine-private `data-nd-*` attributes can no longer be read or written
+    through `toggleAttribute`, `setAttributeNode`, `Attr.value` or the
+    namespaced attribute methods; a page could otherwise make
+    `<input type=file>` read any local file the renderer can open.
+  - The unused `__ndDocEnter`/`__ndDocExit` globals are gone.
+  - WebGL validates draws against the GL driver's own buffer and
+    vertex-array state, keeps the calling context current while page
+    `valueOf` code runs, and reads the canvas back without the page's pack
+    settings; WebGPU keeps borrowed handles and mapped ranges alive while
+    in use.
+  - Use-after-free fixes for live collections, IntersectionObserver and
+    ResizeObserver callbacks, Attr wrappers, form validation, pointer lock,
+    `scrollIntoView()`, `document.scripts`, `document.body`, table row and
+    cell insertion, `hashchange`, frame creation, and DOM insertion methods
+    whose custom element callbacks move nodes; freed nodes no longer stay
+    the `:active`/`:hover`/`:focus` element.
+  - Media elements only send engine-issued tokens to the audio helper, and
+    long chains of safe-browsing "continue" prefixes no longer recurse.
+* The shell and helpers trust the sandboxed renderer less: media helper
+  commands with line breaks or over-long lines are refused, saved pages
+  are not copied through symlinks, cursor names are limited to CSS
+  keywords, renderers no longer inherit other tabs' descriptors, and
+  `file:` downloads from web pages are refused.
+* Sandbox: Landlock now also restricts creating symlinks, fifos, sockets
+  and device nodes, and restricts truncation; it picks the rights the
+  running kernel supports instead of failing on older kernels. Seccomp
+  refuses the TIOCSTI/TIOCLINUX terminal-injection ioctls.
+* Web security: subresource redirects keep their top-level site (cookies,
+  `Sec-Fetch-Site`, `Origin`); `document.cookie` can no longer replace
+  HttpOnly cookies; about:blank/about:srcdoc no longer count as browser
+  pages; HSTS applies to mixed-case URLs; the nghttp2 backend refuses
+  request methods containing line breaks and caps response headers at
+  1 MB; frame documents read cookies for their own URL; IndexedDB is
+  refused for opaque origins (file:, data:, about:) instead of sharing
+  one database between them; extension content scripts keep their
+  privileged natives away from the page.
 * Pages load again in the desktop browser on macOS versions whose
   `shm_open()` rejects `O_CLOEXEC`. Creating a tab's shared framebuffer
   failed there, so no renderer process was started and every page stayed
   blank with "Done" in the status bar. The framebuffer is now opened
   without the flag and marked close-on-exec afterwards in that case.
+* Event listeners are indexed by their target. Dispatching an event to a
+  node, dispatching to the window, and checking for a duplicate in
+  addEventListener each walked every listener of the page; they now look
+  only at the target's own listeners.
+* IntersectionObserver entries are only built for targets whose
+  intersection changed. Every relayout built a full entry with three
+  DOMRects for every observed target and dropped most of them.
+* The animation check after each style pass skips elements that cannot
+  have anything to do: those without animation state and without an
+  animation or transition property, and those whose style was reused and
+  have nothing running. It no longer computes their depth and sorts them.
+* Style elements inside shadow roots and frames are no longer rewritten on
+  every relayout. Their CSS is flattened and scoped to the host, which is a
+  pure function of the text and the host, so the result is now kept by
+  that text. Pages with many such style elements relayout faster
+  (Speedometer's Svelte-Complex-DOM 204 ms to 115 ms).
+* Relayouts measure text once per distinct run instead of on every pass.
+  The size, line count and baseline of a measured text layout are kept,
+  keyed by its text, font, attribute list and layout settings, so a forced
+  layout after a small change no longer shapes and breaks every paragraph
+  of the page again. Speedometer's NewsSite layout time halves.
+* Pages that repeat the same `<style>` many times, such as inline SVG
+  icons that each carry their own style element, restyle much faster.
+  Consecutive style elements are merged into one sheet, and every copy of
+  a rule was matched against every element it could apply to; an earlier
+  copy can never win over a later identical one, so only the last copy of
+  each repeated style text is kept. A Speedometer Complex-DOM page has 416
+  copies of one icon style, 98% of its selector matching.
+* Shadow DOM pages restyle faster. Style sheets in shadow roots are scoped
+  by an attribute on the host, so their rules read `[data-nd-host="7"] .x`;
+  the ancestor filter that skips rules whose ancestors are not on the
+  element's path ignored attributes, and every host's copy of a rule was
+  matched in full against every element. Exact attribute values in ancestor
+  position now go into the filter too. Speedometer's TodoMVC-WebComponents
+  style pass takes 57 ms instead of 221 ms.
+* Placing absolutely positioned boxes nested in other positioned boxes is
+  faster: finding each box's static position no longer walks up the tree
+  for every box it visits, but compares document order ranks and a set of
+  the box's ancestors made once.
+* Large blurred box shadows paint up to 250 times faster. A blurred rounded
+  rectangle is the same along its straight middle, so the blur now runs on a
+  copy with the middle cut short and the uniform row and column are
+  repeated back to full size. TodoMVC's 550 by 6000 pixel list shadow took
+  300 ms per paint and now takes about 1 ms. The pixels are unchanged.
+* Blurred box shadows are drawn once and reused. Every frame blurred every
+  visible shadow again, three passes over a fresh surface each; the blurred
+  surfaces are now kept, keyed by size, corner radii, blur and colour, up to
+  32 MB.
+* Loading a frame no longer measures the whole JavaScript heap. The frame's
+  `performance` object needs to know whether the parent has
+  `performance.memory`, and reading it to find out walked every object of
+  the runtime.
+* Event dispatch no longer walks every listener of the page after each
+  target it visits to clear out removed listeners when none was removed.
+* Dispatching an event no longer searches the document. Looking up the
+  window's `on<type>` handler fell through to the window's named
+  properties whenever the page had not set one, which walked the whole
+  document for a frame and then an element with that name, for every
+  event.
+* Relayouts skip the transition and animation check for elements whose
+  style was reused unchanged and that have nothing running. An element with
+  `transition: all` compared every transitionable property on every
+  relayout.
+* Restyles after a DOM change are much faster on pages whose elements
+  declare `transition`. Every element that had ever been checked for a
+  transition was restyled on every relayout, with its whole subtree, even
+  when nothing was animating; now only elements whose style an animation
+  or transition actually changed are. Speedometer's Complex-DOM suites run
+  two to five times faster (Svelte-Complex-DOM 748 ms to 244 ms).
 * The title bar always shows the browser name. "Nordstjernen Browser" sits
   centred in the window, moves to the right edge once the tabs reach the
   middle, and shortens to "Nordstjernen" when the full name no longer fits.
@@ -153,6 +289,28 @@ Changelog:
 
 1.0.28:
 ======
+* Scrolling stays smooth on pages that react to it. While the user scrolls,
+  frames are painted from the current layout and the page's timers, scroll
+  events and relayouts run at most every 250 ms (longer when they are slow);
+  before, every frame waited for them, and a page that restyles its header
+  on scroll, as Google's results page does, dropped to a few frames per
+  second. The page sees the final scroll position as soon as the user stops.
+* A grid that gets its height from `top` and `bottom` (absolutely positioned,
+  no `height`) sizes its `fr` rows from that height; they were 0 px tall, so
+  the items collapsed or took their content height (the picture mosaic at
+  the top of a Google results page showed one picture and an empty tile).
+* Percentages inside `round()`, `mod()`, `rem()` and `abs()` resolve against
+  the same basis as a plain percentage. They were resolved against the
+  viewport width when the style sheet was parsed, so
+  `width: round(nearest, 100%, 1px)` made a box as wide as the window
+  whatever its container (Google's results page laid out its header, its
+  top cards and its news list too wide, over the right-hand column).
+* A column flex container with `min-height` and no `height` is as tall as
+  its content again; the minimum was used as the height, so the items were
+  shrunk to fit it and the rest of the page was laid out over them
+  (DuckDuckGo's comparison page drew its table over the introduction).
+  `overflow: clip` on a flex item no longer lets it shrink below its
+  content, since it does not make a scroll container.
 * Relayouts of pages with container queries are about 17% faster when the
   containers keep their size (measured on a 6,000 element page relaid out
   after each style write): the selector match cache that serves the second

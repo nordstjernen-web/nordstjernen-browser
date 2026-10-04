@@ -25,6 +25,7 @@
 #define NS_PV_FLING_TAU_MS     400.0
 #define NS_PV_FLING_STOP_PX_S  20.0
 #define NS_PV_HOVER_AFTER_SCROLL_MS 150
+#define NS_PROC_HELPER_LINE_MAX 4096
 
 #ifndef G_OS_WIN32
 #include <sys/mman.h>
@@ -496,9 +497,25 @@ pv_set_named_cursor(GtkWidget *w, const char *name)
         { "zoom-in",       "crosshair" },
         { "zoom-out",      "crosshair" },
     };
+    static const char *const plain[] = {
+        "default", "none", "pointer", "wait", "crosshair", "text",
+        "n-resize", "e-resize", "s-resize", "w-resize", "ew-resize",
+        "ns-resize",
+    };
     const char *fallback = NULL;
+    gboolean known = FALSE;
     for (gsize i = 0; i < G_N_ELEMENTS(fb); i++)
-        if (strcmp(name, fb[i].name) == 0) { fallback = fb[i].fallback; break; }
+        if (strcmp(name, fb[i].name) == 0) {
+            fallback = fb[i].fallback;
+            known = TRUE;
+            break;
+        }
+    for (gsize i = 0; i < G_N_ELEMENTS(plain) && !known; i++)
+        known = strcmp(name, plain[i]) == 0;
+    if (!known) {
+        gtk_widget_set_cursor(w, NULL);
+        return;
+    }
     GdkCursor *fb_cur = fallback ? gdk_cursor_new_from_name(fallback, NULL) : NULL;
     GdkCursor *cur = gdk_cursor_new_from_name(name, fb_cur);
     gtk_widget_set_cursor(w, cur ? cur : fb_cur);
@@ -733,7 +750,7 @@ pv_audio_clock_position(NsProcView *v, const char *token, double *position)
 {
     if (!v->audio_clock || !token || !*token) return FALSE;
     ns_audio_clock_hdr *clock = v->audio_clock;
-    for (guint i = 0; i < clock->nslots; i++) {
+    for (guint i = 0; i < NS_AUDIO_CLOCK_SLOTS; i++) {
         ns_audio_clock_slot *slot = &clock->slots[i];
         guint32 seq1 = __atomic_load_n(&slot->sequence, __ATOMIC_ACQUIRE);
         if (!seq1 || (seq1 & 1u)) continue;
@@ -863,8 +880,15 @@ pv_helper_open_url(const char *cmd)
 }
 
 static gboolean
+pv_helper_line_ok(const char *cmd)
+{
+    return strlen(cmd) < NS_PROC_HELPER_LINE_MAX - 1 && !strpbrk(cmd, "\r\n");
+}
+
+static gboolean
 pv_audio_command_allowed(NsProcView *v, const char *cmd)
 {
+    if (!pv_helper_line_ok(cmd)) return FALSE;
     const char *url = pv_helper_open_url(cmd);
     return !url || pv_audio_url_allowed(v, url);
 }
@@ -872,6 +896,7 @@ pv_audio_command_allowed(NsProcView *v, const char *cmd)
 static gboolean
 pv_video_command_allowed(const char *cmd)
 {
+    if (!pv_helper_line_ok(cmd)) return FALSE;
     const char *url = pv_helper_open_url(cmd);
     return !url || pv_stream_url_allowed(url, "msvideo");
 }
@@ -1002,29 +1027,33 @@ pv_video_snapshot_current(NsProcView *v)
     if (!v || !v->vring || !v->vid_sequence) return;
     ns_video_ring_hdr *r = v->vring;
     guint32 slot = v->vid_slot;
+    guint32 width = __atomic_load_n(&r->width, __ATOMIC_RELAXED);
+    guint32 height = __atomic_load_n(&r->height, __ATOMIC_RELAXED);
+    guint32 stride = __atomic_load_n(&r->stride, __ATOMIC_RELAXED);
+    guint32 frame_bytes = __atomic_load_n(&r->frame_bytes, __ATOMIC_RELAXED);
     if (r->magic != NS_VIDEO_RING_MAGIC ||
-        r->version != NS_VIDEO_RING_VERSION || slot >= r->nslots ||
-        !r->width || !r->height || r->stride < r->width * 4 ||
-        (guint64)r->stride * r->height > r->frame_bytes ||
-        sizeof *r + (gsize)(slot + 1) * r->frame_bytes > v->vring_bytes)
+        r->version != NS_VIDEO_RING_VERSION || slot >= NS_VIDEO_RING_SLOTS ||
+        !width || !height || (guint64)stride < (guint64)width * 4 ||
+        (guint64)stride * height > frame_bytes ||
+        sizeof *r + (gsize)(slot + 1) * frame_bytes > v->vring_bytes)
         return;
     ns_video_ring_slot *meta = &r->slots[slot];
     guint32 sequence = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
     if (sequence != v->vid_sequence || meta->generation != v->vid_generation)
         return;
     cairo_surface_t *copy = cairo_image_surface_create(
-        CAIRO_FORMAT_RGB24, (int)r->width, (int)r->height);
+        CAIRO_FORMAT_RGB24, (int)width, (int)height);
     if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(copy);
         return;
     }
     unsigned char *src = (unsigned char *)r + sizeof *r +
-                         (gsize)slot * r->frame_bytes;
+                         (gsize)slot * frame_bytes;
     unsigned char *dst = cairo_image_surface_get_data(copy);
     int dst_stride = cairo_image_surface_get_stride(copy);
-    for (guint32 y = 0; y < r->height; y++)
+    for (guint32 y = 0; y < height; y++)
         memcpy(dst + (gsize)y * dst_stride,
-               src + (gsize)y * r->stride, (gsize)r->width * 4);
+               src + (gsize)y * stride, (gsize)width * 4);
     cairo_surface_mark_dirty(copy);
     pv_video_fallback_clear(v);
     v->vid_fallback = copy;
@@ -1781,8 +1810,13 @@ worker_main(gpointer data)
                 ns_rproc_http_export(v->proc, req->url) == 0) {
                 GFile *src = g_file_new_for_path(req->url);
                 GFile *dst = g_file_new_for_path(req->export_dest);
-                ok = g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL,
-                                 NULL, NULL, NULL);
+                if (g_file_query_file_type(src,
+                                           G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                           NULL) == G_FILE_TYPE_REGULAR)
+                    ok = g_file_copy(src, dst,
+                                     G_FILE_COPY_OVERWRITE |
+                                         G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                                     NULL, NULL, NULL, NULL);
                 g_object_unref(src);
                 g_object_unref(dst);
             }
@@ -3381,9 +3415,10 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
         }
     }
 
-    for (guint32 age = 0; age < r->nslots && age < published; age++) {
+    for (guint32 age = 0; age < NS_VIDEO_RING_SLOTS && age < published;
+         age++) {
         guint32 sequence = published - age;
-        guint32 slot = (sequence - 1u) % r->nslots;
+        guint32 slot = (sequence - 1u) % NS_VIDEO_RING_SLOTS;
         ns_video_ring_slot *meta = &r->slots[slot];
         guint32 committed = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
         if (committed != sequence || meta->generation != generation) continue;
@@ -3397,10 +3432,10 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
     }
 
     if (!selected_sequence && !v->vid_playing) {
-        for (guint32 age = r->nslots; age > 0; age--) {
+        for (guint32 age = NS_VIDEO_RING_SLOTS; age > 0; age--) {
             if (age > published) continue;
             guint32 sequence = published - age + 1u;
-            guint32 slot = (sequence - 1u) % r->nslots;
+            guint32 slot = (sequence - 1u) % NS_VIDEO_RING_SLOTS;
             ns_video_ring_slot *meta = &r->slots[slot];
             guint32 committed = __atomic_load_n(&meta->sequence,
                                                  __ATOMIC_ACQUIRE);

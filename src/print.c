@@ -12,6 +12,7 @@
 #define NS_PRINT_A4_WIDTH  (210.0 * 96.0 / 25.4)
 #define NS_PRINT_A4_HEIGHT (297.0 * 96.0 / 25.4)
 #define NS_PRINT_MARGIN    (0.5 * 96.0)
+#define NS_PRINT_MAX_SPANS (1u << 20)
 
 typedef struct { double top, bottom; } ns_print_span;
 
@@ -88,7 +89,10 @@ add_text_line_spans(GArray *spans, const ns_box *b, double top, double bottom,
         add_span(spans, top, bottom, page_h);
         return;
     }
-    for (double y = top; y < bottom - 0.5; y += line_h)
+    guint room = spans->len < NS_PRINT_MAX_SPANS
+        ? NS_PRINT_MAX_SPANS - spans->len : 0;
+    for (double y = top; y < bottom - 0.5 && y + line_h > y && room > 0;
+         y += line_h, room--)
         add_span(spans, y, MIN(y + line_h, bottom), page_h);
 }
 

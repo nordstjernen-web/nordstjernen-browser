@@ -58,6 +58,17 @@ open_fb_fd(size_t size)
     }
     return fd;
 }
+
+static void
+close_inherited_fds(long max_fd)
+{
+#ifdef SYS_close_range
+    if (syscall(SYS_close_range, 4u, ~0u, 0u) == 0)
+        return;
+#endif
+    for (long fd = 4; fd < max_fd; fd++)
+        close((int)fd);
+}
 #endif
 #endif
 
@@ -151,6 +162,9 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
             return NULL;
     }
 
+    long max_fd = sysconf(_SC_OPEN_MAX);
+    if (max_fd < 0 || max_fd > 65536)
+        max_fd = 65536;
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
         goto fail;
@@ -167,6 +181,7 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
             dup2(sv[1], 3);
             close(sv[1]);
         }
+        close_inherited_fds(max_fd);
         char wbuf[16], hbuf[16];
         snprintf(wbuf, sizeof wbuf, "%d", max_width);
         snprintf(hbuf, sizeof hbuf, "%d", max_height);
@@ -368,13 +383,11 @@ spawn_inproc(int max_width, int max_height)
         max_width > 32768 || max_height > 32768)
         return NULL;
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
-    unsigned char *fb = malloc(size);
-    if (!fb)
-        return NULL;
+    unsigned char *fb = g_atomic_rc_box_alloc(size);
     memset(fb, 0xff, size);
     ns_rproc_http *r = calloc(1, sizeof *r);
     if (!r) {
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
 
@@ -382,14 +395,14 @@ spawn_inproc(int max_width, int max_height)
     int req[2] = { -1, -1 }, resp[2] = { -1, -1 };
     if (_pipe(req, 1 << 20, _O_BINARY) != 0) {
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     if (_pipe(resp, 1 << 20, _O_BINARY) != 0) {
         _close(req[0]);
         _close(req[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     void *conn = g_inproc_attach(req[0], resp[1], fb, max_width, max_height);
@@ -399,7 +412,7 @@ spawn_inproc(int max_width, int max_height)
         _close(resp[0]);
         _close(resp[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     int client_r = resp[0], client_w = req[1];
@@ -408,7 +421,7 @@ spawn_inproc(int max_width, int max_height)
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     http_set_bufsize(sv[0], 1 << 20);
@@ -418,7 +431,7 @@ spawn_inproc(int max_width, int max_height)
         close(sv[0]);
         close(sv[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     int client_r = sv[0], client_w = sv[0];
@@ -1317,6 +1330,10 @@ ns_rproc_http_print(ns_rproc_http *r, ns_print_setup *out_setup,
     GPtrArray *sheets = g_ptr_array_new();
     for (long i = 0; i < pages; i++) {
         char *path = g_strdup_printf("%s-%ld.png", prefix, i);
+        if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+            g_free(path);
+            break;
+        }
         cairo_surface_t *img = cairo_image_surface_create_from_png(path);
         if (cairo_surface_status(img) == CAIRO_STATUS_SUCCESS)
             g_ptr_array_add(sheets, img);
@@ -1615,7 +1632,7 @@ ns_rproc_http_close(ns_rproc_http *r)
         close(r->sock);
 #endif
         free(r->rxbuf);
-        free(r->map);
+        g_atomic_rc_box_release(r->map);
         free(r);
         return;
     }

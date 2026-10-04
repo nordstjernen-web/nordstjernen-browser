@@ -796,9 +796,14 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
 {
     ns_browser *b = ud;
     if (!b || !url || !*url) return;
-    char *abs = browser_resolve_navigation(b, url);
+    char *abs = ns_url_resolve(b->base_url, url);
+    const char *target = abs ? abs : url;
+    if (!browser_allows_navigation_url(b, target)) {
+        g_free(abs);
+        return;
+    }
     g_free(b->pending_download);
-    b->pending_download = g_strdup_printf("%s\t%s", abs ? abs : url,
+    b->pending_download = g_strdup_printf("%s\t%s", target,
                                           filename ? filename : "");
     g_free(abs);
 }
@@ -1341,7 +1346,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_pending_user_activated = -1;
 
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
-        char *real = g_strdup(url + strlen(NS_UNSAFE_CONTINUE_SCHEME));
+        const char *rest = url;
+        while (g_str_has_prefix(rest, NS_UNSAFE_CONTINUE_SCHEME))
+            rest += strlen(NS_UNSAFE_CONTINUE_SCHEME);
+        if (!*rest) return NULL;
+        char *real = g_strdup(rest);
         char *host = ns_url_host_from(real);
         if (host) {
             ns_safebrowsing_allow_host(host);
@@ -2416,6 +2425,7 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
     if (lx < tx - 3.0 || lx > tx + tw + 3.0 || ly < ty || ly > ty + th)
         return 0;
 
+    const ns_node *box_dom = box->dom;
     double grab;
     if (ly >= thy && ly <= thy + thh) {
         grab = ly - thy;
@@ -2426,13 +2436,15 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
         if (ns < 0) ns = 0;
         if (ns > box->scroll_max_y) ns = box->scroll_max_y;
         box->scroll_y = ns;
-        if (box->dom && browser->js)
-            ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+        if (box_dom && browser->js) {
+            ns_js_dispatch_event(browser->js, box_dom, "scroll", NULL);
+            box = box_find_scrollable_by_dom(browser->layout, box_dom);
+        }
     }
 
     browser->sb_dragging = TRUE;
     browser->sb_box = box;
-    browser->sb_node = box->dom;
+    browser->sb_node = box_dom;
     browser->sb_grab = grab;
     return 1;
 }

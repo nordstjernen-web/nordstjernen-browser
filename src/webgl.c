@@ -80,6 +80,7 @@ typedef struct ns_webgl {
 
 static JSClassID ns_webgl_class_id;
 static GHashTable *g_webgl_by_node;
+static ns_webgl *wgl_active;
 
 static GHashTable *g_webgl_decisions;
 static char *g_webgl_pending;
@@ -226,6 +227,7 @@ wgl_readback_buffer(ns_webgl *g, size_t need)
     if (need <= g->readback_len) return g->readback;
     uint8_t *p = g_try_realloc(g->readback, need);
     if (!p) return NULL;
+    memset(p + g->readback_len, 0, need - g->readback_len);
     g->readback = p;
     g->readback_len = need;
     return p;
@@ -416,6 +418,10 @@ ns_webgl_free(ns_webgl *g)
         ns_gl_context_release(g->gl);
         ns_gl_context_destroy(g->gl);
     }
+    if (wgl_active == g)
+        wgl_active = NULL;
+    else if (wgl_active && wgl_active->gl)
+        ns_gl_context_make_current(wgl_active->gl);
     if (g->syncs) g_hash_table_destroy(g->syncs);
     if (g->bound_buffers) g_hash_table_destroy(g->bound_buffers);
     if (g->buffer_sizes) g_hash_table_destroy(g->buffer_sizes);
@@ -456,6 +462,7 @@ wgl_cur(JSContext *ctx, JSValueConst this_val)
     ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
     if (!g || !g->gl) return NULL;
     ns_gl_context_make_current(g->gl);
+    wgl_active = g;
     ns_webgl_sync_size(g);
     wgl_bind_current_targets(g);
     return g;
@@ -475,11 +482,24 @@ wgl_no_context(JSContext *ctx, JSValueConst this_val)
     return wgl_brand(ctx, this_val) ? JS_UNDEFINED : JS_EXCEPTION;
 }
 
+static void
+wgl_reassert(ns_webgl *keep)
+{
+    if (keep && keep->gl) {
+        ns_gl_context_make_current(keep->gl);
+        wgl_active = keep;
+    }
+}
+
 static int
 argi(JSContext *ctx, int argc, JSValueConst *argv, int i)
 {
     int32_t v = 0;
-    if (i < argc) JS_ToInt32(ctx, &v, argv[i]);
+    if (i < argc) {
+        ns_webgl *keep = wgl_active;
+        JS_ToInt32(ctx, &v, argv[i]);
+        if (JS_IsObject(argv[i])) wgl_reassert(keep);
+    }
     return v;
 }
 
@@ -487,7 +507,11 @@ static double
 argd(JSContext *ctx, int argc, JSValueConst *argv, int i)
 {
     double v = 0;
-    if (i < argc) JS_ToFloat64(ctx, &v, argv[i]);
+    if (i < argc) {
+        ns_webgl *keep = wgl_active;
+        JS_ToFloat64(ctx, &v, argv[i]);
+        if (JS_IsObject(argv[i])) wgl_reassert(keep);
+    }
     return v;
 }
 
@@ -601,15 +625,31 @@ view_bytes(JSContext *ctx, JSValueConst v, size_t *out_len, JSValue *hold)
     return base + off;
 }
 
+static GLenum
+wgl_buffer_binding_query(GLenum target)
+{
+    switch (target) {
+    case GL_ARRAY_BUFFER:              return GL_ARRAY_BUFFER_BINDING;
+    case GL_ELEMENT_ARRAY_BUFFER:      return GL_ELEMENT_ARRAY_BUFFER_BINDING;
+    case GL_COPY_READ_BUFFER:          return GL_COPY_READ_BUFFER_BINDING;
+    case GL_COPY_WRITE_BUFFER:         return GL_COPY_WRITE_BUFFER_BINDING;
+    case GL_PIXEL_PACK_BUFFER:         return GL_PIXEL_PACK_BUFFER_BINDING;
+    case GL_PIXEL_UNPACK_BUFFER:       return GL_PIXEL_UNPACK_BUFFER_BINDING;
+    case GL_TRANSFORM_FEEDBACK_BUFFER: return GL_TRANSFORM_FEEDBACK_BUFFER_BINDING;
+    case GL_UNIFORM_BUFFER:            return GL_UNIFORM_BUFFER_BINDING;
+    default:                           return 0;
+    }
+}
+
 static GLuint
 wgl_bound_buffer(ns_webgl *g, GLenum target)
 {
     if (!g) return 0;
-    if (target == GL_ARRAY_BUFFER) return g->bound_array_buffer;
-    if (target == GL_ELEMENT_ARRAY_BUFFER) return g->bound_element_array_buffer;
-    if (!g->bound_buffers) return 0;
-    return GPOINTER_TO_UINT(g_hash_table_lookup(g->bound_buffers,
-                                                GUINT_TO_POINTER(target)));
+    GLenum query = wgl_buffer_binding_query(target);
+    if (!query) return 0;
+    GLint name = 0;
+    glGetIntegerv(query, &name);
+    return name > 0 ? (GLuint)name : 0;
 }
 
 static void
@@ -787,23 +827,34 @@ wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
 {
     if (!g || vertex_last < 0) return TRUE;
     uint64_t used = wgl_program_attrib_mask();
-    for (int i = 0; i < NS_WEBGL_MAX_VATTRIBS && i < 64; i++) {
-        ns_gl_vattr *a = &g->attribs[i];
-        if (!a->enabled || !a->has_ptr) continue;
+    for (int i = 0; i < 64; i++) {
         if (!(used & ((uint64_t)1 << i))) continue;
-        if (a->buffer == 0) return FALSE;
-        int ebytes = wgl_attr_elem_bytes(a->type, a->size);
-        if (ebytes <= 0) continue;
-        int64_t last = a->divisor == 0 ? vertex_last
-                                       : (instances - 1) / (int64_t)a->divisor;
+        GLuint index = (GLuint)i;
+        GLint enabled = 0, buffer = 0, size = 0, type = 0, stride = 0;
+        GLint divisor = 0;
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
+        if (!enabled) continue;
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &buffer);
+        if (buffer <= 0) return FALSE;
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_SIZE, &size);
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_TYPE, &type);
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &stride);
+        if (g->version >= 2)
+            glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &divisor);
+        void *pointer = NULL;
+        glGetVertexAttribPointerv(index, GL_VERTEX_ATTRIB_ARRAY_POINTER, &pointer);
+        int ebytes = wgl_attr_elem_bytes((GLenum)type, size);
+        if (ebytes <= 0 || stride < 0) return FALSE;
+        int64_t last = divisor == 0 ? vertex_last
+                                    : (instances - 1) / (int64_t)(GLuint)divisor;
         if (last < 0) continue;
-        uint64_t eff = a->stride ? (uint64_t)a->stride : (uint64_t)ebytes;
+        uint64_t eff = stride ? (uint64_t)stride : (uint64_t)ebytes;
         uint64_t need;
         if (__builtin_mul_overflow(eff, (uint64_t)last, &need) ||
-            __builtin_add_overflow(need, (uint64_t)a->offset, &need) ||
+            __builtin_add_overflow(need, (uint64_t)(uintptr_t)pointer, &need) ||
             __builtin_add_overflow(need, (uint64_t)ebytes, &need))
             return FALSE;
-        if (need > wgl_buffer_size(g, a->buffer)) return FALSE;
+        if (need > wgl_buffer_size(g, (GLuint)buffer)) return FALSE;
     }
     return TRUE;
 }
@@ -821,6 +872,7 @@ wgl_floats(JSContext *ctx, JSValueConst v, float *out, int max)
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return cnt;
     }
+    ns_webgl *keep = wgl_active;
     JSValue lv = JS_GetPropertyStr(ctx, v, "length");
     uint32_t len = 0;
     JS_ToUint32(ctx, &len, lv);
@@ -834,6 +886,7 @@ wgl_floats(JSContext *ctx, JSValueConst v, float *out, int max)
         JS_FreeValue(ctx, e);
         out[i] = (float)d;
     }
+    wgl_reassert(keep);
     return cnt;
 }
 
@@ -851,6 +904,7 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return cnt;
     }
+    ns_webgl *keep = wgl_active;
     JSValue lv = JS_GetPropertyStr(ctx, v, "length");
     uint32_t len = 0;
     JS_ToUint32(ctx, &len, lv);
@@ -864,6 +918,7 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
         JS_FreeValue(ctx, e);
         out[i] = d;
     }
+    wgl_reassert(keep);
     return cnt;
 }
 
@@ -875,11 +930,14 @@ static int
 wgl_components(int format)
 {
     switch (format) {
-    case GL_RGBA: case GL_RGBA_INTEGER:            return 4;
-    case GL_RGB:  case GL_RGB_INTEGER:             return 3;
+    case GL_RED:  case GL_RED_INTEGER:
+    case GL_ALPHA: case GL_LUMINANCE:
+    case GL_DEPTH_COMPONENT:                       return 1;
     case GL_RG:   case GL_RG_INTEGER:
     case GL_LUMINANCE_ALPHA: case GL_DEPTH_STENCIL: return 2;
-    default:                                       return 1;
+    case GL_RGB:  case GL_RGB_INTEGER:
+    case GL_SRGB_EXT:                              return 3;
+    default:                                       return 4;
     }
 }
 
@@ -888,9 +946,10 @@ wgl_type_bytes(int type)
 {
     switch (type) {
     case GL_BYTE: case GL_UNSIGNED_BYTE:                return 1;
-    case GL_SHORT: case GL_UNSIGNED_SHORT: case GL_HALF_FLOAT: return 2;
-    case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT:   return 4;
-    default:                                            return 1;
+    case GL_SHORT: case GL_UNSIGNED_SHORT:
+    case GL_HALF_FLOAT: case GL_HALF_FLOAT_OES:         return 2;
+    case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT:
+    default:                                            return 4;
     }
 }
 
@@ -2126,7 +2185,7 @@ wgl_elements_in_range(ns_webgl *g, GLsizei count, GLenum type, GLintptr offset)
     if (count < 0 || offset < 0) return FALSE;
     int isz = wgl_index_bytes(type);
     if (!isz) return FALSE;
-    size_t size = wgl_buffer_size(g, g ? g->bound_element_array_buffer : 0);
+    size_t size = wgl_buffer_size(g, wgl_bound_buffer(g, GL_ELEMENT_ARRAY_BUFFER));
     if (size == 0) return FALSE;
     uint64_t span;
     if (__builtin_mul_overflow((uint64_t)count, (uint64_t)isz, &span) ||
@@ -2136,17 +2195,43 @@ wgl_elements_in_range(ns_webgl *g, GLsizei count, GLenum type, GLintptr offset)
 }
 
 static gboolean
+wgl_transform_feedback_active(ns_webgl *g)
+{
+    if (g->version < 2) return FALSE;
+    GLint active = 0;
+    glGetIntegerv(GL_TRANSFORM_FEEDBACK_ACTIVE, &active);
+    return active != 0;
+}
+
+static GByteArray *
+wgl_elem_shadow_load(ns_webgl *g, GLuint name)
+{
+    wgl_elem_shadow_clear(g, name);
+    size_t size = wgl_buffer_size(g, name);
+    if (g->version < 2 || size == 0) return NULL;
+    const uint8_t *p = glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, 0,
+                                        (GLsizeiptr)size, GL_MAP_READ_BIT);
+    if (!p) return NULL;
+    wgl_elem_shadow_set(g, name, p, size);
+    glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+    return wgl_elem_shadow_get(g, name);
+}
+
+static gboolean
 wgl_draw_elements_ok(ns_webgl *g, GLsizei count, GLenum type, GLintptr offset,
                      int64_t instances)
 {
     if (!wgl_elements_in_range(g, count, type, offset)) return FALSE;
     if (count <= 0 || instances <= 0) return TRUE;
-    GByteArray *sh = wgl_elem_shadow_get(g, g->bound_element_array_buffer);
-    if (!sh) return TRUE;
+    GLuint ebuf = wgl_bound_buffer(g, GL_ELEMENT_ARRAY_BUFFER);
+    GByteArray *sh = wgl_elem_shadow_get(g, ebuf);
+    if (!sh || wgl_transform_feedback_active(g))
+        sh = wgl_elem_shadow_load(g, ebuf);
+    if (!sh) return FALSE;
     uint64_t mx;
     if (!wgl_elem_max_index(sh->data, sh->len, offset, count,
                             wgl_index_bytes(type), g->version, &mx))
-        return TRUE;
+        return FALSE;
     return wgl_attribs_cover(g, (int64_t)mx, instances);
 }
 
@@ -2154,12 +2239,13 @@ static JSValue
 wgl_drawArrays(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLint first = argi(ctx, argc, argv, 1);
     GLsizei count = argi(ctx, argc, argv, 2);
     if (first < 0 || count < 0) return JS_UNDEFINED;
     if (count > 0 && !wgl_attribs_cover(g, (int64_t)first + count - 1, 1))
         return JS_UNDEFINED;
-    glDrawArrays((GLenum)argi(ctx, argc, argv, 0), first, count);
+    glDrawArrays(mode, first, count);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2168,12 +2254,12 @@ static JSValue
 wgl_drawElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLsizei count = argi(ctx, argc, argv, 1);
     GLenum type = (GLenum)argi(ctx, argc, argv, 2);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 3);
     if (!wgl_draw_elements_ok(g, count, type, offset, 1)) return JS_UNDEFINED;
-    glDrawElements((GLenum)argi(ctx, argc, argv, 0), count, type,
-                   (const void *)offset);
+    glDrawElements(mode, count, type, (const void *)offset);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2264,7 +2350,7 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
         cairo_surface_destroy(s);
         return NULL;
     }
-    uint8_t *out = g_try_malloc((size_t)total);
+    uint8_t *out = g_try_malloc0((size_t)total);
     if (!out) {
         cairo_surface_destroy(s);
         return NULL;
@@ -2298,6 +2384,34 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
     *out_w = w;
     *out_h = h;
     return out;
+}
+
+typedef struct {
+    GLint align, row_length, skip_rows, skip_pixels;
+} wgl_unpack_state;
+
+static void
+wgl_unpack_tight(ns_webgl *g, wgl_unpack_state *saved)
+{
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &saved->align);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (g->version < 2) return;
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &saved->row_length);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &saved->skip_rows);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &saved->skip_pixels);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+}
+
+static void
+wgl_unpack_restore(ns_webgl *g, const wgl_unpack_state *saved)
+{
+    glPixelStorei(GL_UNPACK_ALIGNMENT, saved->align);
+    if (g->version < 2) return;
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, saved->row_length);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, saved->skip_rows);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, saved->skip_pixels);
 }
 
 static JSValue
@@ -2368,7 +2482,10 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
                                             &w, &h, &threw);
             if (threw) return JS_EXCEPTION;
             if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
                 glTexImage2D(target, level, internalformat, w, h, 0, format, type, rgba);
+                wgl_unpack_restore(g, &saved);
                 g_free(rgba);
             }
         }
@@ -2440,7 +2557,10 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                                             &w, &h, &threw);
             if (threw) return JS_EXCEPTION;
             if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
                 glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, rgba);
+                wgl_unpack_restore(g, &saved);
                 g_free(rgba);
             }
         }
@@ -2712,6 +2832,7 @@ static JSValue
 wgl_drawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLint first = argi(ctx, argc, argv, 1);
     GLsizei count = argi(ctx, argc, argv, 2);
     GLsizei instances = argi(ctx, argc, argv, 3);
@@ -2719,7 +2840,7 @@ wgl_drawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     if (count > 0 && instances > 0 &&
         !wgl_attribs_cover(g, (int64_t)first + count - 1, instances))
         return JS_UNDEFINED;
-    glDrawArraysInstanced((GLenum)argi(ctx, argc, argv, 0), first, count, instances);
+    glDrawArraysInstanced(mode, first, count, instances);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2728,14 +2849,14 @@ static JSValue
 wgl_drawElementsInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLsizei count = argi(ctx, argc, argv, 1);
     GLenum type = (GLenum)argi(ctx, argc, argv, 2);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 3);
     GLsizei instances = argi(ctx, argc, argv, 4);
     if (instances < 0 || !wgl_draw_elements_ok(g, count, type, offset, instances))
         return JS_UNDEFINED;
-    glDrawElementsInstanced((GLenum)argi(ctx, argc, argv, 0), count, type,
-                            (const void *)offset, instances);
+    glDrawElementsInstanced(mode, count, type, (const void *)offset, instances);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2923,9 +3044,13 @@ static JSValue
 wgl_copyBufferSubData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glCopyBufferSubData((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1),
-                        (GLintptr)argi(ctx, argc, argv, 2), (GLintptr)argi(ctx, argc, argv, 3),
-                        (GLsizeiptr)argi(ctx, argc, argv, 4));
+    GLenum read_target = (GLenum)argi(ctx, argc, argv, 0);
+    GLenum write_target = (GLenum)argi(ctx, argc, argv, 1);
+    GLintptr read_offset = (GLintptr)argi(ctx, argc, argv, 2);
+    GLintptr write_offset = (GLintptr)argi(ctx, argc, argv, 3);
+    GLsizeiptr size = (GLsizeiptr)argi(ctx, argc, argv, 4);
+    glCopyBufferSubData(read_target, write_target, read_offset, write_offset, size);
+    wgl_elem_shadow_clear(g, wgl_bound_buffer(g, write_target));
     return JS_UNDEFINED;
 }
 
@@ -3108,13 +3233,14 @@ static JSValue
 wgl_drawRangeElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
+    GLuint start = (GLuint)argi(ctx, argc, argv, 1);
+    GLuint end = (GLuint)argi(ctx, argc, argv, 2);
     GLsizei count = argi(ctx, argc, argv, 3);
     GLenum type = (GLenum)argi(ctx, argc, argv, 4);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 5);
     if (!wgl_draw_elements_ok(g, count, type, offset, 1)) return JS_UNDEFINED;
-    glDrawRangeElements((GLenum)argi(ctx, argc, argv, 0), (GLuint)argi(ctx, argc, argv, 1),
-                        (GLuint)argi(ctx, argc, argv, 2), count, type,
-                        (const void *)offset);
+    glDrawRangeElements(mode, start, end, count, type, (const void *)offset);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -3342,6 +3468,7 @@ wgl_endTransformFeedback(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     (void)argc; (void)argv;
     WGL_GET(0);
     glEndTransformFeedback();
+    if (g->elem_data) g_hash_table_remove_all(g->elem_data);
     return JS_UNDEFINED;
 }
 
@@ -3503,11 +3630,14 @@ static JSValue
 wgl_clientWaitSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLbitfield flags = (GLbitfield)argi(ctx, argc, argv, 1);
+    double timeout = argd(ctx, argc, argv, 2);
+    GLuint64 ns = !(timeout > 0) ? 0
+                : timeout >= 18446744073709551616.0 ? UINT64_MAX
+                : (GLuint64)timeout;
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (!s) return JS_NewInt32(ctx, (int)GL_WAIT_FAILED);
-    double timeout = argd(ctx, argc, argv, 2);
-    GLenum r = glClientWaitSync(s, (GLbitfield)argi(ctx, argc, argv, 1),
-                                (GLuint64)timeout);
+    GLenum r = glClientWaitSync(s, flags, ns);
     return JS_NewInt32(ctx, (int)r);
 }
 
@@ -3515,9 +3645,10 @@ static JSValue
 wgl_waitSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLbitfield flags = (GLbitfield)argi(ctx, argc, argv, 1);
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (s)
-        glWaitSync(s, (GLbitfield)argi(ctx, argc, argv, 1), GL_TIMEOUT_IGNORED);
+        glWaitSync(s, flags, GL_TIMEOUT_IGNORED);
     return JS_UNDEFINED;
 }
 
@@ -3525,11 +3656,12 @@ static JSValue
 wgl_getSyncParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLsync s = wgl_sync_lookup(ctx, g, argv[0]);
     if (!s) return JS_NULL;
     GLint v = 0;
     GLsizei len = 0;
-    glGetSynciv(s, (GLenum)argi(ctx, argc, argv, 1), 1, &len, &v);
+    glGetSynciv(s, pname, 1, &len, &v);
     return JS_NewInt32(ctx, v);
 }
 
@@ -4625,6 +4757,41 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     return obj;
 }
 
+typedef struct wgl_pack_state {
+    gboolean extended;
+    GLint    align, row_length, skip_rows, skip_pixels, pack_buffer;
+} wgl_pack_state;
+
+static void
+wgl_pack_tight(wgl_pack_state *s)
+{
+    s->extended = epoxy_is_desktop_gl() || epoxy_gl_version() >= 30;
+    s->align = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &s->align);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    if (!s->extended) return;
+    s->row_length = s->skip_rows = s->skip_pixels = s->pack_buffer = 0;
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &s->row_length);
+    glGetIntegerv(GL_PACK_SKIP_ROWS, &s->skip_rows);
+    glGetIntegerv(GL_PACK_SKIP_PIXELS, &s->skip_pixels);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &s->pack_buffer);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    if (s->pack_buffer) glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+}
+
+static void
+wgl_pack_restore(const wgl_pack_state *s)
+{
+    glPixelStorei(GL_PACK_ALIGNMENT, s->align);
+    if (!s->extended) return;
+    glPixelStorei(GL_PACK_ROW_LENGTH, s->row_length);
+    glPixelStorei(GL_PACK_SKIP_ROWS, s->skip_rows);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, s->skip_pixels);
+    if (s->pack_buffer) glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)s->pack_buffer);
+}
+
 cairo_surface_t *
 ns_webgl_canvas_surface(const ns_node *canvas)
 {
@@ -4664,8 +4831,10 @@ ns_webgl_canvas_surface(const ns_node *canvas)
 
     uint8_t *rgba = wgl_readback_buffer(g, (size_t)w * (size_t)h * 4);
     if (!rgba) return g->surf;
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    wgl_pack_state pack;
+    wgl_pack_tight(&pack);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    wgl_pack_restore(&pack);
 
     for (int y = 0; y < h; y++) {
         const uint8_t *src = rgba + (size_t)(h - 1 - y) * (size_t)w * 4;

@@ -311,8 +311,9 @@ ns_window_performance_now(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_perf_entry_to_js(JSContext *ctx, const ns_perf_entry *e)
+ns_perf_entry_to_js(JSContext *ctx, const ns_perf_entry *entry)
 {
+    ns_perf_entry *e = ns_perf_entry_clone(entry);
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e->name ? e->name : ""));
     JS_SetPropertyStr(ctx, o, "entryType",
@@ -371,6 +372,7 @@ ns_perf_entry_to_js(JSContext *ctx, const ns_perf_entry *e)
         JS_FreeValue(ctx, ctor);
         JS_FreeValue(ctx, g);
     }
+    ns_perf_entry_free(e);
     ns_bind_fn(ctx, o, "toJSON", ns_own_data_props_toJSON, 0);
     return o;
 }
@@ -871,10 +873,11 @@ ns_perf_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         if (!JS_IsFunction(ctx, o->cb)) continue;
         GPtrArray *records = o->records;
         o->records = g_ptr_array_new_with_free_func(ns_perf_entry_free);
+        JSValue wrapper = JS_DupValue(ctx, o->wrapper);
         JSValue arr = ns_perf_records_to_array(ctx, records);
         JSValue list = ns_perf_entry_list_from_array(ctx, arr);
-        JSValueConst call_args[2] = { list, JS_DupValue(ctx, o->wrapper) };
-        JSValue ret = JS_Call(ctx, o->cb, o->wrapper, 2, call_args);
+        JSValueConst call_args[2] = { list, wrapper };
+        JSValue ret = JS_Call(ctx, o->cb, wrapper, 2, call_args);
         if (JS_IsException(ret)) {
             JSValue ex = JS_GetException(ctx);
             if (js->log_cb) {
@@ -889,7 +892,7 @@ ns_perf_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
             JS_FreeValue(ctx, ex);
         }
         JS_FreeValue(ctx, ret);
-        JS_FreeValue(ctx, (JSValue)call_args[1]);
+        JS_FreeValue(ctx, wrapper);
         JS_FreeValue(ctx, list);
         JS_FreeValue(ctx, arr);
         g_ptr_array_free(records, TRUE);

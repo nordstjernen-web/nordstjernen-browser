@@ -38,6 +38,8 @@ static JSClassID ns_wasm_global_class_id;
 static JSClassID ns_wasm_func_class_id;
 
 static GMutex ns_wasm_link_mutex;
+static GMutex ns_wasm_buffers_mutex;
+static GHashTable *ns_wasm_buffers;
 
 typedef struct {
     JSContext *ctx;
@@ -558,10 +560,36 @@ ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
 }
 
 static void
+ns_wasm_buffer_track(JSValueConst buffer, gboolean live)
+{
+    g_mutex_lock(&ns_wasm_buffers_mutex);
+    if (!ns_wasm_buffers)
+        ns_wasm_buffers = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (live)
+        g_hash_table_add(ns_wasm_buffers, JS_VALUE_GET_PTR(buffer));
+    else
+        g_hash_table_remove(ns_wasm_buffers, JS_VALUE_GET_PTR(buffer));
+    g_mutex_unlock(&ns_wasm_buffers_mutex);
+}
+
+static gboolean
+ns_wasm_buffer_is_memory(JSValueConst v)
+{
+    if (!JS_IsObject(v))
+        return FALSE;
+    g_mutex_lock(&ns_wasm_buffers_mutex);
+    gboolean hit = ns_wasm_buffers &&
+                   g_hash_table_contains(ns_wasm_buffers, JS_VALUE_GET_PTR(v));
+    g_mutex_unlock(&ns_wasm_buffers_mutex);
+    return hit;
+}
+
+static void
 ns_wasm_memory_detach_buffer(ns_wasm_memory *m)
 {
     if (!m || JS_IsUndefined(m->buffer))
         return;
+    ns_wasm_buffer_track(m->buffer, FALSE);
     JS_DetachArrayBuffer(m->ctx, m->buffer);
     JS_FreeValue(m->ctx, m->buffer);
     m->buffer = JS_UNDEFINED;
@@ -632,7 +660,48 @@ ns_wasm_memory_buffer_get(JSContext *ctx, JSValueConst this_val)
     m->buffer = buffer;
     m->base = base;
     m->size = size;
+    ns_wasm_buffer_track(m->buffer, TRUE);
     return JS_DupValue(ctx, m->buffer);
+}
+
+static JSValue
+ns_wasm_buffer_transfer_guard(JSContext *ctx, JSValueConst this_val, int argc,
+                              JSValueConst *argv, int magic,
+                              JSValueConst *func_data)
+{
+    (void)magic;
+    if (ns_wasm_buffer_is_memory(this_val))
+        return JS_ThrowTypeError(ctx, "cannot transfer the buffer of a "
+                                      "WebAssembly.Memory");
+    return JS_Call(ctx, func_data[0], this_val, argc, argv);
+}
+
+static void
+ns_wasm_guard_buffer_transfer(JSContext *ctx, JSValueConst global)
+{
+    static const char *const names[] = {
+        "transfer", "transferToFixedLength", "transferToImmutable",
+    };
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ArrayBuffer");
+    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
+                                      : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    for (gsize i = 0; JS_IsObject(proto) && i < G_N_ELEMENTS(names); i++) {
+        JSValue orig = JS_GetPropertyStr(ctx, proto, names[i]);
+        if (JS_IsFunction(ctx, orig)) {
+            JSValue guard = JS_NewCFunctionData(ctx, ns_wasm_buffer_transfer_guard,
+                                                0, 0, 1, &orig);
+            JS_DefinePropertyValueStr(ctx, guard, "name",
+                                      JS_NewString(ctx, names[i]),
+                                      JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, proto, names[i], guard,
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        }
+        JS_FreeValue(ctx, orig);
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, proto);
 }
 
 static JSValue
@@ -2440,6 +2509,7 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, tag_sym);
     JS_FreeValue(ctx, sym_ctor);
     JS_DefinePropertyValueStr(ctx, global, "WebAssembly", ns, iface);
+    ns_wasm_guard_buffer_transfer(ctx, global);
 
     JSValue boot = JS_Eval(ctx, ns_wasm_bootstrap_js,
                            sizeof(ns_wasm_bootstrap_js) - 1,

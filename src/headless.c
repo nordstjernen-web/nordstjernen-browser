@@ -1046,6 +1046,20 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             break;
         }
     }
+    const ns_node *hit_img = hit && hit->dom &&
+                             ns_node_is_element_named(hit->dom, "img")
+                             ? hit->dom : NULL;
+    double img_x0 = 0, img_y0 = 0, img_w = 0, img_h = 0;
+    if (hit_img) {
+        img_x0 = hit->x + hit->margin.left + hit->border.left +
+                 hit->padding.left;
+        img_y0 = hit->y + hit->margin.top + hit->border.top +
+                 hit->padding.top;
+        img_w = hit->content_width;
+        img_h = hit->content_height;
+    }
+    g_autofree char *link_href = link && link->href && *link->href
+                                 ? g_strdup(link->href) : NULL;
     fprintf(stderr, "[headless] click hit <%s>\n",
             dom->name ? dom->name : "(text)");
     const ns_node *editable = NULL;
@@ -1079,16 +1093,12 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         headless_submit_form_from(fc, nav, cur);
         return;
     }
-    if (hit && hit->dom && ns_node_is_element_named(hit->dom, "img") && nav) {
-        const char *usemap = ns_element_get_attr(hit->dom, "usemap");
+    if (hit_img && nav) {
+        const char *usemap = ns_element_get_attr(hit_img, "usemap");
         if (usemap && *usemap && fc->doc) {
-            double cx0 = hit->x + hit->margin.left +
-                         hit->border.left + hit->padding.left;
-            double cy0 = hit->y + hit->margin.top +
-                         hit->border.top + hit->padding.top;
-            char *ahref = ns_image_map_resolve(fc->doc, usemap, x - cx0, y - cy0,
-                                               hit->content_width,
-                                               hit->content_height, NULL);
+            char *ahref = ns_image_map_resolve(fc->doc, usemap,
+                                               x - img_x0, y - img_y0,
+                                               img_w, img_h, NULL);
             if (ahref) {
                 g_free(nav->pending_url);
                 nav->pending_url = ahref;
@@ -1096,9 +1106,9 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             }
         }
     }
-    if (link && link->href && *link->href && nav) {
+    if (link_href && nav) {
         g_free(nav->pending_url);
-        nav->pending_url = g_strdup(link->href);
+        nav->pending_url = g_steal_pointer(&link_href);
         return;
     }
     if (nav) {
@@ -1107,14 +1117,9 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             const char *href = ns_element_get_attr(cur, "href");
             if (!href || !*href) break;
             char *url;
-            if (hit && hit->dom && ns_node_is_element_named(hit->dom, "img") &&
-                ns_element_get_attr(hit->dom, "ismap")) {
-                double cx0 = hit->x + hit->margin.left +
-                             hit->border.left + hit->padding.left;
-                double cy0 = hit->y + hit->margin.top +
-                             hit->border.top + hit->padding.top;
-                int ix = (int)(x - cx0); if (ix < 0) ix = 0;
-                int iy = (int)(y - cy0); if (iy < 0) iy = 0;
+            if (hit_img && ns_element_get_attr(hit_img, "ismap")) {
+                int ix = (int)(x - img_x0); if (ix < 0) ix = 0;
+                int iy = (int)(y - img_y0); if (iy < 0) iy = 0;
                 url = g_strdup_printf("%s?%d,%d", href, ix, iy);
             } else {
                 url = g_strdup(href);
@@ -1340,15 +1345,6 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
     ns_js_note_pointer_input(fc->js, FALSE);
     if (!fc->focused || !name || !*name) return;
     ns_node *t = (ns_node *)fc->focused;
-    const char *cur = ns_node_editable_value(t);
-    gsize clen = strlen(cur);
-    if (fc->caret > clen) fc->caret = clen;
-    if (fc->anchor > clen) fc->anchor = clen;
-    gsize lo = MIN(fc->caret, fc->anchor);
-    gsize hi = MAX(fc->caret, fc->anchor);
-    gboolean has_sel = lo != hi;
-    gboolean multiline = (t->name && strcmp(t->name, "textarea") == 0) ||
-                         ns_node_is_contenteditable_host(t);
     gboolean key_prevented = FALSE;
     if (fc->js) {
         int key_code = 0;
@@ -1374,6 +1370,15 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
             ns_js_consume_mutated(fc->js);
         }
     }
+    const char *cur = ns_node_editable_value(t);
+    gsize clen = strlen(cur);
+    if (fc->caret > clen) fc->caret = clen;
+    if (fc->anchor > clen) fc->anchor = clen;
+    gsize lo = MIN(fc->caret, fc->anchor);
+    gsize hi = MAX(fc->caret, fc->anchor);
+    gboolean has_sel = lo != hi;
+    gboolean multiline = (t->name && strcmp(t->name, "textarea") == 0) ||
+                         ns_node_is_contenteditable_host(t);
     if (g_ascii_strcasecmp(name, "Tab") == 0) {
         if (!key_prevented && fc->js) {
             const ns_node *next =
