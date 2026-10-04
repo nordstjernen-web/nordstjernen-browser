@@ -30,6 +30,28 @@ Changelog:
   - Integer overflow and runaway sizes: textarea rows, fitted input
     columns, multicol splits, animation delays, SVG arcs and sizes, PDF
     page rasters, print spans, Web Audio and microphone buffers.
+* More fixes from the security audit:
+  - `fetch()` and message delivery take the requesting document from the
+    engine, not from `this.location`, which a page could forge to reach
+    about: pages, local files or another site's cookies.
+  - Engine-private `data-nd-*` attributes can no longer be read or written
+    through `toggleAttribute`, `setAttributeNode`, `Attr.value` or the
+    namespaced attribute methods; a page could otherwise make
+    `<input type=file>` read any local file the renderer can open.
+  - The unused `__ndDocEnter`/`__ndDocExit` globals are gone.
+  - WebGL validates draws against the GL driver's own buffer and
+    vertex-array state, keeps the calling context current while page
+    `valueOf` code runs, and reads the canvas back without the page's pack
+    settings; WebGPU keeps borrowed handles and mapped ranges alive while
+    in use.
+  - Use-after-free fixes for live collections, IntersectionObserver and
+    ResizeObserver callbacks, Attr wrappers, form validation, pointer lock,
+    `scrollIntoView()`, `document.scripts`, `document.body`, table row and
+    cell insertion, `hashchange`, frame creation, and DOM insertion methods
+    whose custom element callbacks move nodes; freed nodes no longer stay
+    the `:active`/`:hover`/`:focus` element.
+  - Media elements only send engine-issued tokens to the audio helper, and
+    long chains of safe-browsing "continue" prefixes no longer recurse.
 * The shell and helpers trust the sandboxed renderer less: media helper
   commands with line breaks or over-long lines are refused, saved pages
   are not copied through symlinks, cursor names are limited to CSS
