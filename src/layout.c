@@ -3865,6 +3865,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             .start = elem_start,
             .len = ctx->out->len - elem_start,
             .dom = n,
+            .style = s,
         };
         g_array_append_val(ctx->attrs, elem);
     }
@@ -5879,10 +5880,110 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
 
 }
 
+static void
+inline_insert_line_height(NsPangoAttrList *list, double px, guint start,
+                          guint end)
+{
+    NsPangoAttribute *a = ns_pango_attr_line_height_new_absolute(
+        (int)lround(px * NS_PANGO_SCALE));
+    a->start_index = start;
+    a->end_index = end;
+    ns_pango_attr_list_insert(list, a);
+}
+
+static void
+inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
+{
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind == NS_INLINE_SPACER && r->len > 0)
+            inline_insert_line_height(list, 0, (guint)r->start,
+                                      (guint)(r->start + r->len));
+    }
+}
+
+static gboolean
+inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
+                          double strut_px)
+{
+    inline_insert_line_height(list, strut_px, 0, G_MAXUINT);
+    if (!box || !box->attrs) return FALSE;
+    gboolean has_shorter = FALSE;
+    for (guint i = box->attrs->len; i-- > 0;) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT || !r->style || r->len == 0)
+            continue;
+        double px = ns_paint_css_line_height_px(r->style);
+        if (px <= 0 || fabs(px - strut_px) < 0.01) continue;
+        if (px < strut_px) has_shorter = TRUE;
+        inline_insert_line_height(list, px, (guint)r->start,
+                                  (guint)(r->start + r->len));
+    }
+    inline_insert_spacer_line_heights(list, box);
+    return has_shorter;
+}
+
+static void
+inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
+                           const ns_box *box, double strut_px)
+{
+    if (!box->text) return;
+    gsize n = strlen(box->text);
+    if (n == 0) return;
+    enum { STRUT_ROOT, STRUT_SHORTER, STRUT_SPACER };
+    guint8 *kind = g_new0(guint8, n);
+    for (guint i = box->attrs->len; i-- > 0;) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
+        double px = ns_paint_css_line_height_px(r->style);
+        guint8 k = px > 0 && px < strut_px - 0.01 ? STRUT_SHORTER : STRUT_ROOT;
+        for (gsize b = r->start; b < r->start + r->len && b < n; b++)
+            kind[b] = k;
+    }
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_SPACER) continue;
+        for (gsize b = r->start; b < r->start + r->len && b < n; b++)
+            kind[b] = STRUT_SPACER;
+    }
+    if (!*ns_pango_layout_get_text(layout))
+        ns_pango_layout_set_text(layout, box->text, -1);
+    NsPangoAttrList *with_struts = NULL;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        if (!line || line->length <= 0) continue;
+        gsize s0 = (gsize)line->start_index;
+        gsize s1 = MIN(n, s0 + (gsize)line->length);
+        gboolean shorter = FALSE, root = FALSE;
+        for (gsize b = s0; b < s1; b++) {
+            if (kind[b] == STRUT_SHORTER) shorter = TRUE;
+            else if (kind[b] == STRUT_ROOT) root = TRUE;
+        }
+        if (!shorter || root) continue;
+        if (!with_struts) with_struts = ns_pango_attr_list_copy(list);
+        inline_insert_line_height(with_struts, strut_px, (guint)s0, (guint)s1);
+    } while (ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    g_free(kind);
+    if (!with_struts) return;
+    inline_insert_spacer_line_heights(with_struts, box);
+    ns_pango_layout_set_attributes(layout, with_struts);
+    ns_pango_attr_list_unref(with_struts);
+}
+
 void
 ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
                            const ns_box *box)
 {
+    const double *strut_px = g_object_get_data(G_OBJECT(layout),
+                                               NS_CSS_LINE_HEIGHT_KEY);
+    gboolean has_shorter = strut_px && list &&
+                           inline_apply_line_heights(list, box, *strut_px);
     ns_pango_layout_set_attributes(layout, list);
     if (!box || !box->attrs) return;
     gboolean stretched = FALSE;
@@ -5912,6 +6013,7 @@ ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
         stretched = TRUE;
     }
     if (stretched) ns_pango_layout_context_changed(layout);
+    if (has_shorter) inline_restore_strut_lines(layout, list, box, *strut_px);
 }
 
 static double
@@ -6377,6 +6479,19 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     double lh_control = inline_control_line_height(box, lh_default);
     double *line_heights = g_new(double, line_count);
     for (int i = 0; i < line_count; i++) line_heights[i] = lh_control;
+    if (g_object_get_data(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY) &&
+        lh_control <= lh_default + 0.01) {
+        NsPangoLayoutIter *line_iter = ns_pango_layout_get_iter(layout);
+        int j = 0;
+        do {
+            NsPangoRectangle logical;
+            ns_pango_layout_iter_get_line_extents(line_iter, NULL, &logical);
+            if (j < line_count)
+                line_heights[j] = (double)logical.height / NS_PANGO_SCALE;
+            j++;
+        } while (ns_pango_layout_iter_next_line(line_iter));
+        ns_pango_layout_iter_free(line_iter);
+    }
     if (box->inline_atomics) {
         for (guint i = 0; i < box->inline_atomics->len; i++) {
             const ns_inline_atomic *a =
