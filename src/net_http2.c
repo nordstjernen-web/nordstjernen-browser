@@ -299,6 +299,7 @@ typedef struct ns_h2 {
     gboolean          sink_full;
     gboolean          stream_closed;
     gboolean          proto_error;
+    size_t            header_bytes;
 
     const guint8     *body;
     size_t            body_len;
@@ -348,6 +349,7 @@ struct ns_conn {
 #define NS_CONN_MAX_REUSE 1000
 #define NS_CONN_MAX_IDLE_US ((gint64)60 * G_USEC_PER_SEC)
 #define NS_POOL_MAX_PER_ORIGIN 8
+#define NS_H2_MAX_HEADER_BYTES (1024 * 1024)
 
 static void ns_h3_altsvc_note(const char *url, const char *value, size_t vlen);
 #ifdef NS_HTTP_HAVE_HTTP3
@@ -852,8 +854,13 @@ static void
 ns_h2_on_response_header(ns_h2 *c, const char *name, size_t namelen,
                          const char *value, size_t valuelen)
 {
-    if (namelen == 0)
+    if (namelen == 0 || c->proto_error)
         return;
+    c->header_bytes += namelen + valuelen;
+    if (c->header_bytes > NS_H2_MAX_HEADER_BYTES) {
+        c->proto_error = TRUE;
+        return;
+    }
     if (name[0] == ':') {
         if (namelen == 7 && memcmp(name, ":status", 7) == 0) {
             char *tmp = g_strndup(value, valuelen);
@@ -957,7 +964,7 @@ ns_h2_header_cb(nghttp2_session *session, const nghttp2_frame *frame,
         return 0;
     ns_h2_on_response_header(c, (const char *)name, namelen,
                              (const char *)value, valuelen);
-    return 0;
+    return c->proto_error ? NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE : 0;
 }
 
 static int
@@ -1980,6 +1987,7 @@ ns_h2_perform(const ns_hop_req *req, ns_write_ctx *wctx, ns_header_ctx *hctx,
             c.done = c.stream_ok = c.submitted = c.refused = FALSE;
             c.stream_closed = c.rst = c.got_first_byte = c.status_line_fed = FALSE;
             c.informational = FALSE;
+            c.header_bytes = 0;
             c.status = 0;
             c.encoding = NS_ENC_IDENTITY;
             c.body_off = 0;
@@ -2185,6 +2193,8 @@ ns_h3_recv_header_cb(nghttp3_conn *h3conn, int64_t stream_id, int32_t token,
     nghttp3_vec vv = nghttp3_rcbuf_get_buf(value);
     ns_h2_on_response_header(h->c, (const char *)nv.base, nv.len,
                              (const char *)vv.base, vv.len);
+    if (h->c->proto_error)
+        return NGHTTP3_ERR_CALLBACK_FAILURE;
     if (!h->c->informational)
         h->got_response = TRUE;
     return 0;
