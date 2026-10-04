@@ -45,11 +45,11 @@ builds it in place.
 ## License
 
 Nordstjernen is dual-licensed under the **Nordstjernen Source License
-v1.0 (NSL-1.0)** or the **GNU General Public License version 3
-(GPL-3.0)**, at the recipient's option, so the spec tags it
-`LicenseRef-NSL-1.0 OR GPL-3.0-only` and ships `License.md` and `COPYING`
+v1.0 (NSL-1.0)** or the **GNU General Public License version 3 or later
+(GPL-3.0-or-later)**, at the recipient's option, so the spec tags it
+`LicenseRef-NSL-1.0 OR GPL-3.0-or-later` and ships `License.md` and `COPYING`
 as `%license`. NSL-1.0 alone is not OSI-approved (it forbids "Competing
-Use"), but the GPL-3.0 option is free software, which makes the package
+Use"), but the GPL option is free software, which makes the package
 eligible for openSUSE:Factory / Tumbleweed through the usual devel-project
 submit request and legal review. Until it is accepted there, the home:
 project is the distribution channel. See `docs/opensuse.md`.

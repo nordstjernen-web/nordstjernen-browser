@@ -34,15 +34,15 @@ directly: [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nigh
 
 Nordstjernen is **dual-licensed**: each recipient may take it under
 **either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
-**GNU General Public License version 3 (GPL-3.0)**, at their option. The
-spec declares this as `License: LicenseRef-NSL-1.0 OR GPL-3.0-only`.
+**GNU General Public License version 3 or later (GPL-3.0-or-later)**, at
+their option. The spec declares this as `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`.
 
 openSUSE:Factory (Tumbleweed's main / OSS distribution) only accepts free
 / OSI-approved licenses, checked by its automated
 [Cavil](https://github.com/openSUSE/cavil) legal scan and the legal team.
 NSL-1.0 on its own would not pass — its **"Competing Use"** restriction
 and its limit of education and research use to **non-commercial**
-contexts make it non-free — but the GPL-3.0 is free and OSI-approved, and
+contexts make it non-free — but the GPL is free and OSI-approved, and
 the package can be distributed under that option. The bundled third-party
 code (see `THIRD-PARTY-LICENSES.md`) keeps its own free, GPL-3-compatible
 licenses. **Nordstjernen is therefore eligible for Factory**, subject to
@@ -55,12 +55,12 @@ There are two paths, in order of effort:
    review. This is what the install section above uses, and it stays
    available whatever happens in Factory.
 2. **openSUSE:Factory (the OSS distribution).** Possible through the
-   GPL-3.0 option. The package goes into a devel project and from there,
+   GPL option. The package goes into a devel project and from there,
    by submit request, to `openSUSE:Factory`, where the devel project
    maintainers, the legal team (Cavil) and the Factory reviewers check
    it. Expect the legal review to look at the `LicenseRef-NSL-1.0` half
    of the expression, since it is not an SPDX-listed license; the
-   `GPL-3.0-only` alternative is what qualifies the package. **Ask first**
+   `GPL-3.0-or-later` alternative is what qualifies the package. **Ask first**
    on the opensuse-factory mailing list which devel project should host
    it before preparing a submit request.
 
@@ -144,8 +144,8 @@ libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
 no system copies. `mpv` and `myspell-en_US` are `Recommends` (external
 media playback and a spell-check dictionary).
 
-The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-only`;
-`License.md` and `COPYING` (the GPL-3.0 text) are shipped as `%license`.
+The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`;
+`License.md` and `COPYING` (the GPL version 3 text) are shipped as `%license`.
 
 ## Local RPM build
 

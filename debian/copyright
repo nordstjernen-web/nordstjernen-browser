@@ -4,9 +4,9 @@ Upstream-Contact: Andreas Røsdal <andreas.rosdal@gmail.com>
 Source: https://github.com/nordstjernen-web/nordstjernen-browser
 Comment:
  The Nordstjernen source code is dual-licensed: each recipient may use it
- under either the GNU General Public License version 3 (GPL-3) or the
- Nordstjernen Source License v1.0 (NSL-1.0), at their option. The GPL-3
- option is DFSG-free, so the package is distributed under GPL-3 and belongs
+ under either the GNU General Public License version 3 or later (GPL-3+) or
+ the Nordstjernen Source License v1.0 (NSL-1.0), at their option. The GPL-3+
+ option is DFSG-free, so the package is distributed under GPL-3+ and belongs
  in Debian's main component. The NSL-1.0 alternative is documented below for
  completeness; it is not DFSG-free on its own.
  .
@@ -16,7 +16,7 @@ Comment:
 
 Files: *
 Copyright: 2026 Andreas Røsdal
-License: GPL-3 or NSL-1.0
+License: GPL-3+ or NSL-1.0
 
 Files: src/css_media.c src/svg.c src/svg.h src/webaudio.c
 Copyright: 2026 Andreas Røsdal
@@ -60,21 +60,8 @@ License: NSL-1.0
  Grant of Future License: on the tenth anniversary of each release the
  software additionally becomes available under the MIT (Expat) license.
  .
- On its own this license is not DFSG-free; Debian relies on the GPL-3
+ On its own this license is not DFSG-free; Debian relies on the GPL-3+
  alternative.
-
-License: GPL-3
- This program is free software: you can redistribute it and/or modify it
- under the terms of the GNU General Public License as published by the Free
- Software Foundation, version 3.
- .
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- more details.
- .
- On Debian systems the full text of the GNU General Public License version 3
- can be found in /usr/share/common-licenses/GPL-3.
 
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify it

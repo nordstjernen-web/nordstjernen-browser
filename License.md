@@ -7,22 +7,24 @@ under the terms of **either** of these two licenses, at your option:
 
 1. the **Nordstjernen Source License v1.0** (NSL-1.0), reproduced in full
    below; or
-2. the **GNU General Public License, version 3** (GPL-3.0), reproduced in
-   full in [COPYING](COPYING) and at
-   <https://www.gnu.org/licenses/gpl-3.0.html>.
+2. the **GNU General Public License, version 3 or (at your option) any
+   later version** (GPL-3.0-or-later). Version 3 is reproduced in full in
+   [COPYING](COPYING); all versions are published at
+   <https://www.gnu.org/licenses/>.
 
-SPDX-License-Identifier: `LicenseRef-NSL-1.0 OR GPL-3.0-only`
+SPDX-License-Identifier: `LicenseRef-NSL-1.0 OR GPL-3.0-or-later`
 
 You choose one license for your use and follow that license's terms. A
-recipient who takes the GPL-3.0 option receives the Software under the GPL
+recipient who takes the GPL option receives the Software under the GPL
 alone, and the NSL-1.0 terms do not apply to them; a recipient who takes the
 NSL-1.0 option is bound by the NSL-1.0 terms alone.
 
-Under the GPL-3.0 option:
+Under the GPL option:
 
 > Nordstjernen is free software: you can redistribute it and/or modify it
 > under the terms of the GNU General Public License as published by the Free
-> Software Foundation, version 3.
+> Software Foundation, either version 3 of the License, or (at your option)
+> any later version.
 >
 > Nordstjernen is distributed in the hope that it will be useful, but WITHOUT
 > ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
