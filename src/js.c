@@ -25278,9 +25278,9 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
 
     if (JS_IsArrayBuffer(v)) {
         if (ns_sc_buffer_detached(ctx, v)) return ns_sc_fail(ctx);
+        JSValue node = ns_wire_node(ctx, "AB");
         size_t size = 0;
         uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, v);
-        JSValue node = ns_wire_node(ctx, "AB");
         ns_wire_push(ctx, node, JS_NewArrayBufferCopy(ctx, bytes, size));
         JSValue resizable = JS_GetPropertyStr(ctx, v, "resizable");
         if (JS_ToBool(ctx, resizable) > 0)
@@ -25557,6 +25557,7 @@ ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
             size_t got = 0;
             uint8_t *dst = JS_IsException(out) ? NULL
                          : JS_GetArrayBuffer(ctx, &got, out);
+            bytes = dst ? JS_GetArrayBuffer(ctx, &size, a1) : NULL;
             if (dst && bytes && got >= size) memcpy(dst, bytes, size);
         }
     } else if (strcmp(kind, "TA") == 0 || strcmp(kind, "DV") == 0) {
