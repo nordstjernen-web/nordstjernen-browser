@@ -451,44 +451,7 @@ add_project_arguments('-DNS_VERSION="' + meson.project_version() + '"', language
 
 subdir('src/lexbor')
 
-js_engine = get_option('js_engine')
-js_engine_deps = []
-v8_static_monolith = false
-if js_engine == 'v8'
-  v8_cpp = meson.get_compiler('cpp')
-  v8_dep = dependency('v8', required: false)
-  if not v8_dep.found()
-    v8_root = get_option('v8_root')
-    if v8_root == ''
-      error('js_engine=v8 requires V8: provide a pkg-config "v8", or pass ' +
-            '-Dv8_root=/path to an extracted V8 monolith build with ' +
-            'include/v8.h and libv8_monolith.a (e.g. a ' +
-            'https://github.com/just-js/v8 release).')
-    endif
-    v8_inc_args = ['-isystem', v8_root / 'include']
-    if not v8_cpp.has_header('v8.h', args: v8_inc_args)
-      error('js_engine=v8: v8.h not found under ' + v8_root / 'include')
-    endif
-    v8_lib = v8_cpp.find_library('v8_monolith', static: true,
-      dirs: [v8_root / 'lib', v8_root / 'obj', v8_root])
-    v8_monolith_args = ['-DV8_COMPRESS_POINTERS',
-                        '-DV8_COMPRESS_POINTERS_IN_SHARED_CAGE']
-    v8_dep = declare_dependency(compile_args: v8_inc_args + v8_monolith_args,
-                                dependencies: [v8_lib])
-    v8_static_monolith = true
-  endif
-  js_engine_deps = [v8_dep, dependency('threads'),
-                    v8_cpp.find_library('dl', required: false)]
-  libquickjs = declare_dependency(
-    include_directories: include_directories('src/quickjs'))
-  if have_webgpu
-    have_webgpu = false
-    message('js_engine=v8: WebGPU is QuickJS-bound — disabled for this build')
-  endif
-  message('JS engine: v8 (experimental js_v8.cc backend; live core DOM ' +
-          'bindings, no fetch/XHR/modules yet, ' +
-          'WebGL/WebGPU/Wasm-JS/IndexedDB/extensions stubbed)')
-elif get_option('quickjs') == 'quickjs'
+if get_option('quickjs') == 'quickjs'
   quickjs_sp = subproject('quickjs',
     default_options: ['warning_level=0', 'werror=false'])
   quickjs_version = quickjs_sp.get_variable('quickjs_version')
@@ -502,7 +465,7 @@ else
   subdir('src/quickjs')
   message('JS engine: quickjs (in-tree quickjs-ng fork, full DOM bindings)')
 endif
-quickjs_original = js_engine == 'quickjs' and get_option('quickjs') == 'quickjs'
+quickjs_original = get_option('quickjs') == 'quickjs'
 
 wasm_unsupported_cpu = host_machine.cpu_family() == 'x86'
 if get_option('wasm').enabled() and wasm_unsupported_cpu

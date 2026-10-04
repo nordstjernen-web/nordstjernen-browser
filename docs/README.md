@@ -12,7 +12,6 @@ top-level [README.md](../README.md); the development plan is
 - [media.md](media.md) — how `<video>`/`<audio>` play (MPEG-1, optional WebM, the audio helper, WebVTT `<track>` captions, external-player fallback).
 - [Proxy.md](Proxy.md) — proxies and VPNs.
 - [http-backends.md](http-backends.md) — the curl vs nghttp2 HTTP client backends (`-Dhttp_backend`).
-- [V8.md](V8.md) — the experimental V8 JavaScript engine backend (`-Djs_engine=v8`).
 - [quickjs.md](quickjs.md) — running on Fabrice Bellard's original QuickJS instead of the in-tree quickjs-ng fork (`-Dquickjs=quickjs`).
 - [privacy-policy.md](privacy-policy.md) — what the browser does and does not collect.
 

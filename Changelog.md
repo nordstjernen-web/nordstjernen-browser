@@ -318,6 +318,11 @@ Changelog:
   is taller, as the spec's automatic minimum size describes. Content still
   grows such a box when `min-height` is `auto`.
 
+* The experimental V8 JavaScript backend is removed. The `js_engine` and
+  `v8_root` build options, `src/js_v8.cc`, docs/V8.md and the V8 CI job are
+  gone; every build binds the DOM to QuickJS, with `-Dquickjs` still picking
+  the in-tree quickjs-ng fork or Bellard's original QuickJS.
+
 1.0.28:
 ======
 * Scrolling stays smooth on pages that react to it. While the user scrolls,
