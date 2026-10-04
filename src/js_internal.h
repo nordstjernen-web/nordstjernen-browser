@@ -279,7 +279,6 @@ struct ns_js {
     guint         raf_tick_source;
     gint64        raf_host_us;
     gboolean      raf_host_driven;
-    GArray       *doc_stack;
     JSValue       iframe_doc;
     int           iframe_doc_set;
     ns_csp *csp;
