@@ -17,12 +17,7 @@
 static NsPangoContext *
 math_pango_ctx(void)
 {
-    static NsPangoContext *ctx;
-    if (!ctx) {
-        NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-        ctx = ns_pango_font_map_create_context(fm);
-    }
-    return ctx;
+    return ns_paint_text_context();
 }
 
 static gboolean

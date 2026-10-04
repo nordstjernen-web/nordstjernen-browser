@@ -5386,12 +5386,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 static NsPangoLayout *
 make_pango_layout(const ns_style *parent_style)
 {
-    static NsPangoContext *cached_ctx;
-    if (!cached_ctx) {
-        NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-        cached_ctx = ns_pango_font_map_create_context(fm);
-    }
-    NsPangoLayout *layout = ns_pango_layout_new(cached_ctx);
+    NsPangoLayout *layout = ns_pango_layout_new(ns_paint_text_context());
     ns_paint_apply_inline_font(layout, parent_style);
     return layout;
 }

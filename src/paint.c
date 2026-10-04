@@ -103,8 +103,12 @@ paint_group_video_holes(cairo_t *cr, cairo_pattern_t *source,
 static cairo_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
 
-static NsPangoLayout *
-paint_create_layout(void)
+static void ns_paint_font_metrics(const char *family, double size_px,
+                                  int weight, gboolean italic,
+                                  ns_css_font_metrics *out);
+
+NsPangoContext *
+ns_paint_text_context(void)
 {
     static NsPangoContext *cached_ctx;
     if (!cached_ctx) {
@@ -116,10 +120,22 @@ paint_create_layout(void)
         if (base) cairo_font_options_merge(fo, base);
         cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_GRAY);
         cairo_font_options_set_subpixel_order(fo, CAIRO_SUBPIXEL_ORDER_DEFAULT);
+        cairo_font_options_set_hint_metrics(fo, CAIRO_HINT_METRICS_OFF);
+#ifdef __APPLE__
+        cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_NONE);
+#endif
         ns_pango_cairo_context_set_font_options(cached_ctx, fo);
         cairo_font_options_destroy(fo);
+        ns_pango_context_set_round_glyph_positions(cached_ctx, FALSE);
+        ns_pango_cairo_context_set_resolution(cached_ctx, 72.0);
     }
-    return ns_pango_layout_new(cached_ctx);
+    return cached_ctx;
+}
+
+static NsPangoLayout *
+paint_create_layout(void)
+{
+    return ns_pango_layout_new(ns_paint_text_context());
 }
 
 static NsPangoWeight
@@ -1750,15 +1766,39 @@ ns_paint_normal_line_height_px(const ns_style *s)
     double font_size = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
     double factor = 1.2;
     const ns_css_value *family = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
+    if (font_size > 0) {
+        ns_css_font_metrics m = { 0 };
+        gboolean italic = s &&
+            (keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
+             keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique"));
+        ns_paint_font_metrics(family && family->kind == NS_CSS_V_KEYWORD
+                                  ? family->u.keyword : "sans-serif",
+                              font_size,
+                              ns_css_font_weight_number(
+                                  s ? s->values[NS_CSS_FONT_WEIGHT] : NULL, 400),
+                              italic, &m);
+        if (m.line_px > 0) return m.line_px;
+    }
     if (family && family->kind == NS_CSS_V_KEYWORD && family->u.keyword) {
         char *resolved = ns_css_font_family_for_pango(family->u.keyword);
+        gboolean rounded = FALSE;
         if (g_ascii_strcasecmp(resolved, "Arial") == 0 ||
             g_ascii_strcasecmp(resolved, "Helvetica") == 0)
             factor = 1.1;
         else if (g_ascii_strcasecmp(resolved, "Times New Roman") == 0 ||
+                 g_ascii_strcasecmp(resolved, "Times") == 0 ||
                  g_ascii_strcasecmp(resolved, "serif") == 0)
             factor = 1.125;
+        else if (g_ascii_strcasecmp(resolved, "Menlo") == 0) {
+            factor = 1.164;
+            rounded = TRUE;
+        } else if (g_ascii_strcasecmp(resolved, "System Font") == 0) {
+            factor = 1.19;
+            rounded = TRUE;
+        }
         g_free(resolved);
+        if (rounded)
+            return round(font_size * factor);
     }
     return ceil(font_size * factor);
 }
@@ -2168,6 +2208,39 @@ font_metrics_key_free(gpointer v)
     g_free(k);
 }
 
+static gboolean
+font_has_legacy_mac_ascent(const char *family)
+{
+#ifdef __APPLE__
+    return family && (g_ascii_strcasecmp(family, "Times") == 0 ||
+                      g_ascii_strcasecmp(family, "Helvetica") == 0 ||
+                      g_ascii_strcasecmp(family, "Courier") == 0);
+#else
+    (void)family;
+    return FALSE;
+#endif
+}
+
+static double
+font_normal_line_height(NsPangoContext *ctx, const NsPangoFontDescription *fd,
+                        const char *family)
+{
+    NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
+    if (!fm) return 0;
+    double raw_ascent = ns_pango_font_metrics_get_ascent(fm) / (double)NS_PANGO_SCALE;
+    double raw_descent = ns_pango_font_metrics_get_descent(fm) / (double)NS_PANGO_SCALE;
+    double height = ns_pango_font_metrics_get_height(fm) / (double)NS_PANGO_SCALE;
+    ns_pango_font_metrics_unref(fm);
+    double ascent = round(raw_ascent);
+    double descent = round(raw_descent);
+    double gap = height > raw_ascent + raw_descent
+        ? round(height - raw_ascent - raw_descent) : 0;
+    if (font_has_legacy_mac_ascent(family))
+        ascent += floor((ascent + descent) * 0.15 + 0.5);
+    double line = ascent + descent + gap;
+    return line > 0 ? line : 0;
+}
+
 static void
 font_metrics_measure(const char *family, double size_px, int weight,
                      gboolean italic, ns_css_font_metrics *out)
@@ -2178,12 +2251,14 @@ font_metrics_measure(const char *family, double size_px, int weight,
     char *ns_pango_family = family ? ns_css_font_family_for_pango(family) : NULL;
     if (ns_pango_family && *ns_pango_family)
         ns_pango_font_description_set_family(fd, ns_pango_family);
-    g_free(ns_pango_family);
     if (weight > 0) ns_pango_font_description_set_weight(fd, (NsPangoWeight)weight);
     if (italic) ns_pango_font_description_set_style(fd, NS_PANGO_STYLE_ITALIC);
     ns_pango_font_description_set_absolute_size(
         fd, ns_paint_pango_font_size(size_px));
     ns_pango_layout_set_font_description(l, fd);
+    out->line_px = font_normal_line_height(ns_pango_layout_get_context(l), fd,
+                                           ns_pango_family);
+    g_free(ns_pango_family);
 
     NsPangoRectangle ink;
     ns_pango_layout_set_text(l, "x", -1);
@@ -4716,7 +4791,7 @@ paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
     if (fs < 11) fs = 11;
     if (fs > 26) fs = 26;
     NsPangoFontDescription *fd = ns_pango_font_description_from_string("sans");
-    ns_pango_font_description_set_size(fd, fs * NS_PANGO_SCALE);
+    ns_pango_font_description_set_absolute_size(fd, ns_paint_pango_font_size(fs * 4.0 / 3.0));
     ns_pango_font_description_set_weight(fd, NS_PANGO_WEIGHT_MEDIUM);
 
     NsPangoLayout **lays = g_new0(NsPangoLayout *, nl);
@@ -4798,7 +4873,8 @@ paint_video(cairo_t *cr, const ns_box *b)
         double text_w = 0;
         if (dtext[0]) {
             NsPangoLayout *layout = paint_create_layout();
-            NsPangoFontDescription *fd = ns_pango_font_description_from_string("sans 9");
+            NsPangoFontDescription *fd = ns_pango_font_description_from_string("sans");
+            ns_pango_font_description_set_absolute_size(fd, ns_paint_pango_font_size(12));
             ns_pango_layout_set_font_description(layout, fd);
             ns_pango_layout_set_text(layout, dtext, -1);
             int tw = 0, th = 0;
