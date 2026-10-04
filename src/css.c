@@ -5648,6 +5648,8 @@ parse_tracks(const char *text)
                         g_free(v);
                         return NULL;
                     }
+                if (cnt > v->u.tracks.n - v->u.tracks.auto_repeat_start)
+                    cnt = v->u.tracks.n - v->u.tracks.auto_repeat_start;
                 v->u.tracks.auto_repeat_count = cnt;
                 continue;
             }
