@@ -4745,14 +4745,20 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
     box->style = ps;
 
     gsize tlen = strlen(box->text);
-    if (ps->values[NS_CSS_COLOR] && ps->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR) {
+    const char *vis = ns_style_keyword(ps, NS_CSS_VISIBILITY);
+    gboolean invisible = vis && (strcmp(vis, "hidden") == 0 ||
+                                 strcmp(vis, "collapse") == 0);
+    if (invisible ||
+        (ps->values[NS_CSS_COLOR] && ps->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR)) {
+        const ns_css_value *color = ps->values[NS_CSS_COLOR];
+        gboolean have = color && color->kind == NS_CSS_V_COLOR;
         ns_inline_attr a = {
             .kind = NS_INLINE_COLOR,
             .start = 0, .len = tlen,
-            .r = ps->values[NS_CSS_COLOR]->u.color.r,
-            .g = ps->values[NS_CSS_COLOR]->u.color.g,
-            .b = ps->values[NS_CSS_COLOR]->u.color.b,
-            .a = ps->values[NS_CSS_COLOR]->u.color.a,
+            .r = have ? color->u.color.r : 0,
+            .g = have ? color->u.color.g : 0,
+            .b = have ? color->u.color.b : 0,
+            .a = invisible ? 0 : color->u.color.a,
         };
         g_array_append_val(box->attrs, a);
     }
@@ -4981,6 +4987,16 @@ append_display_contents_children(ns_box *block, const ns_node *n,
         if (contents_after) box_append_child(block, contents_after);
     }
     g_contents_depth--;
+}
+
+static ns_box *
+pseudo_item_block(ns_box *run, const ns_style *ps)
+{
+    ns_box *item = box_new(NS_BOX_BLOCK);
+    item->style = ps;
+    collect_box_bg_image(item, ps);
+    box_append_child(item, run);
+    return item;
 }
 
 static ns_box *
@@ -5354,6 +5370,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     gboolean blockify_children = style_is_flex_container(s) ||
                                  style_is_grid_container(s);
+    if (blockify_children && pending_before) {
+        box_append_child(block, pseudo_item_block(pending_before, s->before));
+        pending_before = NULL;
+    }
 
     const ns_node *saved_skip = g_inline_skip_node;
     if (rendered_legend) {
@@ -5516,6 +5536,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     if (s && s->after && !after_block &&
         !style_is_absolute_or_fixed(s->after)) {
         ns_box *gen = build_pseudo_inline_for(s->after, n);
+        if (gen && blockify_children) {
+            box_append_child(block, pseudo_item_block(gen, s->after));
+            gen = NULL;
+        }
         if (gen) {
             ns_box *last = block->first_child;
             while (last && last->next_sibling) last = last->next_sibling;

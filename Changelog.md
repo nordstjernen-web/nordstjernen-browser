@@ -28,6 +28,16 @@ Changelog:
   width as the flex spec describes (clamped by their flex base size when
   they cannot grow or shrink). A centered flex column holding a heading with
   `max-width` no longer stretches to the full width.
+* Lit and other web components that define their reactive properties in an
+  `observedAttributes` getter work: `customElements.define` now reads
+  `observedAttributes` once at definition time, as the spec says, instead of
+  after the first element was constructed. Lit components on MDN never
+  re-rendered, so every dropdown menu in MDN's header stayed open.
+* A `display: contents` shadow host lays out its shadow tree, so content
+  assigned to a hidden `<slot>` is not drawn.
+* `visibility: hidden` hides `::before`/`::after` text, and in flex and grid
+  containers those pseudo-elements become their own items. Stack Overflow's
+  menu labels ("About", "Active") were drawn twice.
 * Percentage widths of inline-blocks resolve against the line's containing
   block during layout. The real layout sized them correctly and then laid
   them out again against their own content width, so a `width: 50%`
