@@ -1345,15 +1345,6 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
     ns_js_note_pointer_input(fc->js, FALSE);
     if (!fc->focused || !name || !*name) return;
     ns_node *t = (ns_node *)fc->focused;
-    const char *cur = ns_node_editable_value(t);
-    gsize clen = strlen(cur);
-    if (fc->caret > clen) fc->caret = clen;
-    if (fc->anchor > clen) fc->anchor = clen;
-    gsize lo = MIN(fc->caret, fc->anchor);
-    gsize hi = MAX(fc->caret, fc->anchor);
-    gboolean has_sel = lo != hi;
-    gboolean multiline = (t->name && strcmp(t->name, "textarea") == 0) ||
-                         ns_node_is_contenteditable_host(t);
     gboolean key_prevented = FALSE;
     if (fc->js) {
         int key_code = 0;
@@ -1379,6 +1370,15 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
             ns_js_consume_mutated(fc->js);
         }
     }
+    const char *cur = ns_node_editable_value(t);
+    gsize clen = strlen(cur);
+    if (fc->caret > clen) fc->caret = clen;
+    if (fc->anchor > clen) fc->anchor = clen;
+    gsize lo = MIN(fc->caret, fc->anchor);
+    gsize hi = MAX(fc->caret, fc->anchor);
+    gboolean has_sel = lo != hi;
+    gboolean multiline = (t->name && strcmp(t->name, "textarea") == 0) ||
+                         ns_node_is_contenteditable_host(t);
     if (g_ascii_strcasecmp(name, "Tab") == 0) {
         if (!key_prevented && fc->js) {
             const ns_node *next =
