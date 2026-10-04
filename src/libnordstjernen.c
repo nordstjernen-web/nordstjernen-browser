@@ -2389,6 +2389,7 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
     if (lx < tx - 3.0 || lx > tx + tw + 3.0 || ly < ty || ly > ty + th)
         return 0;
 
+    const ns_node *box_dom = box->dom;
     double grab;
     if (ly >= thy && ly <= thy + thh) {
         grab = ly - thy;
@@ -2399,13 +2400,15 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
         if (ns < 0) ns = 0;
         if (ns > box->scroll_max_y) ns = box->scroll_max_y;
         box->scroll_y = ns;
-        if (box->dom && browser->js)
-            ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+        if (box_dom && browser->js) {
+            ns_js_dispatch_event(browser->js, box_dom, "scroll", NULL);
+            box = box_find_scrollable_by_dom(browser->layout, box_dom);
+        }
     }
 
     browser->sb_dragging = TRUE;
     browser->sb_box = box;
-    browser->sb_node = box->dom;
+    browser->sb_node = box_dom;
     browser->sb_grab = grab;
     return 1;
 }
