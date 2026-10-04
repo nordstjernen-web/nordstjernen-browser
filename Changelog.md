@@ -114,6 +114,11 @@ Changelog:
   space on each line goes to the items' `auto` margins, and `margin-top` or
   `margin-bottom: auto` aligns an item in its line. MDN's Baseline box
   showed the browser icons next to the label instead of at the right edge.
+* Links, labels and summaries with `display: inline-block` are laid out as
+  inline blocks, with their vertical padding, instead of as plain text.
+  MDN's table of contents links were 19px tall instead of 32px. Inline
+  blocks and images with a horizontal margin are no longer moved right by
+  that margin a second time.
 
 1.0.28:
 ======

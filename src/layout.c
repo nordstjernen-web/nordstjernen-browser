@@ -1274,11 +1274,9 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
         strcmp(nm, "summary") == 0) {
         const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
         ns_display d = ns_css_display_of(s);
-        if (!(display_is_atomic_inline_container(d) ||
-              ns_display_is_flex_container(d) ||
-              ns_display_is_grid_container(d)))
-            return FALSE;
-        return button_has_replaced_child(n) || style_has_atomic_inline_box(s);
+        return display_is_atomic_inline_container(d) ||
+               ns_display_is_flex_container(d) ||
+               ns_display_is_grid_container(d);
     }
     if (strcmp(nm, "img") == 0 || strcmp(nm, "svg") == 0 ||
         strcmp(nm, "audio") == 0 || strcmp(nm, "video") == 0 ||
@@ -6420,8 +6418,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (slack < 0) slack = 0;
             if (within < 0) within = 0;
             if (within > slack) within = slack;
-            double nx = text_x0 + (double)pos.x / NS_PANGO_SCALE + a->box->margin.left;
-            double ny = box->y + line_y + within + a->box->margin.top;
+            double nx = text_x0 + (double)pos.x / NS_PANGO_SCALE;
+            double ny = box->y + line_y + within;
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
         g_free(line_tops);
