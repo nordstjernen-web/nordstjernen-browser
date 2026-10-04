@@ -335,6 +335,7 @@ render_collect_containers(const ns_box *b, GHashTable *map, guint64 *sig)
 static const ns_node *g_cq_prev_doc;
 static double g_cq_prev_width;
 static GHashTable *g_cq_prev_map;
+static gboolean g_cq_prev_settled;
 
 static GHashTable *
 render_cq_predicted_map(const ns_node *doc, double viewport_width,
@@ -349,7 +350,9 @@ render_cq_predicted_map(const ns_node *doc, double viewport_width,
 static gboolean
 render_cq_settled(GHashTable *predicted, GHashTable *measured)
 {
-    return predicted && ns_css_container_maps_equal(predicted, measured);
+    g_cq_prev_settled = predicted &&
+                        ns_css_container_maps_equal(predicted, measured);
+    return g_cq_prev_settled;
 }
 
 static void
@@ -390,6 +393,17 @@ render_cq_wanted(const ns_render_ctx *c, gboolean *uses_units)
     }
     *uses_units = units;
     return want;
+}
+
+static gboolean
+render_selector_cache_wanted(const ns_render_ctx *c, GHashTable *predicted)
+{
+    if (predicted && g_cq_prev_settled) return FALSE;
+    for (guint i = 0; i < c->n_sheets; i++)
+        if (ns_css_stylesheet_has_container_rules(c->sheets[i]) ||
+            ns_css_stylesheet_has_container_units(c->sheets[i]))
+            return TRUE;
+    return FALSE;
 }
 
 static void
@@ -593,15 +607,12 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
 
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     ns_css_set_render_zoom(c->zoom > 0 ? c->zoom : 1.0);
-    gboolean cache_selectors = FALSE;
-    for (guint i = 0; i < c->n_sheets && !cache_selectors; i++)
-        cache_selectors = ns_css_stylesheet_has_container_rules(c->sheets[i]) ||
-                          ns_css_stylesheet_has_container_units(c->sheets[i]);
-    if (cache_selectors) ns_css_selector_cache_begin();
     gboolean uses_cq_units = FALSE;
     gboolean want_cq = render_cq_wanted(c, &uses_cq_units);
     GHashTable *predicted =
         render_cq_predicted_map(c->doc, viewport_width, want_cq);
+    gboolean cache_selectors = render_selector_cache_wanted(c, predicted);
+    if (cache_selectors) ns_css_selector_cache_begin();
     ns_css_set_container_map(predicted);
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->sheet_docs, c->n_sheets);
     ns_css_set_container_map(NULL);
