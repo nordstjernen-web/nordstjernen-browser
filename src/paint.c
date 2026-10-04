@@ -7319,6 +7319,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
                                clip_overflow || has_path_clip ||
+                               b == g_paint_tex_root ||
                                (b == g_paint_flush_box &&
                                 box_isolates_positioned_descendants(b));
     GPtrArray *saved_layer_list = NULL;
