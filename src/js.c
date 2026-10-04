@@ -6148,7 +6148,9 @@ ns_svg_beginElement(JSContext *ctx, JSValueConst this_val,
     if (attr && *attr && to) {
         char anim_attr[64];
         g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to);
+        char *to_copy = g_strdup(to);
+        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to_copy);
+        g_free(to_copy);
     }
     return JS_UNDEFINED;
 }
@@ -8332,18 +8334,14 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         return;
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *c = n->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
+    ns_node *c;
+    while ((c = n->first_child) != NULL) {
         ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
         g_hash_table_add(js->orphan_nodes, c);
         ns_js_index_child_change(js, n, NULL, c);
         g_ptr_array_add(removed, c);
-        c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     GPtrArray *add_arr = NULL;
     if (added) {
         ns_node_append_child(n, added);
@@ -8364,17 +8362,13 @@ ns_element_clear_children_collect(ns_js *js, ns_node *n)
         return g_ptr_array_new();
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *c = n->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
-        if (js) ns_ce_disconnect_subtree(js, c);
+    ns_node *c;
+    while ((c = n->first_child) != NULL) {
+        ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
-        if (js) g_hash_table_add(js->orphan_nodes, c);
+        g_hash_table_add(js->orphan_nodes, c);
         g_ptr_array_add(removed, c);
-        c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     return removed;
 }
 
@@ -8587,7 +8581,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
         while (content->first_child) {
             ns_node *c = content->first_child;
             ns_node_remove(c);
-            ns_node_free(c);
+            ns_js_orphan_node(_j, c);
         }
         ns_mark_scripts_already_started(tfrag);
         ns_node *c = tfrag->first_child;
@@ -8834,9 +8828,8 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         }
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *oc = self->first_child;
-    while (oc) {
-        ns_node *next = oc->next_sibling;
+    ns_node *oc;
+    while ((oc = self->first_child) != NULL) {
         if (_j) {
             ns_ce_disconnect_subtree(_j, oc);
             ns_node_remove(oc);
@@ -8846,12 +8839,11 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             ns_node_remove(oc);
         }
         g_ptr_array_add(removed, oc);
-        oc = next;
     }
-    self->first_child = NULL;
-    self->last_child  = NULL;
     for (guint k = 0; k < added->len; k++) {
         ns_node *a = g_ptr_array_index(added, k);
+        if (ns_node_ancestor_or_self(self, a)) continue;
+        if (_j) g_hash_table_remove(_j->orphan_nodes, a);
         ns_node_append_child(self, a);
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
@@ -11878,6 +11870,7 @@ ns_wc_parse_alg(JSContext *ctx, JSValueConst v, ns_wc_alg *a)
     JSValue pk = JS_GetPropertyStr(ctx, v, "public");
     if (JS_IsObject(pk))
         a->peer = JS_GetOpaque(pk, ns_cryptokey_class_id);
+    if (a->peer) a->peer->refcount++;
     JS_FreeValue(ctx, pk);
     return TRUE;
 }
@@ -11888,6 +11881,8 @@ ns_wc_alg_free(ns_wc_alg *a)
     g_free(a->name); g_free(a->hash); g_free(a->curve);
     g_free(a->iv); g_free(a->aad); g_free(a->label);
     g_free(a->salt); g_free(a->info); g_free(a->counter);
+    ns_crypto_key_unref(a->peer);
+    a->peer = NULL;
 }
 
 static guint32
