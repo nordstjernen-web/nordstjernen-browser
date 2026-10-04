@@ -13155,8 +13155,9 @@ collect_text_input_columns(const ns_box *b, GHashTable *cols)
         double cell = shown > 0 ? control_char_cell_px(b->style) : 0;
         if (cell > 0) {
             int overhead = 2 + text_input_leading_spaces(b->style);
-            int fit = (int)floor(b->content_width / cell) - overhead;
-            if (fit < 1) fit = 1;
+            double cells = floor(b->content_width / cell) - overhead;
+            int fit = cells < 1 ? 1
+                    : cells > G_MAXINT16 ? G_MAXINT16 : (int)cells;
             gboolean grow = fit > have && shown > have;
             gboolean shrink = fit < have && shown > fit &&
                               control_width_is_definite(b->style);
