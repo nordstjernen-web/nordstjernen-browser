@@ -64061,6 +64061,8 @@ static void
 ns_js_sweep_orphans(ns_js *js)
 {
     if (!js || !js->orphan_nodes || g_hash_table_size(js->orphan_nodes) == 0) return;
+    if (js->eval_depth > 0 || js->callback_depth > 0 || js->dispatch_depth > 0)
+        return;
     gint64 now = g_get_monotonic_time();
     if (js->last_orphan_sweep_us != 0 && now - js->last_orphan_sweep_us < 250000)
         return;
