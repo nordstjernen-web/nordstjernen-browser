@@ -35176,6 +35176,9 @@ static JSValue ns_attr_to_js(JSContext *ctx, JSValueConst owner,
 static const ns_attr *ns_element_attr_by_namespace(const ns_node *n,
                                                    const char *namespace_uri,
                                                    const char *local);
+static const ns_attr *ns_page_attr_by_namespace(const ns_node *n,
+                                                const char *namespace_uri,
+                                                const char *local_name);
 static JSValue ns_element_setAttributeNode(JSContext *ctx,
                                            JSValueConst this_val,
                                            int argc, JSValueConst *argv);
@@ -35217,7 +35220,7 @@ ns_namedmap_getNamedItemNS(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     }
     const ns_attr *attr = n
-        ? ns_element_attr_by_namespace(n, namespace_uri, local_name) : NULL;
+        ? ns_page_attr_by_namespace(n, namespace_uri, local_name) : NULL;
     JSValue owner = n ? ns_make_element(ctx, n) : JS_NULL;
     JSValue result = attr ? ns_attr_to_js(ctx, owner, attr, TRUE) : JS_NULL;
     JS_FreeValue(ctx, owner);
@@ -35277,7 +35280,7 @@ ns_namedmap_removeNamedItemNS(JSContext *ctx, JSValueConst this_val,
     if (ns && !*ns) { JS_FreeCString(ctx, ns); ns = NULL; }
     const char *local = JS_ToCString(ctx, argv[1]);
     if (!local) { if (ns) JS_FreeCString(ctx, ns); return JS_EXCEPTION; }
-    const ns_attr *a = n ? ns_element_attr_by_namespace(n, ns, local) : NULL;
+    const ns_attr *a = n ? ns_page_attr_by_namespace(n, ns, local) : NULL;
     if (!a) {
         if (ns) JS_FreeCString(ctx, ns);
         JS_FreeCString(ctx, local);
@@ -35463,7 +35466,7 @@ ns_attr_set_value(JSContext *ctx, JSValueConst this_val,
     if (state) {
         g_free(state->value);
         state->value = g_strdup(s);
-        if (state->owner)
+        if (state->owner && !ns_attr_name_is_internal(state->name))
             ns_js_set_attr_ns_recorded(state->js, state->owner,
                                        state->namespace_uri, state->prefix,
                                        state->local_name, state->name, s);
@@ -35648,7 +35651,8 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (a->name && strcmp(a->name, name) == 0) {
-            out = ns_attr_to_js(ctx, this_val, a, TRUE);
+            if (!ns_attr_name_is_internal(a->name))
+                out = ns_attr_to_js(ctx, this_val, a, TRUE);
             break;
         }
     }
@@ -35671,7 +35675,7 @@ ns_element_getAttributeNodeNS(JSContext *ctx, JSValueConst this_val,
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_NULL;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     JSValue out = a ? ns_attr_to_js(ctx, this_val, a, TRUE) : JS_NULL;
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
@@ -35709,6 +35713,9 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
     if (state->owner && state->owner != n)
         return ns_throw_dom_exception(ctx, "InUseAttributeError", 10,
             "the attribute is in use by another element");
+    if (ns_attr_name_is_internal(state->name) ||
+        ns_attr_name_is_internal(state->local_name))
+        return JS_NULL;
     const ns_attr *prev = ns_element_attr_by_namespace(n, state->namespace_uri,
                                                         state->local_name);
     ns_js_attr *prev_state = ns_attr_state_find(js_from_ctx(ctx), n,
@@ -35848,6 +35855,11 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     }
     char *lowered = NULL;
     const char *name = ns_attr_name_normalize(n, raw_name, &lowered);
+    if (ns_attr_name_is_internal(name)) {
+        JS_FreeCString(ctx, raw_name);
+        g_free(lowered);
+        return JS_FALSE;
+    }
     gboolean had = ns_element_get_attr(n, name) != NULL;
     gboolean want;
     if (argc >= 2 && !JS_IsUndefined(argv[1]))
@@ -35870,6 +35882,15 @@ ns_element_attr_by_namespace(const ns_node *n, const char *namespace_uri,
     return a && !ns_attr_name_is_internal(a->name) ? a : NULL;
 }
 
+static const ns_attr *
+ns_page_attr_by_namespace(const ns_node *n, const char *namespace_uri,
+                          const char *local_name)
+{
+    const ns_attr *a = ns_element_attr_by_namespace(n, namespace_uri,
+                                                    local_name);
+    return a && a->name && ns_attr_name_is_internal(a->name) ? NULL : a;
+}
+
 static JSValue
 ns_element_getAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -35884,7 +35905,7 @@ ns_element_getAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_NULL;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_NewString(ctx, a->value ? a->value : "") : JS_NULL;
@@ -35904,7 +35925,7 @@ ns_element_hasAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_FALSE;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_TRUE : JS_FALSE;
@@ -36005,7 +36026,8 @@ ns_element_removeAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JS
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_UNDEFINED;
     }
-    ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
+    if (ns_page_attr_by_namespace(n, ns_uri, local))
+        ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return JS_UNDEFINED;
