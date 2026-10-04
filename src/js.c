@@ -53886,8 +53886,11 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
         js->ce_defer_upgrades = saved;
     }
 
-    if (js->ce_pending) {
-        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, key);
+    gpointer pending_key = NULL, pending_value = NULL;
+    if (js->ce_pending &&
+        g_hash_table_steal_extended(js->ce_pending, key, &pending_key,
+                                    &pending_value)) {
+        GPtrArray *waiters = pending_value;
         if (waiters) {
             for (guint i = 0; i < waiters->len; i++) {
                 JSValue *fn = g_ptr_array_index(waiters, i);
@@ -53902,9 +53905,9 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
                     g_free(fn);
                 }
             }
-            g_ptr_array_set_size(waiters, 0);
-            g_hash_table_remove(js->ce_pending, key);
+            g_ptr_array_free(waiters, TRUE);
         }
+        g_free(pending_key);
     }
 
     g_free(key);
