@@ -1663,7 +1663,7 @@ text_input_columns(const ns_node *n)
     int size = text_input_size_attr(n);
     if (!g_input_columns_for_layout) return size;
     gpointer fitted = g_hash_table_lookup(g_input_columns_for_layout, n);
-    return fitted ? GPOINTER_TO_INT(fitted) : size;
+    return fitted ? MIN(GPOINTER_TO_INT(fitted), 4096) : size;
 }
 
 static gboolean
