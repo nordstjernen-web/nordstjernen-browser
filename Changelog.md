@@ -13,6 +13,16 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* Scrolling is smooth. Touchpad deltas are applied 1:1 (they were multiplied
+  by 60, so a small swipe jumped hundreds of pixels), the scroll continues
+  with momentum after the fingers lift, mouse-wheel notches and the arrow,
+  Page Up/Down, space, Home and End keys glide to their target, and each
+  scroll rides on the next frame request instead of a separate round trip.
+  The browser no longer re-runs a hover hit test after every frame while
+  the pointer is still (GTK repeats the last motion event), and holds hover
+  updates until scrolling stops; hovering tests only the exact point under
+  the pointer. Scrolling Wikipedia went from about 9 to about 55 frames per
+  second on a 2x display.
 * A single-line row flex container is as wide as the sum of its items'
   min-content widths, not its widest item, when it is squeezed. GitHub's
   header menu shrank below its content and the buttons ran into each other.

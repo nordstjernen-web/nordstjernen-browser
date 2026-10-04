@@ -2129,8 +2129,8 @@ browser_node_is_hyperlink(const ns_node *n)
            ns_node_is_element_named(n, "area");
 }
 
-char *
-ns_browser_link_at(ns_browser *browser, int x, int y)
+static char *
+browser_link_near(ns_browser *browser, int x, int y, int probes)
 {
     if (!browser || !browser->layout) return NULL;
 
@@ -2140,7 +2140,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         { 0, -kR }, { 0, kR }, { -kR, 0 }, { kR, 0 },
         { -kR, -kR }, { kR, -kR }, { -kR, kR }, { kR, kR },
     };
-    for (int i = 0; i < (int)(sizeof probe / sizeof probe[0]); i++) {
+    for (int i = 0; i < probes; i++) {
         int px = x + probe[i][0], py = y + probe[i][1];
         const char *href = ns_box_hit_link(browser->layout,
                                            (double)px, (double)py);
@@ -2153,6 +2153,18 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         if (href && *href) return browser_resolve_navigation(browser, href);
     }
     return NULL;
+}
+
+char *
+ns_browser_link_at(ns_browser *browser, int x, int y)
+{
+    return browser_link_near(browser, x, y, 9);
+}
+
+char *
+ns_browser_link_under(ns_browser *browser, int x, int y)
+{
+    return browser_link_near(browser, x, y, 1);
 }
 
 char *
