@@ -13,6 +13,15 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* Text uses the same fonts and widths as Chrome on macOS. `sans-serif` is
+  Helvetica (it was Verdana, about 14% wider, so text wrapped earlier and
+  overflowed its boxes), `serif` is Times, `monospace` Menlo, `cursive`
+  Apple Chancery, and `system-ui`, `-apple-system` and `BlinkMacSystemFont`
+  the San Francisco system font. Glyph advances are no longer rounded to
+  whole pixels, and font sizes reach HarfBuzz as CSS pixels, so San
+  Francisco gets the same optical size and tracking as in Chrome; measured
+  string widths now agree with Chrome to a tenth of a pixel. `line-height:
+  normal` comes from the font's own ascent, descent and line gap.
 * WOFF2 web fonts load on systems whose FreeType was built without Brotli,
   such as Homebrew's on macOS. Those fonts used to fail silently and pages
   fell back to a default face (GitHub's Mona Sans showed as Verdana). The

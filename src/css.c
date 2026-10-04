@@ -1041,10 +1041,11 @@ font_family_map_generic(const char *token)
 {
     char *lo = g_ascii_strdown(token, -1);
     char *ret = NULL;
-    if (strcmp(lo, "system-ui") == 0 ||
-        strcmp(lo, "ui-sans-serif") == 0 ||
-        strcmp(lo, "ui-rounded") == 0 ||
-        strcmp(lo, "sans-serif") == 0)
+    if (strcmp(lo, "system-ui") == 0)
+        ret = g_strdup("system-ui");
+    else if (strcmp(lo, "ui-sans-serif") == 0 ||
+             strcmp(lo, "ui-rounded") == 0 ||
+             strcmp(lo, "sans-serif") == 0)
         ret = g_strdup("sans-serif");
     else if (strcmp(lo, "ui-serif") == 0 ||
              strcmp(lo, "serif") == 0)
@@ -1071,13 +1072,13 @@ font_family_substitute(const char *token)
 {
     char *lo = g_ascii_strdown(token, -1);
     char *ret = NULL;
-    if (strcmp(lo, "arial") == 0 ||
-        strcmp(lo, "helvetica") == 0 ||
-        strcmp(lo, "segoe ui") == 0 ||
-        g_str_has_prefix(lo, "roboto") ||
-        g_str_has_prefix(lo, "sf pro") ||
-        g_str_has_prefix(lo, "sfpro") ||
-        g_str_has_prefix(lo, "optimistic text"))
+    if (g_str_has_prefix(lo, "sf pro") || g_str_has_prefix(lo, "sfpro"))
+        ret = g_strdup("system-ui");
+    else if (strcmp(lo, "arial") == 0 ||
+             strcmp(lo, "helvetica") == 0 ||
+             strcmp(lo, "segoe ui") == 0 ||
+             g_str_has_prefix(lo, "roboto") ||
+             g_str_has_prefix(lo, "optimistic text"))
         ret = g_strdup("sans-serif");
     g_free(lo);
     return ret;
@@ -1086,6 +1087,35 @@ font_family_substitute(const char *token)
 static gboolean (*g_font_available_cb)(const char *family);
 static guint64 (*g_font_generation_cb)(void);
 static guint g_font_oracle_serial;
+
+static const char *
+platform_family_for_generic(const char *generic)
+{
+#ifdef __APPLE__
+    static const char *const families[][2] = {
+        { "system-ui",  "System Font" },
+        { "sans-serif", "Helvetica" },
+        { "serif",      "Times" },
+        { "monospace",  "Menlo" },
+        { "cursive",    "Apple Chancery" },
+        { "fantasy",    "Papyrus" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(families); i++)
+        if (strcmp(generic, families[i][0]) == 0 &&
+            g_font_available_cb && g_font_available_cb(families[i][1]))
+            return families[i][1];
+#endif
+    if (strcmp(generic, "system-ui") == 0)
+        return platform_family_for_generic("sans-serif");
+    return generic;
+}
+
+static gboolean
+platform_has_system_font(void)
+{
+    return strcmp(platform_family_for_generic("system-ui"),
+                  platform_family_for_generic("sans-serif")) != 0;
+}
 
 void
 ns_css_set_font_available_cb(gboolean (*cb)(const char *family))
@@ -1180,7 +1210,11 @@ font_family_resolve(const char *css_family)
             gboolean system_alias = strcmp(lo, "-apple-system") == 0 ||
                                     strcmp(lo, "blinkmacsystemfont") == 0;
             g_free(lo);
-            if (system_alias) {
+            if (system_alias && platform_has_system_font()) {
+                g_free(token);
+                g_free(fallback);
+                return g_strdup("system-ui");
+            } else if (system_alias) {
                 if (!fallback) fallback = g_strdup("sans-serif");
             } else if (!skip) {
                 char *mapped = font_family_map_generic(token);
@@ -1235,7 +1269,9 @@ ns_css_font_family_for_pango(const char *css_family)
     }
     const char *hit = g_hash_table_lookup(memo, css_family);
     if (hit) return g_strdup(hit);
-    char *resolved = font_family_resolve(css_family);
+    char *generic = font_family_resolve(css_family);
+    char *resolved = g_strdup(platform_family_for_generic(generic));
+    g_free(generic);
     g_hash_table_insert(memo, g_strdup(css_family), g_strdup(resolved));
     return resolved;
 }
