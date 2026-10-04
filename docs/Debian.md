@@ -10,11 +10,9 @@ root. For the plain build-from-source instructions (any distro) see
 
 Nordstjernen is **dual-licensed**: each recipient may take it under
 **either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
-**GNU General Public License version 3 or later (GPL-3.0-or-later)**, at their option (SPDX
-`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`; the texts are `License.md` and
-`COPYING` at the repository root). Four sources — `src/css_media.c`,
-`src/svg.c`, `src/svg.h` and `src/webaudio.c` — are GPL-3.0-or-later
-only.
+**GNU General Public License version 3 or later (GPL-3.0-or-later)**, at
+their option (SPDX `LicenseRef-NSL-1.0 OR GPL-3.0-or-later`; the texts are
+`License.md` and `COPYING` at the repository root).
 
 Debian `main` only accepts software whose license satisfies the [Debian
 Free Software Guidelines
@@ -195,9 +193,8 @@ With a Debian Developer willing to sponsor it:
 
 2. **Polish the source package.** Build cleanly in `sbuild`, get
    `lintian` quiet, and make sure `debian/copyright` is complete and
-   accurate. FTP-masters review this closely: the dual license, the four
-   GPL-3.0-or-later sources (`src/css_media.c`, `src/svg.c`, `src/svg.h`,
-   `src/webaudio.c`) and the bundled-engine licenses must all be listed.
+   accurate. FTP-masters review this closely: the dual license and the
+   bundled-engine licenses must all be listed.
 
 3. **Note the embedded code copies.** Debian discourages bundled library
    copies (Debian Policy §4.13). Nordstjernen *forks* lexbor, QuickJS,
