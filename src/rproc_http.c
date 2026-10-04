@@ -58,6 +58,17 @@ open_fb_fd(size_t size)
     }
     return fd;
 }
+
+static void
+close_inherited_fds(long max_fd)
+{
+#ifdef SYS_close_range
+    if (syscall(SYS_close_range, 4u, ~0u, 0u) == 0)
+        return;
+#endif
+    for (long fd = 4; fd < max_fd; fd++)
+        close((int)fd);
+}
 #endif
 #endif
 
@@ -150,6 +161,9 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
             return NULL;
     }
 
+    long max_fd = sysconf(_SC_OPEN_MAX);
+    if (max_fd < 0 || max_fd > 65536)
+        max_fd = 65536;
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
         goto fail;
@@ -166,6 +180,7 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
             dup2(sv[1], 3);
             close(sv[1]);
         }
+        close_inherited_fds(max_fd);
         char wbuf[16], hbuf[16];
         snprintf(wbuf, sizeof wbuf, "%d", max_width);
         snprintf(hbuf, sizeof hbuf, "%d", max_height);
