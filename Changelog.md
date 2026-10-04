@@ -3,6 +3,51 @@ Changelog:
 
 1.0.29:
 ======
+* Security audit of the engine, shell and helpers. Fixed memory-safety
+  bugs that web content could reach:
+  - Out-of-bounds reads and writes: WebGL texture uploads sized for the
+    wrong pixel format or ignoring the unpack state; a grid
+    `repeat(auto-fill, ...)` track count past the stored tracks; CSS
+    per-rule match arrays one slot short for `::file-selector-button`;
+    `container-name` lists of 16+ names; word selection over text with
+    lone surrogates; Ogg Vorbis links and libav frames whose channel
+    layout changes mid-stream in the audio helper; shared-memory video
+    geometry re-read after it was validated in the shell.
+  - Use-after-free when page script runs in the middle of an operation:
+    custom element upgrades and `whenDefined`, `replaceChildren` and
+    template `innerHTML`, radio groups, inline event handlers,
+    `addEventListener` with an AbortSignal getter, EventSource dispatch,
+    structured clone and worker messages over resized or detached
+    buffers, `getAnimations()`/`getKeyframes()`, performance entries and
+    observers, IndexedDB handles, canvas state and paths, WebAssembly
+    memory buffers passed to `transfer()`, WebCrypto ECDH peer keys,
+    scrollbar and headless hit-testing, and queued scripts or document
+    index entries for removed nodes.
+  - Stack exhaustion from deep nesting: `:nth-child(of ...)`, selector
+    chains, `@supports`, `@container`, `image-set()`, time values,
+    `random-item()`, nested grids and inline runs. CSS nesting can no
+    longer expand a small stylesheet into gigabytes of selectors.
+  - Integer overflow and runaway sizes: textarea rows, fitted input
+    columns, multicol splits, animation delays, SVG arcs and sizes, PDF
+    page rasters, print spans, Web Audio and microphone buffers.
+* The shell and helpers trust the sandboxed renderer less: media helper
+  commands with line breaks or over-long lines are refused, saved pages
+  are not copied through symlinks, cursor names are limited to CSS
+  keywords, renderers no longer inherit other tabs' descriptors, and
+  `file:` downloads from web pages are refused.
+* Sandbox: Landlock now also restricts creating symlinks, fifos, sockets
+  and device nodes, and restricts truncation; it picks the rights the
+  running kernel supports instead of failing on older kernels. Seccomp
+  refuses the TIOCSTI/TIOCLINUX terminal-injection ioctls.
+* Web security: subresource redirects keep their top-level site (cookies,
+  `Sec-Fetch-Site`, `Origin`); `document.cookie` can no longer replace
+  HttpOnly cookies; about:blank/about:srcdoc no longer count as browser
+  pages; HSTS applies to mixed-case URLs; the nghttp2 backend refuses
+  request methods containing line breaks and caps response headers at
+  1 MB; frame documents read cookies for their own URL; IndexedDB is
+  refused for opaque origins (file:, data:, about:) instead of sharing
+  one database between them; extension content scripts keep their
+  privileged natives away from the page.
 * Pages load again in the desktop browser on macOS versions whose
   `shm_open()` rejects `O_CLOEXEC`. Creating a tab's shared framebuffer
   failed there, so no renderer process was started and every page stayed
