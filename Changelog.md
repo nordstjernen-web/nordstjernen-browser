@@ -147,6 +147,10 @@ Changelog:
   borders show as triangles. Stack Overflow's "More" dropdown arrow was a
   black bar.
 
+* An absolutely positioned `::before` or `::after` with `content: ""`
+  no longer draws its borders and background a second time around an empty
+  line of text next to the element.
+
 1.0.28:
 ======
 * Relayouts of pages with container queries are about 17% faster when the
