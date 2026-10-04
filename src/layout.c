@@ -6690,7 +6690,7 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
     }
 
     GPtrArray *fragments = g_ptr_array_new();
-    int per_col = (line_count + n_cols - 1) / n_cols;
+    int per_col = line_count / n_cols + (line_count % n_cols != 0);
     gsize text_len = strlen(src->text);
     for (int col = 0; col < n_cols; col++) {
         int first_line = col * per_col;
