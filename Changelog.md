@@ -13,6 +13,12 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* Reading an element's inline style from script is much faster:
+  `style[i]`, `style.length`, `getPropertyValue()` and
+  `getPropertyPriority()` no longer re-serialize and re-parse the whole
+  `style` attribute on every call. bbc.com/news loads in about 6 s of CPU
+  instead of 33 s; in the desktop browser it used to pass the renderer's
+  30-second reply timeout, restart, and never finish loading.
 * Scrolling is smooth. Touchpad deltas are applied 1:1 (they were multiplied
   by 60, so a small swipe jumped hundreds of pixels), the scroll continues
   with momentum after the fingers lift, mouse-wheel notches and the arrow,

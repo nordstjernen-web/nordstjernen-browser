@@ -23026,6 +23026,40 @@ css_inline_value_canonical(const char *prop, char *value)
     return value;
 }
 
+#define INLINE_DECL_SHEETS_MAX 4096
+
+static __thread GHashTable *g_inline_decl_sheets;
+static __thread double g_inline_decl_sheets_vw, g_inline_decl_sheets_vh;
+
+static const ns_css_stylesheet *
+inline_declaration_sheet(const char *name, const char *value)
+{
+    if (!g_inline_decl_sheets)
+        g_inline_decl_sheets = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free,
+            (GDestroyNotify)ns_css_stylesheet_free);
+    if (g_inline_decl_sheets_vw != g_viewport_w ||
+        g_inline_decl_sheets_vh != g_viewport_h ||
+        g_hash_table_size(g_inline_decl_sheets) >= INLINE_DECL_SHEETS_MAX) {
+        g_hash_table_remove_all(g_inline_decl_sheets);
+        g_inline_decl_sheets_vw = g_viewport_w;
+        g_inline_decl_sheets_vh = g_viewport_h;
+    }
+    char *declaration = g_strdup_printf("*{%s:%s}", name, value);
+    ns_css_stylesheet *sheet = g_hash_table_lookup(g_inline_decl_sheets,
+                                                   declaration);
+    if (sheet) {
+        g_free(declaration);
+        return sheet;
+    }
+    sheet = ns_css_stylesheet_parse(declaration, -1);
+    if (sheet)
+        g_hash_table_insert(g_inline_decl_sheets, declaration, sheet);
+    else
+        g_free(declaration);
+    return sheet;
+}
+
 static char *
 inline_expanded_value(const char *name, const char *value, int prop,
                       gboolean *important)
@@ -23048,9 +23082,7 @@ inline_expanded_value(const char *name, const char *value, int prop,
         if (result != image) g_free(image);
         return result;
     }
-    char *declaration = g_strdup_printf("*{%s:%s}", name, value);
-    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(declaration, -1);
-    g_free(declaration);
+    const ns_css_stylesheet *sheet = inline_declaration_sheet(name, value);
     char *result = NULL;
     if (sheet) {
         for (guint ri = 0; ri < sheet->rules->len; ri++) {
@@ -23064,7 +23096,6 @@ inline_expanded_value(const char *name, const char *value, int prop,
                 *important = decl->important;
             }
         }
-        ns_css_stylesheet_free(sheet);
     }
     return result;
 }
@@ -23538,10 +23569,40 @@ inline_grid_value(const char *style, gboolean full)
     return r;
 }
 
+static char *inline_style_get_uncached(const char *style, const char *prop);
+
+#define INLINE_GET_MEMO 32
+
+static __thread struct {
+    char *style;
+    char *prop;
+    char *value;
+} g_inline_get_memo[INLINE_GET_MEMO];
+static __thread guint g_inline_get_next;
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
     if (!style || !prop) return NULL;
+    for (guint i = 0; i < INLINE_GET_MEMO; i++)
+        if (g_inline_get_memo[i].style &&
+            strcmp(g_inline_get_memo[i].prop, prop) == 0 &&
+            strcmp(g_inline_get_memo[i].style, style) == 0)
+            return g_strdup(g_inline_get_memo[i].value);
+    char *value = inline_style_get_uncached(style, prop);
+    guint slot = g_inline_get_next++ % INLINE_GET_MEMO;
+    g_free(g_inline_get_memo[slot].style);
+    g_free(g_inline_get_memo[slot].prop);
+    g_free(g_inline_get_memo[slot].value);
+    g_inline_get_memo[slot].style = g_strdup(style);
+    g_inline_get_memo[slot].prop = g_strdup(prop);
+    g_inline_get_memo[slot].value = g_strdup(value);
+    return value;
+}
+
+static char *
+inline_style_get_uncached(const char *style, const char *prop)
+{
     if (g_ascii_strcasecmp(prop, "all") == 0)
         return inline_all_value(style);
     if (inline_quad_ids(prop))
@@ -23696,8 +23757,35 @@ inline_decl_find(GPtrArray *decls, const char *name)
     return NULL;
 }
 
+static char *inline_style_serialize_uncached(const char *style);
+
+#define INLINE_SERIALIZE_MEMO 16
+
+static __thread struct {
+    char *in;
+    char *out;
+} g_inline_serialize_memo[INLINE_SERIALIZE_MEMO];
+static __thread guint g_inline_serialize_next;
+
 char *
 ns_inline_style_serialize(const char *style)
+{
+    const char *key = style ? style : "";
+    for (guint i = 0; i < INLINE_SERIALIZE_MEMO; i++)
+        if (g_inline_serialize_memo[i].in &&
+            strcmp(g_inline_serialize_memo[i].in, key) == 0)
+            return g_strdup(g_inline_serialize_memo[i].out);
+    char *out = inline_style_serialize_uncached(style);
+    guint slot = g_inline_serialize_next++ % INLINE_SERIALIZE_MEMO;
+    g_free(g_inline_serialize_memo[slot].in);
+    g_free(g_inline_serialize_memo[slot].out);
+    g_inline_serialize_memo[slot].in = g_strdup(key);
+    g_inline_serialize_memo[slot].out = g_strdup(out);
+    return out;
+}
+
+static char *
+inline_style_serialize_uncached(const char *style)
 {
     GPtrArray *decls = g_ptr_array_new_with_free_func(inline_decl_free);
     const char *p = style ? style : "";
