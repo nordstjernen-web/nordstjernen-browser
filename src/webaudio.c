@@ -127,6 +127,7 @@ ns_wa_buffer_source(JSContext *ctx, JSValueConst node, uint32_t frames,
     double brate = ns_wa_num(ctx, buf, "sampleRate", rate);
     if (!(ratio > 0)) ratio = 1.0;
     double step = ratio * (brate > 0 ? brate / rate : 1.0);
+    if (!isfinite(step)) step = 1.0;
     JSValue loop_v = JS_GetPropertyStr(ctx, node, "loop");
     gboolean loop = JS_ToBool(ctx, loop_v);
     JS_FreeValue(ctx, loop_v);
