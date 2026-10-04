@@ -55888,8 +55888,10 @@ ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
     JSAtom atom = JS_NewAtom(ctx, name);
     JSValue g = JS_NewCFunction2(ctx, (JSCFunction *)(void *)getter, name, 0,
                                  JS_CFUNC_getter, 0);
-    JSValue s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)setter, name, 1,
-                                 JS_CFUNC_setter, 0);
+    JSValue s = setter
+        ? JS_NewCFunction2(ctx, (JSCFunction *)(void *)setter, name, 1,
+                           JS_CFUNC_setter, 0)
+        : JS_UNDEFINED;
     JS_DefinePropertyGetSet(ctx, proto, atom, g, s,
                             JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_FreeAtom(ctx, atom);
