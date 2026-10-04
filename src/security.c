@@ -27,6 +27,7 @@
 #include <sys/syscall.h>
 #ifdef NS_HAVE_SECCOMP
 #include <seccomp.h>
+#include <sys/ioctl.h>
 #endif
 #endif
 
@@ -841,6 +842,24 @@ static const char *const ns_seccomp_allowed_names[] = {
     "write",
     "writev",
 };
+
+static int
+ns_seccomp_deny_tty_injection(void)
+{
+    scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ALLOW);
+    if (!ctx) return -ENOMEM;
+    (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
+    static const unsigned long denied[] = { TIOCSTI, TIOCLINUX };
+    int rc = 0;
+    for (gsize i = 0; rc == 0 && i < G_N_ELEMENTS(denied); i++)
+        rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(ioctl), 1,
+                              SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
+                                      (scmp_datum_t)denied[i]));
+    if (rc == 0)
+        rc = seccomp_load(ctx);
+    seccomp_release(ctx);
+    return rc;
+}
 #endif
 
 void
@@ -854,6 +873,13 @@ ns_security_seccomp_init(void)
         g_info("seccomp: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("seccomp prerequisite (no_new_privs) failed");
         return;
+    }
+
+    int tty_rc = ns_seccomp_deny_tty_injection();
+    if (tty_rc != 0) {
+        g_warning("seccomp: terminal-injection filter failed to load: %s",
+                  g_strerror(-tty_rc));
+        ns_sandbox_require_or_die("seccomp terminal-injection filter failed to load");
     }
 
     scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM));
