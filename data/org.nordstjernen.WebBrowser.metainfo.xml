@@ -60,6 +60,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.28" date="2026-10-04">
+      <description>
+        <p>Dual licensing, performance and compatibility release.</p>
+        <ul>
+          <li>Nordstjernen is dual-licensed under the Nordstjernen Source License v1.0 or the GNU GPL version 3 or later.</li>
+          <li>Style resolution, script parsing, form access and container-query relayout are faster; Speedometer's Complex-DOM suites run about 18% faster.</li>
+          <li>Constructed style sheets adopted by shadow roots work again, and pages with many shadow roots no longer crash the renderer.</li>
+          <li>instanceof follows the prototype chain, so Vue apps render HTML elements correctly.</li>
+          <li>YouTube video events fire once per resource, ads no longer leave the player stalled, and forced layouts on the watch page are much faster.</li>
+          <li>The built-in pages and the browser window have a new, flatter look with light and dark colours.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.27" date="2026-10-02">
       <description>
         <p>Frames, events, workers and robustness release.</p>

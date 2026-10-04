@@ -1,5 +1,5 @@
 Name:           nordstjernen
-Version:        1.0.27
+Version:        1.0.28
 Release:        1%{?dist}
 Summary:        Clean-room, hardened web browser written from scratch in C
 
@@ -87,6 +87,9 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 %{_datadir}/icons/hicolor/scalable/apps/nordstjernen*.svg
 
 %changelog
+* Sun Oct 04 2026 Andreas Røsdal <andreas.rosdal@gmail.com> - 1.0.28-1
+- Release 1.0.28.
+
 * Fri Oct 02 2026 Andreas Røsdal <andreas.rosdal@gmail.com> - 1.0.27-1
 - Release 1.0.27.
 
