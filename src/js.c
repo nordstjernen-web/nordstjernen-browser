@@ -33906,6 +33906,10 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (_j) g_hash_table_remove(_j->orphan_nodes, c);
             ns_node_append_child(parent, c);
@@ -33926,6 +33930,9 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     if (_j) {
         if (child->parent) ns_node_iters_pre_remove(_j, child);
         ns_ce_disconnect_subtree(_j, child);
+        if (ns_node_ancestor_or_self(parent, child))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "the new child is an inclusive ancestor of the parent");
         ns_js_record_move_removal(_j, child);
         g_hash_table_remove(_j->orphan_nodes, child);
     }
@@ -34177,6 +34184,10 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (!ref || ref->parent != parent) {
                 if (_j) g_hash_table_remove(_j->orphan_nodes, c);
@@ -34203,6 +34214,9 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
     }
     if (_j) {
         ns_ce_disconnect_subtree(_j, newc);
+        if (ns_node_ancestor_or_self(parent, newc))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "the new child is an inclusive ancestor of the parent");
         ns_js_record_move_removal(_j, newc);
     }
     if (!ref || ref->parent != parent) {
@@ -34332,6 +34346,10 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (!reference || reference->parent != parent) {
                 if (_j) g_hash_table_remove(_j->orphan_nodes, c);
@@ -34356,6 +34374,8 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         if (newc->parent) ns_node_iters_pre_remove(_j, newc);
         ns_ce_disconnect_subtree(_j, newc);
+        JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
+        if (JS_IsException(verr)) return verr;
         ns_js_record_move_removal(_j, newc);
     }
     if (newc->parent) ns_node_remove(newc);
@@ -34719,6 +34739,7 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
     ns_node *parent = self->parent;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(self->parent, to_insert)) continue;
         ns_insert_sibling_before(self, to_insert);
         if (_j)
             ns_js_record_child_change(_j, parent, to_insert, NULL,
@@ -34766,6 +34787,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
 
     for (guint k = 0; k < seq->len; k++) {
         ns_node *node = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, node)) continue;
         if (viable_next && viable_next->parent == parent)
             ns_insert_sibling_before(viable_next, node);
         else
@@ -34825,6 +34847,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
 
     for (guint k = 0; k < seq->len; k++) {
         ns_node *node = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, node)) continue;
         if (anchor && anchor->parent == parent)
             ns_insert_sibling_before(anchor, node);
         else
@@ -35074,6 +35097,7 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
     }
     for (guint k = 0; k < seq->len; k++) {
         ns_node *added = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, added)) continue;
         ns_node_append_child(parent, added);
         if (_j)
             ns_js_record_child_change(_j, parent, added, NULL,
@@ -35125,16 +35149,11 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
     ns_node *ref = parent->first_child;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
-        if (!ref) {
+        if (ns_node_ancestor_or_self(parent, to_insert)) continue;
+        if (ref && ref->parent == parent)
+            ns_insert_sibling_before(ref, to_insert);
+        else
             ns_node_append_child(parent, to_insert);
-        } else {
-            to_insert->parent = parent;
-            to_insert->next_sibling = ref;
-            to_insert->prev_sibling = ref->prev_sibling;
-            if (ref->prev_sibling) ref->prev_sibling->next_sibling = to_insert;
-            else parent->first_child = to_insert;
-            ref->prev_sibling = to_insert;
-        }
         if (_j)
             ns_js_record_child_change(_j, parent, to_insert, NULL,
                                       to_insert->prev_sibling,
