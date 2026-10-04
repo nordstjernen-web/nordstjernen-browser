@@ -15,6 +15,8 @@
 #include <string.h>
 
 #define NS_BFCACHE_MAX 4
+#define NS_SCROLL_ACTIVE_US   150000
+#define NS_SCROLL_TICK_GAP_US 250000
 
 struct ns_renderer_session {
     int            ctrl_w;
@@ -26,6 +28,10 @@ struct ns_renderer_session {
     ns_browser    *bf[NS_BFCACHE_MAX];
     int            bf_n;
     int            tick_budget_ms;
+    gint64         scroll_until_us;
+    gint64         last_tick_us;
+    gint64         tick_cost_us;
+    int            tick_deferred;
     int            frame_valid;
     long           frame_sx;
     long           frame_sy;
@@ -268,6 +274,43 @@ serve_append_hdr(char *buf, int pos, size_t cap, const char *name,
                           name, maxval, value);
 }
 
+static gboolean
+session_tick_deferred(const struct ns_renderer_session *s, gint64 now)
+{
+    if (now >= s->scroll_until_us) return FALSE;
+    gint64 gap = s->tick_cost_us * 4;
+    if (gap < NS_SCROLL_TICK_GAP_US) gap = NS_SCROLL_TICK_GAP_US;
+    return now - s->last_tick_us < gap;
+}
+
+static int
+session_tick(struct ns_renderer_session *s)
+{
+    gint64 now = g_get_monotonic_time();
+    if (session_tick_deferred(s, now)) {
+        s->tick_deferred = 1;
+        return 0;
+    }
+    int changed = ns_browser_tick(s->cur, s->tick_budget_ms);
+    s->last_tick_us = g_get_monotonic_time();
+    s->tick_cost_us = s->last_tick_us - now;
+    s->tick_deferred = 0;
+    return changed;
+}
+
+static gboolean
+session_animating(const struct ns_renderer_session *s)
+{
+    return ns_browser_animating(s->cur) || s->tick_deferred;
+}
+
+static void
+session_note_scroll(struct ns_renderer_session *s, long sx, long sy)
+{
+    if (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy))
+        s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
+}
+
 int
 ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                            const char *body)
@@ -396,7 +439,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                                 strlen(json));
             return 0;
         }
-        int changed = ns_browser_tick(s->cur, s->tick_budget_ms);
+        int changed = session_tick(s);
         if (changed) s->frame_valid = 0;
         char *nav = ns_browser_take_pending_nav(s->cur);
         if (nav) {
@@ -429,7 +472,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\"}",
-            changed != 0, ns_browser_animating(s->cur) ? 1 : 0,
+            changed != 0, session_animating(s) ? 1 : 0,
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "");
@@ -470,8 +513,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                                 "X-Anim: 0\r\n", NULL, 0);
             return 0;
         }
-        int ticked = s->frame_valid
-            ? ns_browser_tick(s->cur, s->tick_budget_ms) : 0;
+        session_note_scroll(s, sx, sy);
+        int ticked = s->frame_valid ? session_tick(s) : 0;
         int requested_scroll_x = -1;
         int requested_scroll_y = -1;
         ns_browser_take_pending_scroll(s->cur, &requested_scroll_x,
@@ -557,7 +600,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (window_action)
             for (char *p = window_action; *p; p++)
                 if (*p == '\r' || *p == '\n') *p = ' ';
-        int animating = ns_browser_animating(s->cur) ? 1 : 0;
+        int animating = session_animating(s) ? 1 : 0;
         if (ns_browser_caret_blinking(s->cur)) animating |= 2;
         int clipboard_pending = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
         char hdrs[32768];
