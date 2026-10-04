@@ -29749,23 +29749,20 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
                                            &intersecting);
     intersecting = has_box && intersecting;
     if (tw <= 0 || th <= 0) ratio = intersecting ? 1.0 : 0.0;
-    double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
-    double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
-    tx -= viewport_x;
-    ty -= viewport_y;
-    rx -= viewport_x;
-    ry -= viewport_y;
-    ix -= viewport_x;
-    iy -= viewport_y;
-    *out_entry = ns_io_make_entry(ctx, t->wrapper,
-                                  tx, ty, tw, th,
-                                  rx, ry, rw, rh,
-                                  ix, iy, iw, ih,
-                                  ratio, intersecting);
     gboolean changed = !t->has_fired || intersecting != t->last_intersecting;
     if (!changed && ns_io_threshold_index(o, t->last_ratio) !=
                     ns_io_threshold_index(o, ratio))
         changed = TRUE;
+    *out_entry = JS_UNDEFINED;
+    if (changed) {
+        double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
+        double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
+        *out_entry = ns_io_make_entry(ctx, t->wrapper,
+                                      tx - viewport_x, ty - viewport_y, tw, th,
+                                      rx - viewport_x, ry - viewport_y, rw, rh,
+                                      ix - viewport_x, iy - viewport_y, iw, ih,
+                                      ratio, intersecting);
+    }
     t->last_intersecting = intersecting;
     t->last_ratio = ratio;
     t->has_fired = TRUE;

@@ -3,6 +3,9 @@ Changelog:
 
 1.0.29:
 ======
+* IntersectionObserver entries are only built for targets whose
+  intersection changed. Every relayout built a full entry with three
+  DOMRects for every observed target and dropped most of them.
 * The animation check after each style pass skips elements that cannot
   have anything to do: those without animation state and without an
   animation or transition property, and those whose style was reused and
