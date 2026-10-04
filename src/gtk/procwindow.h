@@ -1,6 +1,6 @@
 /* Nordstjernen — GTK tabbed browser window over the out-of-process renderer.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only
  */
 
 #ifndef NORDSTJERNEN_GTK_PROCWINDOW_H

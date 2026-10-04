@@ -1,3 +1,46 @@
+# Nordstjernen licensing
+
+Copyright 2026 Andreas Røsdal
+
+Nordstjernen is dual-licensed. You may use, copy, modify and distribute it
+under the terms of **either** of these two licenses, at your option:
+
+1. the **Nordstjernen Source License v1.0** (NSL-1.0), reproduced in full
+   below; or
+2. the **GNU General Public License, version 3** (GPL-3.0), reproduced in
+   full in [COPYING](COPYING) and at
+   <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+SPDX-License-Identifier: `LicenseRef-NSL-1.0 OR GPL-3.0-only`
+
+You choose one license for your use and follow that license's terms. A
+recipient who takes the GPL-3.0 option receives the Software under the GPL
+alone, and the NSL-1.0 terms do not apply to them; a recipient who takes the
+NSL-1.0 option is bound by the NSL-1.0 terms alone.
+
+Under the GPL-3.0 option:
+
+> Nordstjernen is free software: you can redistribute it and/or modify it
+> under the terms of the GNU General Public License as published by the Free
+> Software Foundation, version 3.
+>
+> Nordstjernen is distributed in the hope that it will be useful, but WITHOUT
+> ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+> FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+> more details.
+>
+> You should have received a copy of the GNU General Public License along
+> with Nordstjernen. If not, see <https://www.gnu.org/licenses/>.
+
+Commercial licenses remain available by written agreement for anyone who
+needs terms that neither license provides; see "Commercial License" below.
+
+Third-party components included with or linked into Nordstjernen keep their
+own licenses; their notices are reproduced in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
+---
+
 # Nordstjernen Source License v1.0
 
 ## Abbreviation

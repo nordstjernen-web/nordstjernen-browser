@@ -3,6 +3,12 @@ Changelog:
 
 1.0.28:
 ======
+* Nordstjernen is now dual-licensed: it may be used, modified and
+  redistributed under either the Nordstjernen Source License v1.0 or the GNU
+  General Public License version 3, at the recipient's option
+  (`LicenseRef-NSL-1.0 OR GPL-3.0-only`). The GPL text ships as `COPYING` in
+  every package and shows at `about:gpl`; the About page and the Debian,
+  RPM, openSUSE, Alpine, Maven and AppStream metadata declare both licenses.
 * Style resolution is faster on pages with attribute selectors: whether an
   attribute's value compares case-insensitively is decided once per selector
   instead of for every element (Speedometer's Complex-DOM suites run about 18%

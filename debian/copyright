@@ -3,11 +3,12 @@ Upstream-Name: Nordstjernen
 Upstream-Contact: Andreas Røsdal <andreas.rosdal@gmail.com>
 Source: https://github.com/nordstjernen-web/nordstjernen-browser
 Comment:
- The Nordstjernen source code is distributed under the Nordstjernen Source
- License v1.0 (NSL-1.0), a source-available license that is NOT DFSG-free:
- it forbids "Competing Use" and restricts some purposes to non-commercial
- use. It converts to the MIT license ten years after each release. Because
- of this restriction the package belongs in Debian's non-free component.
+ The Nordstjernen source code is dual-licensed: each recipient may use it
+ under either the GNU General Public License version 3 (GPL-3) or the
+ Nordstjernen Source License v1.0 (NSL-1.0), at their option. The GPL-3
+ option is DFSG-free, so the package is distributed under GPL-3 and belongs
+ in Debian's main component. The NSL-1.0 alternative is documented below for
+ completeness; it is not DFSG-free on its own.
  .
  The in-tree third-party engines (lexbor, QuickJS, WAMR) and vendored
  single-file libraries (Wuffs, pl_mpeg, miniaudio) carry their own free
@@ -15,7 +16,11 @@ Comment:
 
 Files: *
 Copyright: 2026 Andreas Røsdal
-License: NSL-1.0
+License: GPL-3 or NSL-1.0
+
+Files: src/css_media.c src/svg.c src/svg.h src/webaudio.c
+Copyright: 2026 Andreas Røsdal
+License: GPL-3+
 
 Files: src/lexbor/*
 Copyright: 2018-2025 Alexander Borisov
@@ -55,7 +60,35 @@ License: NSL-1.0
  Grant of Future License: on the tenth anniversary of each release the
  software additionally becomes available under the MIT (Expat) license.
  .
- THIS IS NOT A DFSG-FREE LICENSE. THE PACKAGE MUST STAY IN non-free.
+ On its own this license is not DFSG-free; Debian relies on the GPL-3
+ alternative.
+
+License: GPL-3
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, version 3.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ more details.
+ .
+ On Debian systems the full text of the GNU General Public License version 3
+ can be found in /usr/share/common-licenses/GPL-3.
+
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option)
+ any later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ more details.
+ .
+ On Debian systems the full text of the GNU General Public License version 3
+ can be found in /usr/share/common-licenses/GPL-3.
 
 License: Apache-2.0
  On Debian systems the full text of the Apache License version 2.0 can be

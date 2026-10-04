@@ -147,6 +147,7 @@ fi
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/License.md" "$STAGE/"
+cp "$ROOT/COPYING" "$STAGE/"
 
 if [ "$WEBM" = 1 ]; then
     WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /
@@ -225,8 +226,9 @@ ${WEBGPU_RUN_NOTE}
 
 ## License
 
-Source-available; redistribution / commercial use require a license.
-Copyright 2026 Andreas Røsdal. See README.md for details.
+Dual-licensed under the Nordstjernen Source License v1.0 or the GNU General
+Public License version 3, at your option. Copyright 2026 Andreas Røsdal.
+See License.md and COPYING for the terms.
 EOF
 
 log "staged: $(cd "$STAGE" && find . -type f | sort | tr '\n' ' ')"

@@ -97,6 +97,7 @@ else
 fi
 
 cp "$ROOT/License.md" "$STAGE/Contents/Resources/share/nordstjernen/"
+cp "$ROOT/COPYING" "$STAGE/Contents/Resources/share/nordstjernen/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/Contents/Resources/share/nordstjernen/"
 cp "$ROOT/README.md" "$STAGE/Contents/Resources/share/nordstjernen/"
 

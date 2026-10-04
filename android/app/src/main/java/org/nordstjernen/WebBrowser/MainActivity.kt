@@ -828,6 +828,7 @@ class MainActivity : AppCompatActivity() {
     private fun extractBundledDocs() {
         val outDir = File(filesDir, "nordstjernen")
         extractAsset("License.md", File(outDir, "License.md"))
+        extractAsset("COPYING", File(outDir, "COPYING"))
         extractAsset("THIRD-PARTY-LICENSES.md", File(outDir, "THIRD-PARTY-LICENSES.md"))
     }
 

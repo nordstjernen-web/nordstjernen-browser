@@ -8,7 +8,7 @@ url="https://nordstjernen.org"
 # quickjs and lexbor are vendored C and build in-tree; the engine also links
 # a little C++ (poppler, libavif). Restrict to arches the deps + WAMR asm cover.
 arch="x86_64 aarch64"
-license="custom"
+license="LicenseRef-NSL-1.0 OR GPL-3.0-only"
 makedepends="
 	meson
 	ninja
@@ -45,6 +45,8 @@ package() {
 	DESTDIR="$pkgdir" meson install --no-rebuild -C output
 	install -Dm644 License.md \
 		"$pkgdir"/usr/share/licenses/$pkgname/License.md
+	install -Dm644 COPYING \
+		"$pkgdir"/usr/share/licenses/$pkgname/COPYING
 }
 
 # Regenerate with `abuild checksum` whenever pkgver moves.

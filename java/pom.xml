@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Nordstjernen for Java — Maven build and distribution descriptor.
      Copyright 2026 Andreas Røsdal
-     SPDX-License-Identifier: LicenseRef-NSL-1.0 -->
+     SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-only -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -30,7 +30,13 @@
       <name>Nordstjernen Source License v1.0</name>
       <url>https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-browser/main/License.md</url>
       <distribution>repo</distribution>
-      <comments>LicenseRef-NSL-1.0</comments>
+      <comments>LicenseRef-NSL-1.0; dual-licensed, at your option, with GPL-3.0-only</comments>
+    </license>
+    <license>
+      <name>GNU General Public License, version 3</name>
+      <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+      <distribution>repo</distribution>
+      <comments>GPL-3.0-only; dual-licensed, at your option, with LicenseRef-NSL-1.0</comments>
     </license>
   </licenses>
 

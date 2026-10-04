@@ -544,7 +544,8 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 - **Platforms:** Linux, macOS, Windows (MSYS2/MinGW), plus Android and a
   JVM binding (`java/`, JNI over the same C API) and iOS. Desktop uses
   GTK 4; the engine core is GTK-optional.
-- **License:** Nordstjernen Source License v1.0 (`LicenseRef-NSL-1.0`).
+- **License:** Nordstjernen Source License v1.0 or GNU GPL version 3, at
+  your option (`LicenseRef-NSL-1.0 OR GPL-3.0-only`).
 
 ---
 
