@@ -2515,7 +2515,7 @@ css_pseudo_element_is_standard(const char *name, gsize n)
 static gboolean
 parse_pseudo_keyword(const char *name, gsize n,
                      const char *arg, gsize alen,
-                     ns_css_pseudo_pred *out)
+                     ns_css_pseudo_pred *out, int depth)
 {
     struct { const char *k; ns_css_pseudo v; } table[] = {
         { "first-child",   NS_CSS_PC_FIRST_CHILD },
@@ -2612,7 +2612,8 @@ parse_pseudo_keyword(const char *name, gsize n,
         if (!parse_anb(as, (gsize)(anb_end - as), &a, &b)) return FALSE;
         if (of) {
             const char *fs = css_skip_ws_comments(of + 2, ae);
-            GPtrArray *group = parse_selector_group(fs, (gsize)(ae - fs), 1);
+            GPtrArray *group = parse_selector_group(fs, (gsize)(ae - fs),
+                                                    depth + 1);
             if (!group || group->len == 0) {
                 if (group) g_ptr_array_free(group, TRUE);
                 return FALSE;
@@ -3076,7 +3077,8 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                     }
                 } else if (name_n > 0) {
                     ns_css_pseudo_pred pc = {0};
-                    if (parse_pseudo_keyword(name_s, name_n, arg_s, arg_n, &pc)) {
+                    if (parse_pseudo_keyword(name_s, name_n, arg_s, arg_n, &pc,
+                                             depth)) {
                         g_array_append_val(cmp->pseudos, pc);
                         if (pc.kind == NS_CSS_PC_HOVER)
                             g_sel_has_hover = TRUE;
