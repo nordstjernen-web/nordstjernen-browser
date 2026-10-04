@@ -5270,9 +5270,13 @@ done:
     return result;
 }
 
+#define NS_CSS_RANDOM_ITEM_MAX_DEPTH 16
+
 static gboolean
 font_family_random_item_valid(const char *item, gsize ilen)
 {
+    static __thread int nesting;
+    if (nesting >= NS_CSS_RANDOM_ITEM_MAX_DEPTH) return FALSE;
     const char *open = memchr(item, '(', ilen);
     if (!open || item[ilen - 1] != ')') return FALSE;
     char *body = g_strndup(open + 1, (gsize)(item + ilen - 1 - (open + 1)));
@@ -5324,7 +5328,9 @@ font_family_random_item_valid(const char *item, gsize ilen)
         } else {
             inner = g_strdup(a);
         }
+        nesting++;
         char *canon = ns_css_font_family_canonical(inner);
+        nesting--;
         ok = canon != NULL;
         g_free(canon);
         g_free(inner);
