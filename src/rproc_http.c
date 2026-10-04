@@ -43,6 +43,10 @@ open_fb_fd(size_t size)
         snprintf(name, sizeof name, "/nshttp-%d-%u", (int)getpid(),
                  counter++);
         fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL | O_CLOEXEC, 0600);
+        if (fd < 0 && errno == EINVAL) {
+            fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+            if (fd >= 0) fcntl(fd, F_SETFD, FD_CLOEXEC);
+        }
         if (fd >= 0)
             shm_unlink(name);
     }
