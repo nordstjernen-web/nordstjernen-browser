@@ -1346,7 +1346,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_pending_user_activated = -1;
 
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
-        char *real = g_strdup(url + strlen(NS_UNSAFE_CONTINUE_SCHEME));
+        const char *rest = url;
+        while (g_str_has_prefix(rest, NS_UNSAFE_CONTINUE_SCHEME))
+            rest += strlen(NS_UNSAFE_CONTINUE_SCHEME);
+        if (!*rest) return NULL;
+        char *real = g_strdup(rest);
         char *host = ns_url_host_from(real);
         if (host) {
             ns_safebrowsing_allow_host(host);
