@@ -1,6 +1,6 @@
 /* Northstar — SVG rendering onto Cairo, sharing the CSS cascade with HTML.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #include "svg.h"

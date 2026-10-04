@@ -272,10 +272,7 @@ them large:
    with the App Store terms for the same reason, so a store build by the
    copyright holder would rely on the **NSL-1.0** (or commercial) terms,
    not the GPL. Confirm that NSL-1.0 permits store distribution; the
-   store does let you supply your own EULA. The four GPL-3.0-or-later-only
-   sources (`src/css_media.c`, `src/svg.c`, `src/svg.h`,
-   `src/webaudio.c`) are not covered by NSL-1.0, which is a further
-   obstacle for a store build by anyone other than the copyright holder.
+   store does let you supply your own EULA.
 
 Once those are resolved, the submission is the standard flow: enroll in
 the Apple Developer Program; create the app record in **App Store

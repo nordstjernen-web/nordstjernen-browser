@@ -18,10 +18,6 @@ Files: *
 Copyright: 2026 Andreas Røsdal
 License: GPL-3+ or NSL-1.0
 
-Files: src/css_media.c src/svg.c src/svg.h src/webaudio.c
-Copyright: 2026 Andreas Røsdal
-License: GPL-3+
-
 Files: src/lexbor/*
 Copyright: 2018-2025 Alexander Borisov
 License: Apache-2.0
