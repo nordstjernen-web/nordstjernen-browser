@@ -20752,10 +20752,11 @@ css_append_nested_selector(GString *out, const char *part,
 }
 
 static char *
-css_combine_selectors(const char *parent, const char *child)
+css_combine_selectors(const char *parent, const char *child, gsize max_len)
 {
     char *pc = g_strstrip(g_strdup(parent));
     char *cc = g_strstrip(g_strdup(child));
+    gsize per_parent = strlen(pc) + 6;
     GString *out = g_string_new(NULL);
     const char *p = cc;
     const char *end = cc + strlen(cc);
@@ -20768,6 +20769,19 @@ css_combine_selectors(const char *parent, const char *child)
             g_free(part_buf);
             p = term == ',' ? seg + 1 : seg;
             continue;
+        }
+        gsize part_len = strlen(part);
+        gsize amps = 0;
+        for (const char *q = part; *q; q++)
+            if (*q == '&') amps++;
+        gsize room = max_len - out->len;
+        if (part_len + 2 > room ||
+            amps >= (room - part_len - 2) / per_parent) {
+            g_free(part_buf);
+            g_free(pc);
+            g_free(cc);
+            g_string_free(out, TRUE);
+            return NULL;
         }
         if (out->len) g_string_append(out, ", ");
         char *isparent = g_strdup_printf(":is(%s)", pc);
@@ -20789,9 +20803,10 @@ css_combine_selectors(const char *parent, const char *child)
 static gboolean css_body_has_nested_rule(const char *s, const char *e);
 static void css_flatten_style_rule(GString *out, const char *sel,
                                    const char *body_s, const char *body_e,
-                                   int depth);
+                                   int depth, gsize *budget);
 
 #define NS_CSS_NEST_MAX_DEPTH 128
+#define NS_CSS_NEST_SELECTOR_BUDGET ((gsize)16 * 1024 * 1024)
 
 static void
 css_trim_selector(char *sel)
@@ -20810,7 +20825,8 @@ css_trim_selector(char *sel)
 }
 
 static void
-css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
+css_flatten_rule_list(GString *out, const char *p, const char *end, int depth,
+                      gsize *budget)
 {
     if (depth > NS_CSS_NEST_MAX_DEPTH) return;
     while (p < end) {
@@ -20845,7 +20861,7 @@ css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
                     const char *body_s = seg_end + 1;
                     css_flatten_rule_list(out, body_s,
                                           css_block_body_end(body_s, block_end),
-                                          depth + 1);
+                                          depth + 1, budget);
                     g_string_append_c(out, '}');
                 } else {
                     g_string_append_len(out, prelude, (gssize)(block_end - prelude));
@@ -20869,7 +20885,7 @@ css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
         const char *body_s = seg_end + 1;
         const char *block_end = css_skip_to_block_end(seg_end, end);
         const char *body_e = css_block_body_end(body_s, block_end);
-        css_flatten_style_rule(out, sel, body_s, body_e, depth + 1);
+        css_flatten_style_rule(out, sel, body_s, body_e, depth + 1, budget);
         g_free(sel);
         p = block_end;
     }
@@ -20897,10 +20913,28 @@ css_body_has_nested_rule(const char *s, const char *e)
     return FALSE;
 }
 
+static gboolean
+css_flatten_take_budget(gsize *budget, const char *sel)
+{
+    if (*budget == 0) return FALSE;
+    gsize n = strlen(sel);
+    if (n > *budget) {
+        *budget = 0;
+        return FALSE;
+    }
+    *budget -= n;
+    return TRUE;
+}
+
 static void
-css_flatten_flush_decls(GString *out, const char *sel, GString *decls)
+css_flatten_flush_decls(GString *out, const char *sel, GString *decls,
+                        gsize *budget)
 {
     if (decls->len == 0) return;
+    if (!css_flatten_take_budget(budget, sel)) {
+        g_string_truncate(decls, 0);
+        return;
+    }
     g_string_append(out, sel);
     g_string_append_c(out, '{');
     g_string_append_len(out, decls->str, (gssize)decls->len);
@@ -20910,10 +20944,12 @@ css_flatten_flush_decls(GString *out, const char *sel, GString *decls)
 
 static void
 css_flatten_style_rule(GString *out, const char *sel,
-                       const char *body_s, const char *body_e, int depth)
+                       const char *body_s, const char *body_e, int depth,
+                       gsize *budget)
 {
     if (depth > NS_CSS_NEST_MAX_DEPTH) return;
     if (!css_body_has_nested_rule(body_s, body_e)) {
+        if (!css_flatten_take_budget(budget, sel)) return;
         g_string_append(out, sel);
         g_string_append_c(out, '{');
         g_string_append_len(out, body_s, (gssize)(body_e - body_s));
@@ -20936,7 +20972,7 @@ css_flatten_style_rule(GString *out, const char *sel,
         char term = 0;
         const char *seg_end = css_scan_segment(p, body_e, &term);
         if (term == '{') {
-            css_flatten_flush_decls(out, sel, decls);
+            css_flatten_flush_decls(out, sel, decls, budget);
             char *nsel = g_strndup(p, (gsize)(seg_end - p));
             css_trim_selector(nsel);
             const char *nbody_s = seg_end + 1;
@@ -20953,13 +20989,17 @@ css_flatten_style_rule(GString *out, const char *sel,
                     g_string_append(out, nsel);
                     g_string_append_c(out, '{');
                     css_flatten_style_rule(out, sel, nbody_s, nbody_e,
-                                           depth + 1);
+                                           depth + 1, budget);
                     g_string_append_c(out, '}');
                 }
             } else {
-                char *combined = css_combine_selectors(sel, nsel);
-                css_flatten_style_rule(out, combined, nbody_s, nbody_e,
-                                       depth + 1);
+                char *combined = *budget
+                    ? css_combine_selectors(sel, nsel, *budget) : NULL;
+                if (!combined)
+                    *budget = 0;
+                else if (css_flatten_take_budget(budget, combined))
+                    css_flatten_style_rule(out, combined, nbody_s, nbody_e,
+                                           depth + 1, budget);
                 g_free(combined);
             }
             g_free(nsel);
@@ -20970,7 +21010,7 @@ css_flatten_style_rule(GString *out, const char *sel,
             p = (seg_end < body_e) ? seg_end + 1 : body_e;
         }
     }
-    css_flatten_flush_decls(out, sel, decls);
+    css_flatten_flush_decls(out, sel, decls, budget);
     g_string_free(decls, TRUE);
 }
 
@@ -20979,8 +21019,10 @@ css_flatten_nesting(const char *text, gssize len)
 {
     if (!text) return NULL;
     if (len < 0) len = (gssize)strlen(text);
+    gsize budget = (gsize)len <= (G_MAXSIZE - NS_CSS_NEST_SELECTOR_BUDGET) / 16
+        ? (gsize)len * 16 + NS_CSS_NEST_SELECTOR_BUDGET : G_MAXSIZE;
     GString *out = g_string_new(NULL);
-    css_flatten_rule_list(out, text, text + len, 0);
+    css_flatten_rule_list(out, text, text + len, 0, &budget);
     return g_string_free(out, FALSE);
 }
 
