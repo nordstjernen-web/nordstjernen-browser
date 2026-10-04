@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* Pages load again in the desktop browser on macOS versions whose
+  `shm_open()` rejects `O_CLOEXEC`. Creating a tab's shared framebuffer
+  failed there, so no renderer process was started and every page stayed
+  blank with "Done" in the status bar. The framebuffer is now opened
+  without the flag and marked close-on-exec afterwards in that case.
 * The title bar always shows the browser name. "Nordstjernen Browser" sits
   centred in the window, moves to the right edge once the tabs reach the
   middle, and shortens to "Nordstjernen" when the full name no longer fits.
