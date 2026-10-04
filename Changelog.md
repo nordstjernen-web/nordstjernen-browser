@@ -11,6 +11,12 @@ Changelog:
 
 1.0.28:
 ======
+* Percentages inside `round()`, `mod()`, `rem()` and `abs()` resolve against
+  the same basis as a plain percentage. They were resolved against the
+  viewport width when the style sheet was parsed, so
+  `width: round(nearest, 100%, 1px)` made a box as wide as the window
+  whatever its container (Google's results page laid out its header, its
+  top cards and its news list too wide, over the right-hand column).
 * A column flex container with `min-height` and no `height` is as tall as
   its content again; the minimum was used as the height, so the items were
   shrunk to fit it and the rest of the page was laid out over them

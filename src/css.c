@@ -875,6 +875,47 @@ ns_css_calc_is_math_fn(const ns_css_value *v)
            v->u.calc.n_args > 0;
 }
 
+static double css_round_step(int strategy, double a, double b);
+static double css_mod_rem(gboolean is_mod, double a, double b);
+
+enum {
+    NS_CALC_FN_ROUND = 4,
+    NS_CALC_FN_MOD = 8,
+    NS_CALC_FN_REM = 9,
+    NS_CALC_FN_ABS = 10,
+};
+
+static double
+calc_stepped_eval(guint8 fn, const double *k)
+{
+    if (fn == NS_CALC_FN_ABS) return fabs(k[0]);
+    if (fn == NS_CALC_FN_MOD || fn == NS_CALC_FN_REM)
+        return css_mod_rem(fn == NS_CALC_FN_MOD, k[0], k[1]);
+    return css_round_step(fn - NS_CALC_FN_ROUND, k[0], k[1]);
+}
+
+static double
+calc_clamp_eval(const ns_css_value *v, const double *k)
+{
+    double lo  = (v->u.calc.arg_none & 1u) ? -HUGE_VAL : k[0];
+    double hi  = (v->u.calc.arg_none & 4u) ?  HUGE_VAL : k[2];
+    double out = k[1];
+    if (out > hi) out = hi;
+    if (out < lo) out = lo;
+    return out;
+}
+
+static double
+calc_minmax_eval(const ns_css_value *v, const double *k, int n)
+{
+    double out = k[0];
+    for (int i = 1; i < n; i++) {
+        if (v->u.calc.fn == 1 && k[i] < out) out = k[i];
+        if (v->u.calc.fn == 2 && k[i] > out) out = k[i];
+    }
+    return out;
+}
+
 double
 ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
 {
@@ -883,20 +924,10 @@ ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
     double k[4] = {0, 0, 0, 0};
     for (int i = 0; i < n; i++)
         k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis;
-    if (v->u.calc.fn == 3) {
-        double lo  = (v->u.calc.arg_none & 1u) ? -HUGE_VAL : k[0];
-        double hi  = (v->u.calc.arg_none & 4u) ?  HUGE_VAL : k[2];
-        double out = k[1];
-        if (out > hi) out = hi;
-        if (out < lo) out = lo;
-        return out;
-    }
-    double out = k[0];
-    for (int i = 1; i < n; i++) {
-        if (v->u.calc.fn == 1 && k[i] < out) out = k[i];
-        if (v->u.calc.fn == 2 && k[i] > out) out = k[i];
-    }
-    return out;
+    if (v->u.calc.fn >= NS_CALC_FN_ROUND)
+        return calc_stepped_eval(v->u.calc.fn, k);
+    if (v->u.calc.fn == 3) return calc_clamp_eval(v, k);
+    return calc_minmax_eval(v, k, n);
 }
 
 static double
@@ -4356,6 +4387,88 @@ ns_css_math_canonical(const char *value)
     return out;
 }
 
+typedef struct {
+    double px, pct;
+    gboolean number;
+} calc_arg;
+
+static gboolean
+calc_arg_parse(const char *text, calc_arg *out)
+{
+    out->px = out->pct = 0;
+    if (!resolve_to_px_pct(text, strlen(text), &out->px, &out->pct)) {
+        char *w = g_strdup_printf("calc(%s)", text);
+        gboolean ok = resolve_to_px_pct(w, strlen(w), &out->px, &out->pct);
+        g_free(w);
+        if (!ok) return FALSE;
+    }
+    out->number = calc_arg_is_number(text);
+    return TRUE;
+}
+
+static ns_css_value *
+calc_stepped_result(guint8 fn, const calc_arg *a, double r)
+{
+    int n = fn == NS_CALC_FN_ABS ? 1 : 2;
+    int numbers = 0;
+    gboolean basis = FALSE;
+    for (int i = 0; i < n; i++) {
+        if (a[i].number) numbers++;
+        if (a[i].pct != 0) basis = TRUE;
+    }
+    if (numbers == n) return calc_num_value(r);
+    if (numbers > 0) return NULL;
+    if (!basis) return calc_px_value(r);
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_CALC;
+    v->u.calc.px = r;
+    v->u.calc.fn = fn;
+    v->u.calc.n_args = (guint8)n;
+    for (int i = 0; i < n; i++) {
+        v->u.calc.args[i].px = a[i].px;
+        v->u.calc.args[i].pct = a[i].pct;
+    }
+    return v;
+}
+
+static ns_css_value *
+calc_stepped_fn_value(guint8 fn, char **parts, int n)
+{
+    calc_arg a[2] = { { 0, 0, FALSE }, { 1, 0, TRUE } };
+    double k[2];
+    for (int i = 0; i < n; i++)
+        if (!calc_arg_parse(parts[i], &a[i])) return NULL;
+    for (int i = 0; i < 2; i++)
+        k[i] = a[i].px + a[i].pct * 0.01 * g_viewport_w;
+    return calc_stepped_result(fn, a, calc_stepped_eval(fn, k));
+}
+
+static ns_css_value *
+calc_round_fn_parse(char **parts, int n)
+{
+    static const char *const names[] = { "nearest", "up", "down", "to-zero" };
+    int strategy = 0, vi = 0;
+    for (int i = 0; n > 0 && i < 4; i++)
+        if (g_ascii_strcasecmp(parts[0], names[i]) == 0) {
+            strategy = i;
+            vi = 1;
+        }
+    if (n - vi < 1 || n - vi > 2) return NULL;
+    return calc_stepped_fn_value((guint8)(NS_CALC_FN_ROUND + strategy),
+                                 parts + vi, n - vi);
+}
+
+static ns_css_value *
+calc_stepped_fn_parse(int fn, char **parts, int n)
+{
+    if (fn == 4) return calc_round_fn_parse(parts, n);
+    if (fn == 7)
+        return n == 1 ? calc_stepped_fn_value(NS_CALC_FN_ABS, parts, 1) : NULL;
+    if (n != 2) return NULL;
+    return calc_stepped_fn_value(fn == 5 ? NS_CALC_FN_MOD : NS_CALC_FN_REM,
+                                 parts, 2);
+}
+
 static ns_css_value *
 parse_calc_inner(const char *text)
 {
@@ -4393,41 +4506,8 @@ parse_calc_inner(const char *text)
         char *parts[4] = {0};
         int n = calc_split_args(args, body_end, parts, G_N_ELEMENTS(parts));
         ns_css_value *out = NULL;
-        if (fn == 7 && n == 1) {
-            double x = 0;
-            if (calc_arg_key(parts[0], &x))
-                out = calc_arg_is_number(parts[0])
-                    ? calc_num_value(fabs(x)) : calc_px_value(fabs(x));
-        } else if (fn == 4 && n >= 1) {
-            int vi = 0;
-            int strategy = 0;
-            if (g_ascii_strcasecmp(parts[0], "nearest") == 0) {
-                strategy = 0; vi = 1;
-            } else if (g_ascii_strcasecmp(parts[0], "up") == 0) {
-                strategy = 1; vi = 1;
-            } else if (g_ascii_strcasecmp(parts[0], "down") == 0) {
-                strategy = 2; vi = 1;
-            } else if (g_ascii_strcasecmp(parts[0], "to-zero") == 0) {
-                strategy = 3; vi = 1;
-            }
-            if (vi < n) {
-                double x = 0, step = 1;
-                if (calc_arg_key(parts[vi], &x) &&
-                    (vi + 1 >= n || calc_arg_key(parts[vi + 1], &step))) {
-                    double r = css_round_step(strategy, x, step);
-                    gboolean numeric = calc_arg_is_number(parts[vi]) &&
-                        (vi + 1 >= n || calc_arg_is_number(parts[vi + 1]));
-                    out = numeric ? calc_num_value(r) : calc_px_value(r);
-                }
-            }
-        } else if ((fn == 5 || fn == 6) && n == 2) {
-            double x = 0, y = 0;
-            if (calc_arg_key(parts[0], &x) && calc_arg_key(parts[1], &y)) {
-                double r = css_mod_rem(fn == 5, x, y);
-                out = (calc_arg_is_number(parts[0]) &&
-                       calc_arg_is_number(parts[1]))
-                    ? calc_num_value(r) : calc_px_value(r);
-            }
+        if (fn <= 7) {
+            out = calc_stepped_fn_parse(fn, parts, n);
         } else if (fn == 8 && n >= 1) {
             double sum = 0;
             gboolean ok = TRUE;
