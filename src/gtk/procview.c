@@ -477,9 +477,25 @@ pv_set_named_cursor(GtkWidget *w, const char *name)
         { "zoom-in",       "crosshair" },
         { "zoom-out",      "crosshair" },
     };
+    static const char *const plain[] = {
+        "default", "none", "pointer", "wait", "crosshair", "text",
+        "n-resize", "e-resize", "s-resize", "w-resize", "ew-resize",
+        "ns-resize",
+    };
     const char *fallback = NULL;
+    gboolean known = FALSE;
     for (gsize i = 0; i < G_N_ELEMENTS(fb); i++)
-        if (strcmp(name, fb[i].name) == 0) { fallback = fb[i].fallback; break; }
+        if (strcmp(name, fb[i].name) == 0) {
+            fallback = fb[i].fallback;
+            known = TRUE;
+            break;
+        }
+    for (gsize i = 0; i < G_N_ELEMENTS(plain) && !known; i++)
+        known = strcmp(name, plain[i]) == 0;
+    if (!known) {
+        gtk_widget_set_cursor(w, NULL);
+        return;
+    }
     GdkCursor *fb_cur = fallback ? gdk_cursor_new_from_name(fallback, NULL) : NULL;
     GdkCursor *cur = gdk_cursor_new_from_name(name, fb_cur);
     gtk_widget_set_cursor(w, cur ? cur : fb_cur);
