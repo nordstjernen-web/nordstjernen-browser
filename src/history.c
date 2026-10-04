@@ -251,7 +251,7 @@ history_host(const char *url)
 {
     GUri *uri = g_uri_parse(url, G_URI_FLAGS_NONE, NULL);
     const char *host = uri ? g_uri_get_host(uri) : NULL;
-    char *out = g_strdup(host && *host ? host : url);
+    char *out = g_utf8_make_valid(host && *host ? host : url, -1);
     if (uri)
         g_uri_unref(uri);
     if (g_str_has_prefix(out, "www.")) {
@@ -289,16 +289,19 @@ history_switch_day(GString *s, char **open_day, const char *day)
 }
 
 static void
-history_append_row(GString *s, const char *url, const char *title,
+history_append_row(GString *s, const char *raw_url, const char *raw_title,
                    GDateTime *when)
 {
+    char *url = g_utf8_make_valid(raw_url, -1);
+    char *title = (raw_title && *raw_title)
+        ? g_utf8_make_valid(raw_title, -1) : NULL;
     char *host = history_host(url);
     char initial[8];
     history_initial(host, initial);
     char *e_url   = g_markup_escape_text(url, -1);
     char *e_host  = g_markup_escape_text(host, -1);
     char *e_init  = g_markup_escape_text(initial, -1);
-    char *e_title = g_markup_escape_text((title && *title) ? title : url, -1);
+    char *e_title = g_markup_escape_text(title ? title : url, -1);
     char *clock   = when ? g_date_time_format(when, "%H:%M") : NULL;
     g_string_append_printf(s,
         "<li><a href=\"%s\"><span class=\"av\">%s</span>"
@@ -312,6 +315,8 @@ history_append_row(GString *s, const char *url, const char *title,
     g_free(e_init);
     g_free(e_title);
     g_free(host);
+    g_free(title);
+    g_free(url);
 }
 
 static gboolean
