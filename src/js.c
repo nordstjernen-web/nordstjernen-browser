@@ -26814,11 +26814,12 @@ ns_sw_fetch_result_on_owner(gpointer data)
     }
     ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
                                                 GUINT_TO_POINTER(res->id));
-    if (st) {
+    char *send_url = st ? g_steal_pointer(&st->fb_send_url) : NULL;
+    if (send_url) {
         if (res->outcome == 1) {
             ns_response *resp = g_new0(ns_response, 1);
             resp->status = res->status > 0 ? res->status : 200;
-            resp->final_url = g_strdup(st->fb_send_url ? st->fb_send_url : "");
+            resp->final_url = g_strdup(send_url);
             resp->content_type = res->content_type
                 ? g_strdup(res->content_type) : g_strdup("text/plain;charset=UTF-8");
             resp->cors_allow_origin = g_strdup("*");
@@ -26839,12 +26840,13 @@ ns_sw_fetch_result_on_owner(gpointer data)
             d->resp = resp;
             ns_js_attach_idle(js, ns_on_js_fetch_deliver_idle, d);
         } else {
-            ns_net_request_async(st->fb_send_url, st->fb_top, st->fb_method,
+            ns_net_request_async(send_url, st->fb_top, st->fb_method,
                                  st->fb_body, st->fb_body_len, st->fb_content_type,
                                  (const char *const *)st->fb_headers,
                                  st->cancellable, ns_on_js_fetch_done, st);
         }
     }
+    g_free(send_url);
     g_free(res->raw_headers); g_free(res->content_type);
     g_free(res->body); g_free(res->error);
     ns_worker_host_unref(host);
