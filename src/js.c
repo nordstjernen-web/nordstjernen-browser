@@ -58825,32 +58825,33 @@ ns_realmdoc_ignore_cookie_set(JSContext *ctx, JSValueConst this_val,
 }
 
 static char *
-ns_realmdoc_url(JSContext *ctx, JSValueConst doc)
+ns_realmdoc_url(JSContext *ctx, JSValueConst url_v)
 {
-    JSValue url_v = JS_GetPropertyStr(ctx, doc, "URL");
     const char *url_s = JS_IsString(url_v) ? JS_ToCString(ctx, url_v) : NULL;
     char *url = url_s ? g_strdup(url_s) : NULL;
     if (url_s) JS_FreeCString(ctx, url_s);
-    JS_FreeValue(ctx, url_v);
     return url;
 }
 
 static JSValue
 ns_realmdoc_cookie_get(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
+                       int argc, JSValueConst *argv, int magic,
+                       JSValueConst *func_data)
 {
-    (void)argc; (void)argv;
-    g_autofree char *url = ns_realmdoc_url(ctx, this_val);
+    (void)this_val; (void)argc; (void)argv; (void)magic;
+    g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     g_autofree char *cookies = url ? ns_net_cookies_for_js(url) : NULL;
     return JS_NewString(ctx, cookies ? cookies : "");
 }
 
 static JSValue
 ns_realmdoc_cookie_set(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
+                       int argc, JSValueConst *argv, int magic,
+                       JSValueConst *func_data)
 {
+    (void)this_val; (void)magic;
     if (argc < 1) return JS_UNDEFINED;
-    g_autofree char *url = ns_realmdoc_url(ctx, this_val);
+    g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     const char *value = JS_ToCString(ctx, argv[0]);
     if (url && value && strlen(value) <= 4096)
         ns_net_cookie_store_from_js(url, value);
@@ -58961,11 +58962,16 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
             JS_NewCFunction(ctx, ns_realmdoc_empty_cookie_get, "get cookie", 0),
             JS_NewCFunction(ctx, ns_realmdoc_ignore_cookie_set, "set cookie", 1),
             JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    else
+    else {
+        JSValue cookie_url = JS_NewString(ctx, u);
         JS_DefinePropertyGetSet(ctx, w, cookie_atom,
-            JS_NewCFunction(ctx, ns_realmdoc_cookie_get, "get cookie", 0),
-            JS_NewCFunction(ctx, ns_realmdoc_cookie_set, "set cookie", 1),
+            JS_NewCFunctionData(ctx, ns_realmdoc_cookie_get, 0, 0, 1,
+                                &cookie_url),
+            JS_NewCFunctionData(ctx, ns_realmdoc_cookie_set, 1, 0, 1,
+                                &cookie_url),
             JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeValue(ctx, cookie_url);
+    }
     JS_FreeAtom(ctx, cookie_atom);
     ns_bind_fn(ctx, w, "createElement",      ns_document_createElement, 1);
     ns_bind_fn(ctx, w, "createElementNS",    ns_document_createElementNS, 2);
