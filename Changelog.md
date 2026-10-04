@@ -3,6 +3,13 @@ Changelog:
 
 1.0.29:
 ======
+* Shadow DOM pages restyle faster. Style sheets in shadow roots are scoped
+  by an attribute on the host, so their rules read `[data-nd-host="7"] .x`;
+  the ancestor filter that skips rules whose ancestors are not on the
+  element's path ignored attributes, and every host's copy of a rule was
+  matched in full against every element. Exact attribute values in ancestor
+  position now go into the filter too. Speedometer's TodoMVC-WebComponents
+  style pass takes 57 ms instead of 221 ms.
 * Placing absolutely positioned boxes nested in other positioned boxes is
   faster: finding each box's static position no longer walks up the tree
   for every box it visits, but compares document order ranks and a set of

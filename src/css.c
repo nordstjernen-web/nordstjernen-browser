@@ -2659,9 +2659,49 @@ css_selector_add_ancestor_hash(ns_css_selector *sel, guint32 hash)
         sel->ancestor_hashes[sel->n_ancestor_hashes++] = hash;
 }
 
+static gboolean g_css_attr_ancestor_hashes;
+
+static guint32
+css_attr_value_hash(const char *name, const char *value, gsize value_len)
+{
+    guint32 h = css_identifier_hash('[', name, strlen(name));
+    h = (h ^ (guchar)'=') * 16777619u;
+    for (gsize i = 0; i < value_len; i++)
+        h = (h ^ (guchar)value[i]) * 16777619u;
+    return h;
+}
+
+static gboolean
+css_attr_pred_filterable(const ns_css_attr_pred *a)
+{
+    return a->op == NS_CSS_ATTR_EQ && a->name && a->value &&
+           !a->case_insensitive && !a->html_ci && !strchr(a->name, '|');
+}
+
+static void
+css_selector_collect_attr_ancestor_hashes(ns_css_selector *sel)
+{
+    for (int k = (int)sel->compounds->len - 2; k >= 0; k--) {
+        ns_css_comb right = g_array_index(sel->combinators, ns_css_comb, k + 1);
+        if (right != NS_CSS_COMB_DESCENDANT && right != NS_CSS_COMB_CHILD)
+            continue;
+        const ns_css_simple *c = g_ptr_array_index(sel->compounds, k);
+        for (guint i = 0; c->attrs && i < c->attrs->len; i++) {
+            const ns_css_attr_pred *a =
+                &g_array_index(c->attrs, ns_css_attr_pred, i);
+            if (!css_attr_pred_filterable(a)) continue;
+            css_selector_add_ancestor_hash(
+                sel, css_attr_value_hash(a->name, a->value, strlen(a->value)));
+            sel->n_ancestor_attr_hashes = sel->n_ancestor_hashes;
+            g_css_attr_ancestor_hashes = TRUE;
+        }
+    }
+}
+
 static void
 css_selector_collect_ancestor_hashes(ns_css_selector *sel)
 {
+    css_selector_collect_attr_ancestor_hashes(sel);
     for (int k = (int)sel->compounds->len - 2; k >= 0; k--) {
         ns_css_comb right = g_array_index(sel->combinators, ns_css_comb, k + 1);
         if (right != NS_CSS_COMB_DESCENDANT && right != NS_CSS_COMB_CHILD)
@@ -24325,6 +24365,7 @@ match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
 
 static guint8         g_ancestor_filter[CSS_ANCESTOR_FILTER_SIZE];
 static gboolean       g_ancestor_filter_active;
+static gboolean       g_ancestor_filter_attrs;
 static const ns_node *g_ancestor_filter_subject;
 
 static void
@@ -24338,6 +24379,15 @@ css_ancestor_filter_count(guint32 hash, int delta)
         if (delta > 0) (*counter)++;
         else if (*counter > 0) (*counter)--;
     }
+}
+
+static void
+css_ancestor_filter_count_attrs(const ns_node *el, int delta)
+{
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        if (a->name && a->value)
+            css_ancestor_filter_count(
+                css_attr_value_hash(a->name, a->value, strlen(a->value)), delta);
 }
 
 static void
@@ -24359,12 +24409,14 @@ css_ancestor_filter_update(const ns_node *el, int delta)
             css_ancestor_filter_count(
                 css_identifier_hash('.', token, (gsize)(c - token)), delta);
     }
+    if (g_ancestor_filter_attrs) css_ancestor_filter_count_attrs(el, delta);
 }
 
 static gboolean
 css_ancestor_filter_rejects(const ns_css_selector *sel)
 {
-    for (guint i = 0; i < sel->n_ancestor_hashes; i++) {
+    guint first = g_ancestor_filter_attrs ? 0 : sel->n_ancestor_attr_hashes;
+    for (guint i = first; i < sel->n_ancestor_hashes; i++) {
         guint32 hash = sel->ancestor_hashes[i];
         if (!g_ancestor_filter[hash % CSS_ANCESTOR_FILTER_SIZE] ||
             !g_ancestor_filter[(hash >> 12) % CSS_ANCESTOR_FILTER_SIZE])
@@ -30867,6 +30919,7 @@ ns_css_compute(ns_node *doc,
 
     memset(g_ancestor_filter, 0, sizeof g_ancestor_filter);
     g_ancestor_filter_active = TRUE;
+    g_ancestor_filter_attrs = g_css_attr_ancestor_hashes;
     GHashTable *outer_doc_sheets = g_doc_sheets;
     g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
