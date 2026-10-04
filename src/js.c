@@ -54685,6 +54685,8 @@ typedef struct {
 
 static JSClassID ns_zlib_class_id;
 
+#define NS_ZLIB_MAX_OUTPUT ((gsize)256u * 1024u * 1024u)
+
 static void
 ns_zlib_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -54777,6 +54779,12 @@ ns_zlib_run(JSContext *ctx, ns_zlib_codec *c, const uint8_t *in,
                                                    : "compression");
         }
         size_t produced = sizeof(buf) - c->zs.avail_out;
+        if (produced > NS_ZLIB_MAX_OUTPUT - out->len) {
+            g_byte_array_free(out, TRUE);
+            return JS_ThrowRangeError(ctx, "zlib %s output too large",
+                                      c->decompress ? "decompression"
+                                                    : "compression");
+        }
         if (produced) g_byte_array_append(out, buf, (guint)produced);
         if (rc == Z_STREAM_END) { c->ended = TRUE; break; }
         if (rc == Z_BUF_ERROR) break;
