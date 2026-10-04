@@ -1294,6 +1294,10 @@ ns_rproc_http_print(ns_rproc_http *r, ns_print_setup *out_setup,
     GPtrArray *sheets = g_ptr_array_new();
     for (long i = 0; i < pages; i++) {
         char *path = g_strdup_printf("%s-%ld.png", prefix, i);
+        if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+            g_free(path);
+            break;
+        }
         cairo_surface_t *img = cairo_image_surface_create_from_png(path);
         if (cairo_surface_status(img) == CAIRO_STATUS_SUCCESS)
             g_ptr_array_add(sheets, img);
