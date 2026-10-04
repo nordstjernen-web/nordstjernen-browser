@@ -138,6 +138,10 @@ Changelog:
   text overlapped the next block; GitHub's feature descriptions were 9px
   short. A line made only of smaller text keeps the paragraph's line height.
 
+* A box shadow without blur is drawn only outside its box. A shadow
+  shifted sideways also showed a strip inside the box on the opposite
+  edge, so MDN's table of contents links had a grey line on both sides.
+
 1.0.28:
 ======
 * Relayouts of pages with container queries are about 17% faster when the
