@@ -512,6 +512,24 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 requested_scroll_x = max_scroll_x;
             sx = requested_scroll_x;
         }
+        long wheel_x = 0, wheel_y = 0, wheel_dx = 0, wheel_dy = 0;
+        json_get_long(body, "wheel_dx", &wheel_dx);
+        json_get_long(body, "wheel_dy", &wheel_dy);
+        if (wheel_dx || wheel_dy) {
+            json_get_long(body, "wheel_x", &wheel_x);
+            json_get_long(body, "wheel_y", &wheel_y);
+            if (ns_browser_scroll_at(s->cur, (int)wheel_x, (int)wheel_y,
+                                     (int)wheel_dx, (int)wheel_dy)) {
+                s->frame_valid = 0;
+            } else {
+                int max_x = page_w - (int)ceil((double)vw / scale);
+                int max_y = page_h - (int)ceil((double)vh / scale);
+                long nx = clamp((int)(sx + wheel_dx), 0, max_x > 0 ? max_x : 0);
+                long ny = clamp((int)(sy + wheel_dy), 0, max_y > 0 ? max_y : 0);
+                if (nx != sx) requested_scroll_x = (int)(sx = nx);
+                if (ny != sy) requested_scroll_y = (int)(sy = ny);
+            }
+        }
         int snap_x = (int)sx, snap_y = (int)sy;
         if (ns_browser_snap_document(s->cur, (double)vw / scale,
                                      (double)vh / scale,
@@ -741,7 +759,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int changed = s->cur ? ns_browser_hover(s->cur, (int)x, (int)y) : 0;
         if (changed > 0)
             s->frame_valid = 0;
-        char *href = s->cur ? ns_browser_link_at(s->cur, (int)x, (int)y)
+        char *href = s->cur ? ns_browser_link_under(s->cur, (int)x, (int)y)
                             : NULL;
         char *cursor = s->cur ? ns_browser_cursor_at(s->cur, (int)x, (int)y)
                               : NULL;

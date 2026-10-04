@@ -562,6 +562,16 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
                      int scroll_y, double scale, int caret_active,
                      ns_rproc_http_frame *out)
 {
+    return ns_rproc_http_render_wheel(r, width, height, scroll_x, scroll_y,
+                                      scale, caret_active, NULL, out);
+}
+
+int
+ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
+                           int scroll_x, int scroll_y, double scale,
+                           int caret_active, const ns_rproc_http_wheel *wheel,
+                           ns_rproc_http_frame *out)
+{
     if (!r || !out)
         return -1;
     memset(out, 0, sizeof *out);
@@ -574,14 +584,20 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         scale = 1.0;
     int scale_milli = (int)(scale * 1000.0 + 0.5);
     int dpr = device_pixel_ratio_milli(r);
-    char json[224];
+    char json[320];
     int jn = snprintf(json, sizeof json,
                       "{\"width\":%d,\"height\":%d,\"scroll_x\":%d,"
                       "\"scroll_y\":%d,\"scale\":%d.%03d,\"caret\":%d,"
-                      "\"dpr\":%d.%03d}",
+                      "\"dpr\":%d.%03d",
                       width, height, scroll_x, scroll_y,
                       scale_milli / 1000, scale_milli % 1000,
                       caret_active ? 1 : 0, dpr / 1000, dpr % 1000);
+    if (wheel && (wheel->dx || wheel->dy))
+        jn += snprintf(json + jn, sizeof json - (size_t)jn,
+                       ",\"wheel_x\":%d,\"wheel_y\":%d,"
+                       "\"wheel_dx\":%d,\"wheel_dy\":%d",
+                       wheel->x, wheel->y, wheel->dx, wheel->dy);
+    jn += snprintf(json + jn, sizeof json - (size_t)jn, "}");
     if (http_write_request(r->wfd, "POST", "/render", "application/json",
                            json, (size_t)jn) != 0)
         return -1;

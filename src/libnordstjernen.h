@@ -101,6 +101,9 @@ int ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
 /* Absolute URL of the link at page coordinates (CSS px), or NULL if none.
  * The result is newly allocated; the caller frees it with free(). */
 char *ns_browser_link_at(ns_browser *browser, int x, int y);
+/* Like ns_browser_link_at, but only the link exactly under the point, with no
+ * touch-sized tolerance: what a mouse pointer hovers. */
+char *ns_browser_link_under(ns_browser *browser, int x, int y);
 
 /* Report the pointer button released after a click: clears the CSS :active
  * state set by ns_browser_click and restyles if the page has :active rules.
