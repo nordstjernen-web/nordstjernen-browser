@@ -60799,6 +60799,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_popover_state_clear(js);
     js->focused_node = NULL;
     js->focused_doc = NULL;
+    js->pending_fullscreen_event_target = NULL;
     ns_storage_free_deferred_events(js);
 
     if (js->pending_scrollend) {
@@ -64035,6 +64036,24 @@ ns_js_purge_subtree_script_refs(ns_js *js, ns_node *root)
 }
 
 static void
+ns_js_purge_subtree_node_refs(ns_js *js, ns_node *root)
+{
+    if (!js || !root) return;
+    if (js->raf_pending) {
+        for (guint i = js->raf_pending->len; i > 0; i--) {
+            ns_raf_entry *e =
+                &g_array_index(js->raf_pending, ns_raf_entry, i - 1);
+            if (!e->media || !ns_js_node_in_tree(e->media, root)) continue;
+            JS_FreeValue(e->ctx ? e->ctx : js->ctx, e->cb);
+            g_array_remove_index(js->raf_pending, i - 1);
+        }
+    }
+    if (js->pending_fullscreen_event_target &&
+        ns_js_node_in_tree(js->pending_fullscreen_event_target, root))
+        js->pending_fullscreen_event_target = NULL;
+}
+
+static void
 ns_js_sweep_orphans(ns_js *js)
 {
     if (!js || !js->orphan_nodes || g_hash_table_size(js->orphan_nodes) == 0) return;
@@ -64060,6 +64079,7 @@ ns_js_sweep_orphans(ns_js *js)
         ns_js_purge_subtree_rafs(js, r);
         ns_js_purge_subtree_pending_iframes(js, r);
         ns_js_purge_subtree_script_refs(js, r);
+        ns_js_purge_subtree_node_refs(js, r);
         ns_node_free(r);
     }
     g_ptr_array_free(to_free, TRUE);
