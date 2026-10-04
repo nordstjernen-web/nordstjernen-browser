@@ -1438,7 +1438,7 @@ cmd_seek(const char *token, double seconds)
     ns_audio_player *p = player_find(token);
     if (!p || !p->pcm) return;
     seconds -= p->timeline_offset;
-    if (seconds < 0) seconds = 0;
+    if (!(seconds > 0)) seconds = 0;
     if (seconds > NS_AUDIO_MAX_SECONDS) seconds = NS_AUDIO_MAX_SECONDS;
     size_t frame = (size_t)(seconds * NS_AUDIO_DEVICE_RATE);
     audio_lock();
@@ -1467,7 +1467,7 @@ cmd_volume(const char *token, double vol)
 {
     ns_audio_player *p = player_find(token);
     if (!p || !p->pcm) return;
-    if (vol < 0) vol = 0;
+    if (!(vol > 0)) vol = 0;
     if (vol > 1) vol = 1;
     audio_lock();
     p->volume = (float)vol;
@@ -1588,6 +1588,11 @@ main(void)
 
     char line[4096];
     while (fgets(line, sizeof line, stdin)) {
+        if (!strchr(line, '\n') && !feof(stdin)) {
+            int c;
+            while ((c = getchar()) != EOF && c != '\n') {}
+            continue;
+        }
         size_t n = strlen(line);
         while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
             line[--n] = '\0';
