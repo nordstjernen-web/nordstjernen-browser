@@ -9847,10 +9847,39 @@ layout_flex_row_wrap(ns_box *box, double cw,
         for (guint k = 0; k < line_count; k++)
             remaining -= lens[line_start + k].target;
 
+        int line_auto_margins = 0;
+        for (guint k = 0; k < line_count; k++) {
+            ns_box *c = items->pdata[line_start + k];
+            if (!c->style) continue;
+            if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto"))
+                line_auto_margins++;
+            if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto"))
+                line_auto_margins++;
+        }
+        if (line_auto_margins > 0 && remaining > 0) {
+            double share = remaining / line_auto_margins;
+            for (guint k = 0; k < line_count; k++) {
+                ns_box *c = items->pdata[line_start + k];
+                if (!c->style) continue;
+                double *extras = &g_array_index(extras_arr, double,
+                                                line_start + k);
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto")) {
+                    c->margin.left += share;
+                    *extras += share;
+                }
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto")) {
+                    c->margin.right += share;
+                    *extras += share;
+                }
+            }
+            remaining = 0;
+        }
+
         double leading = 0;
         double between = 0;
-        flex_justify_offsets(box, justify, remaining, line_count, reverse,
-                             &leading, &between);
+        if (line_auto_margins == 0 || remaining < 0)
+            flex_justify_offsets(box, justify, remaining, line_count, reverse,
+                                 &leading, &between);
 
         for (guint k = 0; k < line_count; k++) {
             guint gi = line_start + k;
@@ -9894,8 +9923,17 @@ layout_flex_row_wrap(ns_box *box, double cw,
                                  c->padding.top + c->padding.bottom +
                                  c->border.top + c->border.bottom +
                                  c->margin.top + c->margin.bottom;
+            gboolean mt_auto = c->style &&
+                keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto");
+            gboolean mb_auto = c->style &&
+                keyword_is(c->style->values[NS_CSS_MARGIN_BOTTOM], "auto");
             double cy = line_y;
-            if (strcmp(eff_align, "center") == 0)
+            if (mt_auto || mb_auto) {
+                double free_line = line_max_h - item_h_full;
+                if (free_line < 0) free_line = 0;
+                if (mt_auto && mb_auto) cy = line_y + free_line / 2.0;
+                else if (mt_auto)       cy = line_y + free_line;
+            } else if (strcmp(eff_align, "center") == 0)
                 cy = line_y + (line_max_h - item_h_full) / 2.0;
             else if (strcmp(eff_align, "flex-end") == 0 || strcmp(eff_align, "end") == 0)
                 cy = line_y + line_max_h - item_h_full;
@@ -9908,7 +9946,8 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->has_flex_main = TRUE;
             double item_layout_width = g_array_index(main_arr, double, idx) +
                                        g_array_index(extras_arr, double, idx);
-            gboolean stretches = flex_item_cross_size_auto(c) &&
+            gboolean stretches = !mt_auto && !mb_auto &&
+                                 flex_item_cross_size_auto(c) &&
                                  flex_align_stretches(eff_align);
             gboolean cross_preset = stretches &&
                                     flex_preset_cross_size(c, line_max_h, cw);
