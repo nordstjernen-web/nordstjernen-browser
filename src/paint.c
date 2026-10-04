@@ -2884,7 +2884,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
-        double ti = ns_text_indent_px(s, b->content_width);
+        double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti > 0)
             ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
@@ -3287,7 +3287,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     double text_x = b->x;
     {
-        double ti = ns_text_indent_px(s, b->content_width);
+        double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti < 0) text_x += ti;
     }
     gboolean layout_cacheable = !(highlight && *highlight);
@@ -3716,7 +3716,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
-        double ti = ns_text_indent_px(s, b->content_width);
+        double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
@@ -3798,7 +3798,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
         const ns_style *s = inherited_style(root);
         NsPangoLayout *layout = paint_inline_make_layout(root, s, NULL);
         double text_x = 0;
-        double ti = ns_text_indent_px(s, root->content_width);
+        double ti = ns_inline_text_indent_px(root, s, root->content_width);
         if (ti < 0) text_x = ti;
         for (guint i = 0; i < root->inline_atomics->len; i++) {
             ns_inline_atomic *atomic =
