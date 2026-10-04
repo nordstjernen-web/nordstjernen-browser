@@ -45996,7 +45996,9 @@ ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
         js->soft_nav_cb(js->current_url, FALSE, js->soft_nav_user_data);
     if (js->fragment_nav_cb)
         js->fragment_nav_cb(js->current_url, js->fragment_nav_user_data);
-    ns_js_dispatch_hashchange(js, old_url, js->current_url);
+    char *new_url = g_strdup(js->current_url);
+    ns_js_dispatch_hashchange(js, old_url, new_url);
+    g_free(new_url);
     g_free(old_url);
     return TRUE;
 }
