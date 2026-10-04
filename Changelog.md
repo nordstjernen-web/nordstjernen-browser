@@ -3,6 +3,7 @@ Changelog:
 
 1.0.28:
 ======
+* The about:start splash shows version 1.0.28.
 * Nordstjernen is now dual-licensed: it may be used, modified and
   redistributed under either the Nordstjernen Source License v1.0 or the GNU
   General Public License version 3 or (at the recipient's option) any later
