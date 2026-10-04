@@ -6016,9 +6016,11 @@ deferred_capture_cmp(const void *va, const void *vb)
 {
     const deferred_capture *a = *(deferred_capture *const *)va;
     const deferred_capture *b = *(deferred_capture *const *)vb;
-    int za = box_z_index(a->box), zb = box_z_index(b->box);
+    const ns_box *ab = a->box, *bb = b->box;
+    if (!ab || !bb) return ab ? 1 : bb ? -1 : 0;
+    int za = box_z_index(ab), zb = box_z_index(bb);
     if (za != zb) return za < zb ? -1 : 1;
-    int c = dom_tree_order_cmp(a->box->dom, b->box->dom);
+    int c = dom_tree_order_cmp(ab->dom, bb->dom);
     if (c) return c;
     return a->seq < b->seq ? -1 : a->seq > b->seq ? 1 : 0;
 }
