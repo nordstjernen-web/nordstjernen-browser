@@ -3,6 +3,8 @@ Changelog:
 
 1.0.29:
 ======
+* Event dispatch no longer walks every listener of the page after each
+  target it visits to clear out removed listeners when none was removed.
 * Dispatching an event no longer searches the document. Looking up the
   window's `on<type>` handler fell through to the window's named
   properties whenever the page had not set one, which walked the whole
