@@ -289,6 +289,11 @@ Changelog:
   no longer draws its borders and background a second time around an empty
   line of text next to the element.
 
+* A box with `aspect-ratio` and an explicit `min-height` (or one that
+  scrolls vertically) takes the height from its ratio even when its content
+  is taller, as the spec's automatic minimum size describes. Content still
+  grows such a box when `min-height` is `auto`.
+
 1.0.28:
 ======
 * Scrolling stays smooth on pages that react to it. While the user scrolls,

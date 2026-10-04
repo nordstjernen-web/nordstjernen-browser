@@ -13604,7 +13604,13 @@ flex_done: ;
             ? aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL) : -1;
         if (ratio > 0 && box->content_width > 0) {
             double aspect_h = box->content_width / ratio;
-            box->content_height = aspect_h > measured ? aspect_h : measured;
+            gboolean content_floor =
+                !(mnh && (mnh->kind == NS_CSS_V_LENGTH ||
+                          mnh->kind == NS_CSS_V_CALC)) &&
+                !overflow_scrolls &&
+                !keyword_is(box->style->values[NS_CSS_OVERFLOW_Y], "hidden");
+            box->content_height = content_floor && measured > aspect_h
+                                ? measured : aspect_h;
         } else {
             box->content_height = measured;
         }
