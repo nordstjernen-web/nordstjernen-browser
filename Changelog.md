@@ -3,6 +3,13 @@ Changelog:
 
 1.0.29:
 ======
+* Pages that repeat the same `<style>` many times, such as inline SVG
+  icons that each carry their own style element, restyle much faster.
+  Consecutive style elements are merged into one sheet, and every copy of
+  a rule was matched against every element it could apply to; an earlier
+  copy can never win over a later identical one, so only the last copy of
+  each repeated style text is kept. A Speedometer Complex-DOM page has 416
+  copies of one icon style, 98% of its selector matching.
 * Shadow DOM pages restyle faster. Style sheets in shadow roots are scoped
   by an attribute on the host, so their rules read `[data-nd-host="7"] .x`;
   the ancestor filter that skips rules whose ancestors are not on the
