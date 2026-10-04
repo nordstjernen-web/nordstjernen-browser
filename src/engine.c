@@ -463,6 +463,7 @@ typedef struct {
     GPtrArray  *out;
     GHashTable *cache;
     GString    *run;
+    GPtrArray  *run_chunks;
     const char *run_base;
     const char *top_url;
     gboolean    strict_css_mime;
@@ -484,9 +485,46 @@ engine_node_in_head(const ns_node *n)
 }
 
 static void
+sheet_run_append(sheet_collect_ctx *cc, const char *css, const char *base_url)
+{
+    g_string_append(cc->run, css);
+    g_string_append_c(cc->run, '\n');
+    g_ptr_array_add(cc->run_chunks, g_strdup(css));
+    cc->run_base = base_url;
+}
+
+static void
+sheet_run_drop_repeats(sheet_collect_ctx *cc)
+{
+    guint n = cc->run_chunks->len;
+    if (n < 2) return;
+    GHashTable *later = g_hash_table_new(g_str_hash, g_str_equal);
+    gboolean *drop = g_new0(gboolean, n);
+    gboolean any = FALSE;
+    for (guint i = n; i-- > 0; ) {
+        const char *chunk = g_ptr_array_index(cc->run_chunks, i);
+        if (strchr(chunk, '@')) continue;
+        if (g_hash_table_contains(later, chunk)) drop[i] = any = TRUE;
+        else g_hash_table_add(later, (gpointer)chunk);
+    }
+    if (any) {
+        g_string_set_size(cc->run, 0);
+        for (guint i = 0; i < n; i++) {
+            if (drop[i]) continue;
+            g_string_append(cc->run, g_ptr_array_index(cc->run_chunks, i));
+            g_string_append_c(cc->run, '\n');
+        }
+    }
+    g_free(drop);
+    g_hash_table_destroy(later);
+}
+
+static void
 sheet_run_flush(sheet_collect_ctx *cc)
 {
     if (!cc->run || cc->run->len == 0) return;
+    sheet_run_drop_repeats(cc);
+    g_ptr_array_set_size(cc->run_chunks, 0);
     ns_css_stylesheet *sh =
         ns_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len,
                                     cc->run_base);
@@ -713,9 +751,7 @@ collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
     gboolean alone = !ns_css_syntax_is_self_contained(css, strlen(css));
     if (alone || (cc->run_base && cc->run_base != base_url))
         sheet_run_flush(cc);
-    g_string_append(cc->run, css);
-    g_string_append_c(cc->run, '\n');
-    cc->run_base = base_url;
+    sheet_run_append(cc, css, base_url);
     if (alone) sheet_run_flush(cc);
     g_free(css);
 }
@@ -775,9 +811,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                     g_hash_table_destroy(seen);
                 }
             } else {
-                g_string_append(cc->run, css);
-                g_string_append_c(cc->run, '\n');
-                cc->run_base = base_url;
+                sheet_run_append(cc, css, base_url);
             }
             g_free(css);
         }
@@ -833,7 +867,9 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
         g_hash_table_remove_all(g_collect_frame_vp);
     sheet_collect_ctx cc = {
         .out = out, .cache = css_cache,
-        .run = g_string_new(NULL), .run_base = NULL,
+        .run = g_string_new(NULL),
+        .run_chunks = g_ptr_array_new_with_free_func(g_free),
+        .run_base = NULL,
         .top_url = base_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
         .docs = out_docs, .doc = doc,
@@ -841,6 +877,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
     collect_stylesheets_walk(doc, base_url, &cc, 0);
     sheet_docs_sync(&cc);
     g_string_free(cc.run, TRUE);
+    g_ptr_array_free(cc.run_chunks, TRUE);
     ns_css_style_element_cache_end();
 }
 
