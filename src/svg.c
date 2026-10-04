@@ -351,7 +351,7 @@ svg_anchor_of(const char *s)
 static const char *
 svg_style_decl(const ns_node *n, const char *prop)
 {
-    static char buf[256];
+    static __thread char buf[256];
     const char *style = ns_element_get_attr(n, "style");
     if (!style) return NULL;
     gsize plen = strlen(prop);
@@ -383,7 +383,7 @@ svg_style_decl(const ns_node *n, const char *prop)
     return buf;
 }
 
-static GHashTable *g_svg_var_styles;
+static __thread GHashTable *g_svg_var_styles;
 
 static const char *
 svg_prop(const ns_node *n, const char *name)
@@ -395,7 +395,7 @@ svg_prop(const ns_node *n, const char *name)
     const ns_style *st = g_svg_var_styles
         ? g_hash_table_lookup(g_svg_var_styles, (gpointer)n) : NULL;
     if (!st) return v;
-    static char buf[256];
+    static __thread char buf[256];
     char *resolved = ns_css_resolve_style_vars(v, st);
     if (!resolved) return v;
     if (strlen(resolved) >= sizeof buf) {
