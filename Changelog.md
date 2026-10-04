@@ -7,6 +7,21 @@ Changelog:
   attribute's value compares case-insensitively is decided once per selector
   instead of for every element (Speedometer's Complex-DOM suites run about 18%
   faster).
+* Scripts with many functions parse faster (about 9% on a 1.2 MB script of
+  40,000 small functions): a nested function now shares its script's file
+  name instead of looking the URL up again in the atom table.
+* Reading any property of a `<form>` no longer rebuilds the list of its
+  controls: forms resolve control names before their own members, so every
+  `form.action` or `form.q` walked the document for the form's controls. The
+  list is now cached until the DOM changes, about three times faster on a
+  form with a hundred controls. Changing a control's `name` or `form`
+  attribute now also updates `form.elements` and `getElementsByName()`
+  collections a page already holds, which kept the old members before.
+* Pages with container queries relayout in one pass instead of two when no
+  container changed size: the previous relayout's container sizes are used
+  for the first cascade and checked against the new layout, and only a
+  change in a container's size or position among its siblings runs the second
+  pass. Google's results page ran the second pass on 44 of its 45 relayouts.
 * Constructed style sheets adopted by a shadow root style it again. The
   engine scopes them like a `<style>` at the end of that shadow root, so
   `:host` works, `innerHTML` set later no longer drops them,
@@ -230,6 +245,8 @@ Changelog:
   `copyTexSubImage2D()` work in WebGL 1, `drawingBufferWidth` follows a
   resize, the stencil masks read back unsigned and `getContextAttributes()`
   lists its members in dictionary order.
+* CI no longer runs CodeQL: the `codeql` workflow, its configuration and
+  the README badge are gone. The Semgrep badge is gone too.
 
 1.0.27:
 ======

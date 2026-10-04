@@ -1177,6 +1177,7 @@ void ns_css_set_container_dims(double inline_px, double block_px);
 void ns_css_container_features_begin(void);
 gboolean ns_css_container_features_used(void);
 GHashTable *ns_css_container_map_new(void);
+gboolean ns_css_container_maps_equal(GHashTable *a, GHashTable *b);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
                               double w, double h, gboolean vertical);
