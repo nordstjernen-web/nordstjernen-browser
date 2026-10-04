@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* Relayouts measure text once per distinct run instead of on every pass.
+  The size, line count and baseline of a measured text layout are kept,
+  keyed by its text, font, attribute list and layout settings, so a forced
+  layout after a small change no longer shapes and breaks every paragraph
+  of the page again. Speedometer's NewsSite layout time halves.
 * Pages that repeat the same `<style>` many times, such as inline SVG
   icons that each carry their own style element, restyle much faster.
   Consecutive style elements are merged into one sheet, and every copy of
