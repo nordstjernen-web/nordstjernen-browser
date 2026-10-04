@@ -343,6 +343,14 @@ if have_freetype
   add_project_arguments('-DNS_HAVE_FREETYPE=1', language: 'c')
 endif
 
+# WOFF2 web fonts. FreeType reads them only when it was built with Brotli
+# (Homebrew's is not), so src/woff2.c decodes them over libbrotlidec.
+libbrotlidec_fonts = dependency('libbrotlidec', required: false)
+have_woff2 = libbrotlidec_fonts.found()
+if have_woff2
+  add_project_arguments('-DNS_HAVE_WOFF2=1', language: 'c')
+endif
+
 libwebp = dependency('libwebp')
 libwebpdemux = dependency('libwebpdemux')
 

@@ -129,6 +129,10 @@ if have_avif
   nordstjernen_engine_sources += files('image_avif.c')
 endif
 
+if have_woff2
+  nordstjernen_engine_sources += files('woff2.c')
+endif
+
 if http_backend == 'nghttp2'
   nordstjernen_engine_sources += files('net_http2.c')
 endif
@@ -225,6 +229,10 @@ endif
 
 if have_freetype
   nordstjernen_deps += [libfreetype]
+endif
+
+if have_woff2
+  nordstjernen_deps += [libbrotlidec_fonts]
 endif
 
 nordstjernen_deps += [libpsl]

@@ -13,6 +13,14 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* WOFF2 web fonts load on systems whose FreeType was built without Brotli,
+  such as Homebrew's on macOS. Those fonts used to fail silently and pages
+  fell back to a default face (GitHub's Mona Sans showed as Verdana). The
+  new in-tree decoder `src/woff2.c` unpacks the Brotli stream and rebuilds
+  the transformed `glyf`, `loca` and `hmtx` tables over libbrotlidec.
+* Every named instance and the variable pattern of a web font are now
+  registered under its CSS family, so a variable font such as Mona Sans
+  renders at the requested weight instead of its first instance.
 * Zoom reflows the page like other browsers: at 150% the page is laid out
   for a viewport 1.5 times narrower instead of being magnified and cut off
   at the right edge.
