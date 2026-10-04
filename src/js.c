@@ -24555,11 +24555,14 @@ ns_js_es_on_open(gpointer user_data)
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
-    JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 1));
-    ns_js_ws_dispatch(ctx, s->wrapper, "onopen", ns_js_ws_event(ctx, "open"));
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_push(js, &bg);
+    JS_SetPropertyStr(ctx, wrapper, "readyState", JS_NewInt32(ctx, 1));
+    ns_js_ws_dispatch(ctx, wrapper, "onopen", ns_js_ws_event(ctx, "open"));
+    ns_js_budget_pop(js, &bg);
+    JS_FreeValue(ctx, wrapper);
 }
 
 static void
@@ -24569,8 +24572,10 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
+    ns_js_budget_push(js, &bg);
     const char *type = (event && *event) ? event : "message";
     JSValue ev = ns_js_ws_event(ctx, type);
     ns_event_adopt_interface(ctx, ev, "MessageEvent");
@@ -24580,9 +24585,10 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     JS_SetPropertyStr(ctx, ev, "origin",
                       JS_NewString(ctx, s->origin ? s->origin : ""));
     char *on_name = g_strconcat("on", type, NULL);
-    ns_js_ws_dispatch(ctx, s->wrapper, on_name, ev);
+    ns_js_ws_dispatch(ctx, wrapper, on_name, ev);
     g_free(on_name);
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_pop(js, &bg);
+    JS_FreeValue(ctx, wrapper);
 }
 
 static void
@@ -24591,15 +24597,18 @@ ns_js_es_on_error(gboolean fatal, gpointer user_data)
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
-    JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, fatal ? 2 : 0));
-    ns_js_ws_dispatch(ctx, s->wrapper, "onerror", ns_js_ws_event(ctx, "error"));
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_push(js, &bg);
+    JS_SetPropertyStr(ctx, wrapper, "readyState", JS_NewInt32(ctx, fatal ? 2 : 0));
+    ns_js_ws_dispatch(ctx, wrapper, "onerror", ns_js_ws_event(ctx, "error"));
+    ns_js_budget_pop(js, &bg);
     if (fatal && s->pinned) {
         s->pinned = FALSE;
         JS_FreeValue(ctx, s->wrapper);
     }
+    JS_FreeValue(ctx, wrapper);
 }
 
 static JSValue
