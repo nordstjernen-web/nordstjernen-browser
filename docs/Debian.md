@@ -6,44 +6,49 @@ The packaging sources are in the `debian/` directory at the repository
 root. For the plain build-from-source instructions (any distro) see
 `Linux.md`; this document is specifically about the Debian package.
 
-## Read this first: the licensing reality
+## Read this first: licensing
 
-**Nordstjernen cannot go into Debian `main`.** Debian `main` only accepts
-software whose license satisfies the [Debian Free Software Guidelines
-(DFSG)](https://www.debian.org/social_contract#guidelines). Nordstjernen
-ships under the **Nordstjernen Source License v1.0 (NSL-1.0)**, a
-source-available license that:
+Nordstjernen is **dual-licensed**: each recipient may take it under
+**either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
+**GNU General Public License version 3 (GPL-3.0)**, at their option (SPDX
+`LicenseRef-NSL-1.0 OR GPL-3.0-only`; the texts are `License.md` and
+`COPYING` at the repository root). Four sources — `src/css_media.c`,
+`src/svg.c`, `src/svg.h` and `src/webaudio.c` — are GPL-3.0-or-later
+only.
 
-* forbids a **"Competing Use"** — you may not offer the software (or
-  something substantially similar) as a commercial product or service;
-  and
-* restricts education and research use to **non-commercial** contexts.
+Debian `main` only accepts software whose license satisfies the [Debian
+Free Software Guidelines
+(DFSG)](https://www.debian.org/social_contract#guidelines). NSL-1.0 on
+its own does not: its **"Competing Use"** restriction and its limit of
+education and research use to **non-commercial** contexts both violate
+DFSG §6 ("No Discrimination Against Fields of Endeavor"). The GPL-3.0,
+however, is DFSG-free, and a dual license needs only one DFSG-free
+option: Debian distributes the package under the GPL-3.0 and recipients
+keep the choice. The bundled third-party code (see
+`THIRD-PARTY-LICENSES.md`) keeps its own free, GPL-3-compatible licenses.
+**Nordstjernen can therefore go into Debian `main`**, through the usual
+sponsorship and FTP-master review.
 
-Either restriction alone violates DFSG §6 ("No Discrimination Against
-Fields of Endeavor"), so NSL-1.0 is **not** DFSG-free. (The license does
-include a *Grant of Future License* converting each release to MIT ten
-years after it ships — but a delayed grant does not make the current
-package free today.)
+There are two paths, in order of effort:
 
-That leaves three realistic paths, in order of effort:
+1. **A third-party APT repository (fastest, fully under our control).**
+   We host signed `.deb`s and an `apt` repo; users add it and
+   `apt install nordstjernen`. No Debian FTP-master review, works on
+   Debian and every Debian derivative (Ubuntu, Mint, …). This is the
+   practical channel until the package is in the archive, and is
+   documented below.
+2. **Debian `main`.** The GPL-3.0 option qualifies the package for
+   `main`. It still needs a Debian Developer to sponsor and upload it, an
+   ITP bug, and FTP-master review of `debian/copyright`. The `debian/`
+   tree here targets `main` (`Section: web`). Once in Debian, derivatives
+   such as Ubuntu pick it up through their normal syncs (into Ubuntu's
+   `universe`).
 
-1. **A third-party APT repository (recommended, fully under our
-   control).** We host signed `.deb`s and an `apt` repo; users add it
-   and `apt install nordstjernen`. No Debian FTP-master review, no DFSG
-   gate, works on Debian and every Debian derivative (Ubuntu, Mint, …).
-   This is the practical distribution channel and is documented below.
-2. **Debian `non-free`.** Debian *does* ship a `non-free` component for
-   exactly this situation. It requires a Debian Developer to sponsor and
-   maintain the package, and an ITP bug, but the package can be
-   redistributed by Debian. The `debian/` tree here is already targeted
-   at `non-free` (`Section: non-free/web`).
-3. **Relicense.** If the project ever adopts a DFSG-free license for a
-   release, `main` becomes possible. Not planned.
-
-> Debian distinguishes `non-free` from `contrib`. `contrib` is for
-> DFSG-free software that *depends on* non-free things; Nordstjernen's
-> own license is the non-free part, so it belongs in `non-free`, not
-> `contrib`.
+> Neither `non-free` nor `contrib` is the right home. `non-free` is for
+> software with no DFSG-free license option, and `contrib` for DFSG-free
+> software that *depends on* something outside `main`. Nordstjernen is
+> DFSG-free under the GPL-3.0 option and its build and runtime
+> dependencies are in `main`.
 
 The rest of this document covers building the `.deb` and shipping it
 through paths (1) and (2).
@@ -53,8 +58,8 @@ through paths (1) and (2).
 ```
 debian/
 ├── changelog       # version history; top entry sets the package version
-├── control         # Section: non-free/web, build-deps, binary package
-├── copyright       # DEP-5; documents NSL-1.0 + bundled-engine licenses
+├── control         # Section: web (main), build-deps, binary package
+├── copyright       # DEP-5; GPL-3 or NSL-1.0, plus bundled-engine licenses
 ├── rules           # dh sequencer; configures meson with ai disabled
 ├── source/format   # 3.0 (quilt)
 └── watch           # tracks upstream GitHub tags
@@ -62,9 +67,8 @@ debian/
 
 Key choices:
 
-* **`Section: non-free/web`** and a `control` long-description that
-  states the license restriction outright, so the archive placement is
-  unambiguous.
+* **`Section: web`** — the package targets `main`, distributed under the
+  GPL-3.0 option of the dual license.
 * **`debian/rules`** is a minimal `dh` file. Hardening is on via
   `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
   meson build already enables PIE, stack protector, and FORTIFY itself.
@@ -72,10 +76,12 @@ Key choices:
   (sbuild/pbuilder chroots have no network, so the ns-pango subproject
   cannot be cloned — text shapes through the system Pango instead) and
   `-Dwebgpu=disabled` (wgpu-native is not packaged).
-* **`debian/copyright`** is DEP-5 and spells out NSL-1.0 *plus* the free
-  licenses of the in-tree engines (lexbor — Apache-2.0; QuickJS — Expat;
-  WAMR — Apache-2.0) and vendored single-file libraries (Wuffs —
-  Apache-2.0; pl_mpeg — Expat).
+* **`debian/copyright`** is DEP-5. `Files: *` declares
+  `License: GPL-3 or NSL-1.0`, with a `GPL-3` stanza pointing at
+  `/usr/share/common-licenses/GPL-3` and an `NSL-1.0` stanza for the
+  alternative. It also spells out the free licenses of the in-tree
+  engines (lexbor — Apache-2.0; QuickJS — Expat; WAMR — Apache-2.0) and
+  vendored single-file libraries (Wuffs — Apache-2.0; pl_mpeg — Expat).
 
 ## Build dependencies
 
@@ -138,9 +144,9 @@ or with `pbuilder`:
 
     lintian -i -I --show-overrides ../nordstjernen_*.changes
 
-Expect (and accept) lintian to confirm the package is non-free. Any
-`license-problem-*` tag on the **bundled** engines would be a real issue;
-the NSL-1.0 placement in `non-free` is intentional, not a defect.
+For `main` the package should be lintian-clean. Any `license-problem-*`
+tag — on Nordstjernen's own sources or on a **bundled** engine — is a
+real issue to fix before upload.
 
 ## Path 1 — host a third-party APT repository
 
@@ -174,31 +180,36 @@ Updates ship by adding the new `.deb` to the repo and re-publishing;
 `apt upgrade` then picks it up. Ship a `.deb` per release tag so
 `debian/changelog`'s top version matches the upstream version.
 
-## Path 2 — Debian `non-free`
+## Path 2 — Debian `main`
 
-If a Debian Developer is willing to sponsor it:
+With a Debian Developer willing to sponsor it:
 
 1. **File an ITP** (Intent To Package) bug against `wnpp`:
 
        reportbug --email <you> wnpp
 
    Title it `ITP: nordstjernen -- small, hand-written web browser` and
-   note in the body that it targets `non-free` because of NSL-1.0.
+   give the license as `GPL-3 or NSL-1.0` (SPDX
+   `LicenseRef-NSL-1.0 OR GPL-3.0-only`), noting that Debian distributes
+   it under the GPL-3 option and that it targets `main`.
 
 2. **Polish the source package.** Build cleanly in `sbuild`, get
-   `lintian` quiet apart from the expected non-free placement, and make
-   sure `debian/copyright` is complete and accurate (FTP-masters review
-   this closely — the bundled-engine licenses must all be listed).
+   `lintian` quiet, and make sure `debian/copyright` is complete and
+   accurate. FTP-masters review this closely: the dual license, the four
+   GPL-3.0-or-later sources (`src/css_media.c`, `src/svg.c`, `src/svg.h`,
+   `src/webaudio.c`) and the bundled-engine licenses must all be listed.
 
 3. **Note the embedded code copies.** Debian discourages bundled library
-   copies. Nordstjernen *forks* lexbor, QuickJS, and WAMR in-tree and
-   modifies them for tight integration, so they cannot simply be swapped
-   for system packages. This is acceptable for `non-free` but the
-   `debian/copyright` accounting (already present) must stay exhaustive,
-   and the reasoning should be explained to the sponsor.
+   copies (Debian Policy §4.13). Nordstjernen *forks* lexbor, QuickJS,
+   and WAMR in-tree and modifies them for tight integration, so they
+   cannot simply be swapped for system packages. Expect the sponsor and
+   FTP-masters to ask about this: explain the reasoning, keep the
+   `debian/copyright` accounting exhaustive, and expect the forks to be
+   recorded in the security tracker's embedded-code-copies list.
 
 4. **Upload via the sponsor.** A DD signs and uploads to the archive;
-   the package then lives in `non-free` and is mirrored by Debian.
+   after NEW-queue review the package enters `unstable` in `main`,
+   migrates to `testing`, and is mirrored by Debian.
 
 `debian/watch` lets `uscan` track upstream GitHub tags so the sponsor
 can spot new releases.

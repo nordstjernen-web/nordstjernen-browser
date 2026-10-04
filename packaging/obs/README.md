@@ -42,15 +42,17 @@ produce no archive, so the chain dies at `recompress`
 code path for cloning git, so the source comes from there and the spec
 builds it in place.
 
-## License caveat
+## License
 
-Nordstjernen is under the **Nordstjernen Source License v1.0 (NSL-1.0)**,
-a source-available license that forbids "Competing Use" and restricts some
-purposes to non-commercial use. It is **not** OSI-approved / free software,
-so the spec tags it `SUSE-NonFree`. It can live in a home: project but will
-**not** be accepted into openSUSE:Factory / Tumbleweed, whose legal review
-only admits free licenses. NSL-1.0 converts to MIT ten years after each
-release.
+Nordstjernen is dual-licensed under the **Nordstjernen Source License
+v1.0 (NSL-1.0)** or the **GNU General Public License version 3
+(GPL-3.0)**, at the recipient's option, so the spec tags it
+`LicenseRef-NSL-1.0 OR GPL-3.0-only` and ships `License.md` and `COPYING`
+as `%license`. NSL-1.0 alone is not OSI-approved (it forbids "Competing
+Use"), but the GPL-3.0 option is free software, which makes the package
+eligible for openSUSE:Factory / Tumbleweed through the usual devel-project
+submit request and legal review. Until it is accepted there, the home:
+project is the distribution channel. See `docs/opensuse.md`.
 
 ## Build options
 

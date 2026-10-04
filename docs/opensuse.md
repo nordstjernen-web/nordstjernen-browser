@@ -30,38 +30,42 @@ Prefer a one-off install without adding the repo? Grab the nightly RPM
 directly: [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm)
 (rebuilt from `main` each night; `sudo zypper install ./…rpm`).
 
-## Read this first: the licensing reality
+## Read this first: licensing
 
-**Nordstjernen cannot go into openSUSE:Factory (Tumbleweed's main / OSS
-distribution).** Factory only accepts free / OSI-approved licenses, and
-its automated [Cavil](https://github.com/openSUSE/cavil) legal scan plus
-the legal team will reject anything else. Nordstjernen ships under the
-**Nordstjernen Source License v1.0 (NSL-1.0)**, a source-available license
-that:
+Nordstjernen is **dual-licensed**: each recipient may take it under
+**either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
+**GNU General Public License version 3 (GPL-3.0)**, at their option. The
+spec declares this as `License: LicenseRef-NSL-1.0 OR GPL-3.0-only`.
 
-* forbids a **"Competing Use"** — you may not offer the software (or
-  something substantially similar) as a commercial product or service; and
-* restricts education and research use to **non-commercial** contexts.
+openSUSE:Factory (Tumbleweed's main / OSS distribution) only accepts free
+/ OSI-approved licenses, checked by its automated
+[Cavil](https://github.com/openSUSE/cavil) legal scan and the legal team.
+NSL-1.0 on its own would not pass — its **"Competing Use"** restriction
+and its limit of education and research use to **non-commercial**
+contexts make it non-free — but the GPL-3.0 is free and OSI-approved, and
+the package can be distributed under that option. The bundled third-party
+code (see `THIRD-PARTY-LICENSES.md`) keeps its own free, GPL-3-compatible
+licenses. **Nordstjernen is therefore eligible for Factory**, subject to
+the usual review.
 
-Either restriction makes NSL-1.0 non-free, so the OSS door is closed.
-(The license does convert each release to MIT ten years after it ships,
-but a delayed grant does not make today's package free.)
+There are two paths, in order of effort:
 
-That leaves these paths, in order of effort:
+1. **The OBS home project (fully under our control).** We build and
+   publish RPMs; users add the repo and `zypper install`. No Factory
+   review. This is what the install section above uses, and it stays
+   available whatever happens in Factory.
+2. **openSUSE:Factory (the OSS distribution).** Possible through the
+   GPL-3.0 option. The package goes into a devel project and from there,
+   by submit request, to `openSUSE:Factory`, where the devel project
+   maintainers, the legal team (Cavil) and the Factory reviewers check
+   it. Expect the legal review to look at the `LicenseRef-NSL-1.0` half
+   of the expression, since it is not an SPDX-listed license; the
+   `GPL-3.0-only` alternative is what qualifies the package. **Ask first**
+   on the opensuse-factory mailing list which devel project should host
+   it before preparing a submit request.
 
-1. **The OBS home project (recommended, fully under our control).** We
-   build and publish RPMs; users add the repo and `zypper install`. No
-   Factory review, no legal gate. This is the practical, permanent channel
-   and is what the install section above uses.
-2. **openSUSE non-OSS (`openSUSE:Factory:NonFree` → the `non-oss` repo,
-   enabled by default).** openSUSE *does* ship a non-free component for
-   redistributable-but-not-open-source software. NSL-1.0 permits
-   redistribution of copies (with notice, no Competing Use), so this is the
-   only realistic *in-distribution* path — but it still needs the openSUSE
-   legal team to accept NSL-1.0's terms. **Ask first** on the
-   opensuse-factory mailing list before preparing a submit request.
-3. **Relicense.** If a release ever adopts a free license, Factory becomes
-   possible. Not planned.
+The non-OSS component (`openSUSE:Factory:NonFree` → the `non-oss` repo) is
+no longer the target: it is for software without a free license option.
 
 ## Git-backed OBS package (scmsync)
 
@@ -140,8 +144,8 @@ libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
 no system copies. `mpv` and `myspell-en_US` are `Recommends` (external
 media playback and a spell-check dictionary).
 
-The package is tagged `License: SUSE-NonFree` (the conventional marker for
-a non-free license); `License.md` is shipped as `%license`.
+The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-only`;
+`License.md` and `COPYING` (the GPL-3.0 text) are shipped as `%license`.
 
 ## Local RPM build
 
