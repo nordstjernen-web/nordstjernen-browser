@@ -29262,12 +29262,15 @@ ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
     double content_w = 0, content_h = 0, border_w = 0, border_h = 0;
     double content_x = 0, content_y = 0;
     double border_x = 0, border_y = 0;
+    double border_left = 0, border_top = 0;
     const struct ns_box *box = ns_box_for_this(ctx, target);
     if (box) {
         content_w = box->content_width;
         content_h = box->content_height;
         content_x = box->padding.left;
         content_y = box->padding.top;
+        border_left = box->border.left;
+        border_top = box->border.top;
         ns_box_border_box(box, &border_x, &border_y, &border_w, &border_h);
     }
     double dppx = 1.0;
@@ -29279,8 +29282,8 @@ ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
         dppx = candidate;
     JS_FreeValue(ctx, ratio);
     JS_FreeValue(ctx, global);
-    double device_x = (border_x + (box ? box->border.left : 0) + content_x) * dppx;
-    double device_y = (border_y + (box ? box->border.top : 0) + content_y) * dppx;
+    double device_x = (border_x + border_left + content_x) * dppx;
+    double device_y = (border_y + border_top + content_y) * dppx;
     double device_w = round(device_x + content_w * dppx) - round(device_x);
     double device_h = round(device_y + content_h * dppx) - round(device_y);
     double observed_w = content_w;
@@ -30197,8 +30200,8 @@ ns_resize_observers_tick(ns_js *js)
     js->observer_ticking = TRUE;
     JSContext *ctx = js->ctx;
     for (guint oi = 0; oi < js->resize_observers->len; oi++) {
-        JSValue observer = JS_MKPTR(JS_TAG_OBJECT,
-                                    g_ptr_array_index(js->resize_observers, oi));
+        JSValue observer = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT,
+                                    g_ptr_array_index(js->resize_observers, oi)));
         JSValue cb = JS_GetPropertyStr(ctx, observer, "__cb");
         JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
         JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
@@ -30211,6 +30214,7 @@ ns_resize_observers_tick(ns_js *js)
             JS_FreeValue(ctx, widths);
             JS_FreeValue(ctx, heights);
             JS_FreeValue(ctx, boxes);
+            JS_FreeValue(ctx, observer);
             continue;
         }
         uint32_t len = 0;
@@ -30261,6 +30265,7 @@ ns_resize_observers_tick(ns_js *js)
         JS_FreeValue(ctx, widths);
         JS_FreeValue(ctx, heights);
         JS_FreeValue(ctx, boxes);
+        JS_FreeValue(ctx, observer);
     }
     js->observer_ticking = FALSE;
 }
