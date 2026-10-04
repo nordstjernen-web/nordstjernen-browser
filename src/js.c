@@ -56406,6 +56406,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->ctx = JS_NewContext(js->rt);
     if (js->ctx) ns_js_add_engine_private_names(js->ctx);
     if (!js->ctx) { JS_FreeRuntime(js->rt); g_free(js); return NULL; }
+    JS_AddEnginePrivateName(js->ctx, "__ndRealmDoc");
+    JS_AddEnginePrivateName(js->ctx, "__ndRealmWindow");
     js->main_realm_ctx = js->ctx;
     JS_SetContextOpaque(js->ctx, js);
     JS_SetRuntimeOpaque(js->rt, js);
