@@ -142,6 +142,11 @@ Changelog:
   shifted sideways also showed a strip inside the box on the opposite
   edge, so MDN's table of contents links had a grey line on both sides.
 
+* Solid borders whose sides have different colours meet in a diagonal
+  mitre, as in other browsers, so CSS triangles drawn with transparent side
+  borders show as triangles. Stack Overflow's "More" dropdown arrow was a
+  black bar.
+
 1.0.28:
 ======
 * Relayouts of pages with container queries are about 17% faster when the
