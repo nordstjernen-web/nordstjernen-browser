@@ -585,6 +585,8 @@ void     ns_css_media_viewport_pop(void);
 double   ns_css_media_viewport_current_w(void);
 double   ns_css_media_viewport_current_h(void);
 void     ns_css_set_device_size(double w, double h);
+void     ns_css_set_device_pixel_ratio(double dppx);
+double   ns_css_device_pixel_ratio(void);
 void     ns_css_set_print_media(gboolean printing);
 gboolean ns_css_print_media(void);
 

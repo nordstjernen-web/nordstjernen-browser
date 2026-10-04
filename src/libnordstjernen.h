@@ -67,6 +67,13 @@ int ns_browser_snap_document(ns_browser *browser, double viewport_w,
 int ns_browser_set_viewport_width(ns_browser *browser, int css_width);
 int ns_browser_set_viewport(ns_browser *browser, int css_width,
                             double css_height);
+
+/* Set the device pixel ratio (CSS px to device px, browser zoom included)
+ * that devicePixelRatio, resolution media queries and srcset report. The
+ * ratio is process-wide; pass a NULL browser to set it before a page opens.
+ * Returns 1 when the page was laid out again, 0 when nothing was laid out,
+ * -1 on bad input. */
+int ns_browser_set_device_pixel_ratio(ns_browser *browser, double dppx);
 void ns_browser_window_action_applied(ns_browser *browser);
 
 /* Render a viewport into a caller-owned RGBA8888 (premultiplied) buffer of

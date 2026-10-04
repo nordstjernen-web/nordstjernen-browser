@@ -18,12 +18,25 @@ static int g_mq_stack_len;
 
 static double g_mq_device_w = 1920;
 static double g_mq_device_h = 1080;
+static double g_mq_dppx = 1.0;
 
 void
 ns_css_set_device_size(double w, double h)
 {
     if (w > 0) g_mq_device_w = w;
     if (h > 0) g_mq_device_h = h;
+}
+
+void
+ns_css_set_device_pixel_ratio(double dppx)
+{
+    if (dppx > 0 && isfinite(dppx)) g_mq_dppx = dppx;
+}
+
+double
+ns_css_device_pixel_ratio(void)
+{
+    return g_mq_dppx;
 }
 
 void
@@ -92,7 +105,7 @@ mq_or(mq_tri a, mq_tri b)
 }
 
 typedef enum {
-    MQF_LENGTH, MQF_RATIO, MQF_RESOLUTION, MQF_INTEGER, MQF_DISCRETE,
+    MQF_LENGTH, MQF_RATIO, MQF_RESOLUTION, MQF_INTEGER, MQF_NUMBER, MQF_DISCRETE,
 } mq_feature_type;
 
 typedef struct {
@@ -137,6 +150,7 @@ static const mq_feature_def g_mq_features[] = {
     { "color-index",          MQF_INTEGER,    NULL, 0 },
     { "monochrome",           MQF_INTEGER,    NULL, 0 },
     { "grid",                 MQF_INTEGER,    NULL, 0 },
+    { "-webkit-device-pixel-ratio", MQF_NUMBER, NULL, 0 },
     { "orientation",          MQF_DISCRETE,   mqkw_orientation,  G_N_ELEMENTS(mqkw_orientation) },
     { "scan",                 MQF_DISCRETE,   mqkw_scan,         G_N_ELEMENTS(mqkw_scan) },
     { "overflow-block",       MQF_DISCRETE,   mqkw_overflow_b,   G_N_ELEMENTS(mqkw_overflow_b) },
@@ -498,6 +512,16 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
         return TRUE;
     }
 
+    if (type == MQF_NUMBER) {
+        double v = 0;
+        const char *p = NULL;
+        if (!mq_parse_number(s, e, &v, &p) || mq_skip_ws(p, e) != e)
+            return FALSE;
+        out->num = v;
+        g_strlcpy(out->unit, "", sizeof out->unit);
+        return TRUE;
+    }
+
     if (type == MQF_RATIO) {
         double a = 0, b = 1;
         const char *p = NULL;
@@ -634,8 +658,15 @@ mq_parse_feature(const char *s, const char *e)
         if (!ne || mq_skip_ws(ne, colon) != colon) return NULL;
         int minmax = 0;
         const char *base = name;
+        char webkit_base[40];
         if (g_str_has_prefix(name, "min-")) { minmax = 1; base = name + 4; }
         else if (g_str_has_prefix(name, "max-")) { minmax = 2; base = name + 4; }
+        else if (g_str_has_prefix(name, "-webkit-min-") ||
+                 g_str_has_prefix(name, "-webkit-max-")) {
+            minmax = name[9] == 'i' ? 1 : 2;
+            g_snprintf(webkit_base, sizeof webkit_base, "-webkit-%s", name + 12);
+            base = webkit_base;
+        }
         const mq_feature_def *f = mq_feature_lookup(base);
         if (!f) return NULL;
         if (minmax && (f->type == MQF_DISCRETE ||
@@ -921,8 +952,9 @@ mq_feature_current(const mq_feature_def *f, double *num, double *denom)
     } else if (strcmp(n, "device-aspect-ratio") == 0) {
         *num = g_mq_device_w;
         *denom = g_mq_device_h;
-    } else if (strcmp(n, "resolution") == 0)
-        *num = 1.0;
+    } else if (strcmp(n, "resolution") == 0 ||
+               strcmp(n, "-webkit-device-pixel-ratio") == 0)
+        *num = g_mq_dppx;
     else if (strcmp(n, "color") == 0)
         *num = 8;
     else if (strcmp(n, "monochrome") == 0 || strcmp(n, "color-index") == 0 ||
@@ -1147,6 +1179,10 @@ mq_serialize_value(GString *out, const mq_value *v, mq_feature_type type)
         g_string_append_printf(out, "%gdppx", v->num);
         return;
     }
+    if (type == MQF_NUMBER) {
+        g_string_append_printf(out, "%g", v->num);
+        return;
+    }
     g_string_append_printf(out, "%gpx", v->num);
 }
 
@@ -1184,9 +1220,16 @@ mq_serialize_node(GString *out, const mq_node *n, int depth)
         if (n->nops == 0) {
             g_string_append(out, n->feature->name);
         } else if (n->plain) {
+            const char *fname = n->feature->name;
+            const char *prefix = "";
+            if (g_str_has_prefix(fname, "-webkit-") && n->minmax) {
+                prefix = "-webkit-";
+                fname += 8;
+            }
+            g_string_append(out, prefix);
             if (n->minmax == 1) g_string_append(out, "min-");
             else if (n->minmax == 2) g_string_append(out, "max-");
-            g_string_append(out, n->feature->name);
+            g_string_append(out, fname);
             g_string_append(out, ": ");
             mq_serialize_value(out, &n->v1, n->feature->type);
         } else if (n->nops == 2) {

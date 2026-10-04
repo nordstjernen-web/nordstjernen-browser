@@ -1875,6 +1875,21 @@ ns_browser_set_viewport(ns_browser *browser, int css_width, double css_height)
 }
 
 int
+ns_browser_set_device_pixel_ratio(ns_browser *browser, double dppx)
+{
+    if (!(dppx > 0)) return -1;
+    if (dppx == ns_css_device_pixel_ratio()) return 0;
+    ns_css_set_device_pixel_ratio(dppx);
+    if (!browser || !browser->doc) return 0;
+    if (browser->js) {
+        ns_js_sync_window_metrics(browser->js);
+        ns_js_reeval_media_queries(browser->js);
+    }
+    browser_relayout(browser);
+    return 1;
+}
+
+int
 ns_browser_set_viewport_width(ns_browser *browser, int css_width)
 {
     return ns_browser_set_viewport(browser, css_width,

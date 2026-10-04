@@ -38,6 +38,22 @@ struct ns_renderer_session {
     char          *post_ct;
 };
 
+static double
+request_device_pixel_ratio(const char *body)
+{
+    double dpr = 0;
+    json_get_double(body, "dpr", &dpr);
+    return dpr >= 0.25 && dpr <= 8.0 ? dpr : 0;
+}
+
+static void
+session_apply_device_pixel_ratio(ns_renderer_session *s, const char *body)
+{
+    double dpr = request_device_pixel_ratio(body);
+    if (dpr > 0 && ns_browser_set_device_pixel_ratio(s->cur, dpr) > 0)
+        s->frame_valid = 0;
+}
+
 static void
 session_bfcache_park_or_close(ns_renderer_session *s, ns_browser *b)
 {
@@ -322,6 +338,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         json_get_long(body, "user_activated", &user_activated);
         int vw = clamp((int)w, 1, s->max_w);
         int vh = clamp((int)h, 1, s->max_h);
+        double dpr = request_device_pixel_ratio(body);
+        if (dpr > 0)
+            ns_browser_set_device_pixel_ratio(NULL, dpr);
         ns_browser *restored = (history && url)
             ? session_bfcache_take(s, url) : NULL;
         char *referrer = (!history && s->cur) ? ns_browser_url(s->cur) : NULL;
@@ -464,6 +483,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int vw = clamp((int)w, 1, s->max_w);
         int vh = clamp((int)h, 1, s->max_h);
         int stride = vw * 4;
+        session_apply_device_pixel_ratio(s, body);
         if (!s->cur) {
             http_write_response(ctrl_w, 200, "application/octet-stream",
                                 "X-W: 0\r\nX-H: 0\r\nX-Stride: 0\r\n"
@@ -866,6 +886,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int vh = clamp((int)h, 1, s->max_h);
         int pw = 0, ph = 0, ok = 0;
         s->frame_valid = 0;
+        session_apply_device_pixel_ratio(s, body);
         if (s->cur && ns_browser_set_viewport(s->cur, vw, vh) == 0) {
             ns_browser_window_action_applied(s->cur);
             ns_browser_page_size(s->cur, &pw, &ph);
