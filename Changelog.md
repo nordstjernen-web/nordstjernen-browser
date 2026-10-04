@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* Placing absolutely positioned boxes nested in other positioned boxes is
+  faster: finding each box's static position no longer walks up the tree
+  for every box it visits, but compares document order ranks and a set of
+  the box's ancestors made once.
 * Large blurred box shadows paint up to 250 times faster. A blurred rounded
   rectangle is the same along its straight middle, so the blur now runs on a
   copy with the middle cut short and the uniform row and column are
