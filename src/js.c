@@ -45688,8 +45688,9 @@ ns_js_form_owner_for(const ns_node *el, ns_js *js)
 static ns_node *
 ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
 {
-    const char *group = ns_element_get_attr(radio, "name");
-    if (!group) return NULL;
+    const char *group_attr = ns_element_get_attr(radio, "name");
+    if (!group_attr) return NULL;
+    char *group = g_strdup(group_attr);
     const ns_node *doc = js && js->current_doc ? js->current_doc
                                                 : ns_node_root(radio);
     const ns_node *owner = ns_form_owner(radio, doc);
@@ -45714,6 +45715,7 @@ ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
             g_queue_push_tail(&q, c);
     }
     g_queue_clear(&q);
+    g_free(group);
     return checked;
 }
 
