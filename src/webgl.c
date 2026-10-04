@@ -875,11 +875,14 @@ static int
 wgl_components(int format)
 {
     switch (format) {
-    case GL_RGBA: case GL_RGBA_INTEGER:            return 4;
-    case GL_RGB:  case GL_RGB_INTEGER:             return 3;
+    case GL_RED:  case GL_RED_INTEGER:
+    case GL_ALPHA: case GL_LUMINANCE:
+    case GL_DEPTH_COMPONENT:                       return 1;
     case GL_RG:   case GL_RG_INTEGER:
     case GL_LUMINANCE_ALPHA: case GL_DEPTH_STENCIL: return 2;
-    default:                                       return 1;
+    case GL_RGB:  case GL_RGB_INTEGER:
+    case GL_SRGB_EXT:                              return 3;
+    default:                                       return 4;
     }
 }
 
@@ -888,9 +891,10 @@ wgl_type_bytes(int type)
 {
     switch (type) {
     case GL_BYTE: case GL_UNSIGNED_BYTE:                return 1;
-    case GL_SHORT: case GL_UNSIGNED_SHORT: case GL_HALF_FLOAT: return 2;
-    case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT:   return 4;
-    default:                                            return 1;
+    case GL_SHORT: case GL_UNSIGNED_SHORT:
+    case GL_HALF_FLOAT: case GL_HALF_FLOAT_OES:         return 2;
+    case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT:
+    default:                                            return 4;
     }
 }
 
@@ -2264,7 +2268,7 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
         cairo_surface_destroy(s);
         return NULL;
     }
-    uint8_t *out = g_try_malloc((size_t)total);
+    uint8_t *out = g_try_malloc0((size_t)total);
     if (!out) {
         cairo_surface_destroy(s);
         return NULL;
@@ -2298,6 +2302,34 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
     *out_w = w;
     *out_h = h;
     return out;
+}
+
+typedef struct {
+    GLint align, row_length, skip_rows, skip_pixels;
+} wgl_unpack_state;
+
+static void
+wgl_unpack_tight(ns_webgl *g, wgl_unpack_state *saved)
+{
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &saved->align);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (g->version < 2) return;
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &saved->row_length);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &saved->skip_rows);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &saved->skip_pixels);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+}
+
+static void
+wgl_unpack_restore(ns_webgl *g, const wgl_unpack_state *saved)
+{
+    glPixelStorei(GL_UNPACK_ALIGNMENT, saved->align);
+    if (g->version < 2) return;
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, saved->row_length);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, saved->skip_rows);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, saved->skip_pixels);
 }
 
 static JSValue
@@ -2368,7 +2400,10 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
                                             &w, &h, &threw);
             if (threw) return JS_EXCEPTION;
             if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
                 glTexImage2D(target, level, internalformat, w, h, 0, format, type, rgba);
+                wgl_unpack_restore(g, &saved);
                 g_free(rgba);
             }
         }
@@ -2440,7 +2475,10 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                                             &w, &h, &threw);
             if (threw) return JS_EXCEPTION;
             if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
                 glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, rgba);
+                wgl_unpack_restore(g, &saved);
                 g_free(rgba);
             }
         }
