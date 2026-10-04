@@ -19164,8 +19164,8 @@ cq_serialize(const cq_node *n, GString *out)
 char *
 ns_css_container_name_canonical(const char *text)
 {
-    char *tok[16] = {0};
-    int n = split_ws_limit(text, tok, 16);
+    char *tok[17] = {0};
+    int n = split_ws_limit(text, tok, (int)G_N_ELEMENTS(tok) - 1);
     char *res = NULL;
     if (n == 1 && g_ascii_strcasecmp(tok[0], "none") == 0) {
         res = g_strdup("none");
