@@ -321,9 +321,10 @@ session_animating(const struct ns_renderer_session *s)
 }
 
 static void
-session_note_scroll(struct ns_renderer_session *s, long sx, long sy)
+session_note_scroll(struct ns_renderer_session *s, long sx, long sy,
+                    gboolean wheel)
 {
-    if (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy))
+    if (wheel || (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy)))
         s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
 }
 
@@ -533,7 +534,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                                 "X-Anim: 0\r\n", NULL, 0);
             return 0;
         }
-        session_note_scroll(s, sx, sy);
+        long wheel_x = 0, wheel_y = 0, wheel_dx = 0, wheel_dy = 0;
+        json_get_long(body, "wheel_dx", &wheel_dx);
+        json_get_long(body, "wheel_dy", &wheel_dy);
+        session_note_scroll(s, sx, sy, wheel_dx || wheel_dy);
         int ticked = s->frame_valid ? session_tick(s) : 0;
         int requested_scroll_x = -1;
         int requested_scroll_y = -1;
@@ -555,9 +559,6 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 requested_scroll_x = max_scroll_x;
             sx = requested_scroll_x;
         }
-        long wheel_x = 0, wheel_y = 0, wheel_dx = 0, wheel_dy = 0;
-        json_get_long(body, "wheel_dx", &wheel_dx);
-        json_get_long(body, "wheel_dy", &wheel_dy);
         if (wheel_dx || wheel_dy) {
             json_get_long(body, "wheel_x", &wheel_x);
             json_get_long(body, "wheel_y", &wheel_y);

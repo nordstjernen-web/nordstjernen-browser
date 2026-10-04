@@ -63,7 +63,9 @@ Changelog:
   the pointer is still (GTK repeats the last motion event), and holds hover
   updates until scrolling stops; hovering tests only the exact point under
   the pointer. Scrolling Wikipedia went from about 9 to about 55 frames per
-  second on a 2x display.
+  second on a 2x display. Wheel and touchpad scrolling also lets the
+  renderer delay page timers and relayouts while the gesture lasts, as it
+  already did when the scroll position came from the browser window.
 * A single-line row flex container is as wide as the sum of its items'
   min-content widths, not its widest item, when it is squeezed. GitHub's
   header menu shrank below its content and the buttons ran into each other.
