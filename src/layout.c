@@ -5396,6 +5396,146 @@ make_pango_layout(const ns_style *parent_style)
     return layout;
 }
 
+typedef struct ns_text_measure {
+    NsPangoRectangle logical;
+    int              lines;
+    int              baseline;
+} ns_text_measure;
+
+#define NS_TEXT_MEASURE_CACHE_MAX 32768
+
+typedef struct text_measure_key {
+    guint                   hash;
+    guint                   len;
+    guint8                 *data;
+    NsPangoFontDescription *font;
+} text_measure_key;
+
+typedef struct text_measure_head {
+    guint serial;
+    int   width, height, indent, spacing;
+    float line_spacing;
+    guint flags;
+    guint attrs_len;
+} text_measure_head;
+
+static GHashTable *g_text_measure_cache;
+static GByteArray *g_text_measure_scratch;
+
+static guint
+text_measure_key_hash(gconstpointer p)
+{
+    return ((const text_measure_key *)p)->hash;
+}
+
+static gboolean
+text_measure_key_equal(gconstpointer pa, gconstpointer pb)
+{
+    const text_measure_key *a = pa, *b = pb;
+    if (a->hash != b->hash || a->len != b->len ||
+        memcmp(a->data, b->data, a->len) != 0)
+        return FALSE;
+    if (!a->font || !b->font) return a->font == b->font;
+    return ns_pango_font_description_equal(a->font, b->font);
+}
+
+static void
+text_measure_key_free(gpointer p)
+{
+    text_measure_key *k = p;
+    g_free(k->data);
+    if (k->font) ns_pango_font_description_free(k->font);
+    g_free(k);
+}
+
+static gboolean
+text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
+{
+    NsPangoTabArray *tabs = ns_pango_layout_get_tabs(layout);
+    if (tabs) {
+        ns_pango_tab_array_free(tabs);
+        return FALSE;
+    }
+    NsPangoAttrList *attrs = ns_pango_layout_get_attributes(layout);
+    char *attr_str = attrs ? ns_pango_attr_list_to_string(attrs) : NULL;
+    if (attr_str && strstr(attr_str, " shape")) {
+        g_free(attr_str);
+        return FALSE;
+    }
+    text_measure_head head;
+    memset(&head, 0, sizeof head);
+    head.serial = ns_pango_context_get_serial(ns_pango_layout_get_context(layout));
+    head.width = ns_pango_layout_get_width(layout);
+    head.height = ns_pango_layout_get_height(layout);
+    head.indent = ns_pango_layout_get_indent(layout);
+    head.spacing = ns_pango_layout_get_spacing(layout);
+    head.line_spacing = ns_pango_layout_get_line_spacing(layout);
+    head.flags = (guint)ns_pango_layout_get_justify(layout) |
+                 (guint)ns_pango_layout_get_single_paragraph_mode(layout) << 2 |
+                 (guint)ns_pango_layout_get_auto_dir(layout) << 3 |
+                 (guint)ns_pango_layout_get_alignment(layout) << 4 |
+                 (guint)ns_pango_layout_get_wrap(layout) << 8 |
+                 (guint)ns_pango_layout_get_ellipsize(layout) << 12;
+    head.attrs_len = attr_str ? (guint)strlen(attr_str) : 0;
+    if (!g_text_measure_scratch) g_text_measure_scratch = g_byte_array_new();
+    GByteArray *buf = g_text_measure_scratch;
+    g_byte_array_set_size(buf, 0);
+    g_byte_array_append(buf, (const guint8 *)&head, sizeof head);
+    if (attr_str) g_byte_array_append(buf, (const guint8 *)attr_str, head.attrs_len);
+    const char *text = ns_pango_layout_get_text(layout);
+    g_byte_array_append(buf, (const guint8 *)text, (guint)strlen(text));
+    g_free(attr_str);
+    guint32 h = 2166136261u;
+    for (guint i = 0; i < buf->len; i++) h = (h ^ buf->data[i]) * 16777619u;
+    const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);
+    if (fd) h ^= ns_pango_font_description_hash(fd) * 0x9e3779b1u;
+    probe->hash = h;
+    probe->len = buf->len;
+    probe->data = buf->data;
+    probe->font = (NsPangoFontDescription *)fd;
+    return TRUE;
+}
+
+static void
+text_measure(NsPangoLayout *layout, ns_text_measure *m)
+{
+    text_measure_key probe;
+    gboolean keyed = text_measure_key_build(layout, &probe);
+    if (keyed && g_text_measure_cache) {
+        const ns_text_measure *hit = g_hash_table_lookup(g_text_measure_cache, &probe);
+        if (hit) {
+            *m = *hit;
+            return;
+        }
+    }
+    ns_pango_layout_get_extents(layout, NULL, &m->logical);
+    m->lines = ns_pango_layout_get_line_count(layout);
+    m->baseline = ns_pango_layout_get_baseline(layout);
+    if (!keyed) return;
+    if (!g_text_measure_cache)
+        g_text_measure_cache = g_hash_table_new_full(
+            text_measure_key_hash, text_measure_key_equal,
+            text_measure_key_free, g_free);
+    if (g_hash_table_size(g_text_measure_cache) >= NS_TEXT_MEASURE_CACHE_MAX)
+        g_hash_table_remove_all(g_text_measure_cache);
+    text_measure_key *key = g_new(text_measure_key, 1);
+    key->hash = probe.hash;
+    key->len = probe.len;
+    key->data = g_memdup2(probe.data, probe.len);
+    key->font = probe.font ? ns_pango_font_description_copy(probe.font) : NULL;
+    g_hash_table_insert(g_text_measure_cache, key, g_memdup2(m, sizeof *m));
+}
+
+static void
+text_measure_pixel_size(NsPangoLayout *layout, int *width, int *height)
+{
+    ns_text_measure m;
+    text_measure(layout, &m);
+    ns_pango_extents_to_pixels(&m.logical, NULL);
+    if (width) *width = m.logical.width;
+    if (height) *height = m.logical.height;
+}
+
 static void
 apply_inline_spacing(NsPangoAttrList *list, const ns_style *style, const char *text)
 {
@@ -5935,10 +6075,10 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
     NsPangoLayout *layout = make_pango_layout(parent_style);
     ns_pango_layout_set_width(layout, -1);
     ns_pango_layout_set_text(layout, best, (int)best_len);
-    NsPangoRectangle logical;
-    ns_pango_layout_get_extents(layout, NULL, &logical);
+    ns_text_measure m;
+    text_measure(layout, &m);
     g_object_unref(layout);
-    return ceil((double)logical.width / NS_PANGO_SCALE);
+    return ceil((double)m.logical.width / NS_PANGO_SCALE);
 }
 
 static void shift_box_tree(ns_box *b, double dx, double dy);
@@ -6129,12 +6269,14 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_inline_layout_set_attrs(layout, i18n, box);
     ns_pango_attr_list_unref(i18n);
 
-    int line_count;
     ns_pango_layout_set_text(layout, box->text, -1);
     ns_paint_start_align_overflow(layout);
-    int measured_h = 0;
-    ns_pango_layout_get_pixel_size(layout, NULL, &measured_h);
-    line_count = ns_pango_layout_get_line_count(layout);
+    ns_text_measure measured;
+    text_measure(layout, &measured);
+    NsPangoRectangle measured_px = measured.logical;
+    ns_pango_extents_to_pixels(&measured_px, NULL);
+    int measured_h = measured_px.height;
+    int line_count = measured.lines;
     if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
         double indent = ns_text_indent_px(parent_style, content_width);
         for (guint i = 0; i < box->inline_atomics->len; i++) {
@@ -6186,8 +6328,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     box->content_height = expected;
     double ta_h = inline_textarea_total_height(box, parent_style);
     if (ta_h > box->content_height) box->content_height = ta_h;
-    box->first_baseline =
-        (double)ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
+    box->first_baseline = (double)measured.baseline / NS_PANGO_SCALE;
     if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
     if (cacheable) {
@@ -7494,8 +7635,9 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         apply_inline_layout_attrs(i18n, box);
         ns_inline_layout_set_attrs(layout, i18n, box);
         ns_pango_attr_list_unref(i18n);
-        NsPangoRectangle logical;
-        ns_pango_layout_get_extents(layout, NULL, &logical);
+        ns_text_measure natural;
+        text_measure(layout, &natural);
+        NsPangoRectangle logical = natural.logical;
         double slack = 0;
         const ns_css_value *lsv = parent_style
             ? parent_style->values[NS_CSS_LETTER_SPACING] : NULL;
@@ -7692,7 +7834,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         ns_inline_layout_set_attrs(layout, i18n, box);
         ns_pango_attr_list_unref(i18n);
         int pw, ph;
-        ns_pango_layout_get_pixel_size(layout, &pw, &ph);
+        text_measure_pixel_size(layout, &pw, &ph);
         g_object_unref(layout);
         if (cacheable) {
             box->inline_min_cache_style = parent_style;
@@ -13288,26 +13430,63 @@ box_outer_bottom(const ns_box *b)
            b->margin.bottom;
 }
 
+typedef struct static_abs_target {
+    const ns_node *node;
+    guint          rank;
+    GHashTable    *ancestors;
+} static_abs_target;
+
+static gboolean
+static_abs_y_visit_other(const ns_box *b, const static_abs_target *t,
+                         double *out)
+{
+    guint rb = g_node_order ? GPOINTER_TO_UINT(
+        g_hash_table_lookup(g_node_order, (gpointer)b->dom)) : 0;
+    gboolean ranked = rb && t->rank;
+    if (ranked ? t->rank < rb : node_precedes(t->node, b->dom)) return FALSE;
+    if (style_is_absolute_or_fixed(b->style)) return FALSE;
+    if (ranked ? rb < t->rank : node_precedes(b->dom, t->node)) {
+        double bottom = box_outer_bottom(b);
+        if (bottom > *out) *out = bottom;
+    }
+    return TRUE;
+}
+
+static gboolean
+static_abs_y_visit(const ns_box *b, const static_abs_target *t, double *out)
+{
+    if (!b->dom || b->dom == t->node) return TRUE;
+    if (!g_hash_table_contains(t->ancestors, b->dom))
+        return static_abs_y_visit_other(b, t, out);
+    if (!style_is_absolute_or_fixed(b->style)) {
+        double edge = b->y + b->margin.top + b->border.top + b->padding.top;
+        if (edge > *out) *out = edge;
+    }
+    return TRUE;
+}
+
+static void
+static_abs_y_walk_from(const ns_box *b, const static_abs_target *t, double *out)
+{
+    if (!static_abs_y_visit(b, t, out)) return;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        static_abs_y_walk_from(c, t, out);
+}
+
 static void
 static_abs_y_walk(const ns_box *b, const ns_node *target, double *out)
 {
     if (!b || !target || !out) return;
-    if (b->dom && b->dom != target && !node_is_ancestor_of(b->dom, target)) {
-        if (node_precedes(target, b->dom)) return;
-        if (style_is_absolute_or_fixed(b->style)) return;
-        if (node_precedes(b->dom, target) &&
-            !style_is_absolute_or_fixed(b->style)) {
-            double bottom = box_outer_bottom(b);
-            if (bottom > *out) *out = bottom;
-        }
-    }
-    if (b->dom && b->dom != target && node_is_ancestor_of(b->dom, target) &&
-        !style_is_absolute_or_fixed(b->style)) {
-        double edge = b->y + b->margin.top + b->border.top + b->padding.top;
-        if (edge > *out) *out = edge;
-    }
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        static_abs_y_walk(c, target, out);
+    static_abs_target t = {
+        .node = target,
+        .rank = g_node_order ? GPOINTER_TO_UINT(
+            g_hash_table_lookup(g_node_order, (gpointer)target)) : 0,
+        .ancestors = g_hash_table_new(g_direct_hash, g_direct_equal),
+    };
+    for (const ns_node *p = target->parent; p; p = p->parent)
+        g_hash_table_add(t.ancestors, (gpointer)p);
+    static_abs_y_walk_from(b, &t, out);
+    g_hash_table_destroy(t.ancestors);
 }
 
 static double

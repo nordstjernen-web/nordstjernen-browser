@@ -4392,10 +4392,11 @@ ns_listener_is_tombstoned(const ns_listener *l)
 static void
 ns_listener_tombstone(JSContext *ctx, ns_listener *l)
 {
-    (void)ctx;
     if (!l || ns_listener_is_tombstoned(l)) return;
     g_free(l->type);
     l->type = NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->listener_tombstones++;
 }
 
 static gboolean
@@ -4411,11 +4412,40 @@ ns_listener_signal_aborted(ns_js *js, const ns_listener *l)
 }
 
 static void
+ns_listener_index_add(ns_js *js, ns_listener *l)
+{
+    if (!js->listener_index)
+        js->listener_index = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL,
+            (GDestroyNotify)g_ptr_array_unref);
+    GPtrArray *own = g_hash_table_lookup(js->listener_index, l->target);
+    if (!own) {
+        own = g_ptr_array_new();
+        g_hash_table_insert(js->listener_index, (gpointer)l->target, own);
+    }
+    g_ptr_array_add(own, l);
+}
+
+static GPtrArray *
+ns_listeners_of(ns_js *js, const ns_node *target)
+{
+    return js->listener_index
+        ? g_hash_table_lookup(js->listener_index, target) : NULL;
+}
+
+static void
+ns_listener_index_clear(ns_js *js)
+{
+    if (js->listener_index) g_hash_table_remove_all(js->listener_index);
+}
+
+static void
 ns_listeners_sweep(ns_js *js)
 {
     if (!js || !js->listeners || js->dispatch_depth > 0 ||
-        js->listener_snapshots > 0)
+        js->listener_snapshots > 0 || js->listener_tombstones == 0)
         return;
+    js->listener_tombstones = 0;
     guint w = 0;
     for (guint r = 0; r < js->listeners->len; r++) {
         ns_listener *l = g_ptr_array_index(js->listeners, r);
@@ -4428,6 +4458,9 @@ ns_listeners_sweep(ns_js *js)
         js->listeners->pdata[w++] = l;
     }
     g_ptr_array_set_size(js->listeners, w);
+    ns_listener_index_clear(js);
+    for (guint r = 0; r < w; r++)
+        ns_listener_index_add(js, g_ptr_array_index(js->listeners, r));
 }
 
 static void ns_mut_scrub_node(ns_js *js, ns_node *n);
@@ -9026,8 +9059,9 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     }
     ns_js *_js = js_from_ctx(ctx);
-    for (guint i = 0; i < _js->listeners->len; i++) {
-        ns_listener *ex = g_ptr_array_index(_js->listeners, i);
+    GPtrArray *own = ns_listeners_of(_js, n);
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
         if (ns_listener_signal_aborted(_js, ex)) {
             ns_listener_tombstone(ctx, ex);
@@ -9059,6 +9093,7 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     l->once    = once;
     l->passive = passive;
     g_ptr_array_add(_js->listeners, l);
+    ns_listener_index_add(_js, l);
     ((ns_node *)n)->flags |= NS_NODE_HAS_LISTENERS;
     ns_node_arm_js_invalidate((ns_node *)n);
     JS_FreeCString(ctx, type);
@@ -29747,23 +29782,20 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
                                            &intersecting);
     intersecting = has_box && intersecting;
     if (tw <= 0 || th <= 0) ratio = intersecting ? 1.0 : 0.0;
-    double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
-    double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
-    tx -= viewport_x;
-    ty -= viewport_y;
-    rx -= viewport_x;
-    ry -= viewport_y;
-    ix -= viewport_x;
-    iy -= viewport_y;
-    *out_entry = ns_io_make_entry(ctx, t->wrapper,
-                                  tx, ty, tw, th,
-                                  rx, ry, rw, rh,
-                                  ix, iy, iw, ih,
-                                  ratio, intersecting);
     gboolean changed = !t->has_fired || intersecting != t->last_intersecting;
     if (!changed && ns_io_threshold_index(o, t->last_ratio) !=
                     ns_io_threshold_index(o, ratio))
         changed = TRUE;
+    *out_entry = JS_UNDEFINED;
+    if (changed) {
+        double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
+        double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
+        *out_entry = ns_io_make_entry(ctx, t->wrapper,
+                                      tx - viewport_x, ty - viewport_y, tw, th,
+                                      rx - viewport_x, ry - viewport_y, rw, rh,
+                                      ix - viewport_x, iy - viewport_y, iw, ih,
+                                      ratio, intersecting);
+    }
     t->last_intersecting = intersecting;
     t->last_ratio = ratio;
     t->has_fired = TRUE;
@@ -32138,9 +32170,10 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
     gboolean has_listeners = (cur->kind == NS_NODE_DOCUMENT) ||
                              ((cur->flags & NS_NODE_HAS_LISTENERS) != 0);
     GPtrArray *to_call = NULL;
-    if (has_listeners && js->listeners && js->listeners->len > 0) {
-        for (guint i = 0; i < js->listeners->len; i++) {
-            ns_listener *l = g_ptr_array_index(js->listeners, i);
+    GPtrArray *own = has_listeners ? ns_listeners_of(js, cur) : NULL;
+    if (own) {
+        for (guint i = 0; i < own->len; i++) {
+            ns_listener *l = g_ptr_array_index(own, i);
             if (ns_listener_is_tombstoned(l)) continue;
             if (l->window_level) continue;
             if (l->target != cur || strcmp(l->type, type) != 0) continue;
@@ -32207,7 +32240,9 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
     JSValue global = JS_GetGlobalObject(ctx);
+    ns_window_named_resolving++;
     JSValue handler = JS_GetPropertyStr(ctx, global, prop_name);
+    ns_window_named_resolving--;
     if (JS_IsException(handler)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         handler = JS_UNDEFINED;
@@ -32292,8 +32327,9 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
                                   at_target ? 2 : (capture_phase ? 1 : 3)));
     js->listener_snapshots++;
     GPtrArray *to_call = g_ptr_array_new();
-    for (guint i = 0; js->listeners && i < js->listeners->len; i++) {
-        ns_listener *l = g_ptr_array_index(js->listeners, i);
+    GPtrArray *own = ns_listeners_of(js, event_doc);
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *l = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(l)) continue;
         if (!l->window_level || strcmp(l->type, type) != 0) continue;
         if (l->target != event_doc) continue;
@@ -49925,6 +49961,26 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
     JS_FreeValue(rc->dst, nav);
 }
 
+static gboolean
+ns_obj_has_defined_own_prop(JSContext *ctx, JSValueConst obj, const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    if (has == 0) return FALSE;
+    gboolean defined = (desc.flags & JS_PROP_GETSET) ||
+                       !JS_IsUndefined(desc.value);
+    JS_FreeValue(ctx, desc.value);
+    JS_FreeValue(ctx, desc.getter);
+    JS_FreeValue(ctx, desc.setter);
+    return defined;
+}
+
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                              JSValueConst iframe_doc,
@@ -50033,11 +50089,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (ok) {
         JSValue parent_performance =
             JS_GetPropertyStr(fctx, parent_global, "performance");
-        JSValue parent_memory = JS_IsObject(parent_performance)
-            ? JS_GetPropertyStr(fctx, parent_performance, "memory")
-            : JS_UNDEFINED;
-        gboolean include_memory = !JS_IsUndefined(parent_memory);
-        JS_FreeValue(fctx, parent_memory);
+        gboolean include_memory = JS_IsObject(parent_performance) &&
+            ns_obj_has_defined_own_prop(fctx, parent_performance, "memory");
         JS_FreeValue(fctx, parent_performance);
         JS_SetPropertyStr(fctx, fg, "performance",
                           ns_make_performance_object(fctx, js,
@@ -59113,8 +59166,9 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
         return JS_UNDEFINED;
     }
     ns_js *_js = js_from_ctx(ctx);
-    for (guint i = 0; i < _js->listeners->len; i++) {
-        ns_listener *ex = g_ptr_array_index(_js->listeners, i);
+    GPtrArray *own = ns_listeners_of(_js, target);
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
         if (ns_listener_signal_aborted(_js, ex)) {
             ns_listener_tombstone(ctx, ex);
@@ -59142,6 +59196,7 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
     l->passive = passive;
     l->window_level = window_level;
     g_ptr_array_add(_js->listeners, l);
+    ns_listener_index_add(_js, l);
     ns_node_arm_js_invalidate(target);
     JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
@@ -60629,6 +60684,7 @@ ns_js_reset_runtime_state(ns_js *js)
             g_free(l);
         }
         g_ptr_array_set_size(js->listeners, 0);
+        ns_listener_index_clear(js);
     }
 
     if (js->pending_fetches) {
@@ -61426,6 +61482,7 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->listeners, TRUE);
         js->listeners = NULL;
+        g_clear_pointer(&js->listener_index, g_hash_table_destroy);
     }
     if (js->pending_fetches) {
         for (guint i = 0; i < js->pending_fetches->len; i++) {

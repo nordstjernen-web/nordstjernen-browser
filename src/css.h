@@ -352,6 +352,7 @@ typedef struct ns_css_anim_list {
 } ns_css_anim_list;
 
 struct ns_style;
+gboolean ns_css_style_may_animate(const struct ns_style *s);
 void  ns_css_anim_effective(const struct ns_style *s, gboolean is_animation,
                             ns_css_anim_list *out);
 void  ns_css_anim_list_clear(ns_css_anim_list *list);
@@ -774,6 +775,7 @@ typedef struct ns_css_selector {
 
     guint32 ancestor_hashes[4];
     guint   n_ancestor_hashes;
+    guint   n_ancestor_attr_hashes;
 } ns_css_selector;
 
 GPtrArray *ns_css_parse_selector_list(const char *text);
