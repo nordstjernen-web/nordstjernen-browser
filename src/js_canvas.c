@@ -1163,7 +1163,8 @@ ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
                 row[x * 4 + 3] = na;
             }
         }
-        int radius = (int)(st->shadow_blur * 0.5 + 0.5);
+        double half_blur = st->shadow_blur * 0.5 + 0.5;
+        int radius = half_blur < 64 ? (int)half_blur : 64;
         if (radius > 0)
             ns_box_blur_argb(data, sw, sh, stride, radius);
         cairo_surface_mark_dirty(off);
