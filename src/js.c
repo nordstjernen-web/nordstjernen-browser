@@ -4392,10 +4392,11 @@ ns_listener_is_tombstoned(const ns_listener *l)
 static void
 ns_listener_tombstone(JSContext *ctx, ns_listener *l)
 {
-    (void)ctx;
     if (!l || ns_listener_is_tombstoned(l)) return;
     g_free(l->type);
     l->type = NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->listener_tombstones++;
 }
 
 static gboolean
@@ -4414,8 +4415,9 @@ static void
 ns_listeners_sweep(ns_js *js)
 {
     if (!js || !js->listeners || js->dispatch_depth > 0 ||
-        js->listener_snapshots > 0)
+        js->listener_snapshots > 0 || js->listener_tombstones == 0)
         return;
+    js->listener_tombstones = 0;
     guint w = 0;
     for (guint r = 0; r < js->listeners->len; r++) {
         ns_listener *l = g_ptr_array_index(js->listeners, r);
