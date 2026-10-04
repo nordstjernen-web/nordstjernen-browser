@@ -39761,7 +39761,7 @@ ns_input_get_files(JSContext *ctx, JSValueConst this_val)
     if (!ns_node_is_element_named(n, "input")) return JS_NULL;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || g_ascii_strcasecmp(type, "file") != 0) return JS_NULL;
-    const char *path = ns_element_get_attr(n, "data-nd-file-path");
+    g_autofree char *path = g_strdup(ns_element_get_attr(n, "data-nd-file-path"));
 
     JSValue cached_path = JS_GetPropertyStr(ctx, this_val, "__nd_files_path");
     const char *cp = JS_IsString(cached_path) ? JS_ToCString(ctx, cached_path) : NULL;
@@ -43825,7 +43825,7 @@ ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open)
     ns_js_dispatch_toggle_event(js, details, "beforetoggle",
                                 old_state, new_state, FALSE, NULL);
     if (open) {
-        const char *name = ns_element_get_attr(details, "name");
+        g_autofree char *name = g_strdup(ns_element_get_attr(details, "name"));
         ns_details_close_others_in_group(js, details, name);
     }
     ns_js_dispatch_toggle_event(js, details, "toggle",
@@ -46004,7 +46004,7 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
     }
     if (ns_node_is_element_named(act, "a") ||
         ns_node_is_element_named(act, "area")) {
-        const char *href = ns_element_get_attr(act, "href");
+        g_autofree char *href = g_strdup(ns_element_get_attr(act, "href"));
         if (href && g_str_has_prefix(href, "javascript:")) {
             char *code = g_uri_unescape_string(href + strlen("javascript:"),
                                                NULL);
