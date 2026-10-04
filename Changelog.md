@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.29:
+======
+
 1.0.28:
 ======
 * The about:start splash shows version 1.0.28.
