@@ -3,6 +3,10 @@ Changelog:
 
 1.0.29:
 ======
+* The animation check after each style pass skips elements that cannot
+  have anything to do: those without animation state and without an
+  animation or transition property, and those whose style was reused and
+  have nothing running. It no longer computes their depth and sorts them.
 * Style elements inside shadow roots and frames are no longer rewritten on
   every relayout. Their CSS is flattened and scoped to the host, which is a
   pure function of the text and the host, so the result is now kept by

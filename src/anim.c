@@ -1021,12 +1021,16 @@ void
 ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
 {
     if (!a || !styles) return;
-    GArray *items = g_array_sized_new(FALSE, FALSE, sizeof(ns_anim_observe_item),
-                                      g_hash_table_size(styles));
+    if (a->now_us == 0 || g_hash_table_size(a->active) == 0) a->now_us = now_us;
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(ns_anim_observe_item));
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, styles);
     while (g_hash_table_iter_next(&it, &key, &val)) {
+        const ns_anim_state *s = g_hash_table_lookup(a->states, key);
+        if (s ? s->prev_style == val && !state_is_active(s)
+              : !ns_css_style_may_animate(val))
+            continue;
         ns_anim_observe_item item = { key, val, node_depth(key) };
         g_array_append_val(items, item);
     }
