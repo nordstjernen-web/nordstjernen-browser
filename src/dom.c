@@ -1236,7 +1236,8 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
     const char *pfx = prefix && *prefix ? prefix : NULL;
     const char *qualified = name && *name ? name : local_name;
 
-    if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
+    if (el->class_set && (g_ascii_strcasecmp(local_name, "class") == 0 ||
+                          g_ascii_strcasecmp(qualified, "class") == 0))
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
@@ -1293,7 +1294,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !local_name) return;
     const char *ns = ns_attr_normalize_namespace(namespace_uri);
-    if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
+    if (el->class_set && g_ascii_strcasecmp(local_name, "class") == 0)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
