@@ -41643,12 +41643,19 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_LINKS:
         ns_collect_links(root, ctx, arr, &i, 0);
         break;
-    case NS_LIVE_ATTRIBUTES:
+    case NS_LIVE_ATTRIBUTES: {
+        GArray *attrs = g_array_new(FALSE, FALSE, sizeof(JSValue));
         for (const ns_attr *a = root->attrs; a; a = a->next)
-            if (!ns_attr_name_is_internal(a->name))
-                JS_SetPropertyUint32(ctx, arr, i++,
-                                     ns_attr_to_js(ctx, b->owner, a, FALSE));
+            if (!ns_attr_name_is_internal(a->name)) {
+                JSValue attr = ns_attr_to_js(ctx, b->owner, a, FALSE);
+                g_array_append_val(attrs, attr);
+            }
+        for (guint k = 0; k < attrs->len; k++)
+            JS_SetPropertyUint32(ctx, arr, i++,
+                                 g_array_index(attrs, JSValue, k));
+        g_array_free(attrs, TRUE);
         break;
+    }
     case NS_LIVE_LABELS:
         ns_collect_labels_for(ctx, ns_node_root(root), root, arr, &i, 0);
         break;
@@ -41663,12 +41670,17 @@ ns_live_snapshot(JSContext *ctx, ns_live_back *b)
     guint64 gen = js ? js->dom_gen : 0;
     if (!b->has_cache || b->cache_gen != gen ||
         b->kind == NS_LIVE_ATTRIBUTES) {
+        JSValue stale = b->has_cache ? b->cache : JS_UNDEFINED;
+        b->cache = JS_UNDEFINED;
+        b->has_cache = FALSE;
+        JSValue built = ns_live_build(ctx, b);
         if (b->has_cache) JS_FreeValue(ctx, b->cache);
-        b->cache = ns_live_build(ctx, b);
+        b->cache = built;
         b->cache_gen = gen;
         b->has_cache = TRUE;
+        JS_FreeValue(ctx, stale);
     }
-    return b->cache;
+    return JS_DupValue(ctx, b->cache);
 }
 
 static gboolean
@@ -41736,7 +41748,11 @@ ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
     int ret = 0;
     uint32_t idx = 0;
     if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
-        if (idx >= len) { JS_FreeCString(ctx, name); return 0; }
+        if (idx >= len) {
+            JS_FreeValue(ctx, snap);
+            JS_FreeCString(ctx, name);
+            return 0;
+        }
         if (desc) {
             desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
             desc->value  = JS_GetPropertyUint32(ctx, snap, idx);
@@ -41768,6 +41784,7 @@ ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
             }
         }
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return ret;
 }
@@ -41860,6 +41877,7 @@ ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
         }
         JS_FreeValue(ctx, proto);
     }
+    JS_FreeValue(ctx, snap);
     uint32_t named_count = named ? named->len : 0;
     uint32_t total = len + named_count;
     if (total == 0) {
@@ -41900,8 +41918,10 @@ ns_live_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     if (JS_ToInt32(ctx, &idx, argv[0])) return JS_NULL;
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
-    if (idx < 0 || (uint32_t)idx >= len) return JS_NULL;
-    return JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+    JSValue item = idx < 0 || (uint32_t)idx >= len
+        ? JS_NULL : JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+    JS_FreeValue(ctx, snap);
+    return item;
 }
 
 static JSValue
@@ -41915,6 +41935,7 @@ ns_live_namedItem(JSContext *ctx, JSValueConst this_val, int argc,
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
     JSValue r = ns_live_named(ctx, b, snap, len, name);
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return JS_IsUndefined(r) ? JS_NULL : r;
 }
@@ -41927,14 +41948,21 @@ ns_live_delete_property(JSContext *ctx, JSValueConst obj, JSAtom prop)
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
     uint32_t idx = 0;
-    if (JS_AtomIsArrayIndex(ctx, &idx, prop)) return idx >= len;
+    if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
+        JS_FreeValue(ctx, snap);
+        return idx >= len;
+    }
     const char *name = JS_AtomToCString(ctx, prop);
-    if (!name) return 1;
+    if (!name) {
+        JS_FreeValue(ctx, snap);
+        return 1;
+    }
     int ret = 1;
     if (b->html_collection || b->kind == NS_LIVE_ATTRIBUTES) {
         JSValue found = ns_live_named(ctx, b, snap, len, name);
         if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); ret = 0; }
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return ret;
 }
@@ -41955,6 +41983,7 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
                 JSValue snap = ns_live_snapshot(ctx, b);
                 uint32_t len = ns_js_array_length(ctx, snap);
                 JSValue found = ns_live_named(ctx, b, snap, len, name);
+                JS_FreeValue(ctx, snap);
                 if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); reject = 1; }
             }
             JS_FreeCString(ctx, name);
@@ -41980,7 +42009,9 @@ ns_live_length_get(JSContext *ctx, JSValueConst this_val,
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
     if (!b) return JS_ThrowTypeError(ctx, "Illegal invocation");
     JSValue snap = ns_live_snapshot(ctx, b);
-    return JS_NewInt64(ctx, ns_js_array_length(ctx, snap));
+    uint32_t len = ns_js_array_length(ctx, snap);
+    JS_FreeValue(ctx, snap);
+    return JS_NewInt64(ctx, len);
 }
 
 static void
@@ -42461,7 +42492,7 @@ ns_form_controls_snapshot(JSContext *ctx, JSValueConst form)
     if (!JS_IsUndefined(cached)) return cached;
     JSValue live = ns_element_get_form_elements(ctx, form);
     ns_live_back *b = JS_GetOpaque(live, ns_live_class_id);
-    JSValue snap = JS_DupValue(ctx, b ? ns_live_snapshot(ctx, b) : live);
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, live);
     JS_FreeValue(ctx, live);
     ns_qcache_put(js, node, 'f', "", snap);
     return snap;
@@ -42536,18 +42567,21 @@ ns_radio_node_list_get_value(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     for (uint32_t i = 0; i < n; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, snap, i);
         const ns_node *el = ns_unwrap_element(item);
         if (ns_node_is_radio_input(el) && ns_input_is_checked(el)) {
             const char *value = ns_element_get_attr(el, "value");
+            JSValue result = JS_NewString(ctx, value ? value : "on");
             JS_FreeValue(ctx, item);
-            return JS_NewString(ctx, value ? value : "on");
+            JS_FreeValue(ctx, snap);
+            return result;
         }
         JS_FreeValue(ctx, item);
     }
+    JS_FreeValue(ctx, snap);
     return JS_NewString(ctx, "");
 }
 
@@ -42559,7 +42593,7 @@ ns_radio_node_list_set_value(JSContext *ctx, JSValueConst this_val,
     const char *wanted = JS_ToCString(ctx, argv[0]);
     if (!wanted) return JS_UNDEFINED;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     ns_node *chosen = NULL;
     for (uint32_t i = 0; i < n; i++) {
@@ -42583,6 +42617,7 @@ ns_radio_node_list_set_value(JSContext *ctx, JSValueConst this_val,
         }
         ns_js_set_checkedness(js, chosen, TRUE);
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, wanted);
     return JS_UNDEFINED;
 }
@@ -42595,7 +42630,7 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
     JSValue first = JS_NULL;
     uint32_t count = 0;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     for (uint32_t i = 0; i < n; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, snap, i);
@@ -42618,6 +42653,7 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, item);
         }
     }
+    JS_FreeValue(ctx, snap);
     if (count > 1) {
         ns_node *first_node = (ns_node *)ns_unwrap_element(first);
         const ns_node *form = ns_form_owner(first_node, NULL);
