@@ -958,12 +958,20 @@ node_is_table_internal(const ns_node *n, GHashTable *styles)
            is_table_caption(n, styles);
 }
 
+static void queue_absolute_node(const ns_node *n, const ns_style *s);
+
 static void
 collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
         if (is_table_row(n, styles)) {
+            const ns_style *rs = g_hash_table_lookup(styles, n);
+            if (rs && style_is_none(rs)) return;
+            if (rs && style_is_absolute_or_fixed(rs)) {
+                queue_absolute_node(n, rs);
+                return;
+            }
             g_ptr_array_add(out, (gpointer)n);
             return;
         }
@@ -1254,6 +1262,21 @@ static const ns_node *g_form_control_inline;
 static GHashTable  *g_abs_ph_set;
 static GHashTable  *g_abs_static;
 static GHashTable  *g_abs_seen;
+
+static void
+queue_absolute_node(const ns_node *n, const ns_style *s)
+{
+    if (!g_abs_pending ||
+        (g_abs_seen && !g_hash_table_add(g_abs_seen, (gpointer)n)))
+        return;
+    const ns_css_value *pv = s->values[NS_CSS_POSITION];
+    ns_abs_entry e;
+    e.dom = n;
+    e.pseudo = NULL;
+    e.fixed = pv && pv->kind == NS_CSS_V_KEYWORD && pv->u.keyword &&
+              strcmp(pv->u.keyword, "fixed") == 0;
+    g_array_append_val(g_abs_pending, e);
+}
 static const ns_node *g_inline_skip_node;
 
 static void *
