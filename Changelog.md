@@ -261,8 +261,10 @@ Changelog:
   collapses through its parent, the parent's box now starts below that
   margin, so its background and border no longer cover it. A top margin
   also collapses with the margin above the parent, and flex and grid items
-  keep their children's margins inside. MDN's page header was 16px shorter
-  than in Chrome.
+  keep their children's margins inside. The root element keeps its
+  children's margins too, while `<body>` lets its last child's bottom
+  margin collapse through it. MDN's page header was 16px shorter than in
+  Chrome.
 * Grid sizing: `minmax()` tracks keep their minimum when a grid with
   flexible columns is too narrow (MDN's three columns overflowed the
   window), a stretched grid item stops at its `max-height`, and `0fr` or

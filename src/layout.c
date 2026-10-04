@@ -7402,6 +7402,9 @@ static gboolean
 box_establishes_bfc(const ns_box *box)
 {
     if (!box || !box->parent) return TRUE;
+    if (box->dom && box->dom->kind == NS_NODE_ELEMENT &&
+        (!box->dom->parent || box->dom->parent->kind != NS_NODE_ELEMENT))
+        return TRUE;
     if (box->kind == NS_BOX_TABLE_CELL || box->kind == NS_BOX_TABLE ||
         box->kind == NS_BOX_TABLE_CAPTION)
         return TRUE;
@@ -13156,7 +13159,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         !box_establishes_bfc(box);
     gboolean collapse_bottom_with_parent =
         box->padding.bottom == 0 && box->border.bottom == 0 &&
-        box->parent && !box_is_doc_root(box) && !box_establishes_bfc(box) &&
+        box->parent && !box_establishes_bfc(box) &&
         block_height_is_auto(box, parent_content_width);
 
     if (style_is_flex_container(box->style) || style_is_grid_container(box->style))
