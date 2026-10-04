@@ -352,6 +352,13 @@ Changelog:
   gone; every build binds the DOM to QuickJS, with `-Dquickjs` still picking
   the in-tree quickjs-ng fork or Bellard's original QuickJS.
 
+* `-Dquickjs=quickjs` builds again. The binding had started calling four
+  quickjs-ng functions that the adapter for Bellard's original QuickJS did
+  not provide (`JS_ToNumber`, `JS_GetClassCount`, `JS_NewForwarder`,
+  `JS_CloneCFunction`), so `src/js.c` no longer compiled there. The adapter
+  now supplies them; a frame's copies of native functions forward to the
+  page's functions on that engine, as docs/quickjs.md describes.
+
 1.0.28:
 ======
 * Pages with container queries restyle incrementally again: after a small

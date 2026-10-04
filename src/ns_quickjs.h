@@ -66,6 +66,11 @@ JSValue __js_printf_like(3, 4) JS_ThrowDOMException(JSContext *ctx,
                                                     const char *name,
                                                     const char *fmt, ...);
 const char *JS_GetVersion(void);
+JSValue JS_ToNumber(JSContext *ctx, JSValueConst val);
+int JS_GetClassCount(JSRuntime *rt);
+JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
+                        int length, bool constructor);
+JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func);
 
 static inline bool
 ns_quickjs_is_big_int(JSValueConst val)
