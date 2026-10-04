@@ -94,6 +94,15 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
   cross-realm `createElement` or custom element is tagged with, and puts
   `window.event` on the top-level window while a listener from a frame
   runs.
+- **Native functions in frames.** A frame gets its own copies of the
+  page's interfaces. The fork clones each native function into the frame's
+  realm; the original engine cannot, so the frame's copy forwards to the
+  page's function and the native code runs in the page's realm.
+- **Platform object state.** `JS_IsHostAccess` is always true, so the state
+  the engine keeps on platform objects such as `XMLHttpRequest` and
+  `AbortController` shows up as their own properties, and a page's write to
+  an attribute (`xhr.timeout = '1500'`) is stored as given instead of going
+  through the interface's setter.
 - **WebAssembly memory.** A view made on an imported
   `WebAssembly.Memory`'s `buffer` before the module is instantiated is
   detached by instantiation instead of being repointed at the instance's

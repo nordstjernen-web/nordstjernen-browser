@@ -14811,11 +14811,12 @@ static JSContext *
 ns_window_realm_context(JSContext *ctx, JSValueConst window)
 {
     ns_js *js = js_from_ctx(ctx);
+    if (!js) return ctx;
     ns_node *frame = ns_window_frame_node(js, window);
     JSContext *realm = frame ? g_hash_table_lookup(js->frame_contexts, frame)
                              : NULL;
     if (realm) return realm;
-    return js && js->main_realm_ctx ? js->main_realm_ctx : ctx;
+    return js->main_realm_ctx ? js->main_realm_ctx : ctx;
 }
 
 /* A C function with data runs in the realm of its caller, but postMessage

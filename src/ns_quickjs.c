@@ -4,6 +4,7 @@
  */
 
 #include "ns_quickjs.h"
+#include "js_classid.h"
 
 #include <glib.h>
 #include <stdarg.h>
@@ -20,6 +21,9 @@ typedef struct ns_quickjs_class_ids {
     JSClassID map;
     JSClassID set;
     JSClassID boxed[JS_BOXED_SYMBOL + 1];
+    JSClassID bytecode_function;
+    JSClassID c_function;
+    JSClassID c_function_data;
 } ns_quickjs_class_ids;
 
 typedef struct ns_quickjs_array_buffer_owner {
@@ -27,7 +31,12 @@ typedef struct ns_quickjs_array_buffer_owner {
     void *opaque;
 } ns_quickjs_array_buffer_owner;
 
+typedef struct ns_quickjs_forwarder {
+    JSValue target;
+} ns_quickjs_forwarder;
+
 static ns_quickjs_class_ids ns_quickjs_classes;
+static JSClassID ns_quickjs_forwarder_class_id;
 
 static JSClassID
 ns_quickjs_class_of(JSContext *ctx, JSValue val)
@@ -57,6 +66,40 @@ ns_quickjs_boxed_class_of(JSContext *ctx, JSValue primitive)
     JSClassID id = ns_quickjs_class_of(ctx, JS_ToObject(ctx, primitive));
     JS_FreeValue(ctx, primitive);
     return id;
+}
+
+static JSValue
+ns_quickjs_noop(JSContext *ctx, JSValueConst this_val, int argc,
+                JSValueConst *argv)
+{
+    (void)ctx;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_quickjs_noop_data(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv, int magic, JSValue *func_data)
+{
+    (void)magic;
+    (void)func_data;
+    return ns_quickjs_noop(ctx, this_val, argc, argv);
+}
+
+static void
+ns_quickjs_learn_function_class_ids(JSContext *ctx)
+{
+    static const char probe[] = "(function () {})";
+    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
+    ids->bytecode_function = ns_quickjs_class_of(ctx,
+        JS_Eval(ctx, probe, sizeof(probe) - 1, "<ns_quickjs>",
+                JS_EVAL_TYPE_GLOBAL));
+    ids->c_function = ns_quickjs_class_of(ctx,
+        JS_NewCFunction(ctx, ns_quickjs_noop, "", 0));
+    ids->c_function_data = ns_quickjs_class_of(ctx,
+        JS_NewCFunctionData(ctx, ns_quickjs_noop_data, 0, 0, 0, NULL));
 }
 
 static void
@@ -104,6 +147,7 @@ ns_quickjs_learn_class_ids(JSContext *ctx)
         ids->typed_array[type] = ns_quickjs_class_of(ctx,
             JS_NewTypedArray(ctx, 1, &zero, (JSTypedArrayEnum)type));
     ns_quickjs_learn_value_class_ids(ctx);
+    ns_quickjs_learn_function_class_ids(ctx);
 }
 
 JSContext *
@@ -442,4 +486,119 @@ const char *
 JS_GetVersion(void)
 {
     return NS_QUICKJS_ORIGINAL_VERSION;
+}
+
+JSValue
+JS_ToNumber(JSContext *ctx, JSValueConst val)
+{
+    double d;
+    if (JS_ToFloat64(ctx, &d, val) < 0)
+        return JS_EXCEPTION;
+    return JS_NewFloat64(ctx, d);
+}
+
+int
+JS_GetClassCount(JSRuntime *rt)
+{
+    JSClassID id = (1 << 16) - 1;
+    while (id > 0 && !JS_IsRegisteredClass(rt, id))
+        id--;
+    return (int)id + 1;
+}
+
+static void
+ns_quickjs_forwarder_finalize(JSRuntime *rt, JSValue obj)
+{
+    ns_quickjs_forwarder *fw = JS_GetOpaque(obj, ns_quickjs_forwarder_class_id);
+    if (!fw)
+        return;
+    JS_FreeValueRT(rt, fw->target);
+    g_free(fw);
+}
+
+static void
+ns_quickjs_forwarder_mark(JSRuntime *rt, JSValueConst obj,
+                          JS_MarkFunc *mark_func)
+{
+    ns_quickjs_forwarder *fw = JS_GetOpaque(obj, ns_quickjs_forwarder_class_id);
+    if (fw)
+        JS_MarkValue(rt, fw->target, mark_func);
+}
+
+static JSValue
+ns_quickjs_forwarder_call(JSContext *ctx, JSValueConst func_obj,
+                          JSValueConst this_val, int argc, JSValueConst *argv,
+                          int flags)
+{
+    ns_quickjs_forwarder *fw = JS_GetOpaque(func_obj,
+                                            ns_quickjs_forwarder_class_id);
+    if (!fw)
+        return JS_ThrowTypeError(ctx, "not a function");
+    if (flags & JS_CALL_FLAG_CONSTRUCTOR)
+        return JS_CallConstructor2(ctx, fw->target, this_val, argc, argv);
+    if (!JS_IsUndefined(this_val) && !JS_IsNull(this_val))
+        return JS_Call(ctx, fw->target, this_val, argc, argv);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ret = JS_Call(ctx, fw->target, global, argc, argv);
+    JS_FreeValue(ctx, global);
+    return ret;
+}
+
+static const JSClassDef ns_quickjs_forwarder_class = {
+    .class_name = "Function",
+    .finalizer = ns_quickjs_forwarder_finalize,
+    .gc_mark = ns_quickjs_forwarder_mark,
+    .call = ns_quickjs_forwarder_call,
+};
+
+static JSClassID
+ns_quickjs_forwarder_class_for(JSRuntime *rt)
+{
+    JSClassID class_id = ns_new_class_id(&ns_quickjs_forwarder_class_id);
+    if (!JS_IsRegisteredClass(rt, class_id) &&
+        JS_NewClass(rt, class_id, &ns_quickjs_forwarder_class) < 0)
+        return JS_INVALID_CLASS_ID;
+    return class_id;
+}
+
+JSValue
+JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
+                int length, bool constructor)
+{
+    JSClassID class_id = ns_quickjs_forwarder_class_for(JS_GetRuntime(ctx));
+    if (class_id == JS_INVALID_CLASS_ID)
+        return JS_ThrowInternalError(ctx, "cannot register the forwarder class");
+    JSValue proto = JS_GetClassProto(ctx, ns_quickjs_classes.bytecode_function);
+    JSValue func = JS_NewObjectProtoClass(ctx, proto, class_id);
+    JS_FreeValue(ctx, proto);
+    if (JS_IsException(func))
+        return func;
+    ns_quickjs_forwarder *fw = g_new(ns_quickjs_forwarder, 1);
+    fw->target = JS_DupValue(ctx, target);
+    JS_SetOpaque(func, fw);
+    JS_SetConstructorBit(ctx, func, constructor);
+    JS_DefinePropertyValueStr(ctx, func, "length", JS_NewInt32(ctx, length),
+                              JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, func, "name", JS_NewString(ctx, name),
+                              JS_PROP_CONFIGURABLE);
+    return func;
+}
+
+JSValue
+JS_CloneCFunction(JSContext *ctx, JSValueConst func)
+{
+    JSClassID class_id = JS_GetClassID(func);
+    if (class_id == JS_INVALID_CLASS_ID)
+        return JS_UNDEFINED;
+    bool constructor = JS_IsConstructor(ctx, func);
+    if (class_id == ns_quickjs_forwarder_class_id) {
+        ns_quickjs_forwarder *fw = JS_GetOpaque(func, class_id);
+        if (!fw)
+            return JS_UNDEFINED;
+        return JS_NewForwarder(ctx, fw->target, "", 0, constructor);
+    }
+    if (class_id != ns_quickjs_classes.c_function &&
+        class_id != ns_quickjs_classes.c_function_data)
+        return JS_UNDEFINED;
+    return JS_NewForwarder(ctx, func, "", 0, constructor);
 }
