@@ -9082,6 +9082,18 @@ anim_longhand_props(gboolean is_animation, gsize *n)
     return is_animation ? anim : trans;
 }
 
+gboolean
+ns_css_style_may_animate(const ns_style *s)
+{
+    if (!s) return FALSE;
+    if (s->values[NS_CSS_ANIMATION_NAME]) return TRUE;
+    gsize count;
+    const ns_css_prop *lh = anim_longhand_props(FALSE, &count);
+    for (gsize i = 0; i < count; i++)
+        if (s->values[lh[i]]) return TRUE;
+    return FALSE;
+}
+
 void
 ns_css_anim_effective(const ns_style *s, gboolean is_animation, ns_css_anim_list *out)
 {
