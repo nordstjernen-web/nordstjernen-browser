@@ -26972,6 +26972,7 @@ static const char *kUa =
     "border-top-color: #b8b8b8; border-right-color: #b8b8b8; "
     "border-bottom-color: #b8b8b8; border-left-color: #b8b8b8; }\n"
     "input, select, textarea { color: FieldText; }\n"
+    "input::placeholder, textarea::placeholder { color: #757575; }\n"
     "button { color: ButtonText; }\n"
     "input, button, textarea { letter-spacing: initial; "
     "word-spacing: initial; line-height: initial; }\n"
