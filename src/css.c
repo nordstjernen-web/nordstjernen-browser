@@ -18569,6 +18569,38 @@ ns_css_set_container_map(GHashTable *map)
     g_cq_map = map;
 }
 
+static guint64
+cq_container_hash(gconstpointer node, const ns_cq_container *c)
+{
+    guint64 w, h;
+    memcpy(&w, &c->width, sizeof w);
+    memcpy(&h, &c->height, sizeof h);
+    guint64 x = (guint64)(guintptr)node * 0x9e3779b97f4a7c15ULL;
+    x ^= w + 0x7f4a7c159e3779b9ULL + (x << 6) + (x >> 2);
+    x ^= h + 0x165667b19e3779f9ULL + (x << 6) + (x >> 2);
+    x ^= ((guint64)c->type << 40) ^ ((guint64)c->vertical << 39) ^
+         ((guint64)(guint32)c->sibling_index << 20) ^
+         (guint64)(guint32)c->sibling_count;
+    x ^= c->names ? g_str_hash(c->names) : 0;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    return x;
+}
+
+static guint64
+cq_map_signature(GHashTable *map)
+{
+    if (!map) return 0;
+    guint64 sig = (guint64)g_hash_table_size(map) + 1;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, map);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        sig += cq_container_hash(key, value);
+    return sig;
+}
+
 void
 ns_css_container_features_begin(void)
 {
@@ -28707,6 +28739,7 @@ ns_css_style_before_change(const void *node)
 }
 static ns_node       *g_incr_prev_doc;
 static guint64        g_incr_prev_sig;
+static guint64        g_incr_prev_cq_sig;
 static const ns_node *g_incr_prev_focus;
 static const ns_node *g_incr_prev_hover;
 static const ns_node *g_incr_prev_active;
@@ -31305,11 +31338,13 @@ ns_css_compute(ns_node *doc,
     gboolean incr_usable = g_getenv("NS_NO_INCR_RESTYLE") == NULL
         && g_incr_eligible
         && fabs(g_incr_zoom - 1.0) <= 0.001;
-    gboolean incr_want = incr_usable && g_cq_map == NULL;
+    gboolean incr_want = incr_usable;
+    guint64 cq_sig = cq_map_signature(g_cq_map);
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
         && g_incr_prev_sig == sig
+        && g_incr_prev_cq_sig == cq_sig
         && g_css_focus_node == g_incr_prev_focus
         && g_css_hover_node == g_incr_prev_hover
         && g_css_active_node == g_incr_prev_active
@@ -31345,6 +31380,7 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_styles = new_prev;
         g_incr_prev_doc = doc;
         g_incr_prev_sig = sig;
+        g_incr_prev_cq_sig = cq_sig;
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;

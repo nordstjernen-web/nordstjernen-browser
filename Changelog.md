@@ -354,6 +354,12 @@ Changelog:
 
 1.0.28:
 ======
+* Pages with container queries restyle incrementally again: after a small
+  DOM change only the affected elements get new styles, instead of all of
+  them. Incremental restyle was turned off whenever container sizes were in
+  use, which on Google's results page was every relayout; a style write
+  followed by a layout read on a 4,800 element container query page takes
+  35 ms instead of 45 ms.
 * Scrolling stays smooth on pages that react to it. While the user scrolls,
   frames are painted from the current layout and the page's timers, scroll
   events and relayouts run at most every 250 ms (longer when they are slow);
