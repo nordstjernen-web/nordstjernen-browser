@@ -11,6 +11,10 @@ Changelog:
 
 1.0.28:
 ======
+* A grid that gets its height from `top` and `bottom` (absolutely positioned,
+  no `height`) sizes its `fr` rows from that height; they were 0 px tall, so
+  the items collapsed or took their content height (the picture mosaic at
+  the top of a Google results page showed one picture and an empty tile).
 * Percentages inside `round()`, `mod()`, `rem()` and `abs()` resolve against
   the same basis as a plain percentage. They were resolved against the
   viewport width when the style sheet was parsed, so
