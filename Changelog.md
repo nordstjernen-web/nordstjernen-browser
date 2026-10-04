@@ -110,6 +110,10 @@ Changelog:
 * `flex: unset`, `flex: inherit` and the other CSS-wide keywords reset all
   three flex longhands. `flex-basis` kept its old value, so GitHub's
   security section drew its screenshot as an 18px wide sliver.
+* Auto margins work in wrapping flex containers (`flex-wrap: wrap`): free
+  space on each line goes to the items' `auto` margins, and `margin-top` or
+  `margin-bottom: auto` aligns an item in its line. MDN's Baseline box
+  showed the browser icons next to the label instead of at the right edge.
 
 1.0.28:
 ======
