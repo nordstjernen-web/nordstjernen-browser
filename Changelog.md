@@ -132,6 +132,11 @@ Changelog:
   content. The `grid-template-rows: 0fr` accordions on github.com showed
   every closed panel open. Flex and grid items with `overflow: hidden` now
   clip their content even when they are zero pixels tall.
+* Each line box takes the `line-height` of every inline element on it, as
+  CSS describes. A `<span>` with a larger font or line height inside a
+  paragraph made its lines taller when drawn but not in the layout, so the
+  text overlapped the next block; GitHub's feature descriptions were 9px
+  short. A line made only of smaller text keeps the paragraph's line height.
 
 1.0.28:
 ======

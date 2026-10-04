@@ -1851,15 +1851,10 @@ ns_paint_apply_css_line_spacing(NsPangoLayout *layout, const ns_style *s)
 {
     double lh_px = ns_paint_css_line_height_px(s);
     if (!layout || lh_px <= 0) return;
-    NsPangoContext *ctx = ns_pango_layout_get_context(layout);
-    const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);
-    NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
-    if (!fm) return;
-    double natural = (ns_pango_font_metrics_get_ascent(fm) +
-                      ns_pango_font_metrics_get_descent(fm)) / (double)NS_PANGO_SCALE;
-    ns_pango_font_metrics_unref(fm);
-    if (natural <= 0) return;
-    ns_pango_layout_set_line_spacing(layout, (float)(lh_px / natural));
+    double *stored = g_new(double, 1);
+    *stored = lh_px;
+    g_object_set_data_full(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY, stored,
+                           g_free);
 }
 
 void
@@ -2483,8 +2478,8 @@ ns_paint_inline_y_offset_for_layout(const ns_box *b, NsPangoLayout *layout)
 {
     if (!b || !layout) return 0;
     int ph;
-    ns_pango_layout_get_pixel_size(layout, NULL, &ph);
-    double y_offset = (b->content_height - (double)ph) * 0.5;
+    ns_pango_layout_get_size(layout, NULL, &ph);
+    double y_offset = (b->content_height - (double)ph / NS_PANGO_SCALE) * 0.5;
     if (inline_has_form_controls(b)) y_offset = 0;
     if (y_offset < 0 &&
         ns_paint_css_line_height_px(inherited_style(b)) <= 0)

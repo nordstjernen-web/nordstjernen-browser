@@ -86,6 +86,7 @@ NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 
 double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);
+#define NS_CSS_LINE_HEIGHT_KEY "ns-css-line-height"
 void ns_paint_apply_css_line_spacing(NsPangoLayout *layout,
                                      const ns_style *style);
 void ns_paint_start_align_overflow(NsPangoLayout *layout);
