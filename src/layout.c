@@ -10511,6 +10511,13 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
     if (fit_count) *fit_count = 0;
     if (tr->auto_repeat == NS_CSS_AUTO_REPEAT_NONE) return out;
     if (tr->auto_repeat_count <= 0) return out;
+    if (tr->auto_repeat_start < 0 || tr->auto_repeat_start >= tr->n) return out;
+    ns_css_tracks clamped;
+    if (tr->auto_repeat_count > tr->n - tr->auto_repeat_start) {
+        clamped = *tr;
+        clamped.auto_repeat_count = tr->n - tr->auto_repeat_start;
+        tr = &clamped;
+    }
 
     double base_min = 0;
     for (int i = 0; i < tr->auto_repeat_count; i++) {
