@@ -662,16 +662,9 @@ inline_run_drop_caches(ns_box *run)
     if (run->paint_layout) ns_paint_drop_box_cache(run);
 }
 
-static ns_box *
-inline_run_split(ns_box *run, gsize split)
+static void
+inline_split_attrs(ns_box *run, ns_box *tail, gsize split)
 {
-    ns_box *tail = box_new_inline();
-    tail->dom = run->dom;
-    tail->style = run->style;
-    tail->inline_split_tail = TRUE;
-    tail->text = g_strdup(run->text + split);
-    run->text[split] = '\0';
-
     GArray *head_attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
     for (guint i = 0; run->attrs && i < run->attrs->len; i++) {
         ns_inline_attr a = g_array_index(run->attrs, ns_inline_attr, i);
@@ -690,53 +683,79 @@ inline_run_split(ns_box *run, gsize split)
     }
     if (run->attrs) g_array_free(run->attrs, TRUE);
     run->attrs = head_attrs;
+}
 
-    if (run->links) {
-        GArray *head_links = g_array_new(FALSE, FALSE, sizeof(ns_link_range));
-        g_array_set_clear_func(head_links, link_clear);
-        for (guint i = 0; i < run->links->len; i++) {
-            ns_link_range l = g_array_index(run->links, ns_link_range, i);
-            gsize end = l.start + l.len;
-            if (l.start < split) {
-                ns_link_range h = l;
-                h.href = l.href ? g_strdup(l.href) : NULL;
-                h.target = l.target ? g_strdup(l.target) : NULL;
-                if (end > split) h.len = split - l.start;
-                g_array_append_val(head_links, h);
-            }
-            if (end > split) {
-                ns_link_range t = l;
-                t.href = l.href ? g_strdup(l.href) : NULL;
-                t.target = l.target ? g_strdup(l.target) : NULL;
-                t.start = MAX(l.start, split) - split;
-                t.len = end - MAX(l.start, split);
-                g_array_append_val(inline_links_ensure(tail), t);
-            }
-        }
-        g_array_free(run->links, TRUE);
-        run->links = head_links;
-    }
+static ns_link_range
+link_range_copy(const ns_link_range *l, gsize start, gsize len)
+{
+    ns_link_range c = *l;
+    c.href = l->href ? g_strdup(l->href) : NULL;
+    c.target = l->target ? g_strdup(l->target) : NULL;
+    c.start = start;
+    c.len = len;
+    return c;
+}
 
-    if (run->inline_atomics) {
-        GArray *head_atomics =
-            g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-        for (guint i = 0; i < run->inline_atomics->len; i++) {
-            ns_inline_atomic ia =
-                g_array_index(run->inline_atomics, ns_inline_atomic, i);
-            if (ia.byte_off < split) {
-                g_array_append_val(head_atomics, ia);
-                continue;
-            }
-            if (!tail->inline_atomics)
-                tail->inline_atomics =
-                    g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-            ia.byte_off -= split;
-            if (ia.box && ia.box->parent == run) ia.box->parent = tail;
-            g_array_append_val(tail->inline_atomics, ia);
+static void
+inline_split_links(ns_box *run, ns_box *tail, gsize split)
+{
+    if (!run->links) return;
+    GArray *head_links = g_array_new(FALSE, FALSE, sizeof(ns_link_range));
+    g_array_set_clear_func(head_links, link_clear);
+    for (guint i = 0; i < run->links->len; i++) {
+        const ns_link_range *l = &g_array_index(run->links, ns_link_range, i);
+        gsize end = l->start + l->len;
+        if (l->start < split) {
+            ns_link_range h = link_range_copy(l, l->start,
+                                              MIN(end, split) - l->start);
+            g_array_append_val(head_links, h);
         }
-        g_array_free(run->inline_atomics, TRUE);
-        run->inline_atomics = head_atomics;
+        if (end > split) {
+            gsize from = MAX(l->start, split);
+            ns_link_range t = link_range_copy(l, from - split, end - from);
+            g_array_append_val(inline_links_ensure(tail), t);
+        }
     }
+    g_array_free(run->links, TRUE);
+    run->links = head_links;
+}
+
+static void
+inline_split_atomics(ns_box *run, ns_box *tail, gsize split)
+{
+    if (!run->inline_atomics) return;
+    GArray *head_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
+    for (guint i = 0; i < run->inline_atomics->len; i++) {
+        ns_inline_atomic ia =
+            g_array_index(run->inline_atomics, ns_inline_atomic, i);
+        if (ia.byte_off < split) {
+            g_array_append_val(head_atomics, ia);
+            continue;
+        }
+        if (!tail->inline_atomics)
+            tail->inline_atomics =
+                g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
+        ia.byte_off -= split;
+        if (ia.box && ia.box->parent == run) ia.box->parent = tail;
+        g_array_append_val(tail->inline_atomics, ia);
+    }
+    g_array_free(run->inline_atomics, TRUE);
+    run->inline_atomics = head_atomics;
+}
+
+static ns_box *
+inline_run_split(ns_box *run, gsize split)
+{
+    ns_box *tail = box_new_inline();
+    tail->dom = run->dom;
+    tail->style = run->style;
+    tail->inline_split_tail = TRUE;
+    tail->text = g_strdup(run->text + split);
+    run->text[split] = '\0';
+
+    inline_split_attrs(run, tail, split);
+    inline_split_links(run, tail, split);
+    inline_split_atomics(run, tail, split);
 
     tail->parent = run->parent;
     tail->next_sibling = run->next_sibling;
@@ -6070,31 +6089,54 @@ inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
     return has_shorter;
 }
 
+enum { STRUT_ROOT, STRUT_SHORTER, STRUT_SPACER };
+
 static void
-inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
-                           const ns_box *box, double strut_px)
+strut_mark_range(guint8 *kind, gsize n, const ns_inline_attr *r, guint8 k)
 {
-    if (!box->text) return;
-    gsize n = strlen(box->text);
-    if (n == 0) return;
-    enum { STRUT_ROOT, STRUT_SHORTER, STRUT_SPACER };
+    for (gsize b = r->start; b < r->start + r->len && b < n; b++)
+        kind[b] = k;
+}
+
+static guint8 *
+inline_strut_kinds(const ns_box *box, gsize n, double strut_px)
+{
     guint8 *kind = g_new0(guint8, n);
     for (guint i = box->attrs->len; i-- > 0;) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
         if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
         double px = ns_paint_css_line_height_px(r->style);
-        guint8 k = px > 0 && px < strut_px - 0.01 ? STRUT_SHORTER : STRUT_ROOT;
-        for (gsize b = r->start; b < r->start + r->len && b < n; b++)
-            kind[b] = k;
+        gboolean shorter = px > 0 && px < strut_px - 0.01;
+        strut_mark_range(kind, n, r, shorter ? STRUT_SHORTER : STRUT_ROOT);
     }
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (r->kind != NS_INLINE_SPACER) continue;
-        for (gsize b = r->start; b < r->start + r->len && b < n; b++)
-            kind[b] = STRUT_SPACER;
+        if (r->kind == NS_INLINE_SPACER)
+            strut_mark_range(kind, n, r, STRUT_SPACER);
     }
+    return kind;
+}
+
+static gboolean
+strut_line_lacks_root(const guint8 *kind, gsize s0, gsize s1)
+{
+    gboolean shorter = FALSE;
+    for (gsize b = s0; b < s1; b++) {
+        if (kind[b] == STRUT_ROOT) return FALSE;
+        if (kind[b] == STRUT_SHORTER) shorter = TRUE;
+    }
+    return shorter;
+}
+
+static void
+inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
+                           const ns_box *box, double strut_px)
+{
+    gsize n = box->text ? strlen(box->text) : 0;
+    if (n == 0) return;
+    guint8 *kind = inline_strut_kinds(box, n, strut_px);
     if (!*ns_pango_layout_get_text(layout))
         ns_pango_layout_set_text(layout, box->text, -1);
     NsPangoAttrList *with_struts = NULL;
@@ -6104,12 +6146,7 @@ inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
         if (!line || line->length <= 0) continue;
         gsize s0 = (gsize)line->start_index;
         gsize s1 = MIN(n, s0 + (gsize)line->length);
-        gboolean shorter = FALSE, root = FALSE;
-        for (gsize b = s0; b < s1; b++) {
-            if (kind[b] == STRUT_SHORTER) shorter = TRUE;
-            else if (kind[b] == STRUT_ROOT) root = TRUE;
-        }
-        if (!shorter || root) continue;
+        if (!strut_line_lacks_root(kind, s0, s1)) continue;
         if (!with_struts) with_struts = ns_pango_attr_list_copy(list);
         inline_insert_line_height(with_struts, strut_px, (guint)s0, (guint)s1);
     } while (ns_pango_layout_iter_next_line(it));
@@ -8389,6 +8426,19 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
 }
 
 static double
+flex_contribution_clamp_to_basis(ns_box *c, double contribution,
+                                 double preferred)
+{
+    const ns_css_value *bv = c->style->values[NS_CSS_FLEX_BASIS];
+    double base = definite_width_limit(c, bv);
+    if (base < 0 && (!bv || keyword_is(bv, "auto"))) base = preferred;
+    if (base < 0) return contribution;
+    if (flex_grow_of(c) <= 0 && contribution > base) return base;
+    if (flex_shrink_of(c) <= 0 && contribution < base) return base;
+    return contribution;
+}
+
+static double
 flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
 {
     if (!c->style || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
@@ -8396,14 +8446,8 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
     const ns_style *s = c->style;
     double min_content = measure_min_content_width(c, child_style);
     double preferred = definite_width_limit(c, s->values[NS_CSS_WIDTH]);
-    double contribution = MAX(min_content, preferred);
-    const ns_css_value *bv = s->values[NS_CSS_FLEX_BASIS];
-    double base = definite_width_limit(c, bv);
-    if (base < 0 && (!bv || keyword_is(bv, "auto"))) base = preferred;
-    if (base >= 0) {
-        if (flex_grow_of(c) <= 0 && contribution > base) contribution = base;
-        if (flex_shrink_of(c) <= 0 && contribution < base) contribution = base;
-    }
+    double contribution = flex_contribution_clamp_to_basis(
+        c, MAX(min_content, preferred), preferred);
     double max_main = definite_width_limit(c, s->values[NS_CSS_MAX_WIDTH]);
     if (max_main >= 0 && contribution > max_main) contribution = max_main;
     double min_main = definite_width_limit(c, s->values[NS_CSS_MIN_WIDTH]);

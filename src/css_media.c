@@ -934,10 +934,8 @@ mq_discrete_current(const mq_feature_def *f)
 }
 
 static gboolean
-mq_feature_current(const mq_feature_def *f, double *num, double *denom)
+mq_viewport_feature(const char *n, double *num)
 {
-    const char *n = f->name;
-    *denom = 1;
     if (strcmp(n, "width") == 0 || strcmp(n, "inline-size") == 0)
         *num = mq_vw();
     else if (strcmp(n, "height") == 0 || strcmp(n, "block-size") == 0)
@@ -946,14 +944,31 @@ mq_feature_current(const mq_feature_def *f, double *num, double *denom)
         *num = g_mq_device_w;
     else if (strcmp(n, "device-height") == 0)
         *num = g_mq_device_h;
-    else if (strcmp(n, "aspect-ratio") == 0) {
+    else
+        return FALSE;
+    return TRUE;
+}
+
+static gboolean
+mq_ratio_feature(const char *n, double *num, double *denom)
+{
+    if (strcmp(n, "aspect-ratio") == 0) {
         *num = mq_vw();
         *denom = mq_vh();
     } else if (strcmp(n, "device-aspect-ratio") == 0) {
         *num = g_mq_device_w;
         *denom = g_mq_device_h;
-    } else if (strcmp(n, "resolution") == 0 ||
-               strcmp(n, "-webkit-device-pixel-ratio") == 0)
+    } else {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+mq_display_feature(const char *n, double *num)
+{
+    if (strcmp(n, "resolution") == 0 ||
+        strcmp(n, "-webkit-device-pixel-ratio") == 0)
         *num = g_mq_dppx;
     else if (strcmp(n, "color") == 0)
         *num = 8;
@@ -963,6 +978,15 @@ mq_feature_current(const mq_feature_def *f, double *num, double *denom)
     else
         return FALSE;
     return TRUE;
+}
+
+static gboolean
+mq_feature_current(const mq_feature_def *f, double *num, double *denom)
+{
+    *denom = 1;
+    return mq_viewport_feature(f->name, num) ||
+           mq_ratio_feature(f->name, num, denom) ||
+           mq_display_feature(f->name, num);
 }
 
 static mq_tri

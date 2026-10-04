@@ -262,27 +262,24 @@ write_composite_glyph(w2_glyf_streams *s, GByteArray *out, gint16 *x_min)
 }
 
 static gboolean
-write_simple_glyph(w2_glyf_streams *s, guint32 glyph, gint16 n_contours,
-                   gboolean has_bbox, GByteArray *out, gint16 *x_min)
+read_end_points(w2_glyf_streams *s, gint16 n_contours, guint16 *end_points,
+                guint32 *n_points_out)
 {
-    guint16 *end_points = g_new(guint16, n_contours);
     guint32 n_points = 0;
     for (gint16 c = 0; c < n_contours; c++) {
         n_points += rd_255u16(&s->n_points);
-        if (s->n_points.bad || n_points == 0 || n_points > 0xFFFF) {
-            g_free(end_points);
+        if (s->n_points.bad || n_points == 0 || n_points > 0xFFFF)
             return FALSE;
-        }
         end_points[c] = (guint16)(n_points - 1);
     }
-    const guint8 *flags = rd_bytes(&s->flags, n_points);
-    w2_point *points = flags ? g_new(w2_point, n_points) : NULL;
-    if (!points || !triplet_decode(&s->glyphs, flags, n_points, points)) {
-        g_free(points);
-        g_free(end_points);
-        return FALSE;
-    }
+    *n_points_out = n_points;
+    return TRUE;
+}
 
+static void
+write_points_bbox(GByteArray *out, const w2_point *points, guint32 n_points,
+                  gint16 *x_min)
+{
     gint32 bx0 = points[0].x, by0 = points[0].y, bx1 = bx0, by1 = by0;
     for (guint32 i = 1; i < n_points; i++) {
         bx0 = MIN(bx0, points[i].x);
@@ -290,38 +287,63 @@ write_simple_glyph(w2_glyf_streams *s, guint32 glyph, gint16 n_contours,
         bx1 = MAX(bx1, points[i].x);
         by1 = MAX(by1, points[i].y);
     }
-    put_u16(out, (guint16)n_contours);
-    gboolean ok = TRUE;
-    if (has_bbox) {
-        ok = copy_bbox(s, out, x_min);
-    } else {
-        *x_min = (gint16)bx0;
-        put_u16(out, (guint16)bx0);
-        put_u16(out, (guint16)by0);
-        put_u16(out, (guint16)bx1);
-        put_u16(out, (guint16)by1);
-    }
-    for (gint16 c = 0; ok && c < n_contours; c++)
-        put_u16(out, end_points[c]);
-    ok = ok && copy_instructions(s, out);
+    *x_min = (gint16)bx0;
+    put_u16(out, (guint16)bx0);
+    put_u16(out, (guint16)by0);
+    put_u16(out, (guint16)bx1);
+    put_u16(out, (guint16)by1);
+}
 
-    gboolean overlap = s->overlap_bitmap &&
-        (s->overlap_bitmap[glyph >> 3] & (0x80 >> (glyph & 7)));
-    for (guint32 i = 0; ok && i < n_points; i++) {
+static void
+write_point_data(GByteArray *out, const w2_point *points, guint32 n_points,
+                 gboolean overlap)
+{
+    for (guint32 i = 0; i < n_points; i++) {
         guint8 f = points[i].on_curve ? 0x01 : 0x00;
         if (i == 0 && overlap)
             f |= 0x40;
         g_byte_array_append(out, &f, 1);
     }
     gint32 prev = 0;
-    for (guint32 i = 0; ok && i < n_points; i++) {
+    for (guint32 i = 0; i < n_points; i++) {
         put_u16(out, (guint16)(gint16)(points[i].x - prev));
         prev = points[i].x;
     }
     prev = 0;
-    for (guint32 i = 0; ok && i < n_points; i++) {
+    for (guint32 i = 0; i < n_points; i++) {
         put_u16(out, (guint16)(gint16)(points[i].y - prev));
         prev = points[i].y;
+    }
+}
+
+static gboolean
+write_simple_glyph(w2_glyf_streams *s, guint32 glyph, gint16 n_contours,
+                   gboolean has_bbox, GByteArray *out, gint16 *x_min)
+{
+    guint16 *end_points = g_new(guint16, n_contours);
+    guint32 n_points = 0;
+    const guint8 *flags = NULL;
+    w2_point *points = NULL;
+    gboolean ok = read_end_points(s, n_contours, end_points, &n_points) &&
+                  (flags = rd_bytes(&s->flags, n_points)) != NULL;
+    if (ok) {
+        points = g_new(w2_point, n_points);
+        ok = triplet_decode(&s->glyphs, flags, n_points, points);
+    }
+    if (ok) {
+        put_u16(out, (guint16)n_contours);
+        if (has_bbox)
+            ok = copy_bbox(s, out, x_min);
+        else
+            write_points_bbox(out, points, n_points, x_min);
+    }
+    for (gint16 c = 0; ok && c < n_contours; c++)
+        put_u16(out, end_points[c]);
+    ok = ok && copy_instructions(s, out);
+    if (ok) {
+        gboolean overlap = s->overlap_bitmap &&
+            (s->overlap_bitmap[glyph >> 3] & (0x80 >> (glyph & 7)));
+        write_point_data(out, points, n_points, overlap);
     }
     g_free(points);
     g_free(end_points);
@@ -329,33 +351,66 @@ write_simple_glyph(w2_glyf_streams *s, guint32 glyph, gint16 n_contours,
 }
 
 static gboolean
+read_glyf_streams(w2_reader *r, w2_glyf_streams *s, guint16 *num_glyphs_out)
+{
+    rd_u16(r);
+    guint16 options = rd_u16(r);
+    guint16 num_glyphs = rd_u16(r);
+    rd_u16(r);
+    guint32 sizes[7];
+    for (int i = 0; i < 7; i++)
+        sizes[i] = rd_u32(r);
+    if (r->bad)
+        return FALSE;
+    s->n_contours = sub_reader(r, sizes[0]);
+    s->n_points = sub_reader(r, sizes[1]);
+    s->flags = sub_reader(r, sizes[2]);
+    s->glyphs = sub_reader(r, sizes[3]);
+    s->composite = sub_reader(r, sizes[4]);
+    s->bbox = sub_reader(r, sizes[5]);
+    s->instructions = sub_reader(r, sizes[6]);
+    gsize bitmap_len = 4u * (((gsize)num_glyphs + 31u) / 32u);
+    s->bbox_bitmap = rd_bytes(&s->bbox, bitmap_len);
+    s->overlap_bitmap = (options & 1)
+        ? rd_bytes(r, ((gsize)num_glyphs + 7u) / 8u) : NULL;
+    *num_glyphs_out = num_glyphs;
+    return !r->bad && !s->bbox.bad;
+}
+
+static gboolean
+write_glyph(w2_glyf_streams *s, guint32 g, GByteArray *out, gint16 *x_min)
+{
+    gint16 n_contours = (gint16)rd_u16(&s->n_contours);
+    gboolean has_bbox = (s->bbox_bitmap[g >> 3] & (0x80 >> (g & 7))) != 0;
+    if (s->n_contours.bad)
+        return FALSE;
+    if (n_contours == 0)
+        return !has_bbox;
+    if (n_contours == -1)
+        return has_bbox && write_composite_glyph(s, out, x_min);
+    if (n_contours > 0)
+        return write_simple_glyph(s, g, n_contours, has_bbox, out, x_min);
+    return FALSE;
+}
+
+static void
+store_loca(w2_table *loca, const guint32 *offsets, guint16 num_glyphs)
+{
+    GByteArray *loca_out = g_byte_array_sized_new(((guint)num_glyphs + 1) * 4);
+    for (guint32 g = 0; g <= num_glyphs; g++)
+        put_u32(loca_out, offsets[g]);
+    loca->data_len = loca_out->len;
+    loca->data = g_byte_array_free(loca_out, FALSE);
+}
+
+static gboolean
 reconstruct_glyf(const guint8 *data, gsize len, w2_table *glyf, w2_table *loca,
                  gint16 **x_mins, guint16 *num_glyphs_out)
 {
     w2_reader r = { data, len, 0, FALSE };
-    rd_u16(&r);
-    guint16 options = rd_u16(&r);
-    guint16 num_glyphs = rd_u16(&r);
-    rd_u16(&r);
-    guint32 sizes[7];
-    for (int i = 0; i < 7; i++)
-        sizes[i] = rd_u32(&r);
-    if (r.bad)
-        return FALSE;
-
     w2_glyf_streams s;
-    s.n_contours = sub_reader(&r, sizes[0]);
-    s.n_points = sub_reader(&r, sizes[1]);
-    s.flags = sub_reader(&r, sizes[2]);
-    s.glyphs = sub_reader(&r, sizes[3]);
-    s.composite = sub_reader(&r, sizes[4]);
-    s.bbox = sub_reader(&r, sizes[5]);
-    s.instructions = sub_reader(&r, sizes[6]);
-    gsize bitmap_len = 4u * (((gsize)num_glyphs + 31u) / 32u);
-    s.bbox_bitmap = rd_bytes(&s.bbox, bitmap_len);
-    s.overlap_bitmap = (options & 1)
-        ? rd_bytes(&r, ((gsize)num_glyphs + 7u) / 8u) : NULL;
-    if (r.bad || s.bbox.bad)
+    guint16 num_glyphs = 0;
+    if (!read_glyf_streams(&r, &s, &num_glyphs))
         return FALSE;
 
     GByteArray *out = g_byte_array_sized_new((guint)MIN(len * 2, W2_MAX_OUTPUT));
@@ -364,18 +419,7 @@ reconstruct_glyf(const guint8 *data, gsize len, w2_table *glyf, w2_table *loca,
     gboolean ok = TRUE;
     for (guint32 g = 0; ok && g < num_glyphs; g++) {
         offsets[g] = out->len;
-        gint16 n_contours = (gint16)rd_u16(&s.n_contours);
-        gboolean has_bbox = (s.bbox_bitmap[g >> 3] & (0x80 >> (g & 7))) != 0;
-        if (s.n_contours.bad)
-            ok = FALSE;
-        else if (n_contours == 0)
-            ok = !has_bbox;
-        else if (n_contours == -1)
-            ok = has_bbox && write_composite_glyph(&s, out, &mins[g]);
-        else if (n_contours > 0)
-            ok = write_simple_glyph(&s, g, n_contours, has_bbox, out, &mins[g]);
-        else
-            ok = FALSE;
+        ok = write_glyph(&s, g, out, &mins[g]);
         pad4(out);
         ok = ok && out->len <= W2_MAX_OUTPUT;
     }
@@ -386,16 +430,11 @@ reconstruct_glyf(const guint8 *data, gsize len, w2_table *glyf, w2_table *loca,
         return FALSE;
     }
     offsets[num_glyphs] = out->len;
-
-    GByteArray *loca_out = g_byte_array_sized_new(((guint)num_glyphs + 1) * 4);
-    for (guint32 g = 0; g <= num_glyphs; g++)
-        put_u32(loca_out, offsets[g]);
+    store_loca(loca, offsets, num_glyphs);
     g_free(offsets);
 
     glyf->data_len = out->len;
     glyf->data = g_byte_array_free(out, FALSE);
-    loca->data_len = loca_out->len;
-    loca->data = g_byte_array_free(loca_out, FALSE);
     *x_mins = mins;
     *num_glyphs_out = num_glyphs;
     return TRUE;
@@ -507,30 +546,36 @@ ns_woff2_is_woff2(const guint8 *data, gsize len)
 }
 
 static gboolean
+table_transform_valid(w2_table *t, guint8 version)
+{
+    gboolean outline = t->tag == W2_TAG('g', 'l', 'y', 'f') ||
+                       t->tag == W2_TAG('l', 'o', 'c', 'a');
+    if (outline) {
+        t->transformed = version == 0;
+        return version == 0 || version == 3;
+    }
+    t->transformed = t->tag == W2_TAG('h', 'm', 't', 'x') && version == 1;
+    return version == 0 || t->transformed;
+}
+
+static guint32
+read_table_tag(w2_reader *r, guint8 index)
+{
+    if (index == 63)
+        return rd_u32(r);
+    return W2_TAG(w2_known_tags[index][0], w2_known_tags[index][1],
+                  w2_known_tags[index][2], w2_known_tags[index][3]);
+}
+
+static gboolean
 read_directory(w2_reader *r, w2_table *tables, guint16 n, gsize *stream_total)
 {
     gsize total = 0;
     for (guint16 i = 0; i < n; i++) {
         guint8 flags = rd_u8(r);
-        guint8 index = flags & 0x3F;
-        guint32 tag = index == 63 ? rd_u32(r)
-                                  : W2_TAG(w2_known_tags[index][0],
-                                           w2_known_tags[index][1],
-                                           w2_known_tags[index][2],
-                                           w2_known_tags[index][3]);
-        guint8 version = flags >> 6;
-        gboolean outline = tag == W2_TAG('g', 'l', 'y', 'f') ||
-                           tag == W2_TAG('l', 'o', 'c', 'a');
-        tables[i].tag = tag;
+        tables[i].tag = read_table_tag(r, flags & 0x3F);
         tables[i].orig_len = rd_base128(r);
-        if (outline)
-            tables[i].transformed = version == 0;
-        else if (tag == W2_TAG('h', 'm', 't', 'x'))
-            tables[i].transformed = version == 1;
-        else
-            tables[i].transformed = FALSE;
-        if ((outline && version != 0 && version != 3) ||
-            (!outline && version != 0 && !tables[i].transformed))
+        if (!table_transform_valid(&tables[i], flags >> 6))
             return FALSE;
         tables[i].stream_len = tables[i].transformed ? rd_base128(r)
                                                      : tables[i].orig_len;
@@ -546,7 +591,18 @@ read_directory(w2_reader *r, w2_table *tables, guint16 n, gsize *stream_total)
 }
 
 static gboolean
-reconstruct_tables(const guint8 *stream, w2_table *tables, guint16 n)
+reconstruct_outlines(const guint8 *stream, w2_table *glyf, w2_table *loca,
+                     const w2_table *head, gint16 **x_mins,
+                     guint16 *num_glyphs)
+{
+    if (!loca || loca->stream_len != 0 || !head || head->orig_len < 54)
+        return FALSE;
+    return reconstruct_glyf(stream + glyf->stream_off, glyf->stream_len,
+                            glyf, loca, x_mins, num_glyphs);
+}
+
+static gboolean
+reconstruct_transformed(const guint8 *stream, w2_table *tables, guint16 n)
 {
     w2_table *glyf = find_table(tables, n, W2_TAG('g', 'l', 'y', 'f'));
     w2_table *loca = find_table(tables, n, W2_TAG('l', 'o', 'c', 'a'));
@@ -558,24 +614,23 @@ reconstruct_tables(const guint8 *stream, w2_table *tables, guint16 n)
 
     if ((glyf && glyf->transformed) != (loca && loca->transformed))
         return FALSE;
-    if (glyf && glyf->transformed) {
-        if (!loca || loca->stream_len != 0 || !head || head->orig_len < 54 ||
-            !reconstruct_glyf(stream + glyf->stream_off, glyf->stream_len,
-                              glyf, loca, &x_mins, &num_glyphs))
-            return FALSE;
-    }
-    if (hmtx && hmtx->transformed) {
-        gboolean ok = x_mins && hhea && hhea->orig_len >= 36 &&
-            reconstruct_hmtx(stream + hmtx->stream_off, hmtx->stream_len,
-                             be16_at(stream + hhea->stream_off + 34),
-                             num_glyphs, x_mins, hmtx);
-        if (!ok) {
-            g_free(x_mins);
-            return FALSE;
-        }
-    }
+    if (glyf && glyf->transformed &&
+        !reconstruct_outlines(stream, glyf, loca, head, &x_mins, &num_glyphs))
+        return FALSE;
+    gboolean ok = !(hmtx && hmtx->transformed) ||
+        (x_mins && hhea && hhea->orig_len >= 36 &&
+         reconstruct_hmtx(stream + hmtx->stream_off, hmtx->stream_len,
+                          be16_at(stream + hhea->stream_off + 34),
+                          num_glyphs, x_mins, hmtx));
     g_free(x_mins);
+    return ok;
+}
 
+static gboolean
+reconstruct_tables(const guint8 *stream, w2_table *tables, guint16 n)
+{
+    if (!reconstruct_transformed(stream, tables, n))
+        return FALSE;
     for (guint16 i = 0; i < n; i++) {
         if (tables[i].data)
             continue;
@@ -585,6 +640,8 @@ reconstruct_tables(const guint8 *stream, w2_table *tables, guint16 n)
                                    tables[i].stream_len);
         tables[i].data_len = tables[i].stream_len;
     }
+    w2_table *head = find_table(tables, n, W2_TAG('h', 'e', 'a', 'd'));
+    w2_table *glyf = find_table(tables, n, W2_TAG('g', 'l', 'y', 'f'));
     if (head && head->data_len >= 54) {
         memset(head->data + 8, 0, 4);
         if (glyf && glyf->transformed) {
