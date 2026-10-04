@@ -13,6 +13,21 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* Text flows around floats like in other browsers: a paragraph next to a
+  floated figure keeps its full width and only its lines beside the float
+  are shortened, so text returns to the full width below the float. The
+  whole paragraph used to be narrowed for its entire height, which made
+  Wikipedia articles about 50% taller than in Chrome. Floats also no longer
+  get their top margin twice, and a float before a block whose top margin
+  collapses through the parent moves down with that margin.
+* Absolutely positioned and `display: none` table rows are taken out of the
+  table. Wikipedia hides collapsed table rows that way, and they used to
+  stay in the grid at full height.
+* Definite `min-width` and `max-width` limit a box's min- and max-content
+  width, and the flex items of a single-line row contribute their min-content
+  width as the flex spec describes (clamped by their flex base size when
+  they cannot grow or shrink). A centered flex column holding a heading with
+  `max-width` no longer stretches to the full width.
 * Percentage widths of inline-blocks resolve against the line's containing
   block during layout. The real layout sized them correctly and then laid
   them out again against their own content width, so a `width: 50%`
