@@ -59206,7 +59206,12 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
     for (guint i = 0; own && i < own->len; i++) {
         ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
-        if (ns_listener_signal_aborted(_js, ex)) {
+        gboolean aborted = ns_listener_signal_aborted(_js, ex);
+        if (i >= _js->listeners->len ||
+            g_ptr_array_index(_js->listeners, i) != ex ||
+            ns_listener_is_tombstoned(ex))
+            continue;
+        if (aborted) {
             ns_listener_tombstone(ctx, ex);
             continue;
         }
