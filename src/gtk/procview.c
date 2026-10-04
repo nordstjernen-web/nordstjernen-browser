@@ -714,7 +714,7 @@ pv_audio_clock_position(NsProcView *v, const char *token, double *position)
 {
     if (!v->audio_clock || !token || !*token) return FALSE;
     ns_audio_clock_hdr *clock = v->audio_clock;
-    for (guint i = 0; i < clock->nslots; i++) {
+    for (guint i = 0; i < NS_AUDIO_CLOCK_SLOTS; i++) {
         ns_audio_clock_slot *slot = &clock->slots[i];
         guint32 seq1 = __atomic_load_n(&slot->sequence, __ATOMIC_ACQUIRE);
         if (!seq1 || (seq1 & 1u)) continue;
@@ -991,29 +991,33 @@ pv_video_snapshot_current(NsProcView *v)
     if (!v || !v->vring || !v->vid_sequence) return;
     ns_video_ring_hdr *r = v->vring;
     guint32 slot = v->vid_slot;
+    guint32 width = __atomic_load_n(&r->width, __ATOMIC_RELAXED);
+    guint32 height = __atomic_load_n(&r->height, __ATOMIC_RELAXED);
+    guint32 stride = __atomic_load_n(&r->stride, __ATOMIC_RELAXED);
+    guint32 frame_bytes = __atomic_load_n(&r->frame_bytes, __ATOMIC_RELAXED);
     if (r->magic != NS_VIDEO_RING_MAGIC ||
-        r->version != NS_VIDEO_RING_VERSION || slot >= r->nslots ||
-        !r->width || !r->height || r->stride < r->width * 4 ||
-        (guint64)r->stride * r->height > r->frame_bytes ||
-        sizeof *r + (gsize)(slot + 1) * r->frame_bytes > v->vring_bytes)
+        r->version != NS_VIDEO_RING_VERSION || slot >= NS_VIDEO_RING_SLOTS ||
+        !width || !height || (guint64)stride < (guint64)width * 4 ||
+        (guint64)stride * height > frame_bytes ||
+        sizeof *r + (gsize)(slot + 1) * frame_bytes > v->vring_bytes)
         return;
     ns_video_ring_slot *meta = &r->slots[slot];
     guint32 sequence = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
     if (sequence != v->vid_sequence || meta->generation != v->vid_generation)
         return;
     cairo_surface_t *copy = cairo_image_surface_create(
-        CAIRO_FORMAT_RGB24, (int)r->width, (int)r->height);
+        CAIRO_FORMAT_RGB24, (int)width, (int)height);
     if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(copy);
         return;
     }
     unsigned char *src = (unsigned char *)r + sizeof *r +
-                         (gsize)slot * r->frame_bytes;
+                         (gsize)slot * frame_bytes;
     unsigned char *dst = cairo_image_surface_get_data(copy);
     int dst_stride = cairo_image_surface_get_stride(copy);
-    for (guint32 y = 0; y < r->height; y++)
+    for (guint32 y = 0; y < height; y++)
         memcpy(dst + (gsize)y * dst_stride,
-               src + (gsize)y * r->stride, (gsize)r->width * 4);
+               src + (gsize)y * stride, (gsize)width * 4);
     cairo_surface_mark_dirty(copy);
     pv_video_fallback_clear(v);
     v->vid_fallback = copy;
@@ -3166,9 +3170,10 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
         }
     }
 
-    for (guint32 age = 0; age < r->nslots && age < published; age++) {
+    for (guint32 age = 0; age < NS_VIDEO_RING_SLOTS && age < published;
+         age++) {
         guint32 sequence = published - age;
-        guint32 slot = (sequence - 1u) % r->nslots;
+        guint32 slot = (sequence - 1u) % NS_VIDEO_RING_SLOTS;
         ns_video_ring_slot *meta = &r->slots[slot];
         guint32 committed = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
         if (committed != sequence || meta->generation != generation) continue;
@@ -3182,10 +3187,10 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
     }
 
     if (!selected_sequence && !v->vid_playing) {
-        for (guint32 age = r->nslots; age > 0; age--) {
+        for (guint32 age = NS_VIDEO_RING_SLOTS; age > 0; age--) {
             if (age > published) continue;
             guint32 sequence = published - age + 1u;
-            guint32 slot = (sequence - 1u) % r->nslots;
+            guint32 slot = (sequence - 1u) % NS_VIDEO_RING_SLOTS;
             ns_video_ring_slot *meta = &r->slots[slot];
             guint32 committed = __atomic_load_n(&meta->sequence,
                                                  __ATOMIC_ACQUIRE);
