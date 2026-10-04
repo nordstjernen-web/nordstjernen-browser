@@ -4185,7 +4185,7 @@ static char *
 srcset_select(const char *srcset, const char *sizes, const char *src,
               double *density)
 {
-    const double dpr = 1.0;
+    const double dpr = ns_css_device_pixel_ratio();
     GArray *cands = srcset_parse(srcset);
     gboolean any_width = FALSE, any_unit_density = FALSE;
     double source_size = -1;

@@ -3,6 +3,19 @@ Changelog:
 
 1.0.29:
 ======
+* Pages are drawn at the screen's real pixel density. On a Retina or other
+  HiDPI display the renderer used to paint at one device pixel per CSS pixel
+  and the window stretched the frame, so text and images were blurry. The
+  frame is now rendered at the window's scale factor (2x on a Retina Mac,
+  fractional scales on Linux) and shown pixel for pixel, re-rendering when
+  the window moves to a screen with another scale. `devicePixelRatio`,
+  `resolution` and `-webkit-device-pixel-ratio` media queries and `srcset`
+  report the real ratio, so pages pick their sharp images. The renderer
+  framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
+  windows are no longer cut off at 2560 CSS pixels.
+* Zoom reflows the page like other browsers: at 150% the page is laid out
+  for a viewport 1.5 times narrower instead of being magnified and cut off
+  at the right edge.
 * Pages load again in the desktop browser on macOS versions whose
   `shm_open()` rejects `O_CLOEXEC`. Creating a tab's shared framebuffer
   failed there, so no renderer process was started and every page stayed

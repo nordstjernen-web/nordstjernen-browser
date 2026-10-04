@@ -53968,6 +53968,8 @@ ns_js_sync_window_metrics(ns_js *js)
     JS_SetPropertyStr(ctx, global, "innerHeight", JS_NewInt32(ctx, vh));
     JS_SetPropertyStr(ctx, global, "outerWidth",  JS_NewInt32(ctx, ow));
     JS_SetPropertyStr(ctx, global, "outerHeight", JS_NewInt32(ctx, oh));
+    JS_SetPropertyStr(ctx, global, "devicePixelRatio",
+                      JS_NewFloat64(ctx, ns_css_device_pixel_ratio()));
     JS_FreeValue(ctx, global);
 }
 
@@ -54001,6 +54003,12 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
     JS_FreeValue(ctx, global);
     js->in_scroll_dispatch = FALSE;
     ns_observer_schedule_tick(js);
+}
+
+void
+ns_js_reeval_media_queries(ns_js *js)
+{
+    ns_js_media_queries_reeval(js);
 }
 
 void
@@ -56696,7 +56704,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewInt32(ctx, 0));
     ns_js_sync_window_metrics(js);
-    JS_SetPropertyStr(ctx, global, "devicePixelRatio", JS_NewFloat64(ctx, 1.0));
+
     static const ns_fn_def window_noops[] = {
         { "close", 0 }, { "blur", 0 },
         { "moveTo", 2 }, { "moveBy", 2 },

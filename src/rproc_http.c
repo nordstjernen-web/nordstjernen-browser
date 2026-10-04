@@ -79,6 +79,7 @@ struct ns_rproc_http {
     size_t         map_size;
     int            max_w;
     int            max_h;
+    int            dpr_milli;
     void          *inproc_conn;
 };
 
@@ -465,6 +466,19 @@ ns_rproc_http_spawn_shm_ex(const char *renderer_path, int max_width,
     return spawn_common(renderer_path, max_width, max_height, 1, private_mode);
 }
 
+void
+ns_rproc_http_set_device_pixel_ratio(ns_rproc_http *r, double dpr)
+{
+    if (r && dpr > 0)
+        r->dpr_milli = (int)(dpr * 1000.0 + 0.5);
+}
+
+static int
+device_pixel_ratio_milli(const ns_rproc_http *r)
+{
+    return r->dpr_milli > 0 ? r->dpr_milli : 1000;
+}
+
 int
 ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                    int viewport_height, int settle_ms, ns_rproc_http_page *out)
@@ -486,12 +500,14 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     if (!ue)
         return -1;
     char *json = NULL;
+    int dpr = device_pixel_ratio_milli(r);
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
-                      "\"user_activated\":%d}",
+                      "\"user_activated\":%d,\"dpr\":%d.%03d}",
                       ue, viewport_width, viewport_height, settle_ms,
-                      history ? 1 : 0, user_activated ? 1 : 0);
+                      history ? 1 : 0, user_activated ? 1 : 0,
+                      dpr / 1000, dpr % 1000);
     free(ue);
     if (jn < 0)
         return -1;
@@ -557,13 +573,15 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     if (!(scale > 0))
         scale = 1.0;
     int scale_milli = (int)(scale * 1000.0 + 0.5);
-    char json[192];
+    int dpr = device_pixel_ratio_milli(r);
+    char json[224];
     int jn = snprintf(json, sizeof json,
                       "{\"width\":%d,\"height\":%d,\"scroll_x\":%d,"
-                      "\"scroll_y\":%d,\"scale\":%d.%03d,\"caret\":%d}",
+                      "\"scroll_y\":%d,\"scale\":%d.%03d,\"caret\":%d,"
+                      "\"dpr\":%d.%03d}",
                       width, height, scroll_x, scroll_y,
                       scale_milli / 1000, scale_milli % 1000,
-                      caret_active ? 1 : 0);
+                      caret_active ? 1 : 0, dpr / 1000, dpr % 1000);
     if (http_write_request(r->wfd, "POST", "/render", "application/json",
                            json, (size_t)jn) != 0)
         return -1;
@@ -1033,8 +1051,10 @@ ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
         memset(out, 0, sizeof *out);
     if (!r)
         return -1;
-    char json[64];
-    snprintf(json, sizeof json, "{\"width\":%d,\"height\":%d}", width, height);
+    char json[96];
+    int dpr = device_pixel_ratio_milli(r);
+    snprintf(json, sizeof json, "{\"width\":%d,\"height\":%d,\"dpr\":%d.%03d}",
+             width, height, dpr / 1000, dpr % 1000);
     char *body = request(r, "/viewport", json);
     if (!body)
         return -1;
