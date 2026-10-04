@@ -18164,8 +18164,10 @@ static const ns_style *
 ns_pseudo_substyle(const ns_style *s, const char *pseudo)
 {
     if (!s || !pseudo) return NULL;
-    if (strcmp(pseudo, "before") == 0)       return s->before;
-    if (strcmp(pseudo, "after") == 0)        return s->after;
+    if (strcmp(pseudo, "before") == 0)
+        return s->before ? s->before : s->hidden_before;
+    if (strcmp(pseudo, "after") == 0)
+        return s->after ? s->after : s->hidden_after;
     if (strcmp(pseudo, "marker") == 0)       return s->marker;
     if (strcmp(pseudo, "first-line") == 0)   return s->first_line;
     if (strcmp(pseudo, "first-letter") == 0) return s->first_letter;
@@ -54021,12 +54023,14 @@ static int
 ns_ce_capture_observed_attributes(JSContext *ctx, JSValueConst klass)
 {
     JSValue proto = JS_GetPropertyStr(ctx, klass, "prototype");
+    if (JS_IsException(proto)) return -1;
     JSValue acc = JS_IsObject(proto)
         ? JS_GetPropertyStr(ctx, proto, "attributeChangedCallback")
         : JS_UNDEFINED;
+    JS_FreeValue(ctx, proto);
+    if (JS_IsException(acc)) return -1;
     gboolean observes = JS_IsFunction(ctx, acc);
     JS_FreeValue(ctx, acc);
-    JS_FreeValue(ctx, proto);
     if (!observes) return 0;
     JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
     if (JS_IsException(observed)) return -1;
@@ -54037,7 +54041,9 @@ ns_ce_capture_observed_attributes(JSContext *ctx, JSValueConst klass)
         JS_ToInt32(ctx, &len, len_v);
         JS_FreeValue(ctx, len_v);
         for (int32_t i = 0; i < len; i++) {
-            JSValue name = JS_ToString(ctx, JS_GetPropertyUint32(ctx, observed, i));
+            JSValue item = JS_GetPropertyUint32(ctx, observed, i);
+            JSValue name = JS_ToString(ctx, item);
+            JS_FreeValue(ctx, item);
             if (JS_IsException(name)) {
                 JS_FreeValue(ctx, names);
                 JS_FreeValue(ctx, observed);
