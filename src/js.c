@@ -39635,8 +39635,12 @@ ns_document_get_pointerLockElement(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (js && js->pointer_lock_element)
-        return ns_make_element(ctx, js->pointer_lock_element);
+    if (!js || !js->pointer_lock_element || !js->current_doc) return JS_NULL;
+    const ns_node *root = ns_node_root(js->current_doc);
+    for (const ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE))
+        if (n == js->pointer_lock_element)
+            return ns_make_element(ctx, n);
+    js->pointer_lock_element = NULL;
     return JS_NULL;
 }
 
