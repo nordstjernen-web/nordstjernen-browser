@@ -6,6 +6,7 @@
 #include "pdf.h"
 #include "html.h"
 
+#include <math.h>
 #include <string.h>
 
 #ifdef NS_HAVE_POPPLER
@@ -61,16 +62,12 @@ ns_pdf_page_data_uri(PopplerPage *page)
 {
     double pw = 0, ph = 0;
     poppler_page_get_size(page, &pw, &ph);
-    if (pw <= 0 || ph <= 0)
+    if (!isfinite(pw) || !isfinite(ph) || pw <= 0 || ph <= 0)
         return NULL;
     double scale = NS_PDF_TARGET_W / pw;
     scale = CLAMP(scale, NS_PDF_MIN_SCALE, NS_PDF_MAX_SCALE);
-    int w = (int)(pw * scale + 0.5);
-    int h = (int)(ph * scale + 0.5);
-    if (w < 1) w = 1;
-    if (h < 1) h = 1;
-    if (w > NS_PDF_MAX_DIM) w = NS_PDF_MAX_DIM;
-    if (h > NS_PDF_MAX_DIM) h = NS_PDF_MAX_DIM;
+    int w = (int)CLAMP(pw * scale + 0.5, 1.0, (double)NS_PDF_MAX_DIM);
+    int h = (int)CLAMP(ph * scale + 0.5, 1.0, (double)NS_PDF_MAX_DIM);
 
     cairo_surface_t *surf =
         cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);

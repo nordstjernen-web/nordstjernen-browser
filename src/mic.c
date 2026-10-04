@@ -107,8 +107,7 @@ ns_mic_fill_frequency(guint8 *out, int n)
         memset(out, 0, (gsize)n);
         return;
     }
-    int win = n * 2;
-    if (win > NS_MIC_RING) win = NS_MIC_RING;
+    int win = n > NS_MIC_RING / 2 ? NS_MIC_RING : n * 2;
     float snap[NS_MIC_RING];
     SDL_LockAudioDevice(g_mic_dev);
     guint head = g_mic_head;

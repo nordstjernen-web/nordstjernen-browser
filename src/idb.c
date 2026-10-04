@@ -18,6 +18,7 @@ typedef struct ns_idb_db {
     sqlite3 *db;
     char    *path;
     guint64  last_used;
+    gint     refs;
 } ns_idb_db;
 
 static JSValue ns_idb_throw(JSContext *ctx, const char *name, const char *message);
@@ -27,11 +28,12 @@ static JSValue ns_idb_throw(JSContext *ctx, const char *name, const char *messag
 
 static GHashTable *g_idb_handles;
 static guint64     g_idb_clock;
+static GMutex      g_idb_lock;
 
 static void
-ns_idb_db_free(ns_idb_db *h)
+ns_idb_db_unref(ns_idb_db *h)
 {
-    if (!h) return;
+    if (!h || !g_atomic_int_dec_and_test(&h->refs)) return;
     if (h->db) sqlite3_close(h->db);
     g_free(h->path);
     g_free(h);
@@ -40,14 +42,16 @@ ns_idb_db_free(ns_idb_db *h)
 static void
 ns_idb_db_close(ns_idb_db *h)
 {
-    (void)h;
+    ns_idb_db_unref(h);
 }
 
 static void
 ns_idb_cache_evict(const char *key)
 {
+    g_mutex_lock(&g_idb_lock);
     if (g_idb_handles && key)
         g_hash_table_remove(g_idb_handles, key);
+    g_mutex_unlock(&g_idb_lock);
 }
 
 static void
@@ -109,14 +113,24 @@ ns_idb_hash_string(const char *input)
     return g_compute_checksum_for_string(G_CHECKSUM_SHA256, input, -1);
 }
 
+static const char *
+ns_idb_partition(JSContext *ctx)
+{
+    ns_js *js = JS_GetContextOpaque(ctx);
+    const char *partition = ns_js_storage_partition(js);
+    if (!partition || !*partition || strcmp(partition, "null") == 0 ||
+        g_str_has_prefix(partition, "opaque://"))
+        return NULL;
+    return partition;
+}
+
 static char *
 ns_idb_partition_dir(JSContext *ctx)
 {
     const ns_config *cfg = ns_config_get();
     if (cfg && cfg->private_mode) return NULL;
-    ns_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = ns_js_storage_partition(js);
-    if (!partition || !*partition) return NULL;
+    const char *partition = ns_idb_partition(ctx);
+    if (!partition) return NULL;
     g_autofree char *hash = ns_idb_hash_string(partition);
     char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
                                  "indexeddb", hash, NULL);
@@ -219,17 +233,18 @@ ns_idb_schema(sqlite3 *db)
 
 #ifdef SQLITE_OPEN_NOFOLLOW
 #define NS_IDB_OPEN_FLAGS \
-    (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOFOLLOW)
+    (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX | \
+     SQLITE_OPEN_NOFOLLOW)
 #else
-#define NS_IDB_OPEN_FLAGS (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
+#define NS_IDB_OPEN_FLAGS \
+    (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX)
 #endif
 
 static char *
 ns_idb_cache_key(JSContext *ctx, const char *name)
 {
-    ns_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = ns_js_storage_partition(js);
-    if (!partition || !*partition || !name || !*name) return NULL;
+    const char *partition = ns_idb_partition(ctx);
+    if (!partition || !name || !*name) return NULL;
     return g_strdup_printf("%s\x1f%s", partition, name);
 }
 
@@ -238,13 +253,17 @@ ns_idb_open_db(JSContext *ctx, const char *name)
 {
     g_autofree char *key = ns_idb_cache_key(ctx, name);
     if (!key) return NULL;
+    g_mutex_lock(&g_idb_lock);
     if (g_idb_handles) {
         ns_idb_db *cached = g_hash_table_lookup(g_idb_handles, key);
         if (cached) {
             cached->last_used = ++g_idb_clock;
+            g_atomic_int_inc(&cached->refs);
+            g_mutex_unlock(&g_idb_lock);
             return cached;
         }
     }
+    g_mutex_unlock(&g_idb_lock);
     g_autofree char *path = ns_idb_path_for_name(ctx, name);
     if (!path) return NULL;
     sqlite3 *db = NULL;
@@ -264,12 +283,15 @@ ns_idb_open_db(JSContext *ctx, const char *name)
     ns_idb_db *h = g_new0(ns_idb_db, 1);
     h->db = db;
     h->path = g_strdup(path);
+    h->refs = 2;
+    g_mutex_lock(&g_idb_lock);
     h->last_used = ++g_idb_clock;
     if (!g_idb_handles)
         g_idb_handles = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                              g_free, (GDestroyNotify)ns_idb_db_free);
+                                              g_free, (GDestroyNotify)ns_idb_db_unref);
     g_hash_table_insert(g_idb_handles, g_steal_pointer(&key), h);
     ns_idb_cache_trim();
+    g_mutex_unlock(&g_idb_lock);
     return h;
 }
 
@@ -766,6 +788,7 @@ ns_idb_origin_pages(JSContext *ctx, sqlite3 *current, const char *current_path)
     g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return total;
     gint64 now = g_get_monotonic_time();
+    g_mutex_lock(&g_idb_lock);
     if (!g_idb_sibling_pages)
         g_idb_sibling_pages = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free, g_free);
@@ -779,7 +802,9 @@ ns_idb_origin_pages(JSContext *ctx, sqlite3 *current, const char *current_path)
         cached->pages = siblings;
         cached->stamp_us = now;
     }
-    return total + cached->pages;
+    total += cached->pages;
+    g_mutex_unlock(&g_idb_lock);
+    return total;
 }
 
 static JSValue

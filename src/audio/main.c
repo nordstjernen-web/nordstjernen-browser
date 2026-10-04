@@ -81,6 +81,7 @@ typedef struct {
     int              in_sidx;
     int              in_rate;
     int              in_ch;
+    int              in_sfmt;
     int64_t          in_known_size;
     double           in_resume_target;
     int              in_resume_pending;
@@ -596,6 +597,8 @@ decode_vorbis(const unsigned char *bytes, size_t n,
         long got = ov_read_float(&vf, &chans, 4096, &bitstream);
         if (got == 0) break;
         if (got < 0) continue;
+        vorbis_info *link = ov_info(&vf, bitstream);
+        if (!link || link->channels != ch) continue;
         size_t add = (size_t)got * (size_t)ch;
         if (len + add > cap) {
             size_t want = cap ? cap : (size_t)rate * (size_t)ch;
@@ -737,6 +740,7 @@ decode_libav(const unsigned char *bytes, size_t n,
     float *pcm = NULL;
     size_t cap = 0, len = 0;
     int sidx = -1, rate = 0, ch = 0;
+    enum AVSampleFormat sfmt = AV_SAMPLE_FMT_NONE;
 
     unsigned char *iobuf = av_malloc(32768);
     if (!iobuf) return 0;
@@ -762,6 +766,7 @@ decode_libav(const unsigned char *bytes, size_t n,
 
     rate = dec->sample_rate;
     ch = dec->ch_layout.nb_channels;
+    sfmt = dec->sample_fmt;
     if (rate <= 0 || rate > 192000 || ch < 1 || ch > 8) goto done;
 
     swr = swr_alloc();
@@ -770,7 +775,7 @@ decode_libav(const unsigned char *bytes, size_t n,
     av_opt_set_chlayout(swr, "out_chlayout", &dec->ch_layout, 0);
     av_opt_set_int(swr, "in_sample_rate", rate, 0);
     av_opt_set_int(swr, "out_sample_rate", rate, 0);
-    av_opt_set_sample_fmt(swr, "in_sample_fmt", dec->sample_fmt, 0);
+    av_opt_set_sample_fmt(swr, "in_sample_fmt", sfmt, 0);
     av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(swr) < 0) goto done;
 
@@ -800,6 +805,10 @@ decode_libav(const unsigned char *bytes, size_t n,
             int rr = avcodec_receive_frame(dec, frame);
             if (rr == AVERROR(EAGAIN) || rr == AVERROR_EOF) break;
             if (rr < 0) goto done;
+            if (frame->ch_layout.nb_channels != ch || frame->format != sfmt) {
+                av_frame_unref(frame);
+                continue;
+            }
 
             int out_samples = swr_get_out_samples(swr, frame->nb_samples);
             if (out_samples < 0) { av_frame_unref(frame); goto done; }
@@ -940,6 +949,7 @@ ain_open(ns_audio_player *p, const char *path)
     }
     p->in_rate = p->in_dec->sample_rate;
     p->in_ch = p->in_dec->ch_layout.nb_channels;
+    p->in_sfmt = p->in_dec->sample_fmt;
     if (p->in_rate <= 0 || p->in_rate > 192000 ||
         p->in_ch < 1 || p->in_ch > 8) {
         ain_close(p);
@@ -951,7 +961,7 @@ ain_open(ns_audio_player *p, const char *path)
     av_opt_set_chlayout(p->in_swr, "out_chlayout", &p->in_dec->ch_layout, 0);
     av_opt_set_int(p->in_swr, "in_sample_rate", p->in_rate, 0);
     av_opt_set_int(p->in_swr, "out_sample_rate", p->in_rate, 0);
-    av_opt_set_sample_fmt(p->in_swr, "in_sample_fmt", p->in_dec->sample_fmt, 0);
+    av_opt_set_sample_fmt(p->in_swr, "in_sample_fmt", p->in_sfmt, 0);
     av_opt_set_sample_fmt(p->in_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(p->in_swr) < 0) { ain_close(p); return 0; }
     p->in_pkt = av_packet_alloc();
@@ -1016,6 +1026,11 @@ ain_pump(ns_audio_player *p)
                 double ahead = p->in_resume_target - t0;
                 p->in_discard_frames = ahead > 0
                     ? (size_t)(ahead * NS_AUDIO_DEVICE_RATE) : 0;
+            }
+            if (p->in_frame->ch_layout.nb_channels != p->in_ch ||
+                p->in_frame->format != p->in_sfmt) {
+                av_frame_unref(p->in_frame);
+                continue;
             }
             int out_samples = swr_get_out_samples(p->in_swr,
                                                   p->in_frame->nb_samples);
@@ -1323,6 +1338,7 @@ cmd_reload(const char *token, const char *url)
         p->in_sidx = fresh.in_sidx;
         p->in_rate = fresh.in_rate;
         p->in_ch = fresh.in_ch;
+        p->in_sfmt = fresh.in_sfmt;
         p->in_known_size = fresh.in_known_size;
         memcpy(p->in_path, fresh.in_path, sizeof p->in_path);
         p->pcm = fresh.pcm;
@@ -1438,7 +1454,7 @@ cmd_seek(const char *token, double seconds)
     ns_audio_player *p = player_find(token);
     if (!p || !p->pcm) return;
     seconds -= p->timeline_offset;
-    if (seconds < 0) seconds = 0;
+    if (!(seconds > 0)) seconds = 0;
     if (seconds > NS_AUDIO_MAX_SECONDS) seconds = NS_AUDIO_MAX_SECONDS;
     size_t frame = (size_t)(seconds * NS_AUDIO_DEVICE_RATE);
     audio_lock();
@@ -1467,7 +1483,7 @@ cmd_volume(const char *token, double vol)
 {
     ns_audio_player *p = player_find(token);
     if (!p || !p->pcm) return;
-    if (vol < 0) vol = 0;
+    if (!(vol > 0)) vol = 0;
     if (vol > 1) vol = 1;
     audio_lock();
     p->volume = (float)vol;
@@ -1588,6 +1604,11 @@ main(void)
 
     char line[4096];
     while (fgets(line, sizeof line, stdin)) {
+        if (!strchr(line, '\n') && !feof(stdin)) {
+            int c;
+            while ((c = getchar()) != EOF && c != '\n') {}
+            continue;
+        }
         size_t n = strlen(line);
         while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
             line[--n] = '\0';

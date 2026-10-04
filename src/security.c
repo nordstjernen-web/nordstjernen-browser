@@ -27,6 +27,7 @@
 #include <sys/syscall.h>
 #ifdef NS_HAVE_SECCOMP
 #include <seccomp.h>
+#include <sys/ioctl.h>
 #endif
 #endif
 
@@ -322,6 +323,14 @@ ns_security_add_exec_dir(const char *dir)
 #define LANDLOCK_ACCESS_FS_REFER (1ULL << 13)
 #endif
 
+#ifndef LANDLOCK_ACCESS_FS_TRUNCATE
+#define LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
+#endif
+
+#ifndef LANDLOCK_CREATE_RULESET_VERSION
+#define LANDLOCK_CREATE_RULESET_VERSION (1U << 0)
+#endif
+
 static int
 landlock_create_ruleset_(const struct landlock_ruleset_attr *attr,
                          size_t size, guint32 flags)
@@ -384,7 +393,17 @@ ns_security_sandbox_init(const char *self_exe)
         LANDLOCK_ACCESS_FS_MAKE_DIR |
         LANDLOCK_ACCESS_FS_REMOVE_FILE |
         LANDLOCK_ACCESS_FS_REMOVE_DIR |
+        LANDLOCK_ACCESS_FS_MAKE_SYM |
+        LANDLOCK_ACCESS_FS_MAKE_FIFO |
+        LANDLOCK_ACCESS_FS_MAKE_SOCK |
+        LANDLOCK_ACCESS_FS_MAKE_CHAR |
+        LANDLOCK_ACCESS_FS_MAKE_BLOCK |
         LANDLOCK_ACCESS_FS_REFER;
+    int abi = landlock_create_ruleset_(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+    if (abi < 2)
+        fs_write &= ~LANDLOCK_ACCESS_FS_REFER;
+    if (abi >= 3)
+        fs_write |= LANDLOCK_ACCESS_FS_TRUNCATE;
     guint64 fs_exec = LANDLOCK_ACCESS_FS_EXECUTE;
     guint64 fs_rw   = fs_read | fs_write;
     guint64 fs_all  = fs_read | fs_write | fs_exec;
@@ -413,7 +432,8 @@ ns_security_sandbox_init(const char *self_exe)
     };
     add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, "/dev/urandom");
     add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE |
-                     LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/null");
+                     LANDLOCK_ACCESS_FS_WRITE_FILE |
+                     (fs_write & LANDLOCK_ACCESS_FS_TRUNCATE), "/dev/null");
     for (gsize i = 0; system_exec_dirs[i]; i++)
         add_path_rw(rfd, fs_read | fs_exec, system_exec_dirs[i]);
     for (gsize i = 0; system_read_dirs[i]; i++)
@@ -822,6 +842,24 @@ static const char *const ns_seccomp_allowed_names[] = {
     "write",
     "writev",
 };
+
+static int
+ns_seccomp_deny_tty_injection(void)
+{
+    scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ALLOW);
+    if (!ctx) return -ENOMEM;
+    (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
+    static const unsigned long denied[] = { TIOCSTI, TIOCLINUX };
+    int rc = 0;
+    for (gsize i = 0; rc == 0 && i < G_N_ELEMENTS(denied); i++)
+        rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(ioctl), 1,
+                              SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
+                                      (scmp_datum_t)denied[i]));
+    if (rc == 0)
+        rc = seccomp_load(ctx);
+    seccomp_release(ctx);
+    return rc;
+}
 #endif
 
 void
@@ -835,6 +873,13 @@ ns_security_seccomp_init(void)
         g_info("seccomp: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("seccomp prerequisite (no_new_privs) failed");
         return;
+    }
+
+    int tty_rc = ns_seccomp_deny_tty_injection();
+    if (tty_rc != 0) {
+        g_warning("seccomp: terminal-injection filter failed to load: %s",
+                  g_strerror(-tty_rc));
+        ns_sandbox_require_or_die("seccomp terminal-injection filter failed to load");
     }
 
     scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM));

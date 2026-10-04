@@ -420,6 +420,209 @@ fill_outer_shadow(cairo_t *cr, double ox, double oy, double ow, double oh,
 
 static void box_blur_argb(guchar *data, int stride, int w, int h, int radius);
 
+typedef struct shadow_blur_key {
+    double       sw, sh;
+    corner_radii radii;
+    double       r, g, b, a;
+    int          radius;
+} shadow_blur_key;
+
+#define NS_SHADOW_BLUR_CACHE_BYTES (32u << 20)
+#define NS_SHADOW_BLUR_ENTRY_BYTES (4u << 20)
+
+static GHashTable *g_shadow_blur_cache;
+static gsize       g_shadow_blur_cache_bytes;
+
+static guint
+shadow_blur_key_hash(gconstpointer p)
+{
+    const guchar *bytes = p;
+    guint h = 5381;
+    for (gsize i = 0; i < sizeof(shadow_blur_key); i++)
+        h = h * 33 + bytes[i];
+    return h;
+}
+
+static gboolean
+shadow_blur_key_equal(gconstpointer a, gconstpointer b)
+{
+    return memcmp(a, b, sizeof(shadow_blur_key)) == 0;
+}
+
+static cairo_surface_t *
+blurred_shadow_surface_new(const shadow_blur_key *k, int pad,
+                           int surf_w, int surf_h)
+{
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    cairo_t *scr = cairo_create(surf);
+    rounded_rect_path(scr, pad, pad, k->sw, k->sh, k->radii);
+    cairo_set_source_rgba(scr, k->r, k->g, k->b, k->a);
+    cairo_fill(scr);
+    cairo_destroy(scr);
+    cairo_surface_flush(surf);
+    guchar *data = cairo_image_surface_get_data(surf);
+    int stride = cairo_image_surface_get_stride(surf);
+    box_blur_argb(data, stride, surf_w, surf_h, k->radius);
+    box_blur_argb(data, stride, surf_w, surf_h, k->radius);
+    box_blur_argb(data, stride, surf_w, surf_h, k->radius);
+    cairo_surface_mark_dirty(surf);
+    return surf;
+}
+
+static cairo_surface_t *
+blurred_shadow_cached(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
+                      gboolean keep_large)
+{
+    if (g_shadow_blur_cache) {
+        cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
+        if (hit) return cairo_surface_reference(hit);
+    }
+    cairo_surface_t *surf = blurred_shadow_surface_new(k, pad, surf_w, surf_h);
+    if (!surf) return NULL;
+    gsize bytes = (gsize)cairo_image_surface_get_stride(surf) *
+                  (gsize)cairo_image_surface_get_height(surf);
+    if (bytes > NS_SHADOW_BLUR_ENTRY_BYTES && !keep_large) return surf;
+    if (bytes > NS_SHADOW_BLUR_CACHE_BYTES) return surf;
+    if (!g_shadow_blur_cache)
+        g_shadow_blur_cache = g_hash_table_new_full(
+            shadow_blur_key_hash, shadow_blur_key_equal, g_free,
+            (GDestroyNotify)cairo_surface_destroy);
+    if (g_shadow_blur_cache_bytes + bytes > NS_SHADOW_BLUR_CACHE_BYTES) {
+        g_hash_table_remove_all(g_shadow_blur_cache);
+        g_shadow_blur_cache_bytes = 0;
+    }
+    g_hash_table_insert(g_shadow_blur_cache, g_memdup2(k, sizeof *k),
+                        cairo_surface_reference(surf));
+    g_shadow_blur_cache_bytes += bytes;
+    return surf;
+}
+
+static int
+shadow_band_excess(double len, int pad, int radius, double start_r, double end_r)
+{
+    int first = (int)ceil(pad + start_r) + radius * 3 + 1;
+    int last = (int)floor(pad + len - end_r) - radius * 3 - 1;
+    int uniform = last - first;
+    return uniform > 1 ? uniform - 1 : 0;
+}
+
+static gboolean
+shadow_radii_fit(const shadow_blur_key *k)
+{
+    const corner_radii *c = &k->radii;
+    const double sums[4] = { c->tl + c->tr, c->trv + c->brv,
+                             c->br + c->bl, c->tlv + c->blv };
+    const double lens[4] = { k->sw, k->sh, k->sw, k->sh };
+    for (int i = 0; i < 4; i++)
+        if (sums[i] > 0 && lens[i] / sums[i] < 1.0) return FALSE;
+    return TRUE;
+}
+
+static double
+shadow_corner_w(double w, double h)
+{
+    return w > 0 && h > 0 ? w : 0;
+}
+
+static double
+shadow_corner_h(double w, double h)
+{
+    return w > 0 && h > 0 ? h : 0;
+}
+
+static gboolean
+shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
+             int *mid_x, int *mid_y)
+{
+    *dx = *dy = 0;
+    if (!(k->sw > 0) || !(k->sh > 0) || !shadow_radii_fit(k)) return FALSE;
+    const corner_radii *c = &k->radii;
+    double left_r = MAX(shadow_corner_w(c->tl, c->tlv),
+                        shadow_corner_w(c->bl, c->blv));
+    double right_r = MAX(shadow_corner_w(c->tr, c->trv),
+                         shadow_corner_w(c->br, c->brv));
+    double top_r = MAX(shadow_corner_h(c->tl, c->tlv),
+                       shadow_corner_h(c->tr, c->trv));
+    double bottom_r = MAX(shadow_corner_h(c->bl, c->blv),
+                          shadow_corner_h(c->br, c->brv));
+    *dx = shadow_band_excess(k->sw, pad, k->radius, left_r, right_r);
+    *dy = shadow_band_excess(k->sh, pad, k->radius, top_r, bottom_r);
+    *mid_x = (int)ceil(pad + left_r) + k->radius * 3 + 1;
+    *mid_y = (int)ceil(pad + top_r) + k->radius * 3 + 1;
+    return *dx > 0 || *dy > 0;
+}
+
+static cairo_surface_t *
+shadow_expand_bands(cairo_surface_t *small, int surf_w, int surf_h,
+                    int dx, int dy, int mid_x, int mid_y)
+{
+    cairo_surface_t *full =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
+    if (cairo_surface_status(full) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(full);
+        return NULL;
+    }
+    cairo_surface_flush(full);
+    const guchar *src = cairo_image_surface_get_data(small);
+    int src_stride = cairo_image_surface_get_stride(small);
+    guchar *dst = cairo_image_surface_get_data(full);
+    int dst_stride = cairo_image_surface_get_stride(full);
+    gsize head = (gsize)(mid_x + 1) * 4;
+    gsize tail = (gsize)(surf_w - mid_x - 1 - dx) * 4;
+    for (int y = 0; y < surf_h; y++) {
+        int sy = y <= mid_y ? y : (y <= mid_y + dy ? mid_y : y - dy);
+        guchar *row = dst + (gsize)y * dst_stride;
+        if (y > mid_y && y <= mid_y + dy) {
+            memcpy(row, dst + (gsize)mid_y * dst_stride, (gsize)surf_w * 4);
+            continue;
+        }
+        const guchar *srow = src + (gsize)sy * src_stride;
+        memcpy(row, srow, head);
+        const guchar *mid = srow + (gsize)mid_x * 4;
+        for (int x = 0; x < dx; x++) memcpy(row + head + (gsize)x * 4, mid, 4);
+        memcpy(row + head + (gsize)dx * 4, srow + head, tail);
+    }
+    cairo_surface_mark_dirty(full);
+    return full;
+}
+
+static cairo_surface_t *
+blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h)
+{
+    int dx, dy, mid_x, mid_y;
+    if (!shadow_bands(k, pad, &dx, &dy, &mid_x, &mid_y))
+        return blurred_shadow_cached(k, pad, surf_w, surf_h, FALSE);
+    if (g_shadow_blur_cache) {
+        cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
+        if (hit) return cairo_surface_reference(hit);
+    }
+    shadow_blur_key small_key = *k;
+    small_key.sw -= dx;
+    small_key.sh -= dy;
+    cairo_surface_t *small = blurred_shadow_cached(&small_key, pad, surf_w - dx,
+                                                   surf_h - dy, TRUE);
+    if (!small) return NULL;
+    cairo_surface_t *full = shadow_expand_bands(small, surf_w, surf_h,
+                                                dx, dy, mid_x, mid_y);
+    cairo_surface_destroy(small);
+    if (!full) return NULL;
+    gsize bytes = (gsize)cairo_image_surface_get_stride(full) * (gsize)surf_h;
+    if (bytes > NS_SHADOW_BLUR_ENTRY_BYTES) return full;
+    if (g_shadow_blur_cache_bytes + bytes > NS_SHADOW_BLUR_CACHE_BYTES) {
+        g_hash_table_remove_all(g_shadow_blur_cache);
+        g_shadow_blur_cache_bytes = 0;
+    }
+    g_hash_table_insert(g_shadow_blur_cache, g_memdup2(k, sizeof *k),
+                        cairo_surface_reference(full));
+    g_shadow_blur_cache_bytes += bytes;
+    return full;
+}
+
 static void
 paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh_h,
                          corner_radii radii, double blur,
@@ -436,24 +639,18 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
     if (ish < 1) ish = 1;
     int surf_w = isw + pad * 2, surf_h = ish + pad * 2;
     if (surf_w > 8192 || surf_h > 8192) return;
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
-        return;
-    }
-    cairo_t *scr = cairo_create(surf);
-    rounded_rect_path(scr, pad, pad, sw, sh_h, radii);
-    cairo_set_source_rgba(scr, br, bg, bb, ba);
-    cairo_fill(scr);
-    cairo_destroy(scr);
-    cairo_surface_flush(surf);
-    guchar *data = cairo_image_surface_get_data(surf);
-    int stride = cairo_image_surface_get_stride(surf);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    cairo_surface_mark_dirty(surf);
+    shadow_blur_key key;
+    memset(&key, 0, sizeof key);
+    key.sw = sw;
+    key.sh = sh_h;
+    key.radii = radii;
+    key.r = br;
+    key.g = bg;
+    key.b = bb;
+    key.a = ba;
+    key.radius = radius;
+    cairo_surface_t *surf = blurred_shadow_surface(&key, pad, surf_w, surf_h);
+    if (!surf) return;
 
     cairo_save(cr);
     cairo_new_path(cr);
@@ -3958,19 +4155,20 @@ ns_paint_inline_word_range(const ns_box *b, gsize byte,
     int n_attrs = 0;
     const NsPangoLogAttr *attrs =
         ns_pango_layout_get_log_attrs_readonly(layout, &n_attrs);
+    const char *text = ns_pango_layout_get_text(layout);
     gboolean ok = FALSE;
-    if (attrs && n_attrs > 1) {
-        long here = g_utf8_pointer_to_offset(b->text, b->text + byte);
+    if (attrs && n_attrs > 1 && text && strlen(text) == tlen) {
+        long here = g_utf8_pointer_to_offset(text, text + byte);
         if (here < 0) here = 0;
         if (here > n_attrs - 1) here = n_attrs - 1;
         int s = (int)here, e = (int)here;
         while (s > 0 && !attrs[s].is_word_start) s--;
         while (e < n_attrs - 1 && !attrs[e].is_word_end) e++;
         if (e > s) {
-            const char *sp = g_utf8_offset_to_pointer(b->text, s);
-            const char *ep = g_utf8_offset_to_pointer(b->text, e);
-            if (out_start) *out_start = (gsize)(sp - b->text);
-            if (out_end)   *out_end   = (gsize)(ep - b->text);
+            const char *sp = g_utf8_offset_to_pointer(text, s);
+            const char *ep = g_utf8_offset_to_pointer(text, e);
+            if (out_start) *out_start = (gsize)(sp - text);
+            if (out_end)   *out_end   = (gsize)(ep - text);
             ok = TRUE;
         }
     }

@@ -375,7 +375,7 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
     GArray *frames = g_array_new(FALSE, FALSE, sizeof(ns_image_anim_frame));
     g_array_set_clear_func(frames, ns_image_anim_frame_clear);
     gboolean ok = TRUE;
-    int total = 0;
+    gint64 total = 0;
     int w = 0, h = 0;
     for (guint i = 0; i < pixel_frames->len; i++) {
         ns_image_pixel_frame *pf =
@@ -409,7 +409,7 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
     }
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
-    if (out_total_ms) *out_total_ms = total > 0 ? total : 1;
+    if (out_total_ms) *out_total_ms = (int)CLAMP(total, 1, G_MAXINT);
     return frames;
 }
 
@@ -470,10 +470,10 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         img->texture = f0->texture;
         img->natural_width  = d->w;
         img->natural_height = d->h;
-        int total = 0;
+        gint64 total = 0;
         for (guint i = 0; i < d->frames->len; i++)
             total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
-        img->anim_total_ms = total > 0 ? total : 1;
+        img->anim_total_ms = (int)CLAMP(total, 1, G_MAXINT);
         img->anim_start_us = g_get_monotonic_time();
         img->loaded = TRUE;
     } else if (d->tex) {
@@ -775,7 +775,8 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
         gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
         if (elapsed_ms < 0) elapsed_ms = 0;
         int phase = (int)(elapsed_ms % img->anim_total_ms);
-        int idx = 0, acc = 0;
+        int idx = 0;
+        gint64 acc = 0;
         for (guint i = 0; i < img->anim_frames->len; i++) {
             ns_image_anim_frame *f =
                 &g_array_index(img->anim_frames, ns_image_anim_frame, i);

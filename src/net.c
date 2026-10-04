@@ -1529,6 +1529,34 @@ ns_net_cookies_for_request(const char *url)
     return ns_cookie_collect(url, TRUE);
 }
 
+static gboolean
+ns_cookie_jar_has_httponly(const char *jar_path, const char *domain,
+                           const char *path, const char *name, gint64 now)
+{
+    char *contents = NULL;
+    if (!jar_path || !g_file_get_contents(jar_path, &contents, NULL, NULL))
+        return FALSE;
+    gboolean found = FALSE;
+    char **lines = g_strsplit(contents, "\n", -1);
+    for (int i = 0; lines[i] && !found; i++) {
+        if (!g_str_has_prefix(lines[i], "#HttpOnly_")) continue;
+        char **f = g_strsplit(lines[i] + strlen("#HttpOnly_"), "\t", 7);
+        int nf = 0;
+        while (f[nf]) nf++;
+        if (nf >= 7) {
+            gint64 expiry = g_ascii_strtoll(f[4], NULL, 10);
+            found = g_ascii_strcasecmp(f[0], domain) == 0 &&
+                    strcmp(f[2], path) == 0 &&
+                    strcmp(f[5], name) == 0 &&
+                    (expiry == 0 || expiry >= now);
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    g_free(contents);
+    return found;
+}
+
 static void
 ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
 {
@@ -1662,6 +1690,14 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
         ? ns_net_cookie_path_for_partition(site)
         : ns_net_cookie_js_path_for_partition(site);
     g_autofree char *name_dup = g_strndup(name, name_len);
+    if (!from_http) {
+        g_autofree char *http_jar_path = ns_net_cookie_path_for_partition(site);
+        if (ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
+                                       name_dup, now)) {
+            g_free(file_domain); g_free(domain_attr); g_free(path_attr);
+            return;
+        }
+    }
 
     char *contents = NULL;
     g_file_get_contents(jar_path, &contents, NULL, NULL);
@@ -4770,7 +4806,15 @@ about_start_tagline(void)
 static gboolean
 about_request_from_chrome(const char *top_url)
 {
-    return !top_url || !*top_url || g_str_has_prefix(top_url, "about:");
+    if (!top_url || !*top_url) return TRUE;
+    if (!g_str_has_prefix(top_url, "about:")) return FALSE;
+    const char *page = top_url + strlen("about:");
+    gsize page_len = strcspn(page, "?#");
+    if (page_len == 5 && g_ascii_strncasecmp(page, "blank", 5) == 0)
+        return FALSE;
+    if (page_len == 6 && g_ascii_strncasecmp(page, "srcdoc", 6) == 0)
+        return FALSE;
+    return TRUE;
 }
 
 static gboolean
@@ -5069,9 +5113,8 @@ synthesize_view_source_response(const char *url, const char *top_url,
     if (!g_str_has_prefix(url, prefix)) return FALSE;
     const char *inner = url + sizeof prefix - 1;
     resp->final_url = g_strdup(url);
-    gboolean from_chrome = !top_url || !*top_url ||
-        g_str_has_prefix(top_url, prefix) ||
-        g_str_has_prefix(top_url, "about:");
+    gboolean from_chrome = about_request_from_chrome(top_url) ||
+        g_str_has_prefix(top_url, prefix);
     gboolean inner_allowed =
         g_str_has_prefix(inner, "http:") ||
         g_str_has_prefix(inner, "https:") ||
@@ -5548,16 +5591,20 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (synthesize_file_response(url, top_url, resp))
         return resp;
 
-    char *hsts_upgraded = ns_net_hsts_upgrade(url);
-    if (hsts_upgraded) url = hsts_upgraded;
-
+    char *hsts_upgraded = NULL;
     char *idn_ascii = ns_url_to_ascii(url);
     if (idn_ascii && strcmp(idn_ascii, url) != 0) {
-        g_free(hsts_upgraded);
         hsts_upgraded = idn_ascii;
         url = hsts_upgraded;
     } else {
         g_free(idn_ascii);
+    }
+
+    char *https_url = ns_net_hsts_upgrade(url);
+    if (https_url) {
+        g_free(hsts_upgraded);
+        hsts_upgraded = https_url;
+        url = hsts_upgraded;
     }
 
     gboolean request_http = ns_url_is_http_or_https(url);
@@ -6186,8 +6233,11 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
                 else i++;
             }
         }
-        g_free(cur_top);
-        cur_top = NULL;
+        if (ns_fetch_is_navigation(cur_top, extra_headers) &&
+            g_ascii_strcasecmp(cur_method, "GET") == 0) {
+            g_free(cur_top);
+            cur_top = NULL;
+        }
         g_free(cur_url);
         cur_url = next;
         hops++;

@@ -351,7 +351,7 @@ svg_anchor_of(const char *s)
 static const char *
 svg_style_decl(const ns_node *n, const char *prop)
 {
-    static char buf[256];
+    static __thread char buf[256];
     const char *style = ns_element_get_attr(n, "style");
     if (!style) return NULL;
     gsize plen = strlen(prop);
@@ -383,7 +383,7 @@ svg_style_decl(const ns_node *n, const char *prop)
     return buf;
 }
 
-static GHashTable *g_svg_var_styles;
+static __thread GHashTable *g_svg_var_styles;
 
 static const char *
 svg_prop(const ns_node *n, const char *name)
@@ -395,7 +395,7 @@ svg_prop(const ns_node *n, const char *name)
     const ns_style *st = g_svg_var_styles
         ? g_hash_table_lookup(g_svg_var_styles, (gpointer)n) : NULL;
     if (!st) return v;
-    static char buf[256];
+    static __thread char buf[256];
     char *resolved = ns_css_resolve_style_vars(v, st);
     if (!resolved) return v;
     if (strlen(resolved) >= sizeof buf) {
@@ -668,9 +668,8 @@ svg_arc_to(cairo_t *cr, double x1, double y1, double rx, double ry,
     if (!sweep && dt > 0.0)      dt -= 2.0 * G_PI;
     else if (sweep && dt < 0.0)  dt += 2.0 * G_PI;
 
-    int segs = (int)ceil(fabs(dt) / (G_PI / 2.0) - 1e-9);
-    if (segs < 1) segs = 1;
-    if (segs > 8) segs = 8;
+    double quarters = ceil(fabs(dt) / (G_PI / 2.0) - 1e-9);
+    int segs = quarters > 1.0 ? (int)MIN(quarters, 8.0) : 1;
     double seg = dt / segs;
     double alpha = 4.0 / 3.0 * tan(seg / 4.0);
 
@@ -2053,8 +2052,8 @@ ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
         w = size.ratio * k;
         h = k;
     }
-    if (w <= 0) w = NS_SVG_DEFAULT_DIM_PX;
-    if (h <= 0) h = NS_SVG_DEFAULT_DIM_PX;
+    if (!isfinite(w) || w <= 0) w = NS_SVG_DEFAULT_DIM_PX;
+    if (!isfinite(h) || h <= 0) h = NS_SVG_DEFAULT_DIM_PX;
     if (w > NS_SVG_MAX_DIM_PX || h > NS_SVG_MAX_DIM_PX) {
         double s = (double)NS_SVG_MAX_DIM_PX / MAX(w, h);
         w *= s; h *= s;

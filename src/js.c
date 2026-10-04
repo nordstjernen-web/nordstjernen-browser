@@ -1373,6 +1373,30 @@ ns_js_frame_scope_enter(ns_js *js, JSContext *realm, ns_node *frame,
     js->current_url = g_strdup(frame_url ? frame_url : "");
 }
 
+static ns_node *
+ns_js_frame_of_realm(ns_js *js, JSContext *realm)
+{
+    if (!js || !realm || !js->frame_contexts) return NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        if (value == realm) return key;
+    return NULL;
+}
+
+static const char *
+ns_js_realm_url(ns_js *js, JSContext *realm)
+{
+    if (!js || !realm) return NULL;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (realm == main_ctx) return ns_js_top_url(js);
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
+    const char *url = frame ? ns_element_get_attr(frame, "data-nd-frame-url")
+                            : NULL;
+    return url && *url ? url : NULL;
+}
+
 static void
 ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
 {
@@ -1389,17 +1413,7 @@ ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
         js->top_url_slot = NULL;
         return;
     }
-    if (!js->frame_contexts || g_hash_table_size(js->frame_contexts) == 0)
-        return;
-    ns_node *frame = NULL;
-    GHashTableIter it;
-    gpointer key, value;
-    g_hash_table_iter_init(&it, js->frame_contexts);
-    while (g_hash_table_iter_next(&it, &key, &value))
-        if (value == realm) {
-            frame = key;
-            break;
-        }
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
     if (!frame) return;
     ns_js_frame_scope_enter(js, realm, frame, scope);
 }
@@ -4392,30 +4406,62 @@ ns_listener_is_tombstoned(const ns_listener *l)
 static void
 ns_listener_tombstone(JSContext *ctx, ns_listener *l)
 {
-    (void)ctx;
     if (!l || ns_listener_is_tombstoned(l)) return;
     g_free(l->type);
     l->type = NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->listener_tombstones++;
 }
 
 static gboolean
 ns_listener_signal_aborted(ns_js *js, const ns_listener *l)
 {
     if (!js || !l || !JS_IsObject(l->signal)) return FALSE;
+    JSValue signal = JS_DupValue(js->ctx, l->signal);
     JSValue ab = js->listener_atoms_set
-        ? JS_GetProperty(js->ctx, l->signal, js->atom_aborted)
-        : JS_GetPropertyStr(js->ctx, l->signal, "aborted");
+        ? JS_GetProperty(js->ctx, signal, js->atom_aborted)
+        : JS_GetPropertyStr(js->ctx, signal, "aborted");
     gboolean aborted = JS_ToBool(js->ctx, ab);
     JS_FreeValue(js->ctx, ab);
+    JS_FreeValue(js->ctx, signal);
     return aborted;
+}
+
+static void
+ns_listener_index_add(ns_js *js, ns_listener *l)
+{
+    if (!js->listener_index)
+        js->listener_index = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL,
+            (GDestroyNotify)g_ptr_array_unref);
+    GPtrArray *own = g_hash_table_lookup(js->listener_index, l->target);
+    if (!own) {
+        own = g_ptr_array_new();
+        g_hash_table_insert(js->listener_index, (gpointer)l->target, own);
+    }
+    g_ptr_array_add(own, l);
+}
+
+static GPtrArray *
+ns_listeners_of(ns_js *js, const ns_node *target)
+{
+    return js->listener_index
+        ? g_hash_table_lookup(js->listener_index, target) : NULL;
+}
+
+static void
+ns_listener_index_clear(ns_js *js)
+{
+    if (js->listener_index) g_hash_table_remove_all(js->listener_index);
 }
 
 static void
 ns_listeners_sweep(ns_js *js)
 {
     if (!js || !js->listeners || js->dispatch_depth > 0 ||
-        js->listener_snapshots > 0)
+        js->listener_snapshots > 0 || js->listener_tombstones == 0)
         return;
+    js->listener_tombstones = 0;
     guint w = 0;
     for (guint r = 0; r < js->listeners->len; r++) {
         ns_listener *l = g_ptr_array_index(js->listeners, r);
@@ -4428,6 +4474,9 @@ ns_listeners_sweep(ns_js *js)
         js->listeners->pdata[w++] = l;
     }
     g_ptr_array_set_size(js->listeners, w);
+    ns_listener_index_clear(js);
+    for (guint r = 0; r < w; r++)
+        ns_listener_index_add(js, g_ptr_array_index(js->listeners, r));
 }
 
 static void ns_mut_scrub_node(ns_js *js, ns_node *n);
@@ -6115,7 +6164,9 @@ ns_svg_beginElement(JSContext *ctx, JSValueConst this_val,
     if (attr && *attr && to) {
         char anim_attr[64];
         g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to);
+        char *to_copy = g_strdup(to);
+        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to_copy);
+        g_free(to_copy);
     }
     return JS_UNDEFINED;
 }
@@ -8299,18 +8350,14 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         return;
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *c = n->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
+    ns_node *c;
+    while ((c = n->first_child) != NULL) {
         ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
         g_hash_table_add(js->orphan_nodes, c);
         ns_js_index_child_change(js, n, NULL, c);
         g_ptr_array_add(removed, c);
-        c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     GPtrArray *add_arr = NULL;
     if (added) {
         ns_node_append_child(n, added);
@@ -8331,17 +8378,13 @@ ns_element_clear_children_collect(ns_js *js, ns_node *n)
         return g_ptr_array_new();
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *c = n->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
-        if (js) ns_ce_disconnect_subtree(js, c);
+    ns_node *c;
+    while ((c = n->first_child) != NULL) {
+        ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
-        if (js) g_hash_table_add(js->orphan_nodes, c);
+        g_hash_table_add(js->orphan_nodes, c);
         g_ptr_array_add(removed, c);
-        c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     return removed;
 }
 
@@ -8554,7 +8597,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
         while (content->first_child) {
             ns_node *c = content->first_child;
             ns_node_remove(c);
-            ns_node_free(c);
+            ns_js_orphan_node(_j, c);
         }
         ns_mark_scripts_already_started(tfrag);
         ns_node *c = tfrag->first_child;
@@ -8801,9 +8844,8 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         }
     }
     GPtrArray *removed = g_ptr_array_new();
-    ns_node *oc = self->first_child;
-    while (oc) {
-        ns_node *next = oc->next_sibling;
+    ns_node *oc;
+    while ((oc = self->first_child) != NULL) {
         if (_j) {
             ns_ce_disconnect_subtree(_j, oc);
             ns_node_remove(oc);
@@ -8813,12 +8855,11 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             ns_node_remove(oc);
         }
         g_ptr_array_add(removed, oc);
-        oc = next;
     }
-    self->first_child = NULL;
-    self->last_child  = NULL;
     for (guint k = 0; k < added->len; k++) {
         ns_node *a = g_ptr_array_index(added, k);
+        if (ns_node_ancestor_or_self(self, a)) continue;
+        if (_j) g_hash_table_remove(_j->orphan_nodes, a);
         ns_node_append_child(self, a);
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
@@ -9026,10 +9067,14 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     }
     ns_js *_js = js_from_ctx(ctx);
-    for (guint i = 0; i < _js->listeners->len; i++) {
-        ns_listener *ex = g_ptr_array_index(_js->listeners, i);
+    GPtrArray *own = ns_listeners_of(_js, n);
+    _js->listener_snapshots++;
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
-        if (ns_listener_signal_aborted(_js, ex)) {
+        gboolean aborted = ns_listener_signal_aborted(_js, ex);
+        if (ns_listener_is_tombstoned(ex)) continue;
+        if (aborted) {
             ns_listener_tombstone(ctx, ex);
             continue;
         }
@@ -9037,11 +9082,13 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
+            _js->listener_snapshots--;
             JS_FreeValue(ctx, signal);
             JS_FreeCString(ctx, type);
             return JS_UNDEFINED;
         }
     }
+    _js->listener_snapshots--;
     if (!passive_set && ns_event_type_is_passive_default(type) &&
         _js->current_doc) {
         ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
@@ -9059,6 +9106,7 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     l->once    = once;
     l->passive = passive;
     g_ptr_array_add(_js->listeners, l);
+    ns_listener_index_add(_js, l);
     ((ns_node *)n)->flags |= NS_NODE_HAS_LISTENERS;
     ns_node_arm_js_invalidate((ns_node *)n);
     JS_FreeCString(ctx, type);
@@ -9882,37 +9930,11 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
 }
 
 static char *
-ns_js_fetch_base_from_this(JSContext *ctx, JSValueConst this_val)
+ns_js_fetch_base_url(JSContext *ctx)
 {
-    if (!JS_IsObject(this_val)) return NULL;
-    JSValue loc = JS_GetPropertyStr(ctx, this_val, "location");
-    if (JS_IsException(loc)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return NULL;
-    }
-    if (JS_IsUndefined(loc) || JS_IsNull(loc)) {
-        JS_FreeValue(ctx, loc);
-        return NULL;
-    }
-    JSValue href = JS_GetPropertyStr(ctx, loc, "href");
-    char *out = NULL;
-    if (!JS_IsException(href) && !JS_IsUndefined(href) && !JS_IsNull(href)) {
-        const char *s = JS_ToCString(ctx, href);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    } else if (JS_IsException(href)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, href);
-    if (!out) {
-        const char *s = JS_ToCString(ctx, loc);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, loc);
-    return out;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || ctx == js->ctx) return NULL;
+    return g_strdup(ns_js_realm_url(js, ctx));
 }
 
 static JSValue
@@ -9972,7 +9994,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_autofree char *method = NULL;
     g_autofree char *body = NULL;
     g_autofree char *content_type = NULL;
-    g_autofree char *base_url = ns_js_fetch_base_from_this(ctx, this_val);
+    g_autofree char *base_url = ns_js_fetch_base_url(ctx);
     gsize body_len = 0;
     GPtrArray *extras = g_ptr_array_new_with_free_func(g_free);
     gboolean init_has_headers = argc >= 2 && JS_IsObject(argv[1]) &&
@@ -11843,6 +11865,7 @@ ns_wc_parse_alg(JSContext *ctx, JSValueConst v, ns_wc_alg *a)
     JSValue pk = JS_GetPropertyStr(ctx, v, "public");
     if (JS_IsObject(pk))
         a->peer = JS_GetOpaque(pk, ns_cryptokey_class_id);
+    if (a->peer) a->peer->refcount++;
     JS_FreeValue(ctx, pk);
     return TRUE;
 }
@@ -11853,6 +11876,8 @@ ns_wc_alg_free(ns_wc_alg *a)
     g_free(a->name); g_free(a->hash); g_free(a->curve);
     g_free(a->iv); g_free(a->aad); g_free(a->label);
     g_free(a->salt); g_free(a->info); g_free(a->counter);
+    ns_crypto_key_unref(a->peer);
+    a->peer = NULL;
 }
 
 static guint32
@@ -14460,26 +14485,6 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
     return out;
 }
 
-static char *
-ns_window_url_of(JSContext *ctx, JSValueConst win)
-{
-    JSValue loc = JS_GetPropertyStr(ctx, win, "location");
-    char *out = NULL;
-    if (JS_IsObject(loc)) {
-        JSValue hv = JS_GetPropertyStr(ctx, loc, "href");
-        if (JS_IsString(hv)) {
-            const char *s = JS_ToCString(ctx, hv);
-            if (s) {
-                out = g_strdup(s);
-                JS_FreeCString(ctx, s);
-            }
-        }
-        JS_FreeValue(ctx, hv);
-    }
-    JS_FreeValue(ctx, loc);
-    return out;
-}
-
 static void
 ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
 {
@@ -14587,7 +14592,8 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     if (JS_IsFunction(ctx, deliver)) {
         ns_budget_guard bg = {0};
         ns_js_budget_push(js, &bg);
-        g_autofree char *realm_url = ns_window_url_of(ctx, actual_target);
+        g_autofree char *realm_url =
+            g_strdup(ns_js_realm_url(js, JS_GetFunctionRealm(ctx, deliver)));
         ns_frame_url fu;
         gboolean swap_url = js && realm_url && *realm_url;
         if (swap_url) ns_frame_url_enter(js, &fu, realm_url);
@@ -15158,11 +15164,11 @@ ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
 {
     JSContext *ctx = s->ctx;
     if (ns_sc_buffer_detached(ctx, src)) return ns_sc_fail(ctx);
-    size_t size = 0;
-    uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
     JSValue resizable = JS_GetPropertyStr(ctx, src, "resizable");
     gboolean is_resizable = JS_ToBool(ctx, resizable) > 0;
     JS_FreeValue(ctx, resizable);
+    size_t size = 0;
+    uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
     if (!is_resizable) return JS_NewArrayBufferCopy(ctx, bytes, size);
     JSValue opts = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, opts, "maxByteLength",
@@ -15174,6 +15180,7 @@ ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
     if (JS_IsException(clone)) return clone;
     size_t clone_size = 0;
     uint8_t *dst = JS_GetArrayBuffer(ctx, &clone_size, clone);
+    bytes = JS_GetArrayBuffer(ctx, &size, src);
     if (dst && bytes && clone_size >= size) memcpy(dst, bytes, size);
     return clone;
 }
@@ -16474,13 +16481,13 @@ ns_history_navigate(JSContext *ctx, int delta)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
     ns_history_ensure_stack(js);
-    int n = (int)js->history_entries->len;
-    int target = js->history_pos + delta;
+    gint64 n = js->history_entries->len;
+    gint64 target = (gint64)js->history_pos + delta;
     if (target < 0 || target > n - 1 || target == js->history_pos)
         return JS_UNDEFINED;
 
-    js->history_pos = target;
-    ns_history_entry *e = g_ptr_array_index(js->history_entries, target);
+    js->history_pos = (int)target;
+    ns_history_entry *e = g_ptr_array_index(js->history_entries, (guint)target);
     if (e->url) {
         g_free(js->current_url);
         js->current_url = g_strdup(e->url);
@@ -16518,12 +16525,8 @@ ns_history_go(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
     (void)this_val;
-    int delta = 0;
-    if (argc >= 1) {
-        double d = 0;
-        JS_ToFloat64(ctx, &d, argv[0]);
-        delta = (int)d;
-    }
+    int32_t delta = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &delta, argv[0]);
     return ns_history_navigate(ctx, delta);
 }
 
@@ -22723,6 +22726,7 @@ ns_blob_entry_free(gpointer p)
 }
 
 static GPtrArray *g_blob_js_registry = NULL;
+static GMutex     g_blob_js_registry_lock;
 
 static ns_blob_entry *
 ns_blob_entry_new_for_object(JSContext *ctx, JSValueConst obj)
@@ -22748,36 +22752,56 @@ ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
 {
     (void)user_data;
     if (out_type) *out_type = NULL;
-    if (!g_blob_js_registry || !url) return NULL;
-    for (guint i = 0; i < g_blob_js_registry->len; i++) {
+    if (!url) return NULL;
+    GBytes *found = NULL;
+    g_mutex_lock(&g_blob_js_registry_lock);
+    for (guint i = 0; g_blob_js_registry && i < g_blob_js_registry->len; i++) {
         ns_js *js = g_ptr_array_index(g_blob_js_registry, i);
         if (!js || !js->blob_urls) continue;
         ns_blob_entry *e = g_hash_table_lookup(js->blob_urls, url);
         if (e) {
             if (out_type) *out_type = e->type ? g_strdup(e->type) : NULL;
-            return e->bytes ? g_bytes_ref(e->bytes) : NULL;
+            found = e->bytes ? g_bytes_ref(e->bytes) : NULL;
+            break;
         }
     }
-    return NULL;
+    g_mutex_unlock(&g_blob_js_registry_lock);
+    return found;
 }
 
 static void
 ns_js_blob_registry_add(ns_js *js)
 {
     if (!js) return;
-    if (!g_blob_js_registry) {
+    g_mutex_lock(&g_blob_js_registry_lock);
+    gboolean install = !g_blob_js_registry;
+    if (install)
         g_blob_js_registry = g_ptr_array_new();
-        ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
-    }
     if (!g_ptr_array_find(g_blob_js_registry, js, NULL))
         g_ptr_array_add(g_blob_js_registry, js);
+    g_mutex_unlock(&g_blob_js_registry_lock);
+    if (install)
+        ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
 }
 
 static void
 ns_js_blob_registry_remove(ns_js *js)
 {
+    g_mutex_lock(&g_blob_js_registry_lock);
     if (g_blob_js_registry && js)
         g_ptr_array_remove_fast(g_blob_js_registry, js);
+    g_mutex_unlock(&g_blob_js_registry_lock);
+}
+
+static void
+ns_js_blob_urls_put(ns_js *js, const char *url, ns_blob_entry *entry)
+{
+    g_mutex_lock(&g_blob_js_registry_lock);
+    if (!js->blob_urls)
+        js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, ns_blob_entry_free);
+    g_hash_table_replace(js->blob_urls, g_strdup(url), entry);
+    g_mutex_unlock(&g_blob_js_registry_lock);
 }
 
 static JSValue
@@ -22794,13 +22818,8 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
     g_free(origin);
     g_free(uuid);
 
-    if (js && argc >= 1 && JS_IsObject(argv[0])) {
-        if (!js->blob_urls)
-            js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                  g_free, ns_blob_entry_free);
-        g_hash_table_replace(js->blob_urls, g_strdup(url),
-                             ns_blob_entry_new_for_object(ctx, argv[0]));
-    }
+    if (js && argc >= 1 && JS_IsObject(argv[0]))
+        ns_js_blob_urls_put(js, url, ns_blob_entry_new_for_object(ctx, argv[0]));
     JSValue ret = JS_NewString(ctx, url);
     g_free(url);
     return ret;
@@ -22820,11 +22839,7 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, url);
         return JS_FALSE;
     }
-    if (!js->blob_urls)
-        js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                              g_free, ns_blob_entry_free);
-    g_hash_table_replace(js->blob_urls, g_strdup(url),
-                         ns_blob_entry_new_for_object(ctx, argv[1]));
+    ns_js_blob_urls_put(js, url, ns_blob_entry_new_for_object(ctx, argv[1]));
     js->mutated = TRUE;
     JS_FreeCString(ctx, url);
     return JS_TRUE;
@@ -22839,7 +22854,9 @@ ns_window_url_revoke_object(JSContext *ctx, JSValueConst this_val,
     if (js && js->blob_urls && argc >= 1) {
         const char *url = JS_ToCString(ctx, argv[0]);
         if (url) {
+            g_mutex_lock(&g_blob_js_registry_lock);
             g_hash_table_remove(js->blob_urls, url);
+            g_mutex_unlock(&g_blob_js_registry_lock);
             JS_FreeCString(ctx, url);
         }
     }
@@ -24520,11 +24537,14 @@ ns_js_es_on_open(gpointer user_data)
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
-    JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 1));
-    ns_js_ws_dispatch(ctx, s->wrapper, "onopen", ns_js_ws_event(ctx, "open"));
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_push(js, &bg);
+    JS_SetPropertyStr(ctx, wrapper, "readyState", JS_NewInt32(ctx, 1));
+    ns_js_ws_dispatch(ctx, wrapper, "onopen", ns_js_ws_event(ctx, "open"));
+    ns_js_budget_pop(js, &bg);
+    JS_FreeValue(ctx, wrapper);
 }
 
 static void
@@ -24534,8 +24554,10 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
+    ns_js_budget_push(js, &bg);
     const char *type = (event && *event) ? event : "message";
     JSValue ev = ns_js_ws_event(ctx, type);
     ns_event_adopt_interface(ctx, ev, "MessageEvent");
@@ -24545,9 +24567,10 @@ ns_js_es_on_message(const char *event, const char *data, const char *last_id,
     JS_SetPropertyStr(ctx, ev, "origin",
                       JS_NewString(ctx, s->origin ? s->origin : ""));
     char *on_name = g_strconcat("on", type, NULL);
-    ns_js_ws_dispatch(ctx, s->wrapper, on_name, ev);
+    ns_js_ws_dispatch(ctx, wrapper, on_name, ev);
     g_free(on_name);
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_pop(js, &bg);
+    JS_FreeValue(ctx, wrapper);
 }
 
 static void
@@ -24556,15 +24579,18 @@ ns_js_es_on_error(gboolean fatal, gpointer user_data)
     ns_js_es *s = user_data;
     if (!s || !s->ctx) return;
     JSContext *ctx = s->ctx;
+    ns_js *js = s->js;
+    JSValue wrapper = JS_DupValue(ctx, s->wrapper);
     ns_budget_guard bg = {0};
-    ns_js_budget_push(s->js, &bg);
-    JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, fatal ? 2 : 0));
-    ns_js_ws_dispatch(ctx, s->wrapper, "onerror", ns_js_ws_event(ctx, "error"));
-    ns_js_budget_pop(s->js, &bg);
+    ns_js_budget_push(js, &bg);
+    JS_SetPropertyStr(ctx, wrapper, "readyState", JS_NewInt32(ctx, fatal ? 2 : 0));
+    ns_js_ws_dispatch(ctx, wrapper, "onerror", ns_js_ws_event(ctx, "error"));
+    ns_js_budget_pop(js, &bg);
     if (fatal && s->pinned) {
         s->pinned = FALSE;
         JS_FreeValue(ctx, s->wrapper);
     }
+    JS_FreeValue(ctx, wrapper);
 }
 
 static JSValue
@@ -25219,9 +25245,9 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
 
     if (JS_IsArrayBuffer(v)) {
         if (ns_sc_buffer_detached(ctx, v)) return ns_sc_fail(ctx);
+        JSValue node = ns_wire_node(ctx, "AB");
         size_t size = 0;
         uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, v);
-        JSValue node = ns_wire_node(ctx, "AB");
         ns_wire_push(ctx, node, JS_NewArrayBufferCopy(ctx, bytes, size));
         JSValue resizable = JS_GetPropertyStr(ctx, v, "resizable");
         if (JS_ToBool(ctx, resizable) > 0)
@@ -25498,6 +25524,7 @@ ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
             size_t got = 0;
             uint8_t *dst = JS_IsException(out) ? NULL
                          : JS_GetArrayBuffer(ctx, &got, out);
+            bytes = dst ? JS_GetArrayBuffer(ctx, &size, a1) : NULL;
             if (dst && bytes && got >= size) memcpy(dst, bytes, size);
         }
     } else if (strcmp(kind, "TA") == 0 || strcmp(kind, "DV") == 0) {
@@ -26770,11 +26797,12 @@ ns_sw_fetch_result_on_owner(gpointer data)
     }
     ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
                                                 GUINT_TO_POINTER(res->id));
-    if (st) {
+    char *send_url = st ? g_steal_pointer(&st->fb_send_url) : NULL;
+    if (send_url) {
         if (res->outcome == 1) {
             ns_response *resp = g_new0(ns_response, 1);
             resp->status = res->status > 0 ? res->status : 200;
-            resp->final_url = g_strdup(st->fb_send_url ? st->fb_send_url : "");
+            resp->final_url = g_strdup(send_url);
             resp->content_type = res->content_type
                 ? g_strdup(res->content_type) : g_strdup("text/plain;charset=UTF-8");
             resp->cors_allow_origin = g_strdup("*");
@@ -26795,12 +26823,13 @@ ns_sw_fetch_result_on_owner(gpointer data)
             d->resp = resp;
             ns_js_attach_idle(js, ns_on_js_fetch_deliver_idle, d);
         } else {
-            ns_net_request_async(st->fb_send_url, st->fb_top, st->fb_method,
+            ns_net_request_async(send_url, st->fb_top, st->fb_method,
                                  st->fb_body, st->fb_body_len, st->fb_content_type,
                                  (const char *const *)st->fb_headers,
                                  st->cancellable, ns_on_js_fetch_done, st);
         }
     }
+    g_free(send_url);
     g_free(res->raw_headers); g_free(res->content_type);
     g_free(res->body); g_free(res->error);
     ns_worker_host_unref(host);
@@ -29202,12 +29231,15 @@ ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
     double content_w = 0, content_h = 0, border_w = 0, border_h = 0;
     double content_x = 0, content_y = 0;
     double border_x = 0, border_y = 0;
+    double border_left = 0, border_top = 0;
     const struct ns_box *box = ns_box_for_this(ctx, target);
     if (box) {
         content_w = box->content_width;
         content_h = box->content_height;
         content_x = box->padding.left;
         content_y = box->padding.top;
+        border_left = box->border.left;
+        border_top = box->border.top;
         ns_box_border_box(box, &border_x, &border_y, &border_w, &border_h);
     }
     double dppx = 1.0;
@@ -29219,8 +29251,8 @@ ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
         dppx = candidate;
     JS_FreeValue(ctx, ratio);
     JS_FreeValue(ctx, global);
-    double device_x = (border_x + (box ? box->border.left : 0) + content_x) * dppx;
-    double device_y = (border_y + (box ? box->border.top : 0) + content_y) * dppx;
+    double device_x = (border_x + border_left + content_x) * dppx;
+    double device_y = (border_y + border_top + content_y) * dppx;
     double device_w = round(device_x + content_w * dppx) - round(device_x);
     double device_h = round(device_y + content_h * dppx) - round(device_y);
     double observed_w = content_w;
@@ -29617,6 +29649,8 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
     *ratio = 0;
     *out_intersecting = FALSE;
     ns_io_root_rect(ctx, o, layout_root, rx, ry, rw, rh);
+    ns_js *js = js_from_ctx(ctx);
+    if (js) layout_root = js->layout_root;
     double margin_top = o->margin_top.percentage
         ? o->margin_top.value * *rw / 100.0 : o->margin_top.value;
     double margin_right = o->margin_right.percentage
@@ -29747,23 +29781,20 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
                                            &intersecting);
     intersecting = has_box && intersecting;
     if (tw <= 0 || th <= 0) ratio = intersecting ? 1.0 : 0.0;
-    double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
-    double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
-    tx -= viewport_x;
-    ty -= viewport_y;
-    rx -= viewport_x;
-    ry -= viewport_y;
-    ix -= viewport_x;
-    iy -= viewport_y;
-    *out_entry = ns_io_make_entry(ctx, t->wrapper,
-                                  tx, ty, tw, th,
-                                  rx, ry, rw, rh,
-                                  ix, iy, iw, ih,
-                                  ratio, intersecting);
     gboolean changed = !t->has_fired || intersecting != t->last_intersecting;
     if (!changed && ns_io_threshold_index(o, t->last_ratio) !=
                     ns_io_threshold_index(o, ratio))
         changed = TRUE;
+    *out_entry = JS_UNDEFINED;
+    if (changed) {
+        double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
+        double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
+        *out_entry = ns_io_make_entry(ctx, t->wrapper,
+                                      tx - viewport_x, ty - viewport_y, tw, th,
+                                      rx - viewport_x, ry - viewport_y, rw, rh,
+                                      ix - viewport_x, iy - viewport_y, iw, ih,
+                                      ratio, intersecting);
+    }
     t->last_intersecting = intersecting;
     t->last_ratio = ratio;
     t->has_fired = TRUE;
@@ -29780,12 +29811,23 @@ ns_intersection_observers_tick(ns_js *js)
     for (guint oi = 0; oi < js->intersection_observers->len; oi++) {
         ns_io_observer *o = g_ptr_array_index(js->intersection_observers, oi);
         if (!o || o->disconnected || !o->targets) continue;
+        JSValue self = JS_DupValue(ctx, o->wrapper);
         JSValue entries = JS_UNDEFINED;
         guint n_entries = 0;
         for (guint i = 0; i < o->targets->len; i++) {
-            ns_io_target *t = &g_array_index(o->targets, ns_io_target, i);
+            ns_io_target t = g_array_index(o->targets, ns_io_target, i);
+            t.wrapper = JS_DupValue(ctx, t.wrapper);
             JSValue entry;
-            gboolean changed = ns_io_evaluate_one(ctx, o, t, &entry);
+            gboolean changed = ns_io_evaluate_one(ctx, o, &t, &entry);
+            if (i < o->targets->len) {
+                ns_io_target *slot = &g_array_index(o->targets, ns_io_target, i);
+                if (JS_VALUE_GET_PTR(slot->wrapper) == JS_VALUE_GET_PTR(t.wrapper)) {
+                    slot->last_intersecting = t.last_intersecting;
+                    slot->last_ratio = t.last_ratio;
+                    slot->has_fired = t.has_fired;
+                }
+            }
+            JS_FreeValue(ctx, t.wrapper);
             if (changed) {
                 if (JS_IsUndefined(entries)) entries = JS_NewArray(ctx);
                 JS_SetPropertyUint32(ctx, entries, n_entries++, entry);
@@ -29799,6 +29841,7 @@ ns_intersection_observers_tick(ns_js *js)
         } else if (!JS_IsUndefined(entries)) {
             JS_FreeValue(ctx, entries);
         }
+        JS_FreeValue(ctx, self);
     }
     js->observer_ticking = FALSE;
 }
@@ -30126,8 +30169,8 @@ ns_resize_observers_tick(ns_js *js)
     js->observer_ticking = TRUE;
     JSContext *ctx = js->ctx;
     for (guint oi = 0; oi < js->resize_observers->len; oi++) {
-        JSValue observer = JS_MKPTR(JS_TAG_OBJECT,
-                                    g_ptr_array_index(js->resize_observers, oi));
+        JSValue observer = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT,
+                                    g_ptr_array_index(js->resize_observers, oi)));
         JSValue cb = JS_GetPropertyStr(ctx, observer, "__cb");
         JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
         JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
@@ -30140,6 +30183,7 @@ ns_resize_observers_tick(ns_js *js)
             JS_FreeValue(ctx, widths);
             JS_FreeValue(ctx, heights);
             JS_FreeValue(ctx, boxes);
+            JS_FreeValue(ctx, observer);
             continue;
         }
         uint32_t len = 0;
@@ -30190,6 +30234,7 @@ ns_resize_observers_tick(ns_js *js)
         JS_FreeValue(ctx, widths);
         JS_FreeValue(ctx, heights);
         JS_FreeValue(ctx, boxes);
+        JS_FreeValue(ctx, observer);
     }
     js->observer_ticking = FALSE;
 }
@@ -32138,9 +32183,10 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
     gboolean has_listeners = (cur->kind == NS_NODE_DOCUMENT) ||
                              ((cur->flags & NS_NODE_HAS_LISTENERS) != 0);
     GPtrArray *to_call = NULL;
-    if (has_listeners && js->listeners && js->listeners->len > 0) {
-        for (guint i = 0; i < js->listeners->len; i++) {
-            ns_listener *l = g_ptr_array_index(js->listeners, i);
+    GPtrArray *own = has_listeners ? ns_listeners_of(js, cur) : NULL;
+    if (own) {
+        for (guint i = 0; i < own->len; i++) {
+            ns_listener *l = g_ptr_array_index(own, i);
             if (ns_listener_is_tombstoned(l)) continue;
             if (l->window_level) continue;
             if (l->target != cur || strcmp(l->type, type) != 0) continue;
@@ -32207,7 +32253,9 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
     JSValue global = JS_GetGlobalObject(ctx);
+    ns_window_named_resolving++;
     JSValue handler = JS_GetPropertyStr(ctx, global, prop_name);
+    ns_window_named_resolving--;
     if (JS_IsException(handler)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         handler = JS_UNDEFINED;
@@ -32292,8 +32340,9 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
                                   at_target ? 2 : (capture_phase ? 1 : 3)));
     js->listener_snapshots++;
     GPtrArray *to_call = g_ptr_array_new();
-    for (guint i = 0; js->listeners && i < js->listeners->len; i++) {
-        ns_listener *l = g_ptr_array_index(js->listeners, i);
+    GPtrArray *own = ns_listeners_of(js, event_doc);
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *l = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(l)) continue;
         if (!l->window_level || strcmp(l->type, type) != 0) continue;
         if (l->target != event_doc) continue;
@@ -32523,16 +32572,19 @@ static gboolean
 ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
 {
     if (!js || !js->listeners || !type) return FALSE;
-    for (guint i = 0; i < js->listeners->len; i++) {
+    gboolean found = FALSE;
+    js->listener_snapshots++;
+    for (guint i = 0; !found && i < js->listeners->len; i++) {
         ns_listener *l = g_ptr_array_index(js->listeners, i);
         if (ns_listener_is_tombstoned(l) || l->passive) continue;
         if (!l->type || strcmp(l->type, type) != 0) continue;
         if (ns_listener_signal_aborted(js, l)) continue;
-        if (l->window_level) return TRUE;
-        for (const ns_node *cur = target; cur; cur = cur->parent)
-            if (l->target == cur) return TRUE;
+        if (l->window_level) found = TRUE;
+        for (const ns_node *cur = target; !found && cur; cur = cur->parent)
+            if (l->target == cur) found = TRUE;
     }
-    return FALSE;
+    js->listener_snapshots--;
+    return found;
 }
 
 static gboolean
@@ -33823,6 +33875,10 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (_j) g_hash_table_remove(_j->orphan_nodes, c);
             ns_node_append_child(parent, c);
@@ -33843,6 +33899,9 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     if (_j) {
         if (child->parent) ns_node_iters_pre_remove(_j, child);
         ns_ce_disconnect_subtree(_j, child);
+        if (ns_node_ancestor_or_self(parent, child))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "the new child is an inclusive ancestor of the parent");
         ns_js_record_move_removal(_j, child);
         g_hash_table_remove(_j->orphan_nodes, child);
     }
@@ -34094,6 +34153,10 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (!ref || ref->parent != parent) {
                 if (_j) g_hash_table_remove(_j->orphan_nodes, c);
@@ -34120,6 +34183,9 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
     }
     if (_j) {
         ns_ce_disconnect_subtree(_j, newc);
+        if (ns_node_ancestor_or_self(parent, newc))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "the new child is an inclusive ancestor of the parent");
         ns_js_record_move_removal(_j, newc);
     }
     if (!ref || ref->parent != parent) {
@@ -34249,6 +34315,10 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         while (c) {
             ns_node *next = c->next_sibling;
             if (_j) ns_ce_disconnect_subtree(_j, c);
+            if (ns_node_ancestor_or_self(parent, c)) {
+                c = next;
+                continue;
+            }
             ns_node_remove(c);
             if (!reference || reference->parent != parent) {
                 if (_j) g_hash_table_remove(_j->orphan_nodes, c);
@@ -34273,6 +34343,8 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         if (newc->parent) ns_node_iters_pre_remove(_j, newc);
         ns_ce_disconnect_subtree(_j, newc);
+        JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
+        if (JS_IsException(verr)) return verr;
         ns_js_record_move_removal(_j, newc);
     }
     if (newc->parent) ns_node_remove(newc);
@@ -34636,6 +34708,7 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
     ns_node *parent = self->parent;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(self->parent, to_insert)) continue;
         ns_insert_sibling_before(self, to_insert);
         if (_j)
             ns_js_record_child_change(_j, parent, to_insert, NULL,
@@ -34683,6 +34756,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
 
     for (guint k = 0; k < seq->len; k++) {
         ns_node *node = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, node)) continue;
         if (viable_next && viable_next->parent == parent)
             ns_insert_sibling_before(viable_next, node);
         else
@@ -34742,6 +34816,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
 
     for (guint k = 0; k < seq->len; k++) {
         ns_node *node = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, node)) continue;
         if (anchor && anchor->parent == parent)
             ns_insert_sibling_before(anchor, node);
         else
@@ -34991,6 +35066,7 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
     }
     for (guint k = 0; k < seq->len; k++) {
         ns_node *added = g_ptr_array_index(seq, k);
+        if (ns_node_ancestor_or_self(parent, added)) continue;
         ns_node_append_child(parent, added);
         if (_j)
             ns_js_record_child_change(_j, parent, added, NULL,
@@ -35042,16 +35118,11 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
     ns_node *ref = parent->first_child;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
-        if (!ref) {
+        if (ns_node_ancestor_or_self(parent, to_insert)) continue;
+        if (ref && ref->parent == parent)
+            ns_insert_sibling_before(ref, to_insert);
+        else
             ns_node_append_child(parent, to_insert);
-        } else {
-            to_insert->parent = parent;
-            to_insert->next_sibling = ref;
-            to_insert->prev_sibling = ref->prev_sibling;
-            if (ref->prev_sibling) ref->prev_sibling->next_sibling = to_insert;
-            else parent->first_child = to_insert;
-            ref->prev_sibling = to_insert;
-        }
         if (_j)
             ns_js_record_child_change(_j, parent, to_insert, NULL,
                                       to_insert->prev_sibling,
@@ -35105,6 +35176,9 @@ static JSValue ns_attr_to_js(JSContext *ctx, JSValueConst owner,
 static const ns_attr *ns_element_attr_by_namespace(const ns_node *n,
                                                    const char *namespace_uri,
                                                    const char *local);
+static const ns_attr *ns_page_attr_by_namespace(const ns_node *n,
+                                                const char *namespace_uri,
+                                                const char *local_name);
 static JSValue ns_element_setAttributeNode(JSContext *ctx,
                                            JSValueConst this_val,
                                            int argc, JSValueConst *argv);
@@ -35146,7 +35220,7 @@ ns_namedmap_getNamedItemNS(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     }
     const ns_attr *attr = n
-        ? ns_element_attr_by_namespace(n, namespace_uri, local_name) : NULL;
+        ? ns_page_attr_by_namespace(n, namespace_uri, local_name) : NULL;
     JSValue owner = n ? ns_make_element(ctx, n) : JS_NULL;
     JSValue result = attr ? ns_attr_to_js(ctx, owner, attr, TRUE) : JS_NULL;
     JS_FreeValue(ctx, owner);
@@ -35206,7 +35280,7 @@ ns_namedmap_removeNamedItemNS(JSContext *ctx, JSValueConst this_val,
     if (ns && !*ns) { JS_FreeCString(ctx, ns); ns = NULL; }
     const char *local = JS_ToCString(ctx, argv[1]);
     if (!local) { if (ns) JS_FreeCString(ctx, ns); return JS_EXCEPTION; }
-    const ns_attr *a = n ? ns_element_attr_by_namespace(n, ns, local) : NULL;
+    const ns_attr *a = n ? ns_page_attr_by_namespace(n, ns, local) : NULL;
     if (!a) {
         if (ns) JS_FreeCString(ctx, ns);
         JS_FreeCString(ctx, local);
@@ -35392,7 +35466,7 @@ ns_attr_set_value(JSContext *ctx, JSValueConst this_val,
     if (state) {
         g_free(state->value);
         state->value = g_strdup(s);
-        if (state->owner)
+        if (state->owner && !ns_attr_name_is_internal(state->name))
             ns_js_set_attr_ns_recorded(state->js, state->owner,
                                        state->namespace_uri, state->prefix,
                                        state->local_name, state->name, s);
@@ -35440,6 +35514,7 @@ ns_attr_state_attach(JSContext *ctx, JSValueConst entry, ns_js_attr *state,
                      ns_node *owner)
 {
     if (!state || !owner || state->owner == owner) return;
+    if (state->owner) ns_attr_state_detach(state);
     state->js = js_from_ctx(ctx);
     state->owner = owner;
     state->pinned = JS_DupValue(ctx, entry);
@@ -35474,11 +35549,12 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
     state->pinned = JS_UNDEFINED;
     JS_SetOpaque(entry, state);
     ns_attr_apply_proto(ctx, entry);
-    JS_DefinePropertyValueStr(ctx, entry, "name", JS_NewString(ctx, name),
+    JS_DefinePropertyValueStr(ctx, entry, "name", JS_NewString(ctx, state->name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, entry, "nodeName", JS_NewString(ctx, name),
+    JS_DefinePropertyValueStr(ctx, entry, "nodeName", JS_NewString(ctx, state->name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, entry, "localName", JS_NewString(ctx, local),
+    JS_DefinePropertyValueStr(ctx, entry, "localName",
+                              JS_NewString(ctx, state->local_name),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     ns_attr_define_value_accessor(ctx, entry, "value");
     ns_attr_define_value_accessor(ctx, entry, "nodeValue");
@@ -35487,11 +35563,11 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
     JS_DefinePropertyValueStr(ctx, entry, "nodeType", JS_NewInt32(ctx, 2),
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "namespaceURI",
-                              a && a->namespace_uri ? JS_NewString(ctx, a->namespace_uri)
-                                                    : JS_NULL,
+                              state->namespace_uri
+                                  ? JS_NewString(ctx, state->namespace_uri) : JS_NULL,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "prefix",
-                              a && a->prefix ? JS_NewString(ctx, a->prefix) : JS_NULL,
+                              state->prefix ? JS_NewString(ctx, state->prefix) : JS_NULL,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, entry, "specified", JS_TRUE,
                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
@@ -35500,7 +35576,7 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
         g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         JS_SetPropertyStr(ctx, entry, "baseURI",
             JS_NewString(ctx, base && *base ? base : "about:blank"));
-        const char *aval = a && a->value ? a->value : "";
+        const char *aval = state->value ? state->value : "";
         JSValue kids = JS_NewArray(ctx);
         if (*aval) {
             ns_node *tn = ns_node_new_text(g_strdup(aval));
@@ -35575,7 +35651,8 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (a->name && strcmp(a->name, name) == 0) {
-            out = ns_attr_to_js(ctx, this_val, a, TRUE);
+            if (!ns_attr_name_is_internal(a->name))
+                out = ns_attr_to_js(ctx, this_val, a, TRUE);
             break;
         }
     }
@@ -35598,7 +35675,7 @@ ns_element_getAttributeNodeNS(JSContext *ctx, JSValueConst this_val,
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_NULL;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     JSValue out = a ? ns_attr_to_js(ctx, this_val, a, TRUE) : JS_NULL;
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
@@ -35636,6 +35713,9 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
     if (state->owner && state->owner != n)
         return ns_throw_dom_exception(ctx, "InUseAttributeError", 10,
             "the attribute is in use by another element");
+    if (ns_attr_name_is_internal(state->name) ||
+        ns_attr_name_is_internal(state->local_name))
+        return JS_NULL;
     const ns_attr *prev = ns_element_attr_by_namespace(n, state->namespace_uri,
                                                         state->local_name);
     ns_js_attr *prev_state = ns_attr_state_find(js_from_ctx(ctx), n,
@@ -35775,6 +35855,11 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     }
     char *lowered = NULL;
     const char *name = ns_attr_name_normalize(n, raw_name, &lowered);
+    if (ns_attr_name_is_internal(name)) {
+        JS_FreeCString(ctx, raw_name);
+        g_free(lowered);
+        return JS_FALSE;
+    }
     gboolean had = ns_element_get_attr(n, name) != NULL;
     gboolean want;
     if (argc >= 2 && !JS_IsUndefined(argv[1]))
@@ -35797,6 +35882,15 @@ ns_element_attr_by_namespace(const ns_node *n, const char *namespace_uri,
     return a && !ns_attr_name_is_internal(a->name) ? a : NULL;
 }
 
+static const ns_attr *
+ns_page_attr_by_namespace(const ns_node *n, const char *namespace_uri,
+                          const char *local_name)
+{
+    const ns_attr *a = ns_element_attr_by_namespace(n, namespace_uri,
+                                                    local_name);
+    return a && a->name && ns_attr_name_is_internal(a->name) ? NULL : a;
+}
+
 static JSValue
 ns_element_getAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -35811,7 +35905,7 @@ ns_element_getAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_NULL;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_NewString(ctx, a->value ? a->value : "") : JS_NULL;
@@ -35831,7 +35925,7 @@ ns_element_hasAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_FALSE;
     }
-    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    const ns_attr *a = ns_page_attr_by_namespace(n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_TRUE : JS_FALSE;
@@ -35932,7 +36026,8 @@ ns_element_removeAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JS
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
         return JS_UNDEFINED;
     }
-    ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
+    if (ns_page_attr_by_namespace(n, ns_uri, local))
+        ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return JS_UNDEFINED;
@@ -38658,8 +38753,9 @@ ns_js_compute_validity(const ns_node *n,
         owned_value = opt ? ns_option_value_dup(opt) : g_strdup("");
         value = owned_value ? owned_value : "";
     } else {
-        value = ns_input_used_value(n);
-        if (!value) value = "";
+        const char *used = ns_input_used_value(n);
+        owned_value = g_strdup(used ? used : "");
+        value = owned_value;
     }
     gboolean needs_mutable = is_textarea ||
         (is_input && !ns_node_is_radio(n) &&
@@ -38690,7 +38786,7 @@ ns_js_compute_validity(const ns_node *n,
                  !ns_input_value_to_number(type, value, NULL))
             *type_mismatch = TRUE;
     }
-    const char *pat = ns_element_get_attr(n, "pattern");
+    g_autofree char *pat = g_strdup(ns_element_get_attr(n, "pattern"));
     if (is_input && ns_input_type_supports_text_constraints(type) && pat) {
         gboolean split_email = type &&
             g_ascii_strcasecmp(type, "email") == 0 &&
@@ -39549,8 +39645,12 @@ ns_document_get_pointerLockElement(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (js && js->pointer_lock_element)
-        return ns_make_element(ctx, js->pointer_lock_element);
+    if (!js || !js->pointer_lock_element || !js->current_doc) return JS_NULL;
+    const ns_node *root = ns_node_root(js->current_doc);
+    for (const ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE))
+        if (n == js->pointer_lock_element)
+            return ns_make_element(ctx, n);
+    js->pointer_lock_element = NULL;
     return JS_NULL;
 }
 
@@ -39683,7 +39783,7 @@ ns_input_get_files(JSContext *ctx, JSValueConst this_val)
     if (!ns_node_is_element_named(n, "input")) return JS_NULL;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || g_ascii_strcasecmp(type, "file") != 0) return JS_NULL;
-    const char *path = ns_element_get_attr(n, "data-nd-file-path");
+    g_autofree char *path = g_strdup(ns_element_get_attr(n, "data-nd-file-path"));
 
     JSValue cached_path = JS_GetPropertyStr(ctx, this_val, "__nd_files_path");
     const char *cp = JS_IsString(cached_path) ? JS_ToCString(ctx, cached_path) : NULL;
@@ -41565,12 +41665,19 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_LINKS:
         ns_collect_links(root, ctx, arr, &i, 0);
         break;
-    case NS_LIVE_ATTRIBUTES:
+    case NS_LIVE_ATTRIBUTES: {
+        GArray *attrs = g_array_new(FALSE, FALSE, sizeof(JSValue));
         for (const ns_attr *a = root->attrs; a; a = a->next)
-            if (!ns_attr_name_is_internal(a->name))
-                JS_SetPropertyUint32(ctx, arr, i++,
-                                     ns_attr_to_js(ctx, b->owner, a, FALSE));
+            if (!ns_attr_name_is_internal(a->name)) {
+                JSValue attr = ns_attr_to_js(ctx, b->owner, a, FALSE);
+                g_array_append_val(attrs, attr);
+            }
+        for (guint k = 0; k < attrs->len; k++)
+            JS_SetPropertyUint32(ctx, arr, i++,
+                                 g_array_index(attrs, JSValue, k));
+        g_array_free(attrs, TRUE);
         break;
+    }
     case NS_LIVE_LABELS:
         ns_collect_labels_for(ctx, ns_node_root(root), root, arr, &i, 0);
         break;
@@ -41585,12 +41692,17 @@ ns_live_snapshot(JSContext *ctx, ns_live_back *b)
     guint64 gen = js ? js->dom_gen : 0;
     if (!b->has_cache || b->cache_gen != gen ||
         b->kind == NS_LIVE_ATTRIBUTES) {
+        JSValue stale = b->has_cache ? b->cache : JS_UNDEFINED;
+        b->cache = JS_UNDEFINED;
+        b->has_cache = FALSE;
+        JSValue built = ns_live_build(ctx, b);
         if (b->has_cache) JS_FreeValue(ctx, b->cache);
-        b->cache = ns_live_build(ctx, b);
+        b->cache = built;
         b->cache_gen = gen;
         b->has_cache = TRUE;
+        JS_FreeValue(ctx, stale);
     }
-    return b->cache;
+    return JS_DupValue(ctx, b->cache);
 }
 
 static gboolean
@@ -41658,7 +41770,11 @@ ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
     int ret = 0;
     uint32_t idx = 0;
     if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
-        if (idx >= len) { JS_FreeCString(ctx, name); return 0; }
+        if (idx >= len) {
+            JS_FreeValue(ctx, snap);
+            JS_FreeCString(ctx, name);
+            return 0;
+        }
         if (desc) {
             desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
             desc->value  = JS_GetPropertyUint32(ctx, snap, idx);
@@ -41690,6 +41806,7 @@ ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
             }
         }
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return ret;
 }
@@ -41782,6 +41899,7 @@ ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
         }
         JS_FreeValue(ctx, proto);
     }
+    JS_FreeValue(ctx, snap);
     uint32_t named_count = named ? named->len : 0;
     uint32_t total = len + named_count;
     if (total == 0) {
@@ -41822,8 +41940,10 @@ ns_live_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     if (JS_ToInt32(ctx, &idx, argv[0])) return JS_NULL;
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
-    if (idx < 0 || (uint32_t)idx >= len) return JS_NULL;
-    return JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+    JSValue item = idx < 0 || (uint32_t)idx >= len
+        ? JS_NULL : JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+    JS_FreeValue(ctx, snap);
+    return item;
 }
 
 static JSValue
@@ -41837,6 +41957,7 @@ ns_live_namedItem(JSContext *ctx, JSValueConst this_val, int argc,
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
     JSValue r = ns_live_named(ctx, b, snap, len, name);
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return JS_IsUndefined(r) ? JS_NULL : r;
 }
@@ -41849,14 +41970,21 @@ ns_live_delete_property(JSContext *ctx, JSValueConst obj, JSAtom prop)
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
     uint32_t idx = 0;
-    if (JS_AtomIsArrayIndex(ctx, &idx, prop)) return idx >= len;
+    if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
+        JS_FreeValue(ctx, snap);
+        return idx >= len;
+    }
     const char *name = JS_AtomToCString(ctx, prop);
-    if (!name) return 1;
+    if (!name) {
+        JS_FreeValue(ctx, snap);
+        return 1;
+    }
     int ret = 1;
     if (b->html_collection || b->kind == NS_LIVE_ATTRIBUTES) {
         JSValue found = ns_live_named(ctx, b, snap, len, name);
         if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); ret = 0; }
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, name);
     return ret;
 }
@@ -41877,6 +42005,7 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
                 JSValue snap = ns_live_snapshot(ctx, b);
                 uint32_t len = ns_js_array_length(ctx, snap);
                 JSValue found = ns_live_named(ctx, b, snap, len, name);
+                JS_FreeValue(ctx, snap);
                 if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); reject = 1; }
             }
             JS_FreeCString(ctx, name);
@@ -41902,7 +42031,9 @@ ns_live_length_get(JSContext *ctx, JSValueConst this_val,
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
     if (!b) return JS_ThrowTypeError(ctx, "Illegal invocation");
     JSValue snap = ns_live_snapshot(ctx, b);
-    return JS_NewInt64(ctx, ns_js_array_length(ctx, snap));
+    uint32_t len = ns_js_array_length(ctx, snap);
+    JS_FreeValue(ctx, snap);
+    return JS_NewInt64(ctx, len);
 }
 
 static void
@@ -42383,7 +42514,7 @@ ns_form_controls_snapshot(JSContext *ctx, JSValueConst form)
     if (!JS_IsUndefined(cached)) return cached;
     JSValue live = ns_element_get_form_elements(ctx, form);
     ns_live_back *b = JS_GetOpaque(live, ns_live_class_id);
-    JSValue snap = JS_DupValue(ctx, b ? ns_live_snapshot(ctx, b) : live);
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, live);
     JS_FreeValue(ctx, live);
     ns_qcache_put(js, node, 'f', "", snap);
     return snap;
@@ -42458,18 +42589,21 @@ ns_radio_node_list_get_value(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     for (uint32_t i = 0; i < n; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, snap, i);
         const ns_node *el = ns_unwrap_element(item);
         if (ns_node_is_radio_input(el) && ns_input_is_checked(el)) {
             const char *value = ns_element_get_attr(el, "value");
+            JSValue result = JS_NewString(ctx, value ? value : "on");
             JS_FreeValue(ctx, item);
-            return JS_NewString(ctx, value ? value : "on");
+            JS_FreeValue(ctx, snap);
+            return result;
         }
         JS_FreeValue(ctx, item);
     }
+    JS_FreeValue(ctx, snap);
     return JS_NewString(ctx, "");
 }
 
@@ -42481,7 +42615,7 @@ ns_radio_node_list_set_value(JSContext *ctx, JSValueConst this_val,
     const char *wanted = JS_ToCString(ctx, argv[0]);
     if (!wanted) return JS_UNDEFINED;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     ns_node *chosen = NULL;
     for (uint32_t i = 0; i < n; i++) {
@@ -42505,6 +42639,7 @@ ns_radio_node_list_set_value(JSContext *ctx, JSValueConst this_val,
         }
         ns_js_set_checkedness(js, chosen, TRUE);
     }
+    JS_FreeValue(ctx, snap);
     JS_FreeCString(ctx, wanted);
     return JS_UNDEFINED;
 }
@@ -42517,7 +42652,7 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
     JSValue first = JS_NULL;
     uint32_t count = 0;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    JSValue snap = b ? ns_live_snapshot(ctx, b) : this_val;
+    JSValue snap = b ? ns_live_snapshot(ctx, b) : JS_DupValue(ctx, this_val);
     uint32_t n = ns_js_array_length(ctx, snap);
     for (uint32_t i = 0; i < n; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, snap, i);
@@ -42540,6 +42675,7 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, item);
         }
     }
+    JS_FreeValue(ctx, snap);
     if (count > 1) {
         ns_node *first_node = (ns_node *)ns_unwrap_element(first);
         const ns_node *form = ns_form_owner(first_node, NULL);
@@ -43192,7 +43328,7 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
         ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
         if (g.node[0])
             ns_js_dispatch_focus_event(js, old, "focusout",
-                                       same_doc ? el : NULL);
+                                       same_doc ? g.node[1] : NULL);
         if (js->focused_node) goto out;
     }
     if (!same_doc) {
@@ -43210,9 +43346,10 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
     ns_js_update_focus_visible(js);
     js->focus_nav_start = NULL;
-    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? old : NULL);
+    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? g.node[0] : NULL);
     if (g.node[1])
-        ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+        ns_js_dispatch_focus_event(js, el, "focusin",
+                                   same_doc ? g.node[0] : NULL);
 out:
     js->focus_guard = g.prev;
 }
@@ -43410,10 +43547,6 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!el || !js) return JS_UNDEFINED;
-    ns_js_flush_layout(js);
-    if (!js->layout_root) return JS_UNDEFINED;
-    ns_box *target = (ns_box *)ns_box_find_by_dom(js->layout_root, el);
-    if (!target) return JS_UNDEFINED;
 
     char *block = NULL;
     char *inline_align = NULL;
@@ -43426,6 +43559,16 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1 && JS_IsBool(argv[0]) && !JS_ToBool(ctx, argv[0]))
         block_mode = "end";
 
+    el = ns_unwrap_element(this_val);
+    ns_js_flush_layout(js);
+    ns_box *target = el && js->layout_root
+        ? (ns_box *)ns_box_find_by_dom(js->layout_root, el) : NULL;
+    if (!target) {
+        g_free(block);
+        g_free(inline_align);
+        return JS_UNDEFINED;
+    }
+
     double target_x, target_y, target_w, target_h;
     ns_box_border_box(target, &target_x, &target_y, &target_w, &target_h);
     gboolean changed = FALSE;
@@ -43436,6 +43579,7 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         if (position && strcmp(position, "fixed") == 0)
             fixed = TRUE;
     }
+    GPtrArray *scrolled = g_ptr_array_new();
     for (ns_box *p = target->parent; p; p = p->parent) {
         if (!p->scrolls || (p->scroll_max_x <= 0 && p->scroll_max_y <= 0))
             continue;
@@ -43487,20 +43631,25 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
             p->scroll_x = next_x;
             p->scroll_y = next_y;
             changed = TRUE;
-            if (p->dom) {
-                ns_js_dispatch_event(js, p->dom, "scroll", NULL);
-                ns_js_queue_scrollend(js, p->dom);
-            }
+            if (p->dom) g_ptr_array_add(scrolled, (gpointer)p->dom);
         }
     }
+    double view_x = target_x;
+    double view_y = target_y;
+    for (ns_box *p = target->parent; p; p = p->parent) {
+        view_x -= p->scroll_x;
+        view_y -= p->scroll_y;
+    }
+    for (guint i = 0; i < scrolled->len; i++) {
+        const ns_node *dom = g_ptr_array_index(scrolled, i);
+        ns_js_dispatch_event(js, dom, "scroll", NULL);
+        ns_js_queue_scrollend(js, dom);
+    }
+    g_ptr_array_free(scrolled, TRUE);
 
     if (!fixed) {
-        double x = target_x;
-        double y = target_y;
-        for (ns_box *p = target->parent; p; p = p->parent) {
-            x -= p->scroll_x;
-            y -= p->scroll_y;
-        }
+        double x = view_x;
+        double y = view_y;
         double vw = ns_css_viewport_w();
         double vh = ns_css_viewport_h();
         double sx = ns_window_scroll_prop(ctx, "scrollX");
@@ -43711,7 +43860,7 @@ ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open)
     ns_js_dispatch_toggle_event(js, details, "beforetoggle",
                                 old_state, new_state, FALSE, NULL);
     if (open) {
-        const char *name = ns_element_get_attr(details, "name");
+        g_autofree char *name = g_strdup(ns_element_get_attr(details, "name"));
         ns_details_close_others_in_group(js, details, name);
     }
     ns_js_dispatch_toggle_event(js, details, "toggle",
@@ -45652,8 +45801,9 @@ ns_js_form_owner_for(const ns_node *el, ns_js *js)
 static ns_node *
 ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
 {
-    const char *group = ns_element_get_attr(radio, "name");
-    if (!group) return NULL;
+    const char *group_attr = ns_element_get_attr(radio, "name");
+    if (!group_attr) return NULL;
+    char *group = g_strdup(group_attr);
     const ns_node *doc = js && js->current_doc ? js->current_doc
                                                 : ns_node_root(radio);
     const ns_node *owner = ns_form_owner(radio, doc);
@@ -45678,6 +45828,7 @@ ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
             g_queue_push_tail(&q, c);
     }
     g_queue_clear(&q);
+    g_free(group);
     return checked;
 }
 
@@ -45867,7 +46018,9 @@ ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
         js->soft_nav_cb(js->current_url, FALSE, js->soft_nav_user_data);
     if (js->fragment_nav_cb)
         js->fragment_nav_cb(js->current_url, js->fragment_nav_user_data);
-    ns_js_dispatch_hashchange(js, old_url, js->current_url);
+    char *new_url = g_strdup(js->current_url);
+    ns_js_dispatch_hashchange(js, old_url, new_url);
+    g_free(new_url);
     g_free(old_url);
     return TRUE;
 }
@@ -45888,7 +46041,7 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
     }
     if (ns_node_is_element_named(act, "a") ||
         ns_node_is_element_named(act, "area")) {
-        const char *href = ns_element_get_attr(act, "href");
+        g_autofree char *href = g_strdup(ns_element_get_attr(act, "href"));
         if (href && g_str_has_prefix(href, "javascript:")) {
             char *code = g_uri_unescape_string(href + strlen("javascript:"),
                                                NULL);
@@ -47481,12 +47634,12 @@ static JSValue
 ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tbl = ns_unwrap_element_mut(this_val);
     if (!tbl) return JS_NULL;
     GPtrArray *rows = g_ptr_array_new();
     ns_collect_descendants_named(tbl, "tr", rows);
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)rows->len) idx = (int32_t)rows->len;
     ns_node *new_tr = ns_node_new_element(g_strdup("tr"));
     ns_js *_j = js_from_ctx(ctx);
@@ -47554,6 +47707,8 @@ static JSValue
 ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tr = ns_unwrap_element_mut(this_val);
     if (!tr) return JS_NULL;
     GPtrArray *cells = g_ptr_array_new();
@@ -47563,8 +47718,6 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
              g_ascii_strcasecmp(c->name, "th") == 0))
             g_ptr_array_add(cells, c);
     }
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)cells->len) idx = (int32_t)cells->len;
     ns_node *cell = ns_node_new_element(g_strdup("td"));
     ns_js *_j = js_from_ctx(ctx);
@@ -47774,23 +47927,41 @@ ns_media_src_is_mp3(const char *url)
     return FALSE;
 }
 
+static gboolean
+ns_media_token_valid(const char *token)
+{
+    if (!token || token[0] != 'a' || !token[1] || strlen(token) > 11)
+        return FALSE;
+    for (const char *p = token + 1; *p; p++)
+        if (!g_ascii_isdigit(*p)) return FALSE;
+    return TRUE;
+}
+
+static char *
+ns_media_existing_token(JSContext *ctx, JSValueConst el)
+{
+    JSValue tv = JS_GetPropertyStr(ctx, el, "_nd_audio_token");
+    char *token = NULL;
+    if (JS_IsString(tv)) {
+        const char *s = JS_ToCString(ctx, tv);
+        if (ns_media_token_valid(s)) token = g_strdup(s);
+        if (s) JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, tv);
+    return token;
+}
+
 static char *
 ns_media_token(JSContext *ctx, ns_node *node)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js || !node) return NULL;
     JSValue v = ns_make_element(ctx, node);
-    JSValue tv = JS_GetPropertyStr(ctx, v, "_nd_audio_token");
-    char *token = NULL;
-    if (JS_IsString(tv)) {
-        const char *s = JS_ToCString(ctx, tv);
-        token = g_strdup(s);
-        JS_FreeCString(ctx, s);
-    } else {
+    char *token = ns_media_existing_token(ctx, v);
+    if (!token) {
         token = g_strdup_printf("a%u", ++js->next_audio_token);
         JS_SetPropertyStr(ctx, v, "_nd_audio_token", JS_NewString(ctx, token));
     }
-    JS_FreeValue(ctx, tv);
     JS_FreeValue(ctx, v);
     return token;
 }
@@ -48145,16 +48316,12 @@ ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
     gboolean handled = js->media_seek_cb &&
         js->media_seek_cb(el, t, js->media_seek_user_data);
     if (!handled && js->audio_cb) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) {
-                ns_js_emit_audio(js, "seek %s %.3f", token, t);
-                handled = TRUE;
-                JS_FreeCString(ctx, token);
-            }
+        char *token = ns_media_existing_token(ctx, this_val);
+        if (token) {
+            ns_js_emit_audio(js, "seek %s %.3f", token, t);
+            handled = TRUE;
+            g_free(token);
         }
-        JS_FreeValue(ctx, tv);
     }
     JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, t));
     if (handled) {
@@ -48238,12 +48405,11 @@ ns_media_pause(JSContext *ctx, JSValueConst this_val,
     ns_node *el = ns_unwrap_element_mut(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (el && js) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) { ns_js_emit_audio(js, "pause %s", token); JS_FreeCString(ctx, token); }
+        char *token = ns_media_existing_token(ctx, this_val);
+        if (token) {
+            ns_js_emit_audio(js, "pause %s", token);
+            g_free(token);
         }
-        JS_FreeValue(ctx, tv);
         ns_js_dispatch_event(js, el, "pause", NULL);
         if (js->media_play_cb)
             js->media_play_cb(el, FALSE, js->media_play_user_data);
@@ -48663,34 +48829,6 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     ns_node_append_child(doc, root);
     ns_node_append_child(iframe, doc);
     return root;
-}
-
-static JSValue
-ns_js_doc_enter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
-    if (!js->doc_stack)
-        js->doc_stack = g_array_new(FALSE, FALSE, sizeof(gpointer));
-    gpointer prev = js->current_doc;
-    g_array_append_val(js->doc_stack, prev);
-    ns_node *root = (argc >= 1) ? ns_unwrap_element_mut(argv[0]) : NULL;
-    if (root) js->current_doc = root;
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    if (js && js->doc_stack && js->doc_stack->len > 0) {
-        js->current_doc = g_array_index(js->doc_stack, gpointer,
-                                        js->doc_stack->len - 1);
-        g_array_set_size(js->doc_stack, js->doc_stack->len - 1);
-    }
-    return JS_UNDEFINED;
 }
 
 static const char ns_iframe_scope_bootstrap[] =
@@ -49925,6 +50063,26 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
     JS_FreeValue(rc->dst, nav);
 }
 
+static gboolean
+ns_obj_has_defined_own_prop(JSContext *ctx, JSValueConst obj, const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    if (has == 0) return FALSE;
+    gboolean defined = (desc.flags & JS_PROP_GETSET) ||
+                       !JS_IsUndefined(desc.value);
+    JS_FreeValue(ctx, desc.value);
+    JS_FreeValue(ctx, desc.getter);
+    JS_FreeValue(ctx, desc.setter);
+    return defined;
+}
+
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                              JSValueConst iframe_doc,
@@ -49936,6 +50094,10 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     *out_window = JS_NULL;
     *out_location = JS_NULL;
     *out_history = JS_NULL;
+    g_autofree char *initial_url_copy = g_strdup(initial_url);
+    g_autofree char *doc_url_copy = g_strdup(doc_url);
+    initial_url = initial_url_copy;
+    doc_url = doc_url_copy;
     JSContext *fctx = reuse;
     if (!fctx) {
         fctx = JS_NewContext(js->rt);
@@ -50033,11 +50195,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (ok) {
         JSValue parent_performance =
             JS_GetPropertyStr(fctx, parent_global, "performance");
-        JSValue parent_memory = JS_IsObject(parent_performance)
-            ? JS_GetPropertyStr(fctx, parent_performance, "memory")
-            : JS_UNDEFINED;
-        gboolean include_memory = !JS_IsUndefined(parent_memory);
-        JS_FreeValue(fctx, parent_memory);
+        gboolean include_memory = JS_IsObject(parent_performance) &&
+            ns_obj_has_defined_own_prop(fctx, parent_performance, "memory");
         JS_FreeValue(fctx, parent_performance);
         JS_SetPropertyStr(fctx, fg, "performance",
                           ns_make_performance_object(fctx, js,
@@ -50188,8 +50347,12 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
     }
     gboolean is_xml = (doc->flags & NS_NODE_XML_DOC) != 0;
     const char *mime = is_xml ? "application/xml" : "text/html";
-    JSValue cd = ns_make_realm_document(ctx, doc, url, cs, mime, is_xml, FALSE);
-    ns_frame_document_show_url(ctx, cd, shown);
+    g_autofree char *url_copy = g_strdup(url);
+    g_autofree char *cs_copy = g_strdup(cs);
+    g_autofree char *shown_copy = g_strdup(shown);
+    JSValue cd = ns_make_realm_document(ctx, doc, url_copy, cs_copy, mime,
+                                        is_xml, FALSE);
+    ns_frame_document_show_url(ctx, cd, shown_copy);
     if (JS_IsObject(cd))
         JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
@@ -51285,17 +51448,25 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (new_body->parent) ns_js_record_move_removal(js, new_body);
     if (old_body && old_body != root) {
-        ns_node *reference = old_body->next_sibling;
-        ns_node *old_prev = old_body->prev_sibling;
         if (js) {
             ns_node_iters_pre_remove(js, old_body);
             ns_ce_disconnect_subtree(js, old_body);
         }
-        ns_node_remove(old_body);
-        if (js) {
-            g_hash_table_add(js->orphan_nodes, old_body);
-            ns_js_record_child_change(js, root, NULL, old_body,
-                                      old_prev, reference);
+        new_body = ns_unwrap_element_mut(value);
+        if (!new_body ||
+            ns_node_is_shadow_including_inclusive_ancestor(new_body, root))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                                          "Document.body cannot be inserted");
+        ns_node *reference = NULL;
+        if (old_body->parent == root) {
+            reference = old_body->next_sibling;
+            ns_node *old_prev = old_body->prev_sibling;
+            ns_node_remove(old_body);
+            if (js) {
+                g_hash_table_add(js->orphan_nodes, old_body);
+                ns_js_record_child_change(js, root, NULL, old_body,
+                                          old_prev, reference);
+            }
         }
         if (reference)
             ns_element_insert_before_single(js, root, new_body, reference);
@@ -51380,10 +51551,15 @@ ns_document_collect_by_tag(JSContext *ctx, ns_node *doc, const char *tag)
     uint32_t idx = 0;
     if (doc->tag_index && strcmp(tag, "*") != 0) {
         GPtrArray *list = ns_doc_tag_index_lookup(doc, tag);
-        if (list)
-            for (guint k = 0; k < list->len; k++)
-                JS_SetPropertyUint32(ctx, arr, idx++,
-                                     ns_make_element(ctx, g_ptr_array_index(list, k)));
+        GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
+        for (guint k = 0; list && k < list->len; k++) {
+            JSValue item = ns_make_element(ctx, g_ptr_array_index(list, k));
+            g_array_append_val(items, item);
+        }
+        for (guint k = 0; k < items->len; k++)
+            JS_SetPropertyUint32(ctx, arr, idx++,
+                                 g_array_index(items, JSValue, k));
+        g_array_free(items, TRUE);
         return arr;
     }
     GQueue q = G_QUEUE_INIT;
@@ -53509,9 +53685,11 @@ ns_ce_reclaim_shadowed_props(JSContext *ctx, JSValueConst elem)
 }
 
 static JSValue ns_ce_observed_attributes(JSContext *ctx, JSValueConst klass);
+static void ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth);
 
 static void
-ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
+ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass_arg,
+                           int depth)
 {
     if (!js || !node || !js->ctx) return;
     if (js->ce_under_construction &&
@@ -53520,12 +53698,14 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
     JSContext *ctx = js->ctx;
     JSValue elem = ns_make_element(ctx, node);
     if (!JS_IsObject(elem)) { JS_FreeValue(ctx, elem); return; }
+    JSValue klass = JS_DupValue(ctx, klass_arg);
 
     JSValue marker = JS_GetPropertyStr(ctx, elem, "__nd_ce_class");
     gboolean already = !JS_IsUndefined(marker) && JS_IsStrictEqual(ctx, marker, klass);
     JS_FreeValue(ctx, marker);
     if (already) {
         ns_ce_fire_connected_if_needed(ctx, js, node, elem, klass);
+        JS_FreeValue(ctx, klass);
         JS_FreeValue(ctx, elem);
         return;
     }
@@ -53588,8 +53768,10 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
 
     if (js->ce_defer_upgrades == 0)
         for (ns_node *c = node->first_child; c; c = c->next_sibling)
-            ns_ce_upgrade_subtree_all(js, c);
+            if (ns_ce_node_connected(js, c))
+                ns_ce_upgrade_subtree_all_rec(js, c, depth + 1);
 
+    JS_FreeValue(ctx, klass);
     JS_FreeValue(ctx, elem);
 }
 
@@ -53633,34 +53815,34 @@ ns_ce_class_for_node(ns_js *js, const ns_node *node)
         return JS_UNDEFINED;
     JSContext *ctx = js->ctx;
     const ns_node *doc = ns_ce_node_document(js, node);
-    if (strchr(node->name, '-')) {
-        char *lower = g_ascii_strdown(node->name, -1);
-        char *key = ns_ce_key(js, lower, doc);
-        JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
-        g_free(key);
-        g_free(lower);
-        if (!slot) return JS_UNDEFINED;
-        JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
-        gboolean builtin = JS_IsString(ext);
-        JS_FreeValue(ctx, ext);
-        return builtin ? JS_UNDEFINED : *slot;
-    }
-    const char *is = ns_element_get_attr(node, "is");
-    if (!is || !*is) return JS_UNDEFINED;
-    char *lower = g_ascii_strdown(is, -1);
+    gboolean autonomous = strchr(node->name, '-') != NULL;
+    const char *name = autonomous ? node->name : ns_element_get_attr(node, "is");
+    if (!name || !*name) return JS_UNDEFINED;
+    char *lower = g_ascii_strdown(name, -1);
     char *key = ns_ce_key(js, lower, doc);
-    JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
-    g_free(key);
     g_free(lower);
-    if (!slot) return JS_UNDEFINED;
-    JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
-    JSValue result = JS_UNDEFINED;
-    if (JS_IsString(ext)) {
+    JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
+    if (!slot) {
+        g_free(key);
+        return JS_UNDEFINED;
+    }
+    JSValue klass = JS_DupValue(ctx, *slot);
+    JSValue ext = JS_GetPropertyStr(ctx, klass, "__nd_ce_extends");
+    gboolean match = FALSE;
+    if (!autonomous && JS_IsString(ext)) {
         const char *e = JS_ToCString(ctx, ext);
-        if (e && g_ascii_strcasecmp(e, node->name) == 0) result = *slot;
+        match = e && g_ascii_strcasecmp(e, node->name) == 0;
         if (e) JS_FreeCString(ctx, e);
+    } else if (autonomous) {
+        match = !JS_IsString(ext);
     }
     JS_FreeValue(ctx, ext);
+    slot = js->ce_registry ? g_hash_table_lookup(js->ce_registry, key) : NULL;
+    g_free(key);
+    JSValue result = JS_UNDEFINED;
+    if (match && slot && JS_VALUE_GET_PTR(*slot) == JS_VALUE_GET_PTR(klass))
+        result = *slot;
+    JS_FreeValue(ctx, klass);
     return result;
 }
 
@@ -53676,7 +53858,7 @@ ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
         JSValue klass = ns_ce_class_for_node(js, root);
         if (tslot && JS_IsObject(klass) &&
             JS_VALUE_GET_PTR(klass) == JS_VALUE_GET_PTR(*tslot))
-            ns_ce_upgrade_element_with(js, root, klass);
+            ns_ce_upgrade_element_with(js, root, klass, depth);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_ce_upgrade_subtree_named_rec(js, c, target_name, depth + 1);
@@ -53698,7 +53880,7 @@ ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth)
     if (ns_node_in_template_content(root)) return;
     if (root->kind == NS_NODE_ELEMENT && root->name) {
         JSValue klass = ns_ce_class_for_node(js, root);
-        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, root, klass);
+        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, root, klass, depth);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_ce_upgrade_subtree_all_rec(js, c, depth + 1);
@@ -53881,8 +54063,11 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
         js->ce_defer_upgrades = saved;
     }
 
-    if (js->ce_pending) {
-        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, key);
+    gpointer pending_key = NULL, pending_value = NULL;
+    if (js->ce_pending &&
+        g_hash_table_steal_extended(js->ce_pending, key, &pending_key,
+                                    &pending_value)) {
+        GPtrArray *waiters = pending_value;
         if (waiters) {
             for (guint i = 0; i < waiters->len; i++) {
                 JSValue *fn = g_ptr_array_index(waiters, i);
@@ -53897,9 +54082,9 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
                     g_free(fn);
                 }
             }
-            g_ptr_array_set_size(waiters, 0);
-            g_hash_table_remove(js->ce_pending, key);
+            g_ptr_array_free(waiters, TRUE);
         }
+        g_free(pending_key);
     }
 
     g_free(key);
@@ -54382,7 +54567,7 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     g_snprintf(key, sizeof key, "\xff%s", name);
     g_snprintf(src_key, sizeof src_key, "\xffsrc:%s", name);
     const ns_node *el = ns_unwrap_element(this_val);
-    const char *body = el ? ns_element_get_attr(el, name) : NULL;
+    g_autofree char *body = el ? g_strdup(ns_element_get_attr(el, name)) : NULL;
     JSValue v = JS_GetPropertyStr(ctx, this_val, key);
     if (JS_IsFunction(ctx, v)) {
         JSValue compiled_from = JS_GetPropertyStr(ctx, this_val, src_key);
@@ -56808,8 +56993,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptPointer",        ns_wpt_pointer,                   6);
     ns_bind_fn(ctx, global, "__nsWptKey",            ns_wpt_key,                       4);
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
-    ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
-    ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
@@ -57996,7 +58179,7 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
     ns_tag_owner_document(ctx, this_val, wrapper);
     if (js->ce_registry) {
         JSValue klass = ns_ce_class_for_node(js, el);
-        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, el, klass);
+        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, el, klass, 0);
     }
     return wrapper;
 }
@@ -58800,32 +58983,33 @@ ns_realmdoc_ignore_cookie_set(JSContext *ctx, JSValueConst this_val,
 }
 
 static char *
-ns_realmdoc_url(JSContext *ctx, JSValueConst doc)
+ns_realmdoc_url(JSContext *ctx, JSValueConst url_v)
 {
-    JSValue url_v = JS_GetPropertyStr(ctx, doc, "URL");
     const char *url_s = JS_IsString(url_v) ? JS_ToCString(ctx, url_v) : NULL;
     char *url = url_s ? g_strdup(url_s) : NULL;
     if (url_s) JS_FreeCString(ctx, url_s);
-    JS_FreeValue(ctx, url_v);
     return url;
 }
 
 static JSValue
 ns_realmdoc_cookie_get(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
+                       int argc, JSValueConst *argv, int magic,
+                       JSValueConst *func_data)
 {
-    (void)argc; (void)argv;
-    g_autofree char *url = ns_realmdoc_url(ctx, this_val);
+    (void)this_val; (void)argc; (void)argv; (void)magic;
+    g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     g_autofree char *cookies = url ? ns_net_cookies_for_js(url) : NULL;
     return JS_NewString(ctx, cookies ? cookies : "");
 }
 
 static JSValue
 ns_realmdoc_cookie_set(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
+                       int argc, JSValueConst *argv, int magic,
+                       JSValueConst *func_data)
 {
+    (void)this_val; (void)magic;
     if (argc < 1) return JS_UNDEFINED;
-    g_autofree char *url = ns_realmdoc_url(ctx, this_val);
+    g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     const char *value = JS_ToCString(ctx, argv[0]);
     if (url && value && strlen(value) <= 4096)
         ns_net_cookie_store_from_js(url, value);
@@ -58936,11 +59120,16 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
             JS_NewCFunction(ctx, ns_realmdoc_empty_cookie_get, "get cookie", 0),
             JS_NewCFunction(ctx, ns_realmdoc_ignore_cookie_set, "set cookie", 1),
             JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    else
+    else {
+        JSValue cookie_url = JS_NewString(ctx, u);
         JS_DefinePropertyGetSet(ctx, w, cookie_atom,
-            JS_NewCFunction(ctx, ns_realmdoc_cookie_get, "get cookie", 0),
-            JS_NewCFunction(ctx, ns_realmdoc_cookie_set, "set cookie", 1),
+            JS_NewCFunctionData(ctx, ns_realmdoc_cookie_get, 0, 0, 1,
+                                &cookie_url),
+            JS_NewCFunctionData(ctx, ns_realmdoc_cookie_set, 1, 0, 1,
+                                &cookie_url),
             JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeValue(ctx, cookie_url);
+    }
     JS_FreeAtom(ctx, cookie_atom);
     ns_bind_fn(ctx, w, "createElement",      ns_document_createElement, 1);
     ns_bind_fn(ctx, w, "createElementNS",    ns_document_createElementNS, 2);
@@ -59171,10 +59360,14 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
         return JS_UNDEFINED;
     }
     ns_js *_js = js_from_ctx(ctx);
-    for (guint i = 0; i < _js->listeners->len; i++) {
-        ns_listener *ex = g_ptr_array_index(_js->listeners, i);
+    GPtrArray *own = ns_listeners_of(_js, target);
+    _js->listener_snapshots++;
+    for (guint i = 0; own && i < own->len; i++) {
+        ns_listener *ex = g_ptr_array_index(own, i);
         if (ns_listener_is_tombstoned(ex)) continue;
-        if (ns_listener_signal_aborted(_js, ex)) {
+        gboolean aborted = ns_listener_signal_aborted(_js, ex);
+        if (ns_listener_is_tombstoned(ex)) continue;
+        if (aborted) {
             ns_listener_tombstone(ctx, ex);
             continue;
         }
@@ -59183,11 +59376,13 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
+            _js->listener_snapshots--;
             JS_FreeValue(ctx, signal);
             JS_FreeCString(ctx, type);
             return JS_UNDEFINED;
         }
     }
+    _js->listener_snapshots--;
     if (!passive_set && ns_event_type_is_passive_default(type))
         passive = TRUE;
     ns_listener *l = g_new0(ns_listener, 1);
@@ -59200,6 +59395,7 @@ ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
     l->passive = passive;
     l->window_level = window_level;
     g_ptr_array_add(_js->listeners, l);
+    ns_listener_index_add(_js, l);
     ns_node_arm_js_invalidate(target);
     JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
@@ -60687,6 +60883,7 @@ ns_js_reset_runtime_state(ns_js *js)
             g_free(l);
         }
         g_ptr_array_set_size(js->listeners, 0);
+        ns_listener_index_clear(js);
     }
 
     if (js->pending_fetches) {
@@ -61484,6 +61681,7 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->listeners, TRUE);
         js->listeners = NULL;
+        g_clear_pointer(&js->listener_index, g_hash_table_destroy);
     }
     if (js->pending_fetches) {
         for (guint i = 0; i < js->pending_fetches->len; i++) {
@@ -61696,10 +61894,6 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->resize_observers, TRUE);
         js->resize_observers = NULL;
-    }
-    if (js->doc_stack) {
-        g_array_free(js->doc_stack, TRUE);
-        js->doc_stack = NULL;
     }
     if (js->ce_registry) {
         g_hash_table_destroy(js->ce_registry);
@@ -63013,7 +63207,7 @@ static void
 ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
 {
     if (!js || !n || ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
-    const char *src = ns_element_get_attr(n, "src");
+    g_autofree char *src = g_strdup(ns_element_get_attr(n, "src"));
     ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
     if (!src && ns_script_source_is_empty(n)) {
         n->flags |= NS_NODE_NOT_PARSER_INSERTED;
@@ -63022,7 +63216,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     }
     if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n))
         return;
-    const char *nonce = ns_element_get_attr(n, "nonce");
+    g_autofree char *nonce = g_strdup(ns_element_get_attr(n, "nonce"));
     const char *integrity = ns_element_get_attr(n, "integrity");
     gboolean is_module = ns_script_type_is_module(n);
     if (src && !*src) {
@@ -63848,6 +64042,45 @@ ns_js_purge_subtree_pending_iframes(ns_js *js, ns_node *root)
     }
 }
 
+static gboolean
+ns_js_node_in_tree(const ns_node *n, const ns_node *root)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p == root) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_js_purge_subtree_script_refs(ns_js *js, ns_node *root)
+{
+    if (!js || !root) return;
+    GPtrArray *queues[] = {
+        js->deferred_script_roots,
+        js->async_script_roots,
+    };
+    for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
+        if (!queues[q]) continue;
+        guint i = 0;
+        while (i < queues[q]->len) {
+            if (ns_js_node_in_tree(g_ptr_array_index(queues[q], i), root))
+                g_ptr_array_remove_index(queues[q], i);
+            else
+                i++;
+        }
+    }
+    if (js->lifecycle_tasks) {
+        guint i = 0;
+        while (i < js->lifecycle_tasks->len) {
+            ns_script_task *task =
+                &g_array_index(js->lifecycle_tasks, ns_script_task, i);
+            if (ns_js_node_in_tree(task->node, root))
+                g_array_remove_index(js->lifecycle_tasks, i);
+            else
+                i++;
+        }
+    }
+}
+
 static void
 ns_js_sweep_orphans(ns_js *js)
 {
@@ -63873,6 +64106,7 @@ ns_js_sweep_orphans(ns_js *js)
         g_hash_table_remove(js->orphan_nodes, r);
         ns_js_purge_subtree_rafs(js, r);
         ns_js_purge_subtree_pending_iframes(js, r);
+        ns_js_purge_subtree_script_refs(js, r);
         ns_node_free(r);
     }
     g_ptr_array_free(to_free, TRUE);
