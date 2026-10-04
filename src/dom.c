@@ -706,7 +706,8 @@ ns_node_set_editable_value(ns_node *n, const char *value)
         ns_element_set_attr(n, "data-nd-user-edited", "1");
         g_free(normalized);
     } else if (ns_node_is_contenteditable_host(n)) {
-        ns_node *doc = (ns_node *)ns_node_root(n);
+        ns_node *doc = n;
+        while (doc->parent) doc = doc->parent;
         for (ns_node *c = n->first_child; c; ) {
             ns_node *next = c->next_sibling;
             ns_node_remove(c);
@@ -1559,19 +1560,42 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
     return NULL;
 }
 
+typedef void (*ns_doc_index_visit)(ns_node *doc, ns_node *n);
+
 static void
-ns_doc_id_index_register_subtree(ns_node *doc, ns_node *n, int depth)
+ns_doc_index_walk(ns_node *doc, ns_node *root, gboolean scoped,
+                  ns_doc_index_visit visit)
 {
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
-            g_hash_table_insert(doc->id_index, g_strdup(eid), n);
+    ns_node *n = root;
+    while (n) {
+        gboolean descend = TRUE;
+        if (scoped && n != doc && ns_dom_tree_scope_boundary(n)) {
+            descend = FALSE;
+        } else {
+            visit(doc, n);
+            if (scoped && ns_node_is_element_named(n, "template"))
+                descend = FALSE;
+        }
+        n = ns_node_next_in_subtree(n, root, descend);
     }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_id_index_register_subtree(doc, c, depth + 1);
+}
+
+static void
+ns_doc_id_index_add_node(ns_node *doc, ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT) return;
+    const char *eid = ns_element_get_attr(n, "id");
+    if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
+        g_hash_table_insert(doc->id_index, g_strdup(eid), n);
+}
+
+static void
+ns_doc_id_index_remove_node(ns_node *doc, ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT) return;
+    const char *eid = ns_element_get_attr(n, "id");
+    if (eid && *eid && g_hash_table_lookup(doc->id_index, eid) == n)
+        g_hash_table_remove(doc->id_index, eid);
 }
 
 void
@@ -1584,7 +1608,7 @@ ns_doc_id_index_build(ns_node *doc)
         doc->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     }
-    ns_doc_id_index_register_subtree(doc, doc, 0);
+    ns_doc_index_walk(doc, doc, TRUE, ns_doc_id_index_add_node);
 }
 
 void
@@ -1603,50 +1627,18 @@ ns_doc_id_index_unregister(ns_node *doc, const char *id, const ns_node *node)
     if (cur == node) g_hash_table_remove(doc->id_index, id);
 }
 
-static void
-ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
-{
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
-            g_hash_table_insert(doc->id_index, g_strdup(eid), n);
-    }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_id_index_add_subtree(doc, c, depth + 1);
-}
-
-static void
-ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
-{
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid) {
-            gpointer cur = g_hash_table_lookup(doc->id_index, eid);
-            if (cur == n) g_hash_table_remove(doc->id_index, eid);
-        }
-    }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_id_index_remove_subtree(doc, c, depth + 1);
-}
-
 void
 ns_doc_id_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
-    ns_doc_id_index_add_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, TRUE, ns_doc_id_index_add_node);
 }
 
 void
 ns_doc_id_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
-    ns_doc_id_index_remove_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, FALSE, ns_doc_id_index_remove_node);
 }
 
 #define NS_DOC_INDEX_SCAN_MAX 64
@@ -1932,31 +1924,19 @@ ns_doc_class_index_unregister(ns_node *doc, const char *class_attr, ns_node *nod
 }
 
 static void
-ns_doc_class_index_add_subtree(ns_node *doc, ns_node *n, int depth)
+ns_doc_class_index_add_node(ns_node *doc, ns_node *n)
 {
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *cls = ns_element_get_attr(n, "class");
-        if (cls && *cls) ns_doc_class_index_register(doc, cls, n);
-    }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_class_index_add_subtree(doc, c, depth + 1);
+    if (n->kind != NS_NODE_ELEMENT) return;
+    const char *cls = ns_element_get_attr(n, "class");
+    if (cls && *cls) ns_doc_class_index_register(doc, cls, n);
 }
 
 static void
-ns_doc_class_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
+ns_doc_class_index_remove_node(ns_node *doc, ns_node *n)
 {
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *cls = ns_element_get_attr(n, "class");
-        if (cls && *cls) ns_doc_class_index_unregister(doc, cls, n);
-    }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_class_index_remove_subtree(doc, c, depth + 1);
+    if (n->kind != NS_NODE_ELEMENT) return;
+    const char *cls = ns_element_get_attr(n, "class");
+    if (cls && *cls) ns_doc_class_index_unregister(doc, cls, n);
 }
 
 void
@@ -1970,7 +1950,7 @@ ns_doc_class_index_build(ns_node *doc)
                                                  g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;
-    ns_doc_class_index_add_subtree(doc, doc, 0);
+    ns_doc_index_walk(doc, doc, TRUE, ns_doc_class_index_add_node);
     g_doc_index_building = FALSE;
 }
 
@@ -1978,14 +1958,14 @@ void
 ns_doc_class_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->class_index || !root) return;
-    ns_doc_class_index_add_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, TRUE, ns_doc_class_index_add_node);
 }
 
 void
 ns_doc_class_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->class_index || !root) return;
-    ns_doc_class_index_remove_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, FALSE, ns_doc_class_index_remove_node);
 }
 
 GPtrArray *
@@ -2035,27 +2015,17 @@ ns_doc_tag_index_remove_single(GHashTable *map, const char *tag, ns_node *node)
 }
 
 static void
-ns_doc_tag_index_add_subtree(ns_node *doc, ns_node *n, int depth)
+ns_doc_tag_index_add_node(ns_node *doc, ns_node *n)
 {
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_add_single(doc->tag_index, n->name, n);
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_tag_index_add_subtree(doc, c, depth + 1);
 }
 
 static void
-ns_doc_tag_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
+ns_doc_tag_index_remove_node(ns_node *doc, ns_node *n)
 {
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_dom_tree_scope_boundary(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_remove_single(doc->tag_index, n->name, n);
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_tag_index_remove_subtree(doc, c, depth + 1);
 }
 
 void
@@ -2069,7 +2039,7 @@ ns_doc_tag_index_build(ns_node *doc)
                                                g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;
-    ns_doc_tag_index_add_subtree(doc, doc, 0);
+    ns_doc_index_walk(doc, doc, TRUE, ns_doc_tag_index_add_node);
     g_doc_index_building = FALSE;
 }
 
@@ -2077,14 +2047,14 @@ void
 ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->tag_index || !root) return;
-    ns_doc_tag_index_add_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, TRUE, ns_doc_tag_index_add_node);
 }
 
 void
 ns_doc_tag_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->tag_index || !root) return;
-    ns_doc_tag_index_remove_subtree(doc, root, 0);
+    ns_doc_index_walk(doc, root, FALSE, ns_doc_tag_index_remove_node);
 }
 
 GPtrArray *
