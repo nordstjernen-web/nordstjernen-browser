@@ -129,9 +129,8 @@ typedef struct {
     char            *audio;
     char            *window_action;
     char            *clipboard;
-    cairo_surface_t *surface;
-    double           surface_scale;
-    gboolean         surface_borrowed;
+    GdkTexture      *texture;
+    double           texture_scale;
     char            *href;
     char            *cursor;
     LinkAct          action;
@@ -219,7 +218,7 @@ struct NsProcView {
     int         scroll_x, scroll_y;
     gboolean    opened;
 
-    cairo_surface_t *frame;
+    GdkTexture      *frame;
     double           frame_scale;
     gulong           surface_scale_handler;
     GdkSurface      *scale_surface;
@@ -570,9 +569,7 @@ pv_free(NsProcView *v)
         }
         g_async_queue_unref(v->queue);
     }
-    if (v->frame)
-        cairo_surface_destroy(v->frame);
-    v->frame = NULL;
+    g_clear_object(&v->frame);
     if (v->favicon)
         g_object_unref(v->favicon);
     v->favicon = NULL;
@@ -1470,27 +1467,26 @@ pv_media_pump(NsProcView *v, const char *commands)
     g_string_free(audio, TRUE);
 }
 
-static cairo_surface_t *
+static GdkTexture *
 stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
 {
     (void)v;
-    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(s);
-        return NULL;
-    }
-    cairo_surface_flush(s);
-    unsigned char *dst = cairo_image_surface_get_data(s);
-    int dstride = cairo_image_surface_get_stride(s);
     size_t row = (size_t)w * 4u;
-    if (dstride == stride && (size_t)stride == row) {
-        memcpy(dst, px, row * (size_t)h);
+    if (w <= 0 || h <= 0 || (size_t)stride < row)
+        return NULL;
+    GBytes *bytes;
+    if ((size_t)stride == row) {
+        bytes = g_bytes_new(px, row * (size_t)h);
     } else {
+        unsigned char *dst = g_malloc(row * (size_t)h);
         for (int y = 0; y < h; y++)
-            memcpy(dst + (size_t)y * dstride, px + (size_t)y * stride, row);
+            memcpy(dst + (size_t)y * row, px + (size_t)y * stride, row);
+        bytes = g_bytes_new_take(dst, row * (size_t)h);
     }
-    cairo_surface_mark_dirty(s);
-    return s;
+    GdkTexture *tex = gdk_memory_texture_new(w, h, GDK_MEMORY_DEFAULT, bytes,
+                                             row);
+    g_bytes_unref(bytes);
+    return tex;
 }
 
 static void
@@ -1625,14 +1621,9 @@ worker_main(gpointer data)
                 res->requested_scroll_x = fr.scroll_x;
                 res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
                 if (!fr.unchanged) {
-                    res->surface = stage_fill(v, fr.pixels, fr.width,
+                    res->texture = stage_fill(v, fr.pixels, fr.width,
                                               fr.height, fr.stride);
-                    res->surface_scale = req->raster > 0 ? req->raster : 1.0;
-                    if (res->surface)
-                        cairo_surface_set_device_scale(res->surface,
-                                                       res->surface_scale,
-                                                       res->surface_scale);
-                    res->surface_borrowed = FALSE;
+                    res->texture_scale = req->raster > 0 ? req->raster : 1.0;
                 }
                 if (fr.nav) {
                     res->nav = g_strdup(fr.nav);
@@ -2673,9 +2664,7 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     v->caret_blinking = FALSE;
     stop_wheel_animation(v);
     disarm_anim(v);
-    if (v->frame)
-        cairo_surface_destroy(v->frame);
-    v->frame = NULL;
+    g_clear_object(&v->frame);
     gtk_widget_queue_draw(v->area);
     if (!v->loading) {
         v->loading = TRUE;
@@ -3084,12 +3073,10 @@ on_result(gpointer data)
                 v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
             }
         }
-        if (current && res->ok && res->surface) {
-            if (v->frame)
-                cairo_surface_destroy(v->frame);
-            v->frame = res->surface;
-            v->frame_scale = res->surface_scale;
-            res->surface = NULL;
+        if (current && res->ok && res->texture) {
+            g_clear_object(&v->frame);
+            v->frame = g_steal_pointer(&res->texture);
+            v->frame_scale = res->texture_scale;
             v->render_restarts = 0;
             gtk_widget_queue_draw(v->area);
             clear_busy_cursor(v);
@@ -3367,8 +3354,7 @@ on_result(gpointer data)
     }
 
 done:
-    if (res->surface && !res->surface_borrowed)
-        cairo_surface_destroy(res->surface);
+    g_clear_object(&res->texture);
     g_free(res->title);
     g_free(res->url);
     g_free(res->nav);
@@ -3518,20 +3504,9 @@ pv_video_draw_surface(NsProcView *v, cairo_t *cr, cairo_surface_t *surface)
 }
 
 static void
-on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
-        gpointer data)
+pv_video_draw(NsProcView *v, cairo_t *cr)
 {
-    (void)area;
-    NsProcView *v = data;
     double fs = v->frame_scale > 0 ? v->frame_scale : 1.0;
-    gboolean covers = v->frame &&
-        cairo_image_surface_get_width(v->frame) / fs >= width - 0.5 &&
-        cairo_image_surface_get_height(v->frame) / fs >= height - 0.5;
-    if (!covers) {
-        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-        cairo_rectangle(cr, 0, 0, width, height);
-        cairo_fill(cr);
-    }
     if (v->vring && v->vid_rect_valid) {
         gboolean frame_drawn = FALSE;
         cairo_save(cr);
@@ -3606,10 +3581,73 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             }
         }
     }
-    if (v->frame) {
-        cairo_set_source_surface(cr, v->frame, 0, 0);
-        cairo_paint(cr);
+}
+
+G_DECLARE_FINAL_TYPE(NsProcViewArea, ns_proc_view_area, NS, PROC_VIEW_AREA,
+                     GtkDrawingArea)
+
+struct _NsProcViewArea {
+    GtkDrawingArea parent_instance;
+    NsProcView    *view;
+};
+
+G_DEFINE_TYPE(NsProcViewArea, ns_proc_view_area, GTK_TYPE_DRAWING_AREA)
+
+static gboolean
+pv_frame_covers(NsProcView *v, double fs, const graphene_rect_t *area)
+{
+    return v->frame &&
+        gdk_texture_get_width(v->frame) / fs >= area->size.width - 0.5 &&
+        gdk_texture_get_height(v->frame) / fs >= area->size.height - 0.5;
+}
+
+static void
+pv_snapshot_video(NsProcView *v, double fs, GtkSnapshot *snapshot)
+{
+    if (!v->vring || !v->vid_rect_valid)
+        return;
+    graphene_rect_t clip = GRAPHENE_RECT_INIT(
+        v->vid_clip_x / fs, v->vid_clip_y / fs,
+        MAX(v->vid_clip_w, 0.0) / fs, MAX(v->vid_clip_h, 0.0) / fs);
+    cairo_t *cr = gtk_snapshot_append_cairo(snapshot, &clip);
+    pv_video_draw(v, cr);
+    cairo_destroy(cr);
+}
+
+static void
+ns_proc_view_area_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
+{
+    NsProcView *v = NS_PROC_VIEW_AREA(widget)->view;
+    if (!v)
+        return;
+    double fs = v->frame_scale > 0 ? v->frame_scale : 1.0;
+    graphene_rect_t area = GRAPHENE_RECT_INIT(
+        0, 0, gtk_widget_get_width(widget), gtk_widget_get_height(widget));
+    if (!pv_frame_covers(v, fs, &area)) {
+        GdkRGBA white = { 1.0f, 1.0f, 1.0f, 1.0f };
+        gtk_snapshot_append_color(snapshot, &white, &area);
     }
+    pv_snapshot_video(v, fs, snapshot);
+    if (!v->frame)
+        return;
+    graphene_rect_t bounds = GRAPHENE_RECT_INIT(
+        0, 0, gdk_texture_get_width(v->frame) / fs,
+        gdk_texture_get_height(v->frame) / fs);
+    gtk_snapshot_push_clip(snapshot, &area);
+    gtk_snapshot_append_texture(snapshot, v->frame, &bounds);
+    gtk_snapshot_pop(snapshot);
+}
+
+static void
+ns_proc_view_area_class_init(NsProcViewAreaClass *klass)
+{
+    GTK_WIDGET_CLASS(klass)->snapshot = ns_proc_view_area_snapshot;
+}
+
+static void
+ns_proc_view_area_init(NsProcViewArea *self)
+{
+    self->view = NULL;
 }
 
 static void
@@ -4489,8 +4527,8 @@ on_key_released(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
 static void
 on_area_destroy(GtkWidget *widget, gpointer data)
 {
-    (void)widget;
     NsProcView *v = data;
+    NS_PROC_VIEW_AREA(widget)->view = NULL;
     v->closed = TRUE;
     g_clear_object(&v->im);
     disarm_anim(v);
@@ -4965,11 +5003,11 @@ ns_proc_view_new(void)
     g_signal_connect(v->hadj, "value-changed", G_CALLBACK(on_adj_changed), v);
     g_signal_connect(v->vadj, "value-changed", G_CALLBACK(on_adj_changed), v);
 
-    v->area = gtk_drawing_area_new();
+    v->area = g_object_new(ns_proc_view_area_get_type(), NULL);
+    NS_PROC_VIEW_AREA(v->area)->view = v;
     gtk_widget_set_hexpand(v->area, TRUE);
     gtk_widget_set_vexpand(v->area, TRUE);
     gtk_widget_set_focusable(v->area, TRUE);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(v->area), on_draw, v, NULL);
     g_signal_connect(v->area, "resize", G_CALLBACK(on_resize), v);
     g_signal_connect(v->area, "notify::has-focus",
                      G_CALLBACK(on_area_focus_notify), v);

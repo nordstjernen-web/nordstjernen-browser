@@ -359,6 +359,14 @@ Changelog:
   now supplies them; a frame's copies of native functions forward to the
   page's functions on that engine, as docs/quickjs.md describes.
 
+* The window hands each page frame to GTK as a texture instead of painting
+  it through cairo on every redraw. GTK had to rasterize the whole frame
+  into a new image and upload it each time the window redrew, also when
+  only a wheel event or a video frame changed; it now uploads a frame once.
+  Scrolling a results page in a 1200x760 window on a 2x screen draws 51-54
+  frames a second instead of 44-46, and the window's memory stays around
+  100-130 MB instead of 120-250 MB.
+
 1.0.28:
 ======
 * Scrolling no longer waits behind the page's own work. While a page is
