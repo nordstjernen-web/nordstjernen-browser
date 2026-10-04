@@ -774,6 +774,7 @@ typedef struct ns_css_selector {
 
     guint32 ancestor_hashes[4];
     guint   n_ancestor_hashes;
+    guint   n_ancestor_attr_hashes;
 } ns_css_selector;
 
 GPtrArray *ns_css_parse_selector_list(const char *text);
