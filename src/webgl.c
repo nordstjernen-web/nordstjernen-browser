@@ -80,6 +80,7 @@ typedef struct ns_webgl {
 
 static JSClassID ns_webgl_class_id;
 static GHashTable *g_webgl_by_node;
+static ns_webgl *wgl_active;
 
 static GHashTable *g_webgl_decisions;
 static char *g_webgl_pending;
@@ -417,6 +418,10 @@ ns_webgl_free(ns_webgl *g)
         ns_gl_context_release(g->gl);
         ns_gl_context_destroy(g->gl);
     }
+    if (wgl_active == g)
+        wgl_active = NULL;
+    else if (wgl_active && wgl_active->gl)
+        ns_gl_context_make_current(wgl_active->gl);
     if (g->syncs) g_hash_table_destroy(g->syncs);
     if (g->bound_buffers) g_hash_table_destroy(g->bound_buffers);
     if (g->buffer_sizes) g_hash_table_destroy(g->buffer_sizes);
@@ -457,6 +462,7 @@ wgl_cur(JSContext *ctx, JSValueConst this_val)
     ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
     if (!g || !g->gl) return NULL;
     ns_gl_context_make_current(g->gl);
+    wgl_active = g;
     ns_webgl_sync_size(g);
     wgl_bind_current_targets(g);
     return g;
@@ -476,11 +482,24 @@ wgl_no_context(JSContext *ctx, JSValueConst this_val)
     return wgl_brand(ctx, this_val) ? JS_UNDEFINED : JS_EXCEPTION;
 }
 
+static void
+wgl_reassert(ns_webgl *keep)
+{
+    if (keep && keep->gl) {
+        ns_gl_context_make_current(keep->gl);
+        wgl_active = keep;
+    }
+}
+
 static int
 argi(JSContext *ctx, int argc, JSValueConst *argv, int i)
 {
     int32_t v = 0;
-    if (i < argc) JS_ToInt32(ctx, &v, argv[i]);
+    if (i < argc) {
+        ns_webgl *keep = wgl_active;
+        JS_ToInt32(ctx, &v, argv[i]);
+        if (JS_IsObject(argv[i])) wgl_reassert(keep);
+    }
     return v;
 }
 
@@ -488,7 +507,11 @@ static double
 argd(JSContext *ctx, int argc, JSValueConst *argv, int i)
 {
     double v = 0;
-    if (i < argc) JS_ToFloat64(ctx, &v, argv[i]);
+    if (i < argc) {
+        ns_webgl *keep = wgl_active;
+        JS_ToFloat64(ctx, &v, argv[i]);
+        if (JS_IsObject(argv[i])) wgl_reassert(keep);
+    }
     return v;
 }
 
@@ -849,6 +872,7 @@ wgl_floats(JSContext *ctx, JSValueConst v, float *out, int max)
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return cnt;
     }
+    ns_webgl *keep = wgl_active;
     JSValue lv = JS_GetPropertyStr(ctx, v, "length");
     uint32_t len = 0;
     JS_ToUint32(ctx, &len, lv);
@@ -862,6 +886,7 @@ wgl_floats(JSContext *ctx, JSValueConst v, float *out, int max)
         JS_FreeValue(ctx, e);
         out[i] = (float)d;
     }
+    wgl_reassert(keep);
     return cnt;
 }
 
@@ -879,6 +904,7 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return cnt;
     }
+    ns_webgl *keep = wgl_active;
     JSValue lv = JS_GetPropertyStr(ctx, v, "length");
     uint32_t len = 0;
     JS_ToUint32(ctx, &len, lv);
@@ -892,6 +918,7 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
         JS_FreeValue(ctx, e);
         out[i] = d;
     }
+    wgl_reassert(keep);
     return cnt;
 }
 
@@ -2212,12 +2239,13 @@ static JSValue
 wgl_drawArrays(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLint first = argi(ctx, argc, argv, 1);
     GLsizei count = argi(ctx, argc, argv, 2);
     if (first < 0 || count < 0) return JS_UNDEFINED;
     if (count > 0 && !wgl_attribs_cover(g, (int64_t)first + count - 1, 1))
         return JS_UNDEFINED;
-    glDrawArrays((GLenum)argi(ctx, argc, argv, 0), first, count);
+    glDrawArrays(mode, first, count);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2226,12 +2254,12 @@ static JSValue
 wgl_drawElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLsizei count = argi(ctx, argc, argv, 1);
     GLenum type = (GLenum)argi(ctx, argc, argv, 2);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 3);
     if (!wgl_draw_elements_ok(g, count, type, offset, 1)) return JS_UNDEFINED;
-    glDrawElements((GLenum)argi(ctx, argc, argv, 0), count, type,
-                   (const void *)offset);
+    glDrawElements(mode, count, type, (const void *)offset);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2804,6 +2832,7 @@ static JSValue
 wgl_drawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLint first = argi(ctx, argc, argv, 1);
     GLsizei count = argi(ctx, argc, argv, 2);
     GLsizei instances = argi(ctx, argc, argv, 3);
@@ -2811,7 +2840,7 @@ wgl_drawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     if (count > 0 && instances > 0 &&
         !wgl_attribs_cover(g, (int64_t)first + count - 1, instances))
         return JS_UNDEFINED;
-    glDrawArraysInstanced((GLenum)argi(ctx, argc, argv, 0), first, count, instances);
+    glDrawArraysInstanced(mode, first, count, instances);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -2820,14 +2849,14 @@ static JSValue
 wgl_drawElementsInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLsizei count = argi(ctx, argc, argv, 1);
     GLenum type = (GLenum)argi(ctx, argc, argv, 2);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 3);
     GLsizei instances = argi(ctx, argc, argv, 4);
     if (instances < 0 || !wgl_draw_elements_ok(g, count, type, offset, instances))
         return JS_UNDEFINED;
-    glDrawElementsInstanced((GLenum)argi(ctx, argc, argv, 0), count, type,
-                            (const void *)offset, instances);
+    glDrawElementsInstanced(mode, count, type, (const void *)offset, instances);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
@@ -3204,13 +3233,14 @@ static JSValue
 wgl_drawRangeElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
+    GLuint start = (GLuint)argi(ctx, argc, argv, 1);
+    GLuint end = (GLuint)argi(ctx, argc, argv, 2);
     GLsizei count = argi(ctx, argc, argv, 3);
     GLenum type = (GLenum)argi(ctx, argc, argv, 4);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 5);
     if (!wgl_draw_elements_ok(g, count, type, offset, 1)) return JS_UNDEFINED;
-    glDrawRangeElements((GLenum)argi(ctx, argc, argv, 0), (GLuint)argi(ctx, argc, argv, 1),
-                        (GLuint)argi(ctx, argc, argv, 2), count, type,
-                        (const void *)offset);
+    glDrawRangeElements(mode, start, end, count, type, (const void *)offset);
     wgl_mark_dirty(g);
     return JS_UNDEFINED;
 }
