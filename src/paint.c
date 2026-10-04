@@ -5665,9 +5665,41 @@ paint_entry_cmp(const void *a, const void *b)
 }
 
 static gboolean
+box_z_index_is_auto(const ns_box *b)
+{
+    const ns_css_value *v = b && b->style ? b->style->values[NS_CSS_Z_INDEX]
+                                          : NULL;
+    return !v || v->kind != NS_CSS_V_LENGTH;
+}
+
+static gboolean
+box_is_flex_or_grid_item(const ns_box *b)
+{
+    const ns_box *p = b ? b->parent : NULL;
+    while (p && !p->style) p = p->parent;
+    if (!p) return FALSE;
+    ns_display d = ns_css_display_of(p->style);
+    return ns_display_is_flex_container(d) || ns_display_is_grid_container(d);
+}
+
+static gboolean
 box_defers_to_positioned_layer(const ns_box *b)
 {
-    return box_is_positioned(b) && box_z_index(b) >= 0;
+    if (box_z_index(b) < 0) return FALSE;
+    return box_is_positioned(b) ||
+           (!box_z_index_is_auto(b) && box_is_flex_or_grid_item(b));
+}
+
+static gboolean
+box_isolates_positioned_descendants(const ns_box *b)
+{
+    if (!box_z_index_is_auto(b)) return TRUE;
+    const ns_style *s = b->style;
+    if (!s) return FALSE;
+    const ns_css_value *pos = s->values[NS_CSS_POSITION];
+    if (keyword_is(pos, "fixed") || keyword_is(pos, "sticky")) return TRUE;
+    const ns_css_value *filter = s->values[NS_CSS_FILTER];
+    return filter && !keyword_is(filter, "none");
 }
 
 static int
@@ -5692,73 +5724,80 @@ dom_tree_order_cmp(const ns_node *a, const ns_node *b)
 typedef struct deferred_capture {
     const ns_box *box;
     double dev_x, dev_y;
+    guint seq;
 } deferred_capture;
 
-typedef struct deferred_entry {
-    const ns_box *box;
-    guint idx;
-} deferred_entry;
+static guint g_paint_capture_seq;
 
 static int
-deferred_entry_cmp(const void *va, const void *vb)
+deferred_capture_cmp(const void *va, const void *vb)
 {
-    const deferred_entry *a = va;
-    const deferred_entry *b = vb;
-    if (!a->box || !b->box)
-        return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
+    const deferred_capture *a = *(deferred_capture *const *)va;
+    const deferred_capture *b = *(deferred_capture *const *)vb;
     int za = box_z_index(a->box), zb = box_z_index(b->box);
     if (za != zb) return za < zb ? -1 : 1;
     int c = dom_tree_order_cmp(a->box->dom, b->box->dom);
     if (c) return c;
-    return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
+    return a->seq < b->seq ? -1 : a->seq > b->seq ? 1 : 0;
 }
 
 static void
 paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
 {
     if (!list || list->len == 0) return;
-    deferred_entry entries_buf[32];
-    deferred_entry *entries = list->len <= G_N_ELEMENTS(entries_buf)
-        ? entries_buf : g_new(deferred_entry, list->len);
-    for (guint i = 0; i < list->len; i++) {
-        const deferred_capture *cap = g_ptr_array_index(list, i);
-        entries[i].box = cap->box;
-        entries[i].idx = i;
-    }
-    qsort(entries, list->len, sizeof(deferred_entry), deferred_entry_cmp);
+    GPtrArray *queue = g_ptr_array_sized_new(list->len);
+    GPtrArray *adopted =
+        g_ptr_array_new_with_free_func((GDestroyNotify)g_ptr_array_unref);
+    for (guint i = 0; i < list->len; i++)
+        g_ptr_array_add(queue, g_ptr_array_index(list, i));
+    qsort(queue->pdata, queue->len, sizeof(gpointer), deferred_capture_cmp);
     const ns_box *saved_flush = g_paint_flush_box;
-    for (guint i = 0; i < list->len; i++) {
-        const deferred_capture *cap = NULL;
-        for (guint j = 0; j < list->len; j++) {
-            const deferred_capture *c2 = g_ptr_array_index(list, j);
-            if (c2->box == entries[i].box) { cap = c2; break; }
-        }
+    for (guint i = 0; i < queue->len; i++) {
+        const deferred_capture *cap = g_ptr_array_index(queue, i);
         double cur_x = 0, cur_y = 0;
         cairo_user_to_device(cr, &cur_x, &cur_y);
-        double dx = cap ? cap->dev_x - cur_x : 0;
-        double dy = cap ? cap->dev_y - cur_y : 0;
+        double dx = cap->dev_x - cur_x;
+        double dy = cap->dev_y - cur_y;
         if (isnan(dx) || isnan(dy)) dx = dy = 0;
         cairo_save(cr);
         if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
-        g_paint_flush_box = entries[i].box;
-        if (g_dbg_paint_x >= 0 && entries[i].box->dom) {
+        g_paint_flush_box = cap->box;
+        if (g_dbg_paint_x >= 0 && cap->box->dom) {
             double gx0, gy0, gx1, gy1;
             cairo_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
             g_printerr("[flush-one] <%s#%s y=%.0f h=%.0f> d=%.0f,%.0f "
                        "clip=%.0f,%.0f..%.0f,%.0f\n",
-                       entries[i].box->dom->name ? entries[i].box->dom->name
-                                                 : "?",
-                       ns_element_get_attr(entries[i].box->dom, "id")
-                           ? ns_element_get_attr(entries[i].box->dom, "id")
+                       cap->box->dom->name ? cap->box->dom->name : "?",
+                       ns_element_get_attr(cap->box->dom, "id")
+                           ? ns_element_get_attr(cap->box->dom, "id")
                            : "",
-                       entries[i].box->y, entries[i].box->content_height,
+                       cap->box->y, cap->box->content_height,
                        dx, dy, gx0, gy0, gx1, gy1);
         }
-        paint_walk(cr, entries[i].box, highlight);
+        gboolean flat = !box_isolates_positioned_descendants(cap->box);
+        GPtrArray *saved_list = g_paint_deferred_list;
+        if (flat) {
+            g_paint_deferred_list = NULL;
+            g_paint_defer_depth++;
+        }
+        paint_walk(cr, cap->box, highlight);
+        if (flat) {
+            GPtrArray *found = g_paint_deferred_list;
+            g_paint_deferred_list = saved_list;
+            g_paint_defer_depth--;
+            if (found) {
+                for (guint k = 0; k < found->len; k++)
+                    g_ptr_array_add(queue, g_ptr_array_index(found, k));
+                qsort(queue->pdata + i + 1, queue->len - i - 1,
+                      sizeof(gpointer), deferred_capture_cmp);
+                g_ptr_array_add(adopted, found);
+            }
+        }
         cairo_restore(cr);
     }
     g_paint_flush_box = saved_flush;
-    if (entries != entries_buf) g_free(entries);
+    g_ptr_array_free(queue, TRUE);
+    g_ptr_array_free(adopted, TRUE);
 }
 
 static double g_paint_anchor_dx, g_paint_anchor_dy;
@@ -6653,6 +6692,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             g_paint_deferred_list = g_ptr_array_new_with_free_func(g_free);
         deferred_capture *cap = g_new0(deferred_capture, 1);
         cap->box = b;
+        cap->seq = g_paint_capture_seq++;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
@@ -6978,7 +7018,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
                                clip_overflow || has_path_clip ||
-                               b == g_paint_flush_box;
+                               (b == g_paint_flush_box &&
+                                box_isolates_positioned_descendants(b));
     GPtrArray *saved_layer_list = NULL;
     if (own_layer_scope) {
         saved_layer_list = g_paint_deferred_list;
