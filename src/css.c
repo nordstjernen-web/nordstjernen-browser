@@ -30449,6 +30449,38 @@ scope_shadow_css(const char *flat_css, const char *host_id, gboolean frame_scope
     return g_string_free(out, FALSE);
 }
 
+#define NS_SCOPED_CSS_CACHE_MAX 4096
+
+static GHashTable *g_scoped_css_cache;
+
+static char *
+scoped_css_cached(const char *css, gsize len, const char *host_id,
+                  gboolean frame_scope)
+{
+    GString *key = g_string_sized_new(len + strlen(host_id) + 3);
+    g_string_append_c(key, frame_scope ? 'f' : 's');
+    g_string_append(key, host_id);
+    g_string_append_c(key, '\n');
+    g_string_append_len(key, css, (gssize)len);
+    const char *hit = g_scoped_css_cache
+        ? g_hash_table_lookup(g_scoped_css_cache, key->str) : NULL;
+    if (hit) {
+        g_string_free(key, TRUE);
+        return g_strdup(hit);
+    }
+    char *flat = css_flatten_nesting(css, (gssize)len);
+    char *scoped = scope_shadow_css(flat, host_id, frame_scope);
+    g_free(flat);
+    if (!g_scoped_css_cache)
+        g_scoped_css_cache = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, g_free);
+    if (g_hash_table_size(g_scoped_css_cache) >= NS_SCOPED_CSS_CACHE_MAX)
+        g_hash_table_remove_all(g_scoped_css_cache);
+    g_hash_table_insert(g_scoped_css_cache, g_string_free(key, FALSE),
+                        g_strdup(scoped));
+    return scoped;
+}
+
 static char *
 style_element_final_css(ns_node *style)
 {
@@ -30468,9 +30500,8 @@ style_element_final_css(ns_node *style)
         frame_scope = host_id != NULL;
     }
     if (host_id) {
-        char *flat = css_flatten_nesting(buf->str, (gssize)buf->len);
-        char *rewritten = scope_shadow_css(flat, host_id, frame_scope);
-        g_free(flat);
+        char *rewritten = scoped_css_cached(buf->str, buf->len, host_id,
+                                            frame_scope);
         g_free(host_id);
         g_string_free(buf, TRUE);
         return rewritten;
@@ -30491,9 +30522,7 @@ ns_css_shadow_adopted_css(ns_node *root)
     if (!css || !*css) return NULL;
     char *host_id = shadow_root_host_scope_id(root);
     if (!host_id) return NULL;
-    char *flat = css_flatten_nesting(css, (gssize)strlen(css));
-    char *scoped = scope_shadow_css(flat, host_id, FALSE);
-    g_free(flat);
+    char *scoped = scoped_css_cached(css, strlen(css), host_id, FALSE);
     g_free(host_id);
     return scoped;
 }

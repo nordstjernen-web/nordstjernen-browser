@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* Style elements inside shadow roots and frames are no longer rewritten on
+  every relayout. Their CSS is flattened and scoped to the host, which is a
+  pure function of the text and the host, so the result is now kept by
+  that text. Pages with many such style elements relayout faster
+  (Speedometer's Svelte-Complex-DOM 204 ms to 115 ms).
 * Relayouts measure text once per distinct run instead of on every pass.
   The size, line count and baseline of a measured text layout are kept,
   keyed by its text, font, attribute list and layout settings, so a forced
