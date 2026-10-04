@@ -195,6 +195,7 @@ struct ns_js {
     GHashTable   *js_image_loads;
     GHashTable   *orphan_nodes;
     GPtrArray    *listeners;
+    GHashTable   *listener_index;
     GHashTable   *pinned_wrappers_set;
     GPtrArray    *attr_wrappers;
     GHashTable   *attribute_maps;
@@ -265,6 +266,7 @@ struct ns_js {
     int           dispatch_depth;
     /* listener lists copied for a dispatch in progress (kept from sweeps) */
     int           listener_snapshots;
+    guint         listener_tombstones;
     int           callback_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;

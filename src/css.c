@@ -2690,9 +2690,49 @@ css_selector_add_ancestor_hash(ns_css_selector *sel, guint32 hash)
         sel->ancestor_hashes[sel->n_ancestor_hashes++] = hash;
 }
 
+static gboolean g_css_attr_ancestor_hashes;
+
+static guint32
+css_attr_value_hash(const char *name, const char *value, gsize value_len)
+{
+    guint32 h = css_identifier_hash('[', name, strlen(name));
+    h = (h ^ (guchar)'=') * 16777619u;
+    for (gsize i = 0; i < value_len; i++)
+        h = (h ^ (guchar)value[i]) * 16777619u;
+    return h;
+}
+
+static gboolean
+css_attr_pred_filterable(const ns_css_attr_pred *a)
+{
+    return a->op == NS_CSS_ATTR_EQ && a->name && a->value &&
+           !a->case_insensitive && !a->html_ci && !strchr(a->name, '|');
+}
+
+static void
+css_selector_collect_attr_ancestor_hashes(ns_css_selector *sel)
+{
+    for (int k = (int)sel->compounds->len - 2; k >= 0; k--) {
+        ns_css_comb right = g_array_index(sel->combinators, ns_css_comb, k + 1);
+        if (right != NS_CSS_COMB_DESCENDANT && right != NS_CSS_COMB_CHILD)
+            continue;
+        const ns_css_simple *c = g_ptr_array_index(sel->compounds, k);
+        for (guint i = 0; c->attrs && i < c->attrs->len; i++) {
+            const ns_css_attr_pred *a =
+                &g_array_index(c->attrs, ns_css_attr_pred, i);
+            if (!css_attr_pred_filterable(a)) continue;
+            css_selector_add_ancestor_hash(
+                sel, css_attr_value_hash(a->name, a->value, strlen(a->value)));
+            sel->n_ancestor_attr_hashes = sel->n_ancestor_hashes;
+            g_css_attr_ancestor_hashes = TRUE;
+        }
+    }
+}
+
 static void
 css_selector_collect_ancestor_hashes(ns_css_selector *sel)
 {
+    css_selector_collect_attr_ancestor_hashes(sel);
     for (int k = (int)sel->compounds->len - 2; k >= 0; k--) {
         ns_css_comb right = g_array_index(sel->combinators, ns_css_comb, k + 1);
         if (right != NS_CSS_COMB_DESCENDANT && right != NS_CSS_COMB_CHILD)
@@ -9120,6 +9160,18 @@ anim_longhand_props(gboolean is_animation, gsize *n)
     };
     *n = is_animation ? G_N_ELEMENTS(anim) : G_N_ELEMENTS(trans);
     return is_animation ? anim : trans;
+}
+
+gboolean
+ns_css_style_may_animate(const ns_style *s)
+{
+    if (!s) return FALSE;
+    if (s->values[NS_CSS_ANIMATION_NAME]) return TRUE;
+    gsize count;
+    const ns_css_prop *lh = anim_longhand_props(FALSE, &count);
+    for (gsize i = 0; i < count; i++)
+        if (s->values[lh[i]]) return TRUE;
+    return FALSE;
 }
 
 void
@@ -24405,6 +24457,7 @@ match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
 
 static guint8         g_ancestor_filter[CSS_ANCESTOR_FILTER_SIZE];
 static gboolean       g_ancestor_filter_active;
+static gboolean       g_ancestor_filter_attrs;
 static const ns_node *g_ancestor_filter_subject;
 
 static void
@@ -24418,6 +24471,15 @@ css_ancestor_filter_count(guint32 hash, int delta)
         if (delta > 0) (*counter)++;
         else if (*counter > 0) (*counter)--;
     }
+}
+
+static void
+css_ancestor_filter_count_attrs(const ns_node *el, int delta)
+{
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        if (a->name && a->value)
+            css_ancestor_filter_count(
+                css_attr_value_hash(a->name, a->value, strlen(a->value)), delta);
 }
 
 static void
@@ -24439,12 +24501,14 @@ css_ancestor_filter_update(const ns_node *el, int delta)
             css_ancestor_filter_count(
                 css_identifier_hash('.', token, (gsize)(c - token)), delta);
     }
+    if (g_ancestor_filter_attrs) css_ancestor_filter_count_attrs(el, delta);
 }
 
 static gboolean
 css_ancestor_filter_rejects(const ns_css_selector *sel)
 {
-    for (guint i = 0; i < sel->n_ancestor_hashes; i++) {
+    guint first = g_ancestor_filter_attrs ? 0 : sel->n_ancestor_attr_hashes;
+    for (guint i = first; i < sel->n_ancestor_hashes; i++) {
         guint32 hash = sel->ancestor_hashes[i];
         if (!g_ancestor_filter[hash % CSS_ANCESTOR_FILTER_SIZE] ||
             !g_ancestor_filter[(hash >> 12) % CSS_ANCESTOR_FILTER_SIZE])
@@ -30477,6 +30541,38 @@ scope_shadow_css(const char *flat_css, const char *host_id, gboolean frame_scope
     return g_string_free(out, FALSE);
 }
 
+#define NS_SCOPED_CSS_CACHE_MAX 4096
+
+static GHashTable *g_scoped_css_cache;
+
+static char *
+scoped_css_cached(const char *css, gsize len, const char *host_id,
+                  gboolean frame_scope)
+{
+    GString *key = g_string_sized_new(len + strlen(host_id) + 3);
+    g_string_append_c(key, frame_scope ? 'f' : 's');
+    g_string_append(key, host_id);
+    g_string_append_c(key, '\n');
+    g_string_append_len(key, css, (gssize)len);
+    const char *hit = g_scoped_css_cache
+        ? g_hash_table_lookup(g_scoped_css_cache, key->str) : NULL;
+    if (hit) {
+        g_string_free(key, TRUE);
+        return g_strdup(hit);
+    }
+    char *flat = css_flatten_nesting(css, (gssize)len);
+    char *scoped = scope_shadow_css(flat, host_id, frame_scope);
+    g_free(flat);
+    if (!g_scoped_css_cache)
+        g_scoped_css_cache = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, g_free);
+    if (g_hash_table_size(g_scoped_css_cache) >= NS_SCOPED_CSS_CACHE_MAX)
+        g_hash_table_remove_all(g_scoped_css_cache);
+    g_hash_table_insert(g_scoped_css_cache, g_string_free(key, FALSE),
+                        g_strdup(scoped));
+    return scoped;
+}
+
 static char *
 style_element_final_css(ns_node *style)
 {
@@ -30496,9 +30592,8 @@ style_element_final_css(ns_node *style)
         frame_scope = host_id != NULL;
     }
     if (host_id) {
-        char *flat = css_flatten_nesting(buf->str, (gssize)buf->len);
-        char *rewritten = scope_shadow_css(flat, host_id, frame_scope);
-        g_free(flat);
+        char *rewritten = scoped_css_cached(buf->str, buf->len, host_id,
+                                            frame_scope);
         g_free(host_id);
         g_string_free(buf, TRUE);
         return rewritten;
@@ -30519,9 +30614,7 @@ ns_css_shadow_adopted_css(ns_node *root)
     if (!css || !*css) return NULL;
     char *host_id = shadow_root_host_scope_id(root);
     if (!host_id) return NULL;
-    char *flat = css_flatten_nesting(css, (gssize)strlen(css));
-    char *scoped = scope_shadow_css(flat, host_id, FALSE);
-    g_free(flat);
+    char *scoped = scoped_css_cached(css, strlen(css), host_id, FALSE);
     g_free(host_id);
     return scoped;
 }
@@ -30947,6 +31040,7 @@ ns_css_compute(ns_node *doc,
 
     memset(g_ancestor_filter, 0, sizeof g_ancestor_filter);
     g_ancestor_filter_active = TRUE;
+    g_ancestor_filter_attrs = g_css_attr_ancestor_hashes;
     GHashTable *outer_doc_sheets = g_doc_sheets;
     g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
