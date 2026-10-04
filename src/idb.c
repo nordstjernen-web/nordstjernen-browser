@@ -18,6 +18,7 @@ typedef struct ns_idb_db {
     sqlite3 *db;
     char    *path;
     guint64  last_used;
+    guint    refs;
 } ns_idb_db;
 
 static JSValue ns_idb_throw(JSContext *ctx, const char *name, const char *message);
@@ -29,9 +30,9 @@ static GHashTable *g_idb_handles;
 static guint64     g_idb_clock;
 
 static void
-ns_idb_db_free(ns_idb_db *h)
+ns_idb_db_unref(ns_idb_db *h)
 {
-    if (!h) return;
+    if (!h || --h->refs > 0) return;
     if (h->db) sqlite3_close(h->db);
     g_free(h->path);
     g_free(h);
@@ -40,7 +41,7 @@ ns_idb_db_free(ns_idb_db *h)
 static void
 ns_idb_db_close(ns_idb_db *h)
 {
-    (void)h;
+    ns_idb_db_unref(h);
 }
 
 static void
@@ -242,6 +243,7 @@ ns_idb_open_db(JSContext *ctx, const char *name)
         ns_idb_db *cached = g_hash_table_lookup(g_idb_handles, key);
         if (cached) {
             cached->last_used = ++g_idb_clock;
+            cached->refs++;
             return cached;
         }
     }
@@ -265,9 +267,10 @@ ns_idb_open_db(JSContext *ctx, const char *name)
     h->db = db;
     h->path = g_strdup(path);
     h->last_used = ++g_idb_clock;
+    h->refs = 2;
     if (!g_idb_handles)
         g_idb_handles = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                              g_free, (GDestroyNotify)ns_idb_db_free);
+                                              g_free, (GDestroyNotify)ns_idb_db_unref);
     g_hash_table_insert(g_idb_handles, g_steal_pointer(&key), h);
     ns_idb_cache_trim();
     return h;
