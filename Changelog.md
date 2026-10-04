@@ -13,6 +13,13 @@ Changelog:
   report the real ratio, so pages pick their sharp images. The renderer
   framebuffer limit grows from 2560x1600 to 6144x3456 device pixels, so wide
   windows are no longer cut off at 2560 CSS pixels.
+* Percentage widths of inline-blocks resolve against the line's containing
+  block during layout. The real layout sized them correctly and then laid
+  them out again against their own content width, so a `width: 50%`
+  inline-block came out a few pixels wide (apple.com's region picker showed
+  "..").
+* `display: none` on `::before` and `::after` removes the pseudo-element,
+  as when another rule sets its `content`.
 * `::placeholder` honours `opacity` and `visibility`, and keeps the default
   grey (#757575) when a rule changes other properties. GitHub's sign-up
   field drew its hidden placeholder in black on top of its label.
