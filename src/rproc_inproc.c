@@ -50,6 +50,7 @@ static void
 conn_close(InprocConn *conn)
 {
     ns_renderer_session_free(conn->session);
+    g_atomic_rc_box_release(conn->fb);
 #ifdef _WIN32
     _close(conn->ctrl_r);
     _close(conn->ctrl_w);
@@ -192,12 +193,12 @@ inproc_attach(int ctrl_r, int ctrl_w, unsigned char *fb, int max_w, int max_h)
     InprocConn *conn = g_new0(InprocConn, 1);
     conn->ctrl_r = ctrl_r;
     conn->ctrl_w = ctrl_w;
-    conn->fb = fb;
     conn->session = ns_renderer_session_new(ctrl_w, fb, max_w, max_h, 1);
     if (!conn->session) {
         g_free(conn);
         return NULL;
     }
+    conn->fb = g_atomic_rc_box_acquire(fb);
     g_thread_unref(g_thread_new("ns-inproc-read", reader_thread_main, conn));
     return conn;
 }

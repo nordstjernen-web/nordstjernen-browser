@@ -382,13 +382,11 @@ spawn_inproc(int max_width, int max_height)
         max_width > 32768 || max_height > 32768)
         return NULL;
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
-    unsigned char *fb = malloc(size);
-    if (!fb)
-        return NULL;
+    unsigned char *fb = g_atomic_rc_box_alloc(size);
     memset(fb, 0xff, size);
     ns_rproc_http *r = calloc(1, sizeof *r);
     if (!r) {
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
 
@@ -396,14 +394,14 @@ spawn_inproc(int max_width, int max_height)
     int req[2] = { -1, -1 }, resp[2] = { -1, -1 };
     if (_pipe(req, 1 << 20, _O_BINARY) != 0) {
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     if (_pipe(resp, 1 << 20, _O_BINARY) != 0) {
         _close(req[0]);
         _close(req[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     void *conn = g_inproc_attach(req[0], resp[1], fb, max_width, max_height);
@@ -413,7 +411,7 @@ spawn_inproc(int max_width, int max_height)
         _close(resp[0]);
         _close(resp[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     int client_r = resp[0], client_w = req[1];
@@ -422,7 +420,7 @@ spawn_inproc(int max_width, int max_height)
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     http_set_bufsize(sv[0], 1 << 20);
@@ -432,7 +430,7 @@ spawn_inproc(int max_width, int max_height)
         close(sv[0]);
         close(sv[1]);
         free(r);
-        free(fb);
+        g_atomic_rc_box_release(fb);
         return NULL;
     }
     int client_r = sv[0], client_w = sv[0];
@@ -1594,7 +1592,7 @@ ns_rproc_http_close(ns_rproc_http *r)
         close(r->sock);
 #endif
         free(r->rxbuf);
-        free(r->map);
+        g_atomic_rc_box_release(r->map);
         free(r);
         return;
     }
