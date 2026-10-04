@@ -3,6 +3,11 @@ Changelog:
 
 1.0.29:
 ======
+* Dispatching an event no longer searches the document. Looking up the
+  window's `on<type>` handler fell through to the window's named
+  properties whenever the page had not set one, which walked the whole
+  document for a frame and then an element with that name, for every
+  event.
 * Relayouts skip the transition and animation check for elements whose
   style was reused unchanged and that have nothing running. An element with
   `transition: all` compared every transitionable property on every
