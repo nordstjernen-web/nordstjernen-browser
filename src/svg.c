@@ -668,9 +668,8 @@ svg_arc_to(cairo_t *cr, double x1, double y1, double rx, double ry,
     if (!sweep && dt > 0.0)      dt -= 2.0 * G_PI;
     else if (sweep && dt < 0.0)  dt += 2.0 * G_PI;
 
-    int segs = (int)ceil(fabs(dt) / (G_PI / 2.0) - 1e-9);
-    if (segs < 1) segs = 1;
-    if (segs > 8) segs = 8;
+    double quarters = ceil(fabs(dt) / (G_PI / 2.0) - 1e-9);
+    int segs = quarters > 1.0 ? (int)MIN(quarters, 8.0) : 1;
     double seg = dt / segs;
     double alpha = 4.0 / 3.0 * tan(seg / 4.0);
 
