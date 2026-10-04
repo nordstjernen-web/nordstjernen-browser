@@ -384,6 +384,11 @@ ns_security_sandbox_init(const char *self_exe)
         LANDLOCK_ACCESS_FS_MAKE_DIR |
         LANDLOCK_ACCESS_FS_REMOVE_FILE |
         LANDLOCK_ACCESS_FS_REMOVE_DIR |
+        LANDLOCK_ACCESS_FS_MAKE_SYM |
+        LANDLOCK_ACCESS_FS_MAKE_FIFO |
+        LANDLOCK_ACCESS_FS_MAKE_SOCK |
+        LANDLOCK_ACCESS_FS_MAKE_CHAR |
+        LANDLOCK_ACCESS_FS_MAKE_BLOCK |
         LANDLOCK_ACCESS_FS_REFER;
     guint64 fs_exec = LANDLOCK_ACCESS_FS_EXECUTE;
     guint64 fs_rw   = fs_read | fs_write;
