@@ -6064,7 +6064,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         return;
     }
 
-    if (box->inline_atomics) {
+    for (int pass = 0; pass < 2 && box->inline_atomics; pass++) {
         for (guint i = 0; i < box->inline_atomics->len; i++) {
             ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
             if (ab && !(g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)))
