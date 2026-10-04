@@ -14758,6 +14758,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             abox->style = e.pseudo;
             collect_box_bg_image(abox, e.pseudo);
             ns_box *gen = build_pseudo_inline_for(e.pseudo, e.dom);
+            if (gen && gen->kind == NS_BOX_INLINE && gen->text && !*gen->text &&
+                !gen->inline_atomics) {
+                ns_box_free(gen);
+                gen = NULL;
+            }
             if (gen) box_append_child(abox, gen);
         } else {
             g_abs_force_build = TRUE;
