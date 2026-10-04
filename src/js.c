@@ -54389,7 +54389,7 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     g_snprintf(key, sizeof key, "\xff%s", name);
     g_snprintf(src_key, sizeof src_key, "\xffsrc:%s", name);
     const ns_node *el = ns_unwrap_element(this_val);
-    const char *body = el ? ns_element_get_attr(el, name) : NULL;
+    g_autofree char *body = el ? g_strdup(ns_element_get_attr(el, name)) : NULL;
     JSValue v = JS_GetPropertyStr(ctx, this_val, key);
     if (JS_IsFunction(ctx, v)) {
         JSValue compiled_from = JS_GetPropertyStr(ctx, this_val, src_key);
