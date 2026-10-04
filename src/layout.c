@@ -203,6 +203,36 @@ specified_height_to_content(const ns_box *b, double h)
     return h < 0 ? 0 : h;
 }
 
+static gboolean overflow_establishes_bfc(const ns_style *s);
+
+static double
+grid_item_min_block_contribution(const ns_box *c, double item_outer,
+                                 double cb_height)
+{
+    if (!c->style || !overflow_establishes_bfc(c->style)) return item_outer;
+    const ns_css_value *mnh = c->style->values[NS_CSS_MIN_HEIGHT];
+    double min_h = mnh && (mnh->kind == NS_CSS_V_LENGTH ||
+                           mnh->kind == NS_CSS_V_CALC)
+        ? length_resolve(mnh, cb_height > 0 ? cb_height : 0, 0) : 0;
+    if (min_h < 0) min_h = 0;
+    double extras = c->padding.top + c->padding.bottom +
+                    c->border.top + c->border.bottom +
+                    c->margin.top + c->margin.bottom;
+    return MIN(item_outer, min_h + extras);
+}
+
+static double
+stretched_item_max_height(const ns_box *c)
+{
+    const ns_css_value *mx = c->style ? c->style->values[NS_CSS_MAX_HEIGHT]
+                                      : NULL;
+    if (!mx || !(mx->kind == NS_CSS_V_LENGTH || mx->kind == NS_CSS_V_CALC) ||
+        value_is_percent(mx))
+        return -1;
+    double h = length_resolve(mx, 0, -1);
+    return h < 0 ? -1 : specified_height_to_content(c, h);
+}
+
 static double
 containing_block_definite_height(const ns_box *box)
 {
@@ -10658,9 +10688,14 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         total_fixed += base_sum;
     }
 
+    double fr_min_total = 0;
+    for (int i = 0; i < tr->n; i++)
+        if (tr->tracks[i].kind == NS_CSS_TRACK_FR)
+            fr_min_total += track_min_px(&tr->tracks[i], available_main);
+
     double shrink_used = 0;
-    if (total_fixed > available_main && total_shrink > 0) {
-        shrink_used = total_fixed - available_main;
+    if (total_fixed + fr_min_total > available_main && total_shrink > 0) {
+        shrink_used = total_fixed + fr_min_total - available_main;
         if (shrink_used > total_shrink) shrink_used = total_shrink;
         total_fixed -= shrink_used;
     }
@@ -10669,7 +10704,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     if (remaining < 0) remaining = 0;
 
     double auto_grow[NS_CSS_TRACKS_MAX] = {0};
-    if (n_auto > 0 && remaining > 0 && content_min) {
+    if (n_auto > 0 && remaining > fr_min_total && content_min) {
         double room_total = 0;
         for (int i = 0; i < tr->n; i++) {
             if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
@@ -10677,7 +10712,8 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             if (room > 0) room_total += room;
         }
         if (room_total > 0) {
-            double give = remaining < room_total ? remaining : room_total;
+            double free_space = remaining - fr_min_total;
+            double give = free_space < room_total ? free_space : room_total;
             for (int i = 0; i < tr->n; i++) {
                 if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
                 double room = auto_lim[i] - auto_base[i];
@@ -11981,7 +12017,9 @@ layout_grid(ns_box *box, double cw,
     gboolean *row_fixed = g_new0(gboolean, n_rows + 1);
     gboolean *row_flex = g_new0(gboolean, n_rows + 1);
     double *row_fr = g_new0(double, n_rows + 1);
+    double *row_flex_factor = g_new0(double, n_rows + 1);
     for (int r = 0; r < n_rows; r++) {
+        row_flex_factor[r] = -1;
         double fixed = 0;
         const ns_css_track *tk = NULL;
         if (rows_subgrid) {
@@ -12002,7 +12040,10 @@ layout_grid(ns_box *box, double cw,
                            (definite_rows && flex && tk->has_min &&
                             !track_is_intrinsic(tk->min_kind));
             row_flex[r] = definite_rows && flex;
-            if (flex) row_fr[r] = tk->v > 0 ? tk->v : 1;
+            if (flex) {
+                row_fr[r] = tk->v > 0 ? tk->v : 1;
+                row_flex_factor[r] = tk->v > 0 ? tk->v : 0;
+            }
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
@@ -12013,6 +12054,11 @@ layout_grid(ns_box *box, double cw,
         if (rs < 1) rs = 1;
         if (row + rs > n_rows) rs = n_rows - row;
         double item_outer = g_array_index(item_heights, double, i);
+        if (rs == 1 && !definite_rows && row_flex_factor[row] >= 0 &&
+            row_flex_factor[row] < 1)
+            item_outer = MAX(item_outer * row_flex_factor[row],
+                             grid_item_min_block_contribution(
+                                 items->pdata[i], item_outer, row_basis));
         double used = row_gap * (rs - 1);
         int growable = 0;
         gboolean crosses_flex = FALSE;
@@ -12047,6 +12093,7 @@ layout_grid(ns_box *box, double cw,
     g_free(row_fixed);
     g_free(row_flex);
     g_free(row_fr);
+    g_free(row_flex_factor);
 
     if (!rows_subgrid && row_basis > 0 && n_rows > 0) {
         double over = (n_rows > 1 ? row_gap * (n_rows - 1) : 0) - row_basis;
@@ -12231,9 +12278,16 @@ layout_grid(ns_box *box, double cw,
                                rk == NS_CSS_TRACK_PERCENT ||
                                (rk == NS_CSS_TRACK_FR && row_basis > 0);
             }
+            gboolean shrinks_to_row = span == 1 && free_h < -0.5 &&
+                (row_definite || grid_item_min_block_contribution(
+                                     c, item_outer, row_basis) < item_outer);
             if (!i_has_h && c->kind == NS_BOX_BLOCK &&
-                (free_h > 0.5 || (row_definite && span == 1 && free_h < -0.5)))
+                (free_h > 0.5 || shrinks_to_row)) {
                 c->content_height += free_h;
+                double max_h = stretched_item_max_height(c);
+                if (max_h >= 0 && c->content_height > max_h)
+                    c->content_height = max_h;
+            }
         } else if (free_h > 0.5 && strcmp(a_eff, "center") == 0) {
             dy_align = free_h / 2.0;
         } else if (free_h > 0.5 && (strcmp(a_eff, "end") == 0 ||

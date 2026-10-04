@@ -6986,7 +6986,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
              (bs->values[NS_CSS_WIDTH] &&
               (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
                bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC)));
-        if ((pw > 0 || explicit_w) && (ph > 0 || explicit_h)) {
+        gboolean sized_by_container = box_is_flex_or_grid_item(b);
+        if ((pw > 0 || explicit_w || sized_by_container) &&
+            (ph > 0 || explicit_h || sized_by_container)) {
             cairo_save(cr);
             corner_radii ov_radii = box_border_radii(b);
             if (!corner_radii_zero(ov_radii))
