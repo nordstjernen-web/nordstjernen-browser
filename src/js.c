@@ -51538,10 +51538,15 @@ ns_document_collect_by_tag(JSContext *ctx, ns_node *doc, const char *tag)
     uint32_t idx = 0;
     if (doc->tag_index && strcmp(tag, "*") != 0) {
         GPtrArray *list = ns_doc_tag_index_lookup(doc, tag);
-        if (list)
-            for (guint k = 0; k < list->len; k++)
-                JS_SetPropertyUint32(ctx, arr, idx++,
-                                     ns_make_element(ctx, g_ptr_array_index(list, k)));
+        GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
+        for (guint k = 0; list && k < list->len; k++) {
+            JSValue item = ns_make_element(ctx, g_ptr_array_index(list, k));
+            g_array_append_val(items, item);
+        }
+        for (guint k = 0; k < items->len; k++)
+            JS_SetPropertyUint32(ctx, arr, idx++,
+                                 g_array_index(items, JSValue, k));
+        g_array_free(items, TRUE);
         return arr;
     }
     GQueue q = G_QUEUE_INIT;
