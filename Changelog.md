@@ -3,6 +3,9 @@ Changelog:
 
 1.0.28:
 ======
+* Scripts with many functions parse faster (about 9% on a 1.2 MB script of
+  40,000 small functions): a nested function now shares its script's file
+  name instead of looking the URL up again in the atom table.
 * Reading any property of a `<form>` no longer rebuilds the list of its
   controls: forms resolve control names before their own members, so every
   `form.action` or `form.q` walked the document for the form's controls. The
