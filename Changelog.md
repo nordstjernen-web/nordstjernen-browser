@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* Style resolution is faster on pages with attribute selectors: whether an
+  attribute's value compares case-insensitively is decided once per selector
+  instead of for every element (Speedometer's Complex-DOM suites run about 18%
+  faster).
 * Scripts with many functions parse faster (about 9% on a 1.2 MB script of
   40,000 small functions): a nested function now shares its script's file
   name instead of looking the URL up again in the atom table.
