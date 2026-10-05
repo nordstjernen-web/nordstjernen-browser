@@ -8157,9 +8157,21 @@ replaced_height_for_width(const ns_box *box)
     const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     if (!hv || !(hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         return -1;
-    if (!value_is_percent(hv)) return length_resolve(hv, 0, -1);
-    double cb_h = containing_block_definite_height(box);
-    return cb_h >= 0 ? resolve_height_with_basis(hv, 0, cb_h, -1) : -1;
+    double h;
+    if (!value_is_percent(hv)) {
+        h = length_resolve(hv, 0, -1);
+    } else {
+        double cb_h = containing_block_definite_height(box);
+        h = cb_h >= 0 ? resolve_height_with_basis(hv, 0, cb_h, -1) : -1;
+    }
+    if (h > 0 && ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING],
+                                   "border-box")) {
+        ns_edges m = {0}, pd = {0}, bd = {0};
+        edges_from_style(box->style, 0, &m, &pd, &bd);
+        h -= pd.top + pd.bottom + bd.top + bd.bottom;
+        if (h < 0) h = 0;
+    }
+    return h;
 }
 
 static const ns_box *
@@ -8213,9 +8225,13 @@ replaced_auto_width(const ns_box *box)
     if (box->kind == NS_BOX_SVG && box->dom) {
         ns_svg_size size;
         ns_svg_intrinsic_size(box->dom, &size);
+        double h = replaced_height_for_width(box);
+        if (h > 0 && size.has_ratio && size.ratio > 0) return h * size.ratio;
         return size.has_width && size.width > 0 ? size.width : 300;
     }
-    double attr = box->dom ? image_dimension_attr(box->dom, "width") : 0;
+    const char *width_attr = box->dom ? ns_element_get_attr(box->dom, "width") : NULL;
+    double attr = width_attr && !strchr(width_attr, '%')
+        ? image_dimension_attr(box->dom, "width") : 0;
     if (attr > 0) return attr;
     if (box->kind == NS_BOX_VIDEO) return 300;
     return box->media && box->media->placeholder_image_size ? 200 : 0;
