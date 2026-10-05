@@ -44,6 +44,13 @@ Changelog:
   adds no width to its container's min- and max-content size, as in other
   browsers, takes its width from a definite `height` and its aspect ratio,
   and still fills the line of a flex container or an ordinary block.
+* An image, video or SVG with a percentage width (`width: 100%` and the
+  like) inside a box that sizes itself to its content -- a float, an
+  inline-block, an absolutely positioned box, a flex or grid item -- adds
+  its natural width to that box's max-content size and nothing to its
+  min-content size, as CSS Sizing specifies. It used to add the
+  percentage of the page width, so such a box grew to the full width and
+  the image was drawn at that width.
 
 1.0.29:
 ======
