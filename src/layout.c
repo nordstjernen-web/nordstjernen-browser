@@ -1789,9 +1789,11 @@ build_table_row(const ns_node *tr, GHashTable *styles)
     ns_box *row = box_new(NS_BOX_TABLE_ROW);
     row->dom = tr;
     row->style = g_hash_table_lookup(styles, tr);
-    for (const ns_node *c = tr->first_child; c; c = c->next_sibling)
-        if (is_cell_element(c, styles))
-            box_append_child(row, build_cell(c, styles));
+    for (const ns_node *c = tr->first_child; c; c = c->next_sibling) {
+        if (!is_cell_element(c, styles)) continue;
+        if (style_is_none(g_hash_table_lookup(styles, c))) continue;
+        box_append_child(row, build_cell(c, styles));
+    }
     return row;
 }
 
