@@ -8287,7 +8287,7 @@ ratio_only_replaced_width(const ns_box *box, gboolean max_content)
     }
     if (max_content && replaced_containing_block_is_definite(box)) {
         const ns_box *cb = replaced_containing_box(box);
-        if (cb->content_width > 0) return cb->content_width;
+        if (cb && cb->content_width > 0) return cb->content_width;
     }
     return 0;
 }
