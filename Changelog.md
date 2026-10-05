@@ -36,6 +36,14 @@ Changelog:
   card images grew to twice their height and product shots were squeezed
   instead of cropped. A `<picture>` without an `<img>` now renders nothing.
   `<source>` selection is unchanged.
+* An inline `<svg>` that has only a `viewBox` (no `width`/`height`) no
+  longer stretches the box around it. Floats, inline-blocks, buttons,
+  absolutely positioned boxes, `auto` grid tracks and table cells measured
+  it at the full width of the page, so icon buttons became hundreds of
+  pixels wide and drew their icons as huge black shapes. Such an SVG now
+  adds no width to its container's min- and max-content size, as in other
+  browsers, takes its width from a definite `height` and its aspect ratio,
+  and still fills the line of a flex container or an ordinary block.
 
 1.0.29:
 ======
