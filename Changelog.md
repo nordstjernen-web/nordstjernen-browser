@@ -110,6 +110,11 @@ Changelog:
   percentage of its own width, so a one-line header with `height: 100%`
   became as tall as it was wide and `align-items: center` pushed its
   items hundreds of pixels down.
+* An absolutely positioned box placed at its static position inside a
+  flex or grid container, or in a right-to-left block, now moves with its
+  content. Only the box itself was moved, so its text and children stayed
+  where block layout had first put them: search placeholders and icons
+  were drawn below their input.
 
 1.0.29:
 ======

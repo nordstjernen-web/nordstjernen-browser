@@ -15262,13 +15262,15 @@ grid_static_position(ns_box *abox, const ns_box *cb,
         const char *js = abox->style ? ns_style_keyword(abox->style, NS_CSS_JUSTIFY_SELF) : NULL;
         if (!js || strcmp(js, "auto") == 0)
             js = keyword_or(cb->style, NS_CSS_JUSTIFY_ITEMS, "normal");
-        abox->x = area_x + grid_static_align_offset(js, area_w - outer_w, rtl);
+        shift_box_tree(abox, area_x + grid_static_align_offset(js, area_w - outer_w, rtl)
+                             - abox->x, 0);
     }
     if (static_y) {
         const char *as = abox->style ? ns_style_keyword(abox->style, NS_CSS_ALIGN_SELF) : NULL;
         if (!as || strcmp(as, "auto") == 0)
             as = keyword_or(cb->style, NS_CSS_ALIGN_ITEMS, "normal");
-        abox->y = area_y + grid_static_align_offset(as, area_h - outer_h, FALSE);
+        shift_box_tree(abox, 0, area_y + grid_static_align_offset(as, area_h - outer_h, FALSE)
+                                - abox->y);
     }
 }
 
@@ -15696,15 +15698,15 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean static_y = (!atv || length_is_auto(atv)) &&
                             (!abv || length_is_auto(abv));
         if (static_x && static_rtl && !(st && st->run))
-            abox->x = static_right - (abox->margin.left + abox->border.left +
-                                      abox->padding.left + abox->content_width +
-                                      abox->padding.right + abox->border.right +
-                                      abox->margin.right);
+            shift_box_tree(abox, static_right - (abox->margin.left + abox->border.left +
+                                                 abox->padding.left + abox->content_width +
+                                                 abox->padding.right + abox->border.right +
+                                                 abox->margin.right) - abox->x, 0);
         double flex_x = 0, flex_y = 0;
         if (flex_parent && (static_x || static_y) &&
             flex_static_position(abox, flex_parent, &flex_x, &flex_y)) {
-            if (static_x) abox->x = flex_x;
-            if (static_y) abox->y = flex_y;
+            shift_box_tree(abox, static_x ? flex_x - abox->x : 0,
+                           static_y ? flex_y - abox->y : 0);
         }
         if (grid_cb && flex_parent == cb && (static_x || static_y))
             grid_static_position(abox, cb, grid_x, grid_y, grid_w, grid_h,
