@@ -128,6 +128,46 @@ is_mobile = is_android or is_ios
 # free of GTK. The GTK shell itself is a feature: disabling it yields a
 # renderer-only build that needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
+gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
+use_ns_pango = not is_mobile and get_option('ns-pango').allowed()
+
+# ns-pango enforces the text-stack floors from inside the subproject, where a
+# too-old library surfaces as a bare version mismatch and only the first of
+# several is reported. Checking every hard floor here first names them all.
+ns_dependency_floors = [['libcurl', '>=8.5']]
+if use_ns_pango
+  ns_dependency_floors += [
+    ['glib-2.0', '>=2.80'],
+    ['gobject-2.0', '>=2.80'],
+    ['gio-2.0', '>=2.80'],
+    ['cairo', '>=1.18'],
+    ['harfbuzz', '>=8.3'],
+    ['fribidi', '>=1.0.6'],
+    ['fontconfig', '>=2.15'],
+  ]
+endif
+if not is_mobile and gtk_feature.enabled()
+  ns_dependency_floors += [['gtk4', gtk4_min]]
+endif
+ns_unmet_floors = []
+foreach floor : ns_dependency_floors
+  if not dependency(floor[0], version: floor[1], required: false).found()
+    installed = dependency(floor[0], required: false)
+    ns_unmet_floors += '  @0@ @1@ (@2@)'.format(floor[0], floor[1],
+      installed.found() ? 'found ' + installed.version() : 'not found')
+  endif
+endforeach
+if ns_unmet_floors.length() > 0
+  ns_floor_hint = ''
+  if use_ns_pango
+    ns_floor_hint = (' -Dns-pango=disabled drops the text-stack floors by ' +
+                     'shaping through the system Pango.')
+  endif
+  error('Nordstjernen needs newer system libraries than this machine has:\n' +
+        '\n'.join(ns_unmet_floors) + '\n' +
+        'Ubuntu 24.04, Debian 13 and Fedora 40 are the oldest releases of ' +
+        'their distributions that ship all of them.' + ns_floor_hint)
+endif
 
 glib       = dependency('glib-2.0')
 gobject    = dependency('gobject-2.0')
@@ -139,7 +179,6 @@ cairo      = dependency('cairo')
 # system Pango into the same process. Android and iOS link the system Pango
 # instead -- the fork carries no CoreText backend and requires fontconfig --
 # and src/ns_pango_names.h maps the renamed API back for them.
-use_ns_pango = not is_mobile and get_option('ns-pango').allowed()
 if use_ns_pango
   ns_pango_debug = ns_is_release ? 'false' : 'true'
   ns_pango_ndebug = ns_is_release ? 'true' : 'false'
@@ -178,7 +217,6 @@ endif
 
 have_gtk = false
 if not is_mobile and gtk_feature.allowed()
-  gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
   gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
   if gtk4.found()
     have_gtk = true

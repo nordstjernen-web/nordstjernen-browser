@@ -402,6 +402,14 @@ Changelog:
   quietly returned null or 0, or ran on the wrong object, and Google's
   sign-in checks for this. `HTMLImageElement.decode()` called on something
   that is not a node now rejects at once instead of never settling.
+* `meson setup` checks every hard system-library version floor -- libcurl
+  8.5; with ns-pango, GLib 2.80, Cairo 1.18, HarfBuzz 8.3, FriBidi 1.0.6
+  and fontconfig 2.15; with `-Dgtk=enabled`, GTK 4.14 -- before it
+  configures ns-pango, and names each library that is missing or too old
+  in one error. On a release older than Ubuntu 24.04 the build used to
+  stop inside the ns-pango subproject on whichever floor it met first, as
+  a bare GLib version mismatch. The error also points at
+  `-Dns-pango=disabled`, which shapes through the system Pango instead.
 
 1.0.28:
 ======
