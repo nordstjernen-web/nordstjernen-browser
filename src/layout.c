@@ -7891,6 +7891,9 @@ inline_atomic_needs_layout(const ns_box *ab)
 static double
 inline_atomic_measure_basis(const ns_box *box)
 {
+    if (box && box->media && box->media->intrinsic_ratio_only &&
+        !value_is_percent(box->style ? box->style->values[NS_CSS_WIDTH] : NULL))
+        return 0;
     const ns_css_value *wv = box && box->style
         ? box->style->values[NS_CSS_WIDTH] : NULL;
     gboolean replaced = box && (box->kind == NS_BOX_IMAGE ||
@@ -8130,6 +8133,24 @@ table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
 }
 
 static double
+ratio_only_replaced_width(const ns_box *box, gboolean max_content)
+{
+    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    if (hv && !value_is_percent(hv) &&
+        (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC)) {
+        double h = length_resolve(hv, 0, -1);
+        ns_svg_size size;
+        ns_svg_intrinsic_size(box->dom, &size);
+        if (h > 0 && size.has_ratio && size.ratio > 0) return h * size.ratio;
+    }
+    if (max_content && box->parent &&
+        style_is_flex_container(box->parent->style) &&
+        box->parent->content_width > 0)
+        return box->parent->content_width;
+    return 0;
+}
+
+static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
@@ -8218,6 +8239,8 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
             if (styled >= 0) return styled;
         }
+        if (box->media && box->media->intrinsic_ratio_only)
+            return ratio_only_replaced_width(box, TRUE);
         return box->content_width > 0 ? box->content_width : 200;
     }
     if (box->kind == NS_BOX_TEXT) {
@@ -8420,6 +8443,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (max_width && max_width->kind == NS_CSS_V_LENGTH &&
             max_width->u.length.unit == NS_CSS_UNIT_PERCENT)
             return 0;
+        if (box->media && box->media->intrinsic_ratio_only)
+            return ratio_only_replaced_width(box, FALSE);
         return box->content_width > 0 ? box->content_width : 200;
     }
     if (box->kind == NS_BOX_TEXT)
