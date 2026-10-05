@@ -924,7 +924,6 @@ static gboolean
 is_replaced_block_tag(const char *name)
 {
     return name && (strcmp(name, "img") == 0 ||
-                    strcmp(name, "picture") == 0 ||
                     strcmp(name, "svg") == 0 ||
                     strcmp(name, "canvas") == 0 ||
                     strcmp(name, "audio") == 0 ||
@@ -938,7 +937,7 @@ is_inline_level_replaced(const ns_node *n, GHashTable *styles)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     if (!(strcmp(n->name, "img") == 0 || strcmp(n->name, "svg") == 0 ||
-          strcmp(n->name, "picture") == 0 || strcmp(n->name, "audio") == 0 ||
+          strcmp(n->name, "audio") == 0 ||
           strcmp(n->name, "video") == 0 || strcmp(n->name, "math") == 0 ||
           strcmp(n->name, "canvas") == 0))
         return FALSE;
@@ -1246,7 +1245,7 @@ button_has_replaced_child_depth(const ns_node *n, int depth)
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             (strcmp(c->name, "svg") == 0 || strcmp(c->name, "img") == 0 ||
-             strcmp(c->name, "picture") == 0 || strcmp(c->name, "audio") == 0 ||
+             strcmp(c->name, "audio") == 0 ||
              strcmp(c->name, "video") == 0))
             return TRUE;
         if (c->kind == NS_NODE_ELEMENT &&
@@ -1329,8 +1328,7 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     }
     if (strcmp(nm, "img") == 0 || strcmp(nm, "svg") == 0 ||
         strcmp(nm, "audio") == 0 || strcmp(nm, "video") == 0 ||
-        strcmp(nm, "math") == 0 || strcmp(nm, "canvas") == 0 ||
-        strcmp(nm, "picture") == 0)
+        strcmp(nm, "math") == 0 || strcmp(nm, "canvas") == 0)
         return is_inline_level_replaced(n, styles);
     if (strcmp(nm, "input") == 0 || strcmp(nm, "textarea") == 0 ||
         strcmp(nm, "select") == 0 ||
@@ -5019,7 +5017,6 @@ append_display_contents_children(ns_box *block, const ns_node *n,
                 contains_block_media(c, styles) ||
                 node_has_media_metadata(c) ||
                 (c->name && (strcmp(c->name, "img") == 0 ||
-                             strcmp(c->name, "picture") == 0 ||
                              strcmp(c->name, "svg") == 0 ||
                              strcmp(c->name, "audio") == 0 ||
                              strcmp(c->name, "video") == 0 ||
@@ -5272,8 +5269,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return clearance;
     }
 
-    if (n->name && (strcmp(n->name, "img") == 0 ||
-                    strcmp(n->name, "picture") == 0)) {
+    if (n->name && strcmp(n->name, "img") == 0) {
         ns_box *ib = build_image_box(n);
         if (ib) ib->style = s;
         return ib;
@@ -5535,7 +5531,6 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 contains_block_media(c, styles) ||
                 node_has_media_metadata(c) ||
                 (c->name && (strcmp(c->name, "img") == 0 ||
-                             strcmp(c->name, "picture") == 0 ||
                              strcmp(c->name, "svg") == 0 ||
                              strcmp(c->name, "audio") == 0 ||
                              strcmp(c->name, "video") == 0 ||
