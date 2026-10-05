@@ -7891,9 +7891,6 @@ inline_atomic_needs_layout(const ns_box *ab)
 static double
 inline_atomic_measure_basis(const ns_box *box)
 {
-    if (box && box->media && box->media->intrinsic_ratio_only &&
-        !value_is_percent(box->style ? box->style->values[NS_CSS_WIDTH] : NULL))
-        return 0;
     const ns_css_value *wv = box && box->style
         ? box->style->values[NS_CSS_WIDTH] : NULL;
     gboolean replaced = box && (box->kind == NS_BOX_IMAGE ||
@@ -8132,22 +8129,179 @@ table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
     return sum > captions ? sum : captions;
 }
 
+static gboolean
+box_inline_size_is_definite(const ns_box *box)
+{
+    for (const ns_box *b = box; b; b = b->parent) {
+        if (b->kind == NS_BOX_TABLE_CELL) return FALSE;
+        const ns_style *s = b->style;
+        if (!s) continue;
+        const ns_css_value *wv = s->values[NS_CSS_WIDTH];
+        gboolean fixed = wv && (wv->kind == NS_CSS_V_LENGTH ||
+                                wv->kind == NS_CSS_V_CALC) &&
+                         !value_is_percent(wv);
+        if (fixed) return TRUE;
+        if (style_is_absolute_or_fixed(s) || float_side_of(s) >= 0 ||
+            ns_display_is_atomic_inline(ns_css_display_of(s)))
+            return FALSE;
+        if (b->parent && (style_is_flex_container(b->parent->style) ||
+                          style_is_grid_container(b->parent->style)))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static double
+replaced_height_for_width(const ns_box *box)
+{
+    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    if (!hv || !(hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        return -1;
+    if (!value_is_percent(hv)) return length_resolve(hv, 0, -1);
+    double cb_h = containing_block_definite_height(box);
+    return cb_h >= 0 ? resolve_height_with_basis(hv, 0, cb_h, -1) : -1;
+}
+
+static const ns_box *
+replaced_containing_box(const ns_box *box)
+{
+    for (const ns_box *p = box->parent; p; p = p->parent)
+        if (p->kind != NS_BOX_INLINE) return p;
+    return NULL;
+}
+
+static gboolean
+replaced_containing_block_is_definite(const ns_box *box)
+{
+    if (box->parent && style_is_grid_container(box->parent->style))
+        return FALSE;
+    const ns_box *cb = replaced_containing_box(box);
+    return cb && box_inline_size_is_definite(cb);
+}
+
 static double
 ratio_only_replaced_width(const ns_box *box, gboolean max_content)
 {
-    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
-    if (hv && !value_is_percent(hv) &&
-        (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC)) {
-        double h = length_resolve(hv, 0, -1);
+    double h = replaced_height_for_width(box);
+    if (h > 0) {
         ns_svg_size size;
         ns_svg_intrinsic_size(box->dom, &size);
-        if (h > 0 && size.has_ratio && size.ratio > 0) return h * size.ratio;
+        if (size.has_ratio && size.ratio > 0) return h * size.ratio;
     }
-    if (max_content && box->parent &&
-        style_is_flex_container(box->parent->style) &&
-        box->parent->content_width > 0)
-        return box->parent->content_width;
+    if (max_content && replaced_containing_block_is_definite(box)) {
+        const ns_box *cb = replaced_containing_box(box);
+        if (cb->content_width > 0) return cb->content_width;
+    }
     return 0;
+}
+
+static double
+replaced_auto_width(const ns_box *box)
+{
+    if (box->media && box->media->intrinsic_ratio_only) {
+        double w = ratio_only_replaced_width(box, FALSE);
+        return w > 0 ? w : 300;
+    }
+    const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
+    if (img && img->loaded && img->natural_width > 0 && img->natural_height > 0) {
+        double h = replaced_height_for_width(box);
+        if (h > 0) return h * img->natural_width / img->natural_height;
+        double density = box->media->image_density > 0
+            ? box->media->image_density : 1.0;
+        return img->natural_width / density;
+    }
+    if (box->kind == NS_BOX_SVG && box->dom) {
+        ns_svg_size size;
+        ns_svg_intrinsic_size(box->dom, &size);
+        return size.has_width && size.width > 0 ? size.width : 300;
+    }
+    double attr = box->dom ? image_dimension_attr(box->dom, "width") : 0;
+    if (attr > 0) return attr;
+    if (box->kind == NS_BOX_VIDEO) return 300;
+    return box->media && box->media->placeholder_image_size ? 200 : 0;
+}
+
+static gboolean
+replaced_width_is_cyclic(const ns_box *box)
+{
+    if (!box || !(box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO ||
+                  box->kind == NS_BOX_SVG))
+        return FALSE;
+    const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
+    if (value_is_percent(wv)) return !replaced_containing_block_is_definite(box);
+    gboolean sized = wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
+    return !sized && box->media && box->media->intrinsic_ratio_only;
+}
+
+static double
+replaced_intrinsic_contribution(const ns_box *box, gboolean max_content)
+{
+    const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
+    double w;
+    if (value_is_percent(wv))
+        w = max_content ? replaced_auto_width(box) : 0;
+    else
+        w = ratio_only_replaced_width(box, max_content);
+    const ns_css_value *mxw = box->style ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
+    const ns_css_value *mnw = box->style ? box->style->values[NS_CSS_MIN_WIDTH] : NULL;
+    double max_w = value_is_percent(mxw) ? -1 : length_resolve(mxw, 0, -1);
+    double min_w = value_is_percent(mnw) ? -1 : length_resolve(mnw, 0, -1);
+    if (max_w >= 0 && w > max_w) w = max_w;
+    if (min_w >= 0 && w < min_w) w = min_w;
+    return w;
+}
+
+typedef struct ns_atomic_geometry {
+    ns_box  *box;
+    double   width, height;
+    ns_edges margin, padding, border;
+} ns_atomic_geometry;
+
+static GArray *
+measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
+                             gboolean max_content)
+{
+    GArray *saved = NULL;
+    if (!box->inline_atomics) return NULL;
+    for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
+        ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
+        if (!ab) continue;
+        gboolean cyclic = replaced_width_is_cyclic(ab);
+        if (cyclic) {
+            if (!saved)
+                saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
+            ns_atomic_geometry g = {
+                .box = ab, .width = ab->content_width, .height = ab->content_height,
+                .margin = ab->margin, .padding = ab->padding, .border = ab->border,
+            };
+            g_array_append_val(saved, g);
+        }
+        if (inline_atomic_needs_layout(ab))
+            layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+        if (cyclic) {
+            double w = replaced_intrinsic_contribution(ab, max_content);
+            double ratio = ab->content_width > 0 && ab->content_height > 0
+                ? ab->content_width / ab->content_height : 0;
+            ab->content_width = w;
+            if (ratio > 0) ab->content_height = w / ratio;
+        }
+    }
+    return saved;
+}
+
+static void
+measure_inline_atomics_end(GArray *saved)
+{
+    if (!saved) return;
+    for (guint i = 0; i < saved->len; i++) {
+        ns_atomic_geometry *g = &g_array_index(saved, ns_atomic_geometry, i);
+        g->box->content_width = g->width;
+        g->box->content_height = g->height;
+        g->box->margin = g->margin;
+        g->box->padding = g->padding;
+        g->box->border = g->border;
+    }
+    g_array_free(saved, TRUE);
 }
 
 static double
@@ -8165,18 +8319,17 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             if (!box->inline_atomics || box->inline_atomics->len == 0)
                 return 0;
             double sum = 0;
+            GArray *saved = measure_inline_atomics_begin(box, parent_style, TRUE);
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics,
                                            ns_inline_atomic, ai).box;
                 if (!ab) continue;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab),
-                               parent_style);
                 sum += ab->content_width +
                        ab->margin.left + ab->margin.right +
                        ab->padding.left + ab->padding.right +
                        ab->border.left + ab->border.right;
             }
+            measure_inline_atomics_end(saved);
             return sum;
         }
         gboolean cacheable = inline_box_measure_cacheable(box);
@@ -8185,13 +8338,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             return box->inline_natural_cache_width;
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, -1);
-        if (box->inline_atomics) {
-            for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
-                ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
-            }
-        }
+        GArray *saved = measure_inline_atomics_begin(box, parent_style, TRUE);
         ns_pango_layout_set_text(layout, box->text, -1);
         NsPangoAttrList *i18n = ns_pango_attr_list_new();
         ns_paint_apply_i18n(layout, i18n, box);
@@ -8222,6 +8369,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 if (pw < end) pw = ceil(end);
             }
         }
+        measure_inline_atomics_end(saved);
         g_object_unref(layout);
         if (cacheable) {
             box->inline_natural_cache_style = parent_style;
@@ -8232,6 +8380,8 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     }
     if (box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO ||
         box->kind == NS_BOX_SVG) {
+        if (replaced_width_is_cyclic(box))
+            return replaced_intrinsic_contribution(box, TRUE);
         const ns_css_value *wv = box->style
             ? box->style->values[NS_CSS_WIDTH] : NULL;
         if (wv && (wv->kind == NS_CSS_V_LENGTH ||
@@ -8239,8 +8389,6 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
             if (styled >= 0) return styled;
         }
-        if (box->media && box->media->intrinsic_ratio_only)
-            return ratio_only_replaced_width(box, TRUE);
         return box->content_width > 0 ? box->content_width : 200;
     }
     if (box->kind == NS_BOX_TEXT) {
@@ -8410,13 +8558,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, 1);
         ns_pango_layout_set_wrap(layout, NS_PANGO_WRAP_WORD);
-        if (box->inline_atomics) {
-            for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
-                ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
-            }
-        }
+        GArray *saved = measure_inline_atomics_begin(box, parent_style, FALSE);
         ns_pango_layout_set_text(layout, box->text, -1);
         NsPangoAttrList *i18n = ns_pango_attr_list_new();
         ns_paint_apply_i18n(layout, i18n, box);
@@ -8428,6 +8570,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         ns_pango_attr_list_unref(i18n);
         int pw, ph;
         text_measure_pixel_size(layout, &pw, &ph);
+        measure_inline_atomics_end(saved);
         g_object_unref(layout);
         if (cacheable) {
             box->inline_min_cache_style = parent_style;
@@ -8443,8 +8586,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (max_width && max_width->kind == NS_CSS_V_LENGTH &&
             max_width->u.length.unit == NS_CSS_UNIT_PERCENT)
             return 0;
-        if (box->media && box->media->intrinsic_ratio_only)
-            return ratio_only_replaced_width(box, FALSE);
+        if (replaced_width_is_cyclic(box))
+            return replaced_intrinsic_contribution(box, FALSE);
         return box->content_width > 0 ? box->content_width : 200;
     }
     if (box->kind == NS_BOX_TEXT)
