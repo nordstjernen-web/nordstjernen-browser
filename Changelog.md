@@ -46,11 +46,13 @@ Changelog:
   and still fills the line of a flex container or an ordinary block.
 * An image, video or SVG with a percentage width (`width: 100%` and the
   like) inside a box that sizes itself to its content -- a float, an
-  inline-block, an absolutely positioned box, a flex or grid item -- adds
-  its natural width to that box's max-content size and nothing to its
-  min-content size, as CSS Sizing specifies. It used to add the
-  percentage of the page width, so such a box grew to the full width and
-  the image was drawn at that width.
+  inline-block, an absolutely positioned box, an auto table column, a
+  flex or grid item -- adds its natural width to that box's max-content
+  size and nothing to its min-content size, as CSS Sizing specifies (an
+  SVG without a natural width counts as 300px here, a definite height
+  and aspect ratio take precedence). It used to add the percentage of the
+  page width, so such a box grew to the full width and the image was
+  drawn at that width.
 
 1.0.29:
 ======
