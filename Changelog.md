@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* Clicking into the address bar selects the whole address, as in other
+  browsers; a second click places the cursor, and dragging still selects
+  part of the text.
+* The title bar shows the version after the browser name
+  ("Nordstjernen Browser 1.0.29"; just "Nordstjernen" when space is short).
 * 32-bit builds: the selector-cache hash folded a pointer-sized value
   with `>> 32`, which is undefined on i386 and put every key in one
   bucket, so each lookup scanned the whole cache. The fold is now done
@@ -16,11 +21,6 @@ Changelog:
 1.0.29:
 ======
 * The about:nordstjernen splash shows version 1.0.29.
-* Clicking into the address bar selects the whole address, as in other
-  browsers; a second click places the cursor, and dragging still selects
-  part of the text.
-* The title bar shows the version after the browser name
-  ("Nordstjernen Browser 1.0.29"; just "Nordstjernen" when space is short).
 * Clipboard in text fields: paste with Ctrl+V, Shift+Insert or Cmd+V on
   macOS, and from a new right-click menu on inputs, textareas and
   contenteditable elements (Cut, Copy, Paste, Select All). Ctrl+X cuts and
