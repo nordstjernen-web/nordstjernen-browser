@@ -97,6 +97,7 @@ nordstjernen_engine_sources += files(
   'ext.c',
   'idb.c',
   'js.c',
+  'js_brand.c',
   'js_canvas.c',
   'js_canvas_api.c',
   'js_intl.c',

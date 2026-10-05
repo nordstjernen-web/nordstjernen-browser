@@ -1353,6 +1353,16 @@ typedef union JSCFunctionType {
                              int argc, JSValueConst *argv, int *pdone, int magic);
 } JSCFunctionType;
 
+typedef enum JSBrandMode {
+    JS_BRAND_THROW,
+    JS_BRAND_REJECT,
+    JS_BRAND_IGNORE,
+} JSBrandMode;
+
+JS_EXTERN int JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids,
+                                   int count);
+JS_EXTERN void JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func,
+                                    int brand, JSBrandMode mode);
 JS_EXTERN JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
                                    const char *name,
                                    int length, JSCFunctionEnum cproto, int magic);

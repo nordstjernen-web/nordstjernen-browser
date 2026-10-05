@@ -330,6 +330,9 @@ typedef struct JSEnginePrivateName {
     JSValue symbol; /* keeps shadow alive */
 } JSEnginePrivateName;
 
+#define JS_BRAND_MAX 16
+#define JS_BRAND_SET_SIZE 4
+
 struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
@@ -338,6 +341,8 @@ struct JSRuntime {
     int engine_private_count;
     uint32_t *engine_private_bits; /* bitmap over the names' atom indices */
     uint32_t engine_private_words;
+    uint16_t brand_classes[JS_BRAND_MAX][JS_BRAND_SET_SIZE];
+    int brand_count;
     JSArenaState arena_state;
     const char *rt_info;
 
@@ -1202,6 +1207,8 @@ struct JSObject {
             uint8_t length;
             uint8_t cproto;
             int16_t magic;
+            uint8_t brand;
+            uint8_t brand_mode;
         } cfunc;
         /* array part for fast arrays and typed arrays */
         struct { /* JS_CLASS_ARRAY, JS_CLASS_ARGUMENTS, JS_CLASS_MAPPED_ARGUMENTS, JS_CLASS_UINT8C_ARRAY..JS_CLASS_FLOAT64_ARRAY */
@@ -6588,6 +6595,8 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
     p->u.cfunc.magic = magic;
+    p->u.cfunc.brand = 0;
+    p->u.cfunc.brand_mode = JS_BRAND_THROW;
     p->is_constructor = (cproto == JS_CFUNC_constructor ||
                          cproto == JS_CFUNC_constructor_magic ||
                          cproto == JS_CFUNC_constructor_or_func ||
@@ -6759,6 +6768,8 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
         q->u.cfunc.length = p->u.cfunc.length;
         q->u.cfunc.cproto = p->u.cfunc.cproto;
         q->u.cfunc.magic = p->u.cfunc.magic;
+        q->u.cfunc.brand = p->u.cfunc.brand;
+        q->u.cfunc.brand_mode = p->u.cfunc.brand_mode;
         q->is_constructor = p->is_constructor;
         q->is_host_function = p->is_host_function;
         return func_obj;
@@ -18511,6 +18522,84 @@ static void js_adopt_new_target_prototype(JSContext *ctx, JSValueConst obj,
     JS_FreeValue(ctx, proto);
 }
 
+int JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids, int count)
+{
+    JSRuntime *rt = ctx->rt;
+    uint16_t set[JS_BRAND_SET_SIZE] = { 0 };
+    int i;
+
+    if (count < 1 || count > JS_BRAND_SET_SIZE)
+        return 0;
+    for (i = 0; i < count; i++) {
+        if (class_ids[i] == 0 || class_ids[i] > UINT16_MAX)
+            return 0;
+        set[i] = class_ids[i];
+    }
+    for (i = 0; i < rt->brand_count; i++) {
+        if (!memcmp(rt->brand_classes[i], set, sizeof(set)))
+            return i + 1;
+    }
+    if (rt->brand_count >= JS_BRAND_MAX)
+        return 0;
+    memcpy(rt->brand_classes[rt->brand_count], set, sizeof(set));
+    return ++rt->brand_count;
+}
+
+void JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
+                          JSBrandMode mode)
+{
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+        return;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id != JS_CLASS_C_FUNCTION || brand < 0 ||
+        brand > ctx->rt->brand_count)
+        return;
+    p->u.cfunc.brand = brand;
+    p->u.cfunc.brand_mode = mode;
+}
+
+static bool js_brand_mismatch(JSRuntime *rt, JSObject *p,
+                              JSValueConst this_obj, int flags)
+{
+    const uint16_t *ids;
+    int i;
+
+    if (!p->u.cfunc.brand || (flags & JS_CALL_FLAG_CONSTRUCTOR))
+        return false;
+    ids = rt->brand_classes[p->u.cfunc.brand - 1];
+    for (i = 0; i < JS_BRAND_SET_SIZE && ids[i]; i++) {
+        if (JS_GetOpaque(this_obj, ids[i]))
+            return false;
+    }
+    return true;
+}
+
+static JSValue js_brand_check_failed(JSObject *p)
+{
+    JSContext *realm = p->u.cfunc.realm;
+    JSValue err, promise, funcs[2], ret;
+
+    if (p->u.cfunc.brand_mode == JS_BRAND_IGNORE)
+        return JS_UNDEFINED;
+    JS_ThrowTypeError(realm, "Illegal invocation");
+    if (p->u.cfunc.brand_mode != JS_BRAND_REJECT)
+        return JS_EXCEPTION;
+    err = JS_GetException(realm);
+    promise = JS_NewPromiseCapability(realm, funcs);
+    if (JS_IsException(promise)) {
+        JS_FreeValue(realm, err);
+        return promise;
+    }
+    ret = JS_Call(realm, funcs[1], JS_UNDEFINED, 1, (JSValueConst *)&err);
+    JS_FreeValue(realm, ret);
+    JS_FreeValue(realm, err);
+    JS_FreeValue(realm, funcs[0]);
+    JS_FreeValue(realm, funcs[1]);
+    return promise;
+}
+
 static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
                                   JSValueConst this_obj,
                                   int argc, JSValueConst *argv, int flags)
@@ -18527,6 +18616,9 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     p = JS_VALUE_GET_OBJ(func_obj);
     cproto = p->u.cfunc.cproto;
     arg_count = p->u.cfunc.length;
+
+    if (unlikely(js_brand_mismatch(rt, p, this_obj, flags)))
+        return js_brand_check_failed(p);
 
     /* better to always check stack overflow */
     if (js_check_stack_overflow(rt, sizeof(arg_buf[0]) * arg_count))
