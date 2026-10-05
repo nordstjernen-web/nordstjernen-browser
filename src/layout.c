@@ -10643,13 +10643,14 @@ layout_flex_row_wrap(ns_box *box, double cw,
         double eh = -1;
         if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
             lines->len > 0) {
-            eh = length_resolve(hv, cw, -1);
-            if (keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
+            eh = resolve_used_height(box, hv, cw, -1);
+            if (eh >= 0 &&
+                keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
                 eh -= box->padding.top + box->padding.bottom +
                       box->border.top + box->border.bottom;
-        } else if (box->definite_height > 0 && lines->len > 0) {
-            eh = box->definite_height;
         }
+        if (eh < 0 && box->definite_height > 0 && lines->len > 0)
+            eh = box->definite_height;
         if (eh >= 0) {
             cross_definite = TRUE;
             container_cross = eh;

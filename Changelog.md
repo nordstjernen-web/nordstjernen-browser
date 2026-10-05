@@ -105,6 +105,11 @@ Changelog:
   object size when only its width or only its height is set, as in other
   browsers. `<video style="width: 100%">` without a loaded source used to
   be as tall as it was wide, a square blank box that pushed the page down.
+* A wrapping flex container (`flex-wrap: wrap`) with a percentage height
+  resolves it against its containing block's height. It used to take the
+  percentage of its own width, so a one-line header with `height: 100%`
+  became as tall as it was wide and `align-items: center` pushed its
+  items hundreds of pixels down.
 
 1.0.29:
 ======
