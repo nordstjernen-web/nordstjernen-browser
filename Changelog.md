@@ -410,6 +410,22 @@ Changelog:
   stop inside the ns-pango subproject on whichever floor it met first, as
   a bare GLib version mismatch. The error also points at
   `-Dns-pango=disabled`, which shapes through the system Pango instead.
+* The release ships one .deb per supported distro release -- Ubuntu
+  24.04 LTS, Ubuntu 26.04 LTS and Debian 13 -- named for the release it is
+  for (`nordstjernen_<version>_ubuntu24.04_amd64.deb`,
+  `..._ubuntu26.04_...`, `..._debian13_...`). The single .deb was built on
+  Debian 13, so it depended on that release's FFmpeg 7.1 packages
+  (libavcodec61, libavformat61, libavutil59, libswscale8, libswresample5)
+  and on libwebp 1.5, and dpkg refused to install it on Ubuntu 24.04
+  (FFmpeg 6.1, libwebp 1.3.2) and Ubuntu 26.04 (FFmpeg 8.0). FFmpeg puts
+  its ABI in its package names, so no single package can depend on every
+  release's FFmpeg. Each .deb is now built in a container of its own release
+  against that release's libraries, then installed there and started
+  headless before it is attached to the GitHub release.
+  scripts/pack-deb.sh takes the release tag for the file name from
+  /etc/os-release (`DEB_DISTRO_TAG` overrides it), and the Linux CI now
+  also builds with GCC on Ubuntu 24.04 so the oldest supported release
+  keeps compiling. (Reported by Danik-a-a.)
 
 1.0.28:
 ======
