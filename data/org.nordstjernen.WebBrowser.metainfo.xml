@@ -60,6 +60,21 @@
   </branding>
 
   <releases>
+    <release version="1.0.29" date="2026-10-05">
+      <description>
+        <p>Sharp HiDPI rendering, smooth scrolling, layout and security release.</p>
+        <ul>
+          <li>Pages are drawn at the screen's real pixel density, so text and images are sharp on Retina and other HiDPI displays.</li>
+          <li>Scrolling is smooth and no longer waits for the page's scripts: the window moves pre-painted tiles itself, with touchpad momentum and eased wheel and key scrolling.</li>
+          <li>Clipboard in text fields: paste with Ctrl+V and a new right-click menu with Cut, Copy, Paste and Select All.</li>
+          <li>Text flows around floats, margins collapse and flex, grid and line heights are sized as in other browsers, fixing layout on Wikipedia, GitHub, MDN, apple.com and Stack Overflow.</li>
+          <li>Text uses the same fonts and widths as Chrome on macOS, and WOFF2 and variable web fonts load correctly.</li>
+          <li>Signing in to Google and opening Gmail works.</li>
+          <li>A security audit fixed many memory-safety bugs reachable from web content and tightened the sandbox and web security policy.</li>
+          <li>Restyles, relayouts, event dispatch and box shadows are much faster; the experimental V8 backend is removed.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.28" date="2026-10-04">
       <description>
         <p>Dual licensing, performance and compatibility release.</p>
