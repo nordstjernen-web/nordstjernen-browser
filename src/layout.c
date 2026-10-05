@@ -2922,6 +2922,14 @@ quotes_string_for(const ns_style *s, int depth, gboolean closing)
     return g_strdup(closing ? "\xe2\x80\x99" : "\xe2\x80\x98");
 }
 
+char *
+ns_layout_pseudo_content_text(const ns_css_value *content, const ns_node *host)
+{
+    if (!content || content->kind != NS_CSS_V_KEYWORD || !content->u.keyword)
+        return NULL;
+    return resolve_pseudo_content(content->u.keyword, host);
+}
+
 static void
 append_pseudo_content(GString *out, const ns_css_value *cv,
                       const ns_node *host, const ns_style *host_style)
