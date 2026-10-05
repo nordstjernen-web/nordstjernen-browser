@@ -89,6 +89,11 @@ Changelog:
   `overflow: hidden !important` utility classes did not clip.
   `element.style.overflowX` and a rule's `style.overflowX` read back the
   value as well.
+* A custom property whose value is `var(--b, initial)` (or `inherit`,
+  `unset`) sees `--b` when `--b` is a plain value declared later in the
+  same rule or in the inline style. The fallback keyword used to win and
+  the property was treated as unset, so Netflix's card grid lost its
+  `flex-basis` and stacked the cards.
 
 1.0.29:
 ======
