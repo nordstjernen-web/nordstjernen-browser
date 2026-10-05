@@ -17907,6 +17907,26 @@ css_strip_important(char *text, gboolean *important)
     if (important) *important = TRUE;
 }
 
+static int
+font_face_weight_descriptor(const char *val)
+{
+    if (g_ascii_strcasecmp(val, "normal") == 0) return 400;
+    if (g_ascii_strcasecmp(val, "bold") == 0) return 700;
+    char *end = NULL;
+    double weight = g_ascii_strtod(val, &end);
+    if (end == val || *end != '\0' || weight < 1 || weight > 1000) return 0;
+    return (int)(weight + 0.5);
+}
+
+static ns_font_slant
+font_face_style_descriptor(const char *val)
+{
+    if (g_ascii_strcasecmp(val, "normal") == 0) return NS_FONT_SLANT_ROMAN;
+    if (g_ascii_strcasecmp(val, "italic") == 0) return NS_FONT_SLANT_ITALIC;
+    if (g_ascii_strncasecmp(val, "oblique", 7) == 0) return NS_FONT_SLANT_OBLIQUE;
+    return NS_FONT_SLANT_AUTO;
+}
+
 static void
 font_face_clear(gpointer data)
 {
@@ -20275,6 +20295,7 @@ parse_rules_until(const char **pp, const char *end,
                     char *family = NULL;
                     char *src_url = NULL;
                     char *unicode_range = NULL;
+                    ns_font_descriptors descriptors = { 0, NS_FONT_SLANT_AUTO };
                     const char *decl_p = body_start;
                     while (decl_p < body_end) {
                         char dterm = 0;
@@ -20307,6 +20328,10 @@ parse_rules_until(const char **pp, const char *end,
                         } else if (g_ascii_strcasecmp(prop, "unicode-range") == 0) {
                             g_free(unicode_range);
                             unicode_range = g_strdup(val);
+                        } else if (g_ascii_strcasecmp(prop, "font-weight") == 0) {
+                            descriptors.weight = font_face_weight_descriptor(val);
+                        } else if (g_ascii_strcasecmp(prop, "font-style") == 0) {
+                            descriptors.slant = font_face_style_descriptor(val);
                         }
                         g_free(decl);
                         if (!dterm) break;
@@ -20319,7 +20344,7 @@ parse_rules_until(const char **pp, const char *end,
                     }
                     if (family && *family && src_url && *src_url) {
                         ns_css_font_face ff = {
-                            family, src_url, unicode_range
+                            family, src_url, unicode_range, descriptors
                         };
                         g_array_append_val(sh->font_faces, ff);
                         family = NULL;
