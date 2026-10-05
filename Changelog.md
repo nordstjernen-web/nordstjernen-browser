@@ -4,6 +4,9 @@ Changelog:
 1.0.29:
 ======
 * The about:nordstjernen splash shows version 1.0.29.
+* The title bar shows the version after the browser name
+  ("Nordstjernen Browser 1.0.29", or "Nordstjernen 1.0.29" when space is
+  short).
 * Clipboard in text fields: paste with Ctrl+V, Shift+Insert or Cmd+V on
   macOS, and from a new right-click menu on inputs, textareas and
   contenteditable elements (Cut, Copy, Paste, Select All). Ctrl+X cuts and
