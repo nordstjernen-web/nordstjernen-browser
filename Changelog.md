@@ -28,6 +28,14 @@ Changelog:
 * No more 64-bit format and pointer-type warnings on macOS in the
   IndexedDB, Temporal and WebAssembly code. Ported from
   northstar-browser.
+* `<picture>` is an ordinary inline element again and the `<img>` inside it
+  is the image, as in other browsers. The image used to be laid out with
+  the `<picture>` element's style at its natural size, so the `<img>`'s own
+  `width`/`height` attributes and CSS (`width: 100%`, `max-width`,
+  `position: absolute`, ...) were ignored: hero images covered headlines,
+  card images grew to twice their height and product shots were squeezed
+  instead of cropped. A `<picture>` without an `<img>` now renders nothing.
+  `<source>` selection is unchanged.
 
 1.0.29:
 ======
