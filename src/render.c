@@ -105,10 +105,9 @@ render_font_usage_add_text(render_font_usage *usage, const char *text)
 }
 
 static void
-render_collect_text_font_usage(const ns_node *node, GHashTable *styles,
-                               GHashTable *families)
+render_font_usage_add_styled(const ns_style *style, const char *text,
+                             GHashTable *families)
 {
-    const ns_style *style = g_hash_table_lookup(styles, node->parent);
     const ns_css_value *value = style
         ? style->values[NS_CSS_FONT_FAMILY] : NULL;
     const char *list = value && value->kind == NS_CSS_V_KEYWORD
@@ -119,7 +118,18 @@ render_collect_text_font_usage(const ns_node *node, GHashTable *styles,
     g_hash_table_iter_init(&iter, families);
     while (g_hash_table_iter_next(&iter, &key, &val))
         if (render_font_list_contains(list, key))
-            render_font_usage_add_text(val, node->text);
+            render_font_usage_add_text(val, text);
+}
+
+static void
+render_collect_pseudo_font_usage(const ns_node *host, const ns_style *pseudo,
+                                 GHashTable *families)
+{
+    if (!pseudo) return;
+    char *text = ns_layout_pseudo_content_text(pseudo->values[NS_CSS_CONTENT],
+                                               host);
+    if (text && *text) render_font_usage_add_styled(pseudo, text, families);
+    g_free(text);
 }
 
 static void
@@ -132,9 +142,15 @@ render_collect_font_usage(const ns_node *root, GHashTable *styles,
         if (node->kind == NS_NODE_ELEMENT) {
             const ns_style *style = g_hash_table_lookup(styles, node);
             descend = !ns_display_is_none(ns_css_display_of(style));
+            if (descend && style) {
+                render_collect_pseudo_font_usage(node, style->before, families);
+                render_collect_pseudo_font_usage(node, style->after, families);
+            }
         } else if (node->kind == NS_NODE_TEXT && node->text && *node->text &&
                    node->parent) {
-            render_collect_text_font_usage(node, styles, families);
+            render_font_usage_add_styled(g_hash_table_lookup(styles,
+                                                             node->parent),
+                                         node->text, families);
         }
         node = ns_node_next_in_subtree(node, root, descend);
     }
