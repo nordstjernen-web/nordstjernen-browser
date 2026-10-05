@@ -58,6 +58,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "image.h"
 #include "js_date.h"
 #include "js_intl.h"
+#include "js_brand.h"
 #include "js_realm.h"
 #include "layout.h"
 #include "net.h"
@@ -50255,6 +50256,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         ns_js_adopt_frame_window_events(js, fctx, fg);
         ns_js_link_interface_ctors(fctx);
         ns_js_lock_global_prototypes(fctx);
+        ns_js_brand_node_interfaces(fctx, ns_element_class_id, ns_attr_class_id);
     }
     if (ok) {
         JSValue parent_performance =
@@ -61631,6 +61633,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     }
     ns_install_node_shapes(ctx);
     ns_install_element_shapes(ctx);
+    ns_js_brand_node_interfaces(ctx, ns_element_class_id, ns_attr_class_id);
 }
 
 void
