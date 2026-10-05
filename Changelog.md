@@ -423,9 +423,7 @@ Changelog:
   against that release's libraries, then installed there and started
   headless before it is attached to the GitHub release.
   scripts/pack-deb.sh takes the release tag for the file name from
-  /etc/os-release (`DEB_DISTRO_TAG` overrides it), and the Linux CI now
-  also builds with GCC on Ubuntu 24.04 so the oldest supported release
-  keeps compiling. (Reported by Danik-a-a.)
+  /etc/os-release (`DEB_DISTRO_TAG` overrides it). (Reported by Danik-a-a.)
 
 1.0.28:
 ======
