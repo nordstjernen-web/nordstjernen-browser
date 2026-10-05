@@ -4915,6 +4915,35 @@ layout_slot_host(const ns_node *slot)
     return NULL;
 }
 
+static const ns_node *
+layout_find_slot(const ns_node *scope, const char *name)
+{
+    for (const ns_node *c = scope ? scope->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
+            continue;
+        if (c->name && strcmp(c->name, "slot") == 0) {
+            const char *slot_name = ns_element_get_attr(c, "name");
+            if (g_strcmp0(slot_name ? slot_name : "", name) == 0) return c;
+        }
+        const ns_node *found = layout_find_slot(c, name);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static const ns_node *
+layout_flat_parent(const ns_node *n)
+{
+    const ns_node *p = n ? n->parent : NULL;
+    if (!p || n->kind != NS_NODE_ELEMENT) return p;
+    const ns_node *sr = layout_shadow_root(p);
+    if (!sr || sr == n) return p;
+    const char *name = ns_element_get_attr(n, "slot");
+    const ns_node *slot = layout_find_slot(sr, name ? name : "");
+    return slot ? slot : p;
+}
+
 static ns_box *build_block_impl(const ns_node *n, GHashTable *styles);
 
 static ns_box *
@@ -14334,7 +14363,8 @@ fixed_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
     if (e->pseudo &&
         style_creates_fixed_cb(g_hash_table_lookup(styles, e->dom)))
         return e->dom;
-    for (const ns_node *p = e->dom ? e->dom->parent : NULL; p; p = p->parent) {
+    for (const ns_node *p = layout_flat_parent(e->dom); p;
+         p = layout_flat_parent(p)) {
         if (p->kind != NS_NODE_ELEMENT) continue;
         if (style_creates_fixed_cb(g_hash_table_lookup(styles, p))) return p;
     }
@@ -14543,7 +14573,7 @@ style_creates_fixed_cb(const ns_style *s)
 static const ns_node *
 find_abs_containing_block_dom(const ns_node *n, GHashTable *styles)
 {
-    for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
+    for (const ns_node *p = layout_flat_parent(n); p; p = layout_flat_parent(p)) {
         if (p->kind != NS_NODE_ELEMENT) continue;
         const ns_style *ps = g_hash_table_lookup(styles, p);
         if (style_creates_abs_cb(ps)) return p;
