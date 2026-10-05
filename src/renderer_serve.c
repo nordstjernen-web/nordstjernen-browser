@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "renderer_serve.h"
 #include "libnordstjernen.h"
+#include "renderer_tiles.h"
 #include "print.h"
 #include "proc_limits.h"
 #include "net.h"
@@ -43,6 +44,7 @@ struct ns_renderer_session {
     char          *post_body;
     size_t         post_len;
     char          *post_ct;
+    ns_tiles      *tiles;
 };
 
 static double
@@ -257,6 +259,7 @@ ns_renderer_session_new(int ctrl_w, unsigned char *fb, int max_w, int max_h,
     s->shm_mode = shm_mode;
     s->tick_budget_ms = 16;
     s->frame_scale = 1.0;
+    s->tiles = ns_tiles_new();
     return s;
 }
 
@@ -284,6 +287,7 @@ ns_renderer_session_free(ns_renderer_session *s)
     session_bfcache_clear(s);
     if (s->cur)
         ns_browser_close(s->cur);
+    ns_tiles_free(s->tiles);
     free(s);
 }
 
@@ -334,6 +338,249 @@ session_note_scroll(struct ns_renderer_session *s, long sx, long sy,
 {
     if (wheel || (s->frame_valid && (sx != s->frame_sx || sy != s->frame_sy)))
         s->scroll_until_us = g_get_monotonic_time() + NS_SCROLL_ACTIVE_US;
+}
+
+typedef struct render_view {
+    long   sx, sy;
+    int    vw, vh;
+    double scale;
+    int    caret;
+    int    ticked;
+    int    caret_changed;
+    int    requested_x, requested_y;
+    int    page_w, page_h;
+    int    wheel_snapped;
+    int    unchanged;
+    int    render_rc;
+} render_view;
+
+static int
+render_max_scroll(int page_extent, int view_px, double scale)
+{
+    int max = page_extent - (int)ceil((double)view_px / scale);
+    return max > 0 ? max : 0;
+}
+
+static void
+render_apply_pending_scroll(ns_renderer_session *s, render_view *rv)
+{
+    ns_browser_take_pending_scroll(s->cur, &rv->requested_x,
+                                   &rv->requested_y);
+    ns_browser_page_size(s->cur, &rv->page_w, &rv->page_h);
+    if (rv->requested_y >= 0) {
+        rv->requested_y = MIN(rv->requested_y,
+                              render_max_scroll(rv->page_h, rv->vh,
+                                                rv->scale));
+        rv->sy = rv->requested_y;
+    }
+    if (rv->requested_x >= 0) {
+        rv->requested_x = MIN(rv->requested_x,
+                              render_max_scroll(rv->page_w, rv->vw,
+                                                rv->scale));
+        rv->sx = rv->requested_x;
+    }
+}
+
+static void
+render_apply_wheel(ns_renderer_session *s, const char *body, render_view *rv,
+                   long wheel_dx, long wheel_dy)
+{
+    if (!wheel_dx && !wheel_dy) return;
+    long wheel_x = 0, wheel_y = 0, wheel_viewport = 0;
+    json_get_long(body, "wheel_x", &wheel_x);
+    json_get_long(body, "wheel_y", &wheel_y);
+    json_get_long(body, "wheel_viewport", &wheel_viewport);
+    if (!wheel_viewport &&
+        ns_browser_scroll_at_full(s->cur, (int)wheel_x, (int)wheel_y,
+                                  (int)wheel_dx, (int)wheel_dy,
+                                  &rv->wheel_snapped)) {
+        s->frame_valid = 0;
+        return;
+    }
+    int max_x = render_max_scroll(rv->page_w, rv->vw, rv->scale);
+    int max_y = render_max_scroll(rv->page_h, rv->vh, rv->scale);
+    long nx = clamp((int)(rv->sx + wheel_dx), 0, max_x);
+    long ny = clamp((int)(rv->sy + wheel_dy), 0, max_y);
+    if (nx != rv->sx) rv->requested_x = (int)(rv->sx = nx);
+    if (ny != rv->sy) rv->requested_y = (int)(rv->sy = ny);
+}
+
+static void
+render_apply_snap(ns_renderer_session *s, render_view *rv, int wheeled)
+{
+    int snap_x = (int)rv->sx, snap_y = (int)rv->sy;
+    if (!ns_browser_snap_document(s->cur, (double)rv->vw / rv->scale,
+                                  (double)rv->vh / rv->scale,
+                                  (int)s->frame_sx, (int)s->frame_sy,
+                                  &snap_x, &snap_y))
+        return;
+    if (snap_x != (int)rv->sx) rv->requested_x = (int)(rv->sx = snap_x);
+    if (snap_y != (int)rv->sy) rv->requested_y = (int)(rv->sy = snap_y);
+    if (wheeled) rv->wheel_snapped = 1;
+}
+
+static void
+session_note_frame(ns_renderer_session *s, const render_view *rv)
+{
+    s->frame_valid = 1;
+    s->frame_sx = rv->sx;
+    s->frame_sy = rv->sy;
+    s->frame_w = rv->vw;
+    s->frame_h = rv->vh;
+    s->frame_scale = rv->scale;
+}
+
+static void
+render_frame(ns_renderer_session *s, render_view *rv)
+{
+    rv->unchanged = s->frame_valid && rv->ticked == 0 && !rv->caret_changed &&
+                    rv->sx == s->frame_sx && rv->sy == s->frame_sy &&
+                    rv->vw == s->frame_w && rv->vh == s->frame_h &&
+                    rv->scale == s->frame_scale;
+    if (rv->unchanged) return;
+    int stride = rv->vw * 4;
+    rv->render_rc = ns_browser_render_argb32(s->cur, (int)rv->sx,
+                                             (int)rv->sy, rv->vw, rv->vh,
+                                             rv->scale, s->fb, stride);
+    if (rv->render_rc == 0) {
+        session_note_frame(s, rv);
+    } else {
+        memset(s->fb, 0xff, (size_t)stride * (size_t)rv->vh);
+        s->frame_valid = 0;
+    }
+}
+
+static char *
+render_take_line(ns_browser *b, char *(*take)(ns_browser *), int keep_lf)
+{
+    char *v = take(b);
+    for (char *p = v; p && *p; p++) {
+        if (*p == '\r') *p = ' ';
+        else if (*p == '\n') *p = keep_lf ? '\x1f' : ' ';
+    }
+    return v;
+}
+
+static void
+render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
+             const GString *tiles)
+{
+    char *nav = render_take_line(s->cur, ns_browser_take_pending_nav, 0);
+    if (nav)
+        session_stash_post(s, nav);
+    char *webgl = render_take_line(s->cur, ns_browser_take_pending_webgl, 0);
+    char *camera = render_take_line(s->cur, ns_browser_take_pending_camera, 0);
+    char *download = render_take_line(s->cur, ns_browser_take_pending_download,
+                                      0);
+    char *audio = render_take_line(s->cur, ns_browser_take_pending_audio, 1);
+    char *window_action =
+        render_take_line(s->cur, ns_browser_take_pending_window_action, 0);
+    int animating = session_animating(s) ? 1 : 0;
+    if (ns_browser_caret_blinking(s->cur)) animating |= 2;
+    if (rv->wheel_snapped) animating |= 4;
+    int clipboard_pending = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
+    char hdrs[32768];
+    int hn = snprintf(hdrs, sizeof hdrs,
+             "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
+             "X-PageW: %d\r\nX-PageH: %d\r\nX-ScrollY: %d\r\n"
+             "X-ScrollX: %d\r\nX-Render-RC: %d\r\nX-Clipboard: %d\r\n%s%s",
+             rv->vw, rv->vh, rv->vw * 4, animating,
+             rv->page_w, rv->page_h, rv->requested_y, rv->requested_x,
+             rv->render_rc, clipboard_pending,
+             rv->unchanged ? "X-Unchanged: 1\r\n" : "",
+             tiles ? "X-Tiles: 1\r\n" : "");
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
+                          3000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Audio", audio, 16000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Window-Action",
+                          window_action, 31);
+    free(nav);
+    free(webgl);
+    free(camera);
+    free(download);
+    free(audio);
+    free(window_action);
+    if (tiles)
+        http_write_response(ctrl_w, 200, "text/plain", hdrs, tiles->str,
+                            tiles->len);
+    else if (s->shm_mode || rv->unchanged)
+        http_write_response(ctrl_w, 200, "application/octet-stream",
+                            hdrs, NULL, 0);
+    else
+        http_write_response(ctrl_w, 200, "application/octet-stream",
+                            hdrs, s->fb,
+                            (size_t)rv->vw * 4u * (size_t)rv->vh);
+}
+
+static int
+session_render_tiles(ns_renderer_session *s, int ctrl_w, const char *body,
+                     render_view *rv)
+{
+    ns_tiles_view view = { rv->sx, rv->sy, rv->vw, rv->vh, rv->scale,
+                           rv->page_h };
+    gboolean invalid = !s->frame_valid || rv->ticked || rv->caret_changed;
+    GString *desc = g_string_sized_new(4096);
+    int rc = ns_tiles_render(s->tiles, s->cur, body, &view, invalid, s->fb,
+                             (size_t)s->max_w * (size_t)s->max_h * 4u, desc);
+    if (rc == 0) {
+        session_note_frame(s, rv);
+        render_reply(s, ctrl_w, rv, desc);
+    }
+    g_string_free(desc, TRUE);
+    return rc;
+}
+
+static void
+render_view_parse(ns_renderer_session *s, const char *body, render_view *rv)
+{
+    long w = 0, h = 0, caret = 0;
+    memset(rv, 0, sizeof *rv);
+    rv->scale = 1.0;
+    rv->requested_x = rv->requested_y = -1;
+    json_get_long(body, "width", &w);
+    json_get_long(body, "height", &h);
+    json_get_long(body, "scroll_x", &rv->sx);
+    json_get_long(body, "scroll_y", &rv->sy);
+    json_get_long(body, "caret", &caret);
+    json_get_double(body, "scale", &rv->scale);
+    if (!(rv->scale > 0)) rv->scale = 1.0;
+    rv->caret = caret != 0;
+    rv->vw = clamp((int)w, 1, s->max_w);
+    rv->vh = clamp((int)h, 1, s->max_h);
+}
+
+static int
+session_render(ns_renderer_session *s, int ctrl_w, const char *body)
+{
+    render_view rv;
+    render_view_parse(s, body, &rv);
+    session_apply_device_pixel_ratio(s, body);
+    if (!s->cur) {
+        http_write_response(ctrl_w, 200, "application/octet-stream",
+                            "X-W: 0\r\nX-H: 0\r\nX-Stride: 0\r\n"
+                            "X-Anim: 0\r\n", NULL, 0);
+        return 0;
+    }
+    long wheel_dx = 0, wheel_dy = 0;
+    json_get_long(body, "wheel_dx", &wheel_dx);
+    json_get_long(body, "wheel_dy", &wheel_dy);
+    session_note_scroll(s, rv.sx, rv.sy, wheel_dx || wheel_dy);
+    long fill = 0;
+    json_get_long(body, "fill", &fill);
+    rv.ticked = s->frame_valid && !fill ? session_tick(s) : 0;
+    render_apply_pending_scroll(s, &rv);
+    render_apply_wheel(s, body, &rv, wheel_dx, wheel_dy);
+    render_apply_snap(s, &rv, wheel_dx || wheel_dy);
+    rv.caret_changed = ns_browser_set_caret_blink_active(s->cur, rv.caret);
+    if (s->shm_mode && ns_tiles_requested(body) &&
+        session_render_tiles(s, ctrl_w, body, &rv) == 0)
+        return 0;
+    render_frame(s, &rv);
+    render_reply(s, ctrl_w, &rv, NULL);
+    return 0;
 }
 
 int
@@ -525,172 +772,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
-    if (strcmp(head->path, "/render") == 0) {
-        long w = 0, h = 0, sx = 0, sy = 0, caret = 0;
-        double scale = 1.0;
-        json_get_long(body, "width", &w);
-        json_get_long(body, "height", &h);
-        json_get_long(body, "scroll_x", &sx);
-        json_get_long(body, "scroll_y", &sy);
-        json_get_long(body, "caret", &caret);
-        json_get_double(body, "scale", &scale);
-        int vw = clamp((int)w, 1, s->max_w);
-        int vh = clamp((int)h, 1, s->max_h);
-        int stride = vw * 4;
-        session_apply_device_pixel_ratio(s, body);
-        if (!s->cur) {
-            http_write_response(ctrl_w, 200, "application/octet-stream",
-                                "X-W: 0\r\nX-H: 0\r\nX-Stride: 0\r\n"
-                                "X-Anim: 0\r\n", NULL, 0);
-            return 0;
-        }
-        long wheel_x = 0, wheel_y = 0, wheel_dx = 0, wheel_dy = 0;
-        json_get_long(body, "wheel_dx", &wheel_dx);
-        json_get_long(body, "wheel_dy", &wheel_dy);
-        session_note_scroll(s, sx, sy, wheel_dx || wheel_dy);
-        int ticked = s->frame_valid ? session_tick(s) : 0;
-        int requested_scroll_x = -1;
-        int requested_scroll_y = -1;
-        ns_browser_take_pending_scroll(s->cur, &requested_scroll_x,
-                                       &requested_scroll_y);
-        int page_w = 0, page_h = 0;
-        ns_browser_page_size(s->cur, &page_w, &page_h);
-        if (requested_scroll_y >= 0) {
-            int max_scroll_y = page_h - (int)ceil((double)vh / scale);
-            if (max_scroll_y < 0) max_scroll_y = 0;
-            if (requested_scroll_y > max_scroll_y)
-                requested_scroll_y = max_scroll_y;
-            sy = requested_scroll_y;
-        }
-        if (requested_scroll_x >= 0) {
-            int max_scroll_x = page_w - (int)ceil((double)vw / scale);
-            if (max_scroll_x < 0) max_scroll_x = 0;
-            if (requested_scroll_x > max_scroll_x)
-                requested_scroll_x = max_scroll_x;
-            sx = requested_scroll_x;
-        }
-        int wheel_snapped = 0;
-        if (wheel_dx || wheel_dy) {
-            long wheel_viewport = 0;
-            json_get_long(body, "wheel_x", &wheel_x);
-            json_get_long(body, "wheel_y", &wheel_y);
-            json_get_long(body, "wheel_viewport", &wheel_viewport);
-            if (!wheel_viewport &&
-                ns_browser_scroll_at_full(s->cur, (int)wheel_x, (int)wheel_y,
-                                          (int)wheel_dx, (int)wheel_dy,
-                                          &wheel_snapped)) {
-                s->frame_valid = 0;
-            } else {
-                int max_x = page_w - (int)ceil((double)vw / scale);
-                int max_y = page_h - (int)ceil((double)vh / scale);
-                long nx = clamp((int)(sx + wheel_dx), 0, max_x > 0 ? max_x : 0);
-                long ny = clamp((int)(sy + wheel_dy), 0, max_y > 0 ? max_y : 0);
-                if (nx != sx) requested_scroll_x = (int)(sx = nx);
-                if (ny != sy) requested_scroll_y = (int)(sy = ny);
-            }
-        }
-        int snap_x = (int)sx, snap_y = (int)sy;
-        if (ns_browser_snap_document(s->cur, (double)vw / scale,
-                                     (double)vh / scale,
-                                     (int)s->frame_sx, (int)s->frame_sy,
-                                     &snap_x, &snap_y)) {
-            if (snap_x != (int)sx) {
-                sx = snap_x;
-                requested_scroll_x = snap_x;
-            }
-            if (snap_y != (int)sy) {
-                sy = snap_y;
-                requested_scroll_y = snap_y;
-            }
-            if (wheel_dx || wheel_dy)
-                wheel_snapped = 1;
-        }
-        int caret_changed =
-            ns_browser_set_caret_blink_active(s->cur, caret != 0);
-        int unchanged = s->frame_valid && ticked == 0 && !caret_changed &&
-                        sx == s->frame_sx && sy == s->frame_sy &&
-                        vw == s->frame_w && vh == s->frame_h &&
-                        scale == s->frame_scale;
-        int render_rc = 0;
-        if (!unchanged) {
-            render_rc = ns_browser_render_argb32(s->cur, (int)sx, (int)sy,
-                                                 vw, vh, scale, s->fb,
-                                                 stride);
-            if (render_rc == 0) {
-                s->frame_valid = 1;
-                s->frame_sx = sx;
-                s->frame_sy = sy;
-                s->frame_w = vw;
-                s->frame_h = vh;
-                s->frame_scale = scale;
-            } else {
-                memset(s->fb, 0xff, (size_t)stride * (size_t)vh);
-                s->frame_valid = 0;
-            }
-        }
-        char *nav = ns_browser_take_pending_nav(s->cur);
-        if (nav)
-            for (char *p = nav; *p; p++)
-                if (*p == '\r' || *p == '\n') *p = ' ';
-        if (nav)
-            session_stash_post(s, nav);
-        char *webgl = ns_browser_take_pending_webgl(s->cur);
-        if (webgl)
-            for (char *p = webgl; *p; p++)
-                if (*p == '\r' || *p == '\n') *p = ' ';
-        char *camera = ns_browser_take_pending_camera(s->cur);
-        if (camera)
-            for (char *p = camera; *p; p++)
-                if (*p == '\r' || *p == '\n') *p = ' ';
-        char *download = ns_browser_take_pending_download(s->cur);
-        if (download)
-            for (char *p = download; *p; p++)
-                if (*p == '\r' || *p == '\n') *p = ' ';
-        char *audio = ns_browser_take_pending_audio(s->cur);
-        char *window_action = ns_browser_take_pending_window_action(s->cur);
-        if (audio)
-            for (char *p = audio; *p; p++) {
-                if (*p == '\r') *p = ' ';
-                else if (*p == '\n') *p = '\x1f';
-            }
-        if (window_action)
-            for (char *p = window_action; *p; p++)
-                if (*p == '\r' || *p == '\n') *p = ' ';
-        int animating = session_animating(s) ? 1 : 0;
-        if (ns_browser_caret_blinking(s->cur)) animating |= 2;
-        if (wheel_snapped) animating |= 4;
-        int clipboard_pending = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
-        char hdrs[32768];
-        int hn = snprintf(hdrs, sizeof hdrs,
-                 "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
-                 "X-PageW: %d\r\nX-PageH: %d\r\nX-ScrollY: %d\r\n"
-                 "X-ScrollX: %d\r\nX-Render-RC: %d\r\nX-Clipboard: %d\r\n%s",
-                 vw, vh, stride, animating,
-                 page_w, page_h, requested_scroll_y, requested_scroll_x,
-                 render_rc, clipboard_pending,
-                 unchanged ? "X-Unchanged: 1\r\n" : "");
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
-                              3000);
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Audio", audio, 16000);
-        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Window-Action",
-                              window_action, 31);
-        free(nav);
-        free(webgl);
-        free(camera);
-        free(download);
-        free(audio);
-        free(window_action);
-        if (s->shm_mode || unchanged)
-            http_write_response(ctrl_w, 200, "application/octet-stream",
-                                hdrs, NULL, 0);
-        else
-            http_write_response(ctrl_w, 200, "application/octet-stream",
-                                hdrs, s->fb, (size_t)stride * (size_t)vh);
-        return 0;
-    }
+    if (strcmp(head->path, "/render") == 0)
+        return session_render(s, ctrl_w, body);
 
     if (strcmp(head->path, "/favicon") == 0) {
         int fw = 0, fh = 0;

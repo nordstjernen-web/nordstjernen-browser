@@ -42,6 +42,31 @@ static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
+enum {
+    PAINT_LAYERS_OFF,
+    PAINT_LAYERS_PLAN,
+    PAINT_LAYERS_DOC,
+};
+
+typedef struct paint_layers_state {
+    int mode;
+    const ns_box *root;
+    const ns_box *owner;
+    gboolean flush_layered;
+    int vp_seen;
+    cairo_matrix_t base;
+    cairo_t *doc;
+    GHashTable *kinds;
+    GArray *found;
+    ns_paint_upper_fn upper;
+    gpointer upper_data;
+    int n_upper;
+    gboolean video_above;
+} paint_layers_state;
+
+static paint_layers_state g_layers;
+static const ns_box *g_paint_sticky_static_box;
+
 void
 ns_paint_set_caret_visible(gboolean visible)
 {
@@ -5128,6 +5153,24 @@ paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
 }
 
 static void
+paint_video_note_rects(cairo_t *cr, const ns_box *b, ns_video *v,
+                       int fit_mode)
+{
+    double dx0 = b->x, dy0 = b->y;
+    double dx1 = b->x + b->content_width;
+    double dy1 = b->y + b->content_height;
+    cairo_user_to_device(cr, &dx0, &dy0);
+    cairo_user_to_device(cr, &dx1, &dy1);
+    ns_video_note_paint_rect(v, dx0, dy0, dx1 - dx0, dy1 - dy0, fit_mode);
+    double cx0, cy0, cx1, cy1;
+    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    cairo_user_to_device(cr, &cx0, &cy0);
+    cairo_user_to_device(cr, &cx1, &cy1);
+    ns_video_note_paint_clip(v, MIN(cx0, cx1), MIN(cy0, cy1),
+                             fabs(cx1 - cx0), fabs(cy1 - cy0));
+}
+
+static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
@@ -5213,19 +5256,8 @@ paint_video(cairo_t *cr, const ns_box *b)
         else if (fit && strcmp(fit, "cover") == 0) fit_mode = 2;
         else if (fit && strcmp(fit, "none") == 0) fit_mode = 3;
         else if (fit && strcmp(fit, "scale-down") == 0) fit_mode = 4;
-        double dx0 = b->x, dy0 = b->y;
-        double dx1 = b->x + b->content_width;
-        double dy1 = b->y + b->content_height;
-        cairo_user_to_device(cr, &dx0, &dy0);
-        cairo_user_to_device(cr, &dx1, &dy1);
-        ns_video_note_paint_rect(v, dx0, dy0, dx1 - dx0, dy1 - dy0,
-                                  fit_mode);
-        double cx0, cy0, cx1, cy1;
-        cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
-        cairo_user_to_device(cr, &cx0, &cy0);
-        cairo_user_to_device(cr, &cx1, &cy1);
-        ns_video_note_paint_clip(v, MIN(cx0, cx1), MIN(cy0, cy1),
-                                 fabs(cx1 - cx0), fabs(cy1 - cy0));
+        if (g_layers.mode == PAINT_LAYERS_OFF)
+            paint_video_note_rects(cr, b, v, fit_mode);
     }
     ns_image *bgimg = b->media ? b->media->bg_image : NULL;
     gboolean bg_painted = bgimg && bgimg->loaded && bgimg->texture;
@@ -5251,6 +5283,8 @@ paint_video(cairo_t *cr, const ns_box *b)
     }
     cairo_save(cr);
     if (punched) {
+        if (g_layers.mode == PAINT_LAYERS_DOC && cr != g_layers.doc)
+            g_layers.video_above = TRUE;
         paint_video_hole_record(cr, b->x, b->y,
                                 b->content_width, b->content_height);
         cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
@@ -6041,8 +6075,41 @@ deferred_capture_cmp(const void *va, const void *vb)
 }
 
 static void
+layers_record(cairo_t *cr, const ns_box *box, int kind, double dx, double dy)
+{
+    ns_paint_vp_capture layer = { .box = box, .kind = kind };
+    cairo_matrix_t m, inv = g_layers.base;
+    cairo_get_matrix(cr, &m);
+    cairo_matrix_translate(&m, dx, dy);
+    if (cairo_matrix_invert(&inv) != CAIRO_STATUS_SUCCESS)
+        cairo_matrix_init_identity(&inv);
+    cairo_matrix_multiply(&layer.rel, &m, &inv);
+    g_array_append_val(g_layers.found, layer);
+}
+
+static cairo_t *
+layers_target(cairo_t *cr, const deferred_capture *cap, double dx, double dy)
+{
+    int kind = GPOINTER_TO_INT(g_hash_table_lookup(g_layers.kinds, cap->box));
+    if (kind) {
+        if (g_layers.mode == PAINT_LAYERS_PLAN)
+            layers_record(cr, cap->box, kind, dx, dy);
+        g_layers.vp_seen++;
+        return NULL;
+    }
+    if (g_layers.mode == PAINT_LAYERS_PLAN) return cr;
+    if (g_layers.vp_seen == 0 || g_layers.n_upper == 0) return g_layers.doc;
+    int i = MIN(g_layers.vp_seen, g_layers.n_upper) - 1;
+    cairo_t *upper = g_layers.upper(i, g_layers.upper_data);
+    return upper ? upper : g_layers.doc;
+}
+
+static void
 paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
 {
+    gboolean layered = g_layers.mode != PAINT_LAYERS_OFF &&
+                       g_layers.flush_layered;
+    g_layers.flush_layered = FALSE;
     if (!list || list->len == 0) return;
     GPtrArray *queue = g_ptr_array_sized_new(list->len);
     GPtrArray *adopted =
@@ -6058,8 +6125,16 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
         double dx = cap->dev_x - cur_x;
         double dy = cap->dev_y - cur_y;
         if (isnan(dx) || isnan(dy)) dx = dy = 0;
-        cairo_save(cr);
-        if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
+        cairo_t *target = layered ? layers_target(cr, cap, dx, dy) : cr;
+        if (!target) continue;
+        if (layered) g_layers.owner = cap->box;
+        cairo_save(target);
+        if (target != cr) {
+            cairo_matrix_t m;
+            cairo_get_matrix(cr, &m);
+            cairo_set_matrix(target, &m);
+        }
+        if (dx != 0 || dy != 0) cairo_translate(target, dx, dy);
         g_paint_flush_box = cap->box;
         if (g_dbg_paint_x >= 0 && cap->box->dom) {
             double gx0, gy0, gx1, gy1;
@@ -6079,7 +6154,7 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
             g_paint_deferred_list = NULL;
             g_paint_defer_depth++;
         }
-        paint_walk(cr, cap->box, highlight);
+        paint_walk(target, cap->box, highlight);
         if (flat) {
             GPtrArray *found = g_paint_deferred_list;
             g_paint_deferred_list = saved_list;
@@ -6092,7 +6167,7 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
                 g_ptr_array_add(adopted, found);
             }
         }
-        cairo_restore(cr);
+        cairo_restore(target);
     }
     g_paint_flush_box = saved_flush;
     g_ptr_array_free(queue, TRUE);
@@ -6115,7 +6190,7 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
 {
     *out_dx = 0;
     *out_dy = 0;
-    if (!b || !b->style) return;
+    if (!b || !b->style || b == g_paint_sticky_static_box) return;
     if (ns_box_is_fixed(b)) {
         if (g_paint_have_viewport) {
             *out_dx = g_paint_vp_x0;
@@ -7349,6 +7424,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                            deferred_mine->len, fx0, fy0, fx1, fy1);
             }
             if (has_transform || has_sticky) g_paint_no_cull++;
+            g_layers.flush_layered =
+                b == g_layers.root ||
+                (b == g_layers.owner && !grouped && !has_transform &&
+                 !clip_overflow && !has_path_clip);
             paint_flush_deferred(cr, deferred_mine, highlight);
             if (has_transform || has_sticky) g_paint_no_cull--;
             g_ptr_array_free(deferred_mine, TRUE);
@@ -7484,6 +7563,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                        deferred_mine->len, fx0, fy0, fx1, fy1);
         }
         if (has_transform || has_sticky) g_paint_no_cull++;
+        g_layers.flush_layered =
+            b == g_layers.root ||
+            (b == g_layers.owner && !grouped && !has_transform &&
+             !has_path_clip);
         paint_flush_deferred(cr, deferred_mine, highlight);
         if (has_transform || has_sticky) g_paint_no_cull--;
         g_ptr_array_free(deferred_mine, TRUE);
@@ -7623,8 +7706,9 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
     g_paint_skip_box = saved;
 }
 
-void
-ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
+static void
+paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
+               const struct ns_selection *sel)
 {
     ns_paint_list_ordinals_begin();
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
@@ -7635,10 +7719,13 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
     cairo_paint(cr);
     cairo_restore(cr);
     paint_cache_clip(cr);
+    if (sel)
+        g_paint_sel_runs = ns_selection_ranges(root, sel);
     g_paint_skip_box = top_layer_box(root);
     paint_walk(cr, root, highlight_query);
     g_paint_skip_box = NULL;
     paint_top_layer(cr, root, highlight_query);
+    g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
     g_paint_have_viewport = FALSE;
@@ -7646,24 +7733,205 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
 }
 
 void
+ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
+{
+    paint_document(cr, root, highlight_query, NULL);
+}
+
+void
 ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                         const char *highlight_query,
                         const struct ns_selection *sel)
 {
+    paint_document(cr, root, highlight_query, sel);
+}
+
+gboolean
+ns_paint_canvas_color(const ns_box *root, double rgba_out[4])
+{
+    rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
+    gboolean found = canvas_background_of(root, &bg);
+    rgba_out[0] = bg.r;
+    rgba_out[1] = bg.g;
+    rgba_out[2] = bg.b;
+    rgba_out[3] = bg.a;
+    return found;
+}
+
+static gboolean
+layers_box_bg_fixed(const ns_box *b)
+{
+    const ns_css_value *att = b->style
+        ? b->style->values[NS_CSS_BACKGROUND_ATTACHMENT] : NULL;
+    const ns_css_value *img = b->style
+        ? b->style->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    if (!att || !img || keyword_is(img, "none")) return FALSE;
+    int n = MAX(ns_css_value_layer_count(att), 1);
+    for (int i = 0; i < n; i++)
+        if (keyword_is(ns_css_value_layer(att, i), "fixed")) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+layers_box_video_composited(const ns_box *b)
+{
+    return b->kind == NS_BOX_VIDEO && b->media && b->media->video &&
+           ns_video_helper_composited(b->media->video);
+}
+
+static int
+layers_vp_kind(const ns_box *b)
+{
+    const ns_css_value *pos = b->style ? b->style->values[NS_CSS_POSITION]
+                                       : NULL;
+    if (keyword_is(pos, "fixed"))
+        return ns_box_is_fixed(b) ? NS_PAINT_VP_FIXED : 0;
+    if (keyword_is(pos, "sticky") && !ns_box_in_scroller(b))
+        return NS_PAINT_VP_STICKY;
+    return 0;
+}
+
+static gboolean
+layers_box_needs_frames(const ns_box *b, int under)
+{
+    return (under && layers_box_video_composited(b)) ||
+           layers_box_bg_fixed(b);
+}
+
+static int
+layers_scan_kind(const ns_box *b, int under, gboolean in_atomic)
+{
+    if (layers_box_needs_frames(b, under)) return -1;
+    int kind = layers_vp_kind(b);
+    if (!kind) return 0;
+    gboolean nested_sticky = under == NS_PAINT_VP_STICKY ||
+                             (under && kind == NS_PAINT_VP_STICKY);
+    if (in_atomic || nested_sticky || box_z_index(b) < 0) return -1;
+    return under ? 0 : kind;
+}
+
+static gboolean
+layers_scan(const ns_box *b, int under, gboolean in_atomic, GHashTable *kinds,
+            int *roots);
+
+static gboolean
+layers_scan_children(const ns_box *b, int under, gboolean in_atomic,
+                     GHashTable *kinds, int *roots)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!layers_scan(c, under, in_atomic, kinds, roots)) return FALSE;
+    guint n = b->inline_atomics ? b->inline_atomics->len : 0;
+    for (guint i = 0; i < n; i++) {
+        const ns_box *ab =
+            g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && !layers_scan(ab, under, TRUE, kinds, roots)) return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+layers_scan(const ns_box *b, int under, gboolean in_atomic, GHashTable *kinds,
+            int *roots)
+{
+    if (box_is_hidden(b) || box_clip_hides(b)) return TRUE;
+    int kind = layers_scan_kind(b, under, in_atomic);
+    if (kind < 0) return FALSE;
+    if (kind > 0) {
+        g_hash_table_insert(kinds, (gpointer)b, GINT_TO_POINTER(kind));
+        (*roots)++;
+        under = kind;
+    }
+    return box_skips_contents(b) ||
+           layers_scan_children(b, under, in_atomic, kinds, roots);
+}
+
+void
+ns_paint_layer_plan_init(ns_paint_layer_plan *plan)
+{
+    plan->dynamic = FALSE;
+    plan->kinds = g_hash_table_new(g_direct_hash, g_direct_equal);
+    plan->vp = g_array_new(FALSE, TRUE, sizeof(ns_paint_vp_capture));
+}
+
+void
+ns_paint_layer_plan_clear(ns_paint_layer_plan *plan)
+{
+    g_clear_pointer(&plan->kinds, g_hash_table_destroy);
+    if (plan->vp) g_array_free(plan->vp, TRUE);
+    plan->vp = NULL;
+}
+
+void
+ns_paint_plan_layers(cairo_t *cr, const ns_box *root,
+                     ns_paint_layer_plan *plan)
+{
+    plan->dynamic = FALSE;
+    g_hash_table_remove_all(plan->kinds);
+    g_array_set_size(plan->vp, 0);
+    if (!root) return;
+    int roots = 0;
+    if (top_layer_box(root) ||
+        !layers_scan(root, 0, FALSE, plan->kinds, &roots)) {
+        plan->dynamic = TRUE;
+        return;
+    }
+    if (roots == 0) return;
+    g_layers.mode = PAINT_LAYERS_PLAN;
+    g_layers.root = root;
+    g_layers.kinds = plan->kinds;
+    g_layers.found = plan->vp;
+    cairo_get_matrix(cr, &g_layers.base);
+    paint_document(cr, root, NULL, NULL);
+    memset(&g_layers, 0, sizeof g_layers);
+    if ((int)plan->vp->len != roots) plan->dynamic = TRUE;
+}
+
+gboolean
+ns_paint_doc_layers(cairo_t *cr, ns_paint_upper_fn upper, gpointer upper_data,
+                    const ns_box *root, const char *highlight_query,
+                    const struct ns_selection *sel,
+                    const ns_paint_layer_plan *plan)
+{
+    g_layers.mode = PAINT_LAYERS_DOC;
+    g_layers.root = root;
+    g_layers.doc = cr;
+    g_layers.kinds = plan->kinds;
+    g_layers.upper = upper;
+    g_layers.upper_data = upper_data;
+    g_layers.n_upper = (int)plan->vp->len;
+    paint_document(cr, root, highlight_query, sel);
+    gboolean ok = !g_layers.video_above;
+    memset(&g_layers, 0, sizeof g_layers);
+    return ok;
+}
+
+void
+ns_paint_vp_layer(cairo_t *cr, const ns_box *root,
+                  const ns_paint_vp_capture *layer, double vp_x, double vp_y,
+                  const char *highlight_query,
+                  const struct ns_selection *sel)
+{
     ns_paint_list_ordinals_begin();
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
-    rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
-    canvas_background_of(root, &bg);
-    cairo_save(cr);
-    set_source_rgba(cr, bg);
-    cairo_paint(cr);
-    cairo_restore(cr);
     paint_cache_clip(cr);
-    g_paint_sel_runs = ns_selection_ranges(root, sel);
-    g_paint_skip_box = top_layer_box(root);
-    paint_walk(cr, root, highlight_query);
-    g_paint_skip_box = NULL;
-    paint_top_layer(cr, root, highlight_query);
+    g_paint_vp_x0 = vp_x;
+    g_paint_vp_y0 = vp_y;
+    g_paint_have_viewport = vp_x != 0 || vp_y != 0;
+    if (sel)
+        g_paint_sel_runs = ns_selection_ranges(root, sel);
+    if (layer->kind == NS_PAINT_VP_STICKY)
+        g_paint_sticky_static_box = layer->box;
+    const ns_box *saved_flush = g_paint_flush_box;
+    cairo_save(cr);
+    cairo_matrix_t base, m;
+    cairo_get_matrix(cr, &base);
+    cairo_matrix_multiply(&m, &layer->rel, &base);
+    cairo_set_matrix(cr, &m);
+    g_paint_flush_box = layer->box;
+    paint_walk(cr, layer->box, highlight_query);
+    g_paint_flush_box = saved_flush;
+    cairo_restore(cr);
+    g_paint_sticky_static_box = NULL;
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);

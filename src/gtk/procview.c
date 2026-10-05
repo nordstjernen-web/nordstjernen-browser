@@ -2,6 +2,7 @@
 
 #include "procview.h"
 #include "i18n.h"
+#include "pagelayers.h"
 
 #include "libnordstjernen.h"
 #include "proc_limits.h"
@@ -26,6 +27,7 @@
 #define NS_PV_FLING_TAU_MS     400.0
 #define NS_PV_FLING_STOP_PX_S  20.0
 #define NS_PV_HOVER_AFTER_SCROLL_MS 150
+#define NS_PV_TILE_H           256
 #define NS_PROC_HELPER_LINE_MAX 4096
 
 #ifdef __APPLE__
@@ -103,6 +105,9 @@ typedef struct {
     gboolean history;
     gboolean user_activated;
     gboolean caret_active;
+    ns_rproc_http_tiles_req tiles;
+    char   *have;
+    char   *hold;
 } Req;
 
 typedef enum {
@@ -131,6 +136,7 @@ typedef struct {
     char            *clipboard;
     GdkTexture      *texture;
     double           texture_scale;
+    NsLayerUpdate   *layers;
     char            *href;
     char            *cursor;
     LinkAct          action;
@@ -196,6 +202,7 @@ struct NsProcView {
     double            vid_clip_x, vid_clip_y, vid_clip_w, vid_clip_h;
     int               vid_fit;
     gboolean          vid_rect_valid;
+    gboolean          vid_page;
     gboolean          vid_playing;
     guint             vid_tick_id;
     guint             vid_tick_count;
@@ -220,6 +227,11 @@ struct NsProcView {
 
     GdkTexture      *frame;
     double           frame_scale;
+    NsPageLayers    *layers;
+    gboolean         tiles_mode;
+    gboolean         tiles_fill;
+    gboolean         wheel_remote;
+    int              scroll_dir;
     gulong           surface_scale_handler;
     GdkSurface      *scale_surface;
     cairo_surface_t *stage[2];
@@ -565,11 +577,14 @@ pv_free(NsProcView *v)
             g_free(r->query);
             g_free(r->export_dest);
             g_free(r->paths);
+            g_free(r->have);
+            g_free(r->hold);
             g_free(r);
         }
         g_async_queue_unref(v->queue);
     }
     g_clear_object(&v->frame);
+    ns_page_layers_free(v->layers);
     if (v->favicon)
         g_object_unref(v->favicon);
     v->favicon = NULL;
@@ -1307,10 +1322,10 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
     if (g_str_has_prefix(cmd, "rect ")) {
         char token[64];
         int x, y, w, h, fit = 1;
-        int cx = 0, cy = 0, cw = 0, ch = 0;
-        int fields = sscanf(cmd + 5, "%63s %d %d %d %d %d %d %d %d %d",
+        int cx = 0, cy = 0, cw = 0, ch = 0, page = 0;
+        int fields = sscanf(cmd + 5, "%63s %d %d %d %d %d %d %d %d %d %d",
                             token, &x, &y, &w, &h, &fit,
-                            &cx, &cy, &cw, &ch);
+                            &cx, &cy, &cw, &ch, &page);
         if (fields >= 5 &&
             (strcmp(token, v->vid_token) == 0 || !v->vid_token[0])) {
             v->vid_x = x;
@@ -1323,6 +1338,7 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
             v->vid_clip_w = fields >= 10 ? cw : w;
             v->vid_clip_h = fields >= 10 ? ch : h;
             v->vid_rect_valid = w > 0 && h > 0;
+            v->vid_page = fields >= 11 && page;
             if (g_getenv("NS_DBG_AUDIO"))
                 g_printerr("[video-rect] %d,%d %dx%d clip=%d,%d %dx%d "
                            "valid=%d\n", x, y, w, h, cx, cy, cw, ch,
@@ -1604,11 +1620,21 @@ worker_main(gpointer data)
             res->type = RES_FRAME;
             res->seq = req->seq;
             ns_rproc_http_frame fr;
+            req->tiles.have = req->have;
+            req->tiles.hold = req->hold;
             gboolean rendered = v->proc &&
-                ns_rproc_http_render_wheel(v->proc, req->w, req->h, req->sx,
-                                           req->sy, req->scale,
-                                           req->caret_active, &req->wheel,
-                                           &fr) == 0 &&
+                (req->tiles.tile_h > 0
+                     ? ns_rproc_http_render_tiles(v->proc, req->w, req->h,
+                                                  req->sx, req->sy,
+                                                  req->scale,
+                                                  req->caret_active,
+                                                  &req->wheel, &req->tiles,
+                                                  &fr)
+                     : ns_rproc_http_render_wheel(v->proc, req->w, req->h,
+                                                  req->sx, req->sy,
+                                                  req->scale,
+                                                  req->caret_active,
+                                                  &req->wheel, &fr)) == 0 &&
                 fr.ok;
             if (rendered) {
                 res->ok = TRUE;
@@ -1620,7 +1646,12 @@ worker_main(gpointer data)
                 res->requested_scroll_y = fr.scroll_y;
                 res->requested_scroll_x = fr.scroll_x;
                 res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
-                if (!fr.unchanged) {
+                if (fr.tiles) {
+                    res->layers = ns_layer_update_parse(
+                        fr.tiles, fr.pixels, ns_rproc_http_map_size(v->proc));
+                    free(fr.tiles);
+                    res->frame_unchanged = res->layers == NULL;
+                } else if (!fr.unchanged) {
                     res->texture = stage_fill(v, fr.pixels, fr.width,
                                               fr.height, fr.stride);
                     res->texture_scale = req->raster > 0 ? req->raster : 1.0;
@@ -1896,6 +1927,8 @@ worker_main(gpointer data)
         g_free(req->query);
         g_free(req->export_dest);
         g_free(req->paths);
+        g_free(req->have);
+        g_free(req->hold);
         g_free(req);
     }
     if (v->proc)
@@ -2011,11 +2044,106 @@ on_adj_changed(GtkAdjustment *adj, gpointer data)
         return;
     v->scroll_x = (int)gtk_adjustment_get_value(v->hadj);
     v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
+    if (v->tiles_mode)
+        gtk_widget_queue_draw(v->area);
     if (v->opened && !v->adopting_scroll)
         request_render(v);
 }
 
 static void start_render(NsProcView *v);
+
+static gboolean
+pv_tiles_enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = g_getenv("NS_TILES");
+        enabled = !(e && strcmp(e, "0") == 0);
+    }
+    return enabled;
+}
+
+static void
+pv_tiles_range(NsProcView *v, double *y0, double *y1)
+{
+    double vh = viewport_h(v) / cur_scale(v);
+    double ahead = vh * 1.5, behind = vh * 0.5;
+    *y0 = MAX(v->scroll_y - (v->scroll_dir < 0 ? ahead : behind), 0);
+    *y1 = v->scroll_y + vh + (v->scroll_dir < 0 ? behind : ahead);
+}
+
+static void
+pv_tiles_request(NsProcView *v, Req *req)
+{
+    if (!pv_tiles_enabled())
+        return;
+    double y0, y1;
+    pv_tiles_range(v, &y0, &y1);
+    req->tiles.tile_h = NS_PV_TILE_H;
+    req->tiles.want_y0 = (int)floor(y0);
+    req->tiles.want_y1 = (int)ceil(y1);
+    req->tiles.gen = ns_page_layers_gen(v->layers);
+    req->tiles.vp_held = ns_page_layers_vp_held(v->layers);
+    req->tiles.fill = v->tiles_fill;
+    v->tiles_fill = FALSE;
+    req->have = ns_page_layers_have(v->layers, y0, y1, FALSE);
+    req->hold = ns_page_layers_have(v->layers, y0, y1, TRUE);
+}
+
+static gboolean
+pv_adjustments_stale(NsProcView *v)
+{
+    double s = cur_scale(v);
+    double cw = viewport_w(v) / s, ch = viewport_h(v) / s;
+    return fabs(gtk_adjustment_get_upper(v->hadj) - MAX(v->page_w, cw)) > 0.5 ||
+           fabs(gtk_adjustment_get_upper(v->vadj) - MAX(v->page_h, ch)) > 0.5;
+}
+
+static void
+pv_tiles_apply(NsProcView *v, Res *res)
+{
+    gboolean changed = ns_page_layers_apply(v->layers, res->layers);
+    if (!ns_page_layers_active(v->layers))
+        return;
+    if (!v->tiles_mode) {
+        v->tiles_mode = TRUE;
+        g_clear_object(&v->frame);
+    }
+    v->render_restarts = 0;
+    clear_busy_cursor(v);
+    double vh = viewport_h(v) / cur_scale(v);
+    ns_page_layers_evict(v->layers, v->scroll_y - vh * 1.5,
+                         v->scroll_y + vh * 2.5);
+    if (res->ph > 0) {
+        v->page_h = res->ph;
+        if (res->pw > 0) v->page_w = res->pw;
+    }
+    if (pv_adjustments_stale(v)) {
+        v->adopting_scroll = TRUE;
+        configure_adjustments(v);
+        v->adopting_scroll = FALSE;
+    }
+    double y0, y1;
+    pv_tiles_range(v, &y0, &y1);
+    if (changed) {
+        gtk_widget_queue_draw(v->area);
+        if (ns_page_layers_missing(v->layers, y0, y1, v->scroll_y,
+                                   v->scroll_y + vh, v->page_h) &&
+            !v->render_pending) {
+            v->render_pending = TRUE;
+            v->tiles_fill = TRUE;
+        }
+    }
+}
+
+static void
+pv_tiles_leave(NsProcView *v)
+{
+    if (!v->tiles_mode)
+        return;
+    v->tiles_mode = FALSE;
+    ns_page_layers_reset(v->layers);
+}
 
 static void
 request_tick(NsProcView *v)
@@ -2037,6 +2165,7 @@ request_render(NsProcView *v)
 {
     if (!v->opened)
         return;
+    v->tiles_fill = FALSE;
     if (v->render_inflight) {
         v->render_pending = TRUE;
         return;
@@ -2061,6 +2190,7 @@ start_render(NsProcView *v)
     req->scale = cur_scale(v) * req->raster;
     req->dpr = page_dpr(v);
     req->caret_active = gtk_widget_has_focus(v->area);
+    pv_tiles_request(v, req);
     req->wheel.dx = (int)v->wheel_pend_x;
     req->wheel.dy = (int)v->wheel_pend_y;
     if (req->wheel.dx || req->wheel.dy) {
@@ -2090,17 +2220,58 @@ hover_after_scroll(gpointer data)
 }
 
 static void
+pv_route_wheel(NsProcView *v, double dx, double dy)
+{
+    double s = cur_scale(v);
+    v->wheel_remote = !v->wheel_viewport &&
+        ns_page_layers_scroller_at(v->layers, v->pointer_x / s,
+                                   v->pointer_y / s, v->scroll_x,
+                                   v->scroll_y, fabs(dy) >= fabs(dx));
+}
+
+static int
+pv_take_whole(double *pend)
+{
+    double r = round(*pend);
+    int whole = fabs(*pend - r) < 1e-6 ? (int)r : (int)*pend;
+    *pend -= whole;
+    return whole;
+}
+
+static void
+pv_scroll_local(NsProcView *v)
+{
+    int dx = pv_take_whole(&v->wheel_pend_x);
+    int dy = pv_take_whole(&v->wheel_pend_y);
+    if (!dx && !dy)
+        return;
+    if (dy)
+        v->scroll_dir = dy > 0 ? 1 : -1;
+    int want_x = v->scroll_x + dx, want_y = v->scroll_y + dy;
+    gtk_adjustment_set_value(v->hadj, want_x);
+    gtk_adjustment_set_value(v->vadj, want_y);
+    if (v->scroll_x != want_x)
+        v->wheel_left_x = v->fling_vx = v->wheel_pend_x = 0;
+    if (v->scroll_y != want_y)
+        v->wheel_left_y = v->fling_vy = v->wheel_pend_y = 0;
+}
+
+static void
 queue_wheel_scroll(NsProcView *v, double dx, double dy)
 {
     if (!v->opened)
         return;
     if (v->hover_after_scroll_id)
         g_source_remove(v->hover_after_scroll_id);
+    else
+        pv_route_wheel(v, dx, dy);
     v->hover_after_scroll_id =
         g_timeout_add(NS_PV_HOVER_AFTER_SCROLL_MS, hover_after_scroll, v);
     v->wheel_pend_x += dx;
     v->wheel_pend_y += dy;
-    if (fabs(v->wheel_pend_x) >= 1.0 || fabs(v->wheel_pend_y) >= 1.0)
+    if (v->tiles_mode && !v->wheel_remote)
+        pv_scroll_local(v);
+    else if (fabs(v->wheel_pend_x) >= 1.0 || fabs(v->wheel_pend_y) >= 1.0)
         request_render(v);
 }
 
@@ -2665,6 +2836,8 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     stop_wheel_animation(v);
     disarm_anim(v);
     g_clear_object(&v->frame);
+    ns_page_layers_reset(v->layers);
+    v->tiles_mode = FALSE;
     gtk_widget_queue_draw(v->area);
     if (!v->loading) {
         v->loading = TRUE;
@@ -3073,7 +3246,10 @@ on_result(gpointer data)
                 v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
             }
         }
-        if (current && res->ok && res->texture) {
+        if (current && res->ok && res->layers) {
+            pv_tiles_apply(v, res);
+        } else if (current && res->ok && res->texture) {
+            pv_tiles_leave(v);
             g_clear_object(&v->frame);
             v->frame = g_steal_pointer(&res->texture);
             v->frame_scale = res->texture_scale;
@@ -3355,6 +3531,7 @@ on_result(gpointer data)
 
 done:
     g_clear_object(&res->texture);
+    ns_layer_update_free(res->layers);
     g_free(res->title);
     g_free(res->url);
     g_free(res->nav);
@@ -3504,9 +3681,8 @@ pv_video_draw_surface(NsProcView *v, cairo_t *cr, cairo_surface_t *surface)
 }
 
 static void
-pv_video_draw(NsProcView *v, cairo_t *cr)
+pv_video_draw(NsProcView *v, cairo_t *cr, double fs)
 {
-    double fs = v->frame_scale > 0 ? v->frame_scale : 1.0;
     if (v->vring && v->vid_rect_valid) {
         gboolean frame_drawn = FALSE;
         cairo_save(cr);
@@ -3610,8 +3786,24 @@ pv_snapshot_video(NsProcView *v, double fs, GtkSnapshot *snapshot)
         v->vid_clip_x / fs, v->vid_clip_y / fs,
         MAX(v->vid_clip_w, 0.0) / fs, MAX(v->vid_clip_h, 0.0) / fs);
     cairo_t *cr = gtk_snapshot_append_cairo(snapshot, &clip);
-    pv_video_draw(v, cr);
+    pv_video_draw(v, cr, fs);
     cairo_destroy(cr);
+}
+
+static void
+pv_snapshot_page_video(GtkSnapshot *snapshot, double offset_x,
+                       double offset_y, gpointer data)
+{
+    NsProcView *v = data;
+    if (!v->vid_page)
+        return;
+    double fs = raster_scale(v);
+    gtk_snapshot_save(snapshot);
+    gtk_snapshot_translate(snapshot,
+                           &GRAPHENE_POINT_INIT((float)(-offset_x / fs),
+                                                (float)(-offset_y / fs)));
+    pv_snapshot_video(v, fs, snapshot);
+    gtk_snapshot_restore(snapshot);
 }
 
 static void
@@ -3620,6 +3812,14 @@ ns_proc_view_area_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     NsProcView *v = NS_PROC_VIEW_AREA(widget)->view;
     if (!v)
         return;
+    if (v->tiles_mode) {
+        ns_page_layers_snapshot(v->layers, snapshot,
+                                gtk_widget_get_width(widget),
+                                gtk_widget_get_height(widget),
+                                raster_scale(v), v->scroll_x, v->scroll_y,
+                                pv_snapshot_page_video, v);
+        return;
+    }
     double fs = v->frame_scale > 0 ? v->frame_scale : 1.0;
     graphene_rect_t area = GRAPHENE_RECT_INIT(
         0, 0, gtk_widget_get_width(widget), gtk_widget_get_height(widget));
@@ -3627,7 +3827,8 @@ ns_proc_view_area_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         GdkRGBA white = { 1.0f, 1.0f, 1.0f, 1.0f };
         gtk_snapshot_append_color(snapshot, &white, &area);
     }
-    pv_snapshot_video(v, fs, snapshot);
+    if (!v->vid_page)
+        pv_snapshot_video(v, fs, snapshot);
     if (!v->frame)
         return;
     graphene_rect_t bounds = GRAPHENE_RECT_INIT(
@@ -5003,6 +5204,7 @@ ns_proc_view_new(void)
     g_signal_connect(v->hadj, "value-changed", G_CALLBACK(on_adj_changed), v);
     g_signal_connect(v->vadj, "value-changed", G_CALLBACK(on_adj_changed), v);
 
+    v->layers = ns_page_layers_new();
     v->area = g_object_new(ns_proc_view_area_get_type(), NULL);
     NS_PROC_VIEW_AREA(v->area)->view = v;
     gtk_widget_set_hexpand(v->area, TRUE);

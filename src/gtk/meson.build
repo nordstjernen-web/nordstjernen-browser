@@ -1,10 +1,12 @@
 nordstjernen_gtk_sources = files(
   'appmain.c',
+  'pagelayers.c',
   'procview.c',
   'procwindow.c',
   'titlerow.c',
   '../libnordstjernen.c',
   '../renderer_serve.c',
+  '../renderer_tiles.c',
   '../rproc_http.c',
   '../rproc_inproc.c',
   '../ipc_http.c',
