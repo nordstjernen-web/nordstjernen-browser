@@ -199,11 +199,11 @@ agreement. Bundled third-party components keep their own licenses
 ([THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
 
 # Development team
-Nordstjernen is developed by a team located in Norway, Poland and Spain.
+Nordstjernen is developed by a team located in Norway, Poland and Spain.  
 
+Project home: <https://nordstjernen.org>  
 
-Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal ·
-[Join the Discord](https://discord.gg/4W959nW5vF)
+[Join the Discord](https://discord.gg/4W959nW5vF)  
 
 ## Builds
 [![linux](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/linux.yml)
@@ -213,3 +213,7 @@ Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal ·
 [![java](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml)
 
 <img src="docs/best-viewed-in-nordstjernen.gif" alt="Best viewed in Nordstjernen" width="140">
+
+----
+
+Copyright 2026 Andreas Røsdal ·  
