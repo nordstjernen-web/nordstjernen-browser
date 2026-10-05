@@ -1535,6 +1535,50 @@ collect_box_bg_image(ns_box *box, const ns_style *s)
     }
 }
 
+static void
+append_generated_after(ns_box *block, ns_box *gen)
+{
+    ns_box *last = block->first_child;
+    while (last && last->next_sibling) last = last->next_sibling;
+    if (last && last->kind == NS_BOX_INLINE) {
+        gsize ll = last->text ? strlen(last->text) : 0;
+        gsize gl = gen->text  ? strlen(gen->text)  : 0;
+        if (ll > G_MAXSIZE - gl - 1) { ns_box_free(gen); return; }
+        char *combined = g_malloc(ll + gl + 1);
+        if (ll) memcpy(combined, last->text, ll);
+        if (gl) memcpy(combined + ll, gen->text, gl);
+        combined[ll + gl] = '\0';
+        g_free(last->text);
+        last->text = combined;
+        if (gen->attrs) {
+            for (guint i = 0; i < gen->attrs->len; i++) {
+                ns_inline_attr a = g_array_index(gen->attrs, ns_inline_attr, i);
+                a.start += ll;
+                if (!last->attrs)
+                    last->attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
+                g_array_append_val(last->attrs, a);
+            }
+        }
+        if (gen->inline_atomics) {
+            if (!last->inline_atomics)
+                last->inline_atomics =
+                    g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
+            for (guint i = 0; i < gen->inline_atomics->len; i++) {
+                ns_inline_atomic ia = g_array_index(gen->inline_atomics,
+                                                    ns_inline_atomic, i);
+                ia.byte_off += ll;
+                if (ia.box) ia.box->parent = last;
+                g_array_append_val(last->inline_atomics, ia);
+            }
+            g_array_free(gen->inline_atomics, TRUE);
+            gen->inline_atomics = NULL;
+        }
+        ns_box_free(gen);
+    } else {
+        box_append_child(block, gen);
+    }
+}
+
 static ns_box *
 build_cell(const ns_node *n, GHashTable *styles)
 {
@@ -1546,21 +1590,49 @@ build_cell(const ns_node *n, GHashTable *styles)
     if (cs_attr) cell->colspan = ns_parse_int(cs_attr, 1, 1, 100);
     const char *rs_attr = ns_element_get_attr(n, "rowspan");
     if (rs_attr) cell->rowspan = ns_parse_int(rs_attr, 1, 1, 100);
+    const ns_style *s = cell->style;
+    if (s) {
+        register_abs_pseudo(n, s->before);
+        register_abs_pseudo(n, s->after);
+    }
+    ns_box *before_block = (s && s->before)
+        ? build_pseudo_block_for(s->before, n) : NULL;
+    if (before_block) box_append_child(cell, before_block);
+    ns_box *pending_before = (s && s->before && !before_block &&
+                              !style_is_absolute_or_fixed(s->before))
+        ? build_pseudo_inline_for(s->before, n) : NULL;
     const ns_node *c = n->first_child;
     while (c) {
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
             while (c && continues_inline_run(c, styles)) c = c->next_sibling;
             ns_box *run = build_inline_run(start, c, styles);
+            if (pending_before) {
+                run = inline_merge_prefix(pending_before, run);
+                pending_before = NULL;
+            }
             if (run->text && run->text[0] != '\0')
                 box_append_child(cell, run);
             else
                 ns_box_free(run);
         } else {
+            if (pending_before) {
+                box_append_child(cell, pending_before);
+                pending_before = NULL;
+            }
             ns_box *child = build_block(c, styles);
             if (child) box_append_child(cell, child);
             if (c) c = c->next_sibling;
         }
+    }
+    if (pending_before) box_append_child(cell, pending_before);
+    ns_box *after_block = (s && s->after)
+        ? build_pseudo_block_for(s->after, n) : NULL;
+    if (after_block) box_append_child(cell, after_block);
+    if (s && s->after && !after_block &&
+        !style_is_absolute_or_fixed(s->after)) {
+        ns_box *gen = build_pseudo_inline_for(s->after, n);
+        if (gen) append_generated_after(cell, gen);
     }
     return cell;
 }
@@ -5642,47 +5714,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             box_append_child(block, pseudo_item_block(gen, s->after));
             gen = NULL;
         }
-        if (gen) {
-            ns_box *last = block->first_child;
-            while (last && last->next_sibling) last = last->next_sibling;
-            if (last && last->kind == NS_BOX_INLINE) {
-                gsize ll = last->text ? strlen(last->text) : 0;
-                gsize gl = gen->text  ? strlen(gen->text)  : 0;
-                if (ll > G_MAXSIZE - gl - 1) { ns_box_free(gen); return block; }
-                char *combined = g_malloc(ll + gl + 1);
-                if (ll) memcpy(combined, last->text, ll);
-                if (gl) memcpy(combined + ll, gen->text, gl);
-                combined[ll + gl] = '\0';
-                g_free(last->text);
-                last->text = combined;
-                if (gen->attrs) {
-                    for (guint i = 0; i < gen->attrs->len; i++) {
-                        ns_inline_attr a = g_array_index(gen->attrs, ns_inline_attr, i);
-                        a.start += ll;
-                        if (!last->attrs)
-                            last->attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
-                        g_array_append_val(last->attrs, a);
-                    }
-                }
-                if (gen->inline_atomics) {
-                    if (!last->inline_atomics)
-                        last->inline_atomics =
-                            g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-                    for (guint i = 0; i < gen->inline_atomics->len; i++) {
-                        ns_inline_atomic ia = g_array_index(gen->inline_atomics,
-                                                            ns_inline_atomic, i);
-                        ia.byte_off += ll;
-                        if (ia.box) ia.box->parent = last;
-                        g_array_append_val(last->inline_atomics, ia);
-                    }
-                    g_array_free(gen->inline_atomics, TRUE);
-                    gen->inline_atomics = NULL;
-                }
-                ns_box_free(gen);
-            } else {
-                box_append_child(block, gen);
-            }
-        }
+        if (gen) append_generated_after(block, gen);
     }
     return block;
 }

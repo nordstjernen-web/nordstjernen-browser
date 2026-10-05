@@ -61,6 +61,10 @@ Changelog:
   that reserve their bold width with a hidden block `::before` grew by
   about half, and headings, quotes and counters drawn with block pseudo
   content ran into the text beside them.
+* Table cells (`<td>`, `<th>`) get their `::before` and `::after`
+  generated content. It was never built for cells, so sort arrows,
+  `content: attr(data-label)` labels in responsive tables and icons drawn
+  in a cell's pseudo-element were missing.
 
 1.0.29:
 ======
