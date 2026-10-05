@@ -385,6 +385,11 @@ Changelog:
   tiles out on 5px rows with spans of 25 to 100, so every tile was 24 rows
   tall, the images were cropped and the captions were drawn over them.
   Column spans keep the 24 track limit.
+* Web fonts used only by `::before` and `::after` content are downloaded.
+  The window decided which `@font-face` files to fetch from the text nodes
+  in the document, so an icon font that a page only uses through generated
+  content (Britannica writes every icon as `content: attr(data-icon)`) was
+  never loaded, and the icon names were drawn as plain words.
 
 1.0.28:
 ======
