@@ -4,15 +4,15 @@ Nordstjernen web browser
 Nordstjernen is a web browser written from scratch in C,
 focused on support for modern HTML, CSS and JavaScript standards.
 
-Nordstjernen is built by a team of developers in Norway, Poland and Spain.
-
 ![Nordstjernen showing a Wikipedia article in the light theme](docs/screenshot.png)
 
-Desktop builds run on
-[Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl), macOS, Linux,
-FreeBSD and NetBSD. The same engine also powers
-[Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
-and iOS shells and a Java/JVM binding.
+Supported platforms:
+* [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)
+* MacOS
+* Linux,
+* FreeBSD and NetBSD. 
+* [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
+* Java.
 
 **Current release:** **1.0.29** (October 2026) — see [Changelog.md](Changelog.md).
 
@@ -197,6 +197,10 @@ at your option (`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`).
 See [License.md](License.md) for the full terms. Commercial licenses by
 agreement. Bundled third-party components keep their own licenses
 ([THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
+
+# Development team
+Nordstjernen is developed by a team located in Norway, Poland and Spain.
+
 
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal ·
 [Join the Discord](https://discord.gg/4W959nW5vF)
