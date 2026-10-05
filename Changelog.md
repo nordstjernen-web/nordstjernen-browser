@@ -28,6 +28,97 @@ Changelog:
 * No more 64-bit format and pointer-type warnings on macOS in the
   IndexedDB, Temporal and WebAssembly code. Ported from
   northstar-browser.
+* `<picture>` is an ordinary inline element again and the `<img>` inside it
+  is the image, as in other browsers. The image used to be laid out with
+  the `<picture>` element's style at its natural size, so the `<img>`'s own
+  `width`/`height` attributes and CSS (`width: 100%`, `max-width`,
+  `position: absolute`, ...) were ignored: hero images covered headlines,
+  card images grew to twice their height and product shots were squeezed
+  instead of cropped. A `<picture>` without an `<img>` now renders nothing.
+  `<source>` selection is unchanged.
+* An inline `<svg>` that has only a `viewBox` (no `width`/`height`) no
+  longer stretches the box around it. Floats, inline-blocks, buttons,
+  absolutely positioned boxes, `auto` grid tracks and table cells measured
+  it at the full width of the page, so icon buttons became hundreds of
+  pixels wide and drew their icons as huge black shapes. Such an SVG now
+  adds no width to its container's min- and max-content size, as in other
+  browsers, takes its width from a definite `height` and its aspect ratio,
+  and still fills the line of a flex container or an ordinary block.
+* An image, video or SVG with a percentage width (`width: 100%` and the
+  like) inside a box that sizes itself to its content -- a float, an
+  inline-block, an absolutely positioned box, an auto table column, a
+  flex or grid item -- adds its natural width to that box's max-content
+  size and nothing to its min-content size, as CSS Sizing specifies (an
+  SVG without a natural width counts as 300px here, a definite height
+  and aspect ratio take precedence). It used to add the percentage of the
+  page width, so such a box grew to the full width and the image was
+  drawn at that width.
+* A `::before` or `::after` with `display: block` (or `flex`, `grid`)
+  and text content is a block box of its own. It used to be laid out as
+  inline text at the start of the element's first line or the end of its
+  last one, so it did not start a new line, and its width was added to
+  the text's in shrink-to-fit sizing instead of the wider of the two being
+  taken. Tabs that reserve their bold width with a hidden block `::before`
+  grew by about half, and headings and counters drawn with block pseudo
+  content ran into the text beside them.
+* Table cells (`<td>`, `<th>`) get their `::before` and `::after`
+  generated content. It was never built for cells, so sort arrows,
+  `content: attr(data-label)` labels in responsive tables and icons drawn
+  in a cell's pseudo-element were missing.
+* CSS grid placement by name follows the spec. `grid-column: content`
+  finds the lines named `content-start` and `content-end` (the implicit
+  area that line names create), the end edge of `grid-row: top / nav` or
+  `grid-area: a / 1 / b / -1` resolves to `nav-end`/`b-end` instead of
+  the area's start line, and an item with only an end line
+  (`grid-row-end: main`) is placed against it. Such items used to fall
+  back to auto-placement, which squeezed the Guardian's front-page
+  containers into 60px columns.
+* Grid rows are sized from single-row items first and then from spanning
+  items, smallest span first, and a spanning item's extra height goes to
+  rows that have not reached their content height limit before it is
+  shared out evenly. An empty row next to a spanning header no longer
+  takes half of the header's height.
+* `flex` with only a basis (`flex: 100%`, `flex: 30px`,
+  `flex: calc(...)`) sets `flex-grow: 1` and `flex-shrink: 1`, as the
+  shorthand defines. The grow factor stayed 0, so such items did not grow
+  into the free space of their flex line.
+* A single-value `overflow` (`overflow: hidden`) now sets `overflow-x`
+  and `overflow-y`, so it takes part in the cascade like any shorthand.
+  Any `overflow-x`/`overflow-y` from another rule used to win over it,
+  even when the `overflow` rule was `!important` or more specific, so
+  `overflow: hidden !important` utility classes did not clip.
+  `element.style.overflowX` and a rule's `style.overflowX` read back the
+  value as well.
+* A custom property whose value is `var(--b, initial)` (or `inherit`,
+  `unset`) sees `--b` when `--b` is a plain value declared later in the
+  same rule or in the inline style. The fallback keyword used to win and
+  the property was treated as unset, so Netflix's card grid lost its
+  `flex-basis` and stacked the cards.
+* Form controls get the default look other browsers give them:
+  `<button>`, `<input>` and `<select>` use a 13.33px system font and
+  `<textarea>` a 13.33px monospace font instead of the page's font, buttons have `1px 6px` padding and a
+  2px border, and `<select>` and `<textarea>` a 1px border with Chrome's
+  padding. Unstyled buttons and search boxes were drawn in the page's
+  16px serif with wider padding, and fixed-size icon buttons left too
+  little room for their icon.
+* A `<video>` whose metadata has not loaded uses the 300x150 default
+  object size when only its width or only its height is set, as in other
+  browsers. `<video style="width: 100%">` without a loaded source used to
+  be as tall as it was wide, a square blank box that pushed the page down.
+* A wrapping flex container (`flex-wrap: wrap`) with a percentage height
+  resolves it against its containing block's height. It used to take the
+  percentage of its own width, so a one-line header with `height: 100%`
+  became as tall as it was wide and `align-items: center` pushed its
+  items hundreds of pixels down.
+* An absolutely positioned box placed at its static position inside a
+  flex or grid container, or in a right-to-left block, now moves with its
+  content. Only the box itself was moved, so its text and children stayed
+  where block layout had first put them: search placeholders and icons
+  were drawn below their input.
+* Table cells with `display: none` no longer take a column. They were
+  still built into their row, so a hidden responsive header cell
+  (`colspan="2"`, `width: 100%`) widened GitHub's file table past its
+  container and pushed the commit message and date columns out.
 
 1.0.29:
 ======

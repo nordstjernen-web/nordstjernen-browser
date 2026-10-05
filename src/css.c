@@ -16379,9 +16379,9 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "overflow") == 0) {
             char *tokens[3] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            if (n == 2) {
+            if (n == 2 || (n == 1 && !strchr(tokens[0], '('))) {
                 ns_css_value *vx = parse_value_for(NS_CSS_OVERFLOW_X, tokens[0]);
-                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y, tokens[1]);
+                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y, tokens[n - 1]);
                 if (vx) {
                     ns_css_decl d = { .prop = NS_CSS_OVERFLOW_X, .value = vx, .important = important };
                     g_array_append_val(decls_out, d);
@@ -17154,12 +17154,13 @@ parse_declaration_block(const char **pp, const char *end,
             double grow = 0, shrink = 1;
             char *basis = NULL;
             gboolean basis_set = FALSE;
+            gboolean keyword_set = FALSE;
             int numerics = 0;
             for (int i = 0; i < n; i++) {
                 char *t = tokens[i];
                 double num; ns_css_unit u;
                 if (g_ascii_strcasecmp(t, "none") == 0) {
-                    grow = 0; shrink = 0;
+                    grow = 0; shrink = 0; keyword_set = TRUE;
                     g_free(basis);
                     basis = g_strdup("auto"); basis_set = TRUE;
                     break;
@@ -17173,7 +17174,7 @@ parse_declaration_block(const char **pp, const char *end,
                     continue;
                 }
                 if (g_ascii_strcasecmp(t, "initial") == 0) {
-                    grow = 0; shrink = 1;
+                    grow = 0; shrink = 1; keyword_set = TRUE;
                     g_free(basis);
                     basis = g_strdup("auto"); basis_set = TRUE;
                     continue;
@@ -17208,6 +17209,7 @@ parse_declaration_block(const char **pp, const char *end,
                 basis = g_strdup("0%");
                 basis_set = TRUE;
             }
+            if (numerics == 0 && basis_set && !keyword_set) grow = 1;
             char grow_buf[32];
             g_snprintf(grow_buf, sizeof grow_buf, "%g", grow);
             char shrink_buf[32];
@@ -26417,6 +26419,39 @@ css_collect_property_rules(GHashTable *reg, const ns_css_stylesheet *sh)
     }
 }
 
+static GHashTable *
+var_prefill_plain_values(GHashTable *own, GArray *matches)
+{
+    GHashTable *last = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+    GHashTable *prefilled = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, NULL);
+    for (guint i = 0; i < matches->len; i++) {
+        var_match *vm = &g_array_index(matches, var_match, i);
+        if (!vm->name || !vm->text) continue;
+        gboolean plain = !strstr(vm->text, "var(") &&
+            custom_prop_wide_kind(vm->text) == NS_CUSTOM_WIDE_NONE &&
+            !(g_registered_props &&
+              g_hash_table_lookup(g_registered_props, vm->name));
+        gpointer seen = g_hash_table_lookup(last, vm->name);
+        guint state = plain && (!seen || GPOINTER_TO_UINT(seen) & 1u)
+            ? ((i + 1) << 1) | 1u : 2u;
+        g_hash_table_replace(last, g_strdup(vm->name), GUINT_TO_POINTER(state));
+    }
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, last);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        guint state = GPOINTER_TO_UINT(v);
+        if (!(state & 1u)) continue;
+        var_match *vm = &g_array_index(matches, var_match, (state >> 1) - 1);
+        g_hash_table_replace(own, g_strdup(vm->name), g_strdup(vm->text));
+        g_hash_table_add(prefilled, g_strdup(vm->name));
+    }
+    g_hash_table_destroy(last);
+    return prefilled;
+}
+
 static void
 var_map_apply_unregistered(GHashTable *own, const ns_var_map *parent,
                            GArray *matches, guint index)
@@ -26791,11 +26826,14 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
         GHashTable *own = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                 g_free, g_free);
         g_array_sort(var_matches, var_match_cmp);
+        GHashTable *prefilled = var_prefill_plain_values(own, var_matches);
         for (guint i = 0; i < var_matches->len; i++) {
             var_match *vm = &g_array_index(var_matches, var_match, i);
             if (!vm->name || !vm->text) continue;
+            if (g_hash_table_contains(prefilled, vm->name)) continue;
             var_map_apply_unregistered(own, parent, var_matches, i);
         }
+        g_hash_table_destroy(prefilled);
         return ns_var_map_new(own, ns_var_map_ref(parent));
     }
 
@@ -26808,11 +26846,14 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
     var_map_reset_registered(own, parent);
     if (have_local) {
         g_array_sort(var_matches, var_match_cmp);
+        GHashTable *prefilled = var_prefill_plain_values(own, var_matches);
         for (guint i = 0; i < var_matches->len; i++) {
             var_match *vm = &g_array_index(var_matches, var_match, i);
             if (!vm->name || !vm->text) continue;
+            if (g_hash_table_contains(prefilled, vm->name)) continue;
             var_map_apply_registered(own, parent, var_matches, i);
         }
+        g_hash_table_destroy(prefilled);
     }
     ns_var_map *built;
     if (parent_has && !have_local && g_hash_table_size(own) == 0) {
@@ -27290,11 +27331,14 @@ static const char *kUa =
     "input[type=\"radio\"], input[type=\"checkbox\"], input[type=\"reset\"], "
     "input[type=\"button\"], input[type=\"submit\"], input[type=\"color\"], "
     "input[type=\"search\"], select, button { box-sizing: border-box; }\n"
-    "button { display: inline-block; padding: 4px 12px; background-color: #e6e6e6; "
-    "border-top-width: 1px; border-right-width: 1px; "
-    "border-bottom-width: 1px; border-left-width: 1px; "
-    "border-top-style: solid; border-right-style: solid; "
-    "border-bottom-style: solid; border-left-style: solid; "
+    "input, select, textarea, button { font-style: normal; font-weight: normal; "
+    "font-size: 13.333333px; font-family: system-ui, sans-serif; }\n"
+    "textarea { font-family: monospace; }\n"
+    "button { display: inline-block; padding: 1px 6px; background-color: #e6e6e6; "
+    "border-top-width: 2px; border-right-width: 2px; "
+    "border-bottom-width: 2px; border-left-width: 2px; "
+    "border-top-style: outset; border-right-style: outset; "
+    "border-bottom-style: outset; border-left-style: outset; "
     "border-top-color: #b8b8b8; border-right-color: #b8b8b8; "
     "border-bottom-color: #b8b8b8; border-left-color: #b8b8b8; }\n"
     "input, select, textarea { color: FieldText; }\n"
@@ -27318,6 +27362,12 @@ static const char *kUa =
     "border-bottom-style: inset; border-left-style: inset; "
     "border-top-color: #767676; border-right-color: #767676; "
     "border-bottom-color: #767676; border-left-color: #767676; }\n"
+    "select { padding: 0; }\n"
+    "textarea { padding: 2px; }\n"
+    "select, textarea { border-top-width: 1px; border-right-width: 1px; "
+    "border-bottom-width: 1px; border-left-width: 1px; "
+    "border-top-style: solid; border-right-style: solid; "
+    "border-bottom-style: solid; border-left-style: solid; }\n"
     "area, base, head, script, style, title, meta, link "
     "{ display: none; }\n"
     "[data-nd-shadow-root] { display: block; }\n"
