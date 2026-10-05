@@ -16379,9 +16379,9 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "overflow") == 0) {
             char *tokens[3] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            if (n == 2) {
+            if (n == 2 || (n == 1 && !strchr(tokens[0], '('))) {
                 ns_css_value *vx = parse_value_for(NS_CSS_OVERFLOW_X, tokens[0]);
-                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y, tokens[1]);
+                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y, tokens[n - 1]);
                 if (vx) {
                     ns_css_decl d = { .prop = NS_CSS_OVERFLOW_X, .value = vx, .important = important };
                     g_array_append_val(decls_out, d);
