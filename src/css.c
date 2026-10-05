@@ -27333,6 +27333,7 @@ static const char *kUa =
     "input[type=\"search\"], select, button { box-sizing: border-box; }\n"
     "input, select, textarea, button { font-style: normal; font-weight: normal; "
     "font-size: 13.333333px; font-family: system-ui, sans-serif; }\n"
+    "textarea { font-family: monospace; }\n"
     "button { display: inline-block; padding: 1px 6px; background-color: #e6e6e6; "
     "border-top-width: 2px; border-right-width: 2px; "
     "border-bottom-width: 2px; border-left-width: 2px; "

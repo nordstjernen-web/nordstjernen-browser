@@ -95,8 +95,8 @@ Changelog:
   the property was treated as unset, so Netflix's card grid lost its
   `flex-basis` and stacked the cards.
 * Form controls get the default look other browsers give them:
-  `<button>`, `<input>`, `<select>` and `<textarea>` use a 13.33px system
-  font instead of the page's font, buttons have `1px 6px` padding and a
+  `<button>`, `<input>` and `<select>` use a 13.33px system font and
+  `<textarea>` a 13.33px monospace font instead of the page's font, buttons have `1px 6px` padding and a
   2px border, and `<select>` and `<textarea>` a 1px border with Chrome's
   padding. Unstyled buttons and search boxes were drawn in the page's
   16px serif with wider padding, and fixed-size icon buttons left too
