@@ -359,6 +359,27 @@ Changelog:
   now supplies them; a frame's copies of native functions forward to the
   page's functions on that engine, as docs/quickjs.md describes.
 
+* The window hands each page frame to GTK as a texture instead of painting
+  it through cairo on every redraw. GTK had to rasterize the whole frame
+  into a new image and upload it each time the window redrew, also when
+  only a wheel event or a video frame changed; it now uploads a frame once.
+  Scrolling a results page in a 1200x760 window on a 2x screen draws 51-54
+  frames a second instead of 44-46, and the window's memory stays around
+  100-130 MB instead of 120-250 MB.
+* Scrolling no longer waits for the renderer. The renderer paints the page
+  as tiles and keeps each `position: fixed` and `position: sticky` part in
+  its own layer; the window keeps the tiles as textures and moves them
+  itself, so a long task in the page's scripts no longer stops the page from
+  moving, and only tiles that come into view are uploaded. After a change on
+  the page only the visible tiles are painted again, and tiles whose pixels
+  did not change stay on the GPU. A playing YouTube video is drawn under the
+  tiles. Scrolling at 1500 px/s in a 1280x800 window on a 2x, 120 Hz screen:
+  Wikipedia 56 -> 102 frames a second, GitHub 51 -> 102, BBC News 42 -> 100,
+  a YouTube video page 38 -> 95, and the longest pause on the YouTube video
+  page went from 509 ms to 25 ms. Pages that cannot be split this way (for
+  example `background-attachment: fixed`) still get full frames;
+  `NS_TILES=0` turns tiles off.
+
 1.0.28:
 ======
 * Scrolling no longer waits behind the page's own work. While a page is

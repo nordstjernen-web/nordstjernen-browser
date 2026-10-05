@@ -44,6 +44,7 @@ typedef struct {
     char                *audio;
     char                *window_action;
     int                  clipboard;
+    char                *tiles;
 } ns_rproc_http_frame;
 
 typedef struct {
@@ -112,6 +113,23 @@ int  ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
                                 int caret_active,
                                 const ns_rproc_http_wheel *wheel,
                                 ns_rproc_http_frame *out);
+typedef struct ns_rproc_http_tiles_req {
+    int         tile_h;
+    int         want_y0, want_y1;
+    int         gen;
+    int         vp_held;
+    int         fill;
+    const char *have;
+    const char *hold;
+} ns_rproc_http_tiles_req;
+
+int  ns_rproc_http_render_tiles(ns_rproc_http *r, int width, int height,
+                                int scroll_x, int scroll_y, double scale,
+                                int caret_active,
+                                const ns_rproc_http_wheel *wheel,
+                                const ns_rproc_http_tiles_req *tiles,
+                                ns_rproc_http_frame *out);
+size_t ns_rproc_http_map_size(const ns_rproc_http *r);
 int  ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out);
 void ns_rproc_http_tick_clear(ns_rproc_http_tick *out);
 char *ns_rproc_http_link_at(ns_rproc_http *r, int x, int y);

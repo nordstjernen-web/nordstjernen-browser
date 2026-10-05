@@ -311,6 +311,7 @@ if is_android
   nordstjernen_embed_sources += files(
     'ipc_http.c',
     'renderer_serve.c',
+    'renderer_tiles.c',
     'rproc_http.c',
   )
 endif
@@ -349,7 +350,8 @@ if not is_mobile
 
   executable(
     'nordstjernen-renderer',
-    files('renderer_http.c', 'renderer_serve.c', 'ipc_http.c', 'threaddump.c'),
+    files('renderer_http.c', 'renderer_serve.c', 'renderer_tiles.c',
+          'ipc_http.c', 'threaddump.c'),
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
     dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,
