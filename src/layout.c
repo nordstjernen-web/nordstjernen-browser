@@ -1558,47 +1558,104 @@ collect_box_bg_image(ns_box *box, const ns_style *s)
 }
 
 static void
+inline_append_attrs(ns_box *last, const ns_box *gen, gsize offset)
+{
+    if (!gen->attrs || !gen->attrs->len) return;
+    if (!last->attrs)
+        last->attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
+    for (guint i = 0; i < gen->attrs->len; i++) {
+        ns_inline_attr a = g_array_index(gen->attrs, ns_inline_attr, i);
+        a.start += offset;
+        g_array_append_val(last->attrs, a);
+    }
+}
+
+static void
+inline_take_atomics(ns_box *last, ns_box *gen, gsize offset)
+{
+    if (!gen->inline_atomics) return;
+    if (!last->inline_atomics)
+        last->inline_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
+    for (guint i = 0; i < gen->inline_atomics->len; i++) {
+        ns_inline_atomic ia = g_array_index(gen->inline_atomics,
+                                            ns_inline_atomic, i);
+        ia.byte_off += offset;
+        if (ia.box) ia.box->parent = last;
+        g_array_append_val(last->inline_atomics, ia);
+    }
+    g_array_free(gen->inline_atomics, TRUE);
+    gen->inline_atomics = NULL;
+}
+
+static void
 append_generated_after(ns_box *block, ns_box *gen)
 {
     ns_box *last = block->first_child;
     while (last && last->next_sibling) last = last->next_sibling;
-    if (last && last->kind == NS_BOX_INLINE) {
-        gsize ll = last->text ? strlen(last->text) : 0;
-        gsize gl = gen->text  ? strlen(gen->text)  : 0;
-        if (ll > G_MAXSIZE - gl - 1) { ns_box_free(gen); return; }
-        char *combined = g_malloc(ll + gl + 1);
-        if (ll) memcpy(combined, last->text, ll);
-        if (gl) memcpy(combined + ll, gen->text, gl);
-        combined[ll + gl] = '\0';
-        g_free(last->text);
-        last->text = combined;
-        if (gen->attrs) {
-            for (guint i = 0; i < gen->attrs->len; i++) {
-                ns_inline_attr a = g_array_index(gen->attrs, ns_inline_attr, i);
-                a.start += ll;
-                if (!last->attrs)
-                    last->attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
-                g_array_append_val(last->attrs, a);
-            }
-        }
-        if (gen->inline_atomics) {
-            if (!last->inline_atomics)
-                last->inline_atomics =
-                    g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-            for (guint i = 0; i < gen->inline_atomics->len; i++) {
-                ns_inline_atomic ia = g_array_index(gen->inline_atomics,
-                                                    ns_inline_atomic, i);
-                ia.byte_off += ll;
-                if (ia.box) ia.box->parent = last;
-                g_array_append_val(last->inline_atomics, ia);
-            }
-            g_array_free(gen->inline_atomics, TRUE);
-            gen->inline_atomics = NULL;
-        }
-        ns_box_free(gen);
-    } else {
+    if (!last || last->kind != NS_BOX_INLINE) {
         box_append_child(block, gen);
+        return;
     }
+    gsize ll = last->text ? strlen(last->text) : 0;
+    gsize gl = gen->text  ? strlen(gen->text)  : 0;
+    if (ll > G_MAXSIZE - gl - 1) { ns_box_free(gen); return; }
+    char *combined = g_malloc(ll + gl + 1);
+    if (ll) memcpy(combined, last->text, ll);
+    if (gl) memcpy(combined + ll, gen->text, gl);
+    combined[ll + gl] = '\0';
+    g_free(last->text);
+    last->text = combined;
+    inline_append_attrs(last, gen, ll);
+    inline_take_atomics(last, gen, ll);
+    ns_box_free(gen);
+}
+
+static ns_box *
+cell_pseudo_before(ns_box *cell, const ns_node *n, const ns_style *s)
+{
+    if (!s || !s->before) return NULL;
+    ns_box *before_block = build_pseudo_block_for(s->before, n);
+    if (before_block) {
+        box_append_child(cell, before_block);
+        return NULL;
+    }
+    if (style_is_absolute_or_fixed(s->before)) return NULL;
+    return build_pseudo_inline_for(s->before, n);
+}
+
+static void
+cell_pseudo_after(ns_box *cell, const ns_node *n, const ns_style *s)
+{
+    if (!s || !s->after) return;
+    ns_box *after_block = build_pseudo_block_for(s->after, n);
+    if (after_block) {
+        box_append_child(cell, after_block);
+        return;
+    }
+    if (style_is_absolute_or_fixed(s->after)) return;
+    ns_box *gen = build_pseudo_inline_for(s->after, n);
+    if (gen) append_generated_after(cell, gen);
+}
+
+static void
+cell_append_run(ns_box *cell, ns_box *run, ns_box **pending_before)
+{
+    if (*pending_before) {
+        run = inline_merge_prefix(*pending_before, run);
+        *pending_before = NULL;
+    }
+    if (run->text && run->text[0] != '\0')
+        box_append_child(cell, run);
+    else
+        ns_box_free(run);
+}
+
+static void
+cell_flush_pending(ns_box *cell, ns_box **pending_before)
+{
+    if (!*pending_before) return;
+    box_append_child(cell, *pending_before);
+    *pending_before = NULL;
 }
 
 static ns_box *
@@ -1617,45 +1674,23 @@ build_cell(const ns_node *n, GHashTable *styles)
         register_abs_pseudo(n, s->before);
         register_abs_pseudo(n, s->after);
     }
-    ns_box *before_block = (s && s->before)
-        ? build_pseudo_block_for(s->before, n) : NULL;
-    if (before_block) box_append_child(cell, before_block);
-    ns_box *pending_before = (s && s->before && !before_block &&
-                              !style_is_absolute_or_fixed(s->before))
-        ? build_pseudo_inline_for(s->before, n) : NULL;
+    ns_box *pending_before = cell_pseudo_before(cell, n, s);
     const ns_node *c = n->first_child;
     while (c) {
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
             while (c && continues_inline_run(c, styles)) c = c->next_sibling;
-            ns_box *run = build_inline_run(start, c, styles);
-            if (pending_before) {
-                run = inline_merge_prefix(pending_before, run);
-                pending_before = NULL;
-            }
-            if (run->text && run->text[0] != '\0')
-                box_append_child(cell, run);
-            else
-                ns_box_free(run);
+            cell_append_run(cell, build_inline_run(start, c, styles),
+                            &pending_before);
         } else {
-            if (pending_before) {
-                box_append_child(cell, pending_before);
-                pending_before = NULL;
-            }
+            cell_flush_pending(cell, &pending_before);
             ns_box *child = build_block(c, styles);
             if (child) box_append_child(cell, child);
             if (c) c = c->next_sibling;
         }
     }
-    if (pending_before) box_append_child(cell, pending_before);
-    ns_box *after_block = (s && s->after)
-        ? build_pseudo_block_for(s->after, n) : NULL;
-    if (after_block) box_append_child(cell, after_block);
-    if (s && s->after && !after_block &&
-        !style_is_absolute_or_fixed(s->after)) {
-        ns_box *gen = build_pseudo_inline_for(s->after, n);
-        if (gen) append_generated_after(cell, gen);
-    }
+    cell_flush_pending(cell, &pending_before);
+    cell_pseudo_after(cell, n, s);
     return cell;
 }
 
@@ -8293,6 +8328,34 @@ ratio_only_replaced_width(const ns_box *box, gboolean max_content)
 }
 
 static double
+loaded_image_auto_width(const ns_box *box, const ns_image *img)
+{
+    double h = replaced_height_for_width(box);
+    if (h > 0) return h * img->natural_width / img->natural_height;
+    double density = box->media->image_density > 0
+        ? box->media->image_density : 1.0;
+    return img->natural_width / density;
+}
+
+static double
+svg_auto_width(const ns_box *box)
+{
+    ns_svg_size size;
+    ns_svg_intrinsic_size(box->dom, &size);
+    double h = replaced_height_for_width(box);
+    if (h > 0 && size.has_ratio && size.ratio > 0) return h * size.ratio;
+    return size.has_width && size.width > 0 ? size.width : 300;
+}
+
+static double
+width_attribute_px(const ns_node *dom)
+{
+    const char *width_attr = dom ? ns_element_get_attr(dom, "width") : NULL;
+    if (!width_attr || strchr(width_attr, '%')) return 0;
+    return image_dimension_attr(dom, "width");
+}
+
+static double
 replaced_auto_width(const ns_box *box)
 {
     if (box->media && box->media->intrinsic_ratio_only) {
@@ -8300,23 +8363,10 @@ replaced_auto_width(const ns_box *box)
         return w > 0 ? w : 300;
     }
     const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
-    if (img && img->loaded && img->natural_width > 0 && img->natural_height > 0) {
-        double h = replaced_height_for_width(box);
-        if (h > 0) return h * img->natural_width / img->natural_height;
-        double density = box->media->image_density > 0
-            ? box->media->image_density : 1.0;
-        return img->natural_width / density;
-    }
-    if (box->kind == NS_BOX_SVG && box->dom) {
-        ns_svg_size size;
-        ns_svg_intrinsic_size(box->dom, &size);
-        double h = replaced_height_for_width(box);
-        if (h > 0 && size.has_ratio && size.ratio > 0) return h * size.ratio;
-        return size.has_width && size.width > 0 ? size.width : 300;
-    }
-    const char *width_attr = box->dom ? ns_element_get_attr(box->dom, "width") : NULL;
-    double attr = width_attr && !strchr(width_attr, '%')
-        ? image_dimension_attr(box->dom, "width") : 0;
+    if (img && img->loaded && img->natural_width > 0 && img->natural_height > 0)
+        return loaded_image_auto_width(box, img);
+    if (box->kind == NS_BOX_SVG && box->dom) return svg_auto_width(box);
+    double attr = width_attribute_px(box->dom);
     if (attr > 0) return attr;
     if (box->kind == NS_BOX_VIDEO) return 300;
     return box->media && box->media->placeholder_image_size ? 200 : 0;
@@ -11534,6 +11584,47 @@ grid_span_order(gconstpointer a, gconstpointer b, gpointer data)
     return ia < ib ? -1 : ia > ib ? 1 : 0;
 }
 
+static gboolean
+grid_row_below_limit(const double *height, const double *limit, int k)
+{
+    return limit[k] < 0 || height[k] < limit[k] - 0.01;
+}
+
+static double
+grid_spread_to_limits(double *height, const gboolean *target,
+                      const double *limit, int n, double extra)
+{
+    for (int round = 0; round < n && extra > 0.01; round++) {
+        int open = 0;
+        for (int k = 0; k < n; k++)
+            if (target[k] && grid_row_below_limit(height, limit, k)) open++;
+        if (!open) break;
+        double share = extra / open;
+        for (int k = 0; k < n; k++) {
+            if (!target[k] || !grid_row_below_limit(height, limit, k)) continue;
+            double add = limit[k] < 0 ? share : MIN(share, limit[k] - height[k]);
+            height[k] += add;
+            extra -= add;
+        }
+    }
+    return extra;
+}
+
+static void
+grid_spread_beyond_limits(double *height, const gboolean *target,
+                          const gboolean *max_intrinsic, int n, double extra)
+{
+    gboolean any_max = FALSE;
+    for (int k = 0; k < n; k++)
+        if (target[k] && max_intrinsic[k]) any_max = TRUE;
+    int beyond = 0;
+    for (int k = 0; k < n; k++)
+        if (target[k] && (max_intrinsic[k] || !any_max)) beyond++;
+    for (int k = 0; k < n && beyond; k++)
+        if (target[k] && (max_intrinsic[k] || !any_max))
+            height[k] += extra / beyond;
+}
+
 static void
 grid_distribute_span(double *height, const gboolean *fixed,
                      const double *limit, const gboolean *min_intrinsic,
@@ -11545,34 +11636,9 @@ grid_distribute_span(double *height, const gboolean *fixed,
     gboolean *target = g_new(gboolean, n);
     for (int k = 0; k < n; k++)
         target[k] = !fixed[k] && (min_intrinsic[k] || !any_min);
-    for (int round = 0; round < n && extra > 0.01; round++) {
-        int open = 0;
-        for (int k = 0; k < n; k++)
-            if (target[k] && (limit[k] < 0 || height[k] < limit[k] - 0.01))
-                open++;
-        if (!open) break;
-        double share = extra / open;
-        for (int k = 0; k < n; k++) {
-            if (!target[k] || (limit[k] >= 0 && height[k] >= limit[k] - 0.01))
-                continue;
-            double add = limit[k] < 0 ? share : MIN(share, limit[k] - height[k]);
-            height[k] += add;
-            extra -= add;
-        }
-    }
-    if (extra <= 0.01) {
-        g_free(target);
-        return;
-    }
-    gboolean any_max = FALSE;
-    for (int k = 0; k < n; k++)
-        if (target[k] && max_intrinsic[k]) any_max = TRUE;
-    int beyond = 0;
-    for (int k = 0; k < n; k++)
-        if (target[k] && (max_intrinsic[k] || !any_max)) beyond++;
-    for (int k = 0; k < n && beyond; k++)
-        if (target[k] && (max_intrinsic[k] || !any_max))
-            height[k] += extra / beyond;
+    extra = grid_spread_to_limits(height, target, limit, n, extra);
+    if (extra > 0.01)
+        grid_spread_beyond_limits(height, target, max_intrinsic, n, extra);
     g_free(target);
 }
 
@@ -11588,34 +11654,48 @@ grid_items_by_span(GArray *spans, guint n)
 static const grid_lines *g_grid_lines;
 
 static int
+grid_line_name_with_suffix(const ns_css_tracks *tracks, const char *name,
+                           gsize len, const char *suffix)
+{
+    gsize slen = strlen(suffix);
+    int best = 0;
+    for (int i = 0; tracks && i < tracks->n_line_names; i++) {
+        const ns_css_line_name *ln = &tracks->line_names[i];
+        if (strlen(ln->name) != len + slen) continue;
+        if (strncmp(ln->name, name, len) != 0) continue;
+        if (strcmp(ln->name + len, suffix) != 0) continue;
+        if (!best || ln->line < best) best = ln->line;
+    }
+    return best;
+}
+
+static int
+grid_area_rect_line(const grid_lines *gl, const char *name, gsize len,
+                    gboolean end_side)
+{
+    int best = 0;
+    for (int i = 0; gl->areas && i < gl->areas->n_rects; i++) {
+        const ns_css_area_rect *a = &gl->areas->rects[i];
+        if (!a->name || strlen(a->name) != len ||
+            strncmp(a->name, name, len) != 0)
+            continue;
+        int line = gl->row_axis ? (end_side ? a->r1 + 2 : a->r0 + 1)
+                                : (end_side ? a->c1 + 2 : a->c0 + 1);
+        if (!best || line < best) best = line;
+    }
+    return best;
+}
+
+static int
 grid_area_edge_line(const grid_lines *gl, const char *name, gsize len,
                     gboolean end_side)
 {
-    const char *suffix = end_side ? "-end" : "-start";
-    gsize slen = strlen(suffix);
-    int best = 0;
-    if (gl->tracks) {
-        for (int i = 0; i < gl->tracks->n_line_names; i++) {
-            const ns_css_line_name *ln = &gl->tracks->line_names[i];
-            if (strlen(ln->name) == len + slen &&
-                strncmp(ln->name, name, len) == 0 &&
-                strcmp(ln->name + len, suffix) == 0 &&
-                (!best || ln->line < best))
-                best = ln->line;
-        }
-    }
-    if (gl->areas) {
-        for (int i = 0; i < gl->areas->n_rects; i++) {
-            const ns_css_area_rect *a = &gl->areas->rects[i];
-            if (!a->name || strlen(a->name) != len ||
-                strncmp(a->name, name, len) != 0)
-                continue;
-            int line = gl->row_axis ? (end_side ? a->r1 + 2 : a->r0 + 1)
-                                    : (end_side ? a->c1 + 2 : a->c0 + 1);
-            if (!best || line < best) best = line;
-        }
-    }
-    return best;
+    int named = grid_line_name_with_suffix(gl->tracks, name, len,
+                                           end_side ? "-end" : "-start");
+    int area = grid_area_rect_line(gl, name, len, end_side);
+    if (!named) return area;
+    if (!area) return named;
+    return MIN(named, area);
 }
 
 static int
@@ -11717,6 +11797,38 @@ grid_parse_span(const char *s)
 }
 
 static int
+grid_start_span_count(char *a)
+{
+    if (!g_str_has_prefix(g_strstrip(a), "span ")) return 1;
+    return grid_span_is_count(a + 5) ? grid_parse_span(a + 5) : -1;
+}
+
+static int
+grid_pos_span_pair(const char *s, const char *slash, int n_tracks,
+                   int *out_start, int *out_span)
+{
+    char *a = g_strndup(s, slash - s);
+    const char *b = slash + 1;
+    while (*b == ' ') b++;
+    int n = grid_resolve_line_number(a, n_tracks);
+    *out_start = n > 0 ? n - 1 : 0;
+    int start_span = grid_start_span_count(a);
+    g_free(a);
+    if (g_str_has_prefix(b, "span ")) {
+        *out_span = grid_parse_span(b + 5);
+        return n > 0;
+    }
+    int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0, TRUE);
+    if (n > 0 && e > n) *out_span = e - n;
+    if (n <= 0 && start_span > 0 && e - start_span >= 1) {
+        *out_start = e - start_span - 1;
+        *out_span = start_span;
+        return 1;
+    }
+    return n > 0;
+}
+
+static int
 grid_pos_span(const ns_css_value *v, int n_tracks,
               int *out_start, int *out_span)
 {
@@ -11729,29 +11841,7 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
         return 0;
     }
     const char *slash = strchr(s, '/');
-    if (slash) {
-        char *a = g_strndup(s, slash - s);
-        const char *b = slash + 1;
-        while (*b == ' ') b++;
-        int n = grid_resolve_line_number(a, n_tracks);
-        *out_start = n > 0 ? n - 1 : 0;
-        gboolean a_span = g_str_has_prefix(g_strstrip(a), "span ");
-        int start_span = a_span && grid_span_is_count(a + 5)
-            ? grid_parse_span(a + 5) : a_span ? -1 : 1;
-        g_free(a);
-        if (g_str_has_prefix(b, "span ")) {
-            *out_span = grid_parse_span(b + 5);
-        } else {
-            int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0, TRUE);
-            if (n > 0 && e > n) *out_span = e - n;
-            if (n <= 0 && start_span > 0 && e - start_span >= 1) {
-                *out_start = e - start_span - 1;
-                *out_span = start_span;
-                return 1;
-            }
-        }
-        return n > 0;
-    }
+    if (slash) return grid_pos_span_pair(s, slash, n_tracks, out_start, out_span);
     int n = grid_resolve_line_number(s, n_tracks);
     if (n > 0) { *out_start = n - 1; return 1; }
     return 0;
