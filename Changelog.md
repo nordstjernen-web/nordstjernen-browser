@@ -65,6 +65,19 @@ Changelog:
   generated content. It was never built for cells, so sort arrows,
   `content: attr(data-label)` labels in responsive tables and icons drawn
   in a cell's pseudo-element were missing.
+* CSS grid placement by name follows the spec. `grid-column: content`
+  finds the lines named `content-start` and `content-end` (the implicit
+  area that line names create), the end edge of `grid-row: top / nav` or
+  `grid-area: a / 1 / b / -1` resolves to `nav-end`/`b-end` instead of
+  the area's start line, and an item with only an end line
+  (`grid-row-end: main`) is placed against it. Such items used to fall
+  back to auto-placement, which squeezed the Guardian's front-page
+  containers into 60px columns.
+* Grid rows are sized from single-row items first and then from spanning
+  items, smallest span first, and a spanning item's extra height goes to
+  rows that have not reached their content height limit before it is
+  shared out evenly. An empty row next to a spanning header no longer
+  takes half of the header's height.
 
 1.0.29:
 ======

@@ -11492,13 +11492,92 @@ typedef struct grid_lines {
     gboolean row_axis;
 } grid_lines;
 
+static gint
+grid_span_order(gconstpointer a, gconstpointer b, gpointer data)
+{
+    const GArray *spans = data;
+    guint ia = *(const guint *)a, ib = *(const guint *)b;
+    int sa = MAX(g_array_index(spans, int, ia), 1);
+    int sb = MAX(g_array_index(spans, int, ib), 1);
+    if (sa != sb) return sa < sb ? -1 : 1;
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+
+static void
+grid_distribute_span(double *height, const gboolean *fixed,
+                     const double *limit, int n, double extra)
+{
+    for (int round = 0; round < n && extra > 0.01; round++) {
+        int open = 0;
+        for (int k = 0; k < n; k++)
+            if (!fixed[k] && (limit[k] < 0 || height[k] < limit[k] - 0.01))
+                open++;
+        if (!open) break;
+        double share = extra / open;
+        for (int k = 0; k < n; k++) {
+            if (fixed[k] || (limit[k] >= 0 && height[k] >= limit[k] - 0.01))
+                continue;
+            double add = limit[k] < 0 ? share : MIN(share, limit[k] - height[k]);
+            height[k] += add;
+            extra -= add;
+        }
+    }
+    if (extra <= 0.01) return;
+    int growable = 0;
+    for (int k = 0; k < n; k++) if (!fixed[k]) growable++;
+    for (int k = 0; k < n && growable; k++)
+        if (!fixed[k]) height[k] += extra / growable;
+}
+
+static GArray *
+grid_items_by_span(GArray *spans, guint n)
+{
+    GArray *order = g_array_sized_new(FALSE, FALSE, sizeof(guint), n);
+    for (guint i = 0; i < n; i++) g_array_append_val(order, i);
+    g_array_sort_with_data(order, grid_span_order, spans);
+    return order;
+}
+
 static const grid_lines *g_grid_lines;
 
 static int
-grid_named_line(const char *name, gsize len, int after)
+grid_area_edge_line(const grid_lines *gl, const char *name, gsize len,
+                    gboolean end_side)
+{
+    const char *suffix = end_side ? "-end" : "-start";
+    gsize slen = strlen(suffix);
+    int best = 0;
+    if (gl->tracks) {
+        for (int i = 0; i < gl->tracks->n_line_names; i++) {
+            const ns_css_line_name *ln = &gl->tracks->line_names[i];
+            if (strlen(ln->name) == len + slen &&
+                strncmp(ln->name, name, len) == 0 &&
+                strcmp(ln->name + len, suffix) == 0 &&
+                (!best || ln->line < best))
+                best = ln->line;
+        }
+    }
+    if (gl->areas) {
+        for (int i = 0; i < gl->areas->n_rects; i++) {
+            const ns_css_area_rect *a = &gl->areas->rects[i];
+            if (!a->name || strlen(a->name) != len ||
+                strncmp(a->name, name, len) != 0)
+                continue;
+            int line = gl->row_axis ? (end_side ? a->r1 + 2 : a->r0 + 1)
+                                    : (end_side ? a->c1 + 2 : a->c0 + 1);
+            if (!best || line < best) best = line;
+        }
+    }
+    return best;
+}
+
+static int
+grid_named_line(const char *name, gsize len, int after, gboolean end_side)
 {
     const grid_lines *gl = g_grid_lines;
     if (!gl || !name || !len) return 0;
+    int edge = grid_area_edge_line(gl, name, len, end_side);
+    if (edge > 0) return edge;
     if (gl->tracks) {
         for (int i = 0; i < gl->tracks->n_line_names; i++) {
             const ns_css_line_name *ln = &gl->tracks->line_names[i];
@@ -11544,7 +11623,8 @@ grid_named_line(const char *name, gsize len, int after)
 }
 
 static int
-grid_resolve_line_from(const char *s, int n_tracks, int after)
+grid_resolve_line_from(const char *s, int n_tracks, int after,
+                       gboolean end_side)
 {
     if (!s) return 0;
     while (*s == ' ') s++;
@@ -11553,7 +11633,7 @@ grid_resolve_line_from(const char *s, int n_tracks, int after)
     char *end = NULL;
     long n = strtol(s, &end, 10);
     if (end == s) {
-        int named = grid_named_line(s, len, after);
+        int named = grid_named_line(s, len, after, end_side);
         if (named > 0) return named;
         return 0;
     }
@@ -11567,7 +11647,7 @@ grid_resolve_line_from(const char *s, int n_tracks, int after)
 static int
 grid_resolve_line_number(const char *s, int n_tracks)
 {
-    return grid_resolve_line_from(s, n_tracks, 0);
+    return grid_resolve_line_from(s, n_tracks, 0, FALSE);
 }
 
 #define NS_GRID_ROWS_MAX 4096
@@ -11597,12 +11677,19 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
         while (*b == ' ') b++;
         int n = grid_resolve_line_number(a, n_tracks);
         *out_start = n > 0 ? n - 1 : 0;
+        int start_span = g_str_has_prefix(g_strstrip(a), "span ")
+            ? grid_parse_span(a + 5) : 1;
         g_free(a);
         if (g_str_has_prefix(b, "span ")) {
             *out_span = grid_parse_span(b + 5);
         } else {
-            int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0);
+            int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0, TRUE);
             if (n > 0 && e > n) *out_span = e - n;
+            if (n <= 0 && e - start_span >= 1) {
+                *out_start = e - start_span - 1;
+                *out_span = start_span;
+                return 1;
+            }
         }
         return n > 0;
     }
@@ -11612,11 +11699,12 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
 }
 
 static int
-grid_line_num(const ns_css_value *v, int n_tracks, int after)
+grid_line_num(const ns_css_value *v, int n_tracks, int after,
+              gboolean end_side)
 {
     if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
     if (g_str_has_prefix(v->u.keyword, "span ")) return 0;
-    return grid_resolve_line_from(v->u.keyword, n_tracks, after);
+    return grid_resolve_line_from(v->u.keyword, n_tracks, after, end_side);
 }
 
 static int
@@ -11649,7 +11737,7 @@ grid_area_axis_pos(const ns_style *st, gboolean row_axis, int n_tracks,
         char *tail = NULL;
         strtol(ss, &tail, 10);
         if (tail == ss) {
-            int e = grid_resolve_line_from(ss, n_tracks, *out_start + 1);
+            int e = grid_resolve_line_from(ss, n_tracks, *out_start + 1, TRUE);
             if (e > *out_start + 1) *out_span = e - (*out_start + 1);
         }
     }
@@ -11658,7 +11746,7 @@ grid_area_axis_pos(const ns_style *st, gboolean row_axis, int n_tracks,
         if (g_str_has_prefix(es, "span ")) {
             *out_span = grid_parse_span(es + 5);
         } else if (got) {
-            int e = grid_resolve_line_from(es, n_tracks, *out_start + 1);
+            int e = grid_resolve_line_from(es, n_tracks, *out_start + 1, TRUE);
             if (e > *out_start + 1) *out_span = e - (*out_start + 1);
         }
     }
@@ -11679,8 +11767,8 @@ grid_resolve_pos(const ns_style *st, ns_css_prop shorthand,
     if (grid_area_axis_pos(st, start_prop == NS_CSS_GRID_ROW_START, n_tracks,
                            out_start, out_span))
         return 1;
-    int sl = grid_line_num(st->values[start_prop], n_tracks, 0);
-    int el = grid_line_num(st->values[end_prop], n_tracks, sl);
+    int sl = grid_line_num(st->values[start_prop], n_tracks, 0, FALSE);
+    int el = grid_line_num(st->values[end_prop], n_tracks, sl, TRUE);
     if (sl > 0) {
         *out_start = sl - 1;
         const ns_css_value *ev = st->values[end_prop];
@@ -11692,6 +11780,16 @@ grid_resolve_pos(const ns_style *st, ns_css_prop shorthand,
         return 1;
     }
     const ns_css_value *sv = st->values[start_prop];
+    if (el > 0) {
+        int span = sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
+                   g_str_has_prefix(sv->u.keyword, "span ")
+            ? grid_parse_span(sv->u.keyword + 5) : 1;
+        if (el - span >= 1) {
+            *out_start = el - span - 1;
+            *out_span = span;
+            return 1;
+        }
+    }
     if (sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
         g_str_has_prefix(sv->u.keyword, "span ")) {
         *out_span = grid_parse_span(sv->u.keyword + 5);
@@ -12696,7 +12794,11 @@ layout_grid(ns_box *box, double cw,
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
-    for (guint i = 0; i < items->len; i++) {
+    double *row_limit = g_new(double, n_rows + 1);
+    for (int r = 0; r <= n_rows; r++) row_limit[r] = -1;
+    GArray *by_span = grid_items_by_span(row_spans, items->len);
+    for (guint bi = 0; bi < by_span->len; bi++) {
+        guint i = g_array_index(by_span, guint, bi);
         int row = g_array_index(placed_rows, int, i);
         int rs = g_array_index(row_spans, int, i);
         if (row < 0 || row >= n_rows) continue;
@@ -12718,11 +12820,18 @@ layout_grid(ns_box *box, double cw,
         }
         if (crosses_flex && rs > 1) continue;
         if (item_outer > used && growable > 0) {
-            double add = (item_outer - used) / growable;
-            for (int k = 0; k < rs; k++)
-                if (!row_fixed[row + k]) row_height[row + k] += add;
+            if (rs == 1) {
+                if (!row_fixed[row]) row_height[row] += item_outer - used;
+            } else {
+                grid_distribute_span(row_height + row, row_fixed + row,
+                                     row_limit + row, rs, item_outer - used);
+            }
         }
+        if (rs == 1 && !row_fixed[row] && item_outer > row_limit[row])
+            row_limit[row] = item_outer;
     }
+    g_array_free(by_span, TRUE);
+    g_free(row_limit);
     for (guint i = 0; i < items->len && !definite_rows; i++) {
         int row = g_array_index(placed_rows, int, i);
         int rs = g_array_index(row_spans, int, i);
@@ -14825,7 +14934,7 @@ find_abs_containing_block_dom(const ns_node *n, GHashTable *styles)
 }
 
 static int
-grid_abs_line(const char *tok, int explicit_tracks)
+grid_abs_line(const char *tok, int explicit_tracks, gboolean end_side)
 {
     if (!tok) return 0;
     while (*tok == ' ') tok++;
@@ -14843,7 +14952,7 @@ grid_abs_line(const char *tok, int explicit_tracks)
         if (n > explicit_tracks + 1) return past_end;
         return (int)n;
     }
-    int named = grid_resolve_line_from(tok, explicit_tracks, 0);
+    int named = grid_resolve_line_from(tok, explicit_tracks, 0, end_side);
     if (named < 1) return past_end;
     if (named > explicit_tracks + 1) return past_end;
     return named;
@@ -14894,8 +15003,8 @@ grid_abs_axis_lines(const ns_style *st, gboolean row_axis, int explicit_tracks,
         g_free(end_tok);
         end_tok = g_strdup(ev->u.keyword);
     }
-    int s0 = grid_abs_line(start_tok, explicit_tracks);
-    int e0 = grid_abs_line(end_tok, explicit_tracks);
+    int s0 = grid_abs_line(start_tok, explicit_tracks, FALSE);
+    int e0 = grid_abs_line(end_tok, explicit_tracks, TRUE);
     if (s0 && e0 && s0 > e0) { int t = s0; s0 = e0; e0 = t; }
     if (s0 && e0 && s0 == e0) e0 = 0;
     if (s0 == -1 || s0 >= explicit_tracks + 2) s0 = 0;
