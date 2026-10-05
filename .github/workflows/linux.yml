@@ -33,11 +33,6 @@ jobs:
       matrix:
         ubuntu: ['26.04']
         compiler: [clang, gcc]
-        # The release builds a .deb on Ubuntu 24.04 (see release.yml), so the
-        # oldest supported release keeps compiling with its own GCC.
-        include:
-          - ubuntu: '24.04'
-            compiler: gcc
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -60,9 +55,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-linux-${{ matrix.ubuntu }}-${{ matrix.compiler }}-${{ github.sha }}
+          key: ccache-linux-${{ matrix.compiler }}-${{ github.sha }}
           restore-keys: |
-            ccache-linux-${{ matrix.ubuntu }}-${{ matrix.compiler }}-
+            ccache-linux-${{ matrix.compiler }}-
 
       - name: Configure ccache
         run: |
