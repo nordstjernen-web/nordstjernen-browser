@@ -4755,6 +4755,21 @@ build_video_box(const ns_node *n)
 }
 
 static ns_box *
+pseudo_block_with_text(const ns_style *ps, const char *txt)
+{
+    ns_box *block = box_new(NS_BOX_BLOCK);
+    block->style = ps;
+    collect_box_bg_image(block, ps);
+    if (txt && *txt) {
+        ns_box *txtrun = box_new_inline();
+        txtrun->text = g_strdup(txt);
+        txtrun->style = ps;
+        box_append_child(block, txtrun);
+    }
+    return block;
+}
+
+static ns_box *
 build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
 {
     if (!ps) return NULL;
@@ -4776,15 +4791,7 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
              strcmp(txt, "no-close-quote") == 0) { g_free(resolved); return NULL; }
 
     if (inline_atomic) {
-        ns_box *inner = box_new(NS_BOX_BLOCK);
-        inner->style = ps;
-        collect_box_bg_image(inner, ps);
-        if (txt && *txt) {
-            ns_box *txtrun = box_new_inline();
-            txtrun->text = g_strdup(txt);
-            txtrun->style = ps;
-            box_append_child(inner, txtrun);
-        }
+        ns_box *inner = pseudo_block_with_text(ps, txt);
         g_free(quote);
         g_free(resolved);
         ns_box *run = box_new_inline();
@@ -5097,19 +5104,25 @@ build_pseudo_block_for(const ns_style *ps, const ns_node *host)
     if (style_is_absolute_or_fixed(ps)) return NULL;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
     if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return NULL;
-    if (*cv->u.keyword) {
-        char *resolved = resolve_pseudo_content(cv->u.keyword, host);
-        gboolean empty = resolved && !*resolved;
-        g_free(resolved);
-        if (!empty) return NULL;
-    }
     ns_display d = ns_css_display_of(ps);
     if (!ps->values[NS_CSS_DISPLAY] || ns_display_is_none(d) ||
         d.outer == NS_DISPLAY_OUTER_INLINE)
         return NULL;
-    ns_box *pb = box_new(NS_BOX_BLOCK);
-    pb->style = ps;
-    collect_box_bg_image(pb, ps);
+    char *resolved = *cv->u.keyword
+        ? resolve_pseudo_content(cv->u.keyword, host) : g_strdup("");
+    if (!resolved) return NULL;
+    char *quote = NULL;
+    const char *txt = resolved;
+    if (strcmp(txt, "open-quote") == 0)
+        txt = quote = quotes_string_for(ps, 0, FALSE);
+    else if (strcmp(txt, "close-quote") == 0)
+        txt = quote = quotes_string_for(ps, 0, TRUE);
+    else if (strcmp(txt, "no-open-quote") == 0 ||
+             strcmp(txt, "no-close-quote") == 0)
+        txt = "";
+    ns_box *pb = pseudo_block_with_text(ps, txt);
+    g_free(quote);
+    g_free(resolved);
     return pb;
 }
 
