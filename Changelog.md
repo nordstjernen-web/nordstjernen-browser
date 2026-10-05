@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* A `::before` or `::after` with text content that becomes a flex or
+  grid item paints its background once, on the item box, sized by its
+  `width` and `height`. The generated text painted the background again
+  over its own line box, so Tripletex's hidden `width: 0; height: 2px`
+  focus underlines showed as blue bars under every input.
 * Absolutely and fixed positioned elements assigned to a shadow root's
   `<slot>` find their containing block in the flattened tree, through the
   slot and its shadow ancestors, instead of among their light-DOM

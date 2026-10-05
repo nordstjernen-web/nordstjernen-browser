@@ -5085,6 +5085,10 @@ pseudo_item_block(ns_box *run, const ns_style *ps)
     ns_box *item = box_new(NS_BOX_BLOCK);
     item->style = ps;
     collect_box_bg_image(item, ps);
+    for (guint i = run->attrs ? run->attrs->len : 0; i-- > 0;)
+        if (g_array_index(run->attrs, ns_inline_attr, i).kind ==
+            NS_INLINE_BG_COLOR)
+            g_array_remove_index(run->attrs, i);
     box_append_child(item, run);
     return item;
 }
