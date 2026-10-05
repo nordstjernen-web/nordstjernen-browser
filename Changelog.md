@@ -82,6 +82,13 @@ Changelog:
   `flex: calc(...)`) sets `flex-grow: 1` and `flex-shrink: 1`, as the
   shorthand defines. The grow factor stayed 0, so such items did not grow
   into the free space of their flex line.
+* A single-value `overflow` (`overflow: hidden`) now sets `overflow-x`
+  and `overflow-y`, so it takes part in the cascade like any shorthand.
+  Any `overflow-x`/`overflow-y` from another rule used to win over it,
+  even when the `overflow` rule was `!important` or more specific, so
+  `overflow: hidden !important` utility classes did not clip.
+  `element.style.overflowX` and a rule's `style.overflowX` read back the
+  value as well.
 
 1.0.29:
 ======
