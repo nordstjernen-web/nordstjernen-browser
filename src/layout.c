@@ -175,6 +175,25 @@ resolve_used_height(const ns_box *box, const ns_css_value *hv,
 }
 
 static double
+flex_wrap_clamp_height(const ns_box *box, double h, double width_basis)
+{
+    const ns_style *s = box->style;
+    double mn = resolve_used_height(box, s ? s->values[NS_CSS_MIN_HEIGHT] : NULL,
+                                    width_basis, -1);
+    double mx = resolve_used_height(box, s ? s->values[NS_CSS_MAX_HEIGHT] : NULL,
+                                    width_basis, -1);
+    if (s && ns_css_keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box")) {
+        double vex = box->border.top + box->border.bottom +
+                     box->padding.top + box->padding.bottom;
+        if (mn > 0) mn = MAX(mn - vex, 0);
+        if (mx >= 0) mx = MAX(mx - vex, 0);
+    }
+    if (mx >= 0 && h > mx) h = mx;
+    if (mn > 0 && h < mn) h = mn;
+    return h;
+}
+
+static double
 clamp_height_minmax_px(const ns_style *s, double h)
 {
     if (!s || h < 0) return h;
@@ -10648,8 +10667,13 @@ layout_flex_row_wrap(ns_box *box, double cw,
                 keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
                 eh -= box->padding.top + box->padding.bottom +
                       box->border.top + box->border.bottom;
+            if (eh >= 0) eh = flex_wrap_clamp_height(box, eh, cw);
         }
-        if (eh < 0 && box->definite_height > 0 && lines->len > 0)
+        gboolean flexed_item = box->parent &&
+            style_is_flex_container(box->parent->style) &&
+            box->definite_height > 0;
+        if ((eh < 0 || flexed_item) && box->definite_height > 0 &&
+            lines->len > 0)
             eh = box->definite_height;
         if (eh >= 0) {
             cross_definite = TRUE;
