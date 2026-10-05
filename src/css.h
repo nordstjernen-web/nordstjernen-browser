@@ -10,6 +10,7 @@
 
 #include "css_prop_syntax.h"
 #include "dom.h"
+#include "font.h"
 #include "mat4.h"
 
 G_BEGIN_DECLS
@@ -844,6 +845,7 @@ typedef struct ns_css_font_face {
     char *family;
     char *src_url;
     char *unicode_range;
+    ns_font_descriptors descriptors;
 } ns_css_font_face;
 
 typedef struct ns_css_property_rule {

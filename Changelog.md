@@ -8,6 +8,19 @@ Changelog:
   `width` and `height`. The generated text painted the background again
   over its own line box, so Tripletex's hidden `width: 0; height: 2px`
   focus underlines showed as blue bars under every input.
+* `@font-face` rules honour their `font-weight` and `font-style`
+  descriptors. A downloaded face was registered under its CSS family
+  with whatever weight and slant the font file reports for itself, so
+  when one family listed several files the choice between them followed
+  the files' metadata rather than the stylesheet, and a face declared
+  `font-weight: 700` whose file calls itself regular was emboldened
+  again on top. The declared weight and style now describe the face.
+  A face without the descriptor keeps what the file reports, and so
+  does the weight of a face declared with a weight range or backed by a
+  variable font. FINN's category labels were drawn in a bolder face
+  than the regular one they ask for, Spotify's headings in the wrong
+  face of their family, and the New York Times' summaries came out
+  about ten pixels wider per line than in their declared face.
 * Absolutely and fixed positioned elements assigned to a shadow root's
   `<slot>` find their containing block in the flattened tree, through the
   slot and its shadow ancestors, instead of among their light-DOM
