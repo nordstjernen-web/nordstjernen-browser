@@ -386,6 +386,18 @@ Changelog:
   tall, the images were cropped and the captions were drawn over them.
   Column spans keep the 24 track limit.
 
+* Signing in to Google works: Gmail opens after the email and password
+  steps, where the sign-in page used to turn the browser away with "This
+  browser or app may not be secure" after the email. Methods and
+  attributes of Node, Element, Document and the other node interfaces now
+  check that `this` is a real node, as WebIDL requires: called on any other
+  object they throw a TypeError ("Illegal invocation"), the promise-returning
+  ones reject, and the `[LegacyLenientThis]` handlers `onmouseenter`,
+  `onmouseleave` and `onreadystatechange` return undefined. Before, they
+  quietly returned null or 0, or ran on the wrong object, and Google's
+  sign-in checks for this. `HTMLImageElement.decode()` called on something
+  that is not a node now rejects at once instead of never settling.
+
 1.0.28:
 ======
 * Scrolling no longer waits behind the page's own work. While a page is
