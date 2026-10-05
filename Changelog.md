@@ -115,6 +115,10 @@ Changelog:
   content. Only the box itself was moved, so its text and children stayed
   where block layout had first put them: search placeholders and icons
   were drawn below their input.
+* Table cells with `display: none` no longer take a column. They were
+  still built into their row, so a hidden responsive header cell
+  (`colspan="2"`, `width: 100%`) widened GitHub's file table past its
+  container and pushed the commit message and date columns out.
 
 1.0.29:
 ======
