@@ -101,6 +101,10 @@ Changelog:
   padding. Unstyled buttons and search boxes were drawn in the page's
   16px serif with wider padding, and fixed-size icon buttons left too
   little room for their icon.
+* A `<video>` whose metadata has not loaded uses the 300x150 default
+  object size when only its width or only its height is set, as in other
+  browsers. `<video style="width: 100%">` without a loaded source used to
+  be as tall as it was wide, a square blank box that pushed the page down.
 
 1.0.29:
 ======

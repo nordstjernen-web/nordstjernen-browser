@@ -7867,6 +7867,8 @@ layout_image(ns_box *box, double parent_content_width)
 
     gboolean metadata_video =
         box->kind == NS_BOX_VIDEO && node_has_media_metadata(box->dom);
+    gboolean video_without_metadata = box->kind == NS_BOX_VIDEO && !metadata_video &&
+        ns_node_is_element_named(box->dom, "video");
     if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
@@ -7888,9 +7890,11 @@ layout_image(ns_box *box, double parent_content_width)
             h = ratio_overrides && !ratio_with_auto ? w / intrinsic_ratio : nat_h;
         } else { w = 0; h = 0; }
     } else if (w < 0) {
-        w = intrinsic_ratio > 0 ? h * intrinsic_ratio : h;
+        w = intrinsic_ratio > 0 ? h * intrinsic_ratio
+          : video_without_metadata ? 300 : h;
     } else if (h < 0) {
-        h = intrinsic_ratio > 0 ? w / intrinsic_ratio : w;
+        h = intrinsic_ratio > 0 ? w / intrinsic_ratio
+          : video_without_metadata ? 150 : w;
     }
     if (metadata_video && h <= 0 && w > 0 && nat_w > 0 && nat_h > 0)
         h = w * (nat_h / nat_w);
