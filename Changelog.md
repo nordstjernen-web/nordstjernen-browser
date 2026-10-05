@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* 32-bit builds: the selector-cache hash folded a pointer-sized value
+  with `>> 32`, which is undefined on i386 and put every key in one
+  bucket, so each lookup scanned the whole cache. The fold is now done
+  in 64 bits. minimp3's short-block scalefactor loop states its array
+  bound, so a 32-bit LTO link no longer fails `--werror` on
+  `-Wstringop-overflow`. Ported from northstar-browser.
+* No more 64-bit format and pointer-type warnings on macOS in the
+  IndexedDB, Temporal and WebAssembly code. Ported from
+  northstar-browser.
 
 1.0.29:
 ======
