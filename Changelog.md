@@ -78,6 +78,10 @@ Changelog:
   rows that have not reached their content height limit before it is
   shared out evenly. An empty row next to a spanning header no longer
   takes half of the header's height.
+* `flex` with only a basis (`flex: 100%`, `flex: 30px`,
+  `flex: calc(...)`) sets `flex-grow: 1` and `flex-shrink: 1`, as the
+  shorthand defines. The grow factor stayed 0, so such items did not grow
+  into the free space of their flex line.
 
 1.0.29:
 ======

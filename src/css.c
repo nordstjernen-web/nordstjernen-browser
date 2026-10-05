@@ -17154,12 +17154,13 @@ parse_declaration_block(const char **pp, const char *end,
             double grow = 0, shrink = 1;
             char *basis = NULL;
             gboolean basis_set = FALSE;
+            gboolean keyword_set = FALSE;
             int numerics = 0;
             for (int i = 0; i < n; i++) {
                 char *t = tokens[i];
                 double num; ns_css_unit u;
                 if (g_ascii_strcasecmp(t, "none") == 0) {
-                    grow = 0; shrink = 0;
+                    grow = 0; shrink = 0; keyword_set = TRUE;
                     g_free(basis);
                     basis = g_strdup("auto"); basis_set = TRUE;
                     break;
@@ -17173,7 +17174,7 @@ parse_declaration_block(const char **pp, const char *end,
                     continue;
                 }
                 if (g_ascii_strcasecmp(t, "initial") == 0) {
-                    grow = 0; shrink = 1;
+                    grow = 0; shrink = 1; keyword_set = TRUE;
                     g_free(basis);
                     basis = g_strdup("auto"); basis_set = TRUE;
                     continue;
@@ -17208,6 +17209,7 @@ parse_declaration_block(const char **pp, const char *end,
                 basis = g_strdup("0%");
                 basis_set = TRUE;
             }
+            if (numerics == 0 && basis_set && !keyword_set) grow = 1;
             char grow_buf[32];
             g_snprintf(grow_buf, sizeof grow_buf, "%g", grow);
             char shrink_buf[32];
