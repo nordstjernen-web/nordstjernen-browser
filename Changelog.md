@@ -3,6 +3,7 @@ Changelog:
 
 1.0.29:
 ======
+* The about:nordstjernen splash shows version 1.0.29.
 * Clipboard in text fields: paste with Ctrl+V, Shift+Insert or Cmd+V on
   macOS, and from a new right-click menu on inputs, textareas and
   contenteditable elements (Cut, Copy, Paste, Select All). Ctrl+X cuts and
