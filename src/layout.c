@@ -11505,28 +11505,44 @@ grid_span_order(gconstpointer a, gconstpointer b, gpointer data)
 
 static void
 grid_distribute_span(double *height, const gboolean *fixed,
-                     const double *limit, int n, double extra)
+                     const double *limit, const gboolean *min_intrinsic,
+                     const gboolean *max_intrinsic, int n, double extra)
 {
+    gboolean any_min = FALSE;
+    for (int k = 0; k < n; k++)
+        if (!fixed[k] && min_intrinsic[k]) any_min = TRUE;
+    gboolean *target = g_new(gboolean, n);
+    for (int k = 0; k < n; k++)
+        target[k] = !fixed[k] && (min_intrinsic[k] || !any_min);
     for (int round = 0; round < n && extra > 0.01; round++) {
         int open = 0;
         for (int k = 0; k < n; k++)
-            if (!fixed[k] && (limit[k] < 0 || height[k] < limit[k] - 0.01))
+            if (target[k] && (limit[k] < 0 || height[k] < limit[k] - 0.01))
                 open++;
         if (!open) break;
         double share = extra / open;
         for (int k = 0; k < n; k++) {
-            if (fixed[k] || (limit[k] >= 0 && height[k] >= limit[k] - 0.01))
+            if (!target[k] || (limit[k] >= 0 && height[k] >= limit[k] - 0.01))
                 continue;
             double add = limit[k] < 0 ? share : MIN(share, limit[k] - height[k]);
             height[k] += add;
             extra -= add;
         }
     }
-    if (extra <= 0.01) return;
-    int growable = 0;
-    for (int k = 0; k < n; k++) if (!fixed[k]) growable++;
-    for (int k = 0; k < n && growable; k++)
-        if (!fixed[k]) height[k] += extra / growable;
+    if (extra <= 0.01) {
+        g_free(target);
+        return;
+    }
+    gboolean any_max = FALSE;
+    for (int k = 0; k < n; k++)
+        if (target[k] && max_intrinsic[k]) any_max = TRUE;
+    int beyond = 0;
+    for (int k = 0; k < n; k++)
+        if (target[k] && (max_intrinsic[k] || !any_max)) beyond++;
+    for (int k = 0; k < n && beyond; k++)
+        if (target[k] && (max_intrinsic[k] || !any_max))
+            height[k] += extra / beyond;
+    g_free(target);
 }
 
 static GArray *
@@ -11652,6 +11668,17 @@ grid_resolve_line_number(const char *s, int n_tracks)
 
 #define NS_GRID_ROWS_MAX 4096
 
+static gboolean
+grid_span_is_count(const char *s)
+{
+    while (*s == ' ') s++;
+    char *end = NULL;
+    long n = strtol(s, &end, 10);
+    if (end == s || n < 1) return FALSE;
+    while (*end == ' ') end++;
+    return *end == '\0';
+}
+
 static int
 grid_parse_span(const char *s)
 {
@@ -11677,15 +11704,16 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
         while (*b == ' ') b++;
         int n = grid_resolve_line_number(a, n_tracks);
         *out_start = n > 0 ? n - 1 : 0;
-        int start_span = g_str_has_prefix(g_strstrip(a), "span ")
-            ? grid_parse_span(a + 5) : 1;
+        gboolean a_span = g_str_has_prefix(g_strstrip(a), "span ");
+        int start_span = a_span && grid_span_is_count(a + 5)
+            ? grid_parse_span(a + 5) : a_span ? -1 : 1;
         g_free(a);
         if (g_str_has_prefix(b, "span ")) {
             *out_span = grid_parse_span(b + 5);
         } else {
             int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0, TRUE);
             if (n > 0 && e > n) *out_span = e - n;
-            if (n <= 0 && e - start_span >= 1) {
+            if (n <= 0 && start_span > 0 && e - start_span >= 1) {
                 *out_start = e - start_span - 1;
                 *out_span = start_span;
                 return 1;
@@ -11780,10 +11808,10 @@ grid_resolve_pos(const ns_style *st, ns_css_prop shorthand,
         return 1;
     }
     const ns_css_value *sv = st->values[start_prop];
-    if (el > 0) {
-        int span = sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
-                   g_str_has_prefix(sv->u.keyword, "span ")
-            ? grid_parse_span(sv->u.keyword + 5) : 1;
+    gboolean start_span = sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
+                          g_str_has_prefix(sv->u.keyword, "span ");
+    if (el > 0 && (!start_span || grid_span_is_count(sv->u.keyword + 5))) {
+        int span = start_span ? grid_parse_span(sv->u.keyword + 5) : 1;
         if (el - span >= 1) {
             *out_start = el - span - 1;
             *out_span = span;
@@ -12416,9 +12444,9 @@ layout_grid(ns_box *box, double cw,
         g_array_set_size(placed_rows, items->len);
         g_array_set_size(placed_cols, items->len);
     }
-    for (guint step = 0; !col_flow && step < 2 * items->len; step++) {
+    for (guint step = 0; !col_flow && step < 3 * items->len; step++) {
         guint i = step % items->len;
-        gboolean definite_pass = step < items->len;
+        guint phase = step / items->len;
         int s = g_array_index(col_starts, int, i);
         int sp = g_array_index(col_spans, int, i);
         int rs_start = g_array_index(row_starts, int, i);
@@ -12429,7 +12457,8 @@ layout_grid(ns_box *box, double cw,
         if (rs > NS_GRID_ROWS_MAX) rs = NS_GRID_ROWS_MAX;
         gboolean fixed_col = s >= 0 && s + sp <= n_cols;
         gboolean fixed_row = rs_start >= 0 && rs_start < NS_GRID_ROWS_MAX;
-        if (definite_pass != (fixed_col && fixed_row)) continue;
+        guint item_phase = fixed_row ? (fixed_col ? 0 : 1) : 2;
+        if (phase != item_phase) continue;
         int start_row = fixed_row ? rs_start : (dense ? 0 : auto_row);
         int start_col = fixed_col ? s : (fixed_row || dense ? 0 : auto_col);
         int placed_row = start_row;
@@ -12448,7 +12477,7 @@ layout_grid(ns_box *box, double cw,
         g_array_index(placed_rows, int, i) = placed_row;
         g_array_index(placed_cols, int, i) = placed_col;
         if (placed_row + rs > n_rows) n_rows = placed_row + rs;
-        if (definite_pass) continue;
+        if (phase < 2) continue;
         auto_row = placed_row;
         auto_col = placed_col + sp;
         grid_advance_cursor(occupied, &auto_row, &auto_col, n_cols);
@@ -12765,6 +12794,10 @@ layout_grid(ns_box *box, double cw,
     gboolean *row_flex = g_new0(gboolean, n_rows + 1);
     double *row_fr = g_new0(double, n_rows + 1);
     double *row_flex_factor = g_new0(double, n_rows + 1);
+    double *row_limit = g_new(double, n_rows + 1);
+    gboolean *row_min_intrinsic = g_new0(gboolean, n_rows + 1);
+    gboolean *row_max_intrinsic = g_new0(gboolean, n_rows + 1);
+    for (int r = 0; r <= n_rows; r++) row_limit[r] = -1;
     for (int r = 0; r < n_rows; r++) {
         row_flex_factor[r] = -1;
         double fixed = 0;
@@ -12778,11 +12811,23 @@ layout_grid(ns_box *box, double cw,
             if (ar < 0) ar = 0;
             tk = &auto_rows_tracks->tracks[ar];
         }
+        row_min_intrinsic[r] = TRUE;
+        row_max_intrinsic[r] = TRUE;
         if (tk) {
             gboolean flex = tk->kind == NS_CSS_TRACK_FR;
             fixed = flex ? track_min_px(tk, row_basis > 0 ? row_basis : 0)
                   : tk->fit_content ? 0
                   : grid_track_px(tk, row_basis);
+            if (!flex && !tk->fit_content && tk->has_min &&
+                !track_is_intrinsic(tk->min_kind)) {
+                row_min_intrinsic[r] = FALSE;
+                fixed = MAX(fixed, track_min_px(tk, row_basis > 0 ? row_basis : 0));
+            }
+            if (!flex && !tk->fit_content && !track_is_intrinsic(tk->kind) &&
+                tk->has_min && track_is_intrinsic(tk->min_kind)) {
+                row_max_intrinsic[r] = FALSE;
+                row_limit[r] = grid_track_px(tk, row_basis);
+            }
             row_fixed[r] = grid_track_is_fixed(tk, row_basis) ||
                            (definite_rows && flex && tk->has_min &&
                             !track_is_intrinsic(tk->min_kind));
@@ -12794,8 +12839,6 @@ layout_grid(ns_box *box, double cw,
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
-    double *row_limit = g_new(double, n_rows + 1);
-    for (int r = 0; r <= n_rows; r++) row_limit[r] = -1;
     GArray *by_span = grid_items_by_span(row_spans, items->len);
     for (guint bi = 0; bi < by_span->len; bi++) {
         guint i = g_array_index(by_span, guint, bi);
@@ -12824,7 +12867,9 @@ layout_grid(ns_box *box, double cw,
                 if (!row_fixed[row]) row_height[row] += item_outer - used;
             } else {
                 grid_distribute_span(row_height + row, row_fixed + row,
-                                     row_limit + row, rs, item_outer - used);
+                                     row_limit + row, row_min_intrinsic + row,
+                                     row_max_intrinsic + row, rs,
+                                     item_outer - used);
             }
         }
         if (rs == 1 && !row_fixed[row] && item_outer > row_limit[row])
@@ -12832,6 +12877,8 @@ layout_grid(ns_box *box, double cw,
     }
     g_array_free(by_span, TRUE);
     g_free(row_limit);
+    g_free(row_min_intrinsic);
+    g_free(row_max_intrinsic);
     for (guint i = 0; i < items->len && !definite_rows; i++) {
         int row = g_array_index(placed_rows, int, i);
         int rs = g_array_index(row_spans, int, i);
