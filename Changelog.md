@@ -379,6 +379,12 @@ Changelog:
   page went from 509 ms to 25 ms. Pages that cannot be split this way (for
   example `background-attachment: fixed`) still get full frames;
   `NS_TILES=0` turns tiles off.
+* A grid item can span more than 24 rows. `grid-row: span N` and the other
+  span forms were cut to 24, the limit on explicit tracks in a template,
+  although implicit rows go up to 4096. Google's image results lay their
+  tiles out on 5px rows with spans of 25 to 100, so every tile was 24 rows
+  tall, the images were cropped and the captions were drawn over them.
+  Column spans keep the 24 track limit.
 
 1.0.28:
 ======
