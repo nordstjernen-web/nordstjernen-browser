@@ -48,6 +48,7 @@ typedef struct {
     GtkWidget      *tabstrip;
     GtkWidget      *newtab_btn;
     GtkWidget      *address;
+    gboolean        address_click_focuses;
     GtkWidget      *zoom_button;
     GtkWidget      *back;
     GtkWidget      *forward;
@@ -1396,6 +1397,45 @@ on_address_focus_enter(GtkEventControllerFocus *ctrl, gpointer user_data)
     g_idle_add(address_select_all_idle, user_data);
 }
 
+static gboolean
+address_click_select_all_idle(gpointer user_data)
+{
+    ProcWindow *pw = user_data;
+    if (pw->address && GTK_IS_EDITABLE(pw->address) &&
+        !gtk_editable_get_selection_bounds(GTK_EDITABLE(pw->address), NULL,
+                                           NULL))
+        gtk_editable_select_region(GTK_EDITABLE(pw->address), 0, -1);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_address_click_pressed(GtkGestureClick *gesture, int n_press, double x,
+                         double y, gpointer user_data)
+{
+    (void)gesture;
+    (void)x;
+    (void)y;
+    ProcWindow *pw = user_data;
+    pw->address_click_focuses =
+        n_press == 1 && !(gtk_widget_get_state_flags(pw->address) &
+                          GTK_STATE_FLAG_FOCUS_WITHIN);
+}
+
+static void
+on_address_click_released(GtkGestureClick *gesture, int n_press, double x,
+                          double y, gpointer user_data)
+{
+    (void)gesture;
+    (void)n_press;
+    (void)x;
+    (void)y;
+    ProcWindow *pw = user_data;
+    if (!pw->address_click_focuses)
+        return;
+    pw->address_click_focuses = FALSE;
+    g_idle_add(address_click_select_all_idle, pw);
+}
+
 static void
 on_address_activate(GtkEntry *entry, gpointer user_data)
 {
@@ -2464,6 +2504,14 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_signal_connect(addr_focus, "enter",
                      G_CALLBACK(on_address_focus_enter), pw);
     gtk_widget_add_controller(pw->address, addr_focus);
+    GtkGesture *addr_click = gtk_gesture_click_new();
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(addr_click),
+                                               GTK_PHASE_CAPTURE);
+    g_signal_connect(addr_click, "pressed",
+                     G_CALLBACK(on_address_click_pressed), pw);
+    g_signal_connect(addr_click, "released",
+                     G_CALLBACK(on_address_click_released), pw);
+    gtk_widget_add_controller(pw->address, GTK_EVENT_CONTROLLER(addr_click));
     GtkEventController *addr_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(addr_keys, GTK_PHASE_CAPTURE);
     g_signal_connect(addr_keys, "key-pressed",

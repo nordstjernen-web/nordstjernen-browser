@@ -4,6 +4,9 @@ Changelog:
 1.0.29:
 ======
 * The about:nordstjernen splash shows version 1.0.29.
+* Clicking into the address bar selects the whole address, as in other
+  browsers; a second click places the cursor, and dragging still selects
+  part of the text.
 * The title bar shows the version after the browser name
   ("Nordstjernen Browser 1.0.29"; just "Nordstjernen" when space is short).
 * Clipboard in text fields: paste with Ctrl+V, Shift+Insert or Cmd+V on
