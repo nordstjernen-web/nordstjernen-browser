@@ -462,7 +462,7 @@ ns_idb_backend_set_version(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, name);
     if (!h) return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     char buf[64];
-    g_snprintf(buf, sizeof(buf), "%" G_GINT64_FORMAT, version);
+    g_snprintf(buf, sizeof(buf), "%" G_GINT64_FORMAT, (gint64)version);
     gboolean ok = ns_idb_set_meta(h->db, "version", buf);
     ns_idb_db_close(h);
     return JS_NewBool(ctx, ok);

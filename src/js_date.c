@@ -267,7 +267,7 @@ tmp_epoch_of(int y, int mo, int d, int h, int mi, int s)
 static void
 tmp_append_frac(GString *str, int ms, int us, int ns)
 {
-    int64_t frac = (int64_t)ms * 1000000 + (int64_t)us * 1000 + ns;
+    gint64 frac = (gint64)ms * 1000000 + (gint64)us * 1000 + ns;
     if (frac == 0) return;
     char buf[16];
     g_snprintf(buf, sizeof buf, "%09" G_GINT64_FORMAT, frac);
@@ -1205,13 +1205,13 @@ tmp_duration_toString(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
     GString *str = g_string_new(NULL);
     if (sign < 0) g_string_append_c(str, '-');
     g_string_append_c(str, 'P');
-    int64_t a[10];
+    gint64 a[10];
     for (int i = 0; i < 10; i++) a[i] = t->dur[i] < 0 ? -t->dur[i] : t->dur[i];
     if (a[0]) g_string_append_printf(str, "%" G_GINT64_FORMAT "Y", a[0]);
     if (a[1]) g_string_append_printf(str, "%" G_GINT64_FORMAT "M", a[1]);
     if (a[2]) g_string_append_printf(str, "%" G_GINT64_FORMAT "W", a[2]);
     if (a[3]) g_string_append_printf(str, "%" G_GINT64_FORMAT "D", a[3]);
-    int64_t frac_ns = a[7] * 1000000 + a[8] * 1000 + a[9];
+    gint64 frac_ns = a[7] * 1000000 + a[8] * 1000 + a[9];
     if (a[4] || a[5] || a[6] || frac_ns) {
         g_string_append_c(str, 'T');
         if (a[4]) g_string_append_printf(str, "%" G_GINT64_FORMAT "H", a[4]);

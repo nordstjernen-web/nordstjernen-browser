@@ -1259,7 +1259,7 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
     JSValue argv[NS_WASM_MAX_PARAMS];
     guint argc = b->param_count;
     for (guint i = 0; i < argc; i++) {
-        guint64 *slot = &args[i];
+        uint64_t *slot = &args[i];
         switch (b->param_kinds[i]) {
         case WASM_I32:
             argv[i] = JS_NewInt32(ctx, *(int32_t *)slot);
@@ -1845,7 +1845,7 @@ ns_wasm_copy_staging_around_segments(ns_wasm_instance *wi, guint8 *base,
     guint64 copy_len = MIN(size, staging_size);
     GArray *ranges = g_array_new(FALSE, FALSE, sizeof(guint64) * 2);
     for (int32_t i = 0; i < n; i++) {
-        guint64 off = 0, range[2];
+        uint64_t off = 0, range[2];
         uint32_t len = 0;
         if (!wasm_runtime_get_data_segment_range(module, i, &off, &len)) {
             g_array_free(ranges, TRUE);
