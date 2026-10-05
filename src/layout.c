@@ -15932,6 +15932,98 @@ ns_box_sticky_offset(const ns_box *b, double vp_x0, double vp_y0,
     ns_box_sticky_offset_in(b, x0, y0, x1, y1, dx, dy);
 }
 
+static gboolean
+box_moves_when_painted(const ns_box *b)
+{
+    if (!b->style || !box_paint_unbounded(b)) return FALSE;
+    const ns_css_value *pos = b->style->values[NS_CSS_POSITION];
+    return !keyword_is(pos, "fixed") && !keyword_is(pos, "sticky");
+}
+
+static void
+subtree_extent_y(const ns_box *b, double off, double *top, double *bottom,
+                 gboolean *exact)
+{
+    if (box_moves_when_painted(b)) *exact = FALSE;
+    double t = b->y + off;
+    double bt = t + b->margin.top + b->border.top + b->padding.top +
+                b->content_height + b->padding.bottom + b->border.bottom +
+                b->margin.bottom;
+    if (isfinite(t) && t < *top) *top = t;
+    if (isfinite(bt) && bt > *bottom) *bottom = bt;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        subtree_extent_y(c, off, top, bottom, exact);
+    if (!b->inline_atomics) return;
+    for (guint i = 0; i < b->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        if (a->box)
+            subtree_extent_y(a->box, off + b->y + a->owner_offset_y +
+                                     a->box->rel_dy - a->box->y,
+                             top, bottom, exact);
+    }
+}
+
+gboolean
+ns_box_subtree_extent_y(const ns_box *b, double *top, double *bottom)
+{
+    gboolean exact = TRUE;
+    *top = G_MAXDOUBLE;
+    *bottom = -G_MAXDOUBLE;
+    if (b) subtree_extent_y(b, 0, top, bottom, &exact);
+    if (*top > *bottom) *top = *bottom = 0;
+    return exact;
+}
+
+gboolean
+ns_box_in_scroller(const ns_box *b)
+{
+    double x0, y0, x1, y1;
+    return box_scrollport_for(b, &x0, &y0, &x1, &y1);
+}
+
+gboolean
+ns_box_sticky_y_model(const ns_box *b, double viewport_h, ns_sticky_y *out)
+{
+    memset(out, 0, sizeof *out);
+    const ns_box *p = b ? b->parent : NULL;
+    if (!p || !b->style ||
+        !keyword_is(b->style->values[NS_CSS_POSITION], "sticky"))
+        return FALSE;
+    double box_top = b->y;
+    double box_h = b->margin.top + b->border.top + b->padding.top +
+                   b->content_height +
+                   b->padding.bottom + b->border.bottom + b->margin.bottom;
+    double cb_top = p->y + p->margin.top + p->border.top + p->padding.top;
+    double cb_bot = cb_top + p->content_height;
+    double tval, bval;
+    sticky_inset(b->style->values[NS_CSS_TOP], viewport_h, &out->has_top,
+                 &tval);
+    sticky_inset(b->style->values[NS_CSS_BOTTOM], viewport_h,
+                 &out->has_bottom, &bval);
+    if (out->has_top) {
+        out->top_start = box_top - tval;
+        out->top_cap = MAX(cb_bot - (box_top + box_h), 0);
+    }
+    if (out->has_bottom) {
+        out->bottom_start = box_top + box_h + bval - viewport_h;
+        out->bottom_cap = MIN(cb_top - box_top, 0);
+    }
+    return isfinite(out->top_start) && isfinite(out->top_cap) &&
+           isfinite(out->bottom_start) && isfinite(out->bottom_cap);
+}
+
+double
+ns_sticky_y_offset(const ns_sticky_y *m, double scroll_y)
+{
+    double dy = 0;
+    if (m->has_top && scroll_y > m->top_start)
+        dy = MIN(scroll_y - m->top_start, m->top_cap);
+    if (m->has_bottom && dy == 0 && scroll_y < m->bottom_start)
+        dy = MAX(scroll_y - m->bottom_start, m->bottom_cap);
+    return dy;
+}
+
 void
 ns_box_hit_offset(const ns_box *b, double *dx, double *dy)
 {
