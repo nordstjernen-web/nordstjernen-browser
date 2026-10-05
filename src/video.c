@@ -175,6 +175,7 @@ struct ns_video_cache {
     gpointer          audio_user;
     guint             next_token;
     guint             next_seq;
+    gboolean          page_coords;
 };
 
 typedef struct ns_pending {
@@ -485,11 +486,18 @@ ns_video_box_fit(const ns_box *box)
 }
 
 void
+ns_video_cache_set_page_coords(ns_video_cache *cache, gboolean on)
+{
+    if (cache) cache->page_coords = on;
+}
+
+void
 ns_video_cache_note_layout(ns_video_cache *cache, const ns_box *root,
                            double scroll_x, double scroll_y, double scale)
 {
     if (!cache || !root) return;
     if (!(scale > 0.0)) scale = 1.0;
+    if (cache->page_coords) scroll_y = 0;
     GPtrArray *videos = g_ptr_array_new();
     ns_layout_collect_videos(root, videos);
     for (guint i = 0; i < videos->len; i++) {
@@ -502,6 +510,9 @@ ns_video_cache_note_layout(ns_video_cache *cache, const ns_box *root,
                                  box->content_width * scale,
                                  box->content_height * scale,
                                  ns_video_box_fit(box));
+        if (cache->page_coords)
+            ns_video_note_paint_clip(v, v->rect_x, v->rect_y, v->rect_w,
+                                     v->rect_h);
     }
     g_ptr_array_free(videos, TRUE);
 }
@@ -510,7 +521,7 @@ static void
 ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
     if (!v->video_opened || !cache->audio_cb) return;
-    if (!v->rect_dirty &&
+    if (!v->rect_dirty && v->sent_rect_page == cache->page_coords &&
         now_us - v->rect_sent_us < G_GINT64_CONSTANT(1000000))
         return;
     if (v->rect_w <= 0.5 || v->rect_h <= 0.5) return;
@@ -521,16 +532,18 @@ ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v, gint64 now_us)
     v->sent_rect_w = v->rect_w;
     v->sent_rect_h = v->rect_h;
     v->sent_rect_fit = v->rect_fit;
+    v->sent_rect_page = cache->page_coords;
     v->sent_clip_x = v->clip_x;
     v->sent_clip_y = v->clip_y;
     v->sent_clip_w = v->clip_w;
     v->sent_clip_h = v->clip_h;
-    ns_video_emit_audio(cache, "video rect %s %d %d %d %d %d %d %d %d %d",
+    ns_video_emit_audio(cache, "video rect %s %d %d %d %d %d %d %d %d %d %d",
                          v->token, (int)lround(v->rect_x),
                          (int)lround(v->rect_y), (int)lround(v->rect_w),
                          (int)lround(v->rect_h), v->rect_fit,
                          (int)lround(v->clip_x), (int)lround(v->clip_y),
-                         (int)lround(v->clip_w), (int)lround(v->clip_h));
+                         (int)lround(v->clip_w), (int)lround(v->clip_h),
+                         cache->page_coords ? 1 : 0);
 }
 
 void

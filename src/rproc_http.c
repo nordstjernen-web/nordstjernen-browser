@@ -700,6 +700,108 @@ ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
     return 0;
 }
 
+static int
+tiles_request_json(char *json, size_t cap, int jn,
+                   const ns_rproc_http_tiles_req *t)
+{
+    if (jn <= 0 || (size_t)jn >= cap) return -1;
+    jn--;
+    jn += snprintf(json + jn, cap - (size_t)jn,
+                   ",\"tiles\":1,\"tile_h\":%d,\"want_y0\":%d,"
+                   "\"want_y1\":%d,\"gen\":%d,\"vp_held\":%d,"
+                   "\"fill\":%d,\"have\":\"%s\",\"hold\":\"%s\"}",
+                   t->tile_h, t->want_y0, t->want_y1, t->gen, t->vp_held,
+                   t->fill,
+                   t->have ? t->have : "", t->hold ? t->hold : "");
+    return (size_t)jn < cap ? jn : -1;
+}
+
+static int
+tiles_read_body(ns_rproc_http *r, const http_head *head,
+                ns_rproc_http_frame *out)
+{
+    if (head->content_length <= 0 ||
+        head->content_length > NS_HTTP_MAX_REPLY)
+        return -1;
+    char *desc = malloc((size_t)head->content_length + 1);
+    if (!desc) return -1;
+    if (http_read_body(&r->conn, head->content_length, desc) != 0) {
+        free(desc);
+        return -1;
+    }
+    desc[head->content_length] = '\0';
+    frame_fill_from_head(out, head);
+    out->tiles = desc;
+    out->width = (int)head->x_w;
+    out->height = (int)head->x_h;
+    out->stride = (int)head->x_stride;
+    out->pixels = r->map;
+    return 0;
+}
+
+static int
+tiles_read_frame(ns_rproc_http *r, const http_head *head, int width,
+                 int height, ns_rproc_http_frame *out)
+{
+    if (head->content_length > 0) {
+        http_skip_body(&r->conn, head->content_length);
+        return -1;
+    }
+    if (head->x_unchanged > 0) {
+        frame_fill_from_head(out, head);
+        out->unchanged = 1;
+        return 0;
+    }
+    if (!frame_head_fits(r, head, width, height))
+        return -1;
+    frame_fill_from_head(out, head);
+    out->width = (int)head->x_w;
+    out->height = (int)head->x_h;
+    out->stride = (int)head->x_stride;
+    out->pixels = r->map;
+    return 0;
+}
+
+int
+ns_rproc_http_render_tiles(ns_rproc_http *r, int width, int height,
+                           int scroll_x, int scroll_y, double scale,
+                           int caret_active, const ns_rproc_http_wheel *wheel,
+                           const ns_rproc_http_tiles_req *tiles,
+                           ns_rproc_http_frame *out)
+{
+    if (!r || !out || !tiles || !r->shm)
+        return ns_rproc_http_render_wheel(r, width, height, scroll_x,
+                                          scroll_y, scale, caret_active,
+                                          wheel, out);
+    memset(out, 0, sizeof *out);
+    out->scroll_y = out->scroll_x = -1;
+    width = MIN(width, r->max_w);
+    height = MIN(height, r->max_h);
+    if (!(scale > 0))
+        scale = 1.0;
+    char json[4096];
+    int jn = render_request_json(r, json, sizeof json, width, height,
+                                 scroll_x, scroll_y, scale, caret_active,
+                                 wheel);
+    jn = tiles_request_json(json, sizeof json, jn, tiles);
+    if (jn < 0 ||
+        http_write_request(r->wfd, "POST", "/render", "application/json",
+                           json, (size_t)jn) != 0)
+        return -1;
+    http_head head;
+    if (http_read_head(&r->conn, &head) != 0)
+        return -1;
+    if (head.x_tiles > 0)
+        return tiles_read_body(r, &head, out);
+    return tiles_read_frame(r, &head, width, height, out);
+}
+
+size_t
+ns_rproc_http_map_size(const ns_rproc_http *r)
+{
+    return r && r->shm ? (size_t)r->max_w * (size_t)r->max_h * 4u : 0;
+}
+
 static char *
 request(ns_rproc_http *r, const char *path, const char *json_body)
 {

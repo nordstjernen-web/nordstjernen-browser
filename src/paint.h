@@ -38,6 +38,40 @@ void ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query);
 void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const char *highlight_query,
                              const struct ns_selection *sel);
+enum {
+    NS_PAINT_VP_FIXED = 1,
+    NS_PAINT_VP_STICKY = 2,
+};
+
+typedef struct ns_paint_vp_capture {
+    const ns_box *box;
+    int kind;
+    cairo_matrix_t rel;
+} ns_paint_vp_capture;
+
+typedef struct ns_paint_layer_plan {
+    gboolean dynamic;
+    GHashTable *kinds;
+    GArray *vp;
+} ns_paint_layer_plan;
+
+void ns_paint_layer_plan_init(ns_paint_layer_plan *plan);
+void ns_paint_layer_plan_clear(ns_paint_layer_plan *plan);
+void ns_paint_plan_layers(cairo_t *cr, const ns_box *root,
+                          ns_paint_layer_plan *plan);
+typedef cairo_t *(*ns_paint_upper_fn)(int index, gpointer data);
+
+gboolean ns_paint_doc_layers(cairo_t *cr, ns_paint_upper_fn upper,
+                             gpointer upper_data, const ns_box *root,
+                             const char *highlight_query,
+                             const struct ns_selection *sel,
+                             const ns_paint_layer_plan *plan);
+void ns_paint_vp_layer(cairo_t *cr, const ns_box *root,
+                       const ns_paint_vp_capture *layer, double vp_x,
+                       double vp_y,
+                       const char *highlight_query,
+                       const struct ns_selection *sel);
+gboolean ns_paint_canvas_color(const ns_box *root, double rgba_out[4]);
 void ns_paint_set_js(ns_js *js);
 void ns_paint_set_anim(struct ns_anim *anim);
 void ns_paint_set_caret_visible(gboolean visible);

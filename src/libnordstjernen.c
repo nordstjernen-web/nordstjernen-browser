@@ -4,6 +4,7 @@
  */
 
 #include "libnordstjernen.h"
+#include "layers.h"
 
 #include <cairo.h>
 #include <gio/gio.h>
@@ -2051,15 +2052,10 @@ ns_browser_snap_document(ns_browser *browser, double viewport_w,
     return 1;
 }
 
-int
-ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
-                         int width, int height, double scale,
-                         unsigned char *out, int stride)
+static void
+browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
+                      int height, double scale)
 {
-    if (!browser || !browser->layout || !out) return -1;
-    if (width <= 0 || height <= 0 || stride < width * 4) return -1;
-    if (!(scale > 0)) scale = 1.0;
-
     browser->cur_scroll_x = (double)scroll_x;
     browser->cur_scroll_y = (double)scroll_y;
     browser->cur_scale = scale;
@@ -2075,60 +2071,378 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
                                    browser->cur_scroll_y,
                                    browser->cur_scale);
     }
+}
 
+static cairo_t *
+browser_paint_context(unsigned char *out, int width, int height, int stride,
+                      double scale)
+{
     cairo_surface_t *surf =
         cairo_image_surface_create_for_data(out, CAIRO_FORMAT_ARGB32,
                                             width, height, stride);
     if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surf);
-        return -1;
+        return NULL;
     }
     cairo_t *cr = cairo_create(surf);
+    cairo_surface_destroy(surf);
     cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_clip(cr);
-    cairo_scale(cr, scale, scale);
-    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    return cr;
+}
 
+static void
+browser_paint_context_done(cairo_t *cr)
+{
+    cairo_surface_t *surf = cairo_surface_reference(cairo_get_target(cr));
+    cairo_destroy(cr);
+    cairo_surface_flush(surf);
+    cairo_surface_destroy(surf);
+}
 
-
+static void
+browser_paint_begin(ns_browser *browser)
+{
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     ns_paint_set_caret_visible(browser->caret_paint_visible);
-    const char *highlight = browser->search_query;
+}
+
+static void
+browser_paint_end(void)
+{
+    ns_paint_set_caret_visible(TRUE);
+    ns_paint_set_search(FALSE, NULL);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
+}
+
+static const ns_selection *
+browser_paint_selection(ns_browser *browser)
+{
+    return ns_selection_has_range(&browser->selection) ? &browser->selection
+                                                       : NULL;
+}
+
+static void
+browser_dump_frame(cairo_surface_t *surf)
+{
+    const char *dump_dir = g_getenv("NS_FRAME_DUMP");
+    if (!dump_dir) return;
+    static int frame_no;
+    if (frame_no % 30 == 0) {
+        char *path = g_strdup_printf("%s/frame-%05d.png", dump_dir, frame_no);
+        cairo_surface_write_to_png(surf, path);
+        g_free(path);
+    }
+    frame_no++;
+}
+
+int
+ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
+                         int width, int height, double scale,
+                         unsigned char *out, int stride)
+{
+    if (!browser || !browser->layout || !out) return -1;
+    if (width <= 0 || height <= 0 || stride < width * 4) return -1;
+    if (!(scale > 0)) scale = 1.0;
+
+    ns_video_cache_set_page_coords(browser->videos, FALSE);
+    browser_note_viewport(browser, scroll_x, scroll_y, height, scale);
+    cairo_t *cr = browser_paint_context(out, width, height, stride, scale);
+    if (!cr) return -1;
+    cairo_scale(cr, scale, scale);
+    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+
+    browser_paint_begin(browser);
     gint64 paint_t0 = g_get_monotonic_time();
-    if (ns_selection_has_range(&browser->selection))
-        ns_paint_with_selection(cr, browser->layout, highlight,
-                                &browser->selection);
+    const ns_selection *sel = browser_paint_selection(browser);
+    if (sel)
+        ns_paint_with_selection(cr, browser->layout, browser->search_query,
+                                sel);
     else
-        ns_paint(cr, browser->layout, highlight);
+        ns_paint(cr, browser->layout, browser->search_query);
     ns_video_cache_flush_composites(browser->videos, g_get_monotonic_time());
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] paint %6.1fms %dx%d\n",
                    (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
                    width, height);
-    ns_paint_set_caret_visible(TRUE);
-    ns_paint_set_search(FALSE, NULL);
-    ns_paint_set_anim(NULL);
-    ns_paint_set_js(NULL);
+    browser_paint_end();
 
-    cairo_destroy(cr);
-    cairo_surface_flush(surf);
-    const char *dump_dir = g_getenv("NS_FRAME_DUMP");
-    if (dump_dir) {
-        static int frame_no;
-        if (frame_no % 30 == 0) {
-            char *path = g_strdup_printf("%s/frame-%05d.png",
-                                         dump_dir, frame_no);
-            cairo_surface_write_to_png(surf, path);
-            g_free(path);
-        }
-        frame_no++;
-    }
+    cairo_surface_t *surf = cairo_surface_reference(cairo_get_target(cr));
+    browser_paint_context_done(cr);
+    browser_dump_frame(surf);
     cairo_surface_destroy(surf);
     return 0;
+}
+
+void
+ns_browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
+                         int height, double scale)
+{
+    if (!browser || !browser->layout) return;
+    ns_video_cache_set_page_coords(browser->videos, TRUE);
+    browser_note_viewport(browser, scroll_x, scroll_y, height,
+                          scale > 0 ? scale : 1.0);
+}
+
+void
+ns_browser_flush_video_rects(ns_browser *browser)
+{
+    if (browser && browser->videos)
+        ns_video_cache_flush_composites(browser->videos,
+                                        g_get_monotonic_time());
+}
+
+int
+ns_browser_layers_prepare(ns_browser *browser, int scroll_x, int scroll_y,
+                          int width, int height, double scale,
+                          ns_paint_layer_plan *plan)
+{
+    if (!browser || !browser->layout || !plan || width <= 0 || height <= 0)
+        return -1;
+    if (!(scale > 0)) scale = 1.0;
+    ns_video_cache_set_page_coords(browser->videos, TRUE);
+    browser_note_viewport(browser, scroll_x, scroll_y, height, scale);
+    unsigned char *row = g_malloc((size_t)width * 4u);
+    cairo_t *cr = browser_paint_context(row, width, 1, width * 4, scale);
+    if (!cr) {
+        g_free(row);
+        return -1;
+    }
+    cairo_scale(cr, scale, scale);
+    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    browser_paint_begin(browser);
+    ns_paint_plan_layers(cr, browser->layout, plan);
+    browser_paint_end();
+    browser_paint_context_done(cr);
+    g_free(row);
+    return plan->dynamic ? -1 : 0;
+}
+
+typedef struct doc_tile_paint {
+    unsigned char *const *bufs;
+    cairo_t             **upper;
+    gboolean             *used;
+    int                   width, height, stride;
+    int                   scroll_x, tile_y;
+    double                scale;
+} doc_tile_paint;
+
+static void
+doc_tile_transform(cairo_t *cr, const doc_tile_paint *p)
+{
+    cairo_translate(cr, 0, -(double)p->tile_y);
+    cairo_scale(cr, p->scale, p->scale);
+    cairo_translate(cr, -(double)p->scroll_x, 0);
+}
+
+static cairo_t *
+doc_tile_upper(int index, gpointer data)
+{
+    doc_tile_paint *p = data;
+    if (p->upper[index]) return p->upper[index];
+    memset(p->bufs[index + 1], 0, (size_t)p->stride * (size_t)p->height);
+    p->upper[index] = browser_paint_context(p->bufs[index + 1], p->width,
+                                            p->height, p->stride, p->scale);
+    if (p->upper[index]) doc_tile_transform(p->upper[index], p);
+    p->used[index] = p->upper[index] != NULL;
+    return p->upper[index];
+}
+
+static gboolean
+layer_target_ok(const ns_browser *browser, const ns_paint_layer_plan *plan,
+                int width, int height, int stride)
+{
+    return browser && browser->layout && plan && width > 0 && height > 0 &&
+           stride >= width * 4;
+}
+
+int
+ns_browser_render_doc_tile(ns_browser *browser,
+                           const ns_paint_layer_plan *plan, int scroll_x,
+                           int tile_y, int width, int height, double scale,
+                           unsigned char *const *bufs, int stride,
+                           gboolean *upper_used)
+{
+    if (!bufs || !layer_target_ok(browser, plan, width, height, stride))
+        return -1;
+    if (!(scale > 0)) scale = 1.0;
+    int n_upper = (int)plan->vp->len;
+    doc_tile_paint p = { bufs, g_new0(cairo_t *, MAX(n_upper, 1)),
+                         upper_used, width, height, stride, scroll_x, tile_y,
+                         scale };
+    for (int i = 0; i < n_upper; i++) upper_used[i] = FALSE;
+    cairo_t *cr = browser_paint_context(bufs[0], width, height, stride,
+                                        scale);
+    if (!cr) {
+        g_free(p.upper);
+        return -1;
+    }
+    doc_tile_transform(cr, &p);
+    browser_paint_begin(browser);
+    gboolean ok = ns_paint_doc_layers(cr, doc_tile_upper, &p, browser->layout,
+                                      browser->search_query,
+                                      browser_paint_selection(browser), plan);
+    browser_paint_end();
+    for (int i = 0; i < n_upper; i++)
+        if (p.upper[i]) browser_paint_context_done(p.upper[i]);
+    g_free(p.upper);
+    browser_paint_context_done(cr);
+    return ok ? 0 : -2;
+}
+
+static const ns_paint_vp_capture *
+plan_capture(const ns_paint_layer_plan *plan, int index)
+{
+    if (!plan || index < 0 || index >= (int)plan->vp->len) return NULL;
+    return &g_array_index(plan->vp, ns_paint_vp_capture, index);
+}
+
+static double
+browser_viewport_css_h(const ns_browser *browser)
+{
+    return browser->cur_viewport_h > 0 ? browser->cur_viewport_h
+                                       : browser->vh;
+}
+
+static int
+fixed_layer_info(const ns_box *box, double vh, ns_vp_layer_info *out)
+{
+    gboolean exact = ns_box_subtree_extent_y(box, &out->top, &out->bottom);
+    out->top = exact ? MAX(out->top - NS_VP_LAYER_PAD, 0) : 0;
+    out->bottom = exact ? MIN(out->bottom + NS_VP_LAYER_PAD, vh) : vh;
+    if (out->bottom <= out->top) out->top = out->bottom = 0;
+    return 0;
+}
+
+static int
+sticky_layer_info(const ns_browser *browser, const ns_box *box, double vh,
+                  ns_vp_layer_info *out)
+{
+    gboolean exact = ns_box_subtree_extent_y(box, &out->top, &out->bottom);
+    if (!ns_box_sticky_y_model(box, vh, &out->sticky)) return -1;
+    double dx = 0, dy = 0;
+    ns_box_sticky_offset(box, browser->cur_scroll_x, browser->cur_scroll_y,
+                         browser->cur_scroll_x + browser->vw,
+                         browser->cur_scroll_y + vh, &dx, &dy);
+    out->x_offset = dx;
+    double pad = exact ? NS_VP_LAYER_PAD : vh / 2;
+    out->top -= pad;
+    out->bottom += pad;
+    return out->bottom - out->top <= vh * 4 ? 0 : -1;
+}
+
+int
+ns_browser_vp_layer_info(ns_browser *browser, const ns_paint_layer_plan *plan,
+                         int index, ns_vp_layer_info *out)
+{
+    memset(out, 0, sizeof *out);
+    const ns_paint_vp_capture *cap = plan_capture(plan, index);
+    if (!browser || !browser->layout || !cap) return -1;
+    out->kind = cap->kind;
+    double vh = browser_viewport_css_h(browser);
+    return cap->kind == NS_PAINT_VP_STICKY
+        ? sticky_layer_info(browser, cap->box, vh, out)
+        : fixed_layer_info(cap->box, vh, out);
+}
+
+int
+ns_browser_render_vp_layer(ns_browser *browser,
+                           const ns_paint_layer_plan *plan, int index,
+                           int scroll_x, int scroll_y, int origin_y,
+                           int width, int height, double scale,
+                           unsigned char *out, int stride)
+{
+    const ns_paint_vp_capture *cap = plan_capture(plan, index);
+    if (!out || !cap || !layer_target_ok(browser, plan, width, height, stride))
+        return -1;
+    if (!(scale > 0)) scale = 1.0;
+    memset(out, 0, (size_t)stride * (size_t)height);
+    cairo_t *cr = browser_paint_context(out, width, height, stride, scale);
+    if (!cr) return -1;
+    cairo_translate(cr, 0, -(double)origin_y);
+    cairo_scale(cr, scale, scale);
+    if (cap->kind == NS_PAINT_VP_STICKY)
+        cairo_translate(cr, -(double)scroll_x, 0);
+    else
+        cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    browser_paint_begin(browser);
+    ns_paint_vp_layer(cr, browser->layout, cap, scroll_x, scroll_y,
+                      browser->search_query, browser_paint_selection(browser));
+    browser_paint_end();
+    browser_paint_context_done(cr);
+    return 0;
+}
+
+static gboolean
+box_under_fixed(const ns_box *b)
+{
+    for (const ns_box *a = b; a; a = a->parent)
+        if (ns_box_is_fixed(a)) return TRUE;
+    return FALSE;
+}
+
+typedef struct scroller_walk {
+    double vx, vy;
+    GString *out;
+    int left;
+} scroller_walk;
+
+static void
+scroller_rect_emit(const ns_box *b, double ox, double oy, scroller_walk *w)
+{
+    gboolean fixed = box_under_fixed(b);
+    double x = b->x + b->margin.left + b->border.left + ox;
+    double y = b->y + b->margin.top + b->border.top + oy;
+    double bw = b->content_width + b->padding.left + b->padding.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom;
+    if (fixed) {
+        x -= w->vx;
+        y -= w->vy;
+    }
+    if (!(bw > 0 && bh > 0 && isfinite(x) && isfinite(y))) return;
+    int axes = (b->scroll_max_x > 0 ? 1 : 0) | (b->scroll_max_y > 0 ? 2 : 0);
+    g_string_append_printf(w->out, "sr %d %d %d %d %d %d\n", (int)floor(x),
+                           (int)floor(y), (int)ceil(bw), (int)ceil(bh), axes,
+                           fixed ? 1 : 0);
+    w->left--;
+}
+
+static void
+scroller_rects_walk(const ns_box *b, double ox, double oy, scroller_walk *w)
+{
+    if (!b || w->left <= 0) return;
+    double hx = 0, hy = 0;
+    ns_box_hit_offset(b, &hx, &hy);
+    ox += hx;
+    oy += hy;
+    if (b->scrolls && (b->scroll_max_x > 0 || b->scroll_max_y > 0))
+        scroller_rect_emit(b, ox, oy, w);
+    double cx = ox - b->scroll_x, cy = oy - b->scroll_y;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        scroller_rects_walk(c, cx, cy, w);
+}
+
+void
+ns_browser_scroller_rects(ns_browser *browser, GString *out, int max_rects)
+{
+    if (!browser || !browser->layout || !out) return;
+    scroller_walk w = { browser->cur_scroll_x, browser->cur_scroll_y, out,
+                        max_rects };
+    scroller_rects_walk(browser->layout, 0, 0, &w);
+    if (w.left <= 0)
+        g_string_append(out, "sr-all\n");
+}
+
+gboolean
+ns_browser_canvas_color(ns_browser *browser, double rgba_out[4])
+{
+    return browser && browser->layout &&
+           ns_paint_canvas_color(browser->layout, rgba_out);
 }
 
 static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);

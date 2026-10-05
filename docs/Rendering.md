@@ -36,14 +36,51 @@ and a `scale` that maps CSS pixels to device pixels. The renderer:
 
 Renders are coalesced so at most one is in flight, so the shell's per-view worker
 thread copies the frame out of the shared mapping into its display surface
-(a Cairo surface on GTK) before issuing the next render. The copy
-runs off the UI thread; the data plane never crosses the socket. There is no
-retained per-tile paint cache in the UI process — a frame is a full repaint of
-the visible region inside the renderer, and the shared-memory handoff is the fast
-path. While `ns_browser_animating()` is true
+(a texture on GTK) before issuing the next render. The copy runs off the UI
+thread; the data plane never crosses the socket. While `ns_browser_animating()`
+is true
 (active CSS transitions/animations or pending `requestAnimationFrame`), the
 shell drives a frame loop; otherwise it renders on demand (scroll, resize,
 hover restyle, find, click result).
+
+## Tiles and scrolling
+
+The GTK shell asks for the page as tiles instead of one viewport frame
+(`"tiles":1` in the `/render` body). The renderer (`src/renderer_tiles.c`)
+splits the page into layers by paint order and paints them separately:
+
+- **document layers** are the content that scrolls with the page. They are
+  cut into horizontal tiles of 256 device rows at full viewport width;
+- **fixed layers** hold one `position: fixed` subtree each, in viewport
+  coordinates;
+- **sticky layers** hold one `position: sticky` subtree each (scrollport is
+  the viewport), painted at its static position, plus the clamp that moves it
+  (`ns_box_sticky_y_model`).
+
+`ns_paint_plan_layers` finds the fixed and sticky subtrees, checks that each
+one is painted at the root or inside a stacking context that only orders
+paint (no opacity, transform, clip or filter), and records them in paint
+order. Content painted after the n-th of them goes to document layer n, so
+drawing the layers in order gives the same picture as one full paint. A page
+that cannot be split this way, for example one with `background-attachment:
+fixed`, a modal dialog in the top layer, sticky inside sticky, or a playing
+helper video inside a fixed element, is painted as full frames as before.
+
+The reply body lists the layers and tiles; the pixels are in the shared
+mapping. Tiles carry a generation number that changes whenever the page's
+appearance may have changed (a tick, hover, caret blink, a different size or
+scale). For a new generation the renderer repaints only the visible tiles;
+it hashes each tile and answers `keep` when the shell already holds the same
+pixels, so an animation in one corner uploads only the tiles it touches.
+Tiles outside the view are refreshed when they scroll into view.
+
+The shell (`src/gtk/pagelayers.c`) keeps the tiles as textures and moves them
+itself when the user scrolls, so scrolling does not wait for the renderer or
+for the page's scripts, and a scroll step uploads at most a few new tiles. A
+wheel gesture that starts over an inner scroll container is still sent to the
+renderer, which scrolls that container. A playing helper video is drawn under
+the tiles; the page paints a transparent hole where it shows.
+`NS_TILES=0` turns tiles off and brings back full frames.
 
 Resizing re-lays-out the page for the new CSS-pixel viewport width in the
 renderer (`VIEWPORT` → `ns_browser_set_viewport_width`), re-evaluating

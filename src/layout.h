@@ -259,6 +259,19 @@ void ns_box_sticky_offset(const ns_box *b, double vp_x0, double vp_y0,
                           double *out_dx, double *out_dy);
 void ns_box_hit_offset(const ns_box *b, double *dx, double *dy);
 
+typedef struct ns_sticky_y {
+    gboolean has_top, has_bottom;
+    double top_start, top_cap;
+    double bottom_start, bottom_cap;
+} ns_sticky_y;
+
+gboolean ns_box_in_scroller(const ns_box *b);
+gboolean ns_box_subtree_extent_y(const ns_box *b, double *top,
+                                 double *bottom);
+gboolean ns_box_sticky_y_model(const ns_box *b, double viewport_h,
+                               ns_sticky_y *out);
+double ns_sticky_y_offset(const ns_sticky_y *m, double scroll_y);
+
 ns_box *ns_box_hit_scrollable(ns_box *root, double x, double y);
 
 /* CSS Scroll Snap: moves a scroll container's offsets onto the nearest snap

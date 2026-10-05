@@ -61,6 +61,7 @@ typedef struct ns_video {
     double       sent_rect_x, sent_rect_y, sent_rect_w, sent_rect_h;
     double       sent_clip_x, sent_clip_y, sent_clip_w, sent_clip_h;
     int          sent_rect_fit;
+    gboolean     sent_rect_page;
     char        *token;
     gboolean     playing;
     gboolean     ended;
@@ -99,6 +100,7 @@ void            ns_video_cache_set_audio_cb(ns_video_cache *cache,
 
 void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
                                  const ns_node *doc, gint64 now_us);
+void     ns_video_cache_set_page_coords(ns_video_cache *cache, gboolean on);
 void     ns_video_cache_note_layout(ns_video_cache *cache, const ns_box *root,
                                     double scroll_x, double scroll_y,
                                     double scale);
