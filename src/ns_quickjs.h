@@ -16,6 +16,31 @@
 
 typedef JS_BOOL ns_js_bool;
 
+typedef enum JSBrandMode {
+    JS_BRAND_THROW,
+    JS_BRAND_REJECT,
+    JS_BRAND_IGNORE,
+} JSBrandMode;
+
+static inline int
+JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids, int count)
+{
+    (void)ctx;
+    (void)class_ids;
+    (void)count;
+    return 0;
+}
+
+static inline void
+JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
+                     JSBrandMode mode)
+{
+    (void)ctx;
+    (void)func;
+    (void)brand;
+    (void)mode;
+}
+
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {

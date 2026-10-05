@@ -9822,10 +9822,13 @@
             }
         } catch (e) {}
 
+        var nodeTypeOf = Object.getOwnPropertyDescriptor(global.Node.prototype,
+                                                         'nodeType').get;
         Object.defineProperty(decodeProto, 'decode', {
             configurable: true, writable: true, enumerable: false,
             value: function () {
                 var img = this;
+                try { nodeTypeOf.call(img); } catch (e) { return Promise.reject(e); }
                 return new Promise(function (resolve, reject) {
                     function fail() { reject(encodingError()); }
                     Promise.resolve().then(function () {
@@ -9841,7 +9844,7 @@
                         probe.onload = function () { resolve(); };
                         probe.onerror = fail;
                         probe.src = url;
-                    });
+                    }).then(null, reject);
                 });
             }
         });
