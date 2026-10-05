@@ -1469,6 +1469,9 @@ queue_absolute_node(const ns_node *n, const ns_style *s)
     g_array_append_val(g_abs_pending, e);
 }
 static const ns_node *g_inline_skip_node;
+static const ns_node *g_pseudo_blocks_host;
+static gboolean g_pseudo_block_before;
+static gboolean g_pseudo_block_after;
 static int          g_inline_collect_depth;
 
 static void *
@@ -3895,14 +3898,17 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             ctx->text_transform = kw;
     }
 
-    if (s && s->before && s->before->values[NS_CSS_CONTENT])
+    gboolean pseudo_blocks = n == g_pseudo_blocks_host;
+    if (s && s->before && s->before->values[NS_CSS_CONTENT] &&
+        !(pseudo_blocks && g_pseudo_block_before))
         append_pseudo_content(ctx->out, s->before->values[NS_CSS_CONTENT], n,
                               s->before);
 
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_walk(c, ctx, depth + 1);
 
-    if (s && s->after && s->after->values[NS_CSS_CONTENT])
+    if (s && s->after && s->after->values[NS_CSS_CONTENT] &&
+        !(pseudo_blocks && g_pseudo_block_after))
         append_pseudo_content(ctx->out, s->after->values[NS_CSS_CONTENT], n,
                               s->after);
 
@@ -5232,9 +5238,20 @@ build_blockified_inline_item(const ns_node *n, GHashTable *styles,
     ns_box *before_block = (s && s->before)
         ? build_pseudo_block_for(s->before, n) : NULL;
     if (before_block) box_append_child(item, before_block);
+    ns_box *after_block = (s && s->after)
+        ? build_pseudo_block_for(s->after, n) : NULL;
 
+    const ns_node *saved_host = g_pseudo_blocks_host;
+    gboolean saved_before = g_pseudo_block_before;
+    gboolean saved_after = g_pseudo_block_after;
+    g_pseudo_blocks_host = n;
+    g_pseudo_block_before = before_block != NULL;
+    g_pseudo_block_after = after_block != NULL;
     ns_box *run = build_inline_run_no_abs_placeholders(n, n->next_sibling,
                                                        styles);
+    g_pseudo_blocks_host = saved_host;
+    g_pseudo_block_before = saved_before;
+    g_pseudo_block_after = saved_after;
     if (pending_before && *pending_before) {
         run = inline_merge_prefix(*pending_before, run);
         *pending_before = NULL;
@@ -5245,8 +5262,6 @@ build_blockified_inline_item(const ns_node *n, GHashTable *styles,
         ns_box_free(run);
     }
 
-    ns_box *after_block = (s && s->after)
-        ? build_pseudo_block_for(s->after, n) : NULL;
     if (after_block) box_append_child(item, after_block);
 
     if (!item->first_child && !style_has_atomic_inline_box(s)) {
