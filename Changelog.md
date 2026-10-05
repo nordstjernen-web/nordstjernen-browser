@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* Absolutely and fixed positioned elements assigned to a shadow root's
+  `<slot>` find their containing block in the flattened tree, through the
+  slot and its shadow ancestors, instead of among their light-DOM
+  ancestors. A slotted `position: absolute; inset: 0` scroll container
+  was placed against the viewport and painted under the component's
+  opaque layout, so Tripletex showed its menus but no page content.
 * Clicking into the address bar selects the whole address, as in other
   browsers; a second click places the cursor, and dragging still selects
   part of the text.
