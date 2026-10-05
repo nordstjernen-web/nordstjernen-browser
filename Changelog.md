@@ -53,6 +53,14 @@ Changelog:
   and aspect ratio take precedence). It used to add the percentage of the
   page width, so such a box grew to the full width and the image was
   drawn at that width.
+* A `::before` or `::after` with `display: block` (or `flex`, `grid`,
+  `list-item`) and text content is a block box of its own. It used to be
+  laid out as inline text at the start or end of the element's first line,
+  so it did not start a new line, and its width was added to the text's in
+  shrink-to-fit sizing instead of the wider of the two being taken. Tabs
+  that reserve their bold width with a hidden block `::before` grew by
+  about half, and headings, quotes and counters drawn with block pseudo
+  content ran into the text beside them.
 
 1.0.29:
 ======
