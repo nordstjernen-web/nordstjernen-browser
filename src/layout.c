@@ -2653,16 +2653,6 @@ emit_color_attr(GArray *attrs, gsize start, gsize end,
 }
 
 static void
-emit_bg_color_attr(GArray *attrs, gsize start, gsize end,
-                   guint8 r, guint8 g, guint8 b, guint8 a8)
-{
-    if (end <= start) return;
-    ns_inline_attr a = { .kind = NS_INLINE_BG_COLOR, .start = start,
-                         .len = end - start, .r = r, .g = g, .b = b, .a = a8 };
-    g_array_append_val(attrs, a);
-}
-
-static void
 emit_font_family_attr(GArray *attrs, gsize start, gsize end, const char *family)
 {
     if (end <= start || !family) return;
@@ -3864,6 +3854,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     double mr = length_or(s ? s->values[NS_CSS_MARGIN_RIGHT] : NULL, 0);
     double pl = length_or(s ? s->values[NS_CSS_PADDING_LEFT]  : NULL, 0);
     double pr = length_or(s ? s->values[NS_CSS_PADDING_RIGHT] : NULL, 0);
+    if (s) {
+        pl += border_side_width(s, NS_CSS_BORDER_LEFT_WIDTH,
+                                NS_CSS_BORDER_LEFT_STYLE);
+        pr += border_side_width(s, NS_CSS_BORDER_RIGHT_WIDTH,
+                                NS_CSS_BORDER_RIGHT_STYLE);
+    }
     append_inline_spacer(ctx, ml);
     gsize elem_start = ctx->out->len;
     append_inline_spacer(ctx, pl);
@@ -3997,18 +3993,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         }
     }
 
-    gsize bg_start = ctx->out->len;
-    gboolean bg_active = FALSE;
-    guint8 bgr = 0, bgg = 0, bgb = 0, bga = 0;
-    if (s && s->values[NS_CSS_BACKGROUND_COLOR] &&
-        s->values[NS_CSS_BACKGROUND_COLOR]->kind == NS_CSS_V_COLOR) {
-        bgr = s->values[NS_CSS_BACKGROUND_COLOR]->u.color.r;
-        bgg = s->values[NS_CSS_BACKGROUND_COLOR]->u.color.g;
-        bgb = s->values[NS_CSS_BACKGROUND_COLOR]->u.color.b;
-        bga = s->values[NS_CSS_BACKGROUND_COLOR]->u.color.a;
-        if (bga > 0) bg_active = TRUE;
-    }
-
     gsize family_start = ctx->out->len;
     const char *family_str = NULL;
     if (s && s->values[NS_CSS_FONT_FAMILY] &&
@@ -4045,8 +4029,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         emit_font_size_attr(ctx->attrs, fs_start, ctx->out->len, font_size_self);
     if (color_active && ctx->out->len > color_start)
         emit_color_attr(ctx->attrs, color_start, ctx->out->len, cr, cg, cb, ca);
-    if (bg_active && ctx->out->len > bg_start)
-        emit_bg_color_attr(ctx->attrs, bg_start, ctx->out->len, bgr, bgg, bgb, bga);
     if (family_str && ctx->out->len > family_start)
         emit_font_family_attr(ctx->attrs, family_start, ctx->out->len, family_str);
     if (font_weight_active && ctx->out->len > weight_start)

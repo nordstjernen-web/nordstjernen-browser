@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* Inline elements paint their own box: background over the padding,
+  `border-radius`, and borders, sliced at line breaks so only the first
+  and last fragment get the left and right edges. Before, an inline
+  element's background covered only its glyphs and its borders were not
+  drawn or given space at all. YouTube's description link chips and
+  Stack Overflow's inline `code` now get their rounded, padded
+  background.
 * A translucent background on an inline element is painted with its
   alpha. Pango's background attribute is opaque, so YouTube's
   `rgba(0,0,0,.05)` link chip in a video description became a solid
