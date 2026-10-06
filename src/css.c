@@ -15534,54 +15534,69 @@ mask_layer_chain_append(ns_css_value **head, ns_css_value **tail,
     *tail = v;
 }
 
+typedef struct mask_layer_parts {
+    const char *image;
+    const char *boxes[2];
+    int n_boxes;
+    const char *op;
+} mask_layer_parts;
+
+static void
+mask_layer_classify(char **toks, int n, mask_layer_parts *out)
+{
+    for (int i = 0; i < n; i++) {
+        const char *box = mask_box_keyword(toks[i]);
+        const char *comp = mask_composite_keyword(toks[i]);
+        if (box && out->n_boxes < 2) out->boxes[out->n_boxes++] = box;
+        else if (comp && !out->op) out->op = comp;
+        else if (!out->image && (strchr(toks[i], '(') ||
+                                 g_ascii_strcasecmp(toks[i], "none") == 0))
+            out->image = toks[i];
+    }
+}
+
+static gboolean
+mask_layer_append(const char *layer, ns_css_value **heads,
+                  ns_css_value **tails)
+{
+    char *toks[24] = {0};
+    int n = split_ws_limit(layer, toks, G_N_ELEMENTS(toks));
+    mask_layer_parts parts = {0};
+    mask_layer_classify(toks, n, &parts);
+    ns_css_value *iv = parse_value_for(NS_CSS_MASK_IMAGE,
+                                       parts.image ? parts.image : "none");
+    gboolean ok = iv != NULL;
+    if (ok) {
+        const char *clip = parts.n_boxes ? parts.boxes[parts.n_boxes - 1]
+                                         : "border-box";
+        mask_layer_chain_append(&heads[0], &tails[0], iv);
+        mask_layer_chain_append(&heads[1], &tails[1], keyword_value_dup(clip));
+        mask_layer_chain_append(&heads[2], &tails[2],
+                                keyword_value_dup(parts.op ? parts.op : "add"));
+    }
+    for (int i = 0; i < n; i++) g_free(toks[i]);
+    return ok;
+}
+
 static gboolean
 parse_mask_shorthand(const char *vtext, gboolean important, GArray *decls_out)
 {
     static const ns_css_prop props[] = {
         NS_CSS_MASK_IMAGE, NS_CSS_MASK_CLIP, NS_CSS_MASK_COMPOSITE,
     };
-    ns_css_value *wide = parse_css_wide_keyword(vtext);
-    if (wide) {
-        for (gsize f = 0; f < G_N_ELEMENTS(props); f++) {
-            ns_css_decl d = { .prop = props[f],
-                              .value = f ? ns_css_value_dup(wide) : wide,
-                              .important = important };
-            g_array_append_val(decls_out, d);
-        }
-        return TRUE;
-    }
     ns_css_value *heads[3] = {0}, *tails[3] = {0};
-    GPtrArray *layers = css_split_top_level_commas(vtext);
-    gboolean ok = layers->len > 0;
-    for (guint li = 0; ok && li < layers->len; li++) {
-        char *toks[24] = {0};
-        int n = split_ws_limit(g_ptr_array_index(layers, li), toks,
-                               G_N_ELEMENTS(toks));
-        const char *image = NULL, *boxes[2] = {0}, *op = NULL;
-        int n_boxes = 0;
-        for (int i = 0; i < n; i++) {
-            const char *box = mask_box_keyword(toks[i]);
-            const char *comp = mask_composite_keyword(toks[i]);
-            if (box && n_boxes < 2) boxes[n_boxes++] = box;
-            else if (comp && !op) op = comp;
-            else if (!image && (strchr(toks[i], '(') ||
-                                g_ascii_strcasecmp(toks[i], "none") == 0))
-                image = toks[i];
-        }
-        ns_css_value *iv = parse_value_for(NS_CSS_MASK_IMAGE,
-                                           image ? image : "none");
-        ok = iv != NULL;
-        if (ok) {
-            mask_layer_chain_append(&heads[0], &tails[0], iv);
-            mask_layer_chain_append(&heads[1], &tails[1], keyword_value_dup(
-                n_boxes == 2 ? boxes[1] : n_boxes == 1 ? boxes[0]
-                                                       : "border-box"));
-            mask_layer_chain_append(&heads[2], &tails[2],
-                                    keyword_value_dup(op ? op : "add"));
-        }
-        for (int i = 0; i < n; i++) g_free(toks[i]);
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    gboolean ok = TRUE;
+    if (wide) {
+        for (gsize f = 0; f < G_N_ELEMENTS(props); f++)
+            heads[f] = f ? ns_css_value_dup(wide) : wide;
+    } else {
+        GPtrArray *layers = css_split_top_level_commas(vtext);
+        ok = layers->len > 0;
+        for (guint li = 0; ok && li < layers->len; li++)
+            ok = mask_layer_append(g_ptr_array_index(layers, li), heads, tails);
+        g_ptr_array_free(layers, TRUE);
     }
-    g_ptr_array_free(layers, TRUE);
     for (gsize f = 0; f < G_N_ELEMENTS(props); f++) {
         if (!ok) {
             ns_css_value_free(heads[f]);
@@ -29582,6 +29597,20 @@ incr_keyset_contains(GHashTable *keyset, char prefix, const char *name,
 }
 
 static gboolean
+incr_class_list_matches_keys(const char *cls, GHashTable *keyset)
+{
+    for (const char *p = cls; p && *p; ) {
+        while (*p && g_ascii_isspace((guchar)*p)) p++;
+        const char *tok = p;
+        while (*p && !g_ascii_isspace((guchar)*p)) p++;
+        if (p > tok && incr_keyset_contains(keyset, '.', tok,
+                                            (gsize)(p - tok), FALSE))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !keyset ||
@@ -29593,16 +29622,8 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
     const char *id = ns_element_get_attr(n, "id");
     if (id && *id && incr_keyset_contains(keyset, '#', id, strlen(id), FALSE))
         return TRUE;
-    const char *cls = ns_element_get_attr(n, "class");
-    for (const char *p = cls; p && *p; ) {
-        while (*p && g_ascii_isspace((guchar)*p)) p++;
-        const char *tok = p;
-        while (*p && !g_ascii_isspace((guchar)*p)) p++;
-        if (p > tok && incr_keyset_contains(keyset, '.', tok,
-                                            (gsize)(p - tok), FALSE))
-            return TRUE;
-    }
-    return FALSE;
+    return incr_class_list_matches_keys(ns_element_get_attr(n, "class"),
+                                        keyset);
 }
 
 static gboolean
@@ -29993,16 +30014,9 @@ typedef struct incr_has_ctx {
     const struct incr_has_ctx *outer;
 } incr_has_ctx;
 
-static gboolean
-incr_add_has_anchor_compound(const ns_css_simple *c, int depth)
+static void
+incr_has_anchor_copy_keys(incr_has_anchor *a, const ns_css_simple *c)
 {
-    if (!c || depth > 6) return FALSE;
-    incr_has_anchor *a = g_new0(incr_has_anchor, 1);
-    a->classes = g_ptr_array_new_with_free_func(g_free);
-    a->attrs = g_ptr_array_new_with_free_func(incr_attr_dep_free);
-    if (c->type && *c->type && strcmp(c->type, "*") != 0)
-        a->type = g_ascii_strdown(c->type, -1);
-    if (c->id && *c->id) a->id = g_strdup(c->id);
     for (guint i = 0; c->classes && i < c->classes->len; i++) {
         const char *cls = g_ptr_array_index(c->classes, i);
         if (cls && *cls) g_ptr_array_add(a->classes, g_strdup(cls));
@@ -30017,27 +30031,57 @@ incr_add_has_anchor_compound(const ns_css_simple *c, int depth)
         copy->value = g_strdup(src->value);
         g_ptr_array_add(a->attrs, copy);
     }
-    if (a->type || a->id || a->classes->len > 0 || a->attrs->len > 0) {
+}
+
+static incr_has_anchor *
+incr_has_anchor_from_compound(const ns_css_simple *c)
+{
+    incr_has_anchor *a = g_new0(incr_has_anchor, 1);
+    a->classes = g_ptr_array_new_with_free_func(g_free);
+    a->attrs = g_ptr_array_new_with_free_func(incr_attr_dep_free);
+    if (c->type && *c->type && strcmp(c->type, "*") != 0)
+        a->type = g_ascii_strdown(c->type, -1);
+    if (c->id && *c->id) a->id = g_strdup(c->id);
+    incr_has_anchor_copy_keys(a, c);
+    if (a->type || a->id || a->classes->len > 0 || a->attrs->len > 0)
+        return a;
+    incr_has_anchor_free(a);
+    return NULL;
+}
+
+static gboolean incr_add_has_anchor_compound(const ns_css_simple *c,
+                                             int depth);
+
+static gboolean
+incr_add_has_anchor_group(const GPtrArray *group, int depth)
+{
+    guint mark = g_has_anchors->len;
+    for (guint si = 0; si < group->len; si++) {
+        const ns_css_selector *alt = g_ptr_array_index(group, si);
+        if (!alt || !alt->compounds || alt->compounds->len == 0 ||
+            !incr_add_has_anchor_compound(
+                g_ptr_array_index(alt->compounds, alt->compounds->len - 1),
+                depth + 1)) {
+            g_ptr_array_set_size(g_has_anchors, mark);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static gboolean
+incr_add_has_anchor_compound(const ns_css_simple *c, int depth)
+{
+    if (!c || depth > 6) return FALSE;
+    incr_has_anchor *a = incr_has_anchor_from_compound(c);
+    if (a) {
         g_ptr_array_add(g_has_anchors, a);
         return TRUE;
     }
-    incr_has_anchor_free(a);
-    if (!c->matches_any) return FALSE;
-    for (guint gi = 0; gi < c->matches_any->len; gi++) {
+    for (guint gi = 0; c->matches_any && gi < c->matches_any->len; gi++) {
         const GPtrArray *group = g_ptr_array_index(c->matches_any, gi);
-        if (!group || group->len == 0) continue;
-        guint mark = g_has_anchors->len;
-        gboolean complete = TRUE;
-        for (guint si = 0; complete && si < group->len; si++) {
-            const ns_css_selector *alt = g_ptr_array_index(group, si);
-            complete = alt && alt->compounds && alt->compounds->len > 0 &&
-                incr_add_has_anchor_compound(
-                    g_ptr_array_index(alt->compounds,
-                                      alt->compounds->len - 1),
-                    depth + 1);
-        }
-        if (complete) return TRUE;
-        g_ptr_array_set_size(g_has_anchors, mark);
+        if (group && group->len > 0 && incr_add_has_anchor_group(group, depth))
+            return TRUE;
     }
     return FALSE;
 }
