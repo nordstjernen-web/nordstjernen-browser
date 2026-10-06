@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* An inline-block in a centered or right-aligned `white-space: nowrap`
+  line reports its real position to scripts and hit testing. Paint
+  already aligned the line, but layout placed the inline-blocks as if it
+  were left-aligned, so BBC's centered section menu reported x=0 instead
+  of 259 and YouTube's search tab icon sat 8px left of its button center.
 * Text and inline-blocks that share wrapped lines are painted on the
   line boxes that layout computed. Paint drew each line at Pango's own
   line height and each inline-block at Pango's position, so with a CSS
