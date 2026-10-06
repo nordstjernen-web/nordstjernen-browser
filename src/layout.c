@@ -2005,6 +2005,17 @@ append_inline_spacer(collector_ctx *ctx, double width)
     g_array_append_val(ctx->attrs, spacer);
 }
 
+static double
+inline_box_side_px(const ns_style *s, ns_css_prop padding,
+                   ns_css_prop border_width, ns_css_prop border_style)
+{
+    if (!s) return 0;
+    double side = length_or(s->values[padding], 0);
+    if (s->values[border_style])
+        side += border_side_width(s, border_width, border_style);
+    return side;
+}
+
 static int
 control_pad_spaces(const ns_style *s, ns_css_prop prop)
 {
@@ -3852,14 +3863,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     }
     double ml = length_or(s ? s->values[NS_CSS_MARGIN_LEFT]  : NULL, 0);
     double mr = length_or(s ? s->values[NS_CSS_MARGIN_RIGHT] : NULL, 0);
-    double pl = length_or(s ? s->values[NS_CSS_PADDING_LEFT]  : NULL, 0);
-    double pr = length_or(s ? s->values[NS_CSS_PADDING_RIGHT] : NULL, 0);
-    if (s) {
-        pl += border_side_width(s, NS_CSS_BORDER_LEFT_WIDTH,
-                                NS_CSS_BORDER_LEFT_STYLE);
-        pr += border_side_width(s, NS_CSS_BORDER_RIGHT_WIDTH,
-                                NS_CSS_BORDER_RIGHT_STYLE);
-    }
+    double pl = inline_box_side_px(s, NS_CSS_PADDING_LEFT,
+                                   NS_CSS_BORDER_LEFT_WIDTH,
+                                   NS_CSS_BORDER_LEFT_STYLE);
+    double pr = inline_box_side_px(s, NS_CSS_PADDING_RIGHT,
+                                   NS_CSS_BORDER_RIGHT_WIDTH,
+                                   NS_CSS_BORDER_RIGHT_STYLE);
     append_inline_spacer(ctx, ml);
     gsize elem_start = ctx->out->len;
     append_inline_spacer(ctx, pl);
@@ -17366,6 +17375,12 @@ ns_box_hit_inline_dom(const ns_box *root, double x, double y)
     return best;
 }
 
+static const ns_inline_attr *
+inline_attr_element(const ns_inline_attr *r)
+{
+    return r->kind == NS_INLINE_ELEMENT ? r : NULL;
+}
+
 static void
 box_inline_union_for_dom(const ns_box *root, const ns_node *target,
                          double dx, double dy,
@@ -17380,6 +17395,7 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
             if (r->dom != target || r->len == 0) continue;
             double ex, ey, ew, eh;
             if (!ns_paint_inline_range_extents(root, r->start, r->len,
+                                               inline_attr_element(r),
                                                &ex, &ey, &ew, &eh))
                 continue;
             double rx0 = root->x + dx + ex;

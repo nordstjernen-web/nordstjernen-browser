@@ -697,7 +697,7 @@ style_side_visible(const ns_style *s, ns_css_prop wp, ns_css_prop sp)
     double w = length_or(s->values[wp], 0);
     if (w <= 0) return FALSE;
     const ns_css_value *st = s->values[sp];
-    return !keyword_is(st, "none") && !keyword_is(st, "hidden");
+    return st && !keyword_is(st, "none") && !keyword_is(st, "hidden");
 }
 
 static gboolean
@@ -2570,12 +2570,12 @@ font_has_legacy_mac_ascent(const char *family)
 #endif
 }
 
-static double
-font_normal_line_height(NsPangoContext *ctx, const NsPangoFontDescription *fd,
-                        const char *family)
+static void
+font_vertical_metrics(NsPangoContext *ctx, const NsPangoFontDescription *fd,
+                      const char *family, ns_css_font_metrics *out)
 {
     NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
-    if (!fm) return 0;
+    if (!fm) return;
     double raw_ascent = ns_pango_font_metrics_get_ascent(fm) / (double)NS_PANGO_SCALE;
     double raw_descent = ns_pango_font_metrics_get_descent(fm) / (double)NS_PANGO_SCALE;
     double height = ns_pango_font_metrics_get_height(fm) / (double)NS_PANGO_SCALE;
@@ -2587,7 +2587,10 @@ font_normal_line_height(NsPangoContext *ctx, const NsPangoFontDescription *fd,
     if (font_has_legacy_mac_ascent(family))
         ascent += floor((ascent + descent) * 0.15 + 0.5);
     double line = ascent + descent + gap;
-    return line > 0 ? line : 0;
+    if (!(line > 0)) return;
+    out->line_px = line;
+    out->ascent_px = ascent;
+    out->descent_px = descent;
 }
 
 static void
@@ -2605,8 +2608,8 @@ font_metrics_measure(const char *family, double size_px, int weight,
     ns_pango_font_description_set_absolute_size(
         fd, ns_paint_pango_font_size(size_px));
     ns_pango_layout_set_font_description(l, fd);
-    out->line_px = font_normal_line_height(ns_pango_layout_get_context(l), fd,
-                                           ns_pango_family);
+    font_vertical_metrics(ns_pango_layout_get_context(l), fd, ns_pango_family,
+                          out);
     g_free(ns_pango_family);
 
     NsPangoRectangle ink;
@@ -3659,22 +3662,6 @@ paint_inline_line_baselines(const ns_box *b, NsPangoLayout *layout,
 }
 
 static void
-inline_font_extents(const ns_style *s, double *ascent, double *descent)
-{
-    NsPangoLayout *l = paint_create_layout();
-    ns_paint_apply_inline_font(l, s);
-    NsPangoFontMetrics *fm = ns_pango_context_get_metrics(
-        ns_pango_layout_get_context(l),
-        ns_pango_layout_get_font_description(l), NULL);
-    *ascent = fm ? ns_pango_font_metrics_get_ascent(fm) / (double)NS_PANGO_SCALE
-                 : length_or(s->values[NS_CSS_FONT_SIZE], 16) * 0.8;
-    *descent = fm ? ns_pango_font_metrics_get_descent(fm) / (double)NS_PANGO_SCALE
-                  : length_or(s->values[NS_CSS_FONT_SIZE], 16) * 0.2;
-    if (fm) ns_pango_font_metrics_unref(fm);
-    g_object_unref(l);
-}
-
-static void
 paint_inline_element_fragment(cairo_t *cr, const ns_inline_attr *r,
                               double x0, double x1, double y0, double y1,
                               gboolean open_start, gboolean open_end)
@@ -3691,61 +3678,207 @@ paint_inline_element_fragment(cairo_t *cr, const ns_inline_attr *r,
     cairo_restore(cr);
 }
 
+typedef struct inline_fragment {
+    double x0, y0, x1, y1;
+    gboolean open_left;
+    gboolean open_right;
+} inline_fragment;
+
+typedef void (*inline_fragment_fn)(const inline_fragment *f, gpointer data);
+
+static double
+inline_border_px(const ns_style *s, ns_css_prop width, ns_css_prop style)
+{
+    if (!style_side_visible(s, width, style)) return 0;
+    return length_or(s->values[width], 0);
+}
+
+static gboolean
+inline_box_vertical_reach(const ns_style *s, double *above, double *below)
+{
+    if (!s) return FALSE;
+    double ascent = 0, descent = 0;
+    double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
+    if (font_size > 0) {
+        const ns_css_value *fv = s->values[NS_CSS_FONT_FAMILY];
+        const char *family = fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword
+            ? fv->u.keyword : "sans-serif";
+        gboolean italic = keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
+                          keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique");
+        int weight = ns_css_font_weight_number(s->values[NS_CSS_FONT_WEIGHT], 400);
+        ns_css_font_metrics m = { 0 };
+        ns_paint_font_metrics(family, font_size, weight, italic, &m);
+        if (!(m.ascent_px + m.descent_px > 0)) return FALSE;
+        ascent = m.ascent_px;
+        descent = m.descent_px;
+    }
+    *above = ascent + length_or(s->values[NS_CSS_PADDING_TOP], 0) +
+             inline_border_px(s, NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_TOP_STYLE);
+    *below = descent + length_or(s->values[NS_CSS_PADDING_BOTTOM], 0) +
+             inline_border_px(s, NS_CSS_BORDER_BOTTOM_WIDTH,
+                              NS_CSS_BORDER_BOTTOM_STYLE);
+    return TRUE;
+}
+
+static gboolean
+inline_run_is_spacer(const NsPangoLayoutRun *run)
+{
+    for (const GSList *l = run->item->analysis.extra_attrs; l; l = l->next) {
+        const NsPangoAttribute *attr = l->data;
+        if (attr->klass->type == NS_PANGO_ATTR_SHAPE) return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+inline_line_baseline_shift(const NsPangoLayoutLine *line, gsize lo, gsize hi)
+{
+    int shift[2] = { 0, 0 };
+    gboolean any[2] = { FALSE, FALSE };
+    for (const GSList *l = line->runs; l; l = l->next) {
+        const NsPangoLayoutRun *run = l->data;
+        gsize run_start = (gsize)run->item->offset;
+        gsize run_end = run_start + (gsize)run->item->length;
+        if (run_end <= lo || run_start >= hi) continue;
+        int k = inline_run_is_spacer(run) ? 1 : 0;
+        if (!any[k] || abs(run->y_offset) < abs(shift[k]))
+            shift[k] = run->y_offset;
+        any[k] = TRUE;
+    }
+    return any[0] ? shift[0] : shift[1];
+}
+
+static gboolean
+inline_line_x_extent(NsPangoLayoutLine *line, gsize lo, gsize hi,
+                     double *x0, double *x1)
+{
+    int *ranges = NULL;
+    int n_ranges = 0;
+    ns_pango_layout_line_get_x_ranges(line, (int)lo, (int)hi, &ranges,
+                                      &n_ranges);
+    if (n_ranges <= 0) {
+        g_free(ranges);
+        return FALSE;
+    }
+    int left = MIN(ranges[0], ranges[1]);
+    int right = MAX(ranges[0], ranges[1]);
+    for (int i = 1; i < n_ranges; i++) {
+        left = MIN(left, MIN(ranges[2 * i], ranges[2 * i + 1]));
+        right = MAX(right, MAX(ranges[2 * i], ranges[2 * i + 1]));
+    }
+    g_free(ranges);
+    *x0 = (double)left / NS_PANGO_SCALE;
+    *x1 = (double)right / NS_PANGO_SCALE;
+    return TRUE;
+}
+
+typedef struct inline_range {
+    gsize start;
+    gsize len;
+    const ns_style *box_style;
+    gboolean raised;
+} inline_range;
+
+static gboolean
+inline_element_is_raised(const ns_box *b, const ns_inline_attr *r)
+{
+    for (const ns_node *n = r->dom; n && n != b->dom; n = n->parent) {
+        if (n->kind != NS_NODE_ELEMENT || !n->name) continue;
+        if (strcmp(n->name, "sup") == 0 || strcmp(n->name, "sub") == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+inline_range_fragments(const ns_box *b, NsPangoLayout *layout, double y_origin,
+                       const inline_range *range, inline_fragment_fn fn,
+                       gpointer data)
+{
+    double above = 0, below = 0;
+    gboolean own_box =
+        inline_box_vertical_reach(range->box_style, &above, &below);
+    gboolean rtl = range->box_style &&
+        keyword_is(range->box_style->values[NS_CSS_DIRECTION], "rtl");
+    double *baselines =
+        own_box ? paint_inline_line_baselines(b, layout, y_origin) : NULL;
+    gsize end = range->start + range->len;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    int line_index = -1;
+    do {
+        line_index++;
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        gsize line_start = (gsize)line->start_index;
+        gsize line_end = line_start + (gsize)line->length;
+        gsize lo = MAX(range->start, line_start);
+        gsize hi = MIN(end, line_end);
+        if (lo >= hi) continue;
+        inline_fragment f;
+        if (!inline_line_x_extent(line, lo, hi, &f.x0, &f.x1)) continue;
+        if (own_box) {
+            int shift = range->raised
+                ? inline_line_baseline_shift(line, lo, hi) : 0;
+            double baseline =
+                baselines[line_index] - (double)shift / NS_PANGO_SCALE;
+            f.y0 = baseline - above;
+            f.y1 = baseline + below;
+        } else {
+            NsPangoRectangle lrect;
+            ns_pango_layout_iter_get_line_extents(it, NULL, &lrect);
+            f.y0 = y_origin + (double)lrect.y / NS_PANGO_SCALE;
+            f.y1 = y_origin +
+                (double)(lrect.y + lrect.height) / NS_PANGO_SCALE;
+        }
+        f.open_left = rtl ? hi < end : lo > range->start;
+        f.open_right = rtl ? lo > range->start : hi < end;
+        fn(&f, data);
+    } while (ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    g_free(baselines);
+}
+
+typedef struct inline_box_paint {
+    cairo_t *cr;
+    const ns_inline_attr *attr;
+    double text_x;
+} inline_box_paint;
+
+static void
+paint_inline_box_fragment(const inline_fragment *f, gpointer data)
+{
+    const inline_box_paint *p = data;
+    paint_inline_element_fragment(p->cr, p->attr,
+        snap_device_x(p->cr, p->text_x + f->x0),
+        snap_device_x(p->cr, p->text_x + f->x1),
+        snap_device_y(p->cr, f->y0), snap_device_y(p->cr, f->y1),
+        f->open_left, f->open_right);
+}
+
+static gboolean
+inline_box_is_hidden(const ns_style *s)
+{
+    const char *vis = ns_style_keyword(s, NS_CSS_VISIBILITY);
+    return vis && (strcmp(vis, "hidden") == 0 || strcmp(vis, "collapse") == 0);
+}
+
 static void
 paint_inline_element_boxes(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
                            double text_x, double y_origin)
 {
     if (!b->attrs) return;
-    double *baselines = NULL;
     for (gint i = (gint)b->attrs->len - 1; i >= 0; i--) {
         const ns_inline_attr *r =
             &g_array_index(b->attrs, ns_inline_attr, (guint)i);
         if (r->kind != NS_INLINE_ELEMENT || r->len == 0 ||
-            !style_has_inline_box_paint(r->style))
+            !style_has_inline_box_paint(r->style) ||
+            inline_box_is_hidden(r->style))
             continue;
-        if (!baselines)
-            baselines = paint_inline_line_baselines(b, layout, y_origin);
-        const ns_style *s = r->style;
-        double ascent, descent;
-        inline_font_extents(s, &ascent, &descent);
-        double above = ascent + length_or(s->values[NS_CSS_PADDING_TOP], 0) +
-            (style_side_visible(s, NS_CSS_BORDER_TOP_WIDTH,
-                                NS_CSS_BORDER_TOP_STYLE)
-                 ? length_or(s->values[NS_CSS_BORDER_TOP_WIDTH], 0) : 0);
-        double below = descent +
-            length_or(s->values[NS_CSS_PADDING_BOTTOM], 0) +
-            (style_side_visible(s, NS_CSS_BORDER_BOTTOM_WIDTH,
-                                NS_CSS_BORDER_BOTTOM_STYLE)
-                 ? length_or(s->values[NS_CSS_BORDER_BOTTOM_WIDTH], 0) : 0);
-        int start = (int)r->start, end = (int)(r->start + r->len);
-        NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
-        int line_index = 0;
-        do {
-            NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
-            int s0 = MAX(start, line->start_index);
-            int e0 = MIN(end, line->start_index + line->length);
-            int *ranges = NULL, n_ranges = 0;
-            if (s0 < e0)
-                ns_pango_layout_line_get_x_ranges(line, s0, e0,
-                                                  &ranges, &n_ranges);
-            if (n_ranges > 0) {
-                int lo = ranges[0], hi = ranges[1];
-                for (int k = 1; k < n_ranges; k++) {
-                    lo = MIN(lo, ranges[2 * k]);
-                    hi = MAX(hi, ranges[2 * k + 1]);
-                }
-                double base = baselines[line_index];
-                paint_inline_element_fragment(cr, r,
-                    text_x + (double)lo / NS_PANGO_SCALE,
-                    text_x + (double)hi / NS_PANGO_SCALE,
-                    base - above, base + below, s0 > start, e0 < end);
-            }
-            g_free(ranges);
-            line_index++;
-        } while (ns_pango_layout_iter_next_line(it));
-        ns_pango_layout_iter_free(it);
+        inline_box_paint p = { cr, r, text_x };
+        inline_range range = { r->start, r->len, r->style,
+                               inline_element_is_raised(b, r) };
+        inline_range_fragments(b, layout, y_origin, &range,
+                               paint_inline_box_fragment, &p);
     }
-    g_free(baselines);
 }
 
 static void
@@ -4423,8 +4556,29 @@ ns_paint_inline_word_range(const ns_box *b, gsize byte,
     return ok;
 }
 
+typedef struct inline_union {
+    double x0, y0, x1, y1;
+    gboolean any;
+} inline_union;
+
+static void
+inline_union_add(const inline_fragment *f, gpointer data)
+{
+    inline_union *u = data;
+    if (!u->any) {
+        u->x0 = f->x0; u->y0 = f->y0; u->x1 = f->x1; u->y1 = f->y1;
+        u->any = TRUE;
+        return;
+    }
+    if (f->x0 < u->x0) u->x0 = f->x0;
+    if (f->y0 < u->y0) u->y0 = f->y0;
+    if (f->x1 > u->x1) u->x1 = f->x1;
+    if (f->y1 > u->y1) u->y1 = f->y1;
+}
+
 gboolean
 ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
+                              const ns_inline_attr *element,
                               double *out_x, double *out_y,
                               double *out_w, double *out_h)
 {
@@ -4433,57 +4587,23 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
     if (start >= text_len) return FALSE;
     if (start + len > text_len) len = text_len - start;
 
-    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
-    cairo_t *cr = cairo_create(surf);
-    NsPangoLayout *layout = ns_paint_build_inline_layout(cr, b);
-    if (!layout) {
-        cairo_destroy(cr);
-        cairo_surface_destroy(surf);
-        return FALSE;
-    }
-    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
-    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-    gboolean any = FALSE;
-    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
-    do {
-        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
-        gsize line_start = (gsize)line->start_index;
-        gsize line_end = line_start + (gsize)line->length;
-        gsize lo = start > line_start ? start : line_start;
-        gsize hi = start + len < line_end ? start + len : line_end;
-        if (lo >= hi) continue;
-        NsPangoRectangle p0, p1, lrect;
-        ns_pango_layout_index_to_pos(layout, (int)lo, &p0);
-        int hi_idx = (int)hi - 1;
-        if (hi_idx < (int)lo) hi_idx = (int)lo;
-        ns_pango_layout_index_to_pos(layout, hi_idx, &p1);
-        if (p0.width < 0) { p0.x += p0.width; p0.width = -p0.width; }
-        if (p1.width < 0) { p1.x += p1.width; p1.width = -p1.width; }
-        ns_pango_layout_iter_get_line_extents(it, NULL, &lrect);
-        double seg_x0 = (double)MIN(p0.x, p1.x) / NS_PANGO_SCALE;
-        double seg_x1 = (double)MAX(p0.x + p0.width, p1.x + p1.width)
-                        / NS_PANGO_SCALE;
-        double seg_y0 = (double)lrect.y / NS_PANGO_SCALE;
-        double seg_y1 = (double)(lrect.y + lrect.height) / NS_PANGO_SCALE;
-        if (!any) {
-            x0 = seg_x0; x1 = seg_x1; y0 = seg_y0; y1 = seg_y1;
-            any = TRUE;
-        } else {
-            if (seg_x0 < x0) x0 = seg_x0;
-            if (seg_x1 > x1) x1 = seg_x1;
-            if (seg_y0 < y0) y0 = seg_y0;
-            if (seg_y1 > y1) y1 = seg_y1;
-        }
-    } while (ns_pango_layout_iter_next_line(it));
-    ns_pango_layout_iter_free(it);
+    const ns_style *box_style =
+        element && !b->vertical_wm ? element->style : NULL;
+    NsPangoLayout *layout = box_style
+        ? paint_inline_make_layout(b, inherited_style(b), NULL)
+        : ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+    inline_union u = { 0 };
+    inline_range range = { start, len, box_style,
+                           box_style && inline_element_is_raised(b, element) };
+    inline_range_fragments(b, layout, y_origin, &range, inline_union_add, &u);
     g_object_unref(layout);
-    cairo_destroy(cr);
-    cairo_surface_destroy(surf);
-    if (!any) return FALSE;
-    if (out_x) *out_x = x0;
-    if (out_y) *out_y = y0 + y_offset;
-    if (out_w) *out_w = x1 - x0;
-    if (out_h) *out_h = y1 - y0;
+    if (!u.any) return FALSE;
+    if (out_x) *out_x = u.x0;
+    if (out_y) *out_y = u.y0 - b->y;
+    if (out_w) *out_w = u.x1 - u.x0;
+    if (out_h) *out_h = u.y1 - u.y0;
     return TRUE;
 }
 

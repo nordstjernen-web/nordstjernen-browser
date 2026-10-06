@@ -145,6 +145,19 @@ Changelog:
   at the screen's own scale, recolouring the symbolic ones to the theme's
   foreground as GTK did, and sets the window icon only when GTK can load
   it. Ported from Northstar (northstar-browser#16).
+* The geometry APIs report an inline element's own box.
+  `getBoundingClientRect()`, `getClientRects()`, `offsetHeight` and
+  the rest returned the rectangle of the line a `<span>`, `<a>` or
+  `<code>` sat on, so with `line-height: 1.6` a 16px link measured
+  22px high and started at the line's top. They now return the content
+  area of the element's font (ascent plus descent around the baseline,
+  rounded as other browsers round them) plus its padding and border,
+  the same box the background is painted in, and a line that mixes
+  text directions is measured over all of it. That painted box also
+  follows a raised or lowered `<sup>` / `<sub>`, is left open on the
+  side its `direction` says when it wraps, and is no longer painted
+  for a `visibility: hidden` inline. A border width without a border
+  style no longer takes up room on the line.
 * A printable key fires one `keydown`, not two. Embedders send a
   keydown and then a keypress (`kind` 3) for each typed character, and
   the keypress path dispatched `keydown` again before `keypress`, so
