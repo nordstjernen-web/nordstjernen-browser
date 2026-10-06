@@ -92,6 +92,9 @@ struct ns_rproc_http {
     int            max_h;
     int            dpr_milli;
     void          *inproc_conn;
+    int            linear_w;
+    int            linear_h;
+    int            linear_stride;
 };
 
 static ns_rproc_inproc_attach_fn g_inproc_attach;
@@ -642,6 +645,29 @@ frame_head_fits(const ns_rproc_http *r, const http_head *head, int width,
                      (uint64_t)head->x_stride * (uint64_t)head->x_h;
 }
 
+static void
+shm_note_linear_frame(ns_rproc_http *r, const ns_rproc_http_frame *out)
+{
+    if (!r->shm)
+        return;
+    r->linear_w = out->width;
+    r->linear_h = out->height;
+    r->linear_stride = out->stride;
+}
+
+static void
+shm_attach_unchanged_frame(const ns_rproc_http *r, const http_head *head,
+                           ns_rproc_http_frame *out)
+{
+    if (!r->shm || r->linear_w <= 0 || head->x_w != r->linear_w ||
+        head->x_h != r->linear_h)
+        return;
+    out->width = r->linear_w;
+    out->height = r->linear_h;
+    out->stride = r->linear_stride;
+    out->pixels = r->map;
+}
+
 static int
 render_read_reply(ns_rproc_http *r, http_head *head)
 {
@@ -688,6 +714,7 @@ ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
     if (head.x_unchanged > 0) {
         frame_fill_from_head(out, &head);
         out->unchanged = 1;
+        shm_attach_unchanged_frame(r, &head, out);
         return 0;
     }
     if (!frame_head_fits(r, &head, width, height))
@@ -697,6 +724,7 @@ ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,
     out->height = (int)head.x_h;
     out->stride = (int)head.x_stride;
     out->pixels = r->shm ? r->map : r->rxbuf;
+    shm_note_linear_frame(r, out);
     return 0;
 }
 
@@ -736,6 +764,7 @@ tiles_read_body(ns_rproc_http *r, const http_head *head,
     out->height = (int)head->x_h;
     out->stride = (int)head->x_stride;
     out->pixels = r->map;
+    r->linear_w = 0;
     return 0;
 }
 
@@ -759,6 +788,7 @@ tiles_read_frame(ns_rproc_http *r, const http_head *head, int width,
     out->height = (int)head->x_h;
     out->stride = (int)head->x_stride;
     out->pixels = r->map;
+    shm_note_linear_frame(r, out);
     return 0;
 }
 

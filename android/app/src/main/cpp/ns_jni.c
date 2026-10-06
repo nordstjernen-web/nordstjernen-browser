@@ -45,6 +45,7 @@ typedef struct {
     char          *download;
     char          *webgl;
     char          *camera;
+    jweak          painted_bitmap;
 } AndroidPage;
 
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -226,6 +227,51 @@ page_store_frame_events(AndroidPage *page, ns_rproc_http_frame *frame)
     if (frame->page_w > 0 && frame->page_h > 0) {
         page->page_width = frame->page_w;
         page->page_height = frame->page_h;
+    }
+}
+
+static int
+page_bitmap_holds_frame(JNIEnv *env, const AndroidPage *page, jobject bitmap)
+{
+    return page->painted_bitmap &&
+           (*env)->IsSameObject(env, page->painted_bitmap, bitmap);
+}
+
+static void
+page_note_painted_bitmap(JNIEnv *env, AndroidPage *page, jobject bitmap)
+{
+    if (page_bitmap_holds_frame(env, page, bitmap))
+        return;
+    if (page->painted_bitmap)
+        (*env)->DeleteWeakGlobalRef(env, page->painted_bitmap);
+    page->painted_bitmap = (*env)->NewWeakGlobalRef(env, bitmap);
+}
+
+static void
+bitmap_copy_frame(void *pixels, const AndroidBitmapInfo *info,
+                  const ns_rproc_http_frame *frame)
+{
+    int rows = frame->height < (int)info->height ? frame->height
+                                                 : (int)info->height;
+    int cols = frame->width < (int)info->width ? frame->width
+                                               : (int)info->width;
+    if (rows < 0) rows = 0;
+    if (cols < 0) cols = 0;
+    for (uint32_t y = 0; y < info->height; y++) {
+        unsigned char *dst = (unsigned char *)pixels + (size_t)y * info->stride;
+        int copied = (int)y < rows ? cols : 0;
+        if (copied < (int)info->width)
+            memset(dst + (size_t)copied * 4u, 0xff,
+                   (size_t)((int)info->width - copied) * 4u);
+        if (!copied)
+            continue;
+        const unsigned char *src = frame->pixels + (size_t)y * frame->stride;
+        for (int x = 0; x < copied; x++) {
+            dst[x * 4 + 0] = src[x * 4 + 2];
+            dst[x * 4 + 1] = src[x * 4 + 1];
+            dst[x * 4 + 2] = src[x * 4 + 0];
+            dst[x * 4 + 3] = src[x * 4 + 3];
+        }
     }
 }
 
@@ -616,12 +662,16 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeRender(JNIEnv *env,
     page_store_frame_events(page, &frame);
     if (frame.unchanged) {
         page->unchanged_count++;
-        if (page->unchanged_count <= 4)
-            LOGI("nativeRender unchanged #%d rc=%d view=%ux%u scroll=%d,%d scale=%.3f",
+        int repaint = frame.pixels && !page_bitmap_holds_frame(env, page, bitmap);
+        if (page->unchanged_count <= 4 || repaint)
+            LOGI("nativeRender unchanged #%d rc=%d view=%ux%u scroll=%d,%d scale=%.3f repaint=%d",
                  page->unchanged_count, frame.render_rc, info.width,
-                 info.height, (int)scroll_x, (int)scroll_y, (double)scale);
-        frame_clear(&frame);
-        return flags;
+                 info.height, (int)scroll_x, (int)scroll_y, (double)scale,
+                 repaint);
+        if (!repaint) {
+            frame_clear(&frame);
+            return flags;
+        }
     }
     if (frame.render_rc != 0) {
         page->render_fail_count++;
@@ -645,27 +695,13 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeRender(JNIEnv *env,
         return 0;
     }
 
-    int rows = frame.height < (int)info.height ? frame.height : (int)info.height;
-    int cols = frame.width < (int)info.width ? frame.width : (int)info.width;
-    for (uint32_t y = 0; y < info.height; y++) {
-        unsigned char *dst = (unsigned char *)pixels + (size_t)y * info.stride;
-        memset(dst, 0xff, (size_t)info.width * 4u);
-    }
     uint32_t first_pixel = 0;
-    if (rows > 0 && cols > 0)
+    if (frame.height > 0 && frame.width > 0)
         memcpy(&first_pixel, frame.pixels, sizeof first_pixel);
-    for (int y = 0; y < rows; y++) {
-        const unsigned char *src = frame.pixels + (size_t)y * frame.stride;
-        unsigned char *dst = (unsigned char *)pixels + (size_t)y * info.stride;
-        for (int x = 0; x < cols; x++) {
-            dst[x * 4 + 0] = src[x * 4 + 2];
-            dst[x * 4 + 1] = src[x * 4 + 1];
-            dst[x * 4 + 2] = src[x * 4 + 0];
-            dst[x * 4 + 3] = src[x * 4 + 3];
-        }
-    }
+    bitmap_copy_frame(pixels, &info, &frame);
 
     AndroidBitmap_unlockPixels(env, bitmap);
+    page_note_painted_bitmap(env, page, bitmap);
     if (page->render_count < 6 || first_pixel == 0)
         LOGI("nativeRender frame #%d rc=%d frame=%dx%d stride=%d view=%ux%u scroll=%d,%d scale=%.3f first=%08x anim=%d",
              page->render_count + 1, frame.render_rc, frame.width,
@@ -1114,11 +1150,13 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeClose(JNIEnv *env,
                                                         jclass clazz,
                                                         jlong handle)
 {
-    (void)env; (void)clazz;
+    (void)clazz;
     AndroidPage *page = page_from_handle(handle);
     if (!page)
         return;
     ns_rproc_http_close(page->renderer);
+    if (page->painted_bitmap)
+        (*env)->DeleteWeakGlobalRef(env, page->painted_bitmap);
     LOGI("nativeClose page renders=%d unchanged=%d failures=%d url=%s",
          page->render_count, page->unchanged_count, page->render_fail_count,
          page->url ? page->url : "");

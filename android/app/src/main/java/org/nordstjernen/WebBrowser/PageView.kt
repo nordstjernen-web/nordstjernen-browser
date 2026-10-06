@@ -822,13 +822,12 @@ class PageView @JvmOverloads constructor(
             val wantScrollY = if (ok) NativeBrowser.nativeTakeScrollY(h) else -1
             val size = if (ok) NativeBrowser.nativePageSize(h) else null
             post {
-                if (handle != h) {
-                    renderPending = false
-                    lastRenderStartedAt = 0L
-                    return@post
-                }
                 renderPending = false
                 lastRenderStartedAt = 0L
+                if (handle != h) {
+                    if (renderDirty) scheduleRender()
+                    return@post
+                }
                 if (!nav.isNullOrEmpty()) {
                     onNavigate?.invoke(nav)
                     return@post
