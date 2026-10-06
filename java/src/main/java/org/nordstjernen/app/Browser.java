@@ -5,12 +5,14 @@
 
 package org.nordstjernen.app;
 
+import org.nordstjernen.AudioHelper;
 import org.nordstjernen.RemoteBrowser;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
@@ -18,15 +20,22 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.ProxySelector;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,8 +63,12 @@ import java.util.concurrent.Executors;
  * reloads, {@code Alt+Home} goes home, {@code Ctrl+N}/{@code Ctrl+T} open a new
  * window, {@code Ctrl+W} closes one and {@code Ctrl+Q} quits; with the page
  * focused, the arrow keys, {@code PageUp}/{@code PageDown},
- * {@code Home}/{@code End} and {@code Space} scroll. The mouse back/forward
- * buttons navigate history.
+ * {@code Home}/{@code End} and {@code Space} scroll unless a text field has the
+ * focus, and {@code Ctrl+X}/{@code C}/{@code V} cut, copy and paste. The mouse
+ * back/forward buttons navigate history and a middle click opens a link in a
+ * new window. Page sound plays through the {@code nordstjernen-audio} helper
+ * beside the renderer, and a page can take the window full screen
+ * ({@code Esc} leaves).
  *
  * <p>Point at the renderer binary with {@code -Dnordstjernen.renderer=…} or the
  * {@code NORDSTJERNEN_RENDERER} environment variable.
@@ -67,15 +80,22 @@ public final class Browser {
     private static final int LINE_SCROLL = 60;
     private static final double ZOOM_MIN = 0.25;
     private static final double ZOOM_MAX = 5.0;
-    private static final double ZOOM_STEP = 1.1;
+    private static final int[] ZOOM_LADDER_PERCENT = {
+        25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300,
+        400, 500
+    };
     private static final int MAX_JS_REDIRECTS = 20;
     private static final int MAX_RESTARTS = 3;
     private static final int CONSOLE_POLL_MS = 250;
+    private static final int IDLE_REFRESH_MS = 120;
+    private static final int ANIMATION_REFRESH_MS = 33;
+    private static final String SEARCH_URL = "https://duckduckgo.com/?q=";
     private static final String VERSION = resolveVersion();
     private static final String TITLE_SUFFIX = " (Java " + VERSION + ")";
 
     private final boolean privateMode;
     private final RemoteBrowser engine;
+    private final AudioHelper audio = new AudioHelper();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "ns-engine");
         t.setDaemon(true);
@@ -83,6 +103,8 @@ public final class Browser {
     });
 
     private final JFrame frame = new JFrame("Nordstjernen" + TITLE_SUFFIX);
+    private final JToolBar toolbar = new JToolBar();
+    private final JPanel south = new JPanel(new BorderLayout());
     private final JButton back = navButton("back", "◀", "Back (Alt+Left)");
     private final JButton forward = navButton("forward", "▶", "Forward (Alt+Right)");
     private final JButton reload = navButton("reload", "↻", "Reload (Ctrl+R)");
@@ -124,6 +146,15 @@ public final class Browser {
     private boolean suppressTextInsert = false;
     private boolean draggingScrollbar = false;
     private boolean caretActive = false;
+    private final Map<Integer, String[]> heldKeys = new HashMap<>();
+    private double wheelPendingX, wheelPendingY;
+
+    private int viewportW = -1;
+    private int viewportH = -1;
+    private double viewportDpr = -1;
+    private Runnable queuedNavigation;
+    private boolean pageFullscreen = false;
+    private boolean closed = false;
 
     private final Set<String> webglAsked = new HashSet<>();
     private final Set<String> cameraAsked = new HashSet<>();
@@ -136,6 +167,19 @@ public final class Browser {
     /** Live windows; the process exits when the last one closes. */
     private static final Set<Browser> WINDOWS = new java.util.LinkedHashSet<>();
 
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            List<Browser> open;
+            synchronized (WINDOWS) {
+                open = new ArrayList<>(WINDOWS);
+            }
+            for (Browser b : open) {
+                b.audio.close();
+                b.engine.close();
+            }
+        }, "ns-shutdown"));
+    }
+
     private Browser(String startUrl, boolean privateMode) {
         this.privateMode = privateMode;
         this.engine = new RemoteBrowser(privateMode);
@@ -147,7 +191,7 @@ public final class Browser {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) { }
-        String start = args.length > 0 ? args[0] : "about:start";
+        String start = args.length > 0 ? normalize(args[0]) : HOME_URL;
         SwingUtilities.invokeLater(() -> openWindow(start, false));
     }
 
@@ -159,20 +203,32 @@ public final class Browser {
     private static Browser openWindow(String url, boolean privateMode) {
         Browser b = new Browser(url == null || url.isEmpty() ? HOME_URL : url,
                                 privateMode);
-        WINDOWS.add(b);
+        synchronized (WINDOWS) {
+            WINDOWS.add(b);
+        }
         return b;
     }
 
     private void closeWindow() {
-        WINDOWS.remove(this);
-        frame.dispose();
-        io.submit(engine::close);
-        if (WINDOWS.isEmpty()) {
-            io.submit(() -> System.exit(0));
+        boolean last;
+        synchronized (WINDOWS) {
+            WINDOWS.remove(this);
+            last = WINDOWS.isEmpty();
         }
+        closed = true;
+        frame.dispose();
+        if (refreshTimer != null) refreshTimer.stop();
+        if (consolePoll != null) consolePoll.stop();
+        io.submit(() -> {
+            audio.close();
+            engine.close();
+            if (last) {
+                System.exit(0);
+            }
+        });
     }
 
-    /** Quit every window; each one's shutdown hook stops its renderer process. */
+    /** Quit every window; the shutdown hook stops their renderer processes. */
     private static void quitAll() {
         System.exit(0);
     }
@@ -189,7 +245,7 @@ public final class Browser {
             frame.setIconImage(logoImage);
         }
 
-        JToolBar bar = new JToolBar();
+        JToolBar bar = toolbar;
         bar.setFloatable(false);
         for (JButton b : new JButton[]{back, forward, reload, home}) {
             b.setFocusable(false);
@@ -239,7 +295,6 @@ public final class Browser {
         content.add(hScroll, BorderLayout.SOUTH);
 
         buildFindBar();
-        JPanel south = new JPanel(new BorderLayout());
         south.add(findBar, BorderLayout.NORTH);
         south.add(status, BorderLayout.SOUTH);
 
@@ -259,19 +314,15 @@ public final class Browser {
 
         canvas.setFocusable(true);
         canvas.setFocusTraversalKeysEnabled(false);
-        canvas.addMouseWheelListener(e -> {
-            if (e.isControlDown()) {
-                if (e.getWheelRotation() < 0) zoomIn(); else zoomOut();
-            } else {
-                wheelScroll(docX(e.getX()), docY(e.getY()),
-                            e.getWheelRotation() * LINE_SCROLL);
-            }
-        });
+        canvas.addMouseWheelListener(this::onWheel);
         canvas.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override public void mousePressed(java.awt.event.MouseEvent e) {
                 canvas.requestFocusInWindow();
                 if (e.getButton() == 4) { goBack(); return; }
                 if (e.getButton() == 5) { goForward(); return; }
+                if (e.getButton() == java.awt.event.MouseEvent.BUTTON2) {
+                    openLinkInNewWindow(e.getX(), e.getY()); return;
+                }
                 if (e.isPopupTrigger() || e.getButton() == java.awt.event.MouseEvent.BUTTON3) {
                     showContextMenu(e.getX(), e.getY()); return;
                 }
@@ -313,19 +364,9 @@ public final class Browser {
             @Override public void keyReleased(java.awt.event.KeyEvent e) { onCanvasKeyReleased(e); }
             @Override public void keyTyped(java.awt.event.KeyEvent e) { onCanvasKeyTyped(e); }
         });
-        frame.addComponentListener(new java.awt.event.ComponentAdapter() {
+        canvas.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override public void componentResized(java.awt.event.ComponentEvent e) {
-                if (!loading && currentUrl() != null) {
-                    int w = Math.max(1, canvas.getWidth());
-                    int h = Math.max(1, canvas.getHeight());
-                    io.submit(() -> {
-                        engine.setViewport(w, h);
-                        SwingUtilities.invokeLater(() -> {
-                            updateScrollModel();
-                            scheduleRefresh();
-                        });
-                    });
-                }
+                syncViewport();
             }
         });
 
@@ -333,7 +374,6 @@ public final class Browser {
         installFileDrop();
 
         frame.setVisible(true);
-        Runtime.getRuntime().addShutdownHook(new Thread(engine::close));
     }
 
     /**
@@ -434,6 +474,71 @@ public final class Browser {
     private double visW() { return Math.max(1, canvas.getWidth()) / scale; }
     private double visH() { return Math.max(1, canvas.getHeight()) / scale; }
 
+    private int cssViewportW() {
+        int w = canvas.getWidth() > 0 ? canvas.getWidth() : 1000;
+        return Math.max(1, (int) Math.round(w / scale));
+    }
+
+    private int cssViewportH() {
+        int h = canvas.getHeight() > 0 ? canvas.getHeight() : 700;
+        return Math.max(1, (int) Math.round(h / scale));
+    }
+
+    /** The screen's scale factor (2 on a HiDPI display at 200%). */
+    private double deviceScale() {
+        GraphicsConfiguration gc = canvas.getGraphicsConfiguration();
+        double s = gc != null ? gc.getDefaultTransform().getScaleX() : 1.0;
+        return s >= 1.0 && s <= 8.0 ? s : 1.0;
+    }
+
+    /**
+     * Device pixels per canvas pixel for the next render: the screen's scale
+     * factor, reduced only as far as needed to fit the renderer's framebuffer.
+     */
+    private double rasterScale() {
+        double raster = deviceScale();
+        int w = Math.max(1, canvas.getWidth());
+        int h = Math.max(1, canvas.getHeight());
+        raster = Math.min(raster, (double) RemoteBrowser.MAX_W / w);
+        raster = Math.min(raster, (double) RemoteBrowser.MAX_H / h);
+        return Math.max(raster, 0.01);
+    }
+
+    private double pageDpr() {
+        return scale * deviceScale();
+    }
+
+    /**
+     * Re-lay the page out when the CSS viewport changed: the canvas was
+     * resized (window, find bar, horizontal scrollbar), the zoom moved, or
+     * the window crossed onto a screen with another scale factor.
+     */
+    private void syncViewport() {
+        if (loading || closed || currentUrl() == null || canvas.getWidth() <= 1
+            || canvas.getHeight() <= 1) {
+            return;
+        }
+        final int w = cssViewportW();
+        final int h = cssViewportH();
+        final double dpr = pageDpr();
+        if (w == viewportW && h == viewportH && dpr == viewportDpr) {
+            updateScrollModel();
+            scheduleRefresh();
+            return;
+        }
+        viewportW = w;
+        viewportH = h;
+        viewportDpr = dpr;
+        io.submit(() -> {
+            engine.setDevicePixelRatio(dpr);
+            engine.setViewport(w, h);
+            SwingUtilities.invokeLater(() -> {
+                updateScrollModel();
+                scheduleRefresh();
+            });
+        });
+    }
+
     private int pageStep() {
         return Math.max(LINE_SCROLL, (int) visH() - LINE_SCROLL);
     }
@@ -490,9 +595,27 @@ public final class Browser {
 
     // --- Zoom ----------------------------------------------------------------
 
-    private void zoomIn()  { setZoom(scale * ZOOM_STEP); }
-    private void zoomOut() { setZoom(scale / ZOOM_STEP); }
+    private void zoomIn()  { zoomStep(1); }
+    private void zoomOut() { zoomStep(-1); }
     private void zoomReset() { setZoom(1.0); }
+
+    /** Step to the next stop of the same zoom ladder the GTK shell uses. */
+    private void zoomStep(int direction) {
+        int now = (int) Math.round(scale * 100.0);
+        int target = direction > 0
+            ? ZOOM_LADDER_PERCENT[ZOOM_LADDER_PERCENT.length - 1]
+            : ZOOM_LADDER_PERCENT[0];
+        if (direction > 0) {
+            for (int p : ZOOM_LADDER_PERCENT) {
+                if (p > now) { target = p; break; }
+            }
+        } else {
+            for (int i = ZOOM_LADDER_PERCENT.length - 1; i >= 0; i--) {
+                if (ZOOM_LADDER_PERCENT[i] < now) { target = ZOOM_LADDER_PERCENT[i]; break; }
+            }
+        }
+        setZoom(target / 100.0);
+    }
 
     private void setZoom(double s) {
         int permille = (int) Math.round(s * 1000.0);
@@ -501,10 +624,7 @@ public final class Browser {
         if (clamped == scale) return;
         scale = clamped;
         setStatus("Zoom " + (permille / 10) + "%");
-        if (currentUrl() != null) {
-            updateScrollModel();
-            scheduleRefresh();
-        }
+        syncViewport();
     }
 
     // --- Navigation ----------------------------------------------------------
@@ -521,9 +641,20 @@ public final class Browser {
         navigate(url, record, isRedirect, false);
     }
 
+    /**
+     * Load {@code url}. A page load is one blocking renderer request, so a
+     * navigation asked for while another is still loading waits for it and
+     * then runs — the latest one wins, as when a user clicks again.
+     */
     private void navigate(String url, boolean record, boolean isRedirect,
                           boolean fromHistory) {
-        if (url == null || url.isEmpty() || loading) {
+        if (url == null || url.isEmpty() || closed) {
+            return;
+        }
+        if (loading) {
+            if (!fromHistory) {
+                queuedNavigation = () -> navigate(url, record, isRedirect, false);
+            }
             return;
         }
         if (!isRedirect) {
@@ -532,25 +663,37 @@ public final class Browser {
         }
         loading = true;
         caretActive = false;
+        heldKeys.clear();
         closeFind();
+        leavePageFullscreen(false);
         canvas.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         setStatus("Loading " + url + " …");
-        int vw = Math.max(320, canvas.getWidth() > 0 ? canvas.getWidth() : 1000);
-        int vh = Math.max(240, canvas.getHeight() > 0 ? canvas.getHeight() : 700);
+        final int vw = cssViewportW();
+        final int vh = cssViewportH();
+        final double dpr = pageDpr();
+        viewportW = vw;
+        viewportH = vh;
+        viewportDpr = dpr;
+        final boolean userActivated = !isRedirect;
         io.submit(() -> {
-            boolean ok = engineNavigate(url, vw, vh, fromHistory);
+            audio.stop();
+            engine.setDevicePixelRatio(dpr);
+            boolean ok = engineNavigate(url, vw, vh, fromHistory, userActivated);
             String finalUrl = ok ? engine.url() : url;
             String title = ok ? engine.title() : "";
             String redirect = ok ? engine.pendingNav() : null;
-            scrollX = 0;
-            scrollY = 0;
             SwingUtilities.invokeLater(() -> {
                 loading = false;
                 canvas.setCursor(Cursor.getDefaultCursor());
+                Runnable queued = queuedNavigation;
+                queuedNavigation = null;
                 if (!ok) {
                     setStatus("Failed to load " + url);
+                    if (queued != null) queued.run();
                     return;
                 }
+                scrollX = 0;
+                scrollY = 0;
                 if (record) {
                     while (history.size() > historyIndex + 1) {
                         history.remove(history.size() - 1);
@@ -568,10 +711,15 @@ public final class Browser {
                 updateSecurityBadge();
                 updateScrollModel();
                 setStatus(title);
-                canvas.requestFocusInWindow();
+                if (!address.isFocusOwner()) {
+                    canvas.requestFocusInWindow();
+                }
+                syncViewport();
                 scheduleRefresh();
                 requestFavicon();
-                if (redirect != null && jsRedirects < MAX_JS_REDIRECTS) {
+                if (queued != null) {
+                    queued.run();
+                } else if (redirect != null && jsRedirects < MAX_JS_REDIRECTS) {
                     jsRedirects++;
                     navigate(redirect, false, true);
                 }
@@ -579,17 +727,20 @@ public final class Browser {
         });
     }
 
-    /** Navigate, transparently respawning the renderer once if the IPC died. */
-    private boolean engineNavigate(String url, int vw, int vh, boolean fromHistory) {
+    /**
+     * Navigate, transparently respawning the renderer once if the IPC died.
+     * The fresh process has no back/forward cache to restore from.
+     */
+    private boolean engineNavigate(String url, int vw, int vh, boolean fromHistory,
+                                   boolean userActivated) {
         try {
-            return engine.navigate(url, vw, vh, SETTLE_MS, fromHistory, true);
+            return engine.navigate(url, vw, vh, SETTLE_MS, fromHistory, userActivated);
         } catch (RuntimeException ex) {
             if (restarts >= MAX_RESTARTS) return false;
             restarts++;
             try {
                 engine.restart();
-                // The fresh process has no back/forward cache to restore from.
-                return engine.navigate(url, vw, vh, SETTLE_MS, false, true);
+                return engine.navigate(url, vw, vh, SETTLE_MS, false, userActivated);
             } catch (RuntimeException ex2) {
                 return false;
             }
@@ -635,45 +786,70 @@ public final class Browser {
      * reports the frame unchanged and not animating.
      */
     private void scheduleRefresh() {
+        if (closed) {
+            return;
+        }
         stableFrames = 0;
         if (refreshTimer == null) {
-            refreshTimer = new javax.swing.Timer(120, e -> tickRefresh());
+            refreshTimer = new javax.swing.Timer(IDLE_REFRESH_MS, e -> tickRefresh());
         }
         if (!refreshTimer.isRunning()) {
             refreshTimer.start();
         }
     }
 
+    /**
+     * Render the viewport once. On a HiDPI screen the frame is rasterised at
+     * the screen's scale factor and drawn back at canvas size, so text stays
+     * sharp. Anchors, {@code scrollTo()} and focus scrolling arrive as a
+     * requested scroll position the shell adopts; while the page animates the
+     * loop runs at about 30 frames a second, otherwise it idles until three
+     * frames in a row come back unchanged.
+     */
     private void tickRefresh() {
-        if (renderBusy) {
+        if (renderBusy || loading || closed) {
             return;
         }
         renderBusy = true;
-        final int vw = Math.max(1, canvas.getWidth());
-        final int vh = Math.max(1, canvas.getHeight());
+        final double raster = rasterScale();
+        final int vw = (int) Math.ceil(Math.max(1, canvas.getWidth()) * raster);
+        final int vh = (int) Math.ceil(Math.max(1, canvas.getHeight()) * raster);
         final int sx = scrollX;
         final int sy = scrollY;
-        final double sc = scale;
+        final double sc = scale * raster;
         final boolean caret = caretActive;
+        final String pageUrl = currentUrl();
         io.submit(() -> {
             RemoteBrowser.Frame frm;
+            String copied = null;
             try {
                 frm = engine.render(sx, sy, vw, vh, sc, caret);
+                if (frm.clipboard) {
+                    copied = engine.clipboardText();
+                }
+                if (frm.audio != null) {
+                    audio.send(frm.audio, pageUrl);
+                }
             } catch (RuntimeException ex) {
                 SwingUtilities.invokeLater(this::onRenderCrash);
                 return;
             }
             final RemoteBrowser.Frame f = frm;
+            final String clipboardText = copied;
             SwingUtilities.invokeLater(() -> {
                 renderBusy = false;
+                if (closed) {
+                    return;
+                }
                 if (f.image != null) {
-                    canvas.setImage(f.image);
+                    canvas.setImage(f.image, raster);
                 }
                 updateScrollModel();
-                // Anchors, scrollTo() and focus scrolling land here: the page
-                // asked to be somewhere other than where the shell put it.
                 if (f.requestedScrollY >= 0 && f.requestedScrollY != scrollY) {
                     setScrollY(f.requestedScrollY);
+                }
+                if (f.requestedScrollX >= 0 && f.requestedScrollX != scrollX) {
+                    setScrollX(f.requestedScrollX);
                 }
                 if (f.unchanged && !f.animating && !f.caretBlinking) {
                     if (++stableFrames >= 3 && refreshTimer != null) {
@@ -682,6 +858,17 @@ public final class Browser {
                 } else {
                     stableFrames = 0;
                 }
+                if (refreshTimer != null) {
+                    refreshTimer.setDelay(f.animating ? ANIMATION_REFRESH_MS
+                                                      : IDLE_REFRESH_MS);
+                }
+                if (clipboardText != null) {
+                    setClipboard(clipboardText);
+                    setStatus("Copied to clipboard");
+                }
+                if (f.windowAction != null) {
+                    applyWindowAction(f.windowAction);
+                }
                 if (f.webgl != null) {
                     promptWebgl(f.webgl);
                 }
@@ -689,11 +876,11 @@ public final class Browser {
                     promptCamera(f.camera);
                 }
                 if (f.download != null) {
-                    startDownload(f.download);
+                    startDownload(f.download, f.downloadName);
                 }
                 if (f.nav != null && jsRedirects < MAX_JS_REDIRECTS) {
                     jsRedirects++;
-                    navigate(f.nav, true);
+                    navigate(f.nav, true, true);
                 }
             });
         });
@@ -702,6 +889,9 @@ public final class Browser {
     private void onRenderCrash() {
         renderBusy = false;
         if (refreshTimer != null) refreshTimer.stop();
+        if (closed) {
+            return;
+        }
         if (restarts >= MAX_RESTARTS || currentUrl() == null) {
             setStatus("Renderer keeps failing — reload to retry");
             return;
@@ -743,23 +933,63 @@ public final class Browser {
     }
 
     /**
-     * Send a wheel notch where the pointer is: an overflow scroller under it
+     * Turn a wheel or touchpad event into a scroll. {@code Ctrl} zooms and
+     * {@code Shift} scrolls sideways; fractional touchpad deltas accumulate
+     * until they add up to a whole CSS pixel.
+     */
+    private void onWheel(java.awt.event.MouseWheelEvent e) {
+        double notches = e.getPreciseWheelRotation();
+        if (e.isControlDown()) {
+            if (notches < 0) zoomIn(); else if (notches > 0) zoomOut();
+            return;
+        }
+        if (e.isShiftDown()) {
+            wheelPendingX += notches * LINE_SCROLL;
+        } else {
+            wheelPendingY += notches * LINE_SCROLL;
+        }
+        int dx = (int) wheelPendingX;
+        int dy = (int) wheelPendingY;
+        wheelPendingX -= dx;
+        wheelPendingY -= dy;
+        if (dx != 0 || dy != 0) {
+            wheelScroll(docX(e.getX()), docY(e.getY()), dx, dy);
+        }
+    }
+
+    /**
+     * Send a wheel delta where the pointer is: an overflow scroller under it
      * (a scrollable div, a textarea, an iframe) gets first refusal, and only
      * an unconsumed delta scrolls the page.
      */
-    private void wheelScroll(int docX, int docY, int deltaCss) {
-        if (currentUrl() == null) {
+    private void wheelScroll(int docX, int docY, int deltaX, int deltaY) {
+        if (currentUrl() == null || loading) {
             return;
         }
         io.submit(() -> {
-            boolean consumed = engine.scrollAt(docX, docY, 0, deltaCss);
+            boolean consumed = engine.scrollAt(docX, docY, deltaX, deltaY);
             SwingUtilities.invokeLater(() -> {
                 if (consumed) {
                     scheduleRefresh();
-                } else {
-                    setScrollY(scrollY + deltaCss);
+                    return;
                 }
+                if (deltaX != 0) setScrollX(scrollX + deltaX);
+                if (deltaY != 0) setScrollY(scrollY + deltaY);
             });
+        });
+    }
+
+    /** A middle click opens the link under the pointer in a new window of the same kind. */
+    private void openLinkInNewWindow(int cx, int cy) {
+        if (currentUrl() == null || loading) {
+            return;
+        }
+        final int dx = docX(cx), dy = docY(cy);
+        io.submit(() -> {
+            String link = engine.linkAt(dx, dy);
+            if (link != null) {
+                SwingUtilities.invokeLater(() -> openWindow(link, privateMode));
+            }
         });
     }
 
@@ -797,23 +1027,19 @@ public final class Browser {
     }
 
     private void copySelection() {
-        io.submit(() -> {
-            String text = engine.select(4, 0, 0);
-            if (text != null && !text.isEmpty()) {
-                SwingUtilities.invokeLater(() -> {
-                    setClipboard(text);
-                    setStatus("Copied selection");
-                });
-            }
-        });
+        runEditCommand("copy", null, null, 0, 0);
+    }
+
+    private void cutSelection() {
+        runEditCommand("cut", null, null, 0, 0);
+    }
+
+    private void pasteClipboard() {
+        runEditCommand("paste", null, null, 0, 0);
     }
 
     private void selectAll() {
-        hasSelection = true;
-        io.submit(() -> {
-            engine.select(3, 0, 0);
-            SwingUtilities.invokeLater(this::scheduleRefresh);
-        });
+        runEditCommand("selectAll", null, null, 0, 0);
     }
 
     // --- Hover ---------------------------------------------------------------
@@ -880,13 +1106,11 @@ public final class Browser {
     // --- Keyboard ------------------------------------------------------------
 
     /**
-     * Insert typed text only for keys that {@code keyPressed} did not already
-     * deliver as a printable. The engine inserts a single printable character
-     * on {@code keydown} (its {@code browser_edit_key} path), so for ordinary
-     * keys {@code keyPressed} has done the insertion and we must not insert
-     * again here — that is what produced doubled characters. We still run for
-     * the IME / dead-key / compose path, where the composed character surfaces
-     * only in {@code keyTyped} and no printable {@code keydown} was sent.
+     * Text a key produced that {@code keyPressed} did not already hand to the
+     * page. The engine inserts a printable character on {@code keydown}, so an
+     * ordinary key is done by the time its {@code keyTyped} arrives; only the
+     * IME / dead-key / compose path, where the composed character surfaces
+     * here and no printable {@code keydown} was sent, still needs inserting.
      */
     private void onCanvasKeyTyped(java.awt.event.KeyEvent e) {
         if (suppressTextInsert) {
@@ -897,16 +1121,169 @@ public final class Browser {
         if (c == java.awt.event.KeyEvent.CHAR_UNDEFINED || Character.isISOControl(c)) {
             return;
         }
-        if (e.isControlDown() || e.isAltDown() || e.isMetaDown()) {
+        if (!producesText(e)) {
             return;
         }
         final String s = String.valueOf(c);
+        final int shift = e.isShiftDown() ? 1 : 0;
         io.submit(() -> {
-            engine.key(3, s, "", 0, e.isShiftDown() ? 1 : 0);
+            engine.key(3, s, "", 0, shift);
             RemoteBrowser.Key res = engine.key(2, s, "", 0, 0);
+            SwingUtilities.invokeLater(() -> afterKey(res.nav));
+        });
+    }
+
+    private void onCanvasKeyPressed(java.awt.event.KeyEvent e) {
+        suppressTextInsert = false;
+        int vk = e.getKeyCode();
+        if (pageFullscreen && (vk == java.awt.event.KeyEvent.VK_ESCAPE
+                               || vk == java.awt.event.KeyEvent.VK_F11)) {
+            leavePageFullscreen(true);
+            e.consume();
+            return;
+        }
+        if (isShellShortcut(e)) {
+            return;
+        }
+        if (vk == java.awt.event.KeyEvent.VK_ESCAPE && findBar.isVisible()) {
+            closeFind(); e.consume(); return;
+        }
+        String edit = editCommand(e);
+        if (edit != null) {
+            e.consume();
+            suppressTextInsert = true;
+            runEditCommand(edit, printableKey(e), printableCode(e), vk, swingMods(e));
+            return;
+        }
+        String name = jsKeyName(vk);
+        if (name != null) {
+            e.consume();
+            pressNamedKey(vk, name, swingMods(e));
+            return;
+        }
+        if (vk == java.awt.event.KeyEvent.VK_SPACE) {
+            e.consume();
+            suppressTextInsert = true;
+            pressSpace(swingMods(e), e.isShiftDown());
+            return;
+        }
+        String pk = printableForPress(e);
+        if (pk == null) {
+            return;
+        }
+        final String fpk = pk;
+        final String fcode = printableCode(e);
+        final int fkc = vk;
+        final boolean text = producesText(e);
+        final int fmods = text ? (e.isShiftDown() ? 1 : 0) : swingMods(e);
+        heldKeys.put(vk, new String[]{fpk, fcode, Integer.toString(fkc)});
+        if (text) {
+            suppressTextInsert = true;
+        }
+        io.submit(() -> {
+            RemoteBrowser.Key res = engine.key(0, fpk, fcode, fkc, fmods);
+            String nav = res.nav;
+            if (text && nav == null) {
+                nav = engine.key(3, fpk, fcode, fkc, fmods).nav;
+            }
+            final String target = nav;
+            SwingUtilities.invokeLater(() -> afterKey(target));
+        });
+    }
+
+    private void onCanvasKeyReleased(java.awt.event.KeyEvent e) {
+        String[] held = heldKeys.remove(e.getKeyCode());
+        if (held == null) {
+            return;
+        }
+        final int fmods = swingMods(e);
+        io.submit(() -> {
+            RemoteBrowser.Key res = engine.key(1, held[0], held[1],
+                                               Integer.parseInt(held[2]), fmods);
+            SwingUtilities.invokeLater(() -> afterKey(res.nav));
+        });
+    }
+
+    private void afterKey(String nav) {
+        if (nav != null) {
+            navigate(nav, true);
+        } else {
+            scheduleRefresh();
+        }
+    }
+
+    /**
+     * A named key (Enter, Tab, the arrows, …) goes to the page first. When the
+     * page leaves it alone and no text field has the focus, the navigation
+     * keys scroll the page; in a field they move the caret instead. Tab, Enter
+     * and Escape are how the focus enters and leaves a field without a click,
+     * so they re-probe where it went.
+     */
+    private void pressNamedKey(int vk, String name, int mods) {
+        final int code = jsKeycode(name);
+        heldKeys.put(vk, new String[]{name, name, Integer.toString(code)});
+        final boolean probe = focusMoved(name) || scrollsPage(name);
+        io.submit(() -> {
+            RemoteBrowser.Key res = engine.key(0, name, name, code, mods);
+            final boolean editable = probe && res.nav == null && engine.focusedEditable();
             SwingUtilities.invokeLater(() -> {
+                if (focusMoved(name)) {
+                    caretActive = editable;
+                }
                 if (res.nav != null) {
                     navigate(res.nav, true);
+                    return;
+                }
+                if (!res.prevented && !editable && scrollPageFor(name)) {
+                    return;
+                }
+                scheduleRefresh();
+            });
+        });
+    }
+
+    private boolean scrollPageFor(String name) {
+        switch (name) {
+            case "ArrowDown":  setScrollY(scrollY + LINE_SCROLL); return true;
+            case "ArrowUp":    setScrollY(scrollY - LINE_SCROLL); return true;
+            case "ArrowRight": setScrollX(scrollX + LINE_SCROLL); return true;
+            case "ArrowLeft":  setScrollX(scrollX - LINE_SCROLL); return true;
+            case "PageDown":   setScrollY(scrollY + pageStep()); return true;
+            case "PageUp":     setScrollY(scrollY - pageStep()); return true;
+            case "Home":       setScrollY(0); return true;
+            case "End":        setScrollY(maxScrollY()); return true;
+            default:           return false;
+        }
+    }
+
+    private static boolean scrollsPage(String name) {
+        switch (name) {
+            case "ArrowDown": case "ArrowUp": case "ArrowRight": case "ArrowLeft":
+            case "PageDown": case "PageUp": case "Home": case "End":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Space types a space into a text field, presses a focused button, and
+     * otherwise pages the document down ({@code Shift+Space} up).
+     */
+    private void pressSpace(int mods, boolean shift) {
+        heldKeys.put(java.awt.event.KeyEvent.VK_SPACE, new String[]{" ", "Space", "32"});
+        io.submit(() -> {
+            RemoteBrowser.Key down = engine.key(0, " ", "Space", 32, mods);
+            RemoteBrowser.Key press = down.nav == null
+                ? engine.key(3, " ", "Space", 32, mods) : null;
+            String nav = down.nav != null ? down.nav : press.nav;
+            boolean prevented = down.prevented || (press != null && press.prevented);
+            boolean editable = nav == null && engine.focusedEditable();
+            SwingUtilities.invokeLater(() -> {
+                if (nav != null) {
+                    navigate(nav, true);
+                } else if (!prevented && !editable && (mods & ~1) == 0) {
+                    setScrollY(scrollY + (shift ? -pageStep() : pageStep()));
                 } else {
                     scheduleRefresh();
                 }
@@ -914,91 +1291,113 @@ public final class Browser {
         });
     }
 
-    private void onCanvasKeyPressed(java.awt.event.KeyEvent e) {
-        suppressTextInsert = false;
-        if (e.isControlDown() && !e.isAltDown()) {
-            switch (e.getKeyCode()) {
-                case java.awt.event.KeyEvent.VK_C: copySelection(); e.consume(); return;
-                case java.awt.event.KeyEvent.VK_A: selectAll(); e.consume(); return;
-                default: break;
-            }
+    /**
+     * {@code cut}, {@code copy}, {@code paste} or {@code selectAll} for the
+     * platform's clipboard shortcuts ({@code Ctrl}, or {@code Cmd} on macOS,
+     * with X/C/V/A; {@code Shift+Insert} and {@code Ctrl+Insert}), else null.
+     */
+    private static String editCommand(java.awt.event.KeyEvent e) {
+        int all = java.awt.event.InputEvent.SHIFT_DOWN_MASK
+                | java.awt.event.InputEvent.CTRL_DOWN_MASK
+                | java.awt.event.InputEvent.ALT_DOWN_MASK
+                | java.awt.event.InputEvent.META_DOWN_MASK;
+        int mods = e.getModifiersEx() & all;
+        int vk = e.getKeyCode();
+        if (vk == java.awt.event.KeyEvent.VK_INSERT) {
+            if (mods == java.awt.event.InputEvent.SHIFT_DOWN_MASK) return "paste";
+            if (mods == java.awt.event.InputEvent.CTRL_DOWN_MASK) return "copy";
+            return null;
         }
-        if (e.getKeyCode() == java.awt.event.KeyEvent.VK_ESCAPE && findBar.isVisible()) {
-            closeFind(); e.consume(); return;
+        int primary = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        if ((mods & primary) == 0
+            || (mods & ~(primary | java.awt.event.InputEvent.SHIFT_DOWN_MASK)) != 0) {
+            return null;
         }
-        String name = jsKeyName(e.getKeyCode());
-        if (name == null) {
-            String pk = printableForPress(e);
-            if (pk != null && !e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
-                final String fpk = pk;
-                final String fcode = printableCode(e);
-                final int fkc = e.getKeyCode();
-                final int fmods = swingMods(e);
-                suppressTextInsert = true;
-                io.submit(() -> {
-                    RemoteBrowser.Key res = engine.key(0, fpk, fcode, fkc, fmods);
-                    engine.key(3, fpk, fcode, fkc, fmods);
-                    SwingUtilities.invokeLater(() -> {
-                        if (res.nav != null) {
-                            navigate(res.nav, true);
-                        } else {
-                            scheduleRefresh();
-                        }
-                    });
-                });
-            } else if (pk != null) {
-                final String fpk = pk;
-                final String fcode = printableCode(e);
-                final int fkc = e.getKeyCode();
-                final int fmods = swingMods(e);
-                io.submit(() -> engine.key(0, fpk, fcode, fkc, fmods));
-            }
+        switch (vk) {
+            case java.awt.event.KeyEvent.VK_X: return "cut";
+            case java.awt.event.KeyEvent.VK_C: return "copy";
+            case java.awt.event.KeyEvent.VK_V: return "paste";
+            case java.awt.event.KeyEvent.VK_A: return "selectAll";
+            default: return null;
+        }
+    }
+
+    /**
+     * The page sees the shortcut's {@code keydown} first and may cancel it;
+     * otherwise the edit runs against the focused field or the page selection.
+     */
+    private void runEditCommand(String command, String key, String code,
+                                int keycode, int mods) {
+        final String pasteText = "paste".equals(command) ? clipboardText() : null;
+        if ("paste".equals(command) && pasteText == null) {
             return;
         }
-        e.consume();
-        final String fname = name;
-        final int fcode = jsKeycode(name);
-        final int fmods = swingMods(e);
+        if ("selectAll".equals(command)) {
+            hasSelection = true;
+        }
         io.submit(() -> {
-            RemoteBrowser.Key res = engine.key(0, fname, fname, fcode, fmods);
-            // Tab, Enter and Escape are how the focus enters and leaves a text
-            // field without a click, so re-probe where the caret went.
-            final boolean editable = focusMoved(fname) && engine.focusedEditable();
-            SwingUtilities.invokeLater(() -> {
-                if (focusMoved(fname)) {
-                    caretActive = editable;
+            boolean prevented = key != null && engine.key(0, key, code, keycode, mods).prevented;
+            if (prevented) {
+                SwingUtilities.invokeLater(this::scheduleRefresh);
+                return;
+            }
+            switch (command) {
+                case "copy": {
+                    String text = engine.select(4, 0, 0);
+                    SwingUtilities.invokeLater(() -> copied(text, "Copied selection"));
+                    break;
                 }
-                if (res.nav != null) {
-                    navigate(res.nav, true);
-                    return;
+                case "cut": {
+                    String text = engine.cutSelection();
+                    SwingUtilities.invokeLater(() -> {
+                        copied(text, "Cut selection");
+                        scheduleRefresh();
+                    });
+                    break;
                 }
-                if (!res.prevented) {
-                    switch (fname) {
-                        case "ArrowDown": setScrollY(scrollY + LINE_SCROLL); return;
-                        case "ArrowUp":   setScrollY(scrollY - LINE_SCROLL); return;
-                        case "ArrowRight": setScrollX(scrollX + LINE_SCROLL); return;
-                        case "ArrowLeft": setScrollX(scrollX - LINE_SCROLL); return;
-                        case "PageDown":  setScrollY(scrollY + pageStep()); return;
-                        case "PageUp":    setScrollY(scrollY - pageStep()); return;
-                        case "Home":      setScrollY(0); return;
-                        case "End":       setScrollY(maxScrollY()); return;
-                        default: break;
-                    }
+                case "paste": {
+                    String nav = engine.paste(pasteText);
+                    SwingUtilities.invokeLater(() -> afterKey(nav));
+                    break;
                 }
-                scheduleRefresh();
-            });
+                default:
+                    engine.select(3, 0, 0);
+                    SwingUtilities.invokeLater(this::scheduleRefresh);
+                    break;
+            }
         });
     }
 
-    private void onCanvasKeyReleased(java.awt.event.KeyEvent e) {
-        String name = jsKeyName(e.getKeyCode());
-        if (name == null) {
-            return;
+    private void copied(String text, String message) {
+        if (text != null && !text.isEmpty()) {
+            setClipboard(text);
+            setStatus(message);
         }
-        final String fname = name;
-        final int fcode = jsKeycode(name);
-        final int fmods = swingMods(e);
-        io.submit(() -> engine.key(1, fname, fname, fcode, fmods));
+    }
+
+    /**
+     * True for the browser's own shortcuts (Alt+Left, Ctrl+L, F5, …): those
+     * belong to the window, so the page must neither see nor swallow them.
+     */
+    private boolean isShellShortcut(java.awt.event.KeyEvent e) {
+        KeyStroke ks = KeyStroke.getKeyStrokeForEvent(e);
+        return frame.getRootPane()
+            .getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(ks) != null;
+    }
+
+    /**
+     * Whether a key event types text rather than issuing a shortcut: no
+     * Ctrl/Alt/Meta, or AltGr (which Windows reports as Ctrl+Alt) producing
+     * a character, as for {@code @} on many European layouts.
+     */
+    private static boolean producesText(java.awt.event.KeyEvent e) {
+        if (!e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
+            return true;
+        }
+        char ch = e.getKeyChar();
+        boolean altGr = e.isAltGraphDown() || (e.isControlDown() && e.isAltDown());
+        return altGr && !e.isMetaDown() && ch != java.awt.event.KeyEvent.CHAR_UNDEFINED
+            && !Character.isISOControl(ch);
     }
 
     private static boolean focusMoved(String keyName) {
@@ -1091,14 +1490,14 @@ public final class Browser {
     }
 
     private void goBack() {
-        if (historyIndex > 0) {
+        if (!loading && historyIndex > 0) {
             historyIndex--;
             navigate(history.get(historyIndex), false, false, true);
         }
     }
 
     private void goForward() {
-        if (historyIndex < history.size() - 1) {
+        if (!loading && historyIndex < history.size() - 1) {
             historyIndex++;
             navigate(history.get(historyIndex), false, false, true);
         }
@@ -1198,22 +1597,27 @@ public final class Browser {
         canvas.requestFocusInWindow();
         final int dx = docX(cx), dy = docY(cy);
         io.submit(() -> {
-            // Give the page its contextmenu event first; if it calls
-            // preventDefault() it is drawing its own menu and ours must
-            // stay out of the way.
-            boolean prevented = engine.contextMenu(dx, dy);
-            final String link = prevented ? null : engine.linkAt(dx, dy);
+            RemoteBrowser.ContextMenu target = engine.openContextMenu(dx, dy);
+            final String link = target.prevented ? null : engine.linkAt(dx, dy);
             SwingUtilities.invokeLater(() -> {
-                if (prevented) {
+                if (target.prevented) {
                     scheduleRefresh();
                     return;
                 }
-                buildContextMenu(cx, cy, link);
+                if (target.editable) {
+                    caretActive = true;
+                    scheduleRefresh();
+                }
+                buildContextMenu(cx, cy, link, target.editable);
             });
         });
     }
 
-    private void buildContextMenu(int cx, int cy, String link) {
+    /**
+     * The native menu, shown only when the page did not put up its own (a
+     * {@code contextmenu} listener that calls {@code preventDefault()}).
+     */
+    private void buildContextMenu(int cx, int cy, String link, boolean editable) {
         JPopupMenu menu = new JPopupMenu();
         if (link != null && !link.isEmpty()) {
             JMenuItem open = new JMenuItem("Open Link");
@@ -1224,7 +1628,19 @@ public final class Browser {
             menu.add(copyLink);
             menu.addSeparator();
         }
-        if (hasSelection) {
+        if (editable) {
+            JMenuItem cut = new JMenuItem("Cut");
+            cut.addActionListener(e -> cutSelection());
+            menu.add(cut);
+            JMenuItem copy = new JMenuItem("Copy");
+            copy.addActionListener(e -> copySelection());
+            menu.add(copy);
+            JMenuItem paste = new JMenuItem("Paste");
+            paste.setEnabled(clipboardText() != null);
+            paste.addActionListener(e -> pasteClipboard());
+            menu.add(paste);
+            menu.addSeparator();
+        } else if (hasSelection) {
             JMenuItem copy = new JMenuItem("Copy");
             copy.addActionListener(e -> copySelection());
             menu.add(copy);
@@ -1427,34 +1843,86 @@ public final class Browser {
 
     // --- Downloads -----------------------------------------------------------
 
-    private void startDownload(String url) {
-        URI uri;
-        try {
-            uri = URI.create(url);
-        } catch (IllegalArgumentException ex) {
+    /**
+     * Save a download the page asked for ({@code <a download>}, a
+     * {@code Content-Disposition} response, a script-built {@code data:}
+     * link). The file chooser starts in the user's Downloads folder with the
+     * page's suggested name, or the last segment of the URL.
+     */
+    private void startDownload(String url, String suggestedName) {
+        String page = currentUrl();
+        if (url.startsWith("file:") && (page == null || !page.startsWith("file:"))) {
             return;
         }
-        String suggested = uri.getPath();
-        int slash = suggested == null ? -1 : suggested.lastIndexOf('/');
-        suggested = (slash >= 0 && slash + 1 < suggested.length())
-            ? suggested.substring(slash + 1) : "download";
-        JFileChooser chooser = new JFileChooser();
-        chooser.setSelectedFile(new java.io.File(suggested));
+        if (url.startsWith("blob:")) {
+            setStatus("Cannot save a blob: download from this shell");
+            return;
+        }
+        JFileChooser chooser = new JFileChooser(downloadsDir());
+        chooser.setSelectedFile(new java.io.File(chooser.getCurrentDirectory(),
+                                                 downloadFileName(url, suggestedName)));
         chooser.setDialogTitle("Save download");
         if (chooser.showSaveDialog(frame) != JFileChooser.APPROVE_OPTION) return;
-        final Path dest = chooser.getSelectedFile().toPath();
+        final Path dest;
+        try {
+            dest = chooser.getSelectedFile().toPath();
+        } catch (InvalidPathException ex) {
+            setStatus("Cannot save to " + chooser.getSelectedFile());
+            return;
+        }
         setStatus("Downloading " + url + " …");
         io.submit(() -> {
-            boolean ok = downloadTo(uri, dest);
+            boolean ok = downloadTo(url, dest);
             SwingUtilities.invokeLater(() ->
                 setStatus(ok ? "Downloaded " + dest : "Download failed: " + url));
         });
     }
 
-    private static boolean downloadTo(URI uri, Path dest) {
+    private static java.io.File downloadsDir() {
+        java.io.File dir = new java.io.File(System.getProperty("user.home", "."), "Downloads");
+        return dir.isDirectory() ? dir : new java.io.File(System.getProperty("user.home", "."));
+    }
+
+    /**
+     * A safe file name: the page's suggestion without any directory part, else
+     * the URL's last path segment, with characters the platform cannot put in
+     * a file name (in a non-UTF-8 locale, say) replaced.
+     */
+    static String downloadFileName(String url, String suggestedName) {
+        String name = suggestedName == null ? "" : suggestedName.strip();
+        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+        if (name.isEmpty() || name.equals(".") || name.equals("..")) {
+            String path = "";
+            try {
+                path = URI.create(url).getPath();
+            } catch (IllegalArgumentException ignored) {
+            }
+            path = path == null ? "" : path;
+            name = path.substring(path.lastIndexOf('/') + 1);
+        }
+        name = name.replaceAll("[\\x00-\\x1f<>:\"|?*]", "_");
         try {
+            Path.of(name);
+        } catch (InvalidPathException ex) {
+            name = name.replaceAll("[^\\x20-\\x7e]", "_");
+        }
+        return name.isEmpty() || name.equals(".") || name.equals("..") ? "download" : name;
+    }
+
+    private static boolean downloadTo(String url, Path dest) {
+        try {
+            if (url.startsWith("data:")) {
+                Files.write(dest, decodeDataUrl(url));
+                return true;
+            }
+            URI uri = URI.create(url);
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                Files.copy(Path.of(uri), dest, StandardCopyOption.REPLACE_EXISTING);
+                return true;
+            }
             HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL).build();
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .proxy(ProxySelector.getDefault()).build();
             HttpRequest req = HttpRequest.newBuilder(uri)
                 .header("User-Agent", "Nordstjernen").GET().build();
             HttpResponse<InputStream> resp =
@@ -1464,9 +1932,26 @@ public final class Browser {
                 Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
             }
             return true;
-        } catch (IOException | InterruptedException ex) {
+        } catch (IOException | InterruptedException | IllegalArgumentException
+                 | UnsupportedOperationException ex) {
             return false;
         }
+    }
+
+    /** The bytes of a {@code data:} URL, base64 or percent-encoded. */
+    static byte[] decodeDataUrl(String url) {
+        int comma = url.indexOf(',');
+        if (comma < 0) {
+            throw new IllegalArgumentException("malformed data: URL");
+        }
+        String meta = url.substring(5, comma);
+        String payload = url.substring(comma + 1);
+        if (meta.endsWith(";base64")) {
+            return Base64.getMimeDecoder().decode(
+                URLDecoder.decode(payload, StandardCharsets.US_ASCII));
+        }
+        return URLDecoder.decode(payload.replace("+", "%2B"), StandardCharsets.UTF_8)
+            .getBytes(StandardCharsets.UTF_8);
     }
 
     // --- WebGL trust prompt --------------------------------------------------
@@ -1631,6 +2116,73 @@ public final class Browser {
             .setContents(new StringSelection(text), null);
     }
 
+    /** The system clipboard's text, or null when it holds none. */
+    private static String clipboardText() {
+        try {
+            Object data = Toolkit.getDefaultToolkit().getSystemClipboard()
+                .getData(DataFlavor.stringFlavor);
+            return data instanceof String && !((String) data).isEmpty()
+                ? (String) data : null;
+        } catch (UnsupportedFlavorException | IOException | IllegalStateException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Follow a page's fullscreen request: {@code fullscreen-enter} hides the
+     * toolbar, find bar and status bar and takes the whole screen;
+     * {@code fullscreen-exit} restores the window.
+     */
+    private void applyWindowAction(String action) {
+        if ("fullscreen-enter".equals(action)) {
+            enterPageFullscreen();
+        } else if ("fullscreen-exit".equals(action)) {
+            leavePageFullscreen(false);
+        }
+    }
+
+    private void enterPageFullscreen() {
+        if (pageFullscreen) {
+            return;
+        }
+        pageFullscreen = true;
+        closeFind();
+        toolbar.setVisible(false);
+        south.setVisible(false);
+        GraphicsDevice screen = frame.getGraphicsConfiguration().getDevice();
+        if (screen.isFullScreenSupported()) {
+            screen.setFullScreenWindow(frame);
+        } else {
+            frame.setExtendedState(frame.getExtendedState() | JFrame.MAXIMIZED_BOTH);
+        }
+        canvas.requestFocusInWindow();
+        setStatus("Full screen — press Esc to exit");
+    }
+
+    /**
+     * Restore the window from page fullscreen; {@code tellPage} also asks the
+     * page to leave it, as when the user pressed {@code Esc}.
+     */
+    private void leavePageFullscreen(boolean tellPage) {
+        if (!pageFullscreen) {
+            return;
+        }
+        pageFullscreen = false;
+        GraphicsDevice screen = frame.getGraphicsConfiguration().getDevice();
+        if (screen.getFullScreenWindow() == frame) {
+            screen.setFullScreenWindow(null);
+        }
+        toolbar.setVisible(true);
+        south.setVisible(true);
+        frame.getRootPane().revalidate();
+        if (tellPage) {
+            io.submit(() -> {
+                engine.eval("document.exitFullscreen()");
+                SwingUtilities.invokeLater(this::scheduleRefresh);
+            });
+        }
+    }
+
     private static String resolveVersion() {
         String v = Browser.class.getPackage().getImplementationVersion();
         if (v != null && !v.isBlank()) {
@@ -1669,24 +2221,64 @@ public final class Browser {
         return b;
     }
 
-    private static String normalize(String input) {
-        String s = input.trim();
+    /**
+     * Turn what was typed in the address bar (or given on the command line)
+     * into a URL, the way the GTK shell does: URLs pass through, an existing
+     * local path becomes a {@code file:} URL, anything with a space or no dot
+     * or colon is a search, and the rest is a host name reached over HTTPS.
+     */
+    static String normalize(String input) {
+        String s = input.strip();
         if (s.isEmpty()) return s;
-        if (s.contains("://") || s.startsWith("about:") || s.startsWith("data:")) {
+        if (s.contains("://") || s.startsWith("about:") || s.startsWith("data:")
+            || s.startsWith("file:") || s.startsWith("view-source:")) {
             return s;
         }
-        if (s.contains(".") && !s.contains(" ")) {
-            return "https://" + s;
+        String local = localFileUrl(s);
+        if (local != null) {
+            return local;
         }
-        return "https://duckduckgo.com/?q="
-            + java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
+        if (s.indexOf(' ') >= 0 || s.indexOf('\t') >= 0 || s.indexOf('\u3000') >= 0) {
+            return searchUrl(s);
+        }
+        boolean localhost = s.startsWith("localhost")
+            && (s.length() == 9 || ":/".indexOf(s.charAt(9)) >= 0);
+        if (!localhost && s.indexOf('.') < 0 && s.indexOf(':') < 0) {
+            return searchUrl(s);
+        }
+        return "https://" + s;
     }
 
+    private static String searchUrl(String query) {
+        return SEARCH_URL + java.net.URLEncoder.encode(query, StandardCharsets.UTF_8)
+            .replace("+", "%20");
+    }
+
+    /** A {@code file:} URL for an existing local path, or null. */
+    private static String localFileUrl(String path) {
+        try {
+            Path p = Path.of(path);
+            if (!Files.exists(p)) {
+                return null;
+            }
+            return p.toAbsolutePath().normalize().toUri().toString();
+        } catch (InvalidPathException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Shows the last rendered frame. A frame rasterised at {@code raster}
+     * device pixels per canvas pixel is drawn back at canvas size, which on a
+     * HiDPI screen maps it one-to-one onto the display's pixels.
+     */
     private static final class RenderCanvas extends JComponent {
         private BufferedImage image;
+        private double raster = 1.0;
 
-        void setImage(BufferedImage img) {
+        void setImage(BufferedImage img, double raster) {
             this.image = img;
+            this.raster = raster > 0 ? raster : 1.0;
             repaint();
         }
 
@@ -1694,9 +2286,20 @@ public final class Browser {
         protected void paintComponent(Graphics g) {
             g.setColor(Color.WHITE);
             g.fillRect(0, 0, getWidth(), getHeight());
-            if (image != null) {
-                g.drawImage(image, 0, 0, null);
+            if (image == null) {
+                return;
             }
+            if (raster == 1.0) {
+                g.drawImage(image, 0, 0, null);
+                return;
+            }
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2.drawImage(image, 0, 0,
+                         (int) Math.round(image.getWidth() / raster),
+                         (int) Math.round(image.getHeight() / raster), null);
+            g2.dispose();
         }
     }
 }
