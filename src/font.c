@@ -33,13 +33,14 @@
 typedef struct ns_font_entry {
     char *family;
     char *url;
+    ns_font_descriptors descriptors;
     gboolean loaded;
     gboolean inflight;
     GCancellable *cancel;
 } ns_font_entry;
 
 typedef struct ns_font_pending {
-    GPtrArray *families;
+    GPtrArray *keys;
     GCancellable *cancel;
 } ns_font_pending;
 
@@ -106,14 +107,16 @@ ns_font_pending_free(gpointer data)
     ns_font_pending *p = data;
     if (!p) return;
     if (p->cancel) g_object_unref(p->cancel);
-    if (p->families) g_ptr_array_free(p->families, TRUE);
+    if (p->keys) g_ptr_array_free(p->keys, TRUE);
     g_free(p);
 }
 
 static char *
-ns_font_entry_key(const char *family, const char *url)
+ns_font_entry_key(const char *family, const char *url,
+                  ns_font_descriptors descriptors)
 {
-    return g_strdup_printf("%s\x1f%s", family, url ? url : "");
+    return g_strdup_printf("%s\x1f%s\x1f%d\x1f%d", family, url ? url : "",
+                           descriptors.weight, (int)descriptors.slant);
 }
 
 void
@@ -365,12 +368,55 @@ typedef struct ns_font_fetch_ctx {
 } ns_font_fetch_ctx;
 
 #ifdef NS_HAVE_FONTCONFIG
+static int
+ns_font_fc_slant(ns_font_slant slant)
+{
+    if (slant == NS_FONT_SLANT_ITALIC) return FC_SLANT_ITALIC;
+    if (slant == NS_FONT_SLANT_OBLIQUE) return FC_SLANT_OBLIQUE;
+    return FC_SLANT_ROMAN;
+}
+
 static void
-ns_font_install_file(const char *path, const char *css_family)
+ns_font_apply_descriptors(FcPattern *pat, ns_font_descriptors descriptors)
+{
+    FcBool variable = FcFalse;
+    FcPatternGetBool(pat, FC_VARIABLE, 0, &variable);
+    if (descriptors.weight > 0 && !variable) {
+        FcPatternDel(pat, FC_WEIGHT);
+        FcPatternAddDouble(pat, FC_WEIGHT,
+                           FcWeightFromOpenTypeDouble(descriptors.weight));
+    }
+    if (descriptors.slant != NS_FONT_SLANT_AUTO) {
+        FcPatternDel(pat, FC_SLANT);
+        FcPatternAddInteger(pat, FC_SLANT, ns_font_fc_slant(descriptors.slant));
+    }
+}
+
+static void
+ns_font_describe_added(FcFontSet *app_fonts, int first_added,
+                       const char *css_family, ns_font_descriptors descriptors)
+{
+    if (!app_fonts || !css_family) return;
+    for (int i = first_added; i < app_fonts->nfont; i++) {
+        FcChar8 *internal = NULL;
+        if (FcPatternGetString(app_fonts->fonts[i], FC_FAMILY, 0,
+                               &internal) == FcResultMatch &&
+            internal &&
+            g_ascii_strcasecmp((const char *)internal, css_family) == 0)
+            ns_font_apply_descriptors(app_fonts->fonts[i], descriptors);
+    }
+}
+
+static void
+ns_font_install_file(const char *path, const char *css_family,
+                     ns_font_descriptors descriptors)
 {
     if (!path) return;
+    const FcFontSet *before = FcConfigGetFonts(NULL, FcSetApplication);
+    int first_added = before ? before->nfont : 0;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
     FcFontSet *app_fonts = FcConfigGetFonts(NULL, FcSetApplication);
+    ns_font_describe_added(app_fonts, first_added, css_family, descriptors);
     FcFontSet *faces = css_family && *css_family && app_fonts
         ? FcFontSetCreate() : NULL;
     if (faces) {
@@ -389,6 +435,7 @@ ns_font_install_file(const char *path, const char *css_family)
             FcPatternDel(pat, FC_FAMILY);
             FcPatternDel(pat, FC_FAMILYLANG);
             FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)css_family);
+            ns_font_apply_descriptors(pat, descriptors);
             if (!FcFontSetAdd(app_fonts, pat))
                 FcPatternDestroy(pat);
         }
@@ -412,14 +459,12 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
     ns_response *resp = ns_net_fetch_finish(res, &err);
     ns_font_pending *pending = g_pending_by_url
         ? g_hash_table_lookup(g_pending_by_url, ctx->url) : NULL;
-    GPtrArray *families = pending ? pending->families : NULL;
-    if (families) {
-        for (guint i = 0; i < families->len; i++) {
-            const char *family = g_ptr_array_index(families, i);
-            char *key = ns_font_entry_key(family, ctx->url);
-            ns_font_entry *e = g_entries ? g_hash_table_lookup(g_entries, key)
-                                         : NULL;
-            g_free(key);
+    GPtrArray *keys = pending ? pending->keys : NULL;
+    if (keys) {
+        for (guint i = 0; i < keys->len; i++) {
+            ns_font_entry *e = g_entries
+                ? g_hash_table_lookup(g_entries, g_ptr_array_index(keys, i))
+                : NULL;
             if (!e) continue;
             g_clear_object(&e->cancel);
             e->inflight = FALSE;
@@ -459,28 +504,24 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
             }
         }
 #endif
-        if (families) {
-            for (guint i = 0; i < families->len; i++) {
-                const char *family = g_ptr_array_index(families, i);
-                char *ekey = ns_font_entry_key(family, ctx->url);
+        if (keys) {
+            for (guint i = 0; i < keys->len; i++) {
                 ns_font_entry *e = g_entries
-                    ? g_hash_table_lookup(g_entries, ekey) : NULL;
-                g_free(ekey);
-                char *path = ns_font_cache_path_for(family,
-                                                    e ? e->url
-                                                      : (resp->final_url ? resp->final_url
-                                                                         : ctx->url),
+                    ? g_hash_table_lookup(g_entries, g_ptr_array_index(keys, i))
+                    : NULL;
+                if (!e) continue;
+                char *path = ns_font_cache_path_for(e->family, e->url,
                                                     forced_ext);
                 if (!path) continue;
                 GError *werr = NULL;
                 if (g_file_set_contents(path, (const char *)write_data,
                                         (gssize)write_len, &werr)) {
 #ifdef NS_HAVE_FONTCONFIG
-                    ns_font_install_file(path, family);
+                    ns_font_install_file(path, e->family, e->descriptors);
 #endif
-                    if (e) e->loaded = TRUE;
+                    e->loaded = TRUE;
                     g_font_generation++;
-                    if (g_loaded_cb) g_loaded_cb(family, g_loaded_ud);
+                    if (g_loaded_cb) g_loaded_cb(e->family, g_loaded_ud);
                 }
                 g_clear_error(&werr);
                 g_free(path);
@@ -497,7 +538,8 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 }
 
 void
-ns_font_request(const char *family, const char *src_url, const char *base_url)
+ns_font_request(const char *family, const char *src_url, const char *base_url,
+                ns_font_descriptors descriptors)
 {
     if (!ns_font_available()) return;
     if (!g_entries) ns_font_init();
@@ -506,37 +548,40 @@ ns_font_request(const char *family, const char *src_url, const char *base_url)
     char *abs = base_url ? ns_url_resolve(base_url, src_url) : g_strdup(src_url);
     if (!abs) return;
 
-    char *key = ns_font_entry_key(family, abs);
+    char *key = ns_font_entry_key(family, abs, descriptors);
     ns_font_entry *existing = g_hash_table_lookup(g_entries, key);
     if (existing) {
-        g_free(key);
-        if (existing->loaded || existing->inflight) { g_free(abs); return; }
+        if (existing->loaded || existing->inflight) {
+            g_free(key);
+            g_free(abs);
+            return;
+        }
         g_free(abs);
     } else {
         existing = g_new0(ns_font_entry, 1);
         existing->family = g_strdup(family);
         existing->url = abs;
-        g_hash_table_insert(g_entries, key, existing);
+        existing->descriptors = descriptors;
+        g_hash_table_insert(g_entries, g_strdup(key), existing);
     }
 
     ns_font_pending *pending = g_pending_by_url
         ? g_hash_table_lookup(g_pending_by_url, existing->url) : NULL;
     if (pending) {
-        gboolean seen = FALSE;
-        for (guint i = 0; i < pending->families->len; i++) {
-            const char *f = g_ptr_array_index(pending->families, i);
-            if (strcmp(f, family) == 0) { seen = TRUE; break; }
-        }
-        if (!seen) g_ptr_array_add(pending->families, g_strdup(family));
+        if (g_ptr_array_find_with_equal_func(pending->keys, key, g_str_equal,
+                                             NULL))
+            g_free(key);
+        else
+            g_ptr_array_add(pending->keys, key);
         existing->inflight = TRUE;
         g_set_object(&existing->cancel, pending->cancel);
         return;
     }
 
     pending = g_new0(ns_font_pending, 1);
-    pending->families = g_ptr_array_new_with_free_func(g_free);
+    pending->keys = g_ptr_array_new_with_free_func(g_free);
     pending->cancel = g_cancellable_new();
-    g_ptr_array_add(pending->families, g_strdup(family));
+    g_ptr_array_add(pending->keys, key);
     if (g_pending_by_url)
         g_hash_table_insert(g_pending_by_url, g_strdup(existing->url), pending);
 
