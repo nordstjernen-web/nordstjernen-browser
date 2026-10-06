@@ -3,6 +3,18 @@ Changelog:
 
 1.0.30:
 ======
+* Icon fonts keep the ligatures that start with "s". ns-pango hands
+  HarfBuzz made-up glyph ids for characters a font lacks, and HarfBuzz
+  14.4 stores per-lookup coverage answers under the low 14 bits of the
+  id. In a font without a space glyph, the made-up id for a space was
+  remembered as "not covered" under glyph 32, the letter "s" in Material
+  Icons, so once any text with a space had been shaped in that font,
+  `search`, `settings`, `star` and `share` were drawn as plain words
+  while other icons kept working (Britannica, Google). ns-pango now
+  gives HarfBuzz per-call stand-in ids below that range and writes the
+  made-up glyphs back afterwards. `subprojects/ns-pango.wrap` moves to
+  the ns-pango commit that carries the fix; it also brings the fork's
+  shape and item cache fixes and the merge of upstream Pango 1.58.2.
 * A `::before` or `::after` with text content that becomes a flex or
   grid item paints its background once, on the item box, sized by its
   `width` and `height`. The generated text painted the background again
