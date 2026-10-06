@@ -29567,25 +29567,40 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
 }
 
 static gboolean
+incr_keyset_contains(GHashTable *keyset, char prefix, const char *name,
+                     gsize len, gboolean lower)
+{
+    char stack[128];
+    char *key = len + 2 <= sizeof stack ? stack : g_malloc(len + 2);
+    key[0] = prefix;
+    for (gsize i = 0; i < len; i++)
+        key[i + 1] = lower ? g_ascii_tolower(name[i]) : name[i];
+    key[len + 1] = '\0';
+    gboolean hit = g_hash_table_contains(keyset, key);
+    if (key != stack) g_free(key);
+    return hit;
+}
+
+static gboolean
 incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !keyset ||
         g_hash_table_size(keyset) == 0)
         return FALSE;
-    GHashTableIter it;
-    gpointer k;
+    if (n->name && incr_keyset_contains(keyset, '%', n->name,
+                                        strlen(n->name), TRUE))
+        return TRUE;
     const char *id = ns_element_get_attr(n, "id");
-    g_hash_table_iter_init(&it, keyset);
-    while (g_hash_table_iter_next(&it, &k, NULL)) {
-        const char *key = k;
-        if (key[0] == '%') {
-            if (n->name && g_ascii_strcasecmp(n->name, key + 1) == 0)
-                return TRUE;
-        } else if (key[0] == '#') {
-            if (id && strcmp(id, key + 1) == 0) return TRUE;
-        } else if (key[0] == '.') {
-            if (ns_node_has_class(n, key + 1, strlen(key + 1))) return TRUE;
-        }
+    if (id && *id && incr_keyset_contains(keyset, '#', id, strlen(id), FALSE))
+        return TRUE;
+    const char *cls = ns_element_get_attr(n, "class");
+    for (const char *p = cls; p && *p; ) {
+        while (*p && g_ascii_isspace((guchar)*p)) p++;
+        const char *tok = p;
+        while (*p && !g_ascii_isspace((guchar)*p)) p++;
+        if (p > tok && incr_keyset_contains(keyset, '.', tok,
+                                            (gsize)(p - tok), FALSE))
+            return TRUE;
     }
     return FALSE;
 }
@@ -29715,12 +29730,12 @@ static gboolean
 incr_childlist_needs_flood(const ns_node *parent)
 {
     if (g_struct_loose) return TRUE;
+    if (g_incr_dirty && g_hash_table_contains(g_incr_dirty, parent))
+        return TRUE;
     if (incr_node_matches_keys(parent, g_struct_keys) ||
         incr_node_matches_attr_preds(parent, g_struct_attrs))
         return TRUE;
-    int scanned = 0;
     for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
-        if (++scanned > 64) return TRUE;
         if (c->kind == NS_NODE_ELEMENT &&
             (incr_node_matches_keys(c, g_struct_keys) ||
              incr_node_matches_attr_preds(c, g_struct_attrs)))
@@ -29739,8 +29754,10 @@ ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
     if (!parent) return;
     if (!g_struct_ready || incr_childlist_needs_flood(parent))
         ns_css_mark_restyle_dirty(parent);
+    else if (added)
+        ns_css_mark_restyle_dirty(added);
     else
-        ns_css_mark_restyle_dirty(added ? added : parent);
+        incr_mark_has_subjects(parent);
 }
 
 static gboolean
@@ -29798,6 +29815,9 @@ void
 ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
 {
     if (!target) return;
+    if (name && old_value &&
+        g_strcmp0(ns_element_get_attr(target, name), old_value) == 0)
+        return;
     if (!ns_css_attr_may_affect_style(target, name)) return;
     if (incr_name_change_unused(target, name, old_value)) return;
     if (!g_struct_ready) {

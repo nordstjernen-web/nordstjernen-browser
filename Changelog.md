@@ -3,6 +3,25 @@ Changelog:
 
 1.0.30:
 ======
+* Flex layout stops laying the same item out again when nothing it
+  depends on changed. A row flex item was laid out twice, once to
+  measure its height and once at its final place, and a stretched item
+  a third time with its new definite height; nested flex containers
+  multiplied that, so a 1,500-box YouTube page took 37,000 box layouts
+  per relayout. The second pass now moves the already laid out subtree
+  when the width is the same and nothing inside read the item's
+  definite height, and an inline-block is laid out a second time only
+  when the first pass changed its size. A forced relayout of a saved
+  YouTube watch page drops from 74 ms to 8 ms; the layout of 6,587
+  flexbox, grid, alignment, sizing and inline WPT files is unchanged.
+* Fewer styles are recomputed after DOM changes. Setting an attribute to
+  the value it already has no longer restyles anything (YouTube rewrites
+  the same custom properties into `ytd-watch-flexy`'s `style` attribute
+  dozens of times, each restyling ~2,500 elements); removing a child
+  restyles only the `:has()` anchors around it unless a structural
+  selector applies; and a parent with more than 64 children is no longer
+  restyled whole on every insertion, because the structural-selector
+  check now scans all children with hash lookups instead of giving up.
 * YouTube restyles incrementally again, about five times faster per
   forced layout. One `:has()` selector whose compound had no class, id,
   type or attribute to key on (`:not(:has(...))`, or a bare `:has(> x)`
