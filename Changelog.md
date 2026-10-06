@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* A frame's `history.pushState` and `replaceState` act on the History
+  object they are called on. YouTube binds the methods of a hidden
+  `about:blank` frame to the top window's history, so every navigation
+  to another video changed that frame's URL and left the page's URL,
+  `history.state` and back button on the first video.
 * Inline elements paint their own box: background over the padding,
   `border-radius`, and borders, sliced at line breaks so only the first
   and last fragment get the left and right edges. Before, an inline
