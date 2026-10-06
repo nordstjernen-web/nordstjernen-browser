@@ -34,6 +34,15 @@ Changelog:
   icon wrapper sets `fill: currentcolor`, which painted the red play
   button of the YouTube logo black. `getComputedStyle` reports the
   attribute value as well.
+* CSS masks take several layers. The `mask` / `-webkit-mask` shorthand,
+  `mask-clip` and `mask-composite` (with the legacy `-webkit-` keywords)
+  are parsed per layer, and gradient layers are composited the way
+  Chrome does: each layer inside its own clip box, with `add`,
+  `subtract`, `intersect` or `exclude`. The common "border only"
+  idiom, `linear-gradient(#fff 0 0) content-box exclude,
+  linear-gradient(#fff 0 0)`, now leaves a thin rim. YouTube's buttons
+  use it for their rim light, which was painted as a gradient band
+  across the whole button.
 * Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
   `replaceChildren()` and setting `textContent` now invalidate the
   styles that depend on sibling position. Before, an item that stopped

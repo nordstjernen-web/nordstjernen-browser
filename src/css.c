@@ -442,6 +442,8 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_COUNTER_SET]          = "counter-set",
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = "overflow-clip-margin",
     [NS_CSS_WEBKIT_BOX_ORIENT]    = "-webkit-box-orient",
+    [NS_CSS_MASK_CLIP]            = "mask-clip",
+    [NS_CSS_MASK_COMPOSITE]       = "mask-composite",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9569,6 +9571,8 @@ ns_css_initial_value_text(const char *name)
         { "column-rule-width",          "0px" },
         { "line-clamp",                 "none" },
         { "-webkit-box-orient",         "horizontal" },
+        { "mask-clip",                  "border-box" },
+        { "mask-composite",             "add" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -11103,6 +11107,38 @@ value_has_top_level_comma(const char *t)
     return FALSE;
 }
 
+static const char *
+mask_box_keyword(const char *t)
+{
+    static const char *const boxes[] = {
+        "border-box", "padding-box", "content-box", "fill-box",
+        "stroke-box", "view-box", "no-clip",
+    };
+    static const struct { const char *legacy, *box; } legacy[] = {
+        { "border", "border-box" }, { "padding", "padding-box" },
+        { "content", "content-box" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(boxes); i++)
+        if (g_ascii_strcasecmp(t, boxes[i]) == 0) return boxes[i];
+    for (gsize i = 0; i < G_N_ELEMENTS(legacy); i++)
+        if (g_ascii_strcasecmp(t, legacy[i].legacy) == 0) return legacy[i].box;
+    return NULL;
+}
+
+static const char *
+mask_composite_keyword(const char *t)
+{
+    static const struct { const char *name, *op; } ops[] = {
+        { "add", "add" }, { "subtract", "subtract" },
+        { "intersect", "intersect" }, { "exclude", "exclude" },
+        { "source-over", "add" }, { "source-in", "intersect" },
+        { "source-out", "subtract" }, { "xor", "exclude" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(ops); i++)
+        if (g_ascii_strcasecmp(t, ops[i].name) == 0) return ops[i].op;
+    return NULL;
+}
+
 static gboolean
 prop_is_bg_layered(ns_css_prop prop)
 {
@@ -11113,7 +11149,10 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_POSITION_Y ||
            prop == NS_CSS_BACKGROUND_CLIP ||
            prop == NS_CSS_BACKGROUND_ORIGIN ||
-           prop == NS_CSS_BACKGROUND_ATTACHMENT;
+           prop == NS_CSS_BACKGROUND_ATTACHMENT ||
+           prop == NS_CSS_MASK_IMAGE ||
+           prop == NS_CSS_MASK_CLIP ||
+           prop == NS_CSS_MASK_COMPOSITE;
 }
 
 static char *
@@ -12711,6 +12750,16 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t,
             "horizontal vertical inline-axis block-axis");
         break;
+    case NS_CSS_MASK_CLIP: {
+        const char *box = mask_box_keyword(t);
+        if (box) v = keyword_value_dup(box);
+        break;
+    }
+    case NS_CSS_MASK_COMPOSITE: {
+        const char *op = mask_composite_keyword(t);
+        if (op) v = keyword_value_dup(op);
+        break;
+    }
     case NS_CSS_TEXT_DECORATION_STYLE:
         v = parse_keyword_choice(t, "solid double dotted dashed wavy");
         break;
@@ -13908,10 +13957,12 @@ prop_id(const char *name)
     if (g_ascii_strcasecmp(name, "text-wrap") == 0 ||
         g_ascii_strcasecmp(name, "text-wrap-mode") == 0)
         return NS_CSS_WHITE_SPACE;
-    if (g_ascii_strcasecmp(name, "-webkit-mask-image") == 0 ||
-        g_ascii_strcasecmp(name, "-webkit-mask") == 0 ||
-        g_ascii_strcasecmp(name, "mask") == 0)
+    if (g_ascii_strcasecmp(name, "-webkit-mask-image") == 0)
         return NS_CSS_MASK_IMAGE;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-clip") == 0)
+        return NS_CSS_MASK_CLIP;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-composite") == 0)
+        return NS_CSS_MASK_COMPOSITE;
     if (g_ascii_strcasecmp(name, "-webkit-background-clip") == 0)
         return NS_CSS_BACKGROUND_CLIP;
     if (g_ascii_strcasecmp(name, "-webkit-border-radius") == 0)
@@ -15474,6 +15525,75 @@ bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
     return ok;
 }
 
+static void
+mask_layer_chain_append(ns_css_value **head, ns_css_value **tail,
+                        ns_css_value *v)
+{
+    if (*tail) (*tail)->next_layer = v;
+    else *head = v;
+    *tail = v;
+}
+
+static gboolean
+parse_mask_shorthand(const char *vtext, gboolean important, GArray *decls_out)
+{
+    static const ns_css_prop props[] = {
+        NS_CSS_MASK_IMAGE, NS_CSS_MASK_CLIP, NS_CSS_MASK_COMPOSITE,
+    };
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    if (wide) {
+        for (gsize f = 0; f < G_N_ELEMENTS(props); f++) {
+            ns_css_decl d = { .prop = props[f],
+                              .value = f ? ns_css_value_dup(wide) : wide,
+                              .important = important };
+            g_array_append_val(decls_out, d);
+        }
+        return TRUE;
+    }
+    ns_css_value *heads[3] = {0}, *tails[3] = {0};
+    GPtrArray *layers = css_split_top_level_commas(vtext);
+    gboolean ok = layers->len > 0;
+    for (guint li = 0; ok && li < layers->len; li++) {
+        char *toks[24] = {0};
+        int n = split_ws_limit(g_ptr_array_index(layers, li), toks,
+                               G_N_ELEMENTS(toks));
+        const char *image = NULL, *boxes[2] = {0}, *op = NULL;
+        int n_boxes = 0;
+        for (int i = 0; i < n; i++) {
+            const char *box = mask_box_keyword(toks[i]);
+            const char *comp = mask_composite_keyword(toks[i]);
+            if (box && n_boxes < 2) boxes[n_boxes++] = box;
+            else if (comp && !op) op = comp;
+            else if (!image && (strchr(toks[i], '(') ||
+                                g_ascii_strcasecmp(toks[i], "none") == 0))
+                image = toks[i];
+        }
+        ns_css_value *iv = parse_value_for(NS_CSS_MASK_IMAGE,
+                                           image ? image : "none");
+        ok = iv != NULL;
+        if (ok) {
+            mask_layer_chain_append(&heads[0], &tails[0], iv);
+            mask_layer_chain_append(&heads[1], &tails[1], keyword_value_dup(
+                n_boxes == 2 ? boxes[1] : n_boxes == 1 ? boxes[0]
+                                                       : "border-box"));
+            mask_layer_chain_append(&heads[2], &tails[2],
+                                    keyword_value_dup(op ? op : "add"));
+        }
+        for (int i = 0; i < n; i++) g_free(toks[i]);
+    }
+    g_ptr_array_free(layers, TRUE);
+    for (gsize f = 0; f < G_N_ELEMENTS(props); f++) {
+        if (!ok) {
+            ns_css_value_free(heads[f]);
+            continue;
+        }
+        ns_css_decl d = { .prop = props[f], .value = heads[f],
+                          .important = important };
+        g_array_append_val(decls_out, d);
+    }
+    return ok;
+}
+
 static gboolean
 parse_background_shorthand(const char *vtext, gboolean important,
                            GArray *decls_out)
@@ -16474,6 +16594,14 @@ parse_declaration_block(const char **pp, const char *end,
             break;
         }
         if (aliased_prop) {
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
+        }
+
+        if (strcmp(pname, "mask") == 0 || strcmp(pname, "-webkit-mask") == 0) {
+            parse_mask_shorthand(vtext, important, decls_out);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
