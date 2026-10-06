@@ -253,13 +253,20 @@ stretched_item_max_height(const ns_box *c)
 }
 
 static double
+box_read_definite_height(const ns_box *box)
+{
+    ((ns_box *)box)->definite_height_read = TRUE;
+    return box->definite_height;
+}
+
+static double
 containing_block_definite_height(const ns_box *box)
 {
     if (box && box->cb_height_override > 0) return box->cb_height_override;
     const ns_box *p = box ? box->parent : NULL;
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
-    if (p->definite_height > 0) return p->definite_height;
+    if (box_read_definite_height(p) > 0) return p->definite_height;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
     if (height_keyword_stretches(h)) {
         double base = containing_block_definite_height(p);
@@ -6725,12 +6732,14 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         return;
     }
 
-    for (int pass = 0; pass < 2 && box->inline_atomics; pass++) {
-        for (guint i = 0; i < box->inline_atomics->len; i++) {
-            ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
-            if (ab && !(g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)))
-                layout_box(ab, content_width, parent_style);
-        }
+    for (guint i = 0; box->inline_atomics && i < box->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
+        if (!ab || (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)))
+            continue;
+        double w0 = ab->content_width, h0 = ab->content_height;
+        layout_box(ab, content_width, parent_style);
+        if (ab->content_width != w0 || ab->content_height != h0)
+            layout_box(ab, content_width, parent_style);
     }
 
     gboolean cacheable = inline_box_measure_cacheable(box);
@@ -9603,6 +9612,8 @@ cq_set_dims_from_ancestors(const ns_box *box)
 static void
 layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
+    box->definite_height_read = FALSE;
+    box->last_layout_width = parent_content_width;
     if (box_is_query_container(box)) g_cq_seen_container = TRUE;
     if (g_cq_seen_container) cq_set_dims_from_ancestors(box);
     if (box->kind == NS_BOX_BLOCK) {
@@ -10277,7 +10288,7 @@ layout_flex_row(ns_box *box, double cw,
         (hv_box || (box->style->values[NS_CSS_TOP] &&
                     box->style->values[NS_CSS_BOTTOM])))
         explicit_cross = box->content_height;
-    if (explicit_cross <= 0 && box->definite_height > 0)
+    if (explicit_cross <= 0 && box_read_definite_height(box) > 0)
         explicit_cross = box->definite_height;
     if (!definite_cross && explicit_cross > 0 && box->definite_height > 0)
         definite_cross = TRUE;
@@ -10352,9 +10363,12 @@ layout_flex_row(ns_box *box, double cw,
         c->y = inner_y;
         c->flex_main_size = a;
         c->has_flex_main = TRUE;
+        c->definite_height_before_flex = c->definite_height;
         layout_box(c, a + c->margin.left + c->margin.right
                        + c->border.left + c->border.right
                        + c->padding.left + c->padding.right, child_inherited);
+        c->flex_pass_x = c->x;
+        c->flex_pass_y = c->y;
         double item_h = c->content_height +
                         c->padding.top + c->padding.bottom +
                         c->border.top + c->border.bottom +
@@ -10429,7 +10443,16 @@ layout_flex_row(ns_box *box, double cw,
                              flex_item_cross_size_auto(c);
         gboolean cross_preset = stretches &&
                                 flex_preset_cross_size(c, cross_size, cw);
-        layout_box(c, item_layout_width, child_inherited);
+        gboolean same_input = c->last_layout_width == item_layout_width &&
+            (c->definite_height == c->definite_height_before_flex ||
+             !c->definite_height_read);
+        if (same_input && (!stretches || cross_preset || !c->first_child)) {
+            c->x = c->flex_pass_x;
+            c->y = c->flex_pass_y;
+            shift_box_tree(c, cursor_x - inner_x, cy - inner_y);
+        } else {
+            layout_box(c, item_layout_width, child_inherited);
+        }
         if (!stretches)
             flex_item_fit_line_keyword_limits(c, cross_size, cw);
         if (stretches) {
@@ -10510,7 +10533,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             g_ptr_array_add(items, c);
     double gap = flex_gap_of(box->style, cw);
     double row_gap = flex_gap_row_of(box->style,
-                                     box->definite_height > 0
+                                     box_read_definite_height(box) > 0
                                          ? box->definite_height : 0);
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
     const char *justify = keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT, "flex-start");
@@ -10723,7 +10746,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
         }
         gboolean flexed_item = box->parent &&
             style_is_flex_container(box->parent->style) &&
-            box->definite_height > 0;
+            box_read_definite_height(box) > 0;
         if ((eh < 0 || flexed_item) && box->definite_height > 0 &&
             lines->len > 0)
             eh = box->definite_height;
@@ -10984,7 +11007,7 @@ layout_flex_column(ns_box *box, double cw,
         if (ratio > 0 && cw > 0)
             explicit_h = cw / ratio;
     }
-    if (explicit_h < 0 && box->definite_height > 0)
+    if (explicit_h < 0 && box_read_definite_height(box) > 0)
         explicit_h = box->definite_height;
     if (explicit_h > 0) box->definite_height = explicit_h;
     double row_gap = flex_gap_row_of(box->style,
@@ -11223,12 +11246,16 @@ layout_flex_column(ns_box *box, double cw,
                     if (c->scroll_max_y < 0) c->scroll_max_y = 0;
                 }
                 if (c->first_child && c->definite_height != target_h) {
+                    double relayout_w = stretches ? ln->cross : item_outer_w;
+                    gboolean reuse = !c->definite_height_read &&
+                                     c->last_layout_width == relayout_w;
                     c->definite_height = target_h;
-                    double sx = c->x, sy = c->y;
-                    layout_box(c, stretches ? ln->cross : item_outer_w,
-                               child_inherited);
-                    if (c->x != sx || c->y != sy)
-                        shift_box_tree(c, sx - c->x, sy - c->y);
+                    if (!reuse) {
+                        double sx = c->x, sy = c->y;
+                        layout_box(c, relayout_w, child_inherited);
+                        if (c->x != sx || c->y != sy)
+                            shift_box_tree(c, sx - c->x, sy - c->y);
+                    }
                     c->content_height = target_h;
                 }
             }
