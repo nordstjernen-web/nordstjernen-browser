@@ -63,7 +63,14 @@ ns_mat4_rotate_axis(ns_mat4 *m, double x, double y, double z, double deg)
     if (len < 1e-12) return;
     x /= len; y /= len; z /= len;
     double rad = deg * M_PI / 180.0;
-    double c = cos(rad), s = sin(rad), ic = 1.0 - c;
+    double c = cos(rad), s = sin(rad);
+    double quarters = deg / 90.0;
+    if (isfinite(quarters) && quarters == nearbyint(quarters)) {
+        int q = ((int)fmod(quarters, 4.0) + 4) % 4;
+        c = q == 0 ? 1.0 : q == 2 ? -1.0 : 0.0;
+        s = q == 1 ? 1.0 : q == 3 ? -1.0 : 0.0;
+    }
+    double ic = 1.0 - c;
     ns_mat4 t;
     ns_mat4_identity(&t);
     t.m[0] = c + x * x * ic;

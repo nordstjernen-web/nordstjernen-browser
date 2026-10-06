@@ -25,6 +25,15 @@ typedef struct ns_svg_size {
     gboolean has_ratio;
 } ns_svg_size;
 
+typedef struct ns_svg_geometry {
+    gboolean       found;
+    gboolean       rendered;
+    gboolean       has_box;
+    double         x, y, width, height;
+    cairo_matrix_t to_root;
+    cairo_matrix_t to_viewport;
+} ns_svg_geometry;
+
 gboolean ns_svg_node_is_root(const ns_node *n);
 
 void ns_svg_intrinsic_size(const ns_node *svg, ns_svg_size *out);
@@ -35,6 +44,12 @@ void ns_svg_render_node(cairo_t          *cr,
                         double            height,
                         GHashTable       *styles,
                         const struct ns_style *inherited);
+
+gboolean ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
+                              double width, double height,
+                              GHashTable *styles,
+                              const struct ns_style *inherited,
+                              ns_svg_geometry *out);
 
 ns_texture *ns_svg_decode_bytes(const guchar *data, gsize len,
                                 int *out_w, int *out_h);
