@@ -142,6 +142,10 @@ typedef struct ns_box {
     double content_width, content_height;
     double first_baseline;
     double definite_height;
+    double definite_height_before_flex;
+    double flex_pass_x, flex_pass_y;
+    double last_layout_width;
+    gboolean definite_height_read;
     double measured_content_height;
     double cb_height_override;
     double flex_main_size;
@@ -176,6 +180,7 @@ typedef struct ns_box {
     GArray *links;
     GArray *attrs;
     GArray *inline_atomics;
+    GArray *atomic_line_heights;
     GArray *table_col_hints;
     GArray *grid_col_tracks;
     GArray *grid_row_tracks;

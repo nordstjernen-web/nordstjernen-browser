@@ -878,6 +878,11 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->download = json_get_str(body, "download");
     out->audio = json_get_str(body, "audio");
     out->window_action = json_get_str(body, "window_action");
+    out->title = json_get_str(body, "title");
+    out->url = json_get_str(body, "url");
+    long url_pushed = 0;
+    json_get_long(body, "url_pushed", &url_pushed);
+    out->url_pushed = url_pushed != 0;
     free(body);
     return 0;
 }
@@ -892,6 +897,8 @@ ns_rproc_http_tick_clear(ns_rproc_http_tick *out)
     free(out->download);
     free(out->audio);
     free(out->window_action);
+    free(out->title);
+    free(out->url);
     memset(out, 0, sizeof *out);
 }
 

@@ -82,6 +82,7 @@ struct ns_browser {
     gboolean        cascade_dirty;
     gboolean        relaying;
     char           *pending_nav;
+    gboolean        soft_nav_pushed;
     char           *pending_download;
     char           *pending_clipboard;
     char           *pending_window_action;
@@ -626,9 +627,9 @@ browser_js_scroll_to(const ns_node *target, gpointer user_data)
 static void
 browser_js_soft_navigate(const char *url, gboolean replace, gpointer user_data)
 {
-    (void)replace;
     ns_browser *browser = user_data;
     if (!browser || !url) return;
+    if (!replace) browser->soft_nav_pushed = TRUE;
     gboolean has_fragment = FALSE;
     g_autofree char *fragment = browser_url_fragment(url, &has_fragment);
     ns_css_set_target_fragment(has_fragment && fragment && *fragment
@@ -4197,6 +4198,14 @@ ns_browser_take_pending_nav(ns_browser *browser)
     char *out = strdup(browser->pending_nav);
     g_clear_pointer(&browser->pending_nav, g_free);
     return out;
+}
+
+int
+ns_browser_take_soft_nav_pushed(ns_browser *browser)
+{
+    if (!browser || !browser->soft_nav_pushed) return 0;
+    browser->soft_nav_pushed = FALSE;
+    return 1;
 }
 
 int

@@ -59,6 +59,9 @@ typedef struct {
     char *download;
     char *audio;
     char *window_action;
+    char *title;
+    char *url;
+    int   url_pushed;
 } ns_rproc_http_tick;
 
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
