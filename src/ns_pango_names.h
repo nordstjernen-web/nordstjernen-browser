@@ -32,6 +32,7 @@
 #define ns_pango_attr_overline_new                        pango_attr_overline_new
 #define ns_pango_attr_rise_new                            pango_attr_rise_new
 #define ns_pango_attr_scale_new                           pango_attr_scale_new
+#define NS_PANGO_ATTR_SHAPE                               PANGO_ATTR_SHAPE
 #define ns_pango_attr_shape_new                           pango_attr_shape_new
 #define ns_pango_attr_size_new_absolute                   pango_attr_size_new_absolute
 #define ns_pango_attr_stretch_new                         pango_attr_stretch_new
@@ -190,6 +191,7 @@
 #define NsPangoLayout                                     PangoLayout
 #define NsPangoLayoutIter                                 PangoLayoutIter
 #define NsPangoLayoutLine                                 PangoLayoutLine
+#define NsPangoLayoutRun                                  PangoLayoutRun
 #define NsPangoLogAttr                                    PangoLogAttr
 #define NsPangoRectangle                                  PangoRectangle
 #define NsPangoStretch                                    PangoStretch
