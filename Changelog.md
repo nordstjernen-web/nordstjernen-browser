@@ -3,6 +3,17 @@ Changelog:
 
 1.0.30:
 ======
+* A page that declares several `@font-face` rules for one family is
+  rendered with the same faces on every load. A variable font file named
+  by one rule per weight had every named instance in it registered as
+  that rule's weight, and faces of one family that matched a request
+  equally well were ordered by which download finished first: text on
+  YouTube and Trendyol came out regular in one load and light or bold in
+  the next, and a `unicode-range` subset file could lose to a fallback
+  font. A variable file with a weight, width or optical size axis is
+  now registered as its variable face alone, and of the faces that
+  match equally well the one declared last is used, as in other
+  browsers.
 * The home page set in Settings is saved and used. A text field never
   fired `change` when it lost focus or on Enter, so Settings, which saves
   on `change`, dropped a typed home page; text inputs and textareas now
