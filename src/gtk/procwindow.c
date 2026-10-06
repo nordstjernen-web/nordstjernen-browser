@@ -65,7 +65,6 @@ typedef struct {
     GtkWidget      *fullscreen_notice;
     guint           fullscreen_notice_timer;
     GtkWidget      *bookmarks_button;
-    char           *home_url;
     ns_bookmarks   *bookmarks;
     char           *session_path;
     guint           session_timer;
@@ -99,7 +98,6 @@ procwindow_free(gpointer data)
         if (pw->theme_watch[i])
             g_signal_handler_disconnect(settings, pw->theme_watch[i]);
     g_free(pw->session_path);
-    g_free(pw->home_url);
     g_free(pw->status_base);
     if (pw->bookmarks)
         ns_bookmarks_free(pw->bookmarks);
@@ -1524,13 +1522,25 @@ on_reload_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+load_home_page(NsProcView *v)
+{
+    ns_config_lock();
+    ns_config_reload();
+    const ns_config *cfg = ns_config_get();
+    char *home = normalize_url(cfg && cfg->home_url && *cfg->home_url
+                               ? cfg->home_url : "about:start");
+    ns_config_unlock();
+    ns_proc_view_load(v, home);
+    g_free(home);
+}
+
+static void
 on_home_clicked(GtkButton *b, gpointer ud)
 {
     (void)b;
-    ProcWindow *pw = ud;
-    NsProcView *v = current_view(pw);
+    NsProcView *v = current_view(ud);
     if (v)
-        ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
+        load_home_page(v);
 }
 
 static void
@@ -1681,10 +1691,9 @@ act_home(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a;
     (void)p;
-    ProcWindow *pw = ud;
-    NsProcView *v = current_view(pw);
+    NsProcView *v = current_view(ud);
     if (v)
-        ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
+        load_home_page(v);
 }
 
 static void
@@ -2416,11 +2425,10 @@ menu_append_accel(GMenu *menu, const char *label, const char *action,
 }
 
 static ProcWindow *
-proc_window_new(GtkApplication *app, const char *home_url)
+proc_window_new(GtkApplication *app)
 {
     ProcWindow *pw = g_new0(ProcWindow, 1);
     pw->app = app;
-    pw->home_url = g_strdup(home_url && *home_url ? home_url : "about:start");
     pw->bookmarks = ns_bookmarks_load();
     pw->window = gtk_application_window_new(app);
     g_object_set_data_full(G_OBJECT(pw->window), "ns-procwindow", pw,
@@ -2917,7 +2925,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     ns_macos_set_dock_icon();
 #endif
     install_chrome_css();
-    ProcWindow *pw = proc_window_new(app, "about:start");
+    ProcWindow *pw = proc_window_new(app);
     pw->session_path = g_strdup(ctx->session_path);
     gtk_window_present(GTK_WINDOW(pw->window));
     apply_color_scheme(pw);

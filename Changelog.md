@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* The home page set in Settings is saved and used. A text field never
+  fired `change` when it lost focus or on Enter, so Settings, which saves
+  on `change`, dropped a typed home page; text inputs and textareas now
+  commit a user edit with `change` before `blur`, as other browsers do.
+  Settings has a Save button for the General fields again, each control
+  saves only its own value so a second Settings tab no longer writes back
+  stale ones, and the Home button opens the configured page instead of
+  always `about:start`.
 * A frame's `history.pushState` and `replaceState` act on the History
   object they are called on. YouTube binds the methods of a hidden
   `about:blank` frame to the top window's history, so every navigation

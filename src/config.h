@@ -79,6 +79,7 @@ typedef struct ns_config {
 
 void             ns_config_init(void);
 void             ns_config_shutdown(void);
+void             ns_config_reload(void);
 const ns_config *ns_config_get(void);
 ns_config       *ns_config_mut(void);
 char            *ns_config_dump(void);
