@@ -256,6 +256,8 @@ typedef enum ns_css_prop {
     NS_CSS_COUNTER_SET,
     NS_CSS_OVERFLOW_CLIP_MARGIN,
     NS_CSS_WEBKIT_BOX_ORIENT,
+    NS_CSS_MASK_CLIP,
+    NS_CSS_MASK_COMPOSITE,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 

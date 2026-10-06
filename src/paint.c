@@ -6317,6 +6317,106 @@ mask_gradient_pattern(const ns_css_gradient *gr,
 }
 
 
+static gboolean
+mask_layer_is_gradient(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_GRADIENT && !v->u.gradient.conic;
+}
+
+static gboolean
+mask_layer_is_none(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           strcmp(v->u.keyword, "none") == 0;
+}
+
+static gboolean
+mask_layers_paintable(const ns_style *s)
+{
+    const ns_css_value *mask = s ? s->values[NS_CSS_MASK_IMAGE] : NULL;
+    gboolean any = FALSE;
+    for (const ns_css_value *l = mask; l; l = l->next_layer) {
+        if (mask_layer_is_gradient(l)) any = TRUE;
+        else if (!mask_layer_is_none(l)) return FALSE;
+    }
+    return any;
+}
+
+static cairo_operator_t
+mask_composite_operator(const ns_css_value *v)
+{
+    const char *op = v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+    if (!op) return CAIRO_OPERATOR_OVER;
+    if (strcmp(op, "subtract") == 0) return CAIRO_OPERATOR_OUT;
+    if (strcmp(op, "intersect") == 0) return CAIRO_OPERATOR_IN;
+    if (strcmp(op, "exclude") == 0) return CAIRO_OPERATOR_XOR;
+    return CAIRO_OPERATOR_OVER;
+}
+
+static void
+mask_clip_box_path(cairo_t *cr, const ns_box *b, const ns_css_value *clip)
+{
+    const char *kw = clip && clip->kind == NS_CSS_V_KEYWORD
+        ? clip->u.keyword : NULL;
+    double x = b->x + b->margin.left, y = b->y + b->margin.top;
+    double w = b->content_width + b->padding.left + b->padding.right +
+               b->border.left + b->border.right;
+    double h = b->content_height + b->padding.top + b->padding.bottom +
+               b->border.top + b->border.bottom;
+    corner_radii radii = box_border_radii(b);
+    double t = 0, r = 0, bo = 0, l = 0;
+    if (kw && (strcmp(kw, "padding-box") == 0 ||
+               strcmp(kw, "content-box") == 0)) {
+        t = b->border.top; r = b->border.right;
+        bo = b->border.bottom; l = b->border.left;
+    }
+    if (kw && strcmp(kw, "content-box") == 0) {
+        t += b->padding.top; r += b->padding.right;
+        bo += b->padding.bottom; l += b->padding.left;
+    }
+    if (kw && strcmp(kw, "no-clip") == 0) {
+        cairo_rectangle(cr, x - 1e5, y - 1e5, w + 2e5, h + 2e5);
+        return;
+    }
+    rounded_rect_path(cr, x + l, y + t, MAX(0.0, w - l - r),
+                      MAX(0.0, h - t - bo),
+                      corner_radii_inset(radii, t, r, bo, l));
+}
+
+static cairo_pattern_t *
+mask_layers_pattern(cairo_t *cr, const ns_box *b)
+{
+    const ns_style *s = b->style;
+    const ns_css_value *mask = s->values[NS_CSS_MASK_IMAGE];
+    int n = 0;
+    for (const ns_css_value *l = mask; l; l = l->next_layer) n++;
+    double bx = b->x + b->margin.left, by = b->y + b->margin.top;
+    double bw = b->content_width + b->padding.left + b->padding.right +
+                b->border.left + b->border.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom +
+                b->border.top + b->border.bottom;
+    cairo_push_group_with_content(cr, CAIRO_CONTENT_ALPHA);
+    for (int i = n - 1; i >= 0; i--) {
+        const ns_css_value *layer = ns_css_value_layer(mask, i);
+        cairo_pattern_t *grad = mask_layer_is_gradient(layer)
+            ? mask_gradient_pattern(&layer->u.gradient, bx, by, bw, bh) : NULL;
+        cairo_save(cr);
+        cairo_new_path(cr);
+        mask_clip_box_path(cr, b, ns_css_value_layer(
+            s->values[NS_CSS_MASK_CLIP], i));
+        cairo_clip(cr);
+        cairo_set_operator(cr, i == n - 1 ? CAIRO_OPERATOR_OVER
+            : mask_composite_operator(ns_css_value_layer(
+                  s->values[NS_CSS_MASK_COMPOSITE], i)));
+        if (grad) cairo_set_source(cr, grad);
+        else cairo_set_source_rgba(cr, 0, 0, 0, 0);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        if (grad) cairo_pattern_destroy(grad);
+    }
+    return cairo_pop_group(cr);
+}
+
 static void
 paint_cache_clip(cairo_t *cr)
 {
@@ -7128,9 +7228,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     gboolean skip_contents = box_skips_contents(b);
     double op = box_opacity(b);
     cairo_operator_t blend = blend_mode_operator(style);
-    const ns_css_value *mask_v = style ? style->values[NS_CSS_MASK_IMAGE] : NULL;
-    gboolean mask_grad = mask_v && mask_v->kind == NS_CSS_V_GRADIENT &&
-                         !mask_v->u.gradient.conic;
+    gboolean mask_grad = mask_layers_paintable(style);
     gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask_grad;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
@@ -7615,14 +7713,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_operator_t saved_op = cairo_get_operator(cr);
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
         cairo_pattern_t *mp = NULL;
-        if (mask_grad) {
-            double bx = b->x + b->margin.left, by = b->y + b->margin.top;
-            double bw = b->content_width + b->padding.left + b->padding.right +
-                        b->border.left + b->border.right;
-            double bh = b->content_height + b->padding.top + b->padding.bottom +
-                        b->border.top + b->border.bottom;
-            mp = mask_gradient_pattern(&mask_v->u.gradient, bx, by, bw, bh);
-        }
+        if (mask_grad) mp = mask_layers_pattern(cr, b);
         if (mp) {
             cairo_mask(cr, mp);
         } else {
