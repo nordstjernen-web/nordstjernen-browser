@@ -109,6 +109,7 @@ struct ns_browser {
     int             press_y;
     int             press_mods;
     gboolean        press_active;
+    gboolean        keydown_prevented;
     char           *search_query;
     gboolean        search_case;
     const ns_box   *search_active;
@@ -3563,15 +3564,21 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         }
     } else if (!prevented && !browser->pending_nav) {
         const char *href = NULL;
+        const char *download = NULL;
         for (const ns_node *a = node; a && !href; a = a->parent) {
             if (browser_node_is_hyperlink(a)) {
                 const char *h = ns_element_get_attr(a, "href");
-                if (h && *h) href = h;
+                if (h && *h) {
+                    href = h;
+                    download = ns_element_get_attr(a, "download");
+                }
             }
         }
         if (!href)
             href = ns_box_hit_link(browser->layout, (double)x, (double)y);
-        if (href && *href)
+        if (href && *href && download)
+            browser_js_download(href, download, browser);
+        else if (href && *href)
             browser->pending_nav = browser_resolve_navigation(browser, href);
     }
     }
@@ -3941,6 +3948,21 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
     } else if (kind == 4) {
         if (key && *key && g_utf8_validate(key, -1, NULL))
             browser_paste(browser, target, key);
+    } else if (kind == 3) {
+        int char_code = browser_key_char_code(key);
+        if (!browser->keydown_prevented && char_code > 0 &&
+            (mods & (2 | 4 | 8)) == 0) {
+            gboolean press_prevented = FALSE;
+            ns_js_dispatch_key_event_full(browser->js, target, "keypress",
+                                          key ? key : "", code ? code : "",
+                                          keycode, char_code,
+                                          (mods & 1) != 0, FALSE, FALSE, FALSE,
+                                          &press_prevented);
+            if (out_prevented && press_prevented)
+                *out_prevented = 1;
+            if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        }
+        browser->keydown_prevented = FALSE;
     } else {
         gboolean prevented = FALSE;
         ns_js_dispatch_key_event_full(browser->js, target,
@@ -3952,6 +3974,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                                       &prevented);
         if (out_prevented && prevented)
             *out_prevented = 1;
+        browser->keydown_prevented = kind == 0 && prevented;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
 
         if (kind == 0 && !prevented && (mods & 4) && !(mods & (2 | 8)) &&
@@ -3964,20 +3987,6 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
             }
-        }
-
-        int char_code = browser_key_char_code(key);
-        if (kind == 3 && !prevented && char_code > 0 &&
-            (mods & (2 | 4 | 8)) == 0) {
-            gboolean press_prevented = FALSE;
-            ns_js_dispatch_key_event_full(browser->js, target, "keypress",
-                                          key ? key : "", code ? code : "",
-                                          keycode, char_code,
-                                          (mods & 1) != 0, FALSE, FALSE, FALSE,
-                                          &press_prevented);
-            if (out_prevented && press_prevented)
-                *out_prevented = 1;
-            if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
         }
 
         if (!prevented && kind == 0 && key && strcmp(key, "Tab") == 0) {
