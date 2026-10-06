@@ -31,9 +31,13 @@ import java.util.List;
  */
 public final class RemoteBrowser implements AutoCloseable {
 
-    /** Maximum framebuffer the renderer is asked to allocate. */
-    public static final int MAX_W = 2560;
-    public static final int MAX_H = 1600;
+    /**
+     * Maximum framebuffer the renderer is asked to allocate, in device pixels:
+     * the same 6K bound the GTK shell uses, so a maximised window on a HiDPI
+     * screen still renders at full resolution.
+     */
+    public static final int MAX_W = 6144;
+    public static final int MAX_H = 3456;
 
     /** Result of a render: the image plus any side-channel the page requested. */
     public static final class Frame {
@@ -50,20 +54,32 @@ public final class RemoteBrowser implements AutoCloseable {
         public final String webgl;
         /** Origin requesting camera access (needs a trust prompt), or null. */
         public final String camera;
-        /** A download the page initiated (URL), or null. */
+        /** The URL of a download the page initiated, or null. */
         public final String download;
-        /** A {@code window.moveTo}/{@code resizeTo}-style request, or null. */
+        /** The file name the page suggested for {@link #download} ({@code <a download>}), or null. */
+        public final String downloadName;
+        /** A fullscreen request ({@code fullscreen-enter} / {@code fullscreen-exit}), or null. */
         public final String windowAction;
+        /**
+         * Media commands for the {@code nordstjernen-audio} helper, separated by
+         * {@code U+001F}, or null; see {@link #audioCommands(String)}.
+         */
+        public final String audio;
+        /** The page wrote to the clipboard; fetch the text with {@link #clipboardText()}. */
+        public final boolean clipboard;
         /** Laid-out page size in CSS pixels, as of this frame. */
         public final int pageWidth;
         public final int pageHeight;
-        /** Scroll position the page asked for (anchors, {@code scrollTo}), or -1. */
+        /** Vertical scroll position the page asked for (anchors, {@code scrollTo}), or -1. */
         public final int requestedScrollY;
+        /** Horizontal scroll position the page asked for, or -1. */
+        public final int requestedScrollX;
 
         Frame(BufferedImage image, String nav, boolean unchanged,
               boolean animating, boolean caretBlinking, String webgl,
               String camera, String download, String windowAction,
-              int pageWidth, int pageHeight, int requestedScrollY) {
+              String audio, boolean clipboard, int pageWidth, int pageHeight,
+              int requestedScrollY, int requestedScrollX) {
             this.image = image;
             this.nav = nav;
             this.unchanged = unchanged;
@@ -71,11 +87,15 @@ public final class RemoteBrowser implements AutoCloseable {
             this.caretBlinking = caretBlinking;
             this.webgl = webgl;
             this.camera = camera;
-            this.download = download;
+            this.download = downloadUrl(download);
+            this.downloadName = downloadName(download);
             this.windowAction = windowAction;
+            this.audio = audio;
+            this.clipboard = clipboard;
             this.pageWidth = pageWidth;
             this.pageHeight = pageHeight;
             this.requestedScrollY = requestedScrollY;
+            this.requestedScrollX = requestedScrollX;
         }
     }
 
@@ -118,6 +138,20 @@ public final class RemoteBrowser implements AutoCloseable {
         }
     }
 
+    /**
+     * The outcome of a right-click: whether the page drew its own menu, and
+     * whether the click landed in a text field (so Cut and Paste apply).
+     */
+    public static final class ContextMenu {
+        public final boolean prevented;
+        public final boolean editable;
+
+        ContextMenu(boolean prevented, boolean editable) {
+            this.prevented = prevented;
+            this.editable = editable;
+        }
+    }
+
     /** The focused text field's contents and selection, in UTF-8 byte offsets. */
     public static final class Editable {
         public final boolean active;
@@ -147,11 +181,13 @@ public final class RemoteBrowser implements AutoCloseable {
         public final String webgl;
         public final String camera;
         public final String download;
+        public final String downloadName;
         public final String windowAction;
+        public final String audio;
 
         Tick(boolean changed, boolean animating, int pageWidth, int pageHeight,
              String nav, String webgl, String camera, String download,
-             String windowAction) {
+             String windowAction, String audio) {
             this.changed = changed;
             this.animating = animating;
             this.pageWidth = pageWidth;
@@ -159,8 +195,10 @@ public final class RemoteBrowser implements AutoCloseable {
             this.nav = nav;
             this.webgl = webgl;
             this.camera = camera;
-            this.download = download;
+            this.download = downloadUrl(download);
+            this.downloadName = downloadName(download);
             this.windowAction = windowAction;
+            this.audio = audio;
         }
     }
 
@@ -185,6 +223,7 @@ public final class RemoteBrowser implements AutoCloseable {
     private Security security = Security.NONE;
     private int pageWidth;
     private int pageHeight;
+    private double devicePixelRatio = 1.0;
 
     public RemoteBrowser() {
         this(false);
@@ -203,6 +242,22 @@ public final class RemoteBrowser implements AutoCloseable {
     /** Whether this session's renderer keeps no cookies, cache or history. */
     public boolean isPrivate() {
         return privateMode;
+    }
+
+    /**
+     * The page's {@code window.devicePixelRatio}: the zoom times the screen's
+     * scale factor. It rides along with every later navigation, viewport and
+     * render request, so a page picks {@code srcset} candidates and media
+     * queries for the pixels it will actually be shown on.
+     */
+    public void setDevicePixelRatio(double dpr) {
+        if (dpr > 0 && !Double.isInfinite(dpr)) {
+            this.devicePixelRatio = dpr;
+        }
+    }
+
+    public double devicePixelRatio() {
+        return devicePixelRatio;
     }
 
     /** Navigate to {@code url}; returns false if the page failed to open. */
@@ -232,7 +287,8 @@ public final class RemoteBrowser implements AutoCloseable {
             + viewportWidthCss + ",\"height\":" + viewportHeightCss
             + ",\"settle_ms\":" + settleMs
             + ",\"history\":" + (fromHistory ? 1 : 0)
-            + ",\"user_activated\":" + (userActivated ? 1 : 0) + "}";
+            + ",\"user_activated\":" + (userActivated ? 1 : 0)
+            + ",\"dpr\":" + formatScale(devicePixelRatio) + "}";
         RendererProcess.Response resp = renderer.request("POST", "/open", body);
         String json = new String(resp.body, StandardCharsets.UTF_8);
         if (!Json.flag(json, "ok")) {
@@ -269,7 +325,8 @@ public final class RemoteBrowser implements AutoCloseable {
     /** Tell the engine the viewport changed (re-lays out, fires resize). */
     public void setViewport(int widthCss, int heightCss) {
         RendererProcess.Response resp = renderer.request("POST", "/viewport",
-            "{\"width\":" + widthCss + ",\"height\":" + heightCss + "}");
+            "{\"width\":" + widthCss + ",\"height\":" + heightCss
+            + ",\"dpr\":" + formatScale(devicePixelRatio) + "}");
         String json = new String(resp.body, StandardCharsets.UTF_8);
         if (Json.flag(json, "ok")) {
             this.pageWidth = Json.integer(json, "page_width", pageWidth);
@@ -295,13 +352,16 @@ public final class RemoteBrowser implements AutoCloseable {
         String body = "{\"width\":" + width + ",\"height\":" + height
             + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
             + ",\"scale\":" + formatScale(scale)
-            + ",\"caret\":" + (caretActive ? 1 : 0) + "}";
+            + ",\"caret\":" + (caretActive ? 1 : 0)
+            + ",\"dpr\":" + formatScale(devicePixelRatio) + "}";
         RendererProcess.Response resp = renderer.request("POST", "/render", body);
         String nav = emptyToNull(resp.header("X-Nav"));
         String webgl = emptyToNull(resp.header("X-WebGL"));
         String camera = emptyToNull(resp.header("X-Camera"));
         String download = emptyToNull(resp.header("X-Download"));
         String windowAction = emptyToNull(resp.header("X-Window-Action"));
+        String audio = emptyToNull(resp.header("X-Audio"));
+        boolean clipboard = headerInt(resp, "X-Clipboard", 0) != 0;
         int anim = headerInt(resp, "X-Anim", 0);
         boolean animating = (anim & 1) != 0;
         boolean caretBlinking = (anim & 2) != 0;
@@ -309,6 +369,7 @@ public final class RemoteBrowser implements AutoCloseable {
         this.pageWidth = headerInt(resp, "X-PageW", pageWidth);
         this.pageHeight = headerInt(resp, "X-PageH", pageHeight);
         int requestedScrollY = headerInt(resp, "X-ScrollY", -1);
+        int requestedScrollX = headerInt(resp, "X-ScrollX", -1);
         BufferedImage img = null;
         if (!unchanged && resp.body.length >= 4) {
             int w = headerInt(resp, "X-W", width);
@@ -317,7 +378,8 @@ public final class RemoteBrowser implements AutoCloseable {
         }
         return new Frame(img, nav, unchanged || img == null, animating,
                          caretBlinking, webgl, camera, download, windowAction,
-                         pageWidth, pageHeight, requestedScrollY);
+                         audio, clipboard, pageWidth, pageHeight,
+                         requestedScrollY, requestedScrollX);
     }
 
     /**
@@ -406,9 +468,19 @@ public final class RemoteBrowser implements AutoCloseable {
      * own menu, in which case the shell must not show the native one.
      */
     public boolean contextMenu(int x, int y) {
+        return openContextMenu(x, y).prevented;
+    }
+
+    /**
+     * Deliver a {@code contextmenu} event at a document-coordinate point and
+     * report whether the page took it over and whether the point is a text
+     * field the native menu should offer Cut and Paste for.
+     */
+    public ContextMenu openContextMenu(int x, int y) {
         RendererProcess.Response resp = renderer.request("POST", "/contextmenu",
             "{\"x\":" + x + ",\"y\":" + y + "}");
-        return Json.flag(new String(resp.body, StandardCharsets.UTF_8), "prevented");
+        String json = new String(resp.body, StandardCharsets.UTF_8);
+        return new ContextMenu(Json.flag(json, "prevented"), Json.flag(json, "edit"));
     }
 
     /**
@@ -440,14 +512,17 @@ public final class RemoteBrowser implements AutoCloseable {
                         Json.stringOrNull(json, "webgl"),
                         Json.stringOrNull(json, "camera"),
                         Json.stringOrNull(json, "download"),
-                        Json.stringOrNull(json, "window_action"));
+                        Json.stringOrNull(json, "window_action"),
+                        Json.stringOrNull(json, "audio"));
     }
 
     /**
      * Drive a text selection. {@code kind} is 0 to anchor a new selection at the
-     * point, 1 to extend it, 2 to clear it, 3 to select the whole document, and
-     * 4 to return the currently selected text (the copy path). Returns the
-     * selected text for {@code kind == 4}, otherwise null.
+     * point, 1 to extend it, 2 to clear it, 3 to select the whole document, 4 to
+     * return the currently selected text (the copy path) and 7 to cut the
+     * focused field's selection. While a text field has focus, select-all and
+     * copy act on the field. Returns the text for {@code kind} 4 and 7,
+     * otherwise null.
      */
     public String select(int kind, int x, int y) {
         RendererProcess.Response resp = renderer.request("POST", "/select",
@@ -469,6 +544,33 @@ public final class RemoteBrowser implements AutoCloseable {
         String json = new String(resp.body, StandardCharsets.UTF_8);
         return new Find(Json.integer(json, "total", 0), Json.integer(json, "current", 0),
                         Json.integer(json, "scroll_y", 0));
+    }
+
+    /** Cut the focused text field's selection, returning the removed text or null. */
+    public String cutSelection() {
+        return select(7, 0, 0);
+    }
+
+    /**
+     * Paste {@code text} into the page as a user paste would: a focused text
+     * field takes it at the caret, and the page sees {@code paste} and
+     * {@code input} events. Returns a navigation URL a handler asked for, or null.
+     */
+    public String paste(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        return key(4, text, "", 0, 0).nav;
+    }
+
+    /**
+     * The text the page last wrote to the clipboard
+     * ({@code navigator.clipboard.writeText}, a {@code copy} handler), or null.
+     * Call it when a {@link Frame} reports {@link Frame#clipboard}.
+     */
+    public String clipboardText() {
+        RendererProcess.Response resp = renderer.request("POST", "/clipboard", "{}");
+        return emptyToNull(new String(resp.body, StandardCharsets.UTF_8));
     }
 
     /** Evaluate JavaScript in the page and return its result rendered as text. */
@@ -591,8 +693,10 @@ public final class RemoteBrowser implements AutoCloseable {
 
     /**
      * Forward a key event to the focused element. {@code kind} is 0 for keydown,
-     * 1 for keyup, 2 to insert {@code key} as text, 3 for keypress. {@code key}
-     * and {@code code} are the {@code KeyboardEvent.key}/{@code .code} values.
+     * 1 for keyup, 2 to insert {@code key} as text, 3 for keypress (skipped when
+     * the preceding keydown was cancelled) and 4 to paste {@code key} as
+     * clipboard text. {@code key} and {@code code} are the
+     * {@code KeyboardEvent.key}/{@code .code} values.
      */
     public Key key(int kind, String key, String code, int keycode, int mods) {
         String body = "{\"kind\":" + kind
@@ -635,6 +739,36 @@ public final class RemoteBrowser implements AutoCloseable {
     @Override
     public void close() {
         renderer.close();
+    }
+
+    /**
+     * Split an {@link Frame#audio} side-channel value into the individual
+     * helper commands it carries.
+     */
+    public static List<String> audioCommands(String audio) {
+        if (audio == null || audio.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new java.util.ArrayList<>();
+        for (String line : audio.split("\u001f")) {
+            if (!line.isEmpty()) {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
+    private static String downloadUrl(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        int tab = raw.indexOf('\t');
+        return emptyToNull(tab < 0 ? raw : raw.substring(0, tab));
+    }
+
+    private static String downloadName(String raw) {
+        int tab = raw == null ? -1 : raw.indexOf('\t');
+        return tab < 0 ? null : emptyToNull(raw.substring(tab + 1));
     }
 
     private static String emptyToNull(String s) {

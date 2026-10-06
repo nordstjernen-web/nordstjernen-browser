@@ -6,6 +6,7 @@
 package org.nordstjernen;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -74,16 +75,20 @@ final class RendererProcess implements AutoCloseable {
         this.fromRenderer = new BufferedInputStream(process.getInputStream());
     }
 
-    private static String locateRenderer() {
+    /**
+     * The renderer executable: the {@code nordstjernen.renderer} system
+     * property, else {@code NORDSTJERNEN_RENDERER}, else the first
+     * {@code nordstjernen-renderer} found in the working directory or a
+     * {@code builddir/src/} beside it, else the bare name for a {@code PATH}
+     * lookup.
+     */
+    static String locateRenderer() {
         String configured = System.getProperty("nordstjernen.renderer",
             System.getenv("NORDSTJERNEN_RENDERER"));
         if (configured != null && !configured.isEmpty()) {
             return configured;
         }
-        boolean win = System.getProperty("os.name", "")
-            .toLowerCase(Locale.ROOT).contains("win");
-        String name = win ? "nordstjernen-renderer.exe" : "nordstjernen-renderer";
-        // Probe a few locations relative to the working directory.
+        String name = executableName("nordstjernen-renderer");
         String[] candidates = {
             name,
             "builddir/src/" + name,
@@ -95,6 +100,26 @@ final class RendererProcess implements AutoCloseable {
             }
         }
         return name;
+    }
+
+    /**
+     * A helper executable shipped beside the renderer (such as
+     * {@code nordstjernen-audio}), or null when the renderer's directory does
+     * not hold one.
+     */
+    static String locateHelper(String baseName) {
+        File dir = new File(locateRenderer()).getAbsoluteFile().getParentFile();
+        if (dir == null) {
+            return null;
+        }
+        File helper = new File(dir, executableName(baseName));
+        return helper.isFile() && helper.canExecute() ? helper.getPath() : null;
+    }
+
+    private static String executableName(String baseName) {
+        boolean win = System.getProperty("os.name", "")
+            .toLowerCase(Locale.ROOT).contains("win");
+        return win ? baseName + ".exe" : baseName;
     }
 
     /** Send a request and read the full response (blocking). */
@@ -152,23 +177,28 @@ final class RendererProcess implements AutoCloseable {
         return new Response(status, headers, body);
     }
 
+    /**
+     * One CRLF- or LF-terminated header line, decoded as UTF-8: side-channel
+     * headers such as {@code X-Download} carry page-supplied file names.
+     */
     private String readLine() throws IOException {
-        StringBuilder sb = new StringBuilder();
+        ByteArrayOutputStream line = new ByteArrayOutputStream(64);
         int c;
         while ((c = fromRenderer.read()) != -1) {
             if (c == '\r') {
                 int next = fromRenderer.read();
                 if (next == '\n' || next == -1) {
-                    return sb.toString();
+                    return line.toString(StandardCharsets.UTF_8);
                 }
-                sb.append('\r').append((char) next);
+                line.write('\r');
+                line.write(next);
             } else if (c == '\n') {
-                return sb.toString();
+                return line.toString(StandardCharsets.UTF_8);
             } else {
-                sb.append((char) c);
+                line.write(c);
             }
         }
-        return sb.length() == 0 ? null : sb.toString();
+        return line.size() == 0 ? null : line.toString(StandardCharsets.UTF_8);
     }
 
     @Override
