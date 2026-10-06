@@ -6883,6 +6883,14 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
         ns_pango_layout_set_text(layout, box->text, -1);
+        if (ns_pango_layout_get_width(layout) < 0 &&
+            ns_pango_layout_get_alignment(layout) != NS_PANGO_ALIGN_LEFT) {
+            int pw, ph;
+            ns_pango_layout_get_pixel_size(layout, &pw, &ph);
+            if (pw <= content_width)
+                ns_pango_layout_set_width(layout,
+                                          (int)(content_width * NS_PANGO_SCALE));
+        }
         double *line_tops = g_new0(double, line_count);
         double *line_pango_h = g_new0(double, line_count);
         NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
