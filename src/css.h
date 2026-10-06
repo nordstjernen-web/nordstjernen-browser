@@ -645,6 +645,8 @@ typedef struct ns_css_font_metrics {
     double cap_px;
     double ic_px;
     double line_px;
+    double ascent_px;
+    double descent_px;
 } ns_css_font_metrics;
 
 void ns_css_set_font_metrics_cb(

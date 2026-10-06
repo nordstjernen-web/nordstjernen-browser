@@ -408,7 +408,7 @@ ns_selection_bounds(const ns_box *root, const ns_selection *sel,
                          run->end == strlen(b->text);
         if (!whole) {
             if (!ns_paint_inline_range_extents(b, run->start,
-                                               run->end - run->start,
+                                               run->end - run->start, NULL,
                                                &rx, &ry, &rw, &rh))
                 continue;
             rx += b->x;
