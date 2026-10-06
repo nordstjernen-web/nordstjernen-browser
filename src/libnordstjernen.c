@@ -3440,8 +3440,7 @@ browser_datalist_click(ns_browser *browser, const ns_node *node)
     const char *cur = ns_node_editable_value(inp);
     browser_input_replace(browser, inp, 0, cur ? strlen(cur) : 0,
                           val ? val : "", "insertReplacementText");
-    gboolean p = FALSE;
-    ns_js_dispatch_event(browser->js, inp, "change", &p);
+    ns_js_commit_change(browser->js, inp);
     ns_js_consume_mutated(browser->js);
     g_free(val);
     browser->datalist_suppressed = TRUE;
@@ -3677,6 +3676,7 @@ browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
             g_string_free(s, TRUE);
             return;
         }
+        ns_js_note_user_edit(b->js, node, ns_node_editable_value(node));
     }
     ns_node_set_editable_value(node, s->str);
     b->caret_byte = del_start + ins_len;
@@ -3766,6 +3766,10 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
             browser_input_replace(b, node, sel_lo, sel_hi, "\n",
                                   "insertLineBreak");
             return TRUE;
+        }
+        if (b->js) {
+            ns_js_commit_change(b->js, node);
+            if (ns_js_focused_node(b->js) != node) return TRUE;
         }
         browser_submit_form(b, node);
         return TRUE;

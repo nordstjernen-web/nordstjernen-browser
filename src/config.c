@@ -277,21 +277,63 @@ apply_env(ns_config *c)
     if (g_getenv("NS_PRIVATE")) c->private_mode = TRUE;
 }
 
+static void
+load_config(ns_config *c, const char *path)
+{
+    apply_default(c);
+    load_file(c, path);
+    if (g_strcmp0(c->search_engine, "https://lite.duckduckgo.com/lite/?q=%s") == 0)
+        set_string(&c->search_engine, NS_DEFAULT_SEARCH_ENGINE);
+    apply_env(c);
+}
+
 void
 ns_config_init(void)
 {
     if (g_cfg_path)
         return;
-    apply_default(&g_cfg);
     g_cfg_path = g_build_filename(g_get_user_config_dir(),
                                   NS_APP_DIR_NAME, "nordstjernen.conf",
                                   NULL);
-    load_file(&g_cfg, g_cfg_path);
-    if (g_strcmp0(g_cfg.search_engine, "https://lite.duckduckgo.com/lite/?q=%s") == 0) {
-        g_free(g_cfg.search_engine);
-        g_cfg.search_engine = g_strdup(NS_DEFAULT_SEARCH_ENGINE);
+    load_config(&g_cfg, g_cfg_path);
+}
+
+static void
+adopt_field(ns_config *dst, ns_config *src, const cfg_field *f)
+{
+    void *to = (char *)dst + f->offset;
+    void *from = (char *)src + f->offset;
+    switch (f->kind) {
+    case CFG_STRING: {
+        char **to_s = to, **from_s = from;
+        if (g_strcmp0(*to_s, *from_s) != 0) {
+            g_free(*to_s);
+            *to_s = *from_s;
+        } else {
+            g_free(*from_s);
+        }
+        *from_s = NULL;
+        break;
     }
-    apply_env(&g_cfg);
+    case CFG_BOOL:           *(gboolean *)to = *(gboolean *)from; break;
+    case CFG_INT:            *(int *)to = *(int *)from; break;
+    case CFG_REFERER:        *(ns_referer_policy *)to = *(ns_referer_policy *)from; break;
+    case CFG_COOKIE:         *(ns_cookie_policy *)to = *(ns_cookie_policy *)from; break;
+    case CFG_COLOR_SCHEME:   *(ns_color_scheme_pref *)to = *(ns_color_scheme_pref *)from; break;
+    case CFG_REDUCED_MOTION: *(ns_reduced_motion_pref *)to = *(ns_reduced_motion_pref *)from; break;
+    }
+}
+
+void
+ns_config_reload(void)
+{
+    if (!g_cfg_path)
+        return;
+    ns_config fresh;
+    memset(&fresh, 0, sizeof fresh);
+    load_config(&fresh, g_cfg_path);
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++)
+        adopt_field(&g_cfg, &fresh, &cfg_fields[i]);
 }
 
 void

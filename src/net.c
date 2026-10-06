@@ -4547,6 +4547,7 @@ static const char k_about_settings_html[] =
 ".danger-row{display:flex;align-items:center;justify-content:space-between;"
 "gap:20px;padding:16px 0}\n"
 "#custom_wrap[hidden]{display:none}\n"
+".save-row{display:flex;justify-content:flex-end;padding:14px 0}\n"
 ".toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);"
 "padding:10px 18px;border-radius:999px;background:var(--text);"
 "color:var(--bg);font-size:13.5px;font-weight:600;"
@@ -4583,7 +4584,9 @@ static const char k_about_settings_html[] =
 "Custom search URL</span>"
 "<input id=\"search_engine\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com/?q=%s\"></label>"
-"</div></section>\n"
+"<div class=\"save-row\">"
+"<button id=\"save\" class=\"btn primary\" type=\"button\">Save</button>"
+"</div></div></section>\n"
 "<section id=\"privacy\"><h2>Privacy</h2><div class=\"card\">"
 "<label class=\"field\"><span class=\"lbl\">Cookies</span>"
 "<select id=\"cookie_policy\">"
@@ -4661,20 +4664,22 @@ SETTINGS_SWITCH("cache_enabled",
 "$('cookie_policy').value=''+(c.cookie_policy||0);"
 "toggles.forEach(function(k){$(k).checked=!!c[k];});loaded=true;});}\n"
 "function bv(id){return $(id).checked?'1':'0';}\n"
-"function save(){if(!loaded)return;var se=$('search_pick').value;"
-"if(se!=='custom')$('search_engine').value=se;"
-"var o={home_url:$('home_url').value,search_engine:$('search_engine').value,"
-"cookie_policy:$('cookie_policy').value};"
-"toggles.forEach(function(k){o[k]=bv(k);});"
+"function save(o){if(!loaded)return;"
 "fetch('about:settings-save',{method:'POST',headers:{'Content-Type':"
 "'application/x-www-form-urlencoded'},body:enc(o)}).then(function(){"
 "toast('Saved. Applies to newly opened pages.');});}\n"
+"function saveField(k){var o={};o[k]=$(k).value;save(o);}\n"
+"function saveGeneral(){var se=$('search_pick').value;"
+"if(se!=='custom')$('search_engine').value=se;"
+"save({home_url:$('home_url').value,search_engine:$('search_engine').value});}\n"
 "$('search_pick').onchange=function(){"
 "var v=this.value;$('custom_wrap').hidden=v!=='custom';"
-"if(v!=='custom'){$('search_engine').value=v;save();}};\n"
+"if(v!=='custom'){$('search_engine').value=v;saveField('search_engine');}};\n"
 "['home_url','search_engine','cookie_policy'].forEach(function(k){"
-"$(k).onchange=save;});\n"
-"toggles.forEach(function(k){$(k).onchange=save;});\n"
+"$(k).onchange=function(){saveField(k);};});\n"
+"toggles.forEach(function(k){$(k).onchange=function(){"
+"var o={};o[k]=bv(k);save(o);};});\n"
+"$('save').onclick=saveGeneral;\n"
 "$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
 "b.textContent='Cleared';toast('Browsing data cleared');});};\n"
@@ -4715,6 +4720,8 @@ about_json_escape(const char *s)
 static char *
 about_settings_json(void)
 {
+    ns_config_lock();
+    ns_config_reload();
     const ns_config *c = ns_config_get();
     char *home = about_json_escape(c && c->home_url ? c->home_url : "");
     char *eng = about_json_escape(c && c->search_engine ? c->search_engine : "");
@@ -4735,6 +4742,7 @@ about_settings_json(void)
         (c && c->webgl_enabled) ? "true" : "false",
         (c && c->local_storage_enabled) ? "true" : "false",
         (c && c->cache_enabled) ? "true" : "false");
+    ns_config_unlock();
     g_free(home);
     g_free(eng);
     return json;
@@ -4748,6 +4756,7 @@ about_settings_save(const char *form)
         : NULL;
     if (!q) return;
     ns_config_lock();
+    ns_config_reload();
     ns_config *c = ns_config_mut();
     const char *v;
     if ((v = g_hash_table_lookup(q, "home_url"))) {

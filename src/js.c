@@ -4484,6 +4484,13 @@ ns_listeners_sweep(ns_js *js)
 static void ns_mut_scrub_node(ns_js *js, ns_node *n);
 
 static void
+ns_js_forget_pending_change(ns_js *js)
+{
+    js->change_pending = NULL;
+    g_clear_pointer(&js->change_baseline, g_free);
+}
+
+static void
 ns_invalidate_wrapper(ns_node *n)
 {
     if (!n) return;
@@ -4508,6 +4515,7 @@ ns_invalidate_wrapper(ns_node *n)
         g_hash_table_remove(js->js_image_loads, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
+    if (js && js->change_pending == n) ns_js_forget_pending_change(js);
     if (js && js->focused_doc == n) js->focused_doc = NULL;
     if (js) ns_focus_guard_forget(js, n);
     if (js) ns_parser_hold_forget(js, n);
@@ -43364,6 +43372,10 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
     if (old) {
+        ns_js_commit_change(js, old);
+        if (js->focused_node) goto out;
+    }
+    if (g.node[0]) {
         ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
         if (g.node[0])
             ns_js_dispatch_focus_event(js, old, "focusout",
@@ -43397,6 +43409,29 @@ void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
     ns_js_set_focus_in(js, el, NULL);
+}
+
+void
+ns_js_note_user_edit(ns_js *js, const ns_node *el, const char *value_before)
+{
+    if (!js || !el || js->change_pending == el) return;
+    if (!ns_node_is_element_named(el, "input") &&
+        !ns_node_is_element_named(el, "textarea"))
+        return;
+    ns_js_forget_pending_change(js);
+    ns_node_arm_js_invalidate((ns_node *)el);
+    js->change_pending = el;
+    js->change_baseline = g_strdup(value_before ? value_before : "");
+}
+
+void
+ns_js_commit_change(ns_js *js, const ns_node *el)
+{
+    if (!js || !el || js->change_pending != el) return;
+    gboolean changed =
+        g_strcmp0(ns_node_editable_value(el), js->change_baseline) != 0;
+    ns_js_forget_pending_change(js);
+    if (changed) ns_js_dispatch_event(js, el, "change", NULL);
 }
 
 void
@@ -60909,6 +60944,7 @@ ns_js_reset_runtime_state(ns_js *js)
     if (!js) return;
     ns_popover_state_clear(js);
     js->focused_node = NULL;
+    ns_js_forget_pending_change(js);
     js->focused_doc = NULL;
     js->pending_fullscreen_event_target = NULL;
     ns_storage_free_deferred_events(js);
@@ -61657,6 +61693,7 @@ ns_js_free(ns_js *js)
     g_free(js->cookie_value);
     g_free(js->referrer);
     g_free(js->current_url);
+    g_free(js->change_baseline);
     g_free(js->document_origin);
     g_free(js->selection_text);
     if (js->document_write_buffer) {

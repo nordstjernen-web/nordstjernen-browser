@@ -160,6 +160,8 @@ struct ns_js {
     const void   *box_lookup_pending_root;
     int           box_lookup_pending_count;
     const ns_node *focused_node;
+    const ns_node *change_pending;
+    char          *change_baseline;
     /* The document that has focus; NULL means the top-level document. */
     const ns_node *focused_doc;
     /* The innermost focus change in progress (ns_focus_guard in js.c); the
