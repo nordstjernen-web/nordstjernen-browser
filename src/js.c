@@ -56981,9 +56981,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
                           "observe", ns_resize_observer_observe, 2);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "unobserve", ns_event_noop, 1);
+                          "unobserve", ns_resize_observer_unobserve, 1);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "disconnect", ns_event_noop, 0);
+                          "disconnect", ns_resize_observer_disconnect, 0);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",
                           "observe", ns_perf_observer_observe, 1);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",

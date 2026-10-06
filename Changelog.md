@@ -3,6 +3,10 @@ Changelog:
 
 1.0.30:
 ======
+* `ResizeObserver.disconnect()` and `unobserve()` work. Both were bound
+  to a no-op on the prototype, so a disconnected observer kept firing;
+  YouTube's like counter threw a `TypeError` from such a callback on
+  every navigation.
 * A frame's `history.pushState` and `replaceState` act on the History
   object they are called on. YouTube binds the methods of a hidden
   `about:blank` frame to the top window's history, so every navigation
