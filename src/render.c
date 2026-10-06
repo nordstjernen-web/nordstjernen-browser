@@ -286,7 +286,7 @@ render_request_fonts(const ns_render_ctx *c, GHashTable *styles)
                 g_free(abs);
                 continue;
             }
-            ns_font_request(ff->family, abs, c->base_url);
+            ns_font_request(ff->family, abs, c->base_url, ff->descriptors);
             g_free(abs);
         }
     }

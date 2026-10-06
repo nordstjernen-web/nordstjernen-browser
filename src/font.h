@@ -21,8 +21,21 @@ gboolean ns_font_available(void);
 gboolean ns_font_family_loaded(const char *family);
 guint    ns_font_generation(void);
 
+typedef enum ns_font_slant {
+    NS_FONT_SLANT_AUTO,
+    NS_FONT_SLANT_ROMAN,
+    NS_FONT_SLANT_ITALIC,
+    NS_FONT_SLANT_OBLIQUE,
+} ns_font_slant;
+
+typedef struct ns_font_descriptors {
+    int           weight;
+    ns_font_slant slant;
+} ns_font_descriptors;
+
 void     ns_font_request(const char *family, const char *src_url,
-                         const char *base_url);
+                         const char *base_url,
+                         ns_font_descriptors descriptors);
 
 guint    ns_font_pending_count(void);
 
