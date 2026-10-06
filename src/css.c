@@ -28381,10 +28381,47 @@ legacy_font_size_keyword(const char *s)
     return keywords[CLAMP(value, 1, 7) - 1];
 }
 
+static const char *const kSvgPresentationAttrs[] = {
+    "fill", "fill-opacity", "fill-rule", "clip-rule",
+    "stroke", "stroke-width", "stroke-opacity", "stroke-linecap",
+    "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray",
+    "stroke-dashoffset", "paint-order", "vector-effect", "text-anchor",
+    "stop-color", "stop-opacity", "visibility",
+};
+
+static gboolean
+is_svg_presentation_attr_name(const char *n)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(kSvgPresentationAttrs); i++)
+        if (strcmp(n, kSvgPresentationAttrs[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+append_svg_presentation_hints(GString *out, const ns_node *el)
+{
+    for (const ns_attr *a = el->attrs; a; a = a->next) {
+        if (!a->name || !a->value || !is_svg_presentation_attr_name(a->name))
+            continue;
+        char *value = g_strstrip(g_strdup(a->value));
+        if (*value && !strpbrk(value, ";{}!\\")) {
+            char *end = NULL;
+            g_ascii_strtod(value, &end);
+            gboolean unitless_length = end && end != value && *end == '\0' &&
+                (strcmp(a->name, "stroke-width") == 0 ||
+                 strcmp(a->name, "stroke-dashoffset") == 0);
+            g_string_append_printf(out, "%s: %s%s;", a->name, value,
+                                   unitless_length ? "px" : "");
+        }
+        g_free(value);
+    }
+}
+
 static gboolean
 is_presentational_attr_name(const char *n)
 {
     if (!n || !*n) return FALSE;
+    if (is_svg_presentation_attr_name(n)) return TRUE;
     switch (g_ascii_tolower((guchar)n[0])) {
     case 'a': return g_ascii_strcasecmp(n, "align") == 0;
     case 'b': return g_ascii_strcasecmp(n, "bgcolor") == 0 ||
@@ -28795,6 +28832,8 @@ presentational_hints_css(const ns_node *el)
         if (wrap && g_ascii_strcasecmp(wrap, "off") == 0)
             g_string_append(out, "white-space: pre;");
     }
+    if (el->flags & NS_NODE_SVG_NS)
+        append_svg_presentation_hints(out, el);
 
     if (out->len == 0) {
         g_string_free(out, TRUE);
