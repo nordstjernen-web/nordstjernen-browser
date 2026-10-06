@@ -13,6 +13,20 @@ Changelog:
   every key of its compound, not just the first: `#content.x:has(...)`
   used to match YouTube's top-level `#content` and restyle the whole app
   after any change.
+* `-webkit-line-clamp` clamps. `display: -webkit-box` with
+  `-webkit-box-orient: vertical` and a line clamp now lays out as a
+  block container whose text stops at the clamp line with an ellipsis,
+  as in Chrome, instead of a flex row that showed every line. YouTube's
+  "N chapters" rows spilled their whole chapter list over the results
+  below. `-webkit-box-orient: vertical` without a clamp stacks the
+  children, and `getComputedStyle` reports `-webkit-box` as written.
+* An empty block that starts a new formatting context (`display: flex`,
+  `grid`, `flow-root`, `overflow: hidden`) stops margins from collapsing
+  through it, so a later child's top margin no longer escapes to the
+  parent's top edge.
+* Underlines, overlines and line-throughs skip inline-blocks and images
+  inside a link: an avatar inside a link no longer gets a stray line
+  under it.
 * Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
   `replaceChildren()` and setting `textContent` now invalidate the
   styles that depend on sibling position. Before, an item that stopped

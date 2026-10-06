@@ -2011,6 +2011,34 @@ attr_insert_range(NsPangoAttrList *attrs, NsPangoAttribute *a,
     ns_pango_attr_list_insert(attrs, a);
 }
 
+static void
+decoration_insert_around_atomics(NsPangoAttrList *attrs, NsPangoAttribute *a,
+                                 const char *text, gsize start, gsize len)
+{
+    static const char placeholder[] = "\xef\xbf\xbc";
+    if (!a) return;
+    gsize text_len = text ? strlen(text) : 0;
+    gsize end = MIN(start + len, text_len);
+    gsize seg = start;
+    for (gsize p = start; p + 3 <= end; ) {
+        if (memcmp(text + p, placeholder, 3) != 0) {
+            p++;
+            continue;
+        }
+        if (p > seg)
+            attr_insert_range(attrs, ns_pango_attribute_copy(a), seg, p - seg);
+        p += 3;
+        seg = p;
+    }
+    if (seg == start && end - start == len) {
+        attr_insert_range(attrs, a, start, len);
+        return;
+    }
+    if (end > seg) attr_insert_range(attrs, ns_pango_attribute_copy(a), seg,
+                                     end - seg);
+    ns_pango_attribute_destroy(a);
+}
+
 static gsize
 find_ci_substring(const char *hay, gsize hay_len,
                   const char *needle, gsize needle_len,
@@ -3405,7 +3433,13 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 break;
             }
             }
-            attr_insert_range(attrs, a, r->start, r->len);
+            if (r->kind == NS_INLINE_UNDERLINE ||
+                r->kind == NS_INLINE_OVERLINE ||
+                r->kind == NS_INLINE_STRIKETHROUGH)
+                decoration_insert_around_atomics(attrs, a, b->text,
+                                                 r->start, r->len);
+            else
+                attr_insert_range(attrs, a, r->start, r->len);
         }
     }
     if (highlight && *highlight) {
