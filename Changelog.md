@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* An image or SVG with a percentage width no longer widens the boxes
+  around it when they are sized to their min-content. Such a replaced
+  element is compressible: its min-content contribution is zero, as in
+  Chrome. Before, a YouTube channel name next to a 100%-wide verified
+  badge kept the full name width, so the badge drew on top of the text.
 * Flex layout stops laying the same item out again when nothing it
   depends on changed. A row flex item was laid out twice, once to
   measure its height and once at its final place, and a stretched item
