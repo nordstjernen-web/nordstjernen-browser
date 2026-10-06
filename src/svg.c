@@ -2447,6 +2447,12 @@ svg_find_root(const ns_node *doc)
     return NULL;
 }
 
+const ns_node *
+ns_svg_document_root(const ns_node *doc)
+{
+    return svg_find_root(doc);
+}
+
 gboolean
 ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
                     double width, double height)

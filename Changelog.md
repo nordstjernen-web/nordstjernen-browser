@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* The toolbar, tab-strip and address-bar icons render on systems without
+  librsvg's GdkPixbuf loader (Debian/Ubuntu `librsvg2-common`), which a
+  KDE or minimal desktop often lacks. GTK hands SVG icons, symbolic ones
+  included, to GdkPixbuf, so without that loader every icon was GTK's
+  image-missing placeholder, with no warning. The shell now draws its
+  bundled icons through the in-engine SVG renderer (`src/gtk/icons.c`)
+  at the screen's own scale, recolouring the symbolic ones to the theme's
+  foreground as GTK did, and sets the window icon only when GTK can load
+  it. Ported from Northstar (northstar-browser#16).
 * A printable key fires one `keydown`, not two. Embedders send a
   keydown and then a keypress (`kind` 3) for each typed character, and
   the keypress path dispatched `keydown` again before `keypress`, so

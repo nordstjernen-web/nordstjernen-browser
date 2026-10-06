@@ -36,6 +36,8 @@ typedef struct ns_svg_geometry {
 
 gboolean ns_svg_node_is_root(const ns_node *n);
 
+const ns_node *ns_svg_document_root(const ns_node *doc);
+
 void ns_svg_intrinsic_size(const ns_node *svg, ns_svg_size *out);
 
 void ns_svg_render_node(cairo_t          *cr,
