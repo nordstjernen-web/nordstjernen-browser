@@ -441,6 +441,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_ANIMATION_COMPOSITION] = "animation-composition",
     [NS_CSS_COUNTER_SET]          = "counter-set",
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = "overflow-clip-margin",
+    [NS_CSS_WEBKIT_BOX_ORIENT]    = "-webkit-box-orient",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9567,6 +9568,7 @@ ns_css_initial_value_text(const char *name)
         { "column-rule-style",          "none" },
         { "column-rule-width",          "0px" },
         { "line-clamp",                 "none" },
+        { "-webkit-box-orient",         "horizontal" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10085,6 +10087,8 @@ static const struct {
                               .inner = NS_DISPLAY_INNER_TABLE } },
     { "flex",               { .outer = NS_DISPLAY_OUTER_BLOCK,
                               .inner = NS_DISPLAY_INNER_FLEX } },
+    { "-webkit-box",        { .outer = NS_DISPLAY_OUTER_BLOCK,
+                              .inner = NS_DISPLAY_INNER_FLEX } },
     { "grid",               { .outer = NS_DISPLAY_OUTER_BLOCK,
                               .inner = NS_DISPLAY_INNER_GRID } },
     { "list-item",          { .outer = NS_DISPLAY_OUTER_BLOCK,
@@ -10095,6 +10099,8 @@ static const struct {
     { "inline-table",       { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_TABLE } },
     { "inline-flex",        { .outer = NS_DISPLAY_OUTER_INLINE,
+                              .inner = NS_DISPLAY_INNER_FLEX } },
+    { "-webkit-inline-box", { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_FLEX } },
     { "inline-grid",        { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_GRID } },
@@ -10268,10 +10274,11 @@ normalize_display_value(const char *text)
         { "-ms-inline-flexbox",   "inline-flex" },
         { "-webkit-grid",         "grid" },
         { "-ms-grid",             "grid" },
-        { "-webkit-box",          "flex" },
-        { "-webkit-inline-box",   "inline-flex" },
     };
     char *kw = ascii_lower(text, strlen(text));
+    if (strcmp(kw, "-webkit-box") == 0 ||
+        strcmp(kw, "-webkit-inline-box") == 0)
+        return kw;
     for (guint i = 0; i < G_N_ELEMENTS(prefixed); i++)
         if (strcmp(kw, prefixed[i].alias) == 0) {
             g_free(kw);
@@ -12699,6 +12706,10 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     case NS_CSS_TEXT_OVERFLOW:
         v = parse_keyword_choice(t, "clip ellipsis");
+        break;
+    case NS_CSS_WEBKIT_BOX_ORIENT:
+        v = parse_keyword_choice(t,
+            "horizontal vertical inline-axis block-axis");
         break;
     case NS_CSS_TEXT_DECORATION_STYLE:
         v = parse_keyword_choice(t, "solid double dotted dashed wavy");
@@ -27936,6 +27947,27 @@ style_is_out_of_flow(const ns_style *s)
 }
 
 static ns_display
+legacy_webkit_box_display(ns_style *s, ns_display d)
+{
+    const ns_css_value *disp = s->values[NS_CSS_DISPLAY];
+    if (!disp || disp->kind != NS_CSS_V_KEYWORD || !disp->u.keyword ||
+        strncmp(disp->u.keyword, "-webkit-", 8) != 0)
+        return d;
+    const ns_css_value *orient = s->values[NS_CSS_WEBKIT_BOX_ORIENT];
+    if (!ns_css_keyword_is(orient, "vertical") &&
+        !ns_css_keyword_is(orient, "block-axis"))
+        return d;
+    const ns_css_value *clamp = s->values[NS_CSS_LINE_CLAMP];
+    if (clamp && clamp->kind == NS_CSS_V_LENGTH && clamp->u.length.v >= 1) {
+        d.inner = NS_DISPLAY_INNER_FLOW_ROOT;
+        return d;
+    }
+    ns_css_value_free(s->values[NS_CSS_FLEX_DIRECTION]);
+    s->values[NS_CSS_FLEX_DIRECTION] = keyword_value_dup("column");
+    return d;
+}
+
+static ns_display
 display_after_blockification(ns_display d, const ns_style *s,
                              const ns_style *layout_parent, gboolean is_root)
 {
@@ -28117,8 +28149,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             d = ns_css_display_from_keyword(disp->u.keyword);
         out->specified_inline = d.box == NS_DISPLAY_BOX_NORMAL &&
                                 d.outer == NS_DISPLAY_OUTER_INLINE;
-        ns_display used =
-            display_after_blockification(d, out, layout_parent, is_root);
+        ns_display used = display_after_blockification(
+            legacy_webkit_box_display(out, d), out, layout_parent, is_root);
         if (memcmp(&d, &used, sizeof d) != 0) {
             ns_css_value *nv = g_new0(ns_css_value, 1);
             nv->kind = NS_CSS_V_KEYWORD;
