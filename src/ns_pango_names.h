@@ -41,6 +41,8 @@
 #define ns_pango_attr_underline_new                       pango_attr_underline_new
 #define ns_pango_attr_variant_new                         pango_attr_variant_new
 #define ns_pango_attr_weight_new                          pango_attr_weight_new
+#define ns_pango_attribute_copy                           pango_attribute_copy
+#define ns_pango_attribute_destroy                        pango_attribute_destroy
 #define ns_pango_cairo_context_get_font_options           pango_cairo_context_get_font_options
 #define ns_pango_cairo_context_set_font_options           pango_cairo_context_set_font_options
 #define ns_pango_cairo_context_set_resolution             pango_cairo_context_set_resolution
