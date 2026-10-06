@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* Text and inline-blocks that share wrapped lines are painted on the
+  line boxes that layout computed. Paint drew each line at Pango's own
+  line height and each inline-block at Pango's position, so with a CSS
+  line-height the second and later lines drifted away from the layout:
+  a link after a wrapped paragraph on YouTube floated above the
+  baseline and text overlapped the inline-blocks around it. Text on a
+  single line is drawn as before, and the horizontal position still
+  comes from Pango so `text-align` keeps working.
 * An image or SVG with a percentage width no longer widens the boxes
   around it when they are sized to their min-content. Such a replaced
   element is compressible: its min-content contribution is zero, as in

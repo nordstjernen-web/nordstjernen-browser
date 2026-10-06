@@ -180,6 +180,7 @@ typedef struct ns_box {
     GArray *links;
     GArray *attrs;
     GArray *inline_atomics;
+    GArray *atomic_line_heights;
     GArray *table_col_hints;
     GArray *grid_col_tracks;
     GArray *grid_row_tracks;
