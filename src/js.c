@@ -65,6 +65,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "paint.h"
 #include "eventsource.h"
 #include "security.h"
+#include "svg.h"
 #include "video.h"
 #include "video_decode.h"
 #include "wasm.h"
@@ -37848,52 +37849,132 @@ ns_box_visual_padding_box(const ns_box *box,
     ns_box_apply_visual_transform(box, x, y, w, h);
 }
 
+static void
+ns_point_to_client(JSContext *ctx, const ns_node *node, double *x, double *y)
+{
+    *x -= ns_window_scroll_prop(ctx, "scrollX");
+    *y -= ns_window_scroll_prop(ctx, "scrollY");
+    const ns_node *iframe = ns_node_owner_iframe(node);
+    ns_js *js = js_from_ctx(ctx);
+    const ns_box *iframe_box = js && js->layout_root && iframe
+        ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
+    if (!iframe_box) return;
+    double frame_x, frame_y, frame_w, frame_h;
+    ns_box_visual_border_box(iframe_box, &frame_x, &frame_y,
+                             &frame_w, &frame_h);
+    frame_x += iframe_box->border.left + iframe_box->padding.left;
+    frame_y += iframe_box->border.top + iframe_box->padding.top;
+    frame_x -= ns_window_scroll_prop(ctx, "scrollX");
+    frame_y -= ns_window_scroll_prop(ctx, "scrollY");
+    *x -= frame_x;
+    *y -= frame_y;
+}
+
+static const ns_node *
+ns_svg_owner_root(const ns_node *n)
+{
+    const ns_node *svg = NULL;
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p->name && g_ascii_strcasecmp(p->name, "svg") == 0) svg = p;
+    return svg;
+}
+
+static void
+ns_svg_page_matrix(const ns_box *svg_box, const cairo_matrix_t *to_root,
+                   cairo_matrix_t *to_page)
+{
+    double x, y, w, h;
+    ns_box_border_box(svg_box, &x, &y, &w, &h);
+    cairo_matrix_t placed;
+    cairo_matrix_init_translate(&placed,
+        x + svg_box->border.left + svg_box->padding.left,
+        y + svg_box->border.top + svg_box->padding.top);
+    cairo_matrix_multiply(to_page, to_root, &placed);
+    ns_mat4 css;
+    if (!ns_box_accumulate_transform(svg_box, &css)) return;
+    cairo_matrix_t flat;
+    cairo_matrix_init(&flat, css.m[0], css.m[4], css.m[1], css.m[5],
+                      css.m[3], css.m[7]);
+    cairo_matrix_multiply(to_page, to_page, &flat);
+}
+
+static const ns_box *
+ns_svg_measure_node(JSContext *ctx, const ns_node *node,
+                    ns_svg_geometry *geometry)
+{
+    memset(geometry, 0, sizeof *geometry);
+    cairo_matrix_init_identity(&geometry->to_root);
+    cairo_matrix_init_identity(&geometry->to_viewport);
+    if (!node || !(node->flags & NS_NODE_SVG_NS)) return NULL;
+    const ns_node *svg = ns_svg_owner_root(node);
+    ns_js *js = js_from_ctx(ctx);
+    if (!svg || !js) return NULL;
+    ns_js_flush_layout(js);
+    const ns_box *svg_box = js->layout_root
+        ? ns_box_find_by_dom(js->layout_root, svg) : NULL;
+    if (!svg_box) return NULL;
+    ns_svg_node_geometry(svg, node, svg_box->content_width,
+                         svg_box->content_height, svg_box->svg_styles,
+                         svg_box->style, geometry);
+    return svg_box;
+}
+
+static void
+ns_svg_mapped_bounds(const ns_svg_geometry *geometry,
+                     const cairo_matrix_t *matrix, double *left,
+                     double *top, double *right, double *bottom)
+{
+    const double xs[2] = { geometry->x, geometry->x + geometry->width };
+    const double ys[2] = { geometry->y, geometry->y + geometry->height };
+    *left = *top = G_MAXDOUBLE;
+    *right = *bottom = -G_MAXDOUBLE;
+    for (int corner = 0; corner < 4; corner++) {
+        double px = xs[corner & 1], py = ys[corner >> 1];
+        cairo_matrix_transform_point(matrix, &px, &py);
+        *left = MIN(*left, px);
+        *right = MAX(*right, px);
+        *top = MIN(*top, py);
+        *bottom = MAX(*bottom, py);
+    }
+}
+
+static gboolean
+ns_svg_client_rect(JSContext *ctx, const ns_node *node,
+                   double *x, double *y, double *w, double *h)
+{
+    ns_svg_geometry geometry;
+    const ns_box *svg_box = ns_svg_measure_node(ctx, node, &geometry);
+    if (!svg_box || !geometry.found || !geometry.rendered) return FALSE;
+    cairo_matrix_t to_page;
+    ns_svg_page_matrix(svg_box, &geometry.to_root, &to_page);
+    double left, top, right, bottom;
+    ns_svg_mapped_bounds(&geometry, &to_page, &left, &top, &right, &bottom);
+    *x = left;
+    *y = top;
+    *w = right - left;
+    *h = bottom - top;
+    return TRUE;
+}
+
 static JSValue
 ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     double x = 0, y = 0, w = 0, h = 0;
+    const ns_node *node = ns_unwrap_element(this_val);
     const ns_box *b = ns_box_for_this(ctx, this_val);
     gboolean got_box = b != NULL;
-    if (!b && ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
+    if (!b && ns_svg_client_rect(ctx, node, &x, &y, &w, &h))
+        got_box = TRUE;
+    else if (!b && ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
         got_box = TRUE;
     if (b) ns_box_visual_border_box(b, &x, &y, &w, &h);
-    if (got_box) {
-        x -= ns_window_scroll_prop(ctx, "scrollX");
-        y -= ns_window_scroll_prop(ctx, "scrollY");
-        const ns_node *node = ns_unwrap_element(this_val);
-        const ns_node *iframe = ns_node_owner_iframe(node);
-        ns_js *js = js_from_ctx(ctx);
-        const ns_box *iframe_box = js && js->layout_root && iframe
-            ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
-        if (iframe_box) {
-            double frame_x, frame_y, frame_w, frame_h;
-            ns_box_visual_border_box(iframe_box, &frame_x, &frame_y,
-                                     &frame_w, &frame_h);
-            frame_x += iframe_box->border.left + iframe_box->padding.left;
-            frame_y += iframe_box->border.top + iframe_box->padding.top;
-            frame_x -= ns_window_scroll_prop(ctx, "scrollX");
-            frame_y -= ns_window_scroll_prop(ctx, "scrollY");
-            x -= frame_x;
-            y -= frame_y;
-        }
-    }
+    if (got_box) ns_point_to_client(ctx, node, &x, &y);
     return ns_make_dom_rect(ctx, x, y, w, h);
 }
 
 typedef struct { double x, y; gboolean moveto; } ns_svg_pt;
-
-static double
-ns_svg_num(const ns_node *n, const char *attr, double dflt)
-{
-    if (!n) return dflt;
-    const char *v = ns_element_get_attr(n, attr);
-    if (!v || !*v) return dflt;
-    char *end = NULL;
-    double d = g_ascii_strtod(v, &end);
-    return (end == v) ? dflt : d;
-}
 
 static const char *
 ns_svg_read_num(const char *p, double *out)
@@ -38063,93 +38144,19 @@ ns_svg_flatten_path(const char *d)
     return pts;
 }
 
-static gboolean
-ns_node_local_bbox(const ns_node *n, double *bx, double *by,
-                   double *bw, double *bh, int depth)
-{
-    if (!n || depth >= 512 || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    const char *tag = n->name;
-    if (g_ascii_strcasecmp(tag, "rect") == 0) {
-        *bx = ns_svg_num(n,"x",0); *by = ns_svg_num(n,"y",0);
-        *bw = ns_svg_num(n,"width",0); *bh = ns_svg_num(n,"height",0);
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(tag, "circle") == 0) {
-        double r = ns_svg_num(n,"r",0);
-        *bx = ns_svg_num(n,"cx",0)-r; *by = ns_svg_num(n,"cy",0)-r;
-        *bw = 2*r; *bh = 2*r; return TRUE;
-    }
-    if (g_ascii_strcasecmp(tag, "ellipse") == 0) {
-        double rx = ns_svg_num(n,"rx",0), ry = ns_svg_num(n,"ry",0);
-        *bx = ns_svg_num(n,"cx",0)-rx; *by = ns_svg_num(n,"cy",0)-ry;
-        *bw = 2*rx; *bh = 2*ry; return TRUE;
-    }
-    if (g_ascii_strcasecmp(tag, "line") == 0) {
-        double x1 = ns_svg_num(n,"x1",0), y1 = ns_svg_num(n,"y1",0);
-        double x2 = ns_svg_num(n,"x2",0), y2 = ns_svg_num(n,"y2",0);
-        *bx = MIN(x1,x2); *by = MIN(y1,y2);
-        *bw = fabs(x2-x1); *bh = fabs(y2-y1); return TRUE;
-    }
-    gboolean is_poly = g_ascii_strcasecmp(tag,"polygon") == 0 ||
-                       g_ascii_strcasecmp(tag,"polyline") == 0;
-    gboolean is_path = g_ascii_strcasecmp(tag,"path") == 0;
-    if (is_poly || is_path) {
-        GArray *pts = NULL;
-        if (is_path) pts = ns_svg_flatten_path(ns_element_get_attr(n,"d"));
-        else {
-            pts = g_array_new(FALSE, FALSE, sizeof(ns_svg_pt));
-            const char *p = ns_element_get_attr(n,"points");
-            double vx; gboolean have_x = FALSE; double px = 0;
-            while (p && (p = ns_svg_read_num(p, &vx))) {
-                if (!have_x) { px = vx; have_x = TRUE; }
-                else { ns_svg_pt pt = { px, vx, FALSE };
-                       g_array_append_val(pts, pt); have_x = FALSE; }
-            }
-        }
-        gboolean any = FALSE;
-        for (guint i = 0; i < pts->len; i++) {
-            ns_svg_pt pt = g_array_index(pts, ns_svg_pt, i);
-            if (!any) { *bx = *bw = pt.x; *by = *bh = pt.y; any = TRUE; }
-            else {
-                if (pt.x < *bx) *bx = pt.x;
-                if (pt.x > *bw) *bw = pt.x;
-                if (pt.y < *by) *by = pt.y;
-                if (pt.y > *bh) *bh = pt.y;
-            }
-        }
-        g_array_free(pts, TRUE);
-        if (any) { *bw -= *bx; *bh -= *by; return TRUE; }
-        return FALSE;
-    }
-    gboolean any = FALSE;
-    double ux0=0, uy0=0, ux1=0, uy1=0;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        double cx, cy, cw, ch;
-        if (ns_node_local_bbox(c, &cx, &cy, &cw, &ch, depth + 1)) {
-            if (!any) { ux0=cx; uy0=cy; ux1=cx+cw; uy1=cy+ch; any=TRUE; }
-            else {
-                if (cx < ux0) ux0 = cx;
-                if (cy < uy0) uy0 = cy;
-                if (cx+cw > ux1) ux1 = cx+cw;
-                if (cy+ch > uy1) uy1 = cy+ch;
-            }
-        }
-    }
-    if (any) { *bx=ux0; *by=uy0; *bw=ux1-ux0; *bh=uy1-uy0; return TRUE; }
-    return FALSE;
-}
-
 static JSValue
 ns_element_getBBox(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    const ns_node *n = ns_unwrap_element(this_val);
+    ns_svg_geometry geometry;
+    ns_svg_measure_node(ctx, ns_unwrap_element(this_val), &geometry);
+    if (geometry.found)
+        return ns_make_dom_rect(ctx, geometry.x, geometry.y,
+                                geometry.width, geometry.height);
     double x = 0, y = 0, w = 0, h = 0;
-    if (!ns_node_local_bbox(n, &x, &y, &w, &h, 0)) {
-        const ns_box *b = ns_box_for_this(ctx, this_val);
-        if (b) ns_box_border_box(b, &x, &y, &w, &h);
-    }
+    const ns_box *b = ns_box_for_this(ctx, this_val);
+    if (b) ns_box_border_box(b, &x, &y, &w, &h);
     return ns_make_dom_rect(ctx, x, y, w, h);
 }
 
@@ -38284,44 +38291,20 @@ ns_element_createSVGTransform(JSContext *ctx, JSValueConst this_val,
     return t;
 }
 
-static const ns_node *
-ns_svg_owner_root(const ns_node *n)
-{
-    const ns_node *svg = NULL;
-    for (const ns_node *p = n; p; p = p->parent)
-        if (p->name && g_ascii_strcasecmp(p->name, "svg") == 0) svg = p;
-    return svg;
-}
-
 static JSValue
 ns_element_getScreenCTM(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
-    const ns_node *svg = ns_svg_owner_root(n);
-    double sx = 0, sy = 0, sw = 0, sh = 0;
-    ns_js *js = js_from_ctx(ctx);
-    if (js) {
-        ns_js_flush_layout(js);
-        if (js->layout_root && svg) {
-            const ns_box *b = ns_box_find_by_dom(js->layout_root, svg);
-            if (b) ns_box_border_box(b, &sx, &sy, &sw, &sh);
-        }
+    ns_svg_geometry geometry;
+    const ns_box *svg_box = ns_svg_measure_node(ctx, n, &geometry);
+    cairo_matrix_t m = geometry.to_root;
+    if (svg_box) {
+        ns_svg_page_matrix(svg_box, &geometry.to_root, &m);
+        ns_point_to_client(ctx, n, &m.x0, &m.y0);
     }
-    double scaleX = 1, scaleY = 1, minx = 0, miny = 0;
-    const char *vb = svg ? ns_element_get_attr(svg, "viewBox") : NULL;
-    if (vb) {
-        double v[4]; int got = 0; const char *p = vb;
-        while (got < 4 && (p = ns_svg_read_num(p, &v[got]))) got++;
-        if (got == 4 && v[2] > 0 && v[3] > 0) {
-            minx = v[0]; miny = v[1];
-            if (sw > 0) scaleX = sw / v[2];
-            if (sh > 0) scaleY = sh / v[3];
-        }
-    }
-    return ns_dommatrix_make(ctx, scaleX, 0, 0, scaleY,
-                              sx - minx*scaleX, sy - miny*scaleY);
+    return ns_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0);
 }
 
 static JSValue
@@ -38329,23 +38312,10 @@ ns_element_getCTM(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    const ns_node *n = ns_unwrap_element(this_val);
-    const ns_node *svg = ns_svg_owner_root(n);
-    double scaleX = 1, scaleY = 1, minx = 0, miny = 0;
-    const char *vb = svg ? ns_element_get_attr(svg, "viewBox") : NULL;
-    if (vb) {
-        double v[4]; int got = 0; const char *p = vb;
-        while (got < 4 && (p = ns_svg_read_num(p, &v[got]))) got++;
-        if (got == 4 && v[2] > 0 && v[3] > 0) {
-            minx = v[0]; miny = v[1];
-            double vw = ns_svg_num(svg, "width", v[2]);
-            double vh = ns_svg_num(svg, "height", v[3]);
-            if (v[2] > 0) scaleX = vw / v[2];
-            if (v[3] > 0) scaleY = vh / v[3];
-        }
-    }
-    return ns_dommatrix_make(ctx, scaleX, 0, 0, scaleY,
-                              -minx*scaleX, -miny*scaleY);
+    ns_svg_geometry geometry;
+    ns_svg_measure_node(ctx, ns_unwrap_element(this_val), &geometry);
+    const cairo_matrix_t *m = &geometry.to_viewport;
+    return ns_dommatrix_make(ctx, m->xx, m->yx, m->xy, m->yy, m->x0, m->y0);
 }
 
 static JSValue
@@ -40543,7 +40513,9 @@ ns_element_getClientRects(JSContext *ctx, JSValueConst this_val,
     JSValue arr = JS_NewArray(ctx);
     if (!ns_box_for_this(ctx, this_val)) {
         double x, y, w, h;
-        if (!ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
+        if (!ns_svg_client_rect(ctx, ns_unwrap_element(this_val),
+                                &x, &y, &w, &h) &&
+            !ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
             return arr;
     }
     JSValue rect = ns_element_getBoundingClientRect(ctx, this_val, 0, NULL);
