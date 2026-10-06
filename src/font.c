@@ -18,7 +18,7 @@
 
 #ifdef NS_HAVE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
-#include <fontconfig/fcfreetype.h>
+#define NS_FONT_FACE_VERSION_BASE 0x40000000
 #endif
 #ifdef NS_HAVE_PANGOFT2
 #define NS_HAVE_PANGOFC 1
@@ -34,6 +34,7 @@ typedef struct ns_font_entry {
     char *family;
     char *url;
     ns_font_descriptors descriptors;
+    int declared;
     gboolean loaded;
     gboolean inflight;
     GCancellable *cancel;
@@ -49,6 +50,7 @@ static GHashTable        *g_pending_by_url;
 static char              *g_cache_dir;
 static ns_font_loaded_cb  g_loaded_cb;
 static guint              g_font_generation;
+static int                g_faces_declared;
 static gpointer           g_loaded_ud;
 
 typedef struct ns_font_idle_waiter {
@@ -376,72 +378,132 @@ ns_font_fc_slant(ns_font_slant slant)
     return FC_SLANT_ROMAN;
 }
 
-static void
-ns_font_apply_descriptors(FcPattern *pat, ns_font_descriptors descriptors)
+static gboolean
+ns_font_pattern_is_variable(const FcPattern *pat)
 {
     FcBool variable = FcFalse;
-    FcPatternGetBool(pat, FC_VARIABLE, 0, &variable);
-    if (descriptors.weight > 0 && !variable) {
+    return FcPatternGetBool(pat, FC_VARIABLE, 0, &variable) == FcResultMatch &&
+           variable;
+}
+
+static gboolean
+ns_font_pattern_has_weight_axis(const FcPattern *pat)
+{
+    FcValue weight;
+    return FcPatternGet(pat, FC_WEIGHT, 0, &weight) == FcResultMatch &&
+           weight.type == FcTypeRange;
+}
+
+static int
+ns_font_pattern_face_index(const FcPattern *pat)
+{
+    int index = 0;
+    FcPatternGetInteger(pat, FC_INDEX, 0, &index);
+    return index & 0xFFFF;
+}
+
+static gboolean
+ns_font_is_instance_of_variable_face(const FcFontSet *fonts, int first,
+                                     const FcPattern *pat)
+{
+    if (ns_font_pattern_is_variable(pat)) return FALSE;
+    int face_index = ns_font_pattern_face_index(pat);
+    for (int i = first; i < fonts->nfont; i++) {
+        const FcPattern *other = fonts->fonts[i];
+        if (other && ns_font_pattern_is_variable(other) &&
+            ns_font_pattern_face_index(other) == face_index)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+ns_font_set_order(FcPattern *pat, int order)
+{
+    FcPatternDel(pat, FC_FONTVERSION);
+    FcPatternAddInteger(pat, FC_FONTVERSION, order);
+}
+
+static void
+ns_font_describe_face(FcPattern *pat, const ns_font_entry *face)
+{
+    if (face->descriptors.weight > 0 && !ns_font_pattern_has_weight_axis(pat)) {
         FcPatternDel(pat, FC_WEIGHT);
         FcPatternAddDouble(pat, FC_WEIGHT,
-                           FcWeightFromOpenTypeDouble(descriptors.weight));
+                           FcWeightFromOpenTypeDouble(face->descriptors.weight));
     }
-    if (descriptors.slant != NS_FONT_SLANT_AUTO) {
+    if (face->descriptors.slant != NS_FONT_SLANT_AUTO) {
         FcPatternDel(pat, FC_SLANT);
-        FcPatternAddInteger(pat, FC_SLANT, ns_font_fc_slant(descriptors.slant));
+        FcPatternAddInteger(pat, FC_SLANT,
+                            ns_font_fc_slant(face->descriptors.slant));
     }
+    ns_font_set_order(pat, NS_FONT_FACE_VERSION_BASE + face->declared);
+}
+
+static gboolean
+ns_font_pattern_named(const FcPattern *pat, const char *family)
+{
+    FcChar8 *name = NULL;
+    return FcPatternGetString(pat, FC_FAMILY, 0, &name) == FcResultMatch &&
+           name && g_ascii_strcasecmp((const char *)name, family) == 0;
+}
+
+static void
+ns_font_add_under_family(FcFontSet *app_fonts, const FcPattern *scanned,
+                         const ns_font_entry *face)
+{
+    FcPattern *pat = FcPatternDuplicate(scanned);
+    if (!pat) return;
+    FcPatternDel(pat, FC_FAMILY);
+    FcPatternDel(pat, FC_FAMILYLANG);
+    FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)face->family);
+    ns_font_describe_face(pat, face);
+    if (!FcFontSetAdd(app_fonts, pat))
+        FcPatternDestroy(pat);
+}
+
+static void
+ns_font_drop_variable_instances(FcFontSet *app_fonts, int first_added)
+{
+    for (int i = first_added; i < app_fonts->nfont; i++) {
+        FcPattern *pat = app_fonts->fonts[i];
+        if (ns_font_is_instance_of_variable_face(app_fonts, first_added, pat)) {
+            FcPatternDestroy(pat);
+            app_fonts->fonts[i] = NULL;
+        }
+    }
+    int kept = first_added;
+    for (int i = first_added; i < app_fonts->nfont; i++)
+        if (app_fonts->fonts[i]) app_fonts->fonts[kept++] = app_fonts->fonts[i];
+    app_fonts->nfont = kept;
 }
 
 static void
 ns_font_describe_added(FcFontSet *app_fonts, int first_added,
-                       const char *css_family, ns_font_descriptors descriptors)
+                       const ns_font_entry *face)
 {
-    if (!app_fonts || !css_family) return;
-    for (int i = first_added; i < app_fonts->nfont; i++) {
-        FcChar8 *internal = NULL;
-        if (FcPatternGetString(app_fonts->fonts[i], FC_FAMILY, 0,
-                               &internal) == FcResultMatch &&
-            internal &&
-            g_ascii_strcasecmp((const char *)internal, css_family) == 0)
-            ns_font_apply_descriptors(app_fonts->fonts[i], descriptors);
+    ns_font_drop_variable_instances(app_fonts, first_added);
+    int scanned = app_fonts->nfont;
+    for (int i = first_added; i < scanned; i++) {
+        FcPattern *pat = app_fonts->fonts[i];
+        if (ns_font_pattern_named(pat, face->family)) {
+            ns_font_describe_face(pat, face);
+        } else {
+            ns_font_set_order(pat, face->declared);
+            ns_font_add_under_family(app_fonts, pat, face);
+        }
     }
 }
 
 static void
-ns_font_install_file(const char *path, const char *css_family,
-                     ns_font_descriptors descriptors)
+ns_font_install_file(const char *path, const ns_font_entry *face)
 {
     if (!path) return;
     const FcFontSet *before = FcConfigGetFonts(NULL, FcSetApplication);
     int first_added = before ? before->nfont : 0;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
     FcFontSet *app_fonts = FcConfigGetFonts(NULL, FcSetApplication);
-    ns_font_describe_added(app_fonts, first_added, css_family, descriptors);
-    FcFontSet *faces = css_family && *css_family && app_fonts
-        ? FcFontSetCreate() : NULL;
-    if (faces) {
-        int count = 0;
-        FcFreeTypeQueryAll((const FcChar8 *)path, -1, NULL, &count, faces);
-        for (int i = 0; i < faces->nfont; i++) {
-            FcPattern *pat = faces->fonts[i];
-            faces->fonts[i] = NULL;
-            FcChar8 *internal = NULL;
-            if (FcPatternGetString(pat, FC_FAMILY, 0, &internal) == FcResultMatch &&
-                internal &&
-                g_ascii_strcasecmp((const char *)internal, css_family) == 0) {
-                FcPatternDestroy(pat);
-                continue;
-            }
-            FcPatternDel(pat, FC_FAMILY);
-            FcPatternDel(pat, FC_FAMILYLANG);
-            FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)css_family);
-            ns_font_apply_descriptors(pat, descriptors);
-            if (!FcFontSetAdd(app_fonts, pat))
-                FcPatternDestroy(pat);
-        }
-        faces->nfont = 0;
-        FcFontSetDestroy(faces);
-    }
+    if (app_fonts) ns_font_describe_added(app_fonts, first_added, face);
 #ifdef NS_HAVE_PANGOFC
     NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
     if (fm && NS_PANGO_IS_FC_FONT_MAP(fm))
@@ -517,7 +579,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
                 if (g_file_set_contents(path, (const char *)write_data,
                                         (gssize)write_len, &werr)) {
 #ifdef NS_HAVE_FONTCONFIG
-                    ns_font_install_file(path, e->family, e->descriptors);
+                    ns_font_install_file(path, e);
 #endif
                     e->loaded = TRUE;
                     g_font_generation++;
@@ -562,6 +624,7 @@ ns_font_request(const char *family, const char *src_url, const char *base_url,
         existing->family = g_strdup(family);
         existing->url = abs;
         existing->descriptors = descriptors;
+        existing->declared = ++g_faces_declared;
         g_hash_table_insert(g_entries, g_strdup(key), existing);
     }
 
