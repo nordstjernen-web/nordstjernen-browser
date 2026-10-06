@@ -3089,6 +3089,45 @@ append_pseudo_content(GString *out, const ns_css_value *cv,
     g_free(resolved);
 }
 
+static gboolean
+pseudo_generates_box(const ns_style *ps)
+{
+    const ns_css_value *cv = ps ? ps->values[NS_CSS_CONTENT] : NULL;
+    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
+           strcmp(cv->u.keyword, "none") != 0 &&
+           strcmp(cv->u.keyword, "normal") != 0;
+}
+
+static ns_box *pseudo_block_with_text(const ns_style *ps, const char *txt);
+
+static void
+append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
+                     const ns_node *host)
+{
+    if (!pseudo_generates_box(ps) || style_is_none(ps)) return;
+    if (style_is_absolute_or_fixed(ps)) {
+        append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
+        return;
+    }
+    if (ctx->atomics && ns_display_is_atomic_inline(ns_css_display_of(ps))) {
+        char *txt = resolve_pseudo_content(
+            ps->values[NS_CSS_CONTENT]->u.keyword, host);
+        ns_atomic_raw rec = {
+            .start = ctx->out->len,
+            .box = pseudo_block_with_text(ps, txt),
+        };
+        g_free(txt);
+        g_string_append(ctx->out, "\xef\xbf\xbc");
+        g_array_append_val(ctx->atomics, rec);
+        return;
+    }
+    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_LEFT], 0));
+    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_LEFT], 0));
+    append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
+    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_RIGHT], 0));
+    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_RIGHT], 0));
+}
+
 static void
 emit_open_select_option(collector_ctx *ctx, const ns_node *option)
 {
@@ -3967,16 +4006,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     gboolean pseudo_blocks = n == g_pseudo_blocks_host;
     if (s && s->before && s->before->values[NS_CSS_CONTENT] &&
         !(pseudo_blocks && g_pseudo_block_before))
-        append_pseudo_content(ctx->out, s->before->values[NS_CSS_CONTENT], n,
-                              s->before);
+        append_pseudo_inline(ctx, s->before, n);
 
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_walk(c, ctx, depth + 1);
 
     if (s && s->after && s->after->values[NS_CSS_CONTENT] &&
         !(pseudo_blocks && g_pseudo_block_after))
-        append_pseudo_content(ctx->out, s->after->values[NS_CSS_CONTENT], n,
-                              s->after);
+        append_pseudo_inline(ctx, s->after, n);
 
     ctx->text_transform = prev_text_transform;
 
@@ -4907,10 +4944,41 @@ pseudo_block_with_text(const ns_style *ps, const char *txt)
     if (txt && *txt) {
         ns_box *txtrun = box_new_inline();
         txtrun->text = g_strdup(txt);
-        txtrun->style = ps;
         box_append_child(block, txtrun);
     }
     return block;
+}
+
+static void
+pseudo_box_add_edge_spacers(ns_box *box, const ns_style *ps)
+{
+    double edges[4] = {
+        length_or(ps->values[NS_CSS_MARGIN_LEFT], 0),
+        length_or(ps->values[NS_CSS_PADDING_LEFT], 0),
+        length_or(ps->values[NS_CSS_PADDING_RIGHT], 0),
+        length_or(ps->values[NS_CSS_MARGIN_RIGHT], 0),
+    };
+    static const char spacer[] = "\xef\xbf\xbc";
+    gsize slen = sizeof spacer - 1;
+    gsize lead = (edges[0] > 0 ? slen : 0) + (edges[1] > 0 ? slen : 0);
+    if (lead == 0 && !(edges[2] > 0) && !(edges[3] > 0)) return;
+    GString *text = g_string_new(NULL);
+    for (guint i = 0; i < box->attrs->len; i++)
+        g_array_index(box->attrs, ns_inline_attr, i).start += lead;
+    for (int e = 0; e < 4; e++) {
+        if (e == 2) g_string_append(text, box->text);
+        if (!(edges[e] > 0)) continue;
+        ns_inline_attr a = {
+            .kind = NS_INLINE_SPACER,
+            .start = text->len,
+            .len = slen,
+            .box_w = edges[e],
+        };
+        g_string_append(text, spacer);
+        g_array_append_val(box->attrs, a);
+    }
+    g_free(box->text);
+    box->text = g_string_free(text, FALSE);
 }
 
 static ns_box *
@@ -5040,6 +5108,7 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
         ns_inline_attr a = { .kind = NS_INLINE_ITALIC, .start = 0, .len = tlen };
         g_array_append_val(box->attrs, a);
     }
+    pseudo_box_add_edge_spacers(box, ps);
     return box;
 }
 

@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* `::before` and `::after` inside inline content get their own box
+  model. An inline pseudo-element now keeps its horizontal margin and
+  padding, so YouTube's `89K • Streamed 1mo ago` and El País's section
+  separators are spaced as in Chrome instead of running together. An
+  `inline-block` pseudo-element inside an inline element is laid out as
+  a box instead of flattened into text, which brings back the Guardian's
+  pulsing live dot; and a pseudo-element's padding and margin are no
+  longer counted twice when its width is measured, which made Amazon's
+  video controls and YouTube's ad badge 8-10px too wide.
 * An inline-block in a centered or right-aligned `white-space: nowrap`
   line reports its real position to scripts and hit testing. Paint
   already aligned the line, but layout placed the inline-blocks as if it
