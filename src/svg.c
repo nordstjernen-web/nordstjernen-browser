@@ -13,6 +13,7 @@
 #include "css.h"
 #include "html.h"
 #include "paint.h"
+#include "net.h"
 
 enum {
     NS_SVG_MAX_DEPTH        = 24,
@@ -1714,8 +1715,37 @@ svg_render_children(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 }
 
 static gboolean
+svg_language_preferred(const char *tag, char **preferred)
+{
+    gsize tag_len = strlen(tag);
+    for (guint i = 0; preferred && preferred[i]; i++) {
+        gsize len = strlen(preferred[i]);
+        if (len == 0 || len > tag_len) continue;
+        if (g_ascii_strncasecmp(tag, preferred[i], len) != 0) continue;
+        if (tag[len] == '\0' || tag[len] == '-') return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+svg_system_language_allows(const ns_node *n)
+{
+    const char *value = ns_element_get_attr(n, "systemLanguage");
+    if (!value) return TRUE;
+    char **preferred = ns_net_navigator_languages();
+    char **tags = g_strsplit(value, ",", -1);
+    gboolean allowed = FALSE;
+    for (guint i = 0; tags[i] && !allowed; i++)
+        allowed = svg_language_preferred(g_strstrip(tags[i]), preferred);
+    g_strfreev(tags);
+    g_strfreev(preferred);
+    return allowed;
+}
+
+static gboolean
 svg_is_hidden(svg_ctx *ctx, const ns_node *n)
 {
+    if (!svg_system_language_allows(n)) return TRUE;
     const ns_style *s = ctx->styles
         ? g_hash_table_lookup(ctx->styles, (gpointer)n) : NULL;
     if (s) {
@@ -1746,6 +1776,7 @@ svg_switch_choice(const ns_node *n)
         if (c->kind != NS_NODE_ELEMENT) continue;
         if (ns_element_get_attr(c, "requiredExtensions") ||
             ns_element_get_attr(c, "requiredFeatures")) continue;
+        if (!svg_system_language_allows(c)) continue;
         return c;
     }
     return NULL;
