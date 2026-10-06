@@ -36956,6 +36956,7 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
             return TRUE;
         }
+        if (want_all) return FALSE;
     } else if (root != doc) {
         return FALSE;
     } else if (key->classes && key->classes->len > 0 &&
@@ -36978,16 +36979,11 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
     }
 
     if (single) {
-        gboolean ok = (include_self || single != root) &&
-                      ns_node_ancestor_or_self(single, root) != NULL &&
-                      ns_css_selector_matches(sel, single);
-        if (want_all) {
-            JSValue arr = JS_NewArray(ctx);
-            if (ok) JS_SetPropertyUint32(ctx, arr, 0, ns_make_element(ctx, single));
-            *out = ns_nodelist_from_array(ctx, arr);
-        } else {
-            *out = ok ? ns_make_element(ctx, single) : JS_NULL;
-        }
+        if (!(include_self || single != root) ||
+            !ns_node_ancestor_or_self(single, root) ||
+            !ns_css_selector_matches(sel, single))
+            return FALSE;
+        *out = ns_make_element(ctx, single);
         return TRUE;
     }
     if (!want_all) {

@@ -43,6 +43,12 @@ Changelog:
   linear-gradient(#fff 0 0)`, now leaves a thin rim. YouTube's buttons
   use it for their rim light, which was painted as a gradient band
   across the whole button.
+* `querySelector` and `querySelectorAll` find every element whose
+  selector ends in an id when the id is used more than once.
+  `document.querySelectorAll('#owner #avatar')` returned nothing on
+  YouTube, which repeats ids such as `avatar`, `content` and `text` in
+  every component, because only the first element with that id was
+  tested.
 * Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
   `replaceChildren()` and setting `textContent` now invalidate the
   styles that depend on sibling position. Before, an item that stopped
