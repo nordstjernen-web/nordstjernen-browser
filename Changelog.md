@@ -3,6 +3,21 @@ Changelog:
 
 1.0.30:
 ======
+* YouTube restyles incrementally again, about five times faster per
+  forced layout. One `:has()` selector whose compound had no class, id,
+  type or attribute to key on (`:not(:has(...))`, or a bare `:has(> x)`
+  after a descendant combinator) turned incremental restyle off for the
+  whole page, so every `offsetWidth` read recomputed all ~4000 styles.
+  Such an anchor now keys on the compound that holds the `:not()`, or on
+  the nearest keyed compound to its left. An anchor also has to match
+  every key of its compound, not just the first: `#content.x:has(...)`
+  used to match YouTube's top-level `#content` and restyle the whole app
+  after any change.
+* Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
+  `replaceChildren()` and setting `textContent` now invalidate the
+  styles that depend on sibling position. Before, an item that stopped
+  being `:last-child` because a fragment was appended after it kept its
+  `:last-child` style.
 * The toolbar, tab-strip and address-bar icons render on systems without
   librsvg's GdkPixbuf loader (Debian/Ubuntu `librsvg2-common`), which a
   KDE or minimal desktop often lacks. GTK hands SVG icons, symbolic ones
