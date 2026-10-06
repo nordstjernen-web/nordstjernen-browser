@@ -1,5 +1,6 @@
 nordstjernen_gtk_sources = files(
   'appmain.c',
+  'icons.c',
   'pagelayers.c',
   'procview.c',
   'procwindow.c',

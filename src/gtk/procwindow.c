@@ -2,6 +2,7 @@
 
 #include "procwindow.h"
 #include <glib/gstdio.h>
+#include "icons.h"
 #include "procview.h"
 #include "titlerow.h"
 #include "i18n.h"
@@ -325,8 +326,7 @@ install_chrome_css(void)
         "  margin-right: 10px;"
         "}"
         ".ns-toolbar entry.ns-address > image.right {"
-        "  min-width: 26px;"
-        "  min-height: 26px;"
+        "  padding: 5px;"
         "  margin-left: 6px;"
         "  border-radius: 999px;"
         "}"
@@ -423,7 +423,7 @@ static GtkWidget *
 toolbar_button(const char *icon, const char *tooltip, GCallback cb,
                gpointer data)
 {
-    GtkWidget *b = gtk_button_new_from_icon_name(icon);
+    GtkWidget *b = ns_icon_button_new(icon);
     gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
     gtk_widget_add_css_class(b, "ns-nav-button");
     gtk_widget_set_valign(b, GTK_ALIGN_CENTER);
@@ -481,9 +481,9 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
     pw->loading = loading;
     const char *tip = loading ? ns_i18n("Stop loading this page")
                               : ns_i18n("Reload this page");
-    gtk_button_set_icon_name(GTK_BUTTON(pw->reload),
-                             loading ? "nordstjernen-stop-symbolic"
-                                     : "nordstjernen-reload-symbolic");
+    ns_icon_button_set(GTK_BUTTON(pw->reload),
+                       loading ? "nordstjernen-stop-symbolic"
+                               : "nordstjernen-reload-symbolic");
     gtk_widget_set_tooltip_text(pw->reload, tip);
     set_accessible_label(pw->reload, tip);
 }
@@ -552,14 +552,13 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         gboolean internal = url && g_str_has_prefix(url, "about:");
         const char *page_icon = internal ? "nordstjernen"
                                          : "nordstjernen-globe-symbolic";
-        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY,
-                                          page_icon);
+        ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, page_icon);
         gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, FALSE);
         gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY,
                                         ns_i18n("Page location"));
         return;
     }
-    gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
+    ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
     gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, FALSE);
 
     GString *tip = g_string_new(label);
@@ -667,7 +666,7 @@ update_bookmark_indicator(ProcWindow *pw)
     }
     const char *star = saved ? "nordstjernen-star-filled-symbolic"
                              : "nordstjernen-star-symbolic";
-    gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_SECONDARY, star);
+    ns_icon_entry_set(entry, GTK_ENTRY_ICON_SECONDARY, star);
     gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_SECONDARY,
                                     saved ? ns_i18n("Remove this bookmark")
                                           : ns_i18n("Bookmark this page"));
@@ -1220,8 +1219,8 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             if (icon && fav)
                 gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
             else if (icon)
-                gtk_image_set_from_icon_name(GTK_IMAGE(icon),
-                                             "nordstjernen-page-symbolic");
+                ns_icon_image_set(GTK_IMAGE(icon),
+                                  "nordstjernen-page-symbolic");
             if (icon)
                 gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
         }
@@ -1316,7 +1315,7 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     gtk_button_set_has_frame(GTK_BUTTON(tabbtn), FALSE);
     gtk_widget_add_css_class(tabbtn, "ns-tab-label");
     GtkWidget *tabcontent = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    GtkWidget *icon = gtk_image_new_from_icon_name(
+    GtkWidget *icon = ns_icon_image_new(
         private_mode ? "nordstjernen-private-symbolic"
                      : "nordstjernen-page-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
@@ -1339,8 +1338,7 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     g_signal_connect(tabbtn, "clicked", G_CALLBACK(on_tab_clicked), page);
     gtk_box_append(GTK_BOX(wrapper), tabbtn);
 
-    GtkWidget *close =
-        gtk_button_new_from_icon_name("nordstjernen-close-symbolic");
+    GtkWidget *close = ns_icon_button_new("nordstjernen-close-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
     gtk_widget_add_css_class(close, "ns-tab-close");
     gtk_widget_set_valign(close, GTK_ALIGN_CENTER);
@@ -2446,8 +2444,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(pw->header), FALSE);
     pw->tabstrip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_add_css_class(pw->tabstrip, "ns-tabstrip");
-    pw->newtab_btn =
-        gtk_button_new_from_icon_name("nordstjernen-new-tab-symbolic");
+    pw->newtab_btn = ns_icon_button_new("nordstjernen-new-tab-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);
     gtk_widget_add_css_class(pw->newtab_btn, "ns-newtab");
     gtk_widget_set_tooltip_text(pw->newtab_btn, ns_i18n("New tab"));
@@ -2487,9 +2484,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_widget_set_valign(pw->address, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(pw->address, "ns-address");
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(pw->address),
-                                      GTK_ENTRY_ICON_PRIMARY,
-                                      "nordstjernen-globe-symbolic");
+    ns_icon_entry_set(GTK_ENTRY(pw->address), GTK_ENTRY_ICON_PRIMARY,
+                      "nordstjernen-globe-symbolic");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(pw->address),
                                     GTK_ENTRY_ICON_PRIMARY,
                                     ns_i18n("Page location"));
@@ -2577,8 +2573,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
     g_object_unref(appmenu_about);
     GtkWidget *menu_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
-                                  "nordstjernen-menu-symbolic");
+    ns_icon_menu_button_set(GTK_MENU_BUTTON(menu_button),
+                            "nordstjernen-menu-symbolic");
     gtk_widget_add_css_class(menu_button, "ns-nav-button");
     gtk_widget_set_valign(menu_button, GTK_ALIGN_CENTER);
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
@@ -2916,7 +2912,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     ProcAppCtx *ctx = user_data;
     setlocale(LC_NUMERIC, "C");
     install_icon_search_paths();
-    gtk_window_set_default_icon_name("nordstjernen");
+    ns_icon_install_window_icon("nordstjernen");
 #ifdef __APPLE__
     ns_macos_set_dock_icon();
 #endif
