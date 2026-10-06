@@ -27,6 +27,13 @@ Changelog:
 * Underlines, overlines and line-throughs skip inline-blocks and images
   inside a link: an avatar inside a link no longer gets a stray line
   under it.
+* SVG presentation attributes (`fill`, `stroke`, `stroke-width`,
+  `stop-color`, `visibility` and the other paint attributes) take part
+  in the cascade as presentational hints. A value inherited from an
+  ancestor no longer beats the element's own attribute: YouTube's
+  icon wrapper sets `fill: currentcolor`, which painted the red play
+  button of the YouTube logo black. `getComputedStyle` reports the
+  attribute value as well.
 * Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
   `replaceChildren()` and setting `textContent` now invalidate the
   styles that depend on sibling position. Before, an item that stopped
