@@ -306,6 +306,9 @@ int ns_browser_security(ns_browser *browser, const char **out_ip);
  * href, meta refresh) since the last call, or NULL. Newly allocated; free()
  * it. Returning it clears the pending state. */
 char *ns_browser_take_pending_nav(ns_browser *browser);
+/* 1 when the page's scripts pushed a new same-document history entry
+ * (history.pushState) since the last call, else 0. */
+int ns_browser_take_soft_nav_pushed(ns_browser *browser);
 int ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y);
 int ns_browser_take_pending_scroll(ns_browser *browser, int *out_scroll_x,
                                    int *out_scroll_y);

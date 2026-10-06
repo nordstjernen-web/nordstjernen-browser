@@ -740,6 +740,11 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *download_e = json_escape(download ? download : "");
         char *audio_e = json_escape(audio ? audio : "");
         char *window_action_e = json_escape(window_action ? window_action : "");
+        char *title = ns_browser_title(s->cur);
+        char *page_url = ns_browser_url(s->cur);
+        char *title_e = json_escape(title ? title : "");
+        char *url_e = json_escape(page_url ? page_url : "");
+        int url_pushed = ns_browser_take_soft_nav_pushed(s->cur);
         int page_w = 0, page_h = 0;
         ns_browser_page_size(s->cur, &page_w, &page_h);
         char *json = NULL;
@@ -748,11 +753,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"page_width\":%d,\"page_height\":%d,\"nav\":\"%s\","
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"audio\":\"%s\","
-            "\"window_action\":\"%s\"}",
+            "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
+            "\"url_pushed\":%d}",
             changed != 0, session_animating(s) ? 1 : 0,
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
-            audio_e ? audio_e : "", window_action_e ? window_action_e : "");
+            audio_e ? audio_e : "", window_action_e ? window_action_e : "",
+            title_e ? title_e : "", url_e ? url_e : "", url_pushed);
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);
@@ -763,6 +770,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(download_e);
         free(audio_e);
         free(window_action_e);
+        free(title_e);
+        free(url_e);
+        free(title);
+        free(page_url);
         free(nav);
         free(webgl);
         free(camera);

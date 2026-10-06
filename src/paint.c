@@ -2011,6 +2011,34 @@ attr_insert_range(NsPangoAttrList *attrs, NsPangoAttribute *a,
     ns_pango_attr_list_insert(attrs, a);
 }
 
+static void
+decoration_insert_around_atomics(NsPangoAttrList *attrs, NsPangoAttribute *a,
+                                 const char *text, gsize start, gsize len)
+{
+    static const char placeholder[] = "\xef\xbf\xbc";
+    if (!a) return;
+    gsize text_len = text ? strlen(text) : 0;
+    gsize end = MIN(start + len, text_len);
+    gsize seg = start;
+    for (gsize p = start; p + 3 <= end; ) {
+        if (memcmp(text + p, placeholder, 3) != 0) {
+            p++;
+            continue;
+        }
+        if (p > seg)
+            attr_insert_range(attrs, ns_pango_attribute_copy(a), seg, p - seg);
+        p += 3;
+        seg = p;
+    }
+    if (seg == start && end - start == len) {
+        attr_insert_range(attrs, a, start, len);
+        return;
+    }
+    if (end > seg) attr_insert_range(attrs, ns_pango_attribute_copy(a), seg,
+                                     end - seg);
+    ns_pango_attribute_destroy(a);
+}
+
 static gsize
 find_ci_substring(const char *hay, gsize hay_len,
                   const char *needle, gsize needle_len,
@@ -2839,12 +2867,18 @@ apply_first_line_attrs(NsPangoAttrList *attrs, const ns_style *fl,
                 start, len);
     }
     const ns_css_value *bg = fl->values[NS_CSS_BACKGROUND_COLOR];
-    if (bg && bg->kind == NS_CSS_V_COLOR)
+    if (bg && bg->kind == NS_CSS_V_COLOR && bg->u.color.a > 0) {
         attr_insert_range(attrs,
             ns_pango_attr_background_new((guint16)(bg->u.color.r * 0x101),
                                       (guint16)(bg->u.color.g * 0x101),
                                       (guint16)(bg->u.color.b * 0x101)),
             start, len);
+        if (bg->u.color.a < 255)
+            attr_insert_range(attrs,
+                ns_pango_attr_background_alpha_new(
+                    (guint16)(bg->u.color.a * 0x101)),
+                start, len);
+    }
     int fw = ns_css_font_weight_number(fl->values[NS_CSS_FONT_WEIGHT], -1);
     if (fw > 0)
         attr_insert_range(attrs, ns_pango_attr_weight_new(ns_pango_weight_from_css(fw)),
@@ -3360,10 +3394,16 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                         r->start, r->len);
                 break;
             case NS_INLINE_BG_COLOR:
+                if (r->a == 0) break;
                 a = ns_pango_attr_background_new(
                     (guint16)(r->r * 0x101),
                     (guint16)(r->g * 0x101),
                     (guint16)(r->b * 0x101));
+                if (r->a < 255)
+                    attr_insert_range(attrs,
+                        ns_pango_attr_background_alpha_new(
+                            (guint16)(r->a * 0x101)),
+                        r->start, r->len);
                 break;
             case NS_INLINE_FONT_FAMILY:
                 if (r->family) {
@@ -3405,7 +3445,13 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 break;
             }
             }
-            attr_insert_range(attrs, a, r->start, r->len);
+            if (r->kind == NS_INLINE_UNDERLINE ||
+                r->kind == NS_INLINE_OVERLINE ||
+                r->kind == NS_INLINE_STRIKETHROUGH)
+                decoration_insert_around_atomics(attrs, a, b->text,
+                                                 r->start, r->len);
+            else
+                attr_insert_range(attrs, a, r->start, r->len);
         }
     }
     if (highlight && *highlight) {
@@ -3552,6 +3598,156 @@ paint_selection_foreground(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
     g_array_free(rects, TRUE);
 }
 
+static gboolean
+paint_inline_lines_at_layout_heights(cairo_t *cr, const ns_box *b,
+                                     NsPangoLayout *layout, double text_x)
+{
+    const GArray *heights = b->atomic_line_heights;
+    if (!heights || heights->len < 2 ||
+        (guint)ns_pango_layout_get_line_count(layout) != heights->len)
+        return FALSE;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    double line_top = b->y;
+    guint i = 0;
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        double line_h = g_array_index(heights, double, i);
+        double pango_h = (double)logical.height / NS_PANGO_SCALE;
+        double baseline = (double)(ns_pango_layout_iter_get_baseline(it) -
+                                   logical.y) / NS_PANGO_SCALE;
+        cairo_move_to(cr, text_x + (double)logical.x / NS_PANGO_SCALE,
+                      line_top + (line_h - pango_h) / 2.0 + baseline);
+        ns_pango_cairo_show_layout_line(cr, line);
+        line_top += line_h;
+        i++;
+    } while (i < heights->len && ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    return TRUE;
+}
+
+static double *
+paint_inline_line_baselines(const ns_box *b, NsPangoLayout *layout,
+                            double y_origin)
+{
+    int n = ns_pango_layout_get_line_count(layout);
+    double *out = g_new0(double, n > 0 ? n : 1);
+    const GArray *heights = b->atomic_line_heights;
+    gboolean by_layout = heights && heights->len >= 2 &&
+                         heights->len == (guint)n;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    double line_top = b->y;
+    int i = 0;
+    do {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        int baseline = ns_pango_layout_iter_get_baseline(it);
+        if (by_layout) {
+            double line_h = g_array_index(heights, double, i);
+            out[i] = line_top +
+                (line_h - (double)logical.height / NS_PANGO_SCALE) / 2.0 +
+                (double)(baseline - logical.y) / NS_PANGO_SCALE;
+            line_top += line_h;
+        } else {
+            out[i] = y_origin + (double)baseline / NS_PANGO_SCALE;
+        }
+        i++;
+    } while (i < n && ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    return out;
+}
+
+static void
+inline_font_extents(const ns_style *s, double *ascent, double *descent)
+{
+    NsPangoLayout *l = paint_create_layout();
+    ns_paint_apply_inline_font(l, s);
+    NsPangoFontMetrics *fm = ns_pango_context_get_metrics(
+        ns_pango_layout_get_context(l),
+        ns_pango_layout_get_font_description(l), NULL);
+    *ascent = fm ? ns_pango_font_metrics_get_ascent(fm) / (double)NS_PANGO_SCALE
+                 : length_or(s->values[NS_CSS_FONT_SIZE], 16) * 0.8;
+    *descent = fm ? ns_pango_font_metrics_get_descent(fm) / (double)NS_PANGO_SCALE
+                  : length_or(s->values[NS_CSS_FONT_SIZE], 16) * 0.2;
+    if (fm) ns_pango_font_metrics_unref(fm);
+    g_object_unref(l);
+}
+
+static void
+paint_inline_element_fragment(cairo_t *cr, const ns_inline_attr *r,
+                              double x0, double x1, double y0, double y1,
+                              gboolean open_start, gboolean open_end)
+{
+    double reach = (y1 - y0) + 64.0;
+    double bx0 = open_start ? x0 - reach : x0;
+    double bx1 = open_end ? x1 + reach : x1;
+    cairo_save(cr);
+    if (open_start || open_end) {
+        cairo_rectangle(cr, x0, y0 - reach, x1 - x0, (y1 - y0) + 2 * reach);
+        cairo_clip(cr);
+    }
+    paint_inline_css_chrome(cr, r, bx0, y0, bx1 - bx0, y1 - y0);
+    cairo_restore(cr);
+}
+
+static void
+paint_inline_element_boxes(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                           double text_x, double y_origin)
+{
+    if (!b->attrs) return;
+    double *baselines = NULL;
+    for (gint i = (gint)b->attrs->len - 1; i >= 0; i--) {
+        const ns_inline_attr *r =
+            &g_array_index(b->attrs, ns_inline_attr, (guint)i);
+        if (r->kind != NS_INLINE_ELEMENT || r->len == 0 ||
+            !style_has_inline_box_paint(r->style))
+            continue;
+        if (!baselines)
+            baselines = paint_inline_line_baselines(b, layout, y_origin);
+        const ns_style *s = r->style;
+        double ascent, descent;
+        inline_font_extents(s, &ascent, &descent);
+        double above = ascent + length_or(s->values[NS_CSS_PADDING_TOP], 0) +
+            (style_side_visible(s, NS_CSS_BORDER_TOP_WIDTH,
+                                NS_CSS_BORDER_TOP_STYLE)
+                 ? length_or(s->values[NS_CSS_BORDER_TOP_WIDTH], 0) : 0);
+        double below = descent +
+            length_or(s->values[NS_CSS_PADDING_BOTTOM], 0) +
+            (style_side_visible(s, NS_CSS_BORDER_BOTTOM_WIDTH,
+                                NS_CSS_BORDER_BOTTOM_STYLE)
+                 ? length_or(s->values[NS_CSS_BORDER_BOTTOM_WIDTH], 0) : 0);
+        int start = (int)r->start, end = (int)(r->start + r->len);
+        NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+        int line_index = 0;
+        do {
+            NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+            int s0 = MAX(start, line->start_index);
+            int e0 = MIN(end, line->start_index + line->length);
+            int *ranges = NULL, n_ranges = 0;
+            if (s0 < e0)
+                ns_pango_layout_line_get_x_ranges(line, s0, e0,
+                                                  &ranges, &n_ranges);
+            if (n_ranges > 0) {
+                int lo = ranges[0], hi = ranges[1];
+                for (int k = 1; k < n_ranges; k++) {
+                    lo = MIN(lo, ranges[2 * k]);
+                    hi = MAX(hi, ranges[2 * k + 1]);
+                }
+                double base = baselines[line_index];
+                paint_inline_element_fragment(cr, r,
+                    text_x + (double)lo / NS_PANGO_SCALE,
+                    text_x + (double)hi / NS_PANGO_SCALE,
+                    base - above, base + below, s0 > start, e0 < end);
+            }
+            g_free(ranges);
+            line_index++;
+        } while (ns_pango_layout_iter_next_line(it));
+        ns_pango_layout_iter_free(it);
+    }
+    g_free(baselines);
+}
+
 static void
 paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -3619,6 +3815,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         ((ns_box *)b)->paint_layout = (NsPangoLayout *)g_object_ref(layout);
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double y_origin = b->y + y_offset;
+
+    paint_inline_element_boxes(cr, b, layout, text_x, y_origin);
 
     if (b->attrs) {
         double opt_minx = 1e9, opt_maxx = -1e9, opt_miny = 1e9, opt_maxy = -1e9;
@@ -3817,8 +4015,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     cairo_save(cr);
     set_source_rgba(cr, color);
-    cairo_move_to(cr, text_x, y_origin);
-    ns_pango_cairo_show_layout(cr, layout);
+    if (!paint_inline_lines_at_layout_heights(cr, b, layout, text_x)) {
+        cairo_move_to(cr, text_x, y_origin);
+        ns_pango_cairo_show_layout(cr, layout);
+    }
     cairo_restore(cr);
 
     if (sel_run)
@@ -4000,7 +4200,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
             double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
-            double sy = b->y + (double)pos.y / NS_PANGO_SCALE;
+            double sy = b->atomic_line_heights
+                ? a->box->y - a->box->rel_dy
+                : b->y + (double)pos.y / NS_PANGO_SCALE;
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
             cairo_save(cr);
@@ -4127,7 +4329,9 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
             atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE;
-            atomic->owner_offset_y = (double)pos.y / NS_PANGO_SCALE;
+            atomic->owner_offset_y = root->atomic_line_heights && atomic->box
+                ? atomic->box->y - atomic->box->rel_dy - root->y
+                : (double)pos.y / NS_PANGO_SCALE;
         }
         g_object_unref(layout);
     }
@@ -6283,6 +6487,106 @@ mask_gradient_pattern(const ns_css_gradient *gr,
 }
 
 
+static gboolean
+mask_layer_is_gradient(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_GRADIENT && !v->u.gradient.conic;
+}
+
+static gboolean
+mask_layer_is_none(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           strcmp(v->u.keyword, "none") == 0;
+}
+
+static gboolean
+mask_layers_paintable(const ns_style *s)
+{
+    const ns_css_value *mask = s ? s->values[NS_CSS_MASK_IMAGE] : NULL;
+    gboolean any = FALSE;
+    for (const ns_css_value *l = mask; l; l = l->next_layer) {
+        if (mask_layer_is_gradient(l)) any = TRUE;
+        else if (!mask_layer_is_none(l)) return FALSE;
+    }
+    return any;
+}
+
+static cairo_operator_t
+mask_composite_operator(const ns_css_value *v)
+{
+    const char *op = v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+    if (!op) return CAIRO_OPERATOR_OVER;
+    if (strcmp(op, "subtract") == 0) return CAIRO_OPERATOR_OUT;
+    if (strcmp(op, "intersect") == 0) return CAIRO_OPERATOR_IN;
+    if (strcmp(op, "exclude") == 0) return CAIRO_OPERATOR_XOR;
+    return CAIRO_OPERATOR_OVER;
+}
+
+static void
+mask_clip_box_path(cairo_t *cr, const ns_box *b, const ns_css_value *clip)
+{
+    const char *kw = clip && clip->kind == NS_CSS_V_KEYWORD
+        ? clip->u.keyword : NULL;
+    double x = b->x + b->margin.left, y = b->y + b->margin.top;
+    double w = b->content_width + b->padding.left + b->padding.right +
+               b->border.left + b->border.right;
+    double h = b->content_height + b->padding.top + b->padding.bottom +
+               b->border.top + b->border.bottom;
+    corner_radii radii = box_border_radii(b);
+    double t = 0, r = 0, bo = 0, l = 0;
+    if (kw && (strcmp(kw, "padding-box") == 0 ||
+               strcmp(kw, "content-box") == 0)) {
+        t = b->border.top; r = b->border.right;
+        bo = b->border.bottom; l = b->border.left;
+    }
+    if (kw && strcmp(kw, "content-box") == 0) {
+        t += b->padding.top; r += b->padding.right;
+        bo += b->padding.bottom; l += b->padding.left;
+    }
+    if (kw && strcmp(kw, "no-clip") == 0) {
+        cairo_rectangle(cr, x - 1e5, y - 1e5, w + 2e5, h + 2e5);
+        return;
+    }
+    rounded_rect_path(cr, x + l, y + t, MAX(0.0, w - l - r),
+                      MAX(0.0, h - t - bo),
+                      corner_radii_inset(radii, t, r, bo, l));
+}
+
+static cairo_pattern_t *
+mask_layers_pattern(cairo_t *cr, const ns_box *b)
+{
+    const ns_style *s = b->style;
+    const ns_css_value *mask = s->values[NS_CSS_MASK_IMAGE];
+    int n = 0;
+    for (const ns_css_value *l = mask; l; l = l->next_layer) n++;
+    double bx = b->x + b->margin.left, by = b->y + b->margin.top;
+    double bw = b->content_width + b->padding.left + b->padding.right +
+                b->border.left + b->border.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom +
+                b->border.top + b->border.bottom;
+    cairo_push_group_with_content(cr, CAIRO_CONTENT_ALPHA);
+    for (int i = n - 1; i >= 0; i--) {
+        const ns_css_value *layer = ns_css_value_layer(mask, i);
+        cairo_pattern_t *grad = mask_layer_is_gradient(layer)
+            ? mask_gradient_pattern(&layer->u.gradient, bx, by, bw, bh) : NULL;
+        cairo_save(cr);
+        cairo_new_path(cr);
+        mask_clip_box_path(cr, b, ns_css_value_layer(
+            s->values[NS_CSS_MASK_CLIP], i));
+        cairo_clip(cr);
+        cairo_set_operator(cr, i == n - 1 ? CAIRO_OPERATOR_OVER
+            : mask_composite_operator(ns_css_value_layer(
+                  s->values[NS_CSS_MASK_COMPOSITE], i)));
+        if (grad) cairo_set_source(cr, grad);
+        else cairo_set_source_rgba(cr, 0, 0, 0, 0);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        if (grad) cairo_pattern_destroy(grad);
+    }
+    return cairo_pop_group(cr);
+}
+
 static void
 paint_cache_clip(cairo_t *cr)
 {
@@ -7094,9 +7398,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     gboolean skip_contents = box_skips_contents(b);
     double op = box_opacity(b);
     cairo_operator_t blend = blend_mode_operator(style);
-    const ns_css_value *mask_v = style ? style->values[NS_CSS_MASK_IMAGE] : NULL;
-    gboolean mask_grad = mask_v && mask_v->kind == NS_CSS_V_GRADIENT &&
-                         !mask_v->u.gradient.conic;
+    gboolean mask_grad = mask_layers_paintable(style);
     gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask_grad;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
@@ -7581,14 +7883,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_operator_t saved_op = cairo_get_operator(cr);
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
         cairo_pattern_t *mp = NULL;
-        if (mask_grad) {
-            double bx = b->x + b->margin.left, by = b->y + b->margin.top;
-            double bw = b->content_width + b->padding.left + b->padding.right +
-                        b->border.left + b->border.right;
-            double bh = b->content_height + b->padding.top + b->padding.bottom +
-                        b->border.top + b->border.bottom;
-            mp = mask_gradient_pattern(&mask_v->u.gradient, bx, by, bw, bh);
-        }
+        if (mask_grad) mp = mask_layers_pattern(cr, b);
         if (mp) {
             cairo_mask(cr, mp);
         } else {

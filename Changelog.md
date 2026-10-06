@@ -3,6 +3,139 @@ Changelog:
 
 1.0.30:
 ======
+* A frame's `history.pushState` and `replaceState` act on the History
+  object they are called on. YouTube binds the methods of a hidden
+  `about:blank` frame to the top window's history, so every navigation
+  to another video changed that frame's URL and left the page's URL,
+  `history.state` and back button on the first video.
+* `ResizeObserver.disconnect()` and `unobserve()` work. Both were bound
+  to a no-op on the prototype, so a disconnected observer kept firing;
+  YouTube's like counter threw a `TypeError` from such a callback on
+  every navigation.
+* The address bar, tab title and back button follow same-document
+  navigations. The renderer reported a page's URL and title only when it
+  opened, so after YouTube moved to another video with
+  `history.pushState` the shell kept showing the first video; the
+  regular tick now carries both, and a pushed entry becomes a back step.
+* Inline elements paint their own box: background over the padding,
+  `border-radius`, and borders, sliced at line breaks so only the first
+  and last fragment get the left and right edges. Before, an inline
+  element's background covered only its glyphs and its borders were not
+  drawn or given space at all. YouTube's description link chips and
+  Stack Overflow's inline `code` now get their rounded, padded
+  background.
+* A translucent background on an inline element is painted with its
+  alpha. Pango's background attribute is opaque, so YouTube's
+  `rgba(0,0,0,.05)` link chip in a video description became a solid
+  black bar that hid its text.
+* `white-space` on an inline element applies to its own text. The
+  whole inline run used the mode of its first node, so a `pre-wrap` span
+  inside a normal block lost its line breaks, and a `normal` span inside
+  a `pre-wrap` block kept its runs of spaces. YouTube's
+  `yt-formatted-string[split-lines]` relies on this for the blank line
+  between paragraphs of its notices and descriptions.
+* `::before` and `::after` inside inline content get their own box
+  model. An inline pseudo-element now keeps its horizontal margin and
+  padding, so YouTube's `89K • Streamed 1mo ago` and El País's section
+  separators are spaced as in Chrome instead of running together. An
+  `inline-block` pseudo-element inside an inline element is laid out as
+  a box instead of flattened into text, which brings back the Guardian's
+  pulsing live dot; and a pseudo-element's padding and margin are no
+  longer counted twice when its width is measured, which made Amazon's
+  video controls and YouTube's ad badge 8-10px too wide.
+* An inline-block in a centered or right-aligned `white-space: nowrap`
+  line reports its real position to scripts and hit testing. Paint
+  already aligned the line, but layout placed the inline-blocks as if it
+  were left-aligned, so BBC's centered section menu reported x=0 instead
+  of 259 and YouTube's search tab icon sat 8px left of its button center.
+* Text and inline-blocks that share wrapped lines are painted on the
+  line boxes that layout computed. Paint drew each line at Pango's own
+  line height and each inline-block at Pango's position, so with a CSS
+  line-height the second and later lines drifted away from the layout:
+  a link after a wrapped paragraph on YouTube floated above the
+  baseline and text overlapped the inline-blocks around it. Text on a
+  single line is drawn as before, and the horizontal position still
+  comes from Pango so `text-align` keeps working.
+* An image or SVG with a percentage width no longer widens the boxes
+  around it when they are sized to their min-content. Such a replaced
+  element is compressible: its min-content contribution is zero, as in
+  Chrome. Before, a YouTube channel name next to a 100%-wide verified
+  badge kept the full name width, so the badge drew on top of the text.
+* Flex layout stops laying the same item out again when nothing it
+  depends on changed. A row flex item was laid out twice, once to
+  measure its height and once at its final place, and a stretched item
+  a third time with its new definite height; nested flex containers
+  multiplied that, so a 1,500-box YouTube page took 37,000 box layouts
+  per relayout. The second pass now moves the already laid out subtree
+  when the width is the same and nothing inside read the item's
+  definite height, and an inline-block is laid out a second time only
+  when the first pass changed its size. A forced relayout of a saved
+  YouTube watch page drops from 74 ms to 8 ms; the layout of 6,587
+  flexbox, grid, alignment, sizing and inline WPT files is unchanged.
+* Fewer styles are recomputed after DOM changes. Setting an attribute to
+  the value it already has no longer restyles anything (YouTube rewrites
+  the same custom properties into `ytd-watch-flexy`'s `style` attribute
+  dozens of times, each restyling ~2,500 elements); removing a child
+  restyles only the `:has()` anchors around it unless a structural
+  selector applies; and a parent with more than 64 children is no longer
+  restyled whole on every insertion, because the structural-selector
+  check now scans all children with hash lookups instead of giving up.
+* YouTube restyles incrementally again, about five times faster per
+  forced layout. One `:has()` selector whose compound had no class, id,
+  type or attribute to key on (`:not(:has(...))`, or a bare `:has(> x)`
+  after a descendant combinator) turned incremental restyle off for the
+  whole page, so every `offsetWidth` read recomputed all ~4000 styles.
+  Such an anchor now keys on the compound that holds the `:not()`, or on
+  the nearest keyed compound to its left. An anchor also has to match
+  every key of its compound, not just the first: `#content.x:has(...)`
+  used to match YouTube's top-level `#content` and restyle the whole app
+  after any change.
+* `-webkit-line-clamp` clamps. `display: -webkit-box` with
+  `-webkit-box-orient: vertical` and a line clamp now lays out as a
+  block container whose text stops at the clamp line with an ellipsis,
+  as in Chrome, instead of a flex row that showed every line. YouTube's
+  "N chapters" rows spilled their whole chapter list over the results
+  below. `-webkit-box-orient: vertical` without a clamp stacks the
+  children, and `getComputedStyle` reports `-webkit-box` as written.
+* An empty block that starts a new formatting context (`display: flex`,
+  `grid`, `flow-root`, `overflow: hidden`) stops margins from collapsing
+  through it, so a later child's top margin no longer escapes to the
+  parent's top edge.
+* Underlines, overlines and line-throughs skip inline-blocks and images
+  inside a link: an avatar inside a link no longer gets a stray line
+  under it.
+* SVG presentation attributes (`fill`, `stroke`, `stroke-width`,
+  `stop-color`, `visibility` and the other paint attributes) take part
+  in the cascade as presentational hints. A value inherited from an
+  ancestor no longer beats the element's own attribute: YouTube's
+  icon wrapper sets `fill: currentcolor`, which painted the red play
+  button of the YouTube logo black. `getComputedStyle` reports the
+  attribute value as well.
+* CSS masks take several layers. The `mask` / `-webkit-mask` shorthand,
+  `mask-clip` and `mask-composite` (with the legacy `-webkit-` keywords)
+  are parsed per layer, and gradient layers are composited the way
+  Chrome does: each layer inside its own clip box, with `add`,
+  `subtract`, `intersect` or `exclude`. The common "border only"
+  idiom, `linear-gradient(#fff 0 0) content-box exclude,
+  linear-gradient(#fff 0 0)`, now leaves a thin rim. YouTube's buttons
+  use it for their rim light, which was painted as a gradient band
+  across the whole button.
+* `querySelector` and `querySelectorAll` find every element whose
+  selector ends in an id when the id is used more than once.
+  `document.querySelectorAll('#owner #avatar')` returned nothing on
+  YouTube, which repeats ids such as `avatar`, `content` and `text` in
+  every component, because only the first element with that id was
+  tested.
+* A timer or animation frame callback belongs to the window whose
+  `setTimeout` or `requestAnimationFrame` was called. When an iframe's
+  script called a function of its parent that scheduled one, the
+  callback was tied to the iframe and silently dropped once the iframe
+  was removed, which could leave the parent's scheduler waiting forever.
+* Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
+  `replaceChildren()` and setting `textContent` now invalidate the
+  styles that depend on sibling position. Before, an item that stopped
+  being `:last-child` because a fragment was appended after it kept its
+  `:last-child` style.
 * The toolbar, tab-strip and address-bar icons render on systems without
   librsvg's GdkPixbuf loader (Debian/Ubuntu `librsvg2-common`), which a
   KDE or minimal desktop often lacks. GTK hands SVG icons, symbolic ones

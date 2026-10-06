@@ -441,6 +441,9 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_ANIMATION_COMPOSITION] = "animation-composition",
     [NS_CSS_COUNTER_SET]          = "counter-set",
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = "overflow-clip-margin",
+    [NS_CSS_WEBKIT_BOX_ORIENT]    = "-webkit-box-orient",
+    [NS_CSS_MASK_CLIP]            = "mask-clip",
+    [NS_CSS_MASK_COMPOSITE]       = "mask-composite",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9567,6 +9570,9 @@ ns_css_initial_value_text(const char *name)
         { "column-rule-style",          "none" },
         { "column-rule-width",          "0px" },
         { "line-clamp",                 "none" },
+        { "-webkit-box-orient",         "horizontal" },
+        { "mask-clip",                  "border-box" },
+        { "mask-composite",             "add" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10085,6 +10091,8 @@ static const struct {
                               .inner = NS_DISPLAY_INNER_TABLE } },
     { "flex",               { .outer = NS_DISPLAY_OUTER_BLOCK,
                               .inner = NS_DISPLAY_INNER_FLEX } },
+    { "-webkit-box",        { .outer = NS_DISPLAY_OUTER_BLOCK,
+                              .inner = NS_DISPLAY_INNER_FLEX } },
     { "grid",               { .outer = NS_DISPLAY_OUTER_BLOCK,
                               .inner = NS_DISPLAY_INNER_GRID } },
     { "list-item",          { .outer = NS_DISPLAY_OUTER_BLOCK,
@@ -10095,6 +10103,8 @@ static const struct {
     { "inline-table",       { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_TABLE } },
     { "inline-flex",        { .outer = NS_DISPLAY_OUTER_INLINE,
+                              .inner = NS_DISPLAY_INNER_FLEX } },
+    { "-webkit-inline-box", { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_FLEX } },
     { "inline-grid",        { .outer = NS_DISPLAY_OUTER_INLINE,
                               .inner = NS_DISPLAY_INNER_GRID } },
@@ -10268,10 +10278,11 @@ normalize_display_value(const char *text)
         { "-ms-inline-flexbox",   "inline-flex" },
         { "-webkit-grid",         "grid" },
         { "-ms-grid",             "grid" },
-        { "-webkit-box",          "flex" },
-        { "-webkit-inline-box",   "inline-flex" },
     };
     char *kw = ascii_lower(text, strlen(text));
+    if (strcmp(kw, "-webkit-box") == 0 ||
+        strcmp(kw, "-webkit-inline-box") == 0)
+        return kw;
     for (guint i = 0; i < G_N_ELEMENTS(prefixed); i++)
         if (strcmp(kw, prefixed[i].alias) == 0) {
             g_free(kw);
@@ -11096,6 +11107,38 @@ value_has_top_level_comma(const char *t)
     return FALSE;
 }
 
+static const char *
+mask_box_keyword(const char *t)
+{
+    static const char *const boxes[] = {
+        "border-box", "padding-box", "content-box", "fill-box",
+        "stroke-box", "view-box", "no-clip",
+    };
+    static const struct { const char *legacy, *box; } legacy[] = {
+        { "border", "border-box" }, { "padding", "padding-box" },
+        { "content", "content-box" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(boxes); i++)
+        if (g_ascii_strcasecmp(t, boxes[i]) == 0) return boxes[i];
+    for (gsize i = 0; i < G_N_ELEMENTS(legacy); i++)
+        if (g_ascii_strcasecmp(t, legacy[i].legacy) == 0) return legacy[i].box;
+    return NULL;
+}
+
+static const char *
+mask_composite_keyword(const char *t)
+{
+    static const struct { const char *name, *op; } ops[] = {
+        { "add", "add" }, { "subtract", "subtract" },
+        { "intersect", "intersect" }, { "exclude", "exclude" },
+        { "source-over", "add" }, { "source-in", "intersect" },
+        { "source-out", "subtract" }, { "xor", "exclude" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(ops); i++)
+        if (g_ascii_strcasecmp(t, ops[i].name) == 0) return ops[i].op;
+    return NULL;
+}
+
 static gboolean
 prop_is_bg_layered(ns_css_prop prop)
 {
@@ -11106,7 +11149,10 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_POSITION_Y ||
            prop == NS_CSS_BACKGROUND_CLIP ||
            prop == NS_CSS_BACKGROUND_ORIGIN ||
-           prop == NS_CSS_BACKGROUND_ATTACHMENT;
+           prop == NS_CSS_BACKGROUND_ATTACHMENT ||
+           prop == NS_CSS_MASK_IMAGE ||
+           prop == NS_CSS_MASK_CLIP ||
+           prop == NS_CSS_MASK_COMPOSITE;
 }
 
 static char *
@@ -12700,6 +12746,20 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_TEXT_OVERFLOW:
         v = parse_keyword_choice(t, "clip ellipsis");
         break;
+    case NS_CSS_WEBKIT_BOX_ORIENT:
+        v = parse_keyword_choice(t,
+            "horizontal vertical inline-axis block-axis");
+        break;
+    case NS_CSS_MASK_CLIP: {
+        const char *box = mask_box_keyword(t);
+        if (box) v = keyword_value_dup(box);
+        break;
+    }
+    case NS_CSS_MASK_COMPOSITE: {
+        const char *op = mask_composite_keyword(t);
+        if (op) v = keyword_value_dup(op);
+        break;
+    }
     case NS_CSS_TEXT_DECORATION_STYLE:
         v = parse_keyword_choice(t, "solid double dotted dashed wavy");
         break;
@@ -13897,10 +13957,12 @@ prop_id(const char *name)
     if (g_ascii_strcasecmp(name, "text-wrap") == 0 ||
         g_ascii_strcasecmp(name, "text-wrap-mode") == 0)
         return NS_CSS_WHITE_SPACE;
-    if (g_ascii_strcasecmp(name, "-webkit-mask-image") == 0 ||
-        g_ascii_strcasecmp(name, "-webkit-mask") == 0 ||
-        g_ascii_strcasecmp(name, "mask") == 0)
+    if (g_ascii_strcasecmp(name, "-webkit-mask-image") == 0)
         return NS_CSS_MASK_IMAGE;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-clip") == 0)
+        return NS_CSS_MASK_CLIP;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-composite") == 0)
+        return NS_CSS_MASK_COMPOSITE;
     if (g_ascii_strcasecmp(name, "-webkit-background-clip") == 0)
         return NS_CSS_BACKGROUND_CLIP;
     if (g_ascii_strcasecmp(name, "-webkit-border-radius") == 0)
@@ -15463,6 +15525,90 @@ bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
     return ok;
 }
 
+static void
+mask_layer_chain_append(ns_css_value **head, ns_css_value **tail,
+                        ns_css_value *v)
+{
+    if (*tail) (*tail)->next_layer = v;
+    else *head = v;
+    *tail = v;
+}
+
+typedef struct mask_layer_parts {
+    const char *image;
+    const char *boxes[2];
+    int n_boxes;
+    const char *op;
+} mask_layer_parts;
+
+static void
+mask_layer_classify(char **toks, int n, mask_layer_parts *out)
+{
+    for (int i = 0; i < n; i++) {
+        const char *box = mask_box_keyword(toks[i]);
+        const char *comp = mask_composite_keyword(toks[i]);
+        if (box && out->n_boxes < 2) out->boxes[out->n_boxes++] = box;
+        else if (comp && !out->op) out->op = comp;
+        else if (!out->image && (strchr(toks[i], '(') ||
+                                 g_ascii_strcasecmp(toks[i], "none") == 0))
+            out->image = toks[i];
+    }
+}
+
+static gboolean
+mask_layer_append(const char *layer, ns_css_value **heads,
+                  ns_css_value **tails)
+{
+    char *toks[24] = {0};
+    int n = split_ws_limit(layer, toks, G_N_ELEMENTS(toks));
+    mask_layer_parts parts = {0};
+    mask_layer_classify(toks, n, &parts);
+    ns_css_value *iv = parse_value_for(NS_CSS_MASK_IMAGE,
+                                       parts.image ? parts.image : "none");
+    gboolean ok = iv != NULL;
+    if (ok) {
+        const char *clip = parts.n_boxes ? parts.boxes[parts.n_boxes - 1]
+                                         : "border-box";
+        mask_layer_chain_append(&heads[0], &tails[0], iv);
+        mask_layer_chain_append(&heads[1], &tails[1], keyword_value_dup(clip));
+        mask_layer_chain_append(&heads[2], &tails[2],
+                                keyword_value_dup(parts.op ? parts.op : "add"));
+    }
+    for (int i = 0; i < n; i++) g_free(toks[i]);
+    return ok;
+}
+
+static gboolean
+parse_mask_shorthand(const char *vtext, gboolean important, GArray *decls_out)
+{
+    static const ns_css_prop props[] = {
+        NS_CSS_MASK_IMAGE, NS_CSS_MASK_CLIP, NS_CSS_MASK_COMPOSITE,
+    };
+    ns_css_value *heads[3] = {0}, *tails[3] = {0};
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    gboolean ok = TRUE;
+    if (wide) {
+        for (gsize f = 0; f < G_N_ELEMENTS(props); f++)
+            heads[f] = f ? ns_css_value_dup(wide) : wide;
+    } else {
+        GPtrArray *layers = css_split_top_level_commas(vtext);
+        ok = layers->len > 0;
+        for (guint li = 0; ok && li < layers->len; li++)
+            ok = mask_layer_append(g_ptr_array_index(layers, li), heads, tails);
+        g_ptr_array_free(layers, TRUE);
+    }
+    for (gsize f = 0; f < G_N_ELEMENTS(props); f++) {
+        if (!ok) {
+            ns_css_value_free(heads[f]);
+            continue;
+        }
+        ns_css_decl d = { .prop = props[f], .value = heads[f],
+                          .important = important };
+        g_array_append_val(decls_out, d);
+    }
+    return ok;
+}
+
 static gboolean
 parse_background_shorthand(const char *vtext, gboolean important,
                            GArray *decls_out)
@@ -16463,6 +16609,14 @@ parse_declaration_block(const char **pp, const char *end,
             break;
         }
         if (aliased_prop) {
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
+        }
+
+        if (strcmp(pname, "mask") == 0 || strcmp(pname, "-webkit-mask") == 0) {
+            parse_mask_shorthand(vtext, important, decls_out);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -27936,6 +28090,27 @@ style_is_out_of_flow(const ns_style *s)
 }
 
 static ns_display
+legacy_webkit_box_display(ns_style *s, ns_display d)
+{
+    const ns_css_value *disp = s->values[NS_CSS_DISPLAY];
+    if (!disp || disp->kind != NS_CSS_V_KEYWORD || !disp->u.keyword ||
+        strncmp(disp->u.keyword, "-webkit-", 8) != 0)
+        return d;
+    const ns_css_value *orient = s->values[NS_CSS_WEBKIT_BOX_ORIENT];
+    if (!ns_css_keyword_is(orient, "vertical") &&
+        !ns_css_keyword_is(orient, "block-axis"))
+        return d;
+    const ns_css_value *clamp = s->values[NS_CSS_LINE_CLAMP];
+    if (clamp && clamp->kind == NS_CSS_V_LENGTH && clamp->u.length.v >= 1) {
+        d.inner = NS_DISPLAY_INNER_FLOW_ROOT;
+        return d;
+    }
+    ns_css_value_free(s->values[NS_CSS_FLEX_DIRECTION]);
+    s->values[NS_CSS_FLEX_DIRECTION] = keyword_value_dup("column");
+    return d;
+}
+
+static ns_display
 display_after_blockification(ns_display d, const ns_style *s,
                              const ns_style *layout_parent, gboolean is_root)
 {
@@ -28117,8 +28292,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             d = ns_css_display_from_keyword(disp->u.keyword);
         out->specified_inline = d.box == NS_DISPLAY_BOX_NORMAL &&
                                 d.outer == NS_DISPLAY_OUTER_INLINE;
-        ns_display used =
-            display_after_blockification(d, out, layout_parent, is_root);
+        ns_display used = display_after_blockification(
+            legacy_webkit_box_display(out, d), out, layout_parent, is_root);
         if (memcmp(&d, &used, sizeof d) != 0) {
             ns_css_value *nv = g_new0(ns_css_value, 1);
             nv->kind = NS_CSS_V_KEYWORD;
@@ -28349,10 +28524,47 @@ legacy_font_size_keyword(const char *s)
     return keywords[CLAMP(value, 1, 7) - 1];
 }
 
+static const char *const kSvgPresentationAttrs[] = {
+    "fill", "fill-opacity", "fill-rule", "clip-rule",
+    "stroke", "stroke-width", "stroke-opacity", "stroke-linecap",
+    "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray",
+    "stroke-dashoffset", "paint-order", "vector-effect", "text-anchor",
+    "stop-color", "stop-opacity", "visibility",
+};
+
+static gboolean
+is_svg_presentation_attr_name(const char *n)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(kSvgPresentationAttrs); i++)
+        if (strcmp(n, kSvgPresentationAttrs[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+append_svg_presentation_hints(GString *out, const ns_node *el)
+{
+    for (const ns_attr *a = el->attrs; a; a = a->next) {
+        if (!a->name || !a->value || !is_svg_presentation_attr_name(a->name))
+            continue;
+        char *value = g_strstrip(g_strdup(a->value));
+        if (*value && !strpbrk(value, ";{}!\\")) {
+            char *end = NULL;
+            g_ascii_strtod(value, &end);
+            gboolean unitless_length = end && end != value && *end == '\0' &&
+                (strcmp(a->name, "stroke-width") == 0 ||
+                 strcmp(a->name, "stroke-dashoffset") == 0);
+            g_string_append_printf(out, "%s: %s%s;", a->name, value,
+                                   unitless_length ? "px" : "");
+        }
+        g_free(value);
+    }
+}
+
 static gboolean
 is_presentational_attr_name(const char *n)
 {
     if (!n || !*n) return FALSE;
+    if (is_svg_presentation_attr_name(n)) return TRUE;
     switch (g_ascii_tolower((guchar)n[0])) {
     case 'a': return g_ascii_strcasecmp(n, "align") == 0;
     case 'b': return g_ascii_strcasecmp(n, "bgcolor") == 0 ||
@@ -28763,6 +28975,8 @@ presentational_hints_css(const ns_node *el)
         if (wrap && g_ascii_strcasecmp(wrap, "off") == 0)
             g_string_append(out, "white-space: pre;");
     }
+    if (el->flags & NS_NODE_SVG_NS)
+        append_svg_presentation_hints(out, el);
 
     if (out->len == 0) {
         g_string_free(out, TRUE);
@@ -28839,8 +29053,7 @@ static GHashTable    *g_class_keys;
 static GHashTable    *g_id_keys;
 static gboolean       g_class_keys_loose;
 static gboolean       g_id_keys_loose;
-static GHashTable    *g_has_cq_keys;
-static GPtrArray     *g_has_cq_attrs;
+static GPtrArray     *g_has_anchors;
 static gboolean       g_has_cq_loose;
 static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
@@ -28864,8 +29077,7 @@ static void
 incr_mark_has_subjects(ns_node *changed)
 {
     if (!changed || !g_incr_eligible || g_has_cq_loose) return;
-    if ((!g_has_cq_keys || g_hash_table_size(g_has_cq_keys) == 0) &&
-        (!g_has_cq_attrs || g_has_cq_attrs->len == 0))
+    if (!g_has_anchors || g_has_anchors->len == 0)
         return;
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -29370,27 +29582,48 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
 }
 
 static gboolean
+incr_keyset_contains(GHashTable *keyset, char prefix, const char *name,
+                     gsize len, gboolean lower)
+{
+    char stack[128];
+    char *key = len + 2 <= sizeof stack ? stack : g_malloc(len + 2);
+    key[0] = prefix;
+    for (gsize i = 0; i < len; i++)
+        key[i + 1] = lower ? g_ascii_tolower(name[i]) : name[i];
+    key[len + 1] = '\0';
+    gboolean hit = g_hash_table_contains(keyset, key);
+    if (key != stack) g_free(key);
+    return hit;
+}
+
+static gboolean
+incr_class_list_matches_keys(const char *cls, GHashTable *keyset)
+{
+    for (const char *p = cls; p && *p; ) {
+        while (*p && g_ascii_isspace((guchar)*p)) p++;
+        const char *tok = p;
+        while (*p && !g_ascii_isspace((guchar)*p)) p++;
+        if (p > tok && incr_keyset_contains(keyset, '.', tok,
+                                            (gsize)(p - tok), FALSE))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !keyset ||
         g_hash_table_size(keyset) == 0)
         return FALSE;
-    GHashTableIter it;
-    gpointer k;
+    if (n->name && incr_keyset_contains(keyset, '%', n->name,
+                                        strlen(n->name), TRUE))
+        return TRUE;
     const char *id = ns_element_get_attr(n, "id");
-    g_hash_table_iter_init(&it, keyset);
-    while (g_hash_table_iter_next(&it, &k, NULL)) {
-        const char *key = k;
-        if (key[0] == '%') {
-            if (n->name && g_ascii_strcasecmp(n->name, key + 1) == 0)
-                return TRUE;
-        } else if (key[0] == '#') {
-            if (id && strcmp(id, key + 1) == 0) return TRUE;
-        } else if (key[0] == '.') {
-            if (ns_node_has_class(n, key + 1, strlen(key + 1))) return TRUE;
-        }
-    }
-    return FALSE;
+    if (id && *id && incr_keyset_contains(keyset, '#', id, strlen(id), FALSE))
+        return TRUE;
+    return incr_class_list_matches_keys(ns_element_get_attr(n, "class"),
+                                        keyset);
 }
 
 static gboolean
@@ -29467,23 +29700,63 @@ incr_node_matches_attr_preds(const ns_node *n, const GPtrArray *preds)
     return FALSE;
 }
 
+typedef struct {
+    char *type;
+    char *id;
+    GPtrArray *classes;
+    GPtrArray *attrs;
+} incr_has_anchor;
+
+static void
+incr_has_anchor_free(gpointer data)
+{
+    incr_has_anchor *a = data;
+    g_free(a->type);
+    g_free(a->id);
+    g_ptr_array_free(a->classes, TRUE);
+    g_ptr_array_free(a->attrs, TRUE);
+    g_free(a);
+}
+
+static gboolean
+incr_has_anchor_matches(const ns_node *n, const incr_has_anchor *a)
+{
+    if (a->type && (!n->name || g_ascii_strcasecmp(n->name, a->type) != 0))
+        return FALSE;
+    if (a->id) {
+        const char *id = ns_element_get_attr(n, "id");
+        if (!id || strcmp(id, a->id) != 0) return FALSE;
+    }
+    for (guint i = 0; i < a->classes->len; i++) {
+        const char *cls = g_ptr_array_index(a->classes, i);
+        if (!ns_node_has_class(n, cls, strlen(cls))) return FALSE;
+    }
+    for (guint i = 0; i < a->attrs->len; i++)
+        if (!incr_attr_pred_matches(n, g_ptr_array_index(a->attrs, i)))
+            return FALSE;
+    return TRUE;
+}
+
 static gboolean
 incr_node_matches_has_cq(const ns_node *n)
 {
-    return incr_node_matches_keys(n, g_has_cq_keys) ||
-           incr_node_matches_attr_preds(n, g_has_cq_attrs);
+    if (!n || n->kind != NS_NODE_ELEMENT || !g_has_anchors) return FALSE;
+    for (guint i = 0; i < g_has_anchors->len; i++)
+        if (incr_has_anchor_matches(n, g_ptr_array_index(g_has_anchors, i)))
+            return TRUE;
+    return FALSE;
 }
 
 static gboolean
 incr_childlist_needs_flood(const ns_node *parent)
 {
     if (g_struct_loose) return TRUE;
+    if (g_incr_dirty && g_hash_table_contains(g_incr_dirty, parent))
+        return TRUE;
     if (incr_node_matches_keys(parent, g_struct_keys) ||
         incr_node_matches_attr_preds(parent, g_struct_attrs))
         return TRUE;
-    int scanned = 0;
     for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
-        if (++scanned > 64) return TRUE;
         if (c->kind == NS_NODE_ELEMENT &&
             (incr_node_matches_keys(c, g_struct_keys) ||
              incr_node_matches_attr_preds(c, g_struct_attrs)))
@@ -29502,8 +29775,10 @@ ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
     if (!parent) return;
     if (!g_struct_ready || incr_childlist_needs_flood(parent))
         ns_css_mark_restyle_dirty(parent);
+    else if (added)
+        ns_css_mark_restyle_dirty(added);
     else
-        ns_css_mark_restyle_dirty(added ? added : parent);
+        incr_mark_has_subjects(parent);
 }
 
 static gboolean
@@ -29561,6 +29836,9 @@ void
 ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
 {
     if (!target) return;
+    if (name && old_value &&
+        g_strcmp0(ns_element_get_attr(target, name), old_value) == 0)
+        return;
     if (!ns_css_attr_may_affect_style(target, name)) return;
     if (incr_name_change_unused(target, name, old_value)) return;
     if (!g_struct_ready) {
@@ -29730,18 +30008,110 @@ incr_selector_uses_has(const ns_css_selector *sel, int depth)
     return FALSE;
 }
 
+typedef struct incr_has_ctx {
+    const ns_css_selector *sel;
+    guint idx;
+    const struct incr_has_ctx *outer;
+} incr_has_ctx;
+
+static void
+incr_has_anchor_copy_keys(incr_has_anchor *a, const ns_css_simple *c)
+{
+    for (guint i = 0; c->classes && i < c->classes->len; i++) {
+        const char *cls = g_ptr_array_index(c->classes, i);
+        if (cls && *cls) g_ptr_array_add(a->classes, g_strdup(cls));
+    }
+    for (guint i = 0; c->attrs && i < c->attrs->len; i++) {
+        const ns_css_attr_pred *src =
+            &g_array_index(c->attrs, ns_css_attr_pred, i);
+        if (!src->name) continue;
+        ns_css_attr_pred *copy = g_new0(ns_css_attr_pred, 1);
+        *copy = *src;
+        copy->name = g_strdup(src->name);
+        copy->value = g_strdup(src->value);
+        g_ptr_array_add(a->attrs, copy);
+    }
+}
+
+static incr_has_anchor *
+incr_has_anchor_from_compound(const ns_css_simple *c)
+{
+    incr_has_anchor *a = g_new0(incr_has_anchor, 1);
+    a->classes = g_ptr_array_new_with_free_func(g_free);
+    a->attrs = g_ptr_array_new_with_free_func(incr_attr_dep_free);
+    if (c->type && *c->type && strcmp(c->type, "*") != 0)
+        a->type = g_ascii_strdown(c->type, -1);
+    if (c->id && *c->id) a->id = g_strdup(c->id);
+    incr_has_anchor_copy_keys(a, c);
+    if (a->type || a->id || a->classes->len > 0 || a->attrs->len > 0)
+        return a;
+    incr_has_anchor_free(a);
+    return NULL;
+}
+
+static gboolean incr_add_has_anchor_compound(const ns_css_simple *c,
+                                             int depth);
+
+static gboolean
+incr_add_has_anchor_group(const GPtrArray *group, int depth)
+{
+    guint mark = g_has_anchors->len;
+    for (guint si = 0; si < group->len; si++) {
+        const ns_css_selector *alt = g_ptr_array_index(group, si);
+        if (!alt || !alt->compounds || alt->compounds->len == 0 ||
+            !incr_add_has_anchor_compound(
+                g_ptr_array_index(alt->compounds, alt->compounds->len - 1),
+                depth + 1)) {
+            g_ptr_array_set_size(g_has_anchors, mark);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static gboolean
+incr_add_has_anchor_compound(const ns_css_simple *c, int depth)
+{
+    if (!c || depth > 6) return FALSE;
+    incr_has_anchor *a = incr_has_anchor_from_compound(c);
+    if (a) {
+        g_ptr_array_add(g_has_anchors, a);
+        return TRUE;
+    }
+    for (guint gi = 0; c->matches_any && gi < c->matches_any->len; gi++) {
+        const GPtrArray *group = g_ptr_array_index(c->matches_any, gi);
+        if (group && group->len > 0 && incr_add_has_anchor_group(group, depth))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_add_has_anchor_deps(const incr_has_ctx *at, int depth)
+{
+    for (const incr_has_ctx *cx = at; cx; cx = cx->outer) {
+        for (guint i = cx->idx + 1; i-- > 0; )
+            if (incr_add_has_anchor_compound(
+                    g_ptr_array_index(cx->sel->compounds, i), depth))
+                return TRUE;
+        if (cx->idx + 1 != cx->sel->compounds->len) return FALSE;
+    }
+    return FALSE;
+}
+
 static gboolean incr_collect_has_anchors_selector(const ns_css_selector *sel,
+                                                  const incr_has_ctx *outer,
                                                   int depth);
 
 static gboolean
-incr_collect_has_anchors_simple(const ns_css_simple *c, int depth)
+incr_collect_has_anchors_simple(const incr_has_ctx *at, int depth)
 {
+    const ns_css_simple *c = g_ptr_array_index(at->sel->compounds, at->idx);
     if (!c || depth > 6) return FALSE;
     gboolean found = FALSE;
     if (c->has_groups && c->has_groups->len > 0) {
         found = TRUE;
-        if (!incr_add_positive_compound_deps(
-                g_has_cq_keys, g_has_cq_attrs, c, depth))
+        if (!incr_add_has_anchor_deps(at, depth))
             g_has_cq_loose = TRUE;
     }
     if (c->pseudos)
@@ -29751,7 +30121,7 @@ incr_collect_has_anchors_simple(const ns_css_simple *c, int depth)
             if (!p->of_group) continue;
             for (guint gi = 0; gi < p->of_group->len; gi++)
                 found |= incr_collect_has_anchors_selector(
-                    g_ptr_array_index(p->of_group, gi), depth + 1);
+                    g_ptr_array_index(p->of_group, gi), at, depth + 1);
         }
     GPtrArray *groups[2] = { c->matches_any, c->matches_none };
     for (guint g = 0; g < G_N_ELEMENTS(groups); g++) {
@@ -29760,20 +30130,22 @@ incr_collect_has_anchors_simple(const ns_css_simple *c, int depth)
             const GPtrArray *group = g_ptr_array_index(groups[g], gi);
             for (guint si = 0; group && si < group->len; si++)
                 found |= incr_collect_has_anchors_selector(
-                    g_ptr_array_index(group, si), depth + 1);
+                    g_ptr_array_index(group, si), at, depth + 1);
         }
     }
     return found;
 }
 
 static gboolean
-incr_collect_has_anchors_selector(const ns_css_selector *sel, int depth)
+incr_collect_has_anchors_selector(const ns_css_selector *sel,
+                                  const incr_has_ctx *outer, int depth)
 {
     if (!sel || !sel->compounds || depth > 6) return FALSE;
     gboolean found = FALSE;
-    for (guint i = 0; i < sel->compounds->len; i++)
-        found |= incr_collect_has_anchors_simple(
-            g_ptr_array_index(sel->compounds, i), depth);
+    for (guint i = 0; i < sel->compounds->len; i++) {
+        incr_has_ctx at = { sel, i, outer };
+        found |= incr_collect_has_anchors_simple(&at, depth);
+    }
     return found;
 }
 
@@ -29788,9 +30160,8 @@ incr_collect_has_cq_keys(const ns_css_stylesheet *sh)
             const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
             if (!sel || !sel->compounds || sel->compounds->len == 0) continue;
             if (!incr_selector_uses_has(sel, 0)) continue;
-            if (!incr_collect_has_anchors_selector(sel, 0)) {
+            if (!incr_collect_has_anchors_selector(sel, NULL, 0))
                 g_has_cq_loose = TRUE;
-            }
         }
     }
 }
@@ -31396,17 +31767,13 @@ ns_css_compute(ns_node *doc,
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
     if (sig != g_incr_has_sig) {
-        if (g_has_cq_keys) g_hash_table_remove_all(g_has_cq_keys);
-        else g_has_cq_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                   g_free, NULL);
-        if (g_has_cq_attrs) g_ptr_array_set_size(g_has_cq_attrs, 0);
-        else g_has_cq_attrs =
-            g_ptr_array_new_with_free_func(incr_attr_dep_free);
+        if (g_has_anchors) g_ptr_array_set_size(g_has_anchors, 0);
+        else g_has_anchors =
+            g_ptr_array_new_with_free_func(incr_has_anchor_free);
         g_has_cq_loose = FALSE;
         incr_collect_has_cq_keys(cached_ua);
         for (gsize i = 0; i < n_sheets; i++)
             incr_collect_has_cq_keys(author_sheets[i]);
-        incr_own_attr_deps(g_has_cq_attrs);
         g_incr_eligible = !g_has_cq_loose;
         g_incr_has_sig = sig;
     }

@@ -125,6 +125,7 @@ typedef struct {
     int              pw, ph;
     char            *title;
     char            *url;
+    gboolean         url_pushed;
     char            *nav;
     int              security;
     char            *remote_ip;
@@ -1705,6 +1706,9 @@ worker_main(gpointer data)
                 res->audio = tick.audio ? g_strdup(tick.audio) : NULL;
                 res->window_action = tick.window_action
                     ? g_strdup(tick.window_action) : NULL;
+                res->title = tick.title ? g_strdup(tick.title) : NULL;
+                res->url = tick.url ? g_strdup(tick.url) : NULL;
+                res->url_pushed = tick.url_pushed ? TRUE : FALSE;
                 ns_rproc_http_tick_clear(&tick);
             }
             post(res);
@@ -2795,6 +2799,28 @@ push_history(NsProcView *v, const char *url)
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
 }
 
+static void
+pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
+                              const char *title)
+{
+    if (url && *url && g_strcmp0(url, v->current_url) != 0) {
+        if (pushed || v->hist_index < 0) {
+            push_history(v, url);
+        } else {
+            g_free(g_ptr_array_index(v->history, v->hist_index));
+            g_ptr_array_index(v->history, v->hist_index) = g_strdup(url);
+        }
+        g_free(v->current_url);
+        v->current_url = g_strdup(url);
+        post_emit(v, NS_PROC_EVT_URL, v->current_url);
+    }
+    if (title && g_strcmp0(title, v->current_title) != 0) {
+        g_free(v->current_title);
+        v->current_title = g_strdup(title);
+        post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
+    }
+}
+
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
 
 static void
@@ -3197,6 +3223,9 @@ on_result(gpointer data)
             pv_media_pump(v, res->audio);
         if (current && res->ok && res->window_action && *res->window_action)
             pv_apply_window_action(v, res->window_action);
+        if (current && res->ok && !navigated)
+            pv_follow_same_document_state(v, res->url, res->url_pushed,
+                                          res->title);
         if (current && res->ok) {
             v->page_animating = res->animating;
             if (v->page_animating || v->caret_blinking)

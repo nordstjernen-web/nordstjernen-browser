@@ -767,7 +767,7 @@ typedef struct ns_raf_entry {
 static ns_node *
 ns_js_context_frame(ns_js *js, JSContext *ctx)
 {
-    if (!js || !ctx) return NULL;
+    if (!js || !ctx || ctx == js->main_realm_ctx) return NULL;
     if (js->frame_contexts) {
         GHashTableIter iter;
         gpointer key, value;
@@ -8367,6 +8367,7 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
+    ns_css_mark_childlist_dirty(n, added);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -8866,6 +8867,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
     if (_j) {
+        ns_css_mark_childlist_dirty(self, NULL);
         if (added->len > 0 || original->len > 0)
             ns_mut_record_emit_child_list_arrays(_j, self,
                 added->len ? added : NULL, original->len ? original : NULL,
@@ -30459,7 +30461,7 @@ ns_window_requestAnimationFrame(JSContext *ctx, JSValueConst this_val,
         .ctx = ctx,
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = FALSE,
-        .frame = js->raf_frame_ctx
+        .frame = ns_js_context_frame(js, ctx)
     };
     g_array_append_val(js->raf_pending, e);
     ns_raf_schedule_tick(js);
@@ -33952,9 +33954,11 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
             g_ptr_array_add(moved, c);
             c = next;
         }
-        if (_j && moved->len > 0)
+        if (_j && moved->len > 0) {
+            ns_css_mark_childlist_dirty(parent, g_ptr_array_index(moved, 0));
             ns_mut_record_emit_child_list_arrays(_j, parent, moved, NULL,
                                                  batch_prev, NULL);
+        }
         if (_j) {
             _j->mutated = TRUE;
             ns_js_nodes_inserted(_j, parent, moved);
@@ -34234,9 +34238,11 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
             g_ptr_array_add(added, c);
             c = next;
         }
-        if (_j && added->len > 0)
+        if (_j && added->len > 0) {
+            ns_css_mark_childlist_dirty(parent, g_ptr_array_index(added, 0));
             ns_mut_record_emit_child_list_arrays(_j, parent, added, NULL,
                                                  batch_prev, batch_next);
+        }
         g_ptr_array_free(added, FALSE);
         if (_j) {
             _j->mutated = TRUE;
@@ -36950,6 +36956,7 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
             return TRUE;
         }
+        if (want_all) return FALSE;
     } else if (root != doc) {
         return FALSE;
     } else if (key->classes && key->classes->len > 0 &&
@@ -36972,16 +36979,11 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
     }
 
     if (single) {
-        gboolean ok = (include_self || single != root) &&
-                      ns_node_ancestor_or_self(single, root) != NULL &&
-                      ns_css_selector_matches(sel, single);
-        if (want_all) {
-            JSValue arr = JS_NewArray(ctx);
-            if (ok) JS_SetPropertyUint32(ctx, arr, 0, ns_make_element(ctx, single));
-            *out = ns_nodelist_from_array(ctx, arr);
-        } else {
-            *out = ok ? ns_make_element(ctx, single) : JS_NULL;
-        }
+        if (!(include_self || single != root) ||
+            !ns_node_ancestor_or_self(single, root) ||
+            !ns_css_selector_matches(sel, single))
+            return FALSE;
+        *out = ns_make_element(ctx, single);
         return TRUE;
     }
     if (!want_all) {
@@ -48468,7 +48470,7 @@ ns_media_request_video_frame_callback(JSContext *ctx, JSValueConst this_val,
         .ctx = ctx,
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = TRUE,
-        .frame = js->raf_frame_ctx,
+        .frame = ns_js_context_frame(js, ctx),
         .media = ns_unwrap_element_mut(this_val)
     };
     g_array_append_val(js->raf_pending, e);
@@ -48912,10 +48914,14 @@ static const char ns_iframe_scope_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return vis(); };"
+    "  var topHist = realWin.history;"
+    "  var topPush = topHist && topHist.pushState, topReplace = topHist && topHist.replaceState;"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    pushState: function(s,t,u){ if (this === topHist && topPush) return topPush.apply(topHist, arguments);"
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ if (this === topHist && topReplace) return topReplace.apply(topHist, arguments);"
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  var ov = {"
@@ -49071,10 +49077,14 @@ static const char ns_iframe_global_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return vis(); };"
+    "  var topHist = realWin.history;"
+    "  var topPush = topHist && topHist.pushState, topReplace = topHist && topHist.replaceState;"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    pushState: function(s,t,u){ if (this === topHist && topPush) return topPush.apply(topHist, arguments);"
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
+    "    replaceState: function(s,t,u){ if (this === topHist && topReplace) return topReplace.apply(topHist, arguments);"
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
     "  };"
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
@@ -56971,9 +56981,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
                           "observe", ns_resize_observer_observe, 2);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "unobserve", ns_event_noop, 1);
+                          "unobserve", ns_resize_observer_unobserve, 1);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "disconnect", ns_event_noop, 0);
+                          "disconnect", ns_resize_observer_disconnect, 0);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",
                           "observe", ns_perf_observer_observe, 1);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",
