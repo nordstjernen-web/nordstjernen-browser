@@ -17,12 +17,14 @@ JVM; `Ctrl+N` opens another window with a renderer of its own, and
 `Ctrl+Shift+N` opens a private one whose renderer keeps no cookies, cache or
 history.
 
-Beyond navigation it covers hover link previews and pointer shapes, zoom,
-find-in-page, drag text selection with copy, a right-click menu the page can
-override, WebGL and camera trust prompts, downloads, dropping files onto the
-page, external media playback, scrolling of overflow scrollers and the
-scrollbars a page paints itself, back/forward-cache history traversal, and a
-JavaScript console with page-source, layout, network and performance dumps.
+Beyond navigation it covers hover link previews and pointer shapes, zoom that
+reflows the page, sharp rendering on HiDPI screens, find-in-page, drag text
+selection with cut, copy and paste, a right-click menu the page can override,
+WebGL and camera trust prompts, downloads, dropping files onto the page, page
+audio through the `nordstjernen-audio` helper, page-requested full screen,
+external media playback, scrolling of overflow scrollers and the scrollbars a
+page paints itself, back/forward-cache history traversal, and a JavaScript
+console with page-source, layout, network and performance dumps.
 
 ```sh
 # Nightly fat jar — library + browser app + icons + native libs in one file:
@@ -36,6 +38,7 @@ java -jar nordstjernen-java.jar https://example.com
 Point it at the renderer binary with the `nordstjernen.renderer` system
 property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
 probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
+Page audio plays when a `nordstjernen-audio` helper sits beside the renderer.
 
 ### Keyboard & mouse
 
@@ -50,15 +53,19 @@ probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
 | Close the window / quit | `Ctrl+W` / `Ctrl+Q` |
 | Find in page | `Ctrl+F`, then `Ctrl+G` / `Ctrl+Shift+G` |
 | Zoom | `Ctrl` + `+` / `-` / `0`, or `Ctrl`+wheel |
+| Cut / Copy / Paste / Select all | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` / `Ctrl+A` (`Cmd` on macOS) |
 | Save page as PDF | `Ctrl+P` |
 | JavaScript console | `F12` or `Ctrl+Shift+J` |
-| Scroll | `↑` / `↓` / `PageUp` / `PageDown`, mouse wheel, or the scrollbar |
+| Scroll | `↑` / `↓` / `PageUp` / `PageDown` / `Space`, mouse wheel (`Shift` for sideways), or the scrollbar |
+| Open a link in a new window | Middle click |
+| Leave page full screen | `Esc` |
 
 **Text input.** Click an input field, textarea or other editable element to
 focus it, then type — characters, `Backspace`/`Delete`, caret movement
 (`←`/`→`/`Home`/`End`), `Enter`, and `Tab` between fields are all forwarded to
 the page. Key events go to whatever the page has focused, so the arrow keys
-edit a focused field rather than scrolling.
+edit a focused field rather than scrolling. Paste goes to the focused field
+too, and text a page copies lands on the system clipboard.
 
 ## Use as a library
 
@@ -150,12 +157,17 @@ renderer control protocol —
 | Pointer | `press`, `release`, `hover`, `linkAt`, `contextMenu`, `mediaAt`, `dropFiles` |
 | Scrolling | `scrollAt` for overflow scrollers, `scrollbarPress`/`Drag`/`Release` for the scrollbars a page paints itself |
 | Text | `key`, `select`, `find`, `focusedEditable`, `focusedEditableState`, `setFocusedEditableSelection` |
+| Clipboard | `paste`, `cutSelection`, `clipboardText`, `openContextMenu` (with the field's editable flag) |
 | Scripting | `eval`, `consoleDrain`, `dump("dom" / "layout" / "text" / "links" / "network" / "performance")` |
 | Trust | `security`, `serverIp`, `resolveWebgl`, `resolveCamera` |
+| Display | `setDevicePixelRatio` (zoom × screen scale, for HiDPI rendering) |
 
 Each `render` also reports what the page asked for while it painted: a
-navigation, a download, a WebGL or camera prompt, a window action, the scroll
-position it wants, and its current size.
+navigation, a download (URL and suggested file name), a WebGL or camera
+prompt, a fullscreen request, a clipboard write, audio commands, the scroll
+position it wants on both axes, and its current size. `AudioHelper` plays
+those audio commands through the `nordstjernen-audio` helper beside the
+renderer.
 
 ## Download
 

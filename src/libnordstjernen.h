@@ -135,7 +135,8 @@ char *ns_browser_click(ns_browser *browser, int x, int y, int mods);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);
 
 /* Dispatch a keyboard event into the page's JS (kind 0 = keydown, 1 = keyup,
- * 2 = committed text, 3 = keypress, 4 = paste key as clipboard text),
+ * 2 = committed text, 3 = keypress, skipped when the preceding keydown was
+ * cancelled, 4 = paste key as clipboard text),
  * targeting the focused element or, if none, <body>. key/code are the DOM
  * KeyboardEvent.key / .code strings, keycode the legacy keyCode; mods is bit0
  * shift, bit1 ctrl, bit2 alt, bit3 meta. Pending JS work is pumped and the page

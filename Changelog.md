@@ -3,6 +3,61 @@ Changelog:
 
 1.0.30:
 ======
+* A printable key fires one `keydown`, not two. Embedders send a
+  keydown and then a keypress (`kind` 3) for each typed character, and
+  the keypress path dispatched `keydown` again before `keypress`, so
+  every letter typed into a page reached its `keydown` listeners twice
+  in the GTK and Java shells. Kind 3 now fires only `keypress`, as
+  `libnordstjernen.h` documents, and is skipped when the keydown before
+  it was cancelled.
+* Clicking an `<a download>` link saves the file instead of navigating
+  to it. Only a scripted `element.click()` honoured the attribute; a
+  real mouse click followed the link like any other.
+* Java browser: the page's own shortcuts no longer swallow the
+  browser's. Alt+Left, Alt+Right and Alt+Home did nothing while the page
+  had the focus, because the page view consumed every arrow and Home
+  key before the window's key bindings ran.
+* Java browser: Ctrl+X / Ctrl+V (and Shift+Insert) cut and paste in text
+  fields, and the right-click menu of a field offers Cut, Copy and
+  Paste. Text a page copies (`navigator.clipboard.writeText`, a copy
+  button) reaches the system clipboard.
+* Java browser: downloads work. The renderer reports a download as the
+  URL and the page's suggested file name separated by a tab, which the
+  Java shell handed whole to `URI.create`, so every page-initiated
+  download was silently dropped. The save dialog now opens in the
+  Downloads folder with the suggested name, and `data:` and local
+  `file:` downloads are saved too.
+* Java browser: Space pages down (Shift+Space up) when no text field has
+  the focus, and the arrow, Page and Home/End keys move the caret in a
+  focused field instead of also scrolling the page. Pages receive
+  `keyup` for every key, `code` `"Space"` for the space bar, and AltGr
+  characters such as `@` on European layouts on Windows.
+* Java browser: zoom reflows the page like the GTK shell — the CSS
+  viewport is the window width divided by the zoom, the zoom steps
+  through the same 25–500 % ladder, and resizing the window, opening the
+  find bar or showing the horizontal scrollbar relays the page out.
+  Pages render sharp on HiDPI screens: frames are rasterised at the
+  screen's scale factor and `window.devicePixelRatio` reports it.
+* Java browser: page audio plays through `nordstjernen-audio`, which the
+  shell starts beside the renderer and silences on navigation, as the
+  GTK shell does. A page can take the window full screen (Esc leaves),
+  a middle click opens a link in a new window, touchpad scrolling and
+  Shift+wheel sideways scrolling work, animations refresh at about
+  30 frames a second, and a link clicked while a page is loading is
+  followed once the load finishes instead of being ignored.
+* Java browser: an address typed without a scheme is normalised like
+  the GTK shell's — an existing local path opens as a `file:` URL,
+  `localhost` and `host:port` are hosts, and the command-line start URL
+  is normalised too.
+* Java library: `RemotePage.render` and `renderRgba` return the frame
+  again when called twice for the same region; the second call used to
+  come back fully transparent because the renderer answers an identical
+  request with `X-Unchanged` and no pixels. Renderer headers are decoded
+  as UTF-8. `RemoteBrowser` adds `paste`, `cutSelection`,
+  `clipboardText`, `openContextMenu`, `setDevicePixelRatio` and
+  `audioCommands`, and frames report `downloadName`, `clipboard`,
+  `audio` and `requestedScrollX`; the new `AudioHelper` plays a
+  session's audio for any embedder.
 * Android: pages no longer stay blank and white after a load until they
   are reloaded. The progress bar resizes the page view as a load starts
   and ends, and every resize gives the view a fresh, white bitmap. When

@@ -36,6 +36,9 @@ public final class RemotePage implements AutoCloseable {
     private final String finalUrl;
     private final int pageWidth;
     private final int pageHeight;
+    private byte[] lastFrame;
+    private int lastFrameWidth;
+    private int lastFrameHeight;
 
     private RemotePage(RendererProcess renderer, String title, String finalUrl,
                        int pageWidth, int pageHeight) {
@@ -103,15 +106,9 @@ public final class RemotePage implements AutoCloseable {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("width and height must be positive");
         }
-        String body = "{\"width\":" + width + ",\"height\":" + height
-            + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
-            + ",\"scale\":" + formatScale(scale) + "}";
-        RendererProcess.Response resp = renderer.request("POST", "/render", body);
-        int w = headerInt(resp, "X-W", width);
-        int h = headerInt(resp, "X-H", height);
-        byte[] bgra = resp.body;
-        // The renderer returns cairo ARGB32 (little-endian B,G,R,A). Convert
-        // to the R,G,B,A byte order the in-process Page also exposes.
+        byte[] bgra = renderBgra(scrollX, scrollY, width, height, scale);
+        int w = lastFrameWidth;
+        int h = lastFrameHeight;
         int px = Math.min(w * h, bgra.length / 4);
         byte[] out = new byte[w * h * 4];
         for (int i = 0, p = 0; i < px; i++, p += 4) {
@@ -129,13 +126,9 @@ public final class RemotePage implements AutoCloseable {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("width and height must be positive");
         }
-        String body = "{\"width\":" + width + ",\"height\":" + height
-            + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
-            + ",\"scale\":" + formatScale(scale) + "}";
-        RendererProcess.Response resp = renderer.request("POST", "/render", body);
-        int w = headerInt(resp, "X-W", width);
-        int h = headerInt(resp, "X-H", height);
-        byte[] bgra = resp.body;
+        byte[] bgra = renderBgra(scrollX, scrollY, width, height, scale);
+        int w = lastFrameWidth;
+        int h = lastFrameHeight;
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
         int[] data = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
         int n = Math.min(data.length, bgra.length / 4);
@@ -147,6 +140,31 @@ public final class RemotePage implements AutoCloseable {
             data[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
         return img;
+    }
+
+    /**
+     * Render a viewport region to the renderer's native cairo ARGB32 rows
+     * (little-endian B,G,R,A). The renderer answers a request identical to the
+     * previous one with {@code X-Unchanged} and no pixels, so that frame is
+     * kept and handed back again.
+     */
+    private byte[] renderBgra(int scrollX, int scrollY, int width, int height,
+                              double scale) {
+        String body = "{\"width\":" + width + ",\"height\":" + height
+            + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
+            + ",\"scale\":" + formatScale(scale) + "}";
+        RendererProcess.Response resp = renderer.request("POST", "/render", body);
+        int w = headerInt(resp, "X-W", width);
+        int h = headerInt(resp, "X-H", height);
+        boolean unchanged = "1".equals(resp.header("X-Unchanged"));
+        if (unchanged && lastFrame != null && w == lastFrameWidth
+            && h == lastFrameHeight) {
+            return lastFrame;
+        }
+        lastFrame = resp.body;
+        lastFrameWidth = w;
+        lastFrameHeight = h;
+        return lastFrame;
     }
 
     /** Render the whole page (top to bottom, full width) at {@code scale}. */
