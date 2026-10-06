@@ -3,6 +3,10 @@ Changelog:
 
 1.0.30:
 ======
+* A translucent background on an inline element is painted with its
+  alpha. Pango's background attribute is opaque, so YouTube's
+  `rgba(0,0,0,.05)` link chip in a video description became a solid
+  black bar that hid its text.
 * `white-space` on an inline element applies to its own text. The
   whole inline run used the mode of its first node, so a `pre-wrap` span
   inside a normal block lost its line breaks, and a `normal` span inside
