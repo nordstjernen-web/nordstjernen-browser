@@ -8367,6 +8367,7 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
+    ns_css_mark_childlist_dirty(n, added);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -8866,6 +8867,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
     if (_j) {
+        ns_css_mark_childlist_dirty(self, NULL);
         if (added->len > 0 || original->len > 0)
             ns_mut_record_emit_child_list_arrays(_j, self,
                 added->len ? added : NULL, original->len ? original : NULL,
@@ -33952,9 +33954,11 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
             g_ptr_array_add(moved, c);
             c = next;
         }
-        if (_j && moved->len > 0)
+        if (_j && moved->len > 0) {
+            ns_css_mark_childlist_dirty(parent, g_ptr_array_index(moved, 0));
             ns_mut_record_emit_child_list_arrays(_j, parent, moved, NULL,
                                                  batch_prev, NULL);
+        }
         if (_j) {
             _j->mutated = TRUE;
             ns_js_nodes_inserted(_j, parent, moved);
@@ -34234,9 +34238,11 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
             g_ptr_array_add(added, c);
             c = next;
         }
-        if (_j && added->len > 0)
+        if (_j && added->len > 0) {
+            ns_css_mark_childlist_dirty(parent, g_ptr_array_index(added, 0));
             ns_mut_record_emit_child_list_arrays(_j, parent, added, NULL,
                                                  batch_prev, batch_next);
+        }
         g_ptr_array_free(added, FALSE);
         if (_j) {
             _j->mutated = TRUE;
