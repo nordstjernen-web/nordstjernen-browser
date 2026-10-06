@@ -39,6 +39,21 @@ Changelog:
   ancestors. A slotted `position: absolute; inset: 0` scroll container
   was placed against the viewport and painted under the component's
   opaque layout, so Tripletex showed its menus but no page content.
+* Elements inside an inline `<svg>` report their geometry to scripts.
+  `getBoundingClientRect()` returned an empty rectangle at 0,0 and
+  `getClientRects()` an empty list for every `<g>`, `<path>`, `<rect>`,
+  `<use>` and `<text>`, `getBBox()` ignored the transforms of child
+  elements and knew nothing about `<use>`, `<text>`, `<image>` or a
+  nested `<svg>`, and `getCTM()` / `getScreenCTM()` carried only the root
+  `viewBox` scale, without `preserveAspectRatio`, element transforms,
+  nested viewports, the root's padding and border, CSS transforms or page
+  scroll. All of them are now measured by the SVG renderer itself, with
+  the transforms, `viewBox` fitting, `<use>` and `<switch>` handling it
+  paints with, so a script that positions a tooltip, measures a chart
+  label or checks whether an icon is on screen gets the box that is
+  drawn. A path arc that ends where it starts is skipped instead of
+  drawing a stray curve, and CSS rotations by a multiple of 90 degrees
+  use exact sines and cosines.
 * Clicking into the address bar selects the whole address, as in other
   browsers; a second click places the cursor, and dragging still selects
   part of the text.
