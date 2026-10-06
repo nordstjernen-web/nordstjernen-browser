@@ -8393,6 +8393,14 @@ replaced_width_is_cyclic(const ns_box *box)
     return !sized && box->media && box->media->intrinsic_ratio_only;
 }
 
+static gboolean
+replaced_width_is_percent(const ns_box *box)
+{
+    return (box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO ||
+            box->kind == NS_BOX_SVG) && box->style &&
+           value_is_percent(box->style->values[NS_CSS_WIDTH]);
+}
+
 static double
 replaced_intrinsic_contribution(const ns_box *box, gboolean max_content)
 {
@@ -8426,7 +8434,8 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
     for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
         ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
         if (!ab) continue;
-        gboolean cyclic = replaced_width_is_cyclic(ab);
+        gboolean cyclic = replaced_width_is_cyclic(ab) ||
+            (!max_content && replaced_width_is_percent(ab));
         if (cyclic) {
             if (!saved)
                 saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
@@ -8686,8 +8695,21 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
     return flex_row ? row_sum : max_child;
 }
 
+static int g_min_measure_depth;
+
+static double measure_min_width_at(ns_box *box, const ns_style *parent_style);
+
 static double
 measure_min_width(ns_box *box, const ns_style *parent_style)
+{
+    g_min_measure_depth++;
+    double w = measure_min_width_at(box, parent_style);
+    g_min_measure_depth--;
+    return w;
+}
+
+static double
+measure_min_width_at(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
@@ -8746,7 +8768,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (max_width && max_width->kind == NS_CSS_V_LENGTH &&
             max_width->u.length.unit == NS_CSS_UNIT_PERCENT)
             return 0;
-        if (replaced_width_is_cyclic(box))
+        if (replaced_width_is_cyclic(box) ||
+            (g_min_measure_depth > 1 && replaced_width_is_percent(box)))
             return replaced_intrinsic_contribution(box, FALSE);
         return box->content_width > 0 ? box->content_width : 200;
     }
@@ -8823,8 +8846,20 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
     return contribution;
 }
 
+static double measure_min_content_width_at(ns_box *box,
+                                           const ns_style *parent_style);
+
 static double
 measure_min_content_width(ns_box *box, const ns_style *parent_style)
+{
+    g_min_measure_depth++;
+    double w = measure_min_content_width_at(box, parent_style);
+    g_min_measure_depth--;
+    return w;
+}
+
+static double
+measure_min_content_width_at(ns_box *box, const ns_style *parent_style)
 {
     if (box->kind == NS_BOX_INLINE || box->kind == NS_BOX_IMAGE ||
         box->kind == NS_BOX_VIDEO || box->kind == NS_BOX_SVG ||
