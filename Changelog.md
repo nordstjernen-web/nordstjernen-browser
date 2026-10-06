@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* Android: pages no longer stay blank and white after a load until they
+  are reloaded. The progress bar resizes the page view as a load starts
+  and ends, and every resize gives the view a fresh, white bitmap. When
+  a render of the previous page was still running as the new page
+  arrived, the new page's render request was dropped, so the white
+  bitmap stayed on screen; animated pages such as `about:nordstjernen`
+  hit this most. The request is now kept, and a frame the renderer
+  reports as unchanged is copied into a bitmap that has not yet received
+  it, so a view resized away and back is repainted too.
 * Icon fonts keep the ligatures that start with "s". ns-pango hands
   HarfBuzz made-up glyph ids for characters a font lacks, and HarfBuzz
   14.4 stores per-lookup coverage answers under the low 14 bits of the
