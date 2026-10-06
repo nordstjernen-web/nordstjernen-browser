@@ -49,6 +49,11 @@ Changelog:
   YouTube, which repeats ids such as `avatar`, `content` and `text` in
   every component, because only the first element with that id was
   tested.
+* A timer or animation frame callback belongs to the window whose
+  `setTimeout` or `requestAnimationFrame` was called. When an iframe's
+  script called a function of its parent that scheduled one, the
+  callback was tied to the iframe and silently dropped once the iframe
+  was removed, which could leave the parent's scheduler waiting forever.
 * Inserting a `DocumentFragment` (`appendChild`, `insertBefore`),
   `replaceChildren()` and setting `textContent` now invalidate the
   styles that depend on sibling position. Before, an item that stopped

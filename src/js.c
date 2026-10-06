@@ -767,7 +767,7 @@ typedef struct ns_raf_entry {
 static ns_node *
 ns_js_context_frame(ns_js *js, JSContext *ctx)
 {
-    if (!js || !ctx) return NULL;
+    if (!js || !ctx || ctx == js->main_realm_ctx) return NULL;
     if (js->frame_contexts) {
         GHashTableIter iter;
         gpointer key, value;
@@ -30461,7 +30461,7 @@ ns_window_requestAnimationFrame(JSContext *ctx, JSValueConst this_val,
         .ctx = ctx,
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = FALSE,
-        .frame = js->raf_frame_ctx
+        .frame = ns_js_context_frame(js, ctx)
     };
     g_array_append_val(js->raf_pending, e);
     ns_raf_schedule_tick(js);
@@ -48470,7 +48470,7 @@ ns_media_request_video_frame_callback(JSContext *ctx, JSValueConst this_val,
         .ctx = ctx,
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = TRUE,
-        .frame = js->raf_frame_ctx,
+        .frame = ns_js_context_frame(js, ctx),
         .media = ns_unwrap_element_mut(this_val)
     };
     g_array_append_val(js->raf_pending, e);
