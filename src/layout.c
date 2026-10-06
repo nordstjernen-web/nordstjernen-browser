@@ -890,6 +890,9 @@ ns_box_free(ns_box *box)
             }
             g_array_free(cur->inline_atomics, TRUE);
         }
+        if (cur->atomic_line_heights) {
+            g_array_free(cur->atomic_line_heights, TRUE);
+        }
         g_free(cur->text);
         if (cur->media) {
             g_free(cur->media->image_src);
@@ -6857,6 +6860,13 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
     double expected = 0;
     for (int i = 0; i < line_count; i++) expected += line_heights[i];
+    if (box->inline_atomics && box->inline_atomics->len > 0) {
+        if (!box->atomic_line_heights)
+            box->atomic_line_heights = g_array_new(FALSE, FALSE, sizeof(double));
+        g_array_set_size(box->atomic_line_heights, 0);
+        g_array_append_vals(box->atomic_line_heights, line_heights,
+                            (guint)line_count);
+    }
     box->content_width  = content_width;
     box->content_height = expected;
     double ta_h = inline_textarea_total_height(box, parent_style);

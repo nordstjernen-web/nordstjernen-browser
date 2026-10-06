@@ -3586,6 +3586,35 @@ paint_selection_foreground(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
     g_array_free(rects, TRUE);
 }
 
+static gboolean
+paint_inline_lines_at_layout_heights(cairo_t *cr, const ns_box *b,
+                                     NsPangoLayout *layout, double text_x)
+{
+    const GArray *heights = b->atomic_line_heights;
+    if (!heights || heights->len < 2 ||
+        (guint)ns_pango_layout_get_line_count(layout) != heights->len)
+        return FALSE;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    double line_top = b->y;
+    guint i = 0;
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        double line_h = g_array_index(heights, double, i);
+        double pango_h = (double)logical.height / NS_PANGO_SCALE;
+        double baseline = (double)(ns_pango_layout_iter_get_baseline(it) -
+                                   logical.y) / NS_PANGO_SCALE;
+        cairo_move_to(cr, text_x + (double)logical.x / NS_PANGO_SCALE,
+                      line_top + (line_h - pango_h) / 2.0 + baseline);
+        ns_pango_cairo_show_layout_line(cr, line);
+        line_top += line_h;
+        i++;
+    } while (i < heights->len && ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    return TRUE;
+}
+
 static void
 paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -3851,8 +3880,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     cairo_save(cr);
     set_source_rgba(cr, color);
-    cairo_move_to(cr, text_x, y_origin);
-    ns_pango_cairo_show_layout(cr, layout);
+    if (!paint_inline_lines_at_layout_heights(cr, b, layout, text_x)) {
+        cairo_move_to(cr, text_x, y_origin);
+        ns_pango_cairo_show_layout(cr, layout);
+    }
     cairo_restore(cr);
 
     if (sel_run)
@@ -4034,7 +4065,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
             double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
-            double sy = b->y + (double)pos.y / NS_PANGO_SCALE;
+            double sy = b->atomic_line_heights
+                ? a->box->y - a->box->rel_dy
+                : b->y + (double)pos.y / NS_PANGO_SCALE;
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
             cairo_save(cr);
@@ -4161,7 +4194,9 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
             atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE;
-            atomic->owner_offset_y = (double)pos.y / NS_PANGO_SCALE;
+            atomic->owner_offset_y = root->atomic_line_heights && atomic->box
+                ? atomic->box->y - atomic->box->rel_dy - root->y
+                : (double)pos.y / NS_PANGO_SCALE;
         }
         g_object_unref(layout);
     }
