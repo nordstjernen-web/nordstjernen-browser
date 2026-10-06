@@ -29,6 +29,11 @@ Changelog:
   drawn. A path arc that ends where it starts is skipped instead of
   drawing a stray curve, and CSS rotations by a multiple of 90 degrees
   use exact sines and cosines.
+* SVG `systemLanguage` is honoured. An element whose `systemLanguage`
+  list names none of the user's languages is no longer drawn, and
+  `<switch>` picks the first child whose language matches instead of
+  always the first one, so a translated diagram shows the reader's
+  language rather than whichever translation comes first in the file.
 * Clicking into the address bar selects the whole address, as in other
   browsers; a second click places the cursor, and dragging still selects
   part of the text.
