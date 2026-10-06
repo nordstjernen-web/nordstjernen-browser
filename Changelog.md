@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* `white-space` on an inline element applies to its own text. The
+  whole inline run used the mode of its first node, so a `pre-wrap` span
+  inside a normal block lost its line breaks, and a `normal` span inside
+  a `pre-wrap` block kept its runs of spaces. YouTube's
+  `yt-formatted-string[split-lines]` relies on this for the blank line
+  between paragraphs of its notices and descriptions.
 * `::before` and `::after` inside inline content get their own box
   model. An inline pseudo-element now keeps its horizontal margin and
   padding, so YouTube's `89K • Streamed 1mo ago` and El País's section

@@ -1960,12 +1960,35 @@ typedef struct collector_ctx {
     const char *text_transform;
     GArray     *atomics;
     gboolean    abs_placeholders;
+    GArray     *ws_ranges;
+    const ns_node *ws_parent;
+    int         ws_parent_mode;
 } collector_ctx;
+
+typedef struct ns_ws_range {
+    gsize start, end;
+    int mode;
+} ns_ws_range;
 
 typedef struct ns_atomic_raw {
     gsize start;
     ns_box *box;
 } ns_atomic_raw;
+
+static int white_space_mode(const ns_node *node, GHashTable *styles);
+
+static void
+collector_note_ws(collector_ctx *ctx, const ns_node *parent, gsize start)
+{
+    if (!ctx->ws_ranges || !parent || ctx->out->len <= start) return;
+    if (parent != ctx->ws_parent) {
+        ctx->ws_parent = parent;
+        ctx->ws_parent_mode = white_space_mode(parent, ctx->styles);
+    }
+    ns_ws_range r = { .start = start, .end = ctx->out->len,
+                      .mode = ctx->ws_parent_mode };
+    g_array_append_val(ctx->ws_ranges, r);
+}
 
 static void
 append_inline_spacer(collector_ctx *ctx, double width)
@@ -3272,6 +3295,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                         : NULL;
         g_string_append(ctx->out, xformed ? xformed : n->text);
         g_free(xformed);
+        collector_note_ws(ctx, n->parent, start);
         if (ctx->active_href) {
             ns_link_range r = {
                 .start = start,
@@ -4123,10 +4147,12 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     GArray  *raw_links = g_array_new(FALSE, FALSE, sizeof(ns_link_range));
     GArray  *raw_attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
     GArray  *raw_atomics = g_array_new(FALSE, FALSE, sizeof(ns_atomic_raw));
+    GArray  *ws_ranges = g_array_new(FALSE, FALSE, sizeof(ns_ws_range));
     g_array_set_clear_func(raw_links, link_clear);
     collector_ctx ctx = {
         .styles = styles, .out = buf, .links = raw_links, .attrs = raw_attrs,
         .atomics = raw_atomics, .abs_placeholders = abs_placeholders,
+        .ws_ranges = ws_ranges,
     };
     if (first && first->parent) {
         const ns_style *ps = g_hash_table_lookup(styles, first->parent);
@@ -4149,17 +4175,27 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     for (const ns_node *n = first; n && n != last_excl; n = n->next_sibling)
         collect_walk(n, &ctx, g_inline_collect_depth);
 
-    int ws_mode = first ? white_space_mode(first, styles) : NS_WS_COLLAPSE;
-    gboolean preformatted = ws_mode == NS_WS_PRESERVE;
+    int run_ws_mode = first ? white_space_mode(first, styles) : NS_WS_COLLAPSE;
 
     GString *collapsed = g_string_new(NULL);
     gsize   *map = g_new(gsize, buf->len + 1);
-    gboolean prev_ws = ws_mode != NS_WS_PRESERVE;
+    gboolean prev_ws = run_ws_mode != NS_WS_PRESERVE;
+    gboolean trailing_preserved = FALSE;
+    guint ri = 0;
     for (gsize i = 0; i < buf->len; i++) {
         char c = buf->str[i];
+        while (ri < ws_ranges->len &&
+               g_array_index(ws_ranges, ns_ws_range, ri).end <= i)
+            ri++;
+        int ws_mode = run_ws_mode;
+        if (ri < ws_ranges->len &&
+            g_array_index(ws_ranges, ns_ws_range, ri).start <= i)
+            ws_mode = g_array_index(ws_ranges, ns_ws_range, ri).mode;
+        trailing_preserved = ws_mode == NS_WS_PRESERVE;
         if (ws_mode == NS_WS_PRESERVE) {
             map[i] = collapsed->len;
             g_string_append_c(collapsed, c);
+            prev_ws = c == '\n';
             continue;
         }
         if (ws_mode == NS_WS_PRE_LINE && c == '\n') {
@@ -4186,7 +4222,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     map[buf->len] = collapsed->len;
 
     ns_box *box = box_new_inline();
-    if (!preformatted && collapsed->len > 0 &&
+    if (!trailing_preserved && collapsed->len > 0 &&
         collapsed->str[collapsed->len - 1] == ' ')
         g_string_set_size(collapsed, collapsed->len - 1);
 
@@ -4390,6 +4426,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     g_array_free(raw_links, TRUE);
     g_array_free(raw_attrs, TRUE);
     g_array_free(raw_atomics, TRUE);
+    g_array_free(ws_ranges, TRUE);
     g_string_free(buf, TRUE);
 
     box->text = g_string_free(collapsed, FALSE);
