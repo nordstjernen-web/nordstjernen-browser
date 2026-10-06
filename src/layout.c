@@ -13290,7 +13290,8 @@ empty_block_collapses_through(const ns_box *box, int clear)
     return box && box->kind == NS_BOX_BLOCK && clear == 0 &&
            box->content_height <= 0 &&
            box->padding.top <= 0 && box->padding.bottom <= 0 &&
-           box->border.top <= 0 && box->border.bottom <= 0;
+           box->border.top <= 0 && box->border.bottom <= 0 &&
+           !box_establishes_bfc(box);
 }
 
 static double
@@ -14039,6 +14040,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                     collapsed_margin(prev_margin_bottom, mt),
                     c->margin.bottom);
             } else {
+                collapse_top_with_parent = FALSE;
                 cursor_y += c->margin_top_through;
                 if (collapses_through_top) top_through += c->margin_top_through;
                 cursor_y += c->content_height +
