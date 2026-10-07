@@ -48,8 +48,8 @@ def read_sites(path, only, category):
 
 def engine_version(binary):
     try:
-        rev = subprocess.run(["git", "-C", str(ROOT), "describe", "--always", "--dirty", "--tags"],
-                             capture_output=True, text=True, timeout=10).stdout.strip()
+        rev = subprocess.run(["git", "-C", str(Path(binary).resolve().parent), "describe", "--always",
+                              "--dirty", "--tags"], capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         rev = ""
     return f"nordstjernen {rev}".strip()
