@@ -40582,6 +40582,17 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
 }
 
 static void
+ns_scrollable_overflow_add(double *max_r, double *max_btm, double *min_l,
+                           double *min_t, double x0, double y0, double x1,
+                           double y1)
+{
+    if (x1 > *max_r) *max_r = x1;
+    if (y1 > *max_btm) *max_btm = y1;
+    if (x0 < *min_l) *min_l = x0;
+    if (y0 < *min_t) *min_t = y0;
+}
+
+static void
 ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
                             double *min_l, double *min_t, int depth)
 {
@@ -40594,12 +40605,13 @@ ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
             continue;
         double x, y, w, h;
         ns_box_border_box(c, &x, &y, &w, &h);
-        if (w > 0 || h > 0) {
-            if (x + w > *max_r) *max_r = x + w;
-            if (y + h > *max_btm) *max_btm = y + h;
-            if (x < *min_l) *min_l = x;
-            if (y < *min_t) *min_t = y;
-        }
+        if (w > 0 || h > 0)
+            ns_scrollable_overflow_add(max_r, max_btm, min_l, min_t,
+                                       x, y, x + w, y + h);
+        double mx0, my0, mx1, my1;
+        if (ns_paint_inline_moved_extents(c, &mx0, &my0, &mx1, &my1))
+            ns_scrollable_overflow_add(max_r, max_btm, min_l, min_t,
+                                       mx0, my0, mx1, my1);
         gboolean clips = FALSE;
         if (c->style) {
             static const int oprops[3] = {

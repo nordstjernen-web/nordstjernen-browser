@@ -936,6 +936,10 @@ box_walk_max_bottom(const ns_box *b, double *out)
     if (!b) return;
     double bottom = b->y + b->content_height;
     if (bottom > *out) *out = bottom;
+    double mx0, my0, mx1, my1;
+    if (ns_paint_inline_moved_extents(b, &mx0, &my0, &mx1, &my1) &&
+        my1 > *out)
+        *out = my1;
     if (box_clips_for_page_height(b)) return;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         box_walk_max_bottom(c, out);
@@ -1470,6 +1474,7 @@ typedef struct ns_abs_static {
     ns_box *run;
     double  rel_x;
     double  rel_y;
+    gsize   byte_off;
 } ns_abs_static;
 
 enum {
@@ -6914,6 +6919,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             st->run   = box;
             st->rel_x = indent + (double)pos.x / NS_PANGO_SCALE;
             st->rel_y = pango_layout_line_top(layout, line_index);
+            st->byte_off = a->byte_off;
             g_hash_table_insert(g_abs_static, (gpointer)dom, st);
         }
     }
@@ -7106,6 +7112,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     else
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
     ns_paint_start_align_overflow(layout);
+    ns_inline_unshift_point(box, layout, &local_x, &local_y);
 
     int index = 0, trailing = 0;
     gboolean inside = ns_pango_layout_xy_to_index(
@@ -14735,10 +14742,10 @@ relative_pct_cb_height(const ns_box *box)
    the containing block's height when that is definite (the parent of
    pct_of holds it) and is 0 otherwise. */
 static double
-relative_offset_y(const ns_box *box, double parent_h, const ns_box *pct_of)
+relative_offset_y(const ns_style *s, double parent_h, const ns_box *pct_of)
 {
-    const ns_css_value *tv = box->style->values[NS_CSS_TOP];
-    const ns_css_value *bv = box->style->values[NS_CSS_BOTTOM];
+    const ns_css_value *tv = s->values[NS_CSS_TOP];
+    const ns_css_value *bv = s->values[NS_CSS_BOTTOM];
     gboolean from_top = tv && !length_is_auto(tv);
     const ns_css_value *v = from_top ? tv : bv;
     double sign = from_top ? 1 : -1;
@@ -14749,10 +14756,10 @@ relative_offset_y(const ns_box *box, double parent_h, const ns_box *pct_of)
 }
 
 static double
-relative_offset_x(const ns_box *box, double parent_w)
+relative_offset_x(const ns_style *s, double parent_w)
 {
-    const ns_css_value *lv = box->style->values[NS_CSS_LEFT];
-    const ns_css_value *rv = box->style->values[NS_CSS_RIGHT];
+    const ns_css_value *lv = s->values[NS_CSS_LEFT];
+    const ns_css_value *rv = s->values[NS_CSS_RIGHT];
     if (lv && !length_is_auto(lv))
         return length_or_zero(lv, parent_w);
     if (rv && !length_is_auto(rv))
@@ -14763,8 +14770,216 @@ relative_offset_x(const ns_box *box, double parent_w)
 static void
 apply_relative_offset(ns_box *box, double parent_w, double parent_h)
 {
-    translate_subtree(box, relative_offset_x(box, parent_w),
-                      relative_offset_y(box, parent_h, box));
+    translate_subtree(box, relative_offset_x(box->style, parent_w),
+                      relative_offset_y(box->style, parent_h, box));
+}
+
+static gboolean
+inline_attr_holds(const ns_inline_attr *r, gsize byte)
+{
+    return byte >= r->start && byte < r->start + r->len;
+}
+
+void
+ns_inline_offset_at(const ns_box *box, gsize byte, double *dx, double *dy)
+{
+    *dx = 0;
+    *dy = 0;
+    if (!box || !box->attrs) return;
+    gsize innermost = G_MAXSIZE;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT || r->len >= innermost ||
+            !inline_attr_holds(r, byte))
+            continue;
+        innermost = r->len;
+        *dx = r->rel_dx;
+        *dy = r->rel_dy;
+    }
+}
+
+gboolean
+ns_inline_shift_bounds(const ns_box *box, double *x0, double *y0,
+                       double *x1, double *y1)
+{
+    *x0 = *y0 = *x1 = *y1 = 0;
+    if (!box || !box->attrs) return FALSE;
+    gboolean any = FALSE;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT || (r->rel_dx == 0 && r->rel_dy == 0))
+            continue;
+        any = TRUE;
+        *x0 = MIN(*x0, r->rel_dx);
+        *x1 = MAX(*x1, r->rel_dx);
+        *y0 = MIN(*y0, r->rel_dy);
+        *y1 = MAX(*y1, r->rel_dy);
+    }
+    return any;
+}
+
+static gboolean
+inline_shifted_text_at(const ns_box *box, NsPangoLayout *layout,
+                       const ns_inline_attr *r, double x, double y)
+{
+    int index = 0, trailing = 0;
+    if (!ns_pango_layout_xy_to_index(layout,
+                                     (int)((x - r->rel_dx) * NS_PANGO_SCALE),
+                                     (int)((y - r->rel_dy) * NS_PANGO_SCALE),
+                                     &index, &trailing) ||
+        index < 0 || !inline_attr_holds(r, (gsize)index))
+        return FALSE;
+    double dx, dy;
+    ns_inline_offset_at(box, (gsize)index, &dx, &dy);
+    return dx == r->rel_dx && dy == r->rel_dy;
+}
+
+gboolean
+ns_inline_unshift_point(const ns_box *box, NsPangoLayout *layout,
+                        double *x, double *y)
+{
+    if (!box || !box->attrs || !layout) return FALSE;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT || (r->rel_dx == 0 && r->rel_dy == 0))
+            continue;
+        if (!inline_shifted_text_at(box, layout, r, *x, *y)) continue;
+        *x -= r->rel_dx;
+        *y -= r->rel_dy;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+typedef struct inline_rel_offset {
+    const ns_node *dom;
+    double dx, dy;
+    double acc_dx, acc_dy;
+    gboolean layered;
+    int depth;
+} inline_rel_offset;
+
+typedef struct inline_rel_set {
+    GArray *elements;
+    GHashTable *index;
+} inline_rel_set;
+
+static gboolean
+inline_element_is_relative(const ns_inline_attr *r)
+{
+    return r->kind == NS_INLINE_ELEMENT && r->dom &&
+           style_is_relative(r->style) &&
+           !ns_display_is_contents(ns_css_display_of(r->style));
+}
+
+static int
+inline_node_depth(const ns_node *n)
+{
+    int depth = 0;
+    for (; n; n = n->parent) depth++;
+    return depth;
+}
+
+static void
+inline_rel_set_add(inline_rel_set *set, const ns_inline_attr *r,
+                   double cb_w, double cb_h, const ns_box *box)
+{
+    if (!set->elements) {
+        set->elements = g_array_new(FALSE, FALSE, sizeof(inline_rel_offset));
+        set->index = g_hash_table_new(NULL, NULL);
+    }
+    inline_rel_offset o = { r->dom, relative_offset_x(r->style, cb_w),
+                            relative_offset_y(r->style, cb_h, box),
+                            0, 0, FALSE, inline_node_depth(r->dom) };
+    g_array_append_val(set->elements, o);
+    g_hash_table_insert(set->index, (gpointer)r->dom,
+                        GUINT_TO_POINTER(set->elements->len));
+}
+
+static void
+inline_relative_elements(ns_box *box, double cb_w, double cb_h,
+                         inline_rel_set *set)
+{
+    for (guint i = 0; i < box->attrs->len; i++) {
+        ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        r->rel_dx = 0;
+        r->rel_dy = 0;
+        r->rel_layer = NULL;
+        if (!inline_element_is_relative(r) ||
+            (set->index && g_hash_table_contains(set->index, r->dom)))
+            continue;
+        inline_rel_set_add(set, r, cb_w, cb_h, box);
+    }
+}
+
+static inline_rel_offset *
+inline_rel_nearest(const inline_rel_set *set, const ns_node *n)
+{
+    for (; n; n = n->parent) {
+        guint k = GPOINTER_TO_UINT(g_hash_table_lookup(set->index, n));
+        if (k) return &g_array_index(set->elements, inline_rel_offset, k - 1);
+    }
+    return NULL;
+}
+
+static int
+inline_rel_depth_cmp(gconstpointer a, gconstpointer b, gpointer data)
+{
+    const GArray *elements = data;
+    int da = g_array_index(elements, inline_rel_offset, *(const guint *)a).depth;
+    int db = g_array_index(elements, inline_rel_offset, *(const guint *)b).depth;
+    return da < db ? -1 : (da > db ? 1 : 0);
+}
+
+static void
+inline_rel_resolve(const inline_rel_set *set)
+{
+    GArray *order = g_array_sized_new(FALSE, FALSE, sizeof(guint),
+                                      set->elements->len);
+    for (guint i = 0; i < set->elements->len; i++)
+        g_array_append_val(order, i);
+    g_array_sort_with_data(order, inline_rel_depth_cmp, set->elements);
+    for (guint k = 0; k < order->len; k++) {
+        inline_rel_offset *o = &g_array_index(set->elements, inline_rel_offset,
+                                              g_array_index(order, guint, k));
+        const inline_rel_offset *up = inline_rel_nearest(set, o->dom->parent);
+        o->acc_dx = o->dx + (up ? up->acc_dx : 0);
+        o->acc_dy = o->dy + (up ? up->acc_dy : 0);
+        o->layered = o->dx != 0 || o->dy != 0 || (up && up->layered);
+    }
+    g_array_free(order, TRUE);
+}
+
+static void
+inline_rel_assign(ns_box *box, const inline_rel_set *set)
+{
+    for (guint i = 0; i < box->attrs->len; i++) {
+        ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        if (r->kind != NS_INLINE_ELEMENT) continue;
+        const inline_rel_offset *o = inline_rel_nearest(set, r->dom);
+        if (!o) continue;
+        r->rel_dx = o->acc_dx;
+        r->rel_dy = o->acc_dy;
+        r->rel_layer = o->layered ? o->dom : NULL;
+    }
+}
+
+static void
+apply_inline_relative_offsets(ns_box *box, double cb_w, double cb_h)
+{
+    if (box->kind != NS_BOX_INLINE || !box->attrs) return;
+    inline_rel_set set = { NULL, NULL };
+    inline_relative_elements(box, cb_w, cb_h, &set);
+    if (!set.elements) return;
+    if (!box->vertical_wm) {
+        inline_rel_resolve(&set);
+        inline_rel_assign(box, &set);
+    }
+    g_array_free(set.elements, TRUE);
+    g_hash_table_destroy(set.index);
 }
 
 static void apply_position_offsets(ns_box *box, double parent_w,
@@ -14777,14 +14992,22 @@ static void apply_position_offsets(ns_box *box, double parent_w,
 static void
 apply_atomic_position_offsets(ns_box *box, double cb_w, double cb_h)
 {
+    double sx0, sy0, sx1, sy1;
+    gboolean moved = ns_inline_shift_bounds(box, &sx0, &sy0, &sx1, &sy1);
     for (guint i = 0; i < box->inline_atomics->len; i++) {
-        ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
+        const ns_inline_atomic *atomic =
+            &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+        ns_box *ab = atomic->box;
         if (!ab) continue;
-        if (style_is_relative(ab->style)) {
-            ab->rel_dx = relative_offset_x(ab, cb_w);
-            ab->rel_dy = relative_offset_y(ab, cb_h, box);
-            translate_subtree(ab, ab->rel_dx, ab->rel_dy);
-        }
+        gboolean rel = style_is_relative(ab->style);
+        ab->rel_dx = 0;
+        ab->rel_dy = 0;
+        if (moved)
+            ns_inline_offset_at(box, atomic->byte_off, &ab->rel_dx,
+                                &ab->rel_dy);
+        ab->rel_dx += rel ? relative_offset_x(ab->style, cb_w) : 0;
+        ab->rel_dy += rel ? relative_offset_y(ab->style, cb_h, box) : 0;
+        translate_subtree(ab, ab->rel_dx, ab->rel_dy);
         for (ns_box *c = ab->first_child; c; c = c->next_sibling)
             apply_position_offsets(c, ab->content_width, ab->content_height);
         if (ab->inline_atomics)
@@ -14801,6 +15024,7 @@ apply_position_offsets(ns_box *box, double parent_w, double parent_h)
     double child_h = box->content_height;
     if (style_is_relative(box->style))
         apply_relative_offset(box, parent_w, parent_h);
+    apply_inline_relative_offsets(box, parent_w, parent_h);
     if (box->inline_atomics)
         apply_atomic_position_offsets(box, parent_w, parent_h);
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
@@ -15756,6 +15980,15 @@ abs_height_within_limits(const ns_box *abox, double h, double width_basis,
 }
 
 static void
+abs_place_at_static_run(ns_box *abox, const ns_abs_static *st)
+{
+    double dx, dy;
+    ns_inline_offset_at(st->run, st->byte_off, &dx, &dy);
+    abox->x = st->run->x + st->rel_x + dx;
+    abox->y = st->run->y + st->rel_y + dy;
+}
+
+static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
     if (!g_abs_pending || g_abs_pending->len == 0) return;
@@ -15837,8 +16070,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean static_rtl = FALSE;
         double static_right = 0;
         if (st && st->run) {
-            abox->x = st->run->x + st->rel_x;
-            abox->y = st->run->y + st->rel_y;
+            abs_place_at_static_run(abox, st);
         } else {
             double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
             if (i < batch_len && batch_resolved[i])
@@ -16014,12 +16246,22 @@ box_paint_unbounded(const ns_box *b)
 }
 
 static void
+inline_shift_paint_bounds(const ns_box *b, double *top, double *bottom)
+{
+    double x0, y0, x1, y1;
+    if (!ns_inline_shift_bounds(b, &x0, &y0, &x1, &y1)) return;
+    *top = MIN(*top, b->y + y0);
+    *bottom = MAX(*bottom, b->y + b->content_height + y1);
+}
+
+static void
 compute_paint_bounds(ns_box *b)
 {
     double top = b->y;
     double bottom = b->y + b->margin.top + b->border.top + b->padding.top +
                     b->content_height +
                     b->padding.bottom + b->border.bottom + b->margin.bottom;
+    inline_shift_paint_bounds(b, &top, &bottom);
     if (box_paint_unbounded(b)) {
         top = -G_MAXDOUBLE;
         bottom = G_MAXDOUBLE;
@@ -17237,6 +17479,17 @@ ns_box_find_by_id_or_name(const ns_box *root, const char *frag)
     return NULL;
 }
 
+static gboolean
+inline_box_hit_contains(const ns_box *box, double x, double y)
+{
+    double lx = x - box->x;
+    double ly = y - box->y;
+    if (lx >= 0 && lx <= box->content_width &&
+        ly >= 0 && ly <= box->content_height)
+        return TRUE;
+    return ns_paint_inline_on_shifted_text(box, lx, ly);
+}
+
 const ns_link_range *
 ns_box_hit_link_range(const ns_box *root, double x, double y)
 {
@@ -17258,13 +17511,9 @@ ns_box_hit_link_range(const ns_box *root, double x, double y)
     if (!box_blocks_hit_testing(root) &&
         root->kind == NS_BOX_INLINE && root->links &&
         root->links->len > 0) {
-        double box_x0 = root->x;
-        double box_y0 = root->y;
-        double box_y1 = box_y0 + root->content_height;
-        if (x >= box_x0 && x <= box_x0 + root->content_width &&
-            y >= box_y0 && y <= box_y1) {
+        if (inline_box_hit_contains(root, x, y)) {
             gsize byte = 0;
-            if (ns_paint_inline_xy_to_byte(root, x - box_x0, y - box_y0, &byte)) {
+            if (ns_paint_inline_xy_to_byte(root, x - root->x, y - root->y, &byte)) {
                 for (guint i = 0; i < root->links->len; i++) {
                     const ns_link_range *r = &g_array_index(root->links, ns_link_range, i);
                     if (byte >= r->start && byte < r->start + r->len)
@@ -17328,13 +17577,9 @@ ns_box_hit_inline_dom(const ns_box *root, double x, double y)
     if (!box_blocks_hit_testing(root) &&
         root->kind == NS_BOX_INLINE && root->attrs &&
         root->attrs->len > 0 && root->text && *root->text) {
-        double box_x0 = root->x;
-        double box_y0 = root->y;
-        double box_y1 = box_y0 + root->content_height;
-        if (x >= box_x0 && x <= box_x0 + root->content_width &&
-            y >= box_y0 && y <= box_y1) {
+        if (inline_box_hit_contains(root, x, y)) {
             gsize byte = 0;
-            if (ns_paint_inline_xy_to_byte(root, x - box_x0, y - box_y0, &byte)) {
+            if (ns_paint_inline_xy_to_byte(root, x - root->x, y - root->y, &byte)) {
                 const ns_node *best = NULL;
                 gsize best_len = 0;
                 for (guint i = 0; i < root->attrs->len; i++) {

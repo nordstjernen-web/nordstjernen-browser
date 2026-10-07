@@ -80,6 +80,8 @@ typedef struct ns_inline_attr {
     gsize start;
     gsize len;
     double font_size_px;
+    double rel_dx, rel_dy;
+    const ns_node *rel_layer;
     int font_weight;
     int font_stretch;
     int font_kerning;
@@ -205,6 +207,11 @@ struct _PangoLayout;
 void ns_inline_apply_atomic_shapes(struct _PangoAttrList *list, const ns_box *box);
 void ns_inline_layout_set_attrs(struct _PangoLayout *layout,
                                 struct _PangoAttrList *list, const ns_box *box);
+void ns_inline_offset_at(const ns_box *box, gsize byte, double *dx, double *dy);
+gboolean ns_inline_shift_bounds(const ns_box *box, double *x0, double *y0,
+                                double *x1, double *y1);
+gboolean ns_inline_unshift_point(const ns_box *box, struct _PangoLayout *layout,
+                                 double *x, double *y);
 double ns_text_indent_px(const ns_style *s, double basis);
 double ns_inline_text_indent_px(const ns_box *run, const ns_style *s,
                                 double basis);

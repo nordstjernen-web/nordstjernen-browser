@@ -2039,6 +2039,502 @@ decoration_insert_around_atomics(NsPangoAttrList *attrs, NsPangoAttribute *a,
     ns_pango_attribute_destroy(a);
 }
 
+static gboolean
+inline_box_is_hidden(const ns_style *s)
+{
+    const char *vis = ns_style_keyword(s, NS_CSS_VISIBILITY);
+    return vis && (strcmp(vis, "hidden") == 0 || strcmp(vis, "collapse") == 0);
+}
+
+static gboolean
+inline_attr_paints_box(const ns_inline_attr *r)
+{
+    return r->kind == NS_INLINE_ELEMENT && r->len > 0 &&
+           style_has_inline_box_paint(r->style) &&
+           !inline_box_is_hidden(r->style);
+}
+
+typedef struct inline_layer_line {
+    NsPangoLayoutLine *line;
+    int x, baseline, top, height;
+    guint first_seg, n_segs;
+} inline_layer_line;
+
+typedef struct inline_layer_seg {
+    guint layer;
+    guint line;
+    GSList *first;
+    GSList *last;
+    int x, width;
+    gsize lo, hi;
+} inline_layer_seg;
+
+typedef struct inline_bucket {
+    guint *order;
+    guint *start;
+} inline_bucket;
+
+typedef struct inline_bucket_item {
+    guint value;
+    guint layer;
+} inline_bucket_item;
+
+typedef struct inline_layers {
+    GArray *owners;
+    GHashTable *index;
+    guint *byte_layer;
+    gsize n_bytes;
+    GArray *lines;
+    GArray *segs;
+    inline_bucket seg_order;
+    inline_bucket box_order;
+    inline_bucket atomic_order;
+} inline_layers;
+
+static const char k_inline_layers[] = "ns-inline-layers";
+
+static void
+inline_bucket_free(inline_bucket *bk)
+{
+    g_free(bk->order);
+    g_free(bk->start);
+}
+
+static void
+inline_layers_free(gpointer data)
+{
+    inline_layers *L = data;
+    g_array_free(L->owners, TRUE);
+    g_hash_table_destroy(L->index);
+    g_free(L->byte_layer);
+    if (L->lines) g_array_free(L->lines, TRUE);
+    if (L->segs) g_array_free(L->segs, TRUE);
+    inline_bucket_free(&L->seg_order);
+    inline_bucket_free(&L->box_order);
+    inline_bucket_free(&L->atomic_order);
+    g_free(L);
+}
+
+static gboolean
+inline_attr_owns_layer(const ns_inline_attr *r)
+{
+    return r->kind == NS_INLINE_ELEMENT && r->rel_layer &&
+           r->rel_layer == r->dom;
+}
+
+static gboolean
+inline_box_has_layers(const ns_box *b)
+{
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++)
+        if (inline_attr_owns_layer(&g_array_index(b->attrs, ns_inline_attr, i)))
+            return TRUE;
+    return FALSE;
+}
+
+static int dom_tree_order_cmp(const ns_node *a, const ns_node *b);
+
+static int
+inline_owner_cmp(gconstpointer a, gconstpointer b, gpointer data)
+{
+    const GArray *attrs = data;
+    const ns_inline_attr *x =
+        &g_array_index(attrs, ns_inline_attr, *(const guint *)a);
+    const ns_inline_attr *y =
+        &g_array_index(attrs, ns_inline_attr, *(const guint *)b);
+    if (x->start != y->start) return x->start < y->start ? -1 : 1;
+    if (x->len != y->len) return x->len > y->len ? -1 : 1;
+    return dom_tree_order_cmp(x->dom, y->dom);
+}
+
+static void
+inline_owner_note(GHashTable *first, const GArray *attrs, guint i)
+{
+    const ns_inline_attr *r = &g_array_index(attrs, ns_inline_attr, i);
+    gpointer seen = NULL;
+    if (g_hash_table_lookup_extended(first, r->dom, NULL, &seen) &&
+        g_array_index(attrs, ns_inline_attr,
+                      GPOINTER_TO_UINT(seen)).start <= r->start)
+        return;
+    g_hash_table_insert(first, (gpointer)r->dom, GUINT_TO_POINTER(i));
+}
+
+static GArray *
+inline_layer_owners(const ns_box *b, GHashTable *index)
+{
+    GHashTable *first = g_hash_table_new(NULL, NULL);
+    for (guint i = 0; i < b->attrs->len; i++)
+        if (inline_attr_owns_layer(&g_array_index(b->attrs, ns_inline_attr, i)))
+            inline_owner_note(first, b->attrs, i);
+    GArray *owners = g_array_new(FALSE, FALSE, sizeof(guint));
+    GHashTableIter it;
+    gpointer value;
+    g_hash_table_iter_init(&it, first);
+    while (g_hash_table_iter_next(&it, NULL, &value)) {
+        guint i = GPOINTER_TO_UINT(value);
+        g_array_append_val(owners, i);
+    }
+    g_hash_table_destroy(first);
+    g_array_sort_with_data(owners, inline_owner_cmp, b->attrs);
+    guint none = G_MAXUINT;
+    g_array_prepend_val(owners, none);
+    for (guint k = 1; k < owners->len; k++) {
+        const ns_inline_attr *r = &g_array_index(
+            b->attrs, ns_inline_attr, g_array_index(owners, guint, k));
+        g_hash_table_insert(index, (gpointer)r->dom, GUINT_TO_POINTER(k));
+    }
+    return owners;
+}
+
+static guint
+inline_layer_of_attr(GHashTable *index, const ns_inline_attr *r)
+{
+    return r->rel_layer
+        ? GPOINTER_TO_UINT(g_hash_table_lookup(index, r->rel_layer)) : 0;
+}
+
+static int
+inline_element_tree_order_cmp(gconstpointer a, gconstpointer b, gpointer data)
+{
+    const GArray *attrs = data;
+    guint ia = *(const guint *)a, ib = *(const guint *)b;
+    const ns_inline_attr *ra = &g_array_index(attrs, ns_inline_attr, ia);
+    const ns_inline_attr *rb = &g_array_index(attrs, ns_inline_attr, ib);
+    if (ra->start != rb->start) return ra->start < rb->start ? -1 : 1;
+    if (ra->len != rb->len) return ra->len > rb->len ? -1 : 1;
+    return ia > ib ? -1 : (ia < ib ? 1 : 0);
+}
+
+static GArray *
+inline_elements_in_tree_order(const ns_box *b)
+{
+    GArray *order = g_array_new(FALSE, FALSE, sizeof(guint));
+    for (guint i = 0; i < b->attrs->len; i++)
+        if (g_array_index(b->attrs, ns_inline_attr, i).kind ==
+            NS_INLINE_ELEMENT)
+            g_array_append_val(order, i);
+    g_array_sort_with_data(order, inline_element_tree_order_cmp, b->attrs);
+    return order;
+}
+
+static guint *
+inline_layer_byte_map(const ns_box *b, gsize n, GHashTable *index)
+{
+    guint *map = g_new0(guint, n + 1);
+    GArray *order = inline_elements_in_tree_order(b);
+    for (guint k = 0; k < order->len; k++) {
+        const ns_inline_attr *r = &g_array_index(
+            b->attrs, ns_inline_attr, g_array_index(order, guint, k));
+        guint layer = inline_layer_of_attr(index, r);
+        gsize end = MIN(n, r->start + r->len);
+        for (gsize i = r->start; i < end; i++) map[i] = layer;
+    }
+    g_array_free(order, TRUE);
+    return map;
+}
+
+static void
+inline_layers_attach(const ns_box *b, NsPangoLayout *layout)
+{
+    if (!b->text || !inline_box_has_layers(b)) return;
+    inline_layers *L = g_new0(inline_layers, 1);
+    L->index = g_hash_table_new(NULL, NULL);
+    L->owners = inline_layer_owners(b, L->index);
+    L->n_bytes = strlen(b->text);
+    L->byte_layer = inline_layer_byte_map(b, L->n_bytes, L->index);
+    g_object_set_data_full(G_OBJECT(layout), k_inline_layers, L,
+                           inline_layers_free);
+}
+
+static void
+inline_bucket_build(inline_bucket *bk, guint n_layers, const GArray *items)
+{
+    bk->start = g_new0(guint, n_layers + 2);
+    bk->order = g_new(guint, items->len + 1);
+    for (guint i = 0; i < items->len; i++)
+        bk->start[g_array_index(items, inline_bucket_item, i).layer + 2]++;
+    for (guint k = 2; k < n_layers + 2; k++)
+        bk->start[k] += bk->start[k - 1];
+    for (guint i = 0; i < items->len; i++) {
+        const inline_bucket_item *it =
+            &g_array_index(items, inline_bucket_item, i);
+        bk->order[bk->start[it->layer + 1]++] = it->value;
+    }
+}
+
+static gboolean
+inline_run_has_cluster_at(const NsPangoLayoutRun *run, int at)
+{
+    for (int i = 0; i < run->glyphs->num_glyphs; i++)
+        if (run->glyphs->log_clusters[i] == at) return TRUE;
+    return FALSE;
+}
+
+static int
+inline_run_layer_break(const inline_layers *L, const NsPangoLayoutRun *run)
+{
+    gsize start = (gsize)run->item->offset;
+    gsize end = MIN(L->n_bytes, start + (gsize)run->item->length);
+    if (start >= end ||
+        (run->item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_IS_ELLIPSIS))
+        return 0;
+    for (gsize i = start + 1; i < end; i++)
+        if (L->byte_layer[i] != L->byte_layer[start] &&
+            inline_run_has_cluster_at(run, (int)(i - start)))
+            return (int)(i - start);
+    return 0;
+}
+
+static gboolean
+inline_split_run(const inline_layers *L, GSList *l, const char *text)
+{
+    NsPangoLayoutRun *run = l->data;
+    int at = inline_run_layer_break(L, run);
+    NsPangoLayoutRun *head =
+        at > 0 ? ns_pango_glyph_item_split(run, text, at) : NULL;
+    if (!head) return FALSE;
+    gboolean rtl = run->item->analysis.level % 2 != 0;
+    l->data = rtl ? run : head;
+    l->next = g_slist_prepend(l->next, rtl ? head : run);
+    return TRUE;
+}
+
+static void
+inline_layers_split_line(const inline_layers *L, NsPangoLayoutLine *line,
+                         const char *text)
+{
+    GSList *l = line->runs;
+    while (l)
+        if (!inline_split_run(L, l, text)) l = l->next;
+}
+
+static guint
+inline_run_layer(const inline_layers *L, const NsPangoLayoutRun *run)
+{
+    gsize at = (gsize)run->item->offset;
+    if ((run->item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_IS_ELLIPSIS) ||
+        at >= L->n_bytes)
+        return 0;
+    return L->byte_layer[at];
+}
+
+static int
+inline_run_advance(const NsPangoLayoutRun *run)
+{
+    int width = ns_pango_glyph_string_get_width(run->glyphs);
+    int n = run->glyphs->num_glyphs;
+    for (const GSList *l = run->item->analysis.extra_attrs; l; l = l->next) {
+        const NsPangoAttribute *attr = l->data;
+        if (attr->klass->type != NS_PANGO_ATTR_SHAPE) continue;
+        int w = ((const NsPangoAttrShape *)attr)->logical_rect.width;
+        width = n > 0 ? MAX(w, w + w * (n - 1)) : 0;
+    }
+    return run->start_x_offset + width + run->end_x_offset;
+}
+
+static void
+inline_layers_index_line(inline_layers *L, NsPangoLayoutLine *line,
+                         guint line_no)
+{
+    inline_layer_seg seg = { 0 };
+    int x = 0;
+    for (GSList *l = line->runs; l; l = l->next) {
+        const NsPangoLayoutRun *run = l->data;
+        guint layer = inline_run_layer(L, run);
+        if (!seg.first || layer != seg.layer) {
+            if (seg.first) g_array_append_val(L->segs, seg);
+            seg = (inline_layer_seg){ .layer = layer, .line = line_no,
+                                      .first = l, .x = x, .lo = G_MAXSIZE };
+        }
+        int advance = inline_run_advance(run);
+        seg.last = l;
+        seg.width += advance;
+        seg.lo = MIN(seg.lo, (gsize)run->item->offset);
+        seg.hi = MAX(seg.hi, (gsize)(run->item->offset + run->item->length));
+        x += advance;
+    }
+    if (seg.first) g_array_append_val(L->segs, seg);
+}
+
+static void
+inline_layers_index_lines(inline_layers *L, NsPangoLayout *layout)
+{
+    const char *text = ns_pango_layout_get_text(layout);
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        NsPangoRectangle ink, logical;
+        ns_pango_layout_line_get_extents(line, &ink, &logical);
+        inline_layers_split_line(L, line, text);
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        inline_layer_line g = { line, logical.x,
+                                ns_pango_layout_iter_get_baseline(it),
+                                logical.y, logical.height, L->segs->len, 0 };
+        inline_layers_index_line(L, line, L->lines->len);
+        g.n_segs = L->segs->len - g.first_seg;
+        g_array_append_val(L->lines, g);
+    } while (ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+}
+
+static void
+inline_layers_bucket_segs(inline_layers *L)
+{
+    GArray *items = g_array_sized_new(FALSE, FALSE, sizeof(inline_bucket_item),
+                                      L->segs->len);
+    for (guint i = 0; i < L->segs->len; i++) {
+        inline_bucket_item it = {
+            i, g_array_index(L->segs, inline_layer_seg, i).layer };
+        g_array_append_val(items, it);
+    }
+    inline_bucket_build(&L->seg_order, L->owners->len, items);
+    g_array_free(items, TRUE);
+}
+
+static void
+inline_layers_bucket_boxes(inline_layers *L, const ns_box *b)
+{
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(inline_bucket_item));
+    for (guint i = b->attrs->len; i-- > 0;) {
+        const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
+        if (!inline_attr_paints_box(r)) continue;
+        inline_bucket_item it = { i, inline_layer_of_attr(L->index, r) };
+        g_array_append_val(items, it);
+    }
+    inline_bucket_build(&L->box_order, L->owners->len, items);
+    g_array_free(items, TRUE);
+}
+
+static void
+inline_layers_bucket_atomics(inline_layers *L, const ns_box *b)
+{
+    const GArray *atomics = b->inline_atomics;
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(inline_bucket_item));
+    for (guint i = 0; atomics && i < atomics->len; i++) {
+        gsize at = g_array_index(atomics, ns_inline_atomic, i).byte_off;
+        inline_bucket_item it = {
+            i, at < L->n_bytes ? L->byte_layer[at] : 0 };
+        g_array_append_val(items, it);
+    }
+    inline_bucket_build(&L->atomic_order, L->owners->len, items);
+    g_array_free(items, TRUE);
+}
+
+static const inline_layers *
+inline_layers_of(const ns_box *b, NsPangoLayout *layout)
+{
+    inline_layers *L = g_object_get_data(G_OBJECT(layout), k_inline_layers);
+    if (!L || L->lines) return L;
+    L->lines = g_array_new(FALSE, FALSE, sizeof(inline_layer_line));
+    L->segs = g_array_new(FALSE, FALSE, sizeof(inline_layer_seg));
+    inline_layers_index_lines(L, layout);
+    inline_layers_bucket_segs(L);
+    inline_layers_bucket_boxes(L, b);
+    inline_layers_bucket_atomics(L, b);
+    g_clear_pointer(&L->byte_layer, g_free);
+    return L;
+}
+
+static const ns_inline_attr *
+inline_layer_owner(const ns_box *b, const inline_layers *L, guint layer)
+{
+    if (layer == 0 || layer >= L->owners->len) return NULL;
+    return &g_array_index(b->attrs, ns_inline_attr,
+                          g_array_index(L->owners, guint, layer));
+}
+
+static void
+inline_layer_offset(const ns_box *b, const inline_layers *L, guint layer,
+                    double *dx, double *dy)
+{
+    const ns_inline_attr *owner = inline_layer_owner(b, L, layer);
+    *dx = owner ? owner->rel_dx : 0;
+    *dy = owner ? owner->rel_dy : 0;
+}
+
+static void
+inline_layer_draw_seg(cairo_t *cr, const inline_layer_seg *seg,
+                      NsPangoLayoutLine *line, double x, double y)
+{
+    GSList *runs = line->runs;
+    GSList *after = seg->last->next;
+    seg->last->next = NULL;
+    line->runs = seg->first;
+    cairo_move_to(cr, x + (double)seg->x / NS_PANGO_SCALE, y);
+    ns_pango_cairo_show_layout_line(cr, line);
+    seg->last->next = after;
+    line->runs = runs;
+}
+
+static void
+inline_layer_show(cairo_t *cr, const inline_layers *L, guint layer,
+                  double ox, double oy, const double *baselines)
+{
+    const inline_bucket *bk = &L->seg_order;
+    for (guint k = bk->start[layer]; k < bk->start[layer + 1]; k++) {
+        const inline_layer_seg *seg =
+            &g_array_index(L->segs, inline_layer_seg, bk->order[k]);
+        const inline_layer_line *g =
+            &g_array_index(L->lines, inline_layer_line, seg->line);
+        double y = baselines ? baselines[seg->line]
+                             : oy + (double)g->baseline / NS_PANGO_SCALE;
+        inline_layer_draw_seg(cr, seg, g->line,
+                              ox + (double)g->x / NS_PANGO_SCALE, y);
+    }
+}
+
+static const guint k_inline_all_layers = G_MAXUINT;
+
+typedef struct inline_text_src {
+    const ns_box *box;
+    NsPangoLayout *layout;
+    const inline_layers *layers;
+    guint layer;
+} inline_text_src;
+
+static inline_text_src
+inline_text_src_of(const ns_box *b, NsPangoLayout *layout, guint layer)
+{
+    inline_text_src src = { b, layout, inline_layers_of(b, layout), layer };
+    return src;
+}
+
+static void
+inline_text_src_show(cairo_t *cr, const inline_text_src *src)
+{
+    if (!src->layers) {
+        ns_pango_cairo_show_layout(cr, src->layout);
+        return;
+    }
+    double x = 0, y = 0;
+    cairo_get_current_point(cr, &x, &y);
+    if (src->layer != k_inline_all_layers) {
+        inline_layer_show(cr, src->layers, src->layer, x, y, NULL);
+        return;
+    }
+    for (guint k = 0; k < src->layers->owners->len; k++) {
+        double dx, dy;
+        inline_layer_offset(src->box, src->layers, k, &dx, &dy);
+        inline_layer_show(cr, src->layers, k, x + dx, y + dy, NULL);
+    }
+}
+
+static gboolean
+inline_text_src_extents(const inline_text_src *src, double *x0, double *y0,
+                        double *w, double *h)
+{
+    int lw = 0, lh = 0;
+    ns_pango_layout_get_pixel_size(src->layout, &lw, &lh);
+    if (lw <= 0 || lh <= 0) return FALSE;
+    double sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
+    if (src->layers && src->layer == k_inline_all_layers)
+        ns_inline_shift_bounds(src->box, &sx0, &sy0, &sx1, &sy1);
+    *x0 = sx0;
+    *y0 = sy0;
+    *w = lw + sx1 - sx0;
+    *h = lh + sy1 - sy0;
+    return TRUE;
+}
+
 static gsize
 find_ci_substring(const char *hay, gsize hay_len,
                   const char *needle, gsize needle_len,
@@ -2963,6 +3459,84 @@ decoration_style_of(const ns_inline_attr *r, const ns_style *s)
     return dv && dv->kind == NS_CSS_V_KEYWORD ? dv->u.keyword : NULL;
 }
 
+typedef struct dashed_decoration {
+    const ns_box *box;
+    const ns_inline_attr *attr;
+    const char *keyword;
+    double text_x, base_y;
+    rgba base;
+} dashed_decoration;
+
+static double
+dashed_decoration_y(const ns_inline_attr *r, double base_y, double em,
+                    double thick)
+{
+    if (r->kind == NS_INLINE_STRIKETHROUGH)
+        return base_y - em * 0.28;
+    if (r->kind == NS_INLINE_OVERLINE)
+        return base_y - em * 0.78;
+    return base_y + thick * 1.5;
+}
+
+static void
+paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
+                              NsPangoLayoutLine *line, int seg0, int seg1,
+                              double dx, double dy)
+{
+    const ns_inline_attr *r = d->attr;
+    gboolean dotted = strcmp(d->keyword, "dotted") == 0;
+    int xa = 0, xb = 0;
+    ns_pango_layout_line_index_to_x(line, seg0, FALSE, &xa);
+    ns_pango_layout_line_index_to_x(line, seg1, FALSE, &xb);
+    double x0 = dx + d->text_x + (double)MIN(xa, xb) / NS_PANGO_SCALE;
+    double x1 = dx + d->text_x + (double)MAX(xa, xb) / NS_PANGO_SCALE;
+    double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
+    double thick = MAX(em / 16.0, 1.0);
+    double uy = dy + dashed_decoration_y(r, d->base_y, em, thick);
+    const ns_css_value *dc =
+        r->style ? r->style->values[NS_CSS_TEXT_DECORATION_COLOR] : NULL;
+    cairo_save(cr);
+    if (dc && dc->kind == NS_CSS_V_COLOR)
+        cairo_set_source_rgba(cr, dc->u.color.r / 255.0,
+                              dc->u.color.g / 255.0,
+                              dc->u.color.b / 255.0,
+                              dc->u.color.a / 255.0);
+    else
+        cairo_set_source_rgba(cr, d->base.r, d->base.g, d->base.b, d->base.a);
+    cairo_set_line_width(cr, thick);
+    double dash[2] = { dotted ? thick : thick * 3.0,
+                       dotted ? thick * 1.6 : thick * 2.5 };
+    cairo_set_dash(cr, dash, 2, 0);
+    cairo_set_line_cap(cr, dotted ? CAIRO_LINE_CAP_ROUND
+                                  : CAIRO_LINE_CAP_BUTT);
+    cairo_move_to(cr, x0, uy);
+    cairo_line_to(cr, x1, uy);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+static void
+paint_dashed_decoration(cairo_t *cr, const dashed_decoration *d,
+                        const inline_layers *L, NsPangoLayoutLine *line,
+                        guint line_no, int seg0, int seg1)
+{
+    if (!L || line_no >= L->lines->len) {
+        paint_dashed_decoration_piece(cr, d, line, seg0, seg1, 0, 0);
+        return;
+    }
+    const inline_layer_line *g =
+        &g_array_index(L->lines, inline_layer_line, line_no);
+    for (guint k = g->first_seg; k < g->first_seg + g->n_segs; k++) {
+        const inline_layer_seg *seg =
+            &g_array_index(L->segs, inline_layer_seg, k);
+        int lo = MAX(seg0, (int)seg->lo), hi = MIN(seg1, (int)seg->hi);
+        if (lo >= hi) continue;
+        double dx, dy;
+        inline_layer_offset(d->box, L, seg->layer, &dx, &dy);
+        paint_dashed_decoration_piece(cr, d, line, lo, hi, dx, dy);
+    }
+}
+
 static void
 paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
                                double text_x, double y_origin,
@@ -2985,7 +3559,10 @@ paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, NsPangoLayout *lay
     NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
     if (!iter)
         return;
+    const inline_layers *L = inline_layers_of(b, layout);
+    int line_no = -1;
     do {
+        line_no++;
         NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(iter);
         if (!line)
             continue;
@@ -3003,49 +3580,14 @@ paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, NsPangoLayout *lay
             const char *kw = underline_dash_style(r, s);
             if (!kw)
                 continue;
-            gboolean dotted = strcmp(kw, "dotted") == 0;
             int rstart = (int)r->start, rend = (int)(r->start + r->len);
             int seg0 = rstart > line_start ? rstart : line_start;
             int seg1 = rend < line_end ? rend : line_end;
             if (seg0 >= seg1)
                 continue;
-            int xa = 0, xb = 0;
-            ns_pango_layout_line_index_to_x(line, seg0, FALSE, &xa);
-            ns_pango_layout_line_index_to_x(line, seg1, FALSE, &xb);
-            double x0 = text_x + (double)(xa < xb ? xa : xb) / NS_PANGO_SCALE;
-            double x1 = text_x + (double)(xa < xb ? xb : xa) / NS_PANGO_SCALE;
-            double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
-            double thick = em / 16.0;
-            if (thick < 1.0)
-                thick = 1.0;
-            double uy;
-            if (r->kind == NS_INLINE_STRIKETHROUGH)
-                uy = base_y - em * 0.28;
-            else if (r->kind == NS_INLINE_OVERLINE)
-                uy = base_y - em * 0.78;
-            else
-                uy = base_y + thick * 1.5;
-            const ns_css_value *dc =
-                r->style ? r->style->values[NS_CSS_TEXT_DECORATION_COLOR] : NULL;
-            cairo_save(cr);
-            if (dc && dc->kind == NS_CSS_V_COLOR)
-                cairo_set_source_rgba(cr, dc->u.color.r / 255.0,
-                                      dc->u.color.g / 255.0,
-                                      dc->u.color.b / 255.0,
-                                      dc->u.color.a / 255.0);
-            else
-                cairo_set_source_rgba(cr, base.r, base.g, base.b, base.a);
-            cairo_set_line_width(cr, thick);
-            double on = dotted ? thick : thick * 3.0;
-            double off = dotted ? thick * 1.6 : thick * 2.5;
-            double dash[2] = { on, off };
-            cairo_set_dash(cr, dash, 2, 0);
-            cairo_set_line_cap(cr, dotted ? CAIRO_LINE_CAP_ROUND
-                                          : CAIRO_LINE_CAP_BUTT);
-            cairo_move_to(cr, x0, uy);
-            cairo_line_to(cr, x1, uy);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            dashed_decoration d = { b, r, kw, text_x, base_y, base };
+            paint_dashed_decoration(cr, &d, L, line, (guint)line_no, seg0,
+                                    seg1);
         }
     } while (ns_pango_layout_iter_next_line(iter));
     ns_pango_layout_iter_free(iter);
@@ -3088,74 +3630,91 @@ ns_box_blur_a8(unsigned char *data, int w, int h, int stride, int radius)
     g_free(tmp);
 }
 
+typedef struct text_shadow_geom {
+    int blur, blur_s, pad, mw, mh;
+    double ds;
+} text_shadow_geom;
+
 static void
-paint_text_shadow_layer(cairo_t *cr, NsPangoLayout *layout, double x, double y,
-                        const ns_css_shadow *sh)
+text_shadow_geom_for(const ns_css_shadow *sh, double w, double h,
+                     text_shadow_geom *g)
 {
-    int lw = 0, lh = 0;
-    ns_pango_layout_get_pixel_size(layout, &lw, &lh);
-    if (lw <= 0 || lh <= 0) return;
+    g->blur = MAX((int)(sh->blur + 0.5), 0);
+    g->ds = CLAMP(g->blur / 3.0, 1.0, 4.0);
+    g->blur_s = (int)(g->blur / g->ds + 0.5);
+    if (g->blur > 0 && g->blur_s < 1) g->blur_s = 1;
+    g->pad = g->blur_s * 3 + 2;
+    g->mw = (int)ceil(w / g->ds) + 2 * g->pad;
+    g->mh = (int)ceil(h / g->ds) + 2 * g->pad;
+}
 
-    int blur = (int)(sh->blur + 0.5);
-    if (blur < 0) blur = 0;
-
-    double ds = blur / 3.0;
-    if (ds < 1.0) ds = 1.0;
-    if (ds > 4.0) ds = 4.0;
-    int blur_s = (int)(blur / ds + 0.5);
-    if (blur > 0 && blur_s < 1) blur_s = 1;
-    int pad = blur_s * 3 + 2;
-    int mw = (int)ceil(lw / ds) + 2 * pad;
-    int mh = (int)ceil(lh / ds) + 2 * pad;
-
-    if (mw > 4096 || mh > 4096) {
-        cairo_save(cr);
-        cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
-                              sh->b / 255.0, sh->a / 255.0);
-        cairo_move_to(cr, x + sh->x, y + sh->y);
-        ns_pango_cairo_show_layout(cr, layout);
-        cairo_restore(cr);
-        return;
-    }
-
-    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mw, mh);
+static cairo_surface_t *
+text_shadow_mask(const inline_text_src *src, const text_shadow_geom *g,
+                 double x0, double y0)
+{
+    cairo_surface_t *mask =
+        cairo_image_surface_create(CAIRO_FORMAT_A8, g->mw, g->mh);
     if (cairo_surface_status(mask) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(mask);
-        return;
+        return NULL;
     }
     cairo_t *mcr = cairo_create(mask);
-    cairo_scale(mcr, 1.0 / ds, 1.0 / ds);
-    cairo_move_to(mcr, pad * ds, pad * ds);
-    ns_pango_cairo_show_layout(mcr, layout);
+    cairo_scale(mcr, 1.0 / g->ds, 1.0 / g->ds);
+    cairo_move_to(mcr, g->pad * g->ds - x0, g->pad * g->ds - y0);
+    inline_text_src_show(mcr, src);
     cairo_destroy(mcr);
     cairo_surface_flush(mask);
-
-    if (blur > 0) {
+    if (g->blur > 0) {
         unsigned char *data = cairo_image_surface_get_data(mask);
         int stride = cairo_image_surface_get_stride(mask);
-        ns_box_blur_a8(data, mw, mh, stride, blur_s);
-        ns_box_blur_a8(data, mw, mh, stride, blur_s);
+        ns_box_blur_a8(data, g->mw, g->mh, stride, g->blur_s);
+        ns_box_blur_a8(data, g->mw, g->mh, stride, g->blur_s);
         cairo_surface_mark_dirty(mask);
     }
+    return mask;
+}
 
-    double ox = x + sh->x - pad * ds;
-    double oy = y + sh->y - pad * ds;
+static void
+paint_text_shadow_mask(cairo_t *cr, cairo_surface_t *mask, double ds,
+                       double ox, double oy)
+{
+    if (ds == 1.0) {
+        cairo_mask_surface(cr, mask, ox, oy);
+        return;
+    }
+    cairo_pattern_t *mp = cairo_pattern_create_for_surface(mask);
+    cairo_matrix_t m;
+    cairo_matrix_init_scale(&m, 1.0 / ds, 1.0 / ds);
+    cairo_matrix_translate(&m, -ox, -oy);
+    cairo_pattern_set_matrix(mp, &m);
+    cairo_mask(cr, mp);
+    cairo_pattern_destroy(mp);
+}
+
+static void
+paint_text_shadow_layer(cairo_t *cr, const inline_text_src *src, double x,
+                        double y, const ns_css_shadow *sh)
+{
+    double x0, y0, w, h;
+    if (!inline_text_src_extents(src, &x0, &y0, &w, &h)) return;
+    text_shadow_geom g;
+    text_shadow_geom_for(sh, w, h, &g);
+    gboolean direct = g.mw > 4096 || g.mh > 4096;
+    cairo_surface_t *mask = direct ? NULL : text_shadow_mask(src, &g, x0, y0);
+    if (!direct && !mask) return;
     cairo_save(cr);
     cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
                           sh->b / 255.0, sh->a / 255.0);
-    if (ds == 1.0) {
-        cairo_mask_surface(cr, mask, ox, oy);
+    if (mask) {
+        paint_text_shadow_mask(cr, mask, g.ds,
+                               x + sh->x - g.pad * g.ds + x0,
+                               y + sh->y - g.pad * g.ds + y0);
+        cairo_surface_destroy(mask);
     } else {
-        cairo_pattern_t *mp = cairo_pattern_create_for_surface(mask);
-        cairo_matrix_t m;
-        cairo_matrix_init_scale(&m, 1.0 / ds, 1.0 / ds);
-        cairo_matrix_translate(&m, -ox, -oy);
-        cairo_pattern_set_matrix(mp, &m);
-        cairo_mask(cr, mp);
-        cairo_pattern_destroy(mp);
+        cairo_move_to(cr, x + sh->x, y + sh->y);
+        inline_text_src_show(cr, src);
     }
     cairo_restore(cr);
-    cairo_surface_destroy(mask);
 }
 
 static void
@@ -3492,6 +4051,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     }
     paint_spell_underlines(attrs, b);
     ns_inline_layout_set_attrs(layout, attrs, b);
+    inline_layers_attach(b, layout);
     ns_pango_attr_list_unref(attrs);
 
     apply_text_align(layout, s);
@@ -3572,10 +4132,54 @@ selection_pseudo_color(const ns_box *b, ns_css_prop prop, rgba *out)
 }
 
 static void
-paint_selection_background(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
-                           double ox, double oy, const ns_selection_run *run)
+inline_seg_selection_rects(GArray *out, const inline_layers *L,
+                           const inline_layer_seg *seg, double ox, double oy,
+                           const ns_selection_run *run)
 {
-    GArray *rects = paint_selection_rects(layout, ox, oy, run);
+    gsize s = MAX(seg->lo, (gsize)run->start);
+    gsize e = MIN(seg->hi, (gsize)run->end);
+    if (s >= e) return;
+    const inline_layer_line *g =
+        &g_array_index(L->lines, inline_layer_line, seg->line);
+    int *ranges = NULL;
+    int n_ranges = 0;
+    ns_pango_layout_line_get_x_ranges(g->line, (int)s, (int)e, &ranges,
+                                      &n_ranges);
+    for (int i = 0; i < n_ranges; i++) {
+        int x0 = MIN(ranges[i * 2], ranges[i * 2 + 1]);
+        int x1 = MAX(ranges[i * 2], ranges[i * 2 + 1]);
+        sel_rect r = { ox + (double)x0 / NS_PANGO_SCALE,
+                       oy + (double)g->top / NS_PANGO_SCALE,
+                       MAX((double)(x1 - x0) / NS_PANGO_SCALE, 1.0),
+                       MAX((double)g->height / NS_PANGO_SCALE, 1.0) };
+        g_array_append_val(out, r);
+    }
+    g_free(ranges);
+}
+
+static GArray *
+inline_selection_rects(const inline_text_src *src, double ox, double oy,
+                       const ns_selection_run *run)
+{
+    const inline_layers *L = src->layers;
+    if (!L) return paint_selection_rects(src->layout, ox, oy, run);
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(sel_rect));
+    const inline_bucket *bk = &L->seg_order;
+    for (guint k = bk->start[src->layer]; k < bk->start[src->layer + 1]; k++)
+        inline_seg_selection_rects(
+            out, L, &g_array_index(L->segs, inline_layer_seg, bk->order[k]),
+            ox, oy, run);
+    if (out->len > 0) return out;
+    g_array_free(out, TRUE);
+    return NULL;
+}
+
+static void
+paint_selection_background(cairo_t *cr, const ns_box *b,
+                           const inline_text_src *src, double ox, double oy,
+                           const ns_selection_run *run)
+{
+    GArray *rects = inline_selection_rects(src, ox, oy, run);
     if (!rects) return;
     rgba bg = { 0.20, 0.40, 0.85, 0.30 };
     selection_pseudo_color(b, NS_CSS_BACKGROUND_COLOR, &bg);
@@ -3591,12 +4195,13 @@ paint_selection_background(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
 }
 
 static void
-paint_selection_foreground(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
-                           double ox, double oy, const ns_selection_run *run)
+paint_selection_foreground(cairo_t *cr, const ns_box *b,
+                           const inline_text_src *src, double ox, double oy,
+                           const ns_selection_run *run)
 {
     rgba fg;
     if (!selection_pseudo_color(b, NS_CSS_COLOR, &fg)) return;
-    GArray *rects = paint_selection_rects(layout, ox, oy, run);
+    GArray *rects = inline_selection_rects(src, ox, oy, run);
     if (!rects) return;
     cairo_save(cr);
     for (guint i = 0; i < rects->len; i++) {
@@ -3606,7 +4211,7 @@ paint_selection_foreground(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
     cairo_clip(cr);
     set_source_rgba(cr, fg);
     cairo_move_to(cr, ox, oy);
-    ns_pango_cairo_show_layout(cr, layout);
+    inline_text_src_show(cr, src);
     cairo_restore(cr);
     g_array_free(rects, TRUE);
 }
@@ -3787,6 +4392,7 @@ typedef struct inline_range {
     gsize len;
     const ns_style *box_style;
     gboolean raised;
+    double dx, dy;
 } inline_range;
 
 static gboolean
@@ -3798,6 +4404,22 @@ inline_element_is_raised(const ns_box *b, const ns_inline_attr *r)
             return TRUE;
     }
     return FALSE;
+}
+
+static inline_range
+inline_range_for(const ns_box *b, gsize start, gsize len,
+                 const ns_inline_attr *element)
+{
+    inline_range range = { start, len, NULL, FALSE, 0, 0 };
+    if (!element) {
+        ns_inline_offset_at(b, start, &range.dx, &range.dy);
+        return range;
+    }
+    range.box_style = element->style;
+    range.raised = inline_element_is_raised(b, element);
+    range.dx = element->rel_dx;
+    range.dy = element->rel_dy;
+    return range;
 }
 
 static void
@@ -3841,6 +4463,10 @@ inline_range_fragments(const ns_box *b, NsPangoLayout *layout, double y_origin,
         }
         f.open_left = rtl ? hi < end : lo > range->start;
         f.open_right = rtl ? lo > range->start : hi < end;
+        f.x0 += range->dx;
+        f.x1 += range->dx;
+        f.y0 += range->dy;
+        f.y1 += range->dy;
         fn(&f, data);
     } while (ns_pango_layout_iter_next_line(it));
     ns_pango_layout_iter_free(it);
@@ -3864,31 +4490,208 @@ paint_inline_box_fragment(const inline_fragment *f, gpointer data)
         f->open_left, f->open_right);
 }
 
-static gboolean
-inline_box_is_hidden(const ns_style *s)
+static void
+paint_inline_element_box(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                         double text_x, double y_origin,
+                         const ns_inline_attr *r)
 {
-    const char *vis = ns_style_keyword(s, NS_CSS_VISIBILITY);
-    return vis && (strcmp(vis, "hidden") == 0 || strcmp(vis, "collapse") == 0);
+    inline_box_paint p = { cr, r, text_x };
+    inline_range range = inline_range_for(b, r->start, r->len, r);
+    inline_range_fragments(b, layout, y_origin, &range,
+                           paint_inline_box_fragment, &p);
 }
 
 static void
 paint_inline_element_boxes(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
-                           double text_x, double y_origin)
+                           double text_x, double y_origin, guint layer)
 {
     if (!b->attrs) return;
-    for (gint i = (gint)b->attrs->len - 1; i >= 0; i--) {
-        const ns_inline_attr *r =
-            &g_array_index(b->attrs, ns_inline_attr, (guint)i);
-        if (r->kind != NS_INLINE_ELEMENT || r->len == 0 ||
-            !style_has_inline_box_paint(r->style) ||
-            inline_box_is_hidden(r->style))
-            continue;
-        inline_box_paint p = { cr, r, text_x };
-        inline_range range = { r->start, r->len, r->style,
-                               inline_element_is_raised(b, r) };
-        inline_range_fragments(b, layout, y_origin, &range,
-                               paint_inline_box_fragment, &p);
+    const inline_layers *L = inline_layers_of(b, layout);
+    if (!L) {
+        for (guint i = b->attrs->len; i-- > 0;) {
+            const ns_inline_attr *r =
+                &g_array_index(b->attrs, ns_inline_attr, i);
+            if (inline_attr_paints_box(r))
+                paint_inline_element_box(cr, b, layout, text_x, y_origin, r);
+        }
+        return;
     }
+    const inline_bucket *bk = &L->box_order;
+    for (guint k = bk->start[layer]; k < bk->start[layer + 1]; k++)
+        paint_inline_element_box(cr, b, layout, text_x, y_origin,
+            &g_array_index(b->attrs, ns_inline_attr, bk->order[k]));
+}
+
+static double *
+inline_layer_baselines(const ns_box *b, const inline_layers *L)
+{
+    const GArray *heights = b->atomic_line_heights;
+    if (!heights || heights->len < 2 || heights->len != L->lines->len)
+        return NULL;
+    double *out = g_new(double, heights->len);
+    double top = b->y;
+    for (guint i = 0; i < heights->len; i++) {
+        const inline_layer_line *g =
+            &g_array_index(L->lines, inline_layer_line, i);
+        double line_h = g_array_index(heights, double, i);
+        out[i] = top + (line_h - (double)g->height / NS_PANGO_SCALE) / 2.0 +
+                 (double)(g->baseline - g->top) / NS_PANGO_SCALE;
+        top += line_h;
+    }
+    return out;
+}
+
+static void
+paint_inline_text(cairo_t *cr, const ns_box *b, const inline_text_src *src,
+                  double text_x, double y_origin, rgba color)
+{
+    cairo_save(cr);
+    set_source_rgba(cr, color);
+    if (src->layers) {
+        double *baselines = inline_layer_baselines(b, src->layers);
+        inline_layer_show(cr, src->layers, src->layer, text_x, y_origin,
+                          baselines);
+        g_free(baselines);
+    } else if (!paint_inline_lines_at_layout_heights(cr, b, src->layout,
+                                                     text_x)) {
+        cairo_move_to(cr, text_x, y_origin);
+        ns_pango_cairo_show_layout(cr, src->layout);
+    }
+    cairo_restore(cr);
+}
+
+static void
+paint_inline_text_shadows(cairo_t *cr, const ns_box *b, const ns_style *s,
+                          NsPangoLayout *layout, double text_x,
+                          double y_origin)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_TEXT_SHADOW] : NULL;
+    if (!v || v->kind != NS_CSS_V_SHADOW) return;
+    inline_text_src src = inline_text_src_of(b, layout, k_inline_all_layers);
+    for (int si = v->u.shadow.n - 1; si >= 0; si--)
+        paint_text_shadow_layer(cr, &src, text_x, y_origin,
+                                &v->u.shadow.s[si]);
+}
+
+static void
+paint_inline_atomic(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                    double text_x, ns_inline_atomic *a, const char *highlight)
+{
+    if (!a->box) return;
+    NsPangoRectangle pos;
+    ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+    double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
+    double sy = b->atomic_line_heights
+        ? a->box->y - a->box->rel_dy
+        : b->y + (double)pos.y / NS_PANGO_SCALE;
+    a->owner_offset_x = sx - b->x;
+    a->owner_offset_y = sy - b->y;
+    cairo_save(cr);
+    cairo_translate(cr, sx + a->box->rel_dx - a->box->x,
+                    sy + a->box->rel_dy - a->box->y);
+    g_paint_no_cull++;
+    const ns_box *saved_flush = g_paint_flush_box;
+    g_paint_flush_box = a->box;
+    paint_walk(cr, a->box, highlight);
+    g_paint_flush_box = saved_flush;
+    g_paint_no_cull--;
+    cairo_restore(cr);
+}
+
+static void
+paint_inline_atomics(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                     double text_x, const char *highlight, guint layer)
+{
+    GArray *atomics = b->inline_atomics;
+    if (!atomics) return;
+    const inline_layers *L = inline_layers_of(b, layout);
+    if (!L) {
+        for (guint i = 0; i < atomics->len; i++)
+            paint_inline_atomic(cr, b, layout, text_x,
+                &g_array_index(atomics, ns_inline_atomic, i), highlight);
+        return;
+    }
+    const inline_bucket *bk = &L->atomic_order;
+    for (guint k = bk->start[layer]; k < bk->start[layer + 1]; k++)
+        paint_inline_atomic(cr, b, layout, text_x,
+            &g_array_index(atomics, ns_inline_atomic, bk->order[k]),
+            highlight);
+}
+
+static rgba
+paint_inline_color(const ns_box *b, const ns_style *s)
+{
+    return rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
+                     s ? s->values[NS_CSS_COLOR] : NULL, 0.07, 0.07, 0.07, 1);
+}
+
+static double
+paint_inline_text_x(const ns_box *b, const ns_style *s)
+{
+    double ti = ns_inline_text_indent_px(b, s, b->content_width);
+    return b->x + (ti < 0 ? ti : 0);
+}
+
+static NsPangoLayout *
+paint_inline_layout(const ns_box *b, const ns_style *s, const char *highlight)
+{
+    gboolean cacheable = !(highlight && *highlight);
+    if (cacheable && b->paint_layout)
+        return g_object_ref(b->paint_layout);
+    NsPangoLayout *layout = paint_inline_make_layout(b, s, highlight);
+    if (cacheable)
+        ((ns_box *)b)->paint_layout = g_object_ref(layout);
+    return layout;
+}
+
+typedef struct inline_layer_place {
+    double text_x, y_origin;
+    rgba color;
+} inline_layer_place;
+
+static void
+paint_inline_layer(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                   guint layer, const inline_layer_place *at,
+                   const char *highlight)
+{
+    const inline_layers *L = inline_layers_of(b, layout);
+    const ns_inline_attr *owner = L ? inline_layer_owner(b, L, layer) : NULL;
+    if (!owner) return;
+    paint_inline_element_boxes(cr, b, layout, at->text_x, at->y_origin, layer);
+    inline_text_src src = { b, layout, L, layer };
+    const ns_selection_run *sel_run = paint_selection_run(b);
+    cairo_save(cr);
+    cairo_translate(cr, owner->rel_dx, owner->rel_dy);
+    if (sel_run)
+        paint_selection_background(cr, b, &src, at->text_x, at->y_origin,
+                                   sel_run);
+    paint_inline_text(cr, b, &src, at->text_x, at->y_origin, at->color);
+    if (sel_run)
+        paint_selection_foreground(cr, b, &src, at->text_x, at->y_origin,
+                                   sel_run);
+    cairo_restore(cr);
+    paint_inline_atomics(cr, b, layout, at->text_x, highlight, layer);
+}
+
+static void paint_inline_defer_layers(cairo_t *cr, const ns_box *b,
+                                      NsPangoLayout *layout,
+                                      const inline_layer_place *at,
+                                      const char *highlight);
+static void paint_inline_negative_layers(cairo_t *cr, const ns_box *b,
+                                         NsPangoLayout *layout,
+                                         const inline_layer_place *at,
+                                         const char *highlight);
+
+static void
+inline_shift_rect(const ns_box *b, gsize byte, double *x0, double *y0,
+                  double *x1, double *y1)
+{
+    double dx, dy;
+    ns_inline_offset_at(b, byte, &dx, &dy);
+    *x0 += dx;
+    *x1 += dx;
+    *y0 += dy;
+    *y1 += dy;
 }
 
 static void
@@ -3896,9 +4699,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b->text || !*b->text) return;
     const ns_style *s = inherited_style(b);
-    rgba color = rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
-                           s ? s->values[NS_CSS_COLOR] : NULL,
-                           0.07, 0.07, 0.07, 1);
+    rgba color = paint_inline_color(b, s);
 
     if (b->vertical_wm) {
         if (b->text_orient == 1) {
@@ -3945,21 +4746,14 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         return;
     }
 
-    double text_x = b->x;
-    {
-        double ti = ns_inline_text_indent_px(b, s, b->content_width);
-        if (ti < 0) text_x += ti;
-    }
-    gboolean layout_cacheable = !(highlight && *highlight);
-    NsPangoLayout *layout = (layout_cacheable && b->paint_layout)
-        ? (NsPangoLayout *)g_object_ref(b->paint_layout)
-        : paint_inline_make_layout(b, s, highlight);
-    if (layout_cacheable && !b->paint_layout)
-        ((ns_box *)b)->paint_layout = (NsPangoLayout *)g_object_ref(layout);
+    double text_x = paint_inline_text_x(b, s);
+    NsPangoLayout *layout = paint_inline_layout(b, s, highlight);
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double y_origin = b->y + y_offset;
+    inline_layer_place at = { text_x, y_origin, color };
 
-    paint_inline_element_boxes(cr, b, layout, text_x, y_origin);
+    paint_inline_negative_layers(cr, b, layout, &at, highlight);
+    paint_inline_element_boxes(cr, b, layout, text_x, y_origin, 0);
 
     if (b->attrs) {
         double opt_minx = 1e9, opt_maxx = -1e9, opt_miny = 1e9, opt_maxy = -1e9;
@@ -4062,6 +4856,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     y1 = cy + r->box_h / 2.0;
                 }
             }
+            inline_shift_rect(b, r->start, &x0, &y0, &x1, &y1);
             if (x1 < x0) { double t = x0; x0 = x1; x1 = t; }
             const ns_box *field_box = NULL;
             for (const ns_box *p = b; p; p = p->parent)
@@ -4129,12 +4924,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
 
-    if (s && s->values[NS_CSS_TEXT_SHADOW] &&
-        s->values[NS_CSS_TEXT_SHADOW]->kind == NS_CSS_V_SHADOW) {
-        const ns_css_shadow_list *sl = &s->values[NS_CSS_TEXT_SHADOW]->u.shadow;
-        for (int si = sl->n - 1; si >= 0; si--)
-            paint_text_shadow_layer(cr, layout, text_x, y_origin, &sl->s[si]);
-    }
+    paint_inline_text_shadows(cr, b, s, layout, text_x, y_origin);
 
     if (g_dbg_paint_x >= 0 && b->text) {
         double px0 = b->x, py0 = b->y;
@@ -4153,19 +4943,14 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
     const ns_selection_run *sel_run = paint_selection_run(b);
+    inline_text_src src = inline_text_src_of(b, layout, 0);
     if (sel_run)
-        paint_selection_background(cr, b, layout, text_x, y_origin, sel_run);
+        paint_selection_background(cr, b, &src, text_x, y_origin, sel_run);
 
-    cairo_save(cr);
-    set_source_rgba(cr, color);
-    if (!paint_inline_lines_at_layout_heights(cr, b, layout, text_x)) {
-        cairo_move_to(cr, text_x, y_origin);
-        ns_pango_cairo_show_layout(cr, layout);
-    }
-    cairo_restore(cr);
+    paint_inline_text(cr, b, &src, text_x, y_origin, color);
 
     if (sel_run)
-        paint_selection_foreground(cr, b, layout, text_x, y_origin, sel_run);
+        paint_selection_foreground(cr, b, &src, text_x, y_origin, sel_run);
 
     paint_inline_dashed_decorations(cr, b, layout, text_x, y_origin, s, color);
 
@@ -4177,8 +4962,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             if (b->text && r->start >= strlen(b->text)) continue;
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)r->start, &pos);
-            double cx = text_x + (double)pos.x / NS_PANGO_SCALE;
-            double cy = y_origin + (double)pos.y / NS_PANGO_SCALE;
+            double shift_x, shift_y;
+            ns_inline_offset_at(b, r->start, &shift_x, &shift_y);
+            double cx = text_x + shift_x + (double)pos.x / NS_PANGO_SCALE;
+            double cy = y_origin + shift_y + (double)pos.y / NS_PANGO_SCALE;
             double ch = (double)pos.height / NS_PANGO_SCALE;
             if (ch < 1.0) ch = 14.0;
             cairo_save(cr);
@@ -4231,6 +5018,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double gy0 = y_origin + (double)r0.y / NS_PANGO_SCALE;
             double gx1 = text_x + (double)(r1.x + r1.width) / NS_PANGO_SCALE;
             double gy1 = y_origin + (double)(r0.y + r0.height) / NS_PANGO_SCALE;
+            inline_shift_rect(b, r->start, &gx0, &gy0, &gx1, &gy1);
             if (gx1 < gx0) { double t = gx0; gx0 = gx1; gx1 = t; }
             double side = font_size * 0.82;
             if (r->box_w > 0 || r->box_h > 0) {
@@ -4298,6 +5086,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double gy0 = y_origin + (double)r0.y / NS_PANGO_SCALE;
             double gx1 = text_x + (double)(r1.x + r1.width) / NS_PANGO_SCALE;
             double gy1 = y_origin + (double)(r0.y + r0.height) / NS_PANGO_SCALE;
+            inline_shift_rect(b, r->start, &gx0, &gy0, &gx1, &gy1);
             if (gx1 < gx0) { double t = gx0; gx0 = gx1; gx1 = t; }
             double pad_x = 2;
             double bx = gx0 + pad_x;
@@ -4335,32 +5124,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
 
-    if (b->inline_atomics) {
-        for (guint i = 0; i < b->inline_atomics->len; i++) {
-            ns_inline_atomic *a =
-                &g_array_index(b->inline_atomics, ns_inline_atomic, i);
-            if (!a->box) continue;
-            NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
-            double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
-            double sy = b->atomic_line_heights
-                ? a->box->y - a->box->rel_dy
-                : b->y + (double)pos.y / NS_PANGO_SCALE;
-            a->owner_offset_x = sx - b->x;
-            a->owner_offset_y = sy - b->y;
-            cairo_save(cr);
-            cairo_translate(cr, sx + a->box->rel_dx - a->box->x,
-                            sy + a->box->rel_dy - a->box->y);
-            g_paint_no_cull++;
-            const ns_box *saved_flush = g_paint_flush_box;
-            g_paint_flush_box = a->box;
-            paint_walk(cr, a->box, highlight);
-            g_paint_flush_box = saved_flush;
-            g_paint_no_cull--;
-            cairo_restore(cr);
-        }
-    }
-
+    paint_inline_atomics(cr, b, layout, text_x, highlight, 0);
+    paint_inline_defer_layers(cr, b, layout, &at, highlight);
     g_object_unref(layout);
 }
 
@@ -4503,9 +5268,11 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
 
     int index = 0, trailing = 0;
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
+    double layout_x = rel_x;
     double layout_y = rel_y - y_offset;
+    ns_inline_unshift_point(b, layout, &layout_x, &layout_y);
     if (layout_y < 0) layout_y = 0;
-    ns_pango_layout_xy_to_index(layout, (int)(rel_x * NS_PANGO_SCALE),
+    ns_pango_layout_xy_to_index(layout, (int)(layout_x * NS_PANGO_SCALE),
                              (int)(layout_y * NS_PANGO_SCALE),
                              &index, &trailing);
     if (out_byte) {
@@ -4520,6 +5287,134 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
     cairo_destroy(cr);
     cairo_surface_destroy(surf);
     return TRUE;
+}
+
+static gboolean
+inline_point_near_shift(const ns_box *b, double rel_x, double rel_y)
+{
+    double x0, y0, x1, y1;
+    if (!ns_inline_shift_bounds(b, &x0, &y0, &x1, &y1)) return FALSE;
+    return rel_x >= x0 && rel_x <= b->content_width + x1 &&
+           rel_y >= y0 && rel_y <= b->content_height + y1;
+}
+
+typedef struct inline_extent {
+    gboolean any;
+    double x0, y0, x1, y1;
+} inline_extent;
+
+static void
+inline_extent_add(inline_extent *e, double x0, double y0, double x1,
+                  double y1)
+{
+    if (!e->any) {
+        *e = (inline_extent){ TRUE, x0, y0, x1, y1 };
+        return;
+    }
+    e->x0 = MIN(e->x0, x0);
+    e->y0 = MIN(e->y0, y0);
+    e->x1 = MAX(e->x1, x1);
+    e->y1 = MAX(e->y1, y1);
+}
+
+typedef struct inline_extent_walk {
+    const inline_layers *layers;
+    const double *baselines;
+    double ox, oy;
+    inline_extent *extent;
+} inline_extent_walk;
+
+static void
+inline_run_moved_extent(inline_extent *e, const NsPangoLayoutRun *run,
+                        double x0, double baseline)
+{
+    NsPangoRectangle logical;
+    ns_pango_glyph_string_extents(run->glyphs, run->item->analysis.font,
+                                  NULL, &logical);
+    double base = baseline - (double)run->y_offset / NS_PANGO_SCALE;
+    double ascent = round(-(double)logical.y / NS_PANGO_SCALE);
+    double descent =
+        round((double)(logical.height + logical.y) / NS_PANGO_SCALE);
+    inline_extent_add(e, x0, base - ascent,
+                      x0 + (double)inline_run_advance(run) / NS_PANGO_SCALE,
+                      base + descent);
+}
+
+static void
+inline_seg_moved_extent(const inline_extent_walk *w,
+                        const inline_layer_seg *seg,
+                        const ns_inline_attr *owner)
+{
+    const inline_layer_line *g =
+        &g_array_index(w->layers->lines, inline_layer_line, seg->line);
+    double baseline = owner->rel_dy + (w->baselines
+        ? w->baselines[seg->line]
+        : w->oy + (double)g->baseline / NS_PANGO_SCALE);
+    double x0 = w->ox + owner->rel_dx +
+                (double)(g->x + seg->x) / NS_PANGO_SCALE;
+    double x = x0;
+    for (const GSList *l = seg->first; l; l = l->next) {
+        inline_run_moved_extent(w->extent, l->data, x, baseline);
+        x += (double)inline_run_advance(l->data) / NS_PANGO_SCALE;
+        if (l == seg->last) break;
+    }
+    double above, below;
+    if (!inline_box_vertical_reach(owner->style, &above, &below)) return;
+    const NsPangoLayoutRun *first = seg->first->data;
+    double base = baseline - (double)first->y_offset / NS_PANGO_SCALE;
+    inline_extent_add(w->extent, x0, base - above,
+                      x0 + (double)seg->width / NS_PANGO_SCALE, base + below);
+}
+
+static void
+inline_layers_moved_extent(const ns_box *b, const inline_layers *L,
+                           double ox, double oy, inline_extent *e)
+{
+    double *baselines = inline_layer_baselines(b, L);
+    inline_extent_walk w = { L, baselines, ox, oy, e };
+    const inline_bucket *bk = &L->seg_order;
+    for (guint k = bk->start[1]; k < bk->start[L->owners->len]; k++) {
+        const inline_layer_seg *seg =
+            &g_array_index(L->segs, inline_layer_seg, bk->order[k]);
+        const ns_inline_attr *owner = inline_layer_owner(b, L, seg->layer);
+        if (owner) inline_seg_moved_extent(&w, seg, owner);
+    }
+    g_free(baselines);
+}
+
+gboolean
+ns_paint_inline_moved_extents(const ns_box *b, double *x0, double *y0,
+                              double *x1, double *y1)
+{
+    if (!b || b->kind != NS_BOX_INLINE || !b->text || !*b->text ||
+        !inline_box_has_layers(b))
+        return FALSE;
+    const ns_style *s = inherited_style(b);
+    NsPangoLayout *layout = paint_inline_layout(b, s, NULL);
+    const inline_layers *L = inline_layers_of(b, layout);
+    inline_extent e = { FALSE, 0, 0, 0, 0 };
+    if (L)
+        inline_layers_moved_extent(b, L, paint_inline_text_x(b, s),
+            b->y + ns_paint_inline_y_offset_for_layout(b, layout), &e);
+    g_object_unref(layout);
+    *x0 = e.x0;
+    *y0 = e.y0;
+    *x1 = e.x1;
+    *y1 = e.y1;
+    return e.any;
+}
+
+gboolean
+ns_paint_inline_on_shifted_text(const ns_box *b, double rel_x, double rel_y)
+{
+    if (!b || !b->text || !*b->text || !inline_point_near_shift(b, rel_x, rel_y))
+        return FALSE;
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double layout_y = rel_y - ns_paint_inline_y_offset_for_layout(b, layout);
+    gboolean on = ns_inline_unshift_point(b, layout, &rel_x, &layout_y);
+    g_object_unref(layout);
+    return on;
 }
 
 gboolean
@@ -4605,8 +5500,8 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
     if (!layout) return FALSE;
     double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
     inline_union u = { 0 };
-    inline_range range = { start, len, box_style,
-                           box_style && inline_element_is_raised(b, element) };
+    inline_range range =
+        inline_range_for(b, start, len, box_style ? element : NULL);
     inline_range_fragments(b, layout, y_origin, &range, inline_union_add, &u);
     g_object_unref(layout);
     if (!u.any) return FALSE;
@@ -6304,13 +7199,18 @@ box_clip_hides(const ns_box *b)
 }
 
 static int
-box_z_index(const ns_box *b)
+style_z_index(const ns_style *s)
 {
-    const ns_style *s = b ? b->style : NULL;
     if (!s) return 0;
     const ns_css_value *v = s->values[NS_CSS_Z_INDEX];
     if (!v || v->kind != NS_CSS_V_LENGTH) return 0;
     return (int)v->u.length.v;
+}
+
+static int
+box_z_index(const ns_box *b)
+{
+    return style_z_index(b ? b->style : NULL);
 }
 
 typedef struct paint_entry {
@@ -6330,11 +7230,16 @@ paint_entry_cmp(const void *a, const void *b)
 }
 
 static gboolean
+style_z_index_is_auto(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_Z_INDEX] : NULL;
+    return !v || v->kind != NS_CSS_V_LENGTH;
+}
+
+static gboolean
 box_z_index_is_auto(const ns_box *b)
 {
-    const ns_css_value *v = b && b->style ? b->style->values[NS_CSS_Z_INDEX]
-                                          : NULL;
-    return !v || v->kind != NS_CSS_V_LENGTH;
+    return style_z_index_is_auto(b ? b->style : NULL);
 }
 
 static gboolean
@@ -6356,15 +7261,20 @@ box_defers_to_positioned_layer(const ns_box *b)
 }
 
 static gboolean
-box_isolates_positioned_descendants(const ns_box *b)
+style_isolates_positioned_descendants(const ns_style *s)
 {
-    if (!box_z_index_is_auto(b)) return TRUE;
-    const ns_style *s = b->style;
+    if (!style_z_index_is_auto(s)) return TRUE;
     if (!s) return FALSE;
     const ns_css_value *pos = s->values[NS_CSS_POSITION];
     if (keyword_is(pos, "fixed") || keyword_is(pos, "sticky")) return TRUE;
     const ns_css_value *filter = s->values[NS_CSS_FILTER];
     return filter && !keyword_is(filter, "none");
+}
+
+static gboolean
+box_isolates_positioned_descendants(const ns_box *b)
+{
+    return style_isolates_positioned_descendants(b->style);
 }
 
 static int
@@ -6390,9 +7300,38 @@ typedef struct deferred_capture {
     const ns_box *box;
     double dev_x, dev_y;
     guint seq;
+    NsPangoLayout *layout;
+    guint layer;
+    inline_layer_place at;
+    const ns_node *dom;
+    int z;
+    gboolean isolates;
 } deferred_capture;
 
 static guint g_paint_capture_seq;
+
+static void
+deferred_capture_free(gpointer data)
+{
+    deferred_capture *cap = data;
+    if (cap->layout) g_object_unref(cap->layout);
+    g_free(cap);
+}
+
+static int
+deferred_capture_z(const deferred_capture *cap)
+{
+    return cap->layout ? cap->z : box_z_index(cap->box);
+}
+
+static int
+deferred_capture_tree_cmp(const deferred_capture *a, const deferred_capture *b)
+{
+    if (a->layout && b->layout && a->box == b->box)
+        return a->layer < b->layer ? -1 : (a->layer > b->layer ? 1 : 0);
+    return dom_tree_order_cmp(a->layout ? a->dom : a->box->dom,
+                              b->layout ? b->dom : b->box->dom);
+}
 
 static int
 deferred_capture_cmp(const void *va, const void *vb)
@@ -6401,11 +7340,102 @@ deferred_capture_cmp(const void *va, const void *vb)
     const deferred_capture *b = *(deferred_capture *const *)vb;
     const ns_box *ab = a->box, *bb = b->box;
     if (!ab || !bb) return ab ? 1 : bb ? -1 : 0;
-    int za = box_z_index(ab), zb = box_z_index(bb);
+    int za = deferred_capture_z(a), zb = deferred_capture_z(b);
     if (za != zb) return za < zb ? -1 : 1;
-    int c = dom_tree_order_cmp(ab->dom, bb->dom);
+    int c = deferred_capture_tree_cmp(a, b);
     if (c) return c;
     return a->seq < b->seq ? -1 : a->seq > b->seq ? 1 : 0;
+}
+
+static void
+paint_defer_inline_layer(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                         guint layer, const inline_layer_place *at,
+                         const ns_inline_attr *owner)
+{
+    if (!g_paint_deferred_list)
+        g_paint_deferred_list =
+            g_ptr_array_new_with_free_func(deferred_capture_free);
+    deferred_capture *cap = g_new0(deferred_capture, 1);
+    cap->box = b;
+    cap->seq = g_paint_capture_seq++;
+    cap->layout = g_object_ref(layout);
+    cap->layer = layer;
+    cap->at = *at;
+    cap->dom = owner->dom;
+    cap->z = style_z_index(owner->style);
+    cap->isolates = style_isolates_positioned_descendants(owner->style);
+    cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
+    g_ptr_array_add(g_paint_deferred_list, cap);
+}
+
+static void
+paint_inline_defer_layers(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
+                          const inline_layer_place *at, const char *highlight)
+{
+    const inline_layers *L = inline_layers_of(b, layout);
+    for (guint k = 1; L && k < L->owners->len; k++) {
+        const ns_inline_attr *owner = inline_layer_owner(b, L, k);
+        if (style_z_index(owner->style) < 0)
+            continue;
+        if (g_paint_defer_depth > 0)
+            paint_defer_inline_layer(cr, b, layout, k, at, owner);
+        else
+            paint_inline_layer(cr, b, layout, k, at, highlight);
+    }
+}
+
+static void
+paint_inline_negative_layers(cairo_t *cr, const ns_box *b,
+                             NsPangoLayout *layout,
+                             const inline_layer_place *at,
+                             const char *highlight)
+{
+    const inline_layers *L = inline_layers_of(b, layout);
+    for (guint k = 1; L && k < L->owners->len; k++)
+        if (style_z_index(inline_layer_owner(b, L, k)->style) < 0)
+            paint_inline_layer(cr, b, layout, k, at, highlight);
+}
+
+static void paint_flush_deferred(cairo_t *cr, GPtrArray *list,
+                                 const char *highlight);
+
+static void
+paint_deferred_inline_layer(cairo_t *cr, const deferred_capture *cap,
+                            const char *highlight)
+{
+    if (!cap->isolates) {
+        paint_inline_layer(cr, cap->box, cap->layout, cap->layer, &cap->at,
+                           highlight);
+        return;
+    }
+    GPtrArray *saved_list = g_paint_deferred_list;
+    g_paint_deferred_list = NULL;
+    g_paint_defer_depth++;
+    paint_inline_layer(cr, cap->box, cap->layout, cap->layer, &cap->at,
+                       highlight);
+    GPtrArray *mine = g_paint_deferred_list;
+    g_paint_deferred_list = saved_list;
+    g_paint_defer_depth--;
+    if (!mine) return;
+    paint_flush_deferred(cr, mine, highlight);
+    g_ptr_array_free(mine, TRUE);
+}
+
+static void
+paint_deferred_capture(cairo_t *cr, const deferred_capture *cap,
+                       const char *highlight)
+{
+    if (cap->layout)
+        paint_deferred_inline_layer(cr, cap, highlight);
+    else
+        paint_walk(cr, cap->box, highlight);
+}
+
+static gboolean
+deferred_capture_isolates(const deferred_capture *cap)
+{
+    return cap->layout ? cap->isolates
+                       : box_isolates_positioned_descendants(cap->box);
 }
 
 static void
@@ -6482,13 +7512,13 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
                        cap->box->y, cap->box->content_height,
                        dx, dy, gx0, gy0, gx1, gy1);
         }
-        gboolean flat = !box_isolates_positioned_descendants(cap->box);
+        gboolean flat = !deferred_capture_isolates(cap);
         GPtrArray *saved_list = g_paint_deferred_list;
         if (flat) {
             g_paint_deferred_list = NULL;
             g_paint_defer_depth++;
         }
-        paint_walk(target, cap->box, highlight);
+        paint_deferred_capture(target, cap, highlight);
         if (flat) {
             GPtrArray *found = g_paint_deferred_list;
             g_paint_deferred_list = saved_list;
@@ -7497,7 +8527,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (g_paint_defer_depth > 0 && b != g_paint_flush_box &&
         box_defers_to_positioned_layer(b)) {
         if (!g_paint_deferred_list)
-            g_paint_deferred_list = g_ptr_array_new_with_free_func(g_free);
+            g_paint_deferred_list =
+                g_ptr_array_new_with_free_func(deferred_capture_free);
         deferred_capture *cap = g_new0(deferred_capture, 1);
         cap->box = b;
         cap->seq = g_paint_capture_seq++;
