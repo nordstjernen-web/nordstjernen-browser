@@ -97,3 +97,4 @@ __pycache__/
 /builddir-asan/
 /scripts/sitebench/node_modules/
 /scripts/sitebench/package-lock.json
+/builddir-dbg/
