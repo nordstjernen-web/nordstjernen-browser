@@ -51,6 +51,7 @@ typedef struct headless_timing {
     gint64 settle_us;
     gint64 images_us;
     gint64 paint_us;
+    gint64 encode_us;
     gint64 first_render_us;
     gint64 first_render_cpu_us;
     int    hops;
@@ -94,6 +95,7 @@ headless_print_timing(void)
             "\"first_render_ms\":%.1f,\"first_render_cpu_ms\":%.1f,"
             "\"fetch_ms\":%.1f,\"parse_ms\":%.1f,\"style_ms\":%.1f,"
             "\"script_ms\":%.1f,\"images_ms\":%.1f,\"paint_ms\":%.1f,"
+            "\"encode_ms\":%.1f,"
             "\"settle_ms\":%.1f,\"relayouts\":%" G_GUINT64_FORMAT ","
             "\"relayout_ms\":%.1f,\"net_waits\":%" G_GUINT64_FORMAT ","
             "\"net_wait_ms\":%.1f,\"hops\":%d,\"status\":%d,"
@@ -104,6 +106,7 @@ headless_print_timing(void)
             g_timing.fetch_us / 1000.0, g_timing.parse_us / 1000.0,
             g_timing.style_us / 1000.0, g_timing.script_us / 1000.0,
             g_timing.images_us / 1000.0, g_timing.paint_us / 1000.0,
+            g_timing.encode_us / 1000.0,
             g_timing.settle_us / 1000.0, relayouts, relayout_ms, net_waits,
             net_wait_ms, g_timing.hops, g_timing.status, g_timing.nodes);
     fflush(stdout);
@@ -2259,11 +2262,17 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_paint_set_anim(anim);
         char *initial_path = ns_engine_suffix_before_ext(opts->out_path, "-initial");
         phase_t0 = g_get_monotonic_time();
+        gint64 encode_before_us = (gint64)(ns_engine_encode_ms() * 1000.0);
         rc = write_capture(layout, initial_path, opts->dump);
-        gint64 painted = g_get_monotonic_time();
+        gint64 encode_us =
+            (gint64)(ns_engine_encode_ms() * 1000.0) - encode_before_us;
+        gint64 painted = g_get_monotonic_time() - encode_us;
         g_timing.paint_us += painted - phase_t0;
-        g_timing.first_render_us = painted - g_timing.start_us - g_timing.settle_us;
-        g_timing.first_render_cpu_us = headless_thread_cpu_us() - g_timing.start_cpu_us;
+        g_timing.encode_us += encode_us;
+        g_timing.first_render_us = painted - g_timing.start_us -
+                                   g_timing.settle_us;
+        g_timing.first_render_cpu_us = headless_thread_cpu_us() -
+                                       g_timing.start_cpu_us - encode_us;
         g_timing.nodes = headless_count_elements(doc);
         fprintf(stderr, "[headless] initial render -> %s\n", initial_path);
         g_free(initial_path);

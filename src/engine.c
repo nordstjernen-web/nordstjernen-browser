@@ -73,6 +73,14 @@ ns_engine_blocking_perf(guint64 *waits, double *total_ms)
     if (total_ms) *total_ms = g_engine_blocking_us / 1000.0;
 }
 
+static gint64 g_engine_encode_us;
+
+double
+ns_engine_encode_ms(void)
+{
+    return g_engine_encode_us / 1000.0;
+}
+
 static void
 on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -1347,7 +1355,9 @@ ns_engine_write_png(const ns_box *root, const char *path)
     cairo_t *cr = cairo_create(surf);
     ns_paint(cr, root, NULL);
     cairo_destroy(cr);
+    gint64 encode_t0 = g_get_monotonic_time();
     cairo_status_t st = cairo_surface_write_to_png(surf, path);
+    g_engine_encode_us += g_get_monotonic_time() - encode_t0;
     cairo_surface_destroy(surf);
     if (st != CAIRO_STATUS_SUCCESS) {
         fprintf(stderr, "engine: PNG write failed: %s\n",
