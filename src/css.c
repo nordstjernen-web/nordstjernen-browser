@@ -1129,8 +1129,44 @@ font_family_substitute(const char *token)
 }
 
 static gboolean (*g_font_available_cb)(const char *family);
+static char *(*g_font_alias_cb)(const char *family);
 static guint64 (*g_font_generation_cb)(void);
 static guint g_font_oracle_serial;
+
+static char *
+font_family_installed_as(const char *family)
+{
+    if (g_font_available_cb && g_font_available_cb(family))
+        return g_strdup(family);
+    return g_font_alias_cb ? g_font_alias_cb(family) : NULL;
+}
+
+#ifndef __APPLE__
+static const char *
+browser_default_for_generic(const char *generic)
+{
+    static const char *const defaults[][2] = {
+        { "serif",      "Times New Roman" },
+        { "sans-serif", "Arial" },
+    };
+    static GMutex lock;
+    static char *resolved[G_N_ELEMENTS(defaults)];
+    static gboolean done[G_N_ELEMENTS(defaults)];
+    for (gsize i = 0; i < G_N_ELEMENTS(defaults); i++) {
+        if (strcmp(generic, defaults[i][0]) != 0) continue;
+        if (!g_font_available_cb || !g_font_alias_cb) return NULL;
+        g_mutex_lock(&lock);
+        if (!done[i]) {
+            resolved[i] = font_family_installed_as(defaults[i][1]);
+            done[i] = TRUE;
+        }
+        const char *family = resolved[i];
+        g_mutex_unlock(&lock);
+        return family;
+    }
+    return NULL;
+}
+#endif
 
 static const char *
 platform_family_for_generic(const char *generic)
@@ -1148,23 +1184,39 @@ platform_family_for_generic(const char *generic)
         if (strcmp(generic, families[i][0]) == 0 &&
             g_font_available_cb && g_font_available_cb(families[i][1]))
             return families[i][1];
-#endif
     if (strcmp(generic, "system-ui") == 0)
         return platform_family_for_generic("sans-serif");
+#else
+    if (strcmp(generic, "system-ui") == 0)
+        return "sans-serif";
+    const char *browser_default = browser_default_for_generic(generic);
+    if (browser_default) return browser_default;
+#endif
     return generic;
 }
 
 static gboolean
 platform_has_system_font(void)
 {
+#ifdef __APPLE__
     return strcmp(platform_family_for_generic("system-ui"),
                   platform_family_for_generic("sans-serif")) != 0;
+#else
+    return FALSE;
+#endif
 }
 
 void
 ns_css_set_font_available_cb(gboolean (*cb)(const char *family))
 {
     g_font_available_cb = cb;
+    g_font_oracle_serial++;
+}
+
+void
+ns_css_set_font_alias_cb(char *(*cb)(const char *family))
+{
+    g_font_alias_cb = cb;
     g_font_oracle_serial++;
 }
 
@@ -1270,6 +1322,12 @@ font_family_resolve(const char *css_family)
                 if (!g_font_available_cb || g_font_available_cb(token)) {
                     g_free(fallback);
                     return token;
+                }
+                char *alias = g_font_alias_cb ? g_font_alias_cb(token) : NULL;
+                if (alias) {
+                    g_free(token);
+                    g_free(fallback);
+                    return alias;
                 }
                 char *substitute = font_family_substitute(token);
                 if (substitute) {
