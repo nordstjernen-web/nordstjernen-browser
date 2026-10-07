@@ -143,6 +143,20 @@ ns_texture *ns_image_decode_avif(const guchar *data, gsize len,
 gboolean ns_image_avif_supports_bytes(const guchar *data, gsize len);
 #endif
 
+#ifdef NS_HAVE_JXL
+ns_texture *ns_image_decode_jxl(const guchar *data, gsize len,
+                                int *out_w, int *out_h);
+
+guint8 *ns_image_jxl_decode_to_bgra(const guchar *data, gsize len,
+                                    int *out_w, int *out_h,
+                                    gsize *out_stride, gsize *out_buf_len);
+
+GArray *ns_image_decode_jxl_anim_to_pixels(const guchar *data, gsize len,
+                                           int *out_w, int *out_h);
+
+gboolean ns_image_jxl_supports_bytes(const guchar *data, gsize len);
+#endif
+
 gboolean ns_image_supports_mime(const char *mime);
 
 G_END_DECLS

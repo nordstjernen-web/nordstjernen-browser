@@ -399,6 +399,13 @@ if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
+jxl_feature = get_option('jxl').disable_auto_if(is_mobile)
+libjxl = dependency('libjxl', required: jxl_feature)
+have_jxl = libjxl.found() and not is_mobile
+if have_jxl
+  add_project_arguments('-DNS_HAVE_JXL=1', language: 'c')
+endif
+
 # Inline WebM (VP9/VP8 + Opus/Vorbis) over FFmpeg's libav* (github.com/FFmpeg/
 # FFmpeg, not the defunct Libav fork). Required on Linux and Windows, where WebM
 # is the dominant format served by YouTube and other sites and the
@@ -620,6 +627,7 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
 subdir('src')

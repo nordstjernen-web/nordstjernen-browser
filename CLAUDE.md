@@ -324,7 +324,10 @@ Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
 the build works without it and simply does no spell-checking. `libavif-dev` is optional too and adds
 AVIF decoding; it drags in a full AV1 decoder for a format that is rare
-on the web, so `-Davif=disabled` drops it.
+on the web, so `-Davif=disabled` drops it. `libjxl-dev` is optional in the
+same way and adds JPEG XL decoding (`src/image_jxl.c`: stills and
+animations, `image/jxl` in `<picture>` and the image `Accept` header);
+`-Djxl=disabled` drops it.
 
 The FFmpeg libav\* dev packages in the command above (MSYS2
 `mingw-w64-x86_64-ffmpeg`, or the LGPL build from

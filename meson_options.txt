@@ -12,6 +12,8 @@ option('wasm', type: 'feature', value: 'auto',
        description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default; disable on platforms WAMR does not support, e.g. NetBSD).')
 option('avif', type: 'feature', value: 'auto',
        description: 'Decode AVIF images through libavif (on by default when libavif is present; never on the mobile builds). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
+option('jxl', type: 'feature', value: 'auto',
+       description: 'Decode JPEG XL images (stills and animations) through libjxl (on by default when libjxl is present; never on the mobile builds).')
 option('audio', type: 'feature', value: 'auto',
        description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')
 option('webgpu', type: 'feature', value: 'auto',
