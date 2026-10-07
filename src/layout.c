@@ -1260,7 +1260,8 @@ static void translate_subtree(ns_box *box, double dx, double dy);
 static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static gboolean inline_atomic_needs_layout(const ns_box *ab);
 static double pango_layout_line_top(NsPangoLayout *layout, int line_index);
-static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host);
+static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
+                                       const ns_style *host_style);
 static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
 static void register_abs_pseudo(const ns_node *host, const ns_style *ps);
 static ns_box *build_blockified_inline_item(const ns_node *n, GHashTable *styles,
@@ -1635,7 +1636,7 @@ cell_pseudo_before(ns_box *cell, const ns_node *n, const ns_style *s)
         return NULL;
     }
     if (style_is_absolute_or_fixed(s->before)) return NULL;
-    return build_pseudo_inline_for(s->before, n);
+    return build_pseudo_inline_for(s->before, n, s);
 }
 
 static void
@@ -1648,7 +1649,7 @@ cell_pseudo_after(ns_box *cell, const ns_node *n, const ns_style *s)
         return;
     }
     if (style_is_absolute_or_fixed(s->after)) return;
-    ns_box *gen = build_pseudo_inline_for(s->after, n);
+    ns_box *gen = build_pseudo_inline_for(s->after, n, s);
     if (gen) append_generated_after(cell, gen);
 }
 
@@ -1968,6 +1969,7 @@ typedef struct collector_ctx {
     GArray     *ws_ranges;
     const ns_node *ws_parent;
     int         ws_parent_mode;
+    double      rise;
 } collector_ctx;
 
 typedef struct ns_ws_range {
@@ -1978,6 +1980,7 @@ typedef struct ns_ws_range {
 typedef struct ns_atomic_raw {
     gsize start;
     ns_box *box;
+    double rise;
 } ns_atomic_raw;
 
 static int white_space_mode(const ns_node *node, GHashTable *styles);
@@ -2189,6 +2192,86 @@ emit_attr(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize end)
     if (end <= start) return;
     ns_inline_attr a = { .kind = k, .start = start, .len = end - start };
     g_array_append_val(attrs, a);
+}
+
+static const ns_style *
+inline_parent_box_style(const ns_node *n, GHashTable *styles)
+{
+    for (const ns_node *p = n->parent; p; p = p->parent) {
+        const ns_style *ps = g_hash_table_lookup(styles, p);
+        if (!ps || !style_is_contents(ps)) return ps;
+    }
+    return NULL;
+}
+
+static double
+inline_text_edge_rise(const ns_style *s, const ns_style *ps, gboolean top)
+{
+    ns_css_font_metrics own = { 0 }, parent = { 0 };
+    if (!ns_paint_style_font_metrics(s, &own) ||
+        !ns_paint_style_font_metrics(ps, &parent))
+        return 0;
+    double content = own.ascent_px + own.descent_px;
+    double lh = ns_paint_css_line_height_px(s);
+    if (lh < 0) lh = content;
+    double ascent = own.ascent_px + floor((lh - content) / 2.0);
+    return top ? parent.ascent_px - ascent : lh - ascent - parent.descent_px;
+}
+
+static double
+inline_vertical_align_length(const ns_css_value *va, const ns_style *s)
+{
+    double lh = MAX(0.0, ns_paint_css_line_height_px(s));
+    if (ns_css_calc_is_math_fn(va)) return ns_css_calc_math_fn_px(va, lh);
+    if (va->kind == NS_CSS_V_CALC)
+        return va->u.calc.px + va->u.calc.pct * lh / 100.0;
+    if (va->u.length.unit == NS_CSS_UNIT_PERCENT)
+        return va->u.length.v * lh / 100.0;
+    return ns_css_dimension_px(va, length_or(s->values[NS_CSS_FONT_SIZE], 16),
+                               lh);
+}
+
+static double
+vertical_align_script_rise(const ns_style *s, const ns_style *ps)
+{
+    const ns_css_value *va = s ? s->values[NS_CSS_VERTICAL_ALIGN] : NULL;
+    double fs = length_or(ps ? ps->values[NS_CSS_FONT_SIZE] : NULL, 16);
+    if (keyword_is(va, "super")) return fs / 3.0 + 1.0;
+    if (keyword_is(va, "sub")) return -(fs / 5.0 + 1.0);
+    return 0;
+}
+
+static double
+atomic_vertical_align_rise(const ns_node *n, const ns_style *s,
+                           GHashTable *styles)
+{
+    return vertical_align_script_rise(s, inline_parent_box_style(n, styles));
+}
+
+static double
+inline_vertical_align_rise(const ns_node *n, const ns_style *s,
+                           GHashTable *styles)
+{
+    const ns_css_value *va = s ? s->values[NS_CSS_VERTICAL_ALIGN] : NULL;
+    if (!va || style_is_contents(s)) return 0;
+    if (va->kind == NS_CSS_V_LENGTH || va->kind == NS_CSS_V_CALC)
+        return inline_vertical_align_length(va, s);
+    const ns_style *ps = inline_parent_box_style(n, styles);
+    if (keyword_is(va, "text-top")) return inline_text_edge_rise(s, ps, TRUE);
+    if (keyword_is(va, "text-bottom"))
+        return inline_text_edge_rise(s, ps, FALSE);
+    return vertical_align_script_rise(s, ps);
+}
+
+static void
+emit_rise_attr(collector_ctx *ctx, gsize start, double own_rise)
+{
+    if (own_rise == 0 || ctx->out->len <= start) return;
+    ns_inline_attr a = {
+        .kind = NS_INLINE_RISE, .start = start,
+        .len = ctx->out->len - start, .rise_px = ctx->rise,
+    };
+    g_array_append_val(ctx->attrs, a);
 }
 
 static void
@@ -3144,6 +3227,8 @@ append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
         ns_atomic_raw rec = {
             .start = ctx->out->len,
             .box = pseudo_block_with_text(ps, txt),
+            .rise = vertical_align_script_rise(
+                ps, g_hash_table_lookup(ctx->styles, host)),
         };
         g_free(txt);
         g_string_append(ctx->out, "\xef\xbf\xbc");
@@ -3348,7 +3433,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         ns_box *sub = build_block(n, ctx->styles);
         g_inline_collect_depth = saved_collect_depth;
         if (sub) {
-            ns_atomic_raw rec = { .start = ctx->out->len, .box = sub };
+            ns_atomic_raw rec = {
+                .start = ctx->out->len, .box = sub,
+                .rise = atomic_vertical_align_rise(n, s, ctx->styles),
+            };
             g_string_append(ctx->out, "\xef\xbf\xbc");
             g_array_append_val(ctx->atomics, rec);
         }
@@ -3972,8 +4060,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                                            : "\xe2\x80\xad"); /* LRO */
     }
 
-    gboolean sup = strcmp(n->name, "sup") == 0;
-    gboolean sub = strcmp(n->name, "sub") == 0;
+    double outer_rise = ctx->rise;
+    double own_rise = inline_vertical_align_rise(n, s, ctx->styles);
+    ctx->rise += own_rise;
     gsize rise_start = ctx->out->len;
     gboolean small_caps = s && keyword_is(s->values[NS_CSS_FONT_VARIANT],
                                           "small-caps");
@@ -4073,10 +4162,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (strike && --ctx->strike_depth == 0)
         emit_attr_styled(ctx->attrs, NS_INLINE_STRIKETHROUGH, ctx->strike_start,
                          ctx->out->len, decor_style);
-    if (sup && ctx->out->len > rise_start)
-        emit_attr(ctx->attrs, NS_INLINE_SUPERSCRIPT, rise_start, ctx->out->len);
-    if (sub && ctx->out->len > rise_start)
-        emit_attr(ctx->attrs, NS_INLINE_SUBSCRIPT, rise_start, ctx->out->len);
+    emit_rise_attr(ctx, rise_start, own_rise);
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
     if (bidi_override)
@@ -4095,11 +4181,13 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             .kind = NS_INLINE_ELEMENT,
             .start = elem_start,
             .len = ctx->out->len - elem_start,
+            .rise_px = ctx->rise,
             .dom = n,
             .style = s,
         };
         g_array_append_val(ctx->attrs, elem);
     }
+    ctx->rise = outer_rise;
     append_inline_spacer(ctx, mr);
     ctx->active_href   = prev_href;
     ctx->active_target = prev_target;
@@ -4413,7 +4501,9 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         if (ns > collapsed->len) ns = collapsed->len;
         if (!box->inline_atomics)
             box->inline_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-        ns_inline_atomic ia = { .byte_off = ns, .box = rr->box };
+        ns_inline_atomic ia = {
+            .byte_off = ns, .box = rr->box, .rise_px = rr->rise,
+        };
         if (rr->box && !rr->box->parent) rr->box->parent = box;
         g_array_append_val(box->inline_atomics, ia);
     }
@@ -5015,7 +5105,8 @@ pseudo_box_add_edge_spacers(ns_box *box, const ns_style *ps)
 }
 
 static ns_box *
-build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
+build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
+                        const ns_style *host_style)
 {
     if (!ps) return NULL;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
@@ -5043,7 +5134,10 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
         run->style = ps;
         run->text = g_strdup("\xef\xbf\xbc");
         run->inline_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
-        ns_inline_atomic ia = { .byte_off = 0, .box = inner };
+        ns_inline_atomic ia = {
+            .byte_off = 0, .box = inner,
+            .rise_px = vertical_align_script_rise(ps, host_style),
+        };
         inner->parent = run;
         g_array_append_val(run->inline_atomics, ia);
         return run;
@@ -5220,7 +5314,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
     const ns_style *s = g_hash_table_lookup(styles, n);
     ns_box *contents_before = (s && s->before &&
                                !style_is_absolute_or_fixed(s->before))
-        ? build_pseudo_inline_for(s->before, n) : NULL;
+        ? build_pseudo_inline_for(s->before, n, s) : NULL;
     if (pending_before && *pending_before) {
         contents_before = inline_merge_prefix(*pending_before, contents_before);
         *pending_before = NULL;
@@ -5323,7 +5417,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
     }
 
     if (s && s->after && !style_is_absolute_or_fixed(s->after)) {
-        ns_box *contents_after = build_pseudo_inline_for(s->after, n);
+        ns_box *contents_after = build_pseudo_inline_for(s->after, n, s);
         if (contents_after) box_append_child(block, contents_after);
     }
     g_contents_depth--;
@@ -5724,7 +5818,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     ns_box *pending_before = (s && s->before && !before_block &&
                               !style_is_absolute_or_fixed(s->before))
-        ? build_pseudo_inline_for(s->before, n) : NULL;
+        ? build_pseudo_inline_for(s->before, n, s) : NULL;
 
     gboolean blockify_children = style_is_flex_container(s) ||
                                  style_is_grid_container(s);
@@ -5892,7 +5986,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     if (s && s->after && !after_block &&
         !style_is_absolute_or_fixed(s->after)) {
-        ns_box *gen = build_pseudo_inline_for(s->after, n);
+        ns_box *gen = build_pseudo_inline_for(s->after, n, s);
         if (gen && blockify_children) {
             box_append_child(block, pseudo_item_block(gen, s->after));
             gen = NULL;
@@ -6178,15 +6272,9 @@ apply_inline_layout_attrs(NsPangoAttrList *attrs, const ns_box *box)
                 g_free(ns_pango_family);
             }
             break;
-        case NS_INLINE_SUPERSCRIPT:
-            layout_attr_insert_range(attrs, ns_pango_attr_rise_new(4000),
-                                     r->start, r->len);
-            a = ns_pango_attr_scale_new(0.75);
-            break;
-        case NS_INLINE_SUBSCRIPT:
-            layout_attr_insert_range(attrs, ns_pango_attr_rise_new(-3000),
-                                     r->start, r->len);
-            a = ns_pango_attr_scale_new(0.75);
+        case NS_INLINE_RISE:
+            a = ns_pango_attr_rise_new(
+                (int)lround(r->rise_px * NS_PANGO_SCALE));
             break;
         case NS_INLINE_SMALL_CAPS:
             a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS);
@@ -6250,8 +6338,7 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                 a_asc = ab->margin.top + ab_baseline;
             if (va) {
                 if (strcmp(va, "middle") == 0)      a_asc = h / 2 + xh / 2;
-                else if (strcmp(va, "super") == 0)  a_asc = h + fs * 0.3;
-                else if (strcmp(va, "sub") == 0)    a_asc = h - fs * 0.2;
+                else if (a->rise_px != 0)           a_asc = h + a->rise_px;
                 else if (strcmp(va, "top") == 0 ||
                          strcmp(va, "text-top") == 0 ||
                          strcmp(va, "bottom") == 0 ||
@@ -6294,8 +6381,7 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                 else if (strcmp(va, "top") == 0)         top = -line_asc;
                 else if (strcmp(va, "text-bottom") == 0) top = desc - h;
                 else if (strcmp(va, "bottom") == 0)      top = desc - h;
-                else if (strcmp(va, "super") == 0)       top -= fs * 0.3;
-                else if (strcmp(va, "sub") == 0)         top += fs * 0.2;
+                else if (a->rise_px != 0)                top -= a->rise_px;
             }
             NsPangoRectangle r = { 0, (int)(top * NS_PANGO_SCALE),
                                  (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE) };
@@ -6309,15 +6395,22 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
 }
 
 static void
+inline_insert_line_height_units(NsPangoAttrList *list, int units, guint start,
+                                guint end)
+{
+    NsPangoAttribute *a = ns_pango_attr_line_height_new_absolute(units);
+    a->start_index = start;
+    a->end_index = end;
+    ns_pango_attr_list_insert(list, a);
+}
+
+static void
 inline_insert_line_height(NsPangoAttrList *list, double px, guint start,
                           guint end)
 {
     px = CLAMP(px, 0.0, (double)G_MAXINT16);
-    NsPangoAttribute *a = ns_pango_attr_line_height_new_absolute(
-        (int)lround(px * NS_PANGO_SCALE));
-    a->start_index = start;
-    a->end_index = end;
-    ns_pango_attr_list_insert(list, a);
+    inline_insert_line_height_units(
+        list, MAX(1, (int)lround(px * NS_PANGO_SCALE)), start, end);
 }
 
 static void
@@ -6327,8 +6420,8 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
         if (r->kind == NS_INLINE_SPACER && r->len > 0)
-            inline_insert_line_height(list, 0, (guint)r->start,
-                                      (guint)(r->start + r->len));
+            inline_insert_line_height_units(list, 0, (guint)r->start,
+                                            (guint)(r->start + r->len));
     }
 }
 
@@ -6345,7 +6438,7 @@ inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
         if (r->kind != NS_INLINE_ELEMENT || !r->style || r->len == 0)
             continue;
         double px = ns_paint_css_line_height_px(r->style);
-        if (px <= 0 || fabs(px - strut_px) < 0.01) continue;
+        if (px < 0 || fabs(px - strut_px) < 0.01) continue;
         if (px < strut_px) has_shorter = TRUE;
         inline_insert_line_height(list, px, (guint)r->start,
                                   (guint)(r->start + r->len));
@@ -6372,7 +6465,7 @@ inline_strut_kinds(const ns_box *box, gsize n, double strut_px)
             &g_array_index(box->attrs, ns_inline_attr, i);
         if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
         double px = ns_paint_css_line_height_px(r->style);
-        gboolean shorter = px > 0 && px < strut_px - 0.01;
+        gboolean shorter = px >= 0 && px < strut_px - 0.01;
         strut_mark_range(kind, n, r, shorter ? STRUT_SHORTER : STRUT_ROOT);
     }
     for (guint i = 0; i < box->attrs->len; i++) {
@@ -6574,8 +6667,6 @@ inline_attr_affects_measure(ns_inline_attr_kind k)
     case NS_INLINE_FONT_FEATURES:
     case NS_INLINE_FONT_VARIATIONS:
     case NS_INLINE_FONT_FAMILY:
-    case NS_INLINE_SUPERSCRIPT:
-    case NS_INLINE_SUBSCRIPT:
     case NS_INLINE_SMALL_CAPS:
         return TRUE;
     default:
@@ -16032,7 +16123,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             abox = box_new(NS_BOX_BLOCK);
             abox->style = e.pseudo;
             collect_box_bg_image(abox, e.pseudo);
-            ns_box *gen = build_pseudo_inline_for(e.pseudo, e.dom);
+            ns_box *gen = build_pseudo_inline_for(e.pseudo, e.dom, NULL);
             if (gen && gen->kind == NS_BOX_INLINE && gen->text && !*gen->text &&
                 !gen->inline_atomics) {
                 ns_box_free(gen);

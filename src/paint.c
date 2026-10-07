@@ -3984,15 +3984,9 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                     g_free(ns_pango_family);
                 }
                 break;
-            case NS_INLINE_SUPERSCRIPT:
-                attr_insert_range(attrs, ns_pango_attr_rise_new(4000),
-                                  r->start, r->len);
-                a = ns_pango_attr_scale_new(0.75);
-                break;
-            case NS_INLINE_SUBSCRIPT:
-                attr_insert_range(attrs, ns_pango_attr_rise_new(-3000),
-                                  r->start, r->len);
-                a = ns_pango_attr_scale_new(0.75);
+            case NS_INLINE_RISE:
+                a = ns_pango_attr_rise_new(
+                    (int)lround(r->rise_px * NS_PANGO_SCALE));
                 break;
             case NS_INLINE_SMALL_CAPS:
                 a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS);
@@ -4308,22 +4302,29 @@ inline_border_px(const ns_style *s, ns_css_prop width, ns_css_prop style)
     return length_or(s->values[width], 0);
 }
 
+gboolean
+ns_paint_style_font_metrics(const ns_style *s, ns_css_font_metrics *m)
+{
+    double font_size = s ? length_or(s->values[NS_CSS_FONT_SIZE], 16) : 16;
+    if (!s || font_size <= 0) return FALSE;
+    const ns_css_value *fv = s->values[NS_CSS_FONT_FAMILY];
+    const char *family = fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword
+        ? fv->u.keyword : "sans-serif";
+    gboolean italic = keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
+                      keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique");
+    int weight = ns_css_font_weight_number(s->values[NS_CSS_FONT_WEIGHT], 400);
+    ns_paint_font_metrics(family, font_size, weight, italic, m);
+    return m->ascent_px + m->descent_px > 0;
+}
+
 static gboolean
 inline_box_vertical_reach(const ns_style *s, double *above, double *below)
 {
     if (!s) return FALSE;
     double ascent = 0, descent = 0;
-    double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
-    if (font_size > 0) {
-        const ns_css_value *fv = s->values[NS_CSS_FONT_FAMILY];
-        const char *family = fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword
-            ? fv->u.keyword : "sans-serif";
-        gboolean italic = keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
-                          keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique");
-        int weight = ns_css_font_weight_number(s->values[NS_CSS_FONT_WEIGHT], 400);
+    if (length_or(s->values[NS_CSS_FONT_SIZE], 16) > 0) {
         ns_css_font_metrics m = { 0 };
-        ns_paint_font_metrics(family, font_size, weight, italic, &m);
-        if (!(m.ascent_px + m.descent_px > 0)) return FALSE;
+        if (!ns_paint_style_font_metrics(s, &m)) return FALSE;
         ascent = m.ascent_px;
         descent = m.descent_px;
     }
@@ -4333,34 +4334,6 @@ inline_box_vertical_reach(const ns_style *s, double *above, double *below)
              inline_border_px(s, NS_CSS_BORDER_BOTTOM_WIDTH,
                               NS_CSS_BORDER_BOTTOM_STYLE);
     return TRUE;
-}
-
-static gboolean
-inline_run_is_spacer(const NsPangoLayoutRun *run)
-{
-    for (const GSList *l = run->item->analysis.extra_attrs; l; l = l->next) {
-        const NsPangoAttribute *attr = l->data;
-        if (attr->klass->type == NS_PANGO_ATTR_SHAPE) return TRUE;
-    }
-    return FALSE;
-}
-
-static int
-inline_line_baseline_shift(const NsPangoLayoutLine *line, gsize lo, gsize hi)
-{
-    int shift[2] = { 0, 0 };
-    gboolean any[2] = { FALSE, FALSE };
-    for (const GSList *l = line->runs; l; l = l->next) {
-        const NsPangoLayoutRun *run = l->data;
-        gsize run_start = (gsize)run->item->offset;
-        gsize run_end = run_start + (gsize)run->item->length;
-        if (run_end <= lo || run_start >= hi) continue;
-        int k = inline_run_is_spacer(run) ? 1 : 0;
-        if (!any[k] || abs(run->y_offset) < abs(shift[k]))
-            shift[k] = run->y_offset;
-        any[k] = TRUE;
-    }
-    return any[0] ? shift[0] : shift[1];
 }
 
 static gboolean
@@ -4391,32 +4364,21 @@ typedef struct inline_range {
     gsize start;
     gsize len;
     const ns_style *box_style;
-    gboolean raised;
+    double rise;
     double dx, dy;
 } inline_range;
-
-static gboolean
-inline_element_is_raised(const ns_box *b, const ns_inline_attr *r)
-{
-    for (const ns_node *n = r->dom; n && n != b->dom; n = n->parent) {
-        if (n->kind != NS_NODE_ELEMENT || !n->name) continue;
-        if (strcmp(n->name, "sup") == 0 || strcmp(n->name, "sub") == 0)
-            return TRUE;
-    }
-    return FALSE;
-}
 
 static inline_range
 inline_range_for(const ns_box *b, gsize start, gsize len,
                  const ns_inline_attr *element)
 {
-    inline_range range = { start, len, NULL, FALSE, 0, 0 };
+    inline_range range = { start, len, NULL, 0, 0, 0 };
     if (!element) {
         ns_inline_offset_at(b, start, &range.dx, &range.dy);
         return range;
     }
     range.box_style = element->style;
-    range.raised = inline_element_is_raised(b, element);
+    range.rise = element->rise_px;
     range.dx = element->rel_dx;
     range.dy = element->rel_dy;
     return range;
@@ -4448,10 +4410,7 @@ inline_range_fragments(const ns_box *b, NsPangoLayout *layout, double y_origin,
         inline_fragment f;
         if (!inline_line_x_extent(line, lo, hi, &f.x0, &f.x1)) continue;
         if (own_box) {
-            int shift = range->raised
-                ? inline_line_baseline_shift(line, lo, hi) : 0;
-            double baseline =
-                baselines[line_index] - (double)shift / NS_PANGO_SCALE;
+            double baseline = baselines[line_index] - range->rise;
             f.y0 = baseline - above;
             f.y1 = baseline + below;
         } else {
@@ -5195,9 +5154,9 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
                     g_free(ns_pango_family);
                 }
                 break;
-            case NS_INLINE_SUPERSCRIPT:
-            case NS_INLINE_SUBSCRIPT:
-                a = ns_pango_attr_scale_new(0.75); break;
+            case NS_INLINE_RISE:
+                a = ns_pango_attr_rise_new(
+                    (int)lround(r->rise_px * NS_PANGO_SCALE)); break;
             case NS_INLINE_SMALL_CAPS:
                 a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS); break;
             case NS_INLINE_SPACER: {

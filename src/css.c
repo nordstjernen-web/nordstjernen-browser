@@ -12655,6 +12655,34 @@ ns_css_border_image_params(const ns_style *s, ns_border_image *out)
 }
 
 static ns_css_value *
+parse_vertical_align_length(const char *t)
+{
+    ns_css_value *v = parse_calc(t);
+    double num;
+    ns_css_unit unit;
+    if (v || !parse_length(t, &num, &unit) ||
+        (unit == NS_CSS_UNIT_NUMBER && num != 0))
+        return v;
+    v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_LENGTH;
+    v->u.length.v = num;
+    v->u.length.unit = unit == NS_CSS_UNIT_NUMBER ? NS_CSS_UNIT_PX : unit;
+    return v;
+}
+
+static ns_css_value *
+parse_keyword_value(ns_css_prop prop, const char *t)
+{
+    ns_css_value *v = prop == NS_CSS_VERTICAL_ALIGN
+        ? parse_vertical_align_length(t) : NULL;
+    if (v) return v;
+    v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = ascii_lower(t, strlen(t));
+    return v;
+}
+
+static ns_css_value *
 parse_value_for(ns_css_prop prop, const char *text)
 {
 
@@ -13955,14 +13983,9 @@ parse_value_for(ns_css_prop prop, const char *text)
         v->u.keyword = canon;
         break;
     }
-    default: {
-
-        char *kw = ascii_lower(t, strlen(t));
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
-        v->u.keyword = kw;
+    default:
+        v = parse_keyword_value(prop, t);
         break;
-    }
     }
     if (v && !v->next_layer)
         value_record_specified_keyword(v, prop, t);
@@ -27555,7 +27578,8 @@ static const char *kUa =
     "textarea { white-space: pre-wrap; }\n"
     "mark { background-color: Mark; color: MarkText; }\n"
     "small { font-size: smaller; }\n"
-    "sub, sup { font-size: 0.75em; }\n"
+    "sub { vertical-align: sub; font-size: smaller; }\n"
+    "sup { vertical-align: super; font-size: smaller; }\n"
     "table { display: table; border-collapse: separate; border-spacing: 2px; "
     "box-sizing: border-box; }\n"
     "caption { display: table-caption; text-align: center; }\n"

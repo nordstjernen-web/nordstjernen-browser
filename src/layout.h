@@ -65,8 +65,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_COLOR,
     NS_INLINE_FONT_FAMILY,
     NS_INLINE_BG_COLOR,
-    NS_INLINE_SUPERSCRIPT,
-    NS_INLINE_SUBSCRIPT,
+    NS_INLINE_RISE,
     NS_INLINE_SMALL_CAPS,
     NS_INLINE_CARET,
     NS_INLINE_SELECTION,
@@ -89,6 +88,7 @@ typedef struct ns_inline_attr {
     const char *font_features;
     const char *font_variations;
     double box_w, box_h;
+    double rise_px;
     gboolean native_chrome;
     guint8 r, g, b, a;
     const char *family;
@@ -103,6 +103,7 @@ typedef struct ns_inline_atomic {
     struct ns_box *box;
     double owner_offset_x;
     double owner_offset_y;
+    double rise_px;
 } ns_inline_atomic;
 
 typedef struct ns_box_media {
