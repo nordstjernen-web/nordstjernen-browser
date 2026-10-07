@@ -91,3 +91,9 @@ Thumbs.db
 perf.data
 /builddir-stock/
 __pycache__/
+
+# Site benchmark captures and the Chrome-side node install
+/sitebench-out/
+/builddir-asan/
+/scripts/sitebench/node_modules/
+/scripts/sitebench/package-lock.json
