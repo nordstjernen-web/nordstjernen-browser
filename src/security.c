@@ -456,6 +456,15 @@ ns_security_sandbox_init(const char *self_exe)
         g_free(xauth_dir);
     }
 
+    static const char *const ca_bundle_envs[] = {
+        "CURL_CA_BUNDLE", "SSL_CERT_FILE", NULL,
+    };
+    for (gsize i = 0; ca_bundle_envs[i]; i++) {
+        const char *bundle = g_getenv(ca_bundle_envs[i]);
+        if (bundle && *bundle && g_path_is_absolute(bundle))
+            add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, bundle);
+    }
+
     const char *home = g_get_home_dir();
 
     add_path_rw(rfd, fs_read, g_get_user_config_dir());
