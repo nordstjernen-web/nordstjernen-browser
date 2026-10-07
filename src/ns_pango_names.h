@@ -11,6 +11,7 @@
 #define NS_PANGO_ALIGN_CENTER                             PANGO_ALIGN_CENTER
 #define NS_PANGO_ALIGN_LEFT                               PANGO_ALIGN_LEFT
 #define NS_PANGO_ALIGN_RIGHT                              PANGO_ALIGN_RIGHT
+#define NS_PANGO_ANALYSIS_FLAG_IS_ELLIPSIS                PANGO_ANALYSIS_FLAG_IS_ELLIPSIS
 #define ns_pango_attr_allow_breaks_new                    pango_attr_allow_breaks_new
 #define ns_pango_attr_background_alpha_new                pango_attr_background_alpha_new
 #define ns_pango_attr_background_new                      pango_attr_background_new
@@ -89,6 +90,9 @@
 #define ns_pango_font_metrics_get_height                  pango_font_metrics_get_height
 #define ns_pango_font_metrics_unref                       pango_font_metrics_unref
 #define ns_pango_get_log_attrs                            pango_get_log_attrs
+#define ns_pango_glyph_item_split                         pango_glyph_item_split
+#define ns_pango_glyph_string_extents                     pango_glyph_string_extents
+#define ns_pango_glyph_string_get_width                   pango_glyph_string_get_width
 #define NS_PANGO_IS_FC_FONT_MAP                           PANGO_IS_FC_FONT_MAP
 #define ns_pango_language_from_string                     pango_language_from_string
 #define ns_pango_layout_context_changed                   pango_layout_context_changed
@@ -125,6 +129,7 @@
 #define ns_pango_layout_iter_get_line_extents             pango_layout_iter_get_line_extents
 #define ns_pango_layout_iter_get_line_readonly            pango_layout_iter_get_line_readonly
 #define ns_pango_layout_iter_next_line                    pango_layout_iter_next_line
+#define ns_pango_layout_line_get_extents                  pango_layout_line_get_extents
 #define ns_pango_layout_line_get_x_ranges                 pango_layout_line_get_x_ranges
 #define ns_pango_layout_line_index_to_x                   pango_layout_line_index_to_x
 #define ns_pango_layout_new                               pango_layout_new
@@ -181,6 +186,7 @@
 #define NsPangoAlignment                                  PangoAlignment
 #define NsPangoAttribute                                  PangoAttribute
 #define NsPangoAttrList                                   PangoAttrList
+#define NsPangoAttrShape                                  PangoAttrShape
 #define NsPangoContext                                    PangoContext
 #define NsPangoDirection                                  PangoDirection
 #define NsPangoFontDescription                            PangoFontDescription

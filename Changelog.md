@@ -3,6 +3,20 @@ Changelog:
 
 1.0.30:
 ======
+* `position: relative` with `top`, `right`, `bottom` or `left` now moves
+  an inline element such as a `<span>`, `<a>` or `<sup>` with
+  `display: inline`. The offset was ignored, so an icon label nudged
+  with `top: -2px` or a link shifted sideways stayed where the line put
+  it. The element's text, background, border, underline, the images and
+  inline blocks inside it, and an absolute box that sits at its static
+  position inside it are now drawn at the offset, above the rest of the
+  line like other positioned boxes (below the line's text with a
+  negative `z-index`). Clicks on the moved text, selection,
+  `getBoundingClientRect()` and `scrollWidth`/`scrollHeight` follow the
+  moved element, and nested offsets add up, while the line keeps its
+  height and the text after the element stays in place, as in other
+  browsers. For example `<span style="position: relative; top: -10px">`
+  is drawn 10px above the line.
 * quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
   use-after-free in `AsyncDisposableStack`, a reference-count bug in
   `Promise.withResolvers`, an out-of-bounds read when creating typed
