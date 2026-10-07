@@ -220,6 +220,8 @@ def capture_site(site, a, probe_src):
     n_err, err_sample = js_errors(visual["stderr"])
 
     summary = {
+        "firstPaintMs": median(p["timing"].get("first_paint_ms") for p in perf_runs),
+        "firstPaintCpuMs": median(p["timing"].get("first_paint_cpu_ms") for p in perf_runs),
         "firstRenderMs": median(p["timing"].get("first_render_ms") for p in perf_runs),
         "firstRenderCpuMs": median(p["timing"].get("first_render_cpu_ms") for p in perf_runs),
         "fetchMs": median(p["timing"].get("fetch_ms") for p in perf_runs),
@@ -298,7 +300,8 @@ def main():
         if res is None:
             return
         s = res["summary"]
-        print(f"{site['id']:<20} {str(res['status'] or '-'):<4} first-render={s['firstRenderMs']} "
+        print(f"{site['id']:<20} {str(res['status'] or '-'):<4} first-paint={s['firstPaintMs']} "
+              f"images-loaded={s['firstRenderMs']} "
               f"cpu={s['processCpuMs']} rss={s['maxRssMb']}MB nodes={s['nodes']} jsErr={s['jsErrors']}"
               + (f"  ERR {res['error']}" if res["error"] else ""), flush=True)
 

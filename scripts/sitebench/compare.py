@@ -327,8 +327,11 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
         visual["parity"] = parity(visual) if ns_img is not None else 0.0
         entry["visual"] = visual
         c = row["chrome"] or {}
+        first_paint = s.get("firstPaintMs") or s.get("firstRenderMs")
+        entry["firstPaintMs"] = first_paint
         entry["vsChrome"] = {
-            "firstRender": ratio(s.get("firstRenderMs"), c.get("fcp")),
+            "firstRender": ratio(first_paint, c.get("fcp")),
+            "imagesLoaded": ratio(s.get("firstRenderMs"), c.get("load")),
             "mainThread": ratio(s.get("settledMainThreadMs"), c.get("mainThreadMs")),
             "memory": ratio(s.get("settledMaxRssMb"), c.get("browserRssMb")),
         }
@@ -367,7 +370,9 @@ def aggregate(rows, labels):
             "parityMean": round(sum(e["visual"]["parity"] or 0 for e in es) / len(es), 1) if es else None,
             "ssimMedian": med([e["visual"].get("ssim") for e in es]),
             "componentsPlacedMedian": med([(e["visual"].get("components") or {}).get("placedRate") for e in es]),
-            "firstRenderMedianMs": med([e.get("firstRenderMs") for e in ok]),
+            "firstRenderMedianMs": med([e.get("firstPaintMs") for e in ok]),
+            "imagesLoadedMedianMs": med([e.get("firstRenderMs") for e in ok]),
+            "imagesLoadedVsLoadGeomean": geomean([e["vsChrome"]["imagesLoaded"] for e in ok]),
             "firstRenderVsFcpGeomean": geomean([e["vsChrome"]["firstRender"] for e in ok]),
             "mainThreadVsChromeGeomean": geomean([e["vsChrome"]["mainThread"] for e in ok]),
             "memoryVsChromeGeomean": geomean([e["vsChrome"]["memory"] for e in ok]),
@@ -417,9 +422,10 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
             ("Median viewport SSIM", "ssimMedian", lambda v: fmt(v, 3)),
             ("Median components placed", "componentsPlacedMedian",
              lambda v: "–" if v is None else f"{v * 100:.0f}%"),
-            ("Median first render (ms)", "firstRenderMedianMs", lambda v: fmt(v)),
-            ("First render ÷ Chrome FCP (geomean)", "firstRenderVsFcpGeomean", fmt_ratio),
-            ("Sites rendering before Chrome FCP", "fasterFirstRender", lambda v: fmt(v)),
+            ("Median first paint (ms)", "firstRenderMedianMs", lambda v: fmt(v)),
+            ("First paint ÷ Chrome FCP (geomean)", "firstRenderVsFcpGeomean", fmt_ratio),
+            ("Sites painting before Chrome FCP", "fasterFirstRender", lambda v: fmt(v)),
+            ("Images loaded ÷ Chrome load event (geomean)", "imagesLoadedVsLoadGeomean", fmt_ratio),
             ("Main-thread CPU ÷ Chrome (geomean)", "mainThreadVsChromeGeomean", fmt_ratio),
             ("Peak memory ÷ Chrome (geomean)", "memoryVsChromeGeomean", fmt_ratio),
             ("JS errors (all sites)", "jsErrors", lambda v: fmt(v)),
@@ -436,7 +442,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
                      "an error page instead of the site: " + ", ".join(c["excluded"]) + ".")
     lines.append("")
     head = "| Site | Chrome FCP | Chrome main | " + " | ".join(
-        f"{l} parity | {l} first render | {l} main CPU" for l in labels) + " |"
+        f"{l} parity | {l} first paint | {l} main CPU" for l in labels) + " |"
     lines.append(head)
     lines.append("|---|---:|---:|" + "---:|---:|---:|" * len(labels))
     for r in rows:
@@ -450,7 +456,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
                 continue
             mark = " ⚠" if e.get("error") or e.get("blocked") else ""
             cells += [fmt(e["visual"].get("parity"), 1) + mark,
-                      fmt(e.get("firstRenderMs")), fmt(e.get("settledMainThreadMs"))]
+                      fmt(e.get("firstPaintMs")), fmt(e.get("settledMainThreadMs"))]
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -506,11 +512,12 @@ def write_html(rows, agg, labels, base_label, meta, path):
     out.append("<h2>Summary</h2><div class=wrap><table><thead><tr><th>Metric</th>" +
                "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
     for title, key, digits in [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
-                               ("Median SSIM", "ssimMedian", 3), ("Median first render ms", "firstRenderMedianMs", 0),
-                               ("First render ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
+                               ("Median SSIM", "ssimMedian", 3), ("Median first paint ms", "firstRenderMedianMs", 0),
+                               ("First paint ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
+                               ("Images loaded ÷ Chrome load", "imagesLoadedVsLoadGeomean", 2),
                                ("Main-thread CPU ÷ Chrome", "mainThreadVsChromeGeomean", 2),
                                ("Peak memory ÷ Chrome", "memoryVsChromeGeomean", 2),
-                               ("Sites rendering before Chrome FCP", "fasterFirstRender", 0),
+                               ("Sites painting before Chrome FCP", "fasterFirstRender", 0),
                                ("JS errors", "jsErrors", 0)]:
         out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[l].get(key), digits) for l in labels) + "</tr>")
     out.append("</tbody></table></div>")
@@ -518,7 +525,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
     out.append("<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
                "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>")
     for l in labels:
-        out.append(f"<th>{e(l)} parity</th><th>SSIM</th><th>Placed</th><th>First render</th>"
+        out.append(f"<th>{e(l)} parity</th><th>SSIM</th><th>Placed</th><th>First paint</th>"
                    f"<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
     out.append("</tr></thead><tbody>")
     for r in rows:
@@ -537,7 +544,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
             placed = comp.get("placedRate")
             out.append(cell(v.get("parity"), 1, "bad" if en.get("error") else "") + cell(v.get("ssim"), 3) +
                        cell(None if placed is None else round(placed * 100), 0) +
-                       cell(en.get("firstRenderMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
+                       cell(en.get("firstPaintMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
                        cell(en.get("settledMainThreadMs")) + ratio_cell(en["vsChrome"]["mainThread"]) +
                        cell(en.get("settledMaxRssMb")) + cell(en.get("jsErrors")))
         out.append("</tr>")
@@ -568,7 +575,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
             v = en["visual"]
             out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(l)}.jpg' alt=''>"
                        f"<figcaption>{e(l)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
-                       f"first render {fmt(en.get('firstRenderMs'))} ms"
+                       f"first paint {fmt(en.get('firstPaintMs'))} ms · images loaded {fmt(en.get('firstRenderMs'))} ms"
                        + (f" · <span class=bad>{e(en['error'])}</span>" if en.get("error") else "") +
                        "</figcaption></figure>")
         if labels and labels[-1] in r["engines"]:
@@ -662,7 +669,7 @@ def main():
     for l in labels:
         g = agg[l]
         print(f"{l}: loaded {g['loaded']}/{g['sites']}, parity {g['parityMean']}, "
-              f"first render ÷ FCP {fmt_ratio(g['firstRenderVsFcpGeomean'])}, "
+              f"first paint ÷ FCP {fmt_ratio(g['firstRenderVsFcpGeomean'])}, "
               f"main CPU ÷ Chrome {fmt_ratio(g['mainThreadVsChromeGeomean'])}, "
               f"memory ÷ Chrome {fmt_ratio(g['memoryVsChromeGeomean'])}")
     print(f"report: {report / 'index.html'}")
