@@ -54,6 +54,8 @@ typedef struct headless_timing {
     gint64 encode_us;
     gint64 first_render_us;
     gint64 first_render_cpu_us;
+    gint64 first_paint_us;
+    gint64 first_paint_cpu_us;
     int    hops;
     int    status;
     guint  nodes;
@@ -82,6 +84,22 @@ headless_count_elements(const ns_node *n)
 }
 
 static void
+headless_time_first_paint(const ns_box *layout, int width, int height)
+{
+    if (!layout || width <= 0 || height <= 0) return;
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t *cr = cairo_create(surf);
+    ns_paint(cr, layout, NULL);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surf);
+    g_timing.first_paint_us =
+        g_get_monotonic_time() - g_timing.start_us - g_timing.settle_us;
+    g_timing.first_paint_cpu_us =
+        headless_thread_cpu_us() - g_timing.start_cpu_us;
+}
+
+static void
 headless_print_timing(void)
 {
     gint64 total = g_get_monotonic_time() - g_timing.start_us;
@@ -92,6 +110,7 @@ headless_print_timing(void)
     ns_engine_blocking_perf(&net_waits, &net_wait_ms);
     fprintf(stdout,
             "timing: {\"total_ms\":%.1f,\"busy_ms\":%.1f,\"cpu_ms\":%.1f,"
+            "\"first_paint_ms\":%.1f,\"first_paint_cpu_ms\":%.1f,"
             "\"first_render_ms\":%.1f,\"first_render_cpu_ms\":%.1f,"
             "\"fetch_ms\":%.1f,\"parse_ms\":%.1f,\"style_ms\":%.1f,"
             "\"script_ms\":%.1f,\"images_ms\":%.1f,\"paint_ms\":%.1f,"
@@ -101,6 +120,8 @@ headless_print_timing(void)
             "\"net_wait_ms\":%.1f,\"hops\":%d,\"status\":%d,"
             "\"nodes\":%u}\n",
             total / 1000.0, (total - g_timing.settle_us) / 1000.0, cpu / 1000.0,
+            g_timing.first_paint_us / 1000.0,
+            g_timing.first_paint_cpu_us / 1000.0,
             g_timing.first_render_us / 1000.0,
             g_timing.first_render_cpu_us / 1000.0,
             g_timing.fetch_us / 1000.0, g_timing.parse_us / 1000.0,
@@ -2192,6 +2213,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     }
 
     headless_relayout(&flush_ctx);
+    if (opts->timing) headless_time_first_paint(layout, vw, (int)vh);
     if (js && opts->settle_ms > 0) {
         settle_main_loop(opts->settle_ms, &flush_ctx);
         headless_relayout(&flush_ctx);
