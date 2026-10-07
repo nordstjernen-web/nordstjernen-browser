@@ -14000,11 +14000,35 @@ alias_logical(const char *name)
     return NULL;
 }
 
+static GHashTable *
+prop_id_table(void)
+{
+    static gsize ready;
+    static GHashTable *table;
+    if (g_once_init_enter(&ready)) {
+        GHashTable *t = g_hash_table_new(g_str_hash, g_str_equal);
+        for (int i = NS_CSS_PROP_COUNT - 1; i >= 0; i--)
+            if (kProp[i])
+                g_hash_table_insert(t, (gpointer)kProp[i], GINT_TO_POINTER(i + 1));
+        table = t;
+        g_once_init_leave(&ready, 1);
+    }
+    return table;
+}
+
 static int
 prop_id(const char *name)
 {
-    for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
-        if (g_ascii_strcasecmp(name, kProp[i]) == 0) return i;
+    char lower[64];
+    gsize len = strlen(name);
+    if (len < sizeof lower) {
+        for (gsize i = 0; i < len; i++) lower[i] = g_ascii_tolower(name[i]);
+        lower[len] = '\0';
+        gpointer hit = g_hash_table_lookup(prop_id_table(), lower);
+        if (hit) return GPOINTER_TO_INT(hit) - 1;
+    } else {
+        for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
+            if (kProp[i] && g_ascii_strcasecmp(name, kProp[i]) == 0) return i;
     }
     if (g_ascii_strcasecmp(name, "word-wrap") == 0)
         return NS_CSS_OVERFLOW_WRAP;
@@ -14038,8 +14062,10 @@ prop_id(const char *name)
         return NS_CSS_APPEARANCE;
     const char *phys = alias_logical(name);
     if (phys) {
+        gpointer hit = g_hash_table_lookup(prop_id_table(), phys);
+        if (hit) return GPOINTER_TO_INT(hit) - 1;
         for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
-            if (g_ascii_strcasecmp(phys, kProp[i]) == 0) return i;
+            if (kProp[i] && g_ascii_strcasecmp(phys, kProp[i]) == 0) return i;
     }
     return -1;
 }
