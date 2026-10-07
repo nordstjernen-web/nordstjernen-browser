@@ -16,6 +16,11 @@ try:
 except ImportError:
     sys.exit("compare: needs Pillow and numpy (pip install pillow numpy)")
 
+CHALLENGE = re.compile(
+    r"just a moment|attention required|access denied|403 forbidden|confirm you are human|"
+    r"security verification|are you a robot|robot check|pardon our interruption|request blocked|"
+    r"verify you are human|you've been blocked|blocked by network security|captcha", re.I)
+
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
 
@@ -116,6 +121,17 @@ def speed_index(frames_dir):
         if visually_complete is None and p >= 0.98:
             visually_complete = t
     return round(si), visually_complete
+
+
+def blocked_reason(probe, status):
+    if not probe:
+        return None
+    first_text = " ".join(c.get("text") or "" for c in (probe.get("components") or [])[:12])
+    if CHALLENGE.search(probe.get("title") or "") or CHALLENGE.search(first_text):
+        return "bot challenge"
+    if status in (401, 403, 429) and (probe.get("nodes") or 0) < 200:
+        return f"HTTP {status}"
+    return None
 
 
 def identifiable(c):
@@ -258,7 +274,8 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
         row["chrome"] = dict(cs, status=chrome.get("status"), error=chrome.get("error"),
                              speedIndex=si, visuallyComplete=vc,
                              docH=(chrome_probe or {}).get("docH"),
-                             textLen=(chrome_probe or {}).get("textLen"))
+                             textLen=(chrome_probe or {}).get("textLen"),
+                             blocked=blocked_reason(chrome_probe, chrome.get("status")))
     size = (vw // 2, vh // 2)
     chrome_img = load_rgb(chrome_dir / "viewport.png", size)
     if chrome_img is not None:
@@ -287,7 +304,8 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
         s = ns["summary"]
         entry = dict(s, status=ns.get("status"), error=ns.get("error"),
                      docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
-                     jsErrorSample=ns.get("jsErrorSample", []))
+                     jsErrorSample=ns.get("jsErrorSample", []),
+                     blocked=blocked_reason(ns_probe, ns.get("status")))
         ns_img = load_rgb(ns_dir / "viewport.png", size)
         visual = {}
         if ns_img is not None:
@@ -333,8 +351,14 @@ def med(xs):
     return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
 
 
+def comparable(row):
+    return bool(row.get("chrome")) and not row["chrome"].get("blocked")
+
+
 def aggregate(rows, labels):
     agg = {}
+    blocked = [r["id"] for r in rows if not comparable(r)]
+    rows = [r for r in rows if comparable(r)]
     for label in labels:
         es = [r["engines"][label] for r in rows if label in r["engines"]]
         ok = [e for e in es if not e.get("error")]
@@ -349,10 +373,12 @@ def aggregate(rows, labels):
             "memoryVsChromeGeomean": geomean([e["vsChrome"]["memory"] for e in ok]),
             "fasterFirstRender": sum(1 for e in ok if (e["vsChrome"]["firstRender"] or 9) < 1.0),
             "jsErrors": sum(e.get("jsErrors") or 0 for e in es),
+            "nsBlocked": sum(1 for e in es if e.get("blocked")),
         }
     chrome = [r["chrome"] for r in rows if r.get("chrome")]
     agg["chrome"] = {
         "sites": len(chrome),
+        "excluded": blocked,
         "fcpMedianMs": med([c.get("fcp") for c in chrome]),
         "lcpMedianMs": med([c.get("lcp") for c in chrome]),
         "loadMedianMs": med([c.get("load") for c in chrome]),
@@ -396,13 +422,18 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
             ("Sites rendering before Chrome FCP", "fasterFirstRender", lambda v: fmt(v)),
             ("Main-thread CPU ÷ Chrome (geomean)", "mainThreadVsChromeGeomean", fmt_ratio),
             ("Peak memory ÷ Chrome (geomean)", "memoryVsChromeGeomean", fmt_ratio),
-            ("JS errors (all sites)", "jsErrors", lambda v: fmt(v))]
+            ("JS errors (all sites)", "jsErrors", lambda v: fmt(v)),
+            ("Sites showing a bot challenge", "nsBlocked", lambda v: fmt(v))]
     for title, key, f in keys:
         lines.append(f"| {title} | " + " | ".join(f(agg[l].get(key)) for l in labels) + " |")
     c = agg["chrome"]
     lines.append("")
     lines.append(f"Chrome medians: FCP {fmt(c['fcpMedianMs'])} ms, LCP {fmt(c['lcpMedianMs'])} ms, "
                  f"load {fmt(c['loadMedianMs'])} ms, main thread {fmt(c['mainThreadMedianMs'])} ms.")
+    if c.get("excluded"):
+        lines.append("")
+        lines.append("Left out of the aggregates because headless Chrome was shown a bot challenge or "
+                     "an error page instead of the site: " + ", ".join(c["excluded"]) + ".")
     lines.append("")
     head = "| Site | Chrome FCP | Chrome main | " + " | ".join(
         f"{l} parity | {l} first render | {l} main CPU" for l in labels) + " |"
@@ -410,13 +441,15 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
     lines.append("|---|---:|---:|" + "---:|---:|---:|" * len(labels))
     for r in rows:
         ch = r.get("chrome") or {}
-        cells = [r["id"], fmt(ch.get("fcp")), fmt(ch.get("mainThreadMs"))]
+        site_id = r["id"] + (" (Chrome blocked)" if ch.get("blocked") else "")
+        cells = [site_id, fmt(ch.get("fcp")), fmt(ch.get("mainThreadMs"))]
         for l in labels:
             e = r["engines"].get(l)
             if not e:
                 cells += ["–", "–", "–"]
                 continue
-            cells += [fmt(e["visual"].get("parity"), 1) + (" ⚠" if e.get("error") else ""),
+            mark = " ⚠" if e.get("error") or e.get("blocked") else ""
+            cells += [fmt(e["visual"].get("parity"), 1) + mark,
                       fmt(e.get("firstRenderMs")), fmt(e.get("settledMainThreadMs"))]
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
@@ -517,6 +550,13 @@ def write_html(rows, agg, labels, base_label, meta, path):
                    f"<span class=muted>· <a href='{e(site.get('url', ''))}'>{e(site.get('url', ''))}</a></span></h2>")
         if ch.get("error"):
             out.append(f"<p class=bad>Chrome: {e(ch['error'])}</p>")
+        if ch.get("blocked"):
+            out.append(f"<p class=bad>Chrome was shown a {e(ch['blocked'])} page; this site is left out "
+                       f"of the aggregates.</p>")
+        for l in labels:
+            en = r["engines"].get(l)
+            if en and en.get("blocked"):
+                out.append(f"<p class=bad>{e(l)} was shown a {e(en['blocked'])} page.</p>")
         out.append("<div class=shots>")
         out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}.jpg' alt=''>"
                    f"<figcaption>Chrome · FCP {fmt(ch.get('fcp'))} ms · LCP {fmt(ch.get('lcp'))} ms · "

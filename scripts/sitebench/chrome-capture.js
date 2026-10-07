@@ -285,8 +285,12 @@ async function main() {
   const { chromium } = loadPlaywright();
   const sites = readSites(o.sites, o.only, o.category);
   if (!sites.length) { console.error('chrome-capture: no sites selected'); process.exit(2); }
-  const launch = { headless: true, args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none'] };
-  if (o.channel) launch.channel = o.channel;
+  const launch = {
+    headless: true,
+    channel: o.channel || 'chromium',
+    args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none',
+           '--disable-blink-features=AutomationControlled'],
+  };
   if (o.executable) launch.executablePath = o.executable;
   const browser = await chromium.launch(launch);
   const version = browser.version();
