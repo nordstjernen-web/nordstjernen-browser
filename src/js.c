@@ -63734,6 +63734,27 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
     ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
 }
 
+static void
+ns_js_fire_parsed_stylesheet_loads(ns_js *js, ns_node *doc)
+{
+    GPtrArray *sheets = g_ptr_array_new();
+    ns_js_collect_pending_stylesheets(doc, sheets);
+    g_autofree char *origin = sheets->len ? ns_js_node_document_base_url(js, doc)
+                                          : NULL;
+    for (guint i = 0; i < sheets->len && !js->halted; i++) {
+        ns_node *link = g_ptr_array_index(sheets, i);
+        g_autofree char *abs =
+            ns_url_resolve(origin, ns_element_get_attr(link, "href"));
+        if (ns_engine_linked_css_known(abs)) {
+            link->flags |= NS_NODE_LINK_LOAD_FIRED;
+            ns_js_dispatch_resource_event(js, link, "load");
+        } else {
+            ns_js_load_stylesheet_element(js, link, origin ? origin : "inline");
+        }
+    }
+    g_ptr_array_free(sheets, TRUE);
+}
+
 static gboolean
 ns_js_root_connected(ns_js *js, const ns_node *root)
 {
@@ -65678,6 +65699,7 @@ ns_js_lifecycle_tick(gpointer data)
             &js->navigation_timing.dom_content_loaded_event_end_ms,
             "domContentLoadedEventEnd");
         ns_ce_upgrade_subtree_all(js, doc);
+        ns_js_fire_parsed_stylesheet_loads(js, doc);
         js->lifecycle_phase = 2;
         ns_js_lifecycle_schedule(js);
         return G_SOURCE_REMOVE;
