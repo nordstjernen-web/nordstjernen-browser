@@ -175,6 +175,46 @@ ns_font_available(void)
 #endif
 }
 
+char *
+ns_font_metric_alias(const char *family)
+{
+#ifdef NS_HAVE_FONTCONFIG
+    if (!family || !*family) return NULL;
+    FcPattern *pat = FcPatternCreate();
+    if (!pat) return NULL;
+    FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)family);
+    FcConfigSubstitute(NULL, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+    int last_bound = -1;
+    FcValue value;
+    FcValueBinding binding;
+    for (int i = 0; FcPatternGetWithBinding(pat, FC_FAMILY, i, &value,
+                                            &binding) == FcResultMatch; i++)
+        if (binding != FcValueBindingWeak) last_bound = i;
+    char *alias = NULL;
+    FcResult result;
+    FcPattern *match = FcFontMatch(NULL, pat, &result);
+    FcChar8 *got = NULL;
+    for (int j = 0; match && !alias &&
+         FcPatternGetString(match, FC_FAMILY, j, &got) == FcResultMatch; j++) {
+        for (int i = 0; i <= last_bound; i++) {
+            FcChar8 *want = NULL;
+            if (FcPatternGetString(pat, FC_FAMILY, i, &want) == FcResultMatch &&
+                FcStrCmpIgnoreCase(want, got) == 0) {
+                alias = g_strdup((const char *)got);
+                break;
+            }
+        }
+    }
+    if (match) FcPatternDestroy(match);
+    FcPatternDestroy(pat);
+    return alias;
+#else
+    (void)family;
+    return NULL;
+#endif
+}
+
 guint
 ns_font_generation(void)
 {

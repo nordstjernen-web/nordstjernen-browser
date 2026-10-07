@@ -2525,6 +2525,34 @@ ns_paint_font_available(const char *family)
     return has;
 }
 
+static char *
+ns_paint_font_alias(const char *family)
+{
+    static GMutex lock;
+    static GHashTable *aliases;
+    if (!family || !*family) return NULL;
+    char *key = g_ascii_strdown(family, -1);
+    g_mutex_lock(&lock);
+    if (!aliases)
+        aliases = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    gpointer cached = NULL;
+    gboolean known = g_hash_table_lookup_extended(aliases, key, NULL, &cached);
+    g_mutex_unlock(&lock);
+    if (known) {
+        g_free(key);
+        return cached ? g_strdup(cached) : NULL;
+    }
+    char *alias = ns_font_metric_alias(family);
+    if (alias && !ns_paint_font_available(alias)) {
+        g_free(alias);
+        alias = NULL;
+    }
+    g_mutex_lock(&lock);
+    g_hash_table_replace(aliases, key, g_strdup(alias));
+    g_mutex_unlock(&lock);
+    return alias;
+}
+
 typedef struct {
     char    *family;
     double   size_px;
@@ -2696,6 +2724,7 @@ void
 ns_paint_register_font_oracle(void)
 {
     ns_css_set_font_available_cb(ns_paint_font_available);
+    ns_css_set_font_alias_cb(ns_paint_font_alias);
     ns_css_set_font_generation_cb(ns_paint_font_generation);
     ns_css_set_font_metrics_cb(ns_paint_font_metrics);
 }
