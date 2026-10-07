@@ -153,6 +153,7 @@ struct ns_js {
     gint64        raf_last_us;
     ns_node      *raf_frame_ctx;
     JSValue       pristine_promise;
+    JSValue       fonts_set;
     GHashTable   *style_table;
     const struct ns_box *layout_root;
     GHashTable   *box_lookup_cache;
