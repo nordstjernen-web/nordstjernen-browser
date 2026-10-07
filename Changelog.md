@@ -3,6 +3,23 @@ Changelog:
 
 1.0.30:
 ======
+* Superscripts, subscripts and inline text with `vertical-align` are
+  placed as in Chrome. `<sup>` and `<sub>` were shrunk twice, to 0.75em
+  by the default style and by three quarters again when drawn, and
+  raised by a fixed amount chosen by tag name, so footnote markers came
+  out a third too narrow and their line did not grow; `vertical-align`
+  on other inline elements was ignored. The default style now gives them
+  `font-size: smaller` and `vertical-align: super` or `sub`. An inline
+  element (not an inline block or image) is shifted from its parent
+  box's baseline by `super` (up a third of the parent's font size plus
+  one pixel), `sub` (down a fifth plus one), a length, a percentage of
+  its own `line-height`, `text-top` or `text-bottom`; shifts nest, and
+  the line grows to hold the element unless its `line-height` is 0.
+  Images and inline blocks with `super` or `sub` use the parent box's
+  font size too; `top`, `middle` and `bottom` on inline elements are not
+  handled yet. In 16px Arial at `line-height: 1.5`, `<sup>raised</sup>`
+  is 36px wide instead of 25px, and a line holding it and a `<sub>` is
+  30.5px tall instead of 26.4px, as in Chrome.
 * `position: relative` with `top`, `right`, `bottom` or `left` now moves
   an inline element such as a `<span>`, `<a>` or `<sup>` with
   `display: inline`. The offset was ignored, so an icon label nudged
