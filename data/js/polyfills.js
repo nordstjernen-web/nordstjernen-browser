@@ -7929,6 +7929,32 @@
             function () { return containerSingle(this, 1); },
             function () {});
 
+        var pendingCommits = [];
+        var commitQueued = false;
+        function flushCommits() {
+            commitQueued = false;
+            var due = pendingCommits;
+            pendingCommits = [];
+            for (var i = 0; i < due.length; i++) {
+                try { due[i](); } catch (e) {}
+            }
+        }
+        function queueCommit(fn) {
+            pendingCommits.push(fn);
+            if (typeof global.__ns_cssom_pending === 'function')
+                global.__ns_cssom_pending();
+            if (!commitQueued) {
+                commitQueued = true;
+                Promise.resolve().then(flushCommits);
+            }
+        }
+        try {
+            Object.defineProperty(global, '__ndFlushCSSOM', {
+                value: flushCommits, configurable: true,
+                writable: true, enumerable: false
+            });
+        } catch (e) {}
+
         function makeList() {
             var list = [];
             list.item = function (i) {
@@ -8458,7 +8484,8 @@
                 throw domError('HierarchyRequestError',
                     '@' + rule.__at + ' not allowed here');
             rules.splice(index, 0, rule);
-            syncList(list, rules);
+            if (list.length === len) list.splice(index, 0, rule);
+            else syncList(list, rules);
             notify(owner);
             return index;
         }
@@ -8468,10 +8495,12 @@
                 throw domError('IndexSizeError',
                     'deleteRule index ' + index + ' out of range');
             var removed = rules[index];
+            var listed = list.length === rules.length;
             rules.splice(index, 1);
             removed.__parentStyleSheet = null;
             removed.__parentRule = null;
-            syncList(list, rules);
+            if (listed) list.splice(index, 1);
+            else syncList(list, rules);
             notify(owner);
         }
 
@@ -8587,7 +8616,16 @@
             },
             __notify: {
                 configurable: true,
-                value: function () { commitConstructed(this); }
+                value: function () {
+                    var sheet = this;
+                    var state = constructedState(sheet);
+                    if (state.commitQueued) return;
+                    state.commitQueued = true;
+                    queueCommit(function () {
+                        state.commitQueued = false;
+                        commitConstructed(sheet);
+                    });
+                }
             }
         });
 
@@ -8595,6 +8633,7 @@
             if (node.__ndSheet) return node.__ndSheet;
             var sheet = Object.create(SheetProto);
             var rules = null, list = makeList(), lastText = null;
+            var commitPending = false;
             var isLink = node.tagName &&
                          node.tagName.toLowerCase() === 'link';
 
@@ -8608,6 +8647,7 @@
             }
 
             function ensure() {
+                if (rules !== null && commitPending) return;
                 var txt = sourceText();
                 if (rules !== null && txt === lastText) return;
                 lastText = txt;
@@ -8720,7 +8760,20 @@
                 },
                 __notify: {
                     configurable: true,
-                    value: function () { ensure(); rebuild(); }
+                    value: function () {
+                        ensure();
+                        if (commitPending) return;
+                        commitPending = true;
+                        queueCommit(function () {
+                            commitPending = false;
+                            if (sourceText() !== lastText) {
+                                rules = null;
+                                ensure();
+                                return;
+                            }
+                            rebuild();
+                        });
+                    }
                 }
             });
 

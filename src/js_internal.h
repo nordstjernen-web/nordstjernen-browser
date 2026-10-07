@@ -113,6 +113,7 @@ struct ns_js {
     gboolean    (*load_delay_cb)(gpointer user_data);
     gpointer      load_delay_user_data;
     gboolean      in_layout_flush;
+    gboolean      cssom_commit_pending;
     guint64       task_epoch;
     ns_js_clipboard_write_cb clipboard_write_cb;
     ns_js_selection_cmd_cb selection_cmd_cb;

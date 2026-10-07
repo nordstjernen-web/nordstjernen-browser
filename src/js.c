@@ -18805,6 +18805,29 @@ ns_anim_animate_native(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_cssom_mark_pending(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->cssom_commit_pending = TRUE;
+    return JS_UNDEFINED;
+}
+
+static void
+ns_js_commit_cssom(ns_js *js)
+{
+    static const char src[] =
+        "typeof __ndFlushCSSOM==='function'&&__ndFlushCSSOM()";
+    if (!js || !js->cssom_commit_pending || !js->ctx) return;
+    js->cssom_commit_pending = FALSE;
+    JSValue r = JS_Eval(js->ctx, src, sizeof(src) - 1, "<cssom-commit>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+}
+
+static JSValue
 ns_linked_css_text(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
@@ -57102,6 +57125,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_DefinePropertyValueStr(ctx, global, "__ns_linked_css",
         JS_NewCFunction(ctx, ns_linked_css_text, "__ns_linked_css", 1),
         0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_cssom_pending",
+        JS_NewCFunction(ctx, ns_cssom_mark_pending, "__ns_cssom_pending", 0),
+        0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_list",
         JS_NewCFunction(ctx, ns_anim_list_native, "__ns_anim_list", 1), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_query",
@@ -66335,7 +66361,9 @@ ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data)
 static void
 ns_js_flush_layout(ns_js *js)
 {
-    if (!js || !js->layout_flush_cb || js->in_layout_flush) return;
+    if (!js || js->in_layout_flush) return;
+    ns_js_commit_cssom(js);
+    if (!js->layout_flush_cb) return;
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
