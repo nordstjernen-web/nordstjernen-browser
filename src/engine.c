@@ -421,6 +421,19 @@ on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 }
 
 void
+ns_engine_preload_script(const char *url, const char *top_url)
+{
+    if (!url || !top_url || !ns_url_is_http_or_https(url)) return;
+    const char *const *headers = ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
+    char *key = ns_net_request_key(url, top_url, "GET", headers);
+    if (!key) return;
+    ns_net_preload_expect(key);
+    g_free(key);
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
+                         on_preload_fetched, NULL);
+}
+
+void
 ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                               gboolean include_images)
 {

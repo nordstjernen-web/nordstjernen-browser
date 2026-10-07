@@ -57,6 +57,7 @@ GPtrArray *ns_engine_take_resource_timings(const char *top_url);
 
 void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
+void ns_engine_preload_script(const char *url, const char *top_url);
 
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                                       GHashTable *css_cache, ns_anim *anim);

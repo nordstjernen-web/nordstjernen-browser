@@ -63925,6 +63925,26 @@ ns_js_script_needs_prepare(ns_js *js, ns_node *script)
 }
 
 static void
+ns_js_preload_inserted_script(ns_js *js, const ns_node *script,
+                              const char *origin)
+{
+    const char *src = ns_element_get_attr(script, "src");
+    if (!src || !*src || ns_script_type_is_module(script) ||
+        g_str_has_prefix(src, "data:") || g_str_has_prefix(src, "blob:"))
+        return;
+    g_autofree char *abs_url = ns_url_resolve(origin, src);
+    if (!abs_url || (g_str_has_prefix(origin, "https://") &&
+                     !g_str_has_prefix(abs_url, "https://")))
+        return;
+    if (js->csp &&
+        !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+                                  ns_element_get_attr(script, "nonce"),
+                                  FALSE))
+        return;
+    ns_engine_preload_script(abs_url, origin);
+}
+
+static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
     if (!js || !root || !js->current_doc || js->halted) return;
@@ -63955,13 +63975,16 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         /* While the initial parse is held at a script, a blocking script it
          * writes runs before the parser goes on, even an external one. */
         gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
-                                 js->callback_depth == 0;
+                                 js->callback_depth == 0 &&
+                                 !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
         if (t->schedule == NS_SCRIPT_BLOCKING &&
             (!ns_element_get_attr(t->node, "src") || parser_paused) &&
-            !ns_script_type_is_module(t->node))
+            !ns_script_type_is_module(t->node)) {
             ns_js_run_script_element(js, t->node, origin);
-        else
+        } else {
             have_external = TRUE;
+            ns_js_preload_inserted_script(js, t->node, origin);
+        }
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
     if (js->eval_depth > 0 || js->callback_depth > 0 ||
