@@ -2071,6 +2071,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         vh = ps->height - ps->margin_top - ps->margin_bottom;
     }
     ns_css_set_viewport((double)vw, vh);
+    if (parse_cfg && parse_cfg->speculative_preload)
+        ns_engine_speculative_preload(doc, page_url, FALSE);
     const char *frag = opts->url ? strchr(opts->url, '#') : NULL;
     const char *target_frag = frag && *(frag + 1) ? frag + 1 : NULL;
     ns_css_set_target_fragment(target_frag);
