@@ -29290,10 +29290,10 @@ incr_attr_dep_free(gpointer data)
 }
 
 static void
-incr_own_attr_deps(GPtrArray *attrs)
+incr_own_attr_deps_from(GPtrArray *attrs, guint first)
 {
     if (!attrs) return;
-    for (guint i = 0; i < attrs->len; i++) {
+    for (guint i = first; i < attrs->len; i++) {
         const ns_css_attr_pred *source = g_ptr_array_index(attrs, i);
         ns_css_attr_pred *copy = g_new0(ns_css_attr_pred, 1);
         *copy = *source;
@@ -29301,6 +29301,12 @@ incr_own_attr_deps(GPtrArray *attrs)
         copy->value = g_strdup(source->value);
         attrs->pdata[i] = copy;
     }
+}
+
+static void
+incr_own_attr_deps(GPtrArray *attrs)
+{
+    incr_own_attr_deps_from(attrs, 0);
 }
 
 static gboolean
@@ -29614,12 +29620,57 @@ incr_name_change_unused(const ns_node *target, const char *name,
     return FALSE;
 }
 
+static gboolean
+incr_sheet_newly_seen(GHashTable *seen, const ns_css_stylesheet *sh)
+{
+    if (!sh) return FALSE;
+    if (g_hash_table_contains(seen, &sh->serial)) return FALSE;
+    g_hash_table_add(seen, g_memdup2(&sh->serial, sizeof sh->serial));
+    return TRUE;
+}
+
+static GHashTable *g_struct_serials;
+static GHashTable *g_has_serials;
+
+static gboolean
+incr_struct_keys_extend(const ns_css_stylesheet *ua,
+                        const ns_css_stylesheet *const *author, gsize n)
+{
+    if (!g_struct_ready || !g_struct_serials ||
+        g_hash_table_size(g_struct_serials) > 2 * (n + 1) + 64)
+        return FALSE;
+    guint attrs_mark = g_struct_attrs->len;
+    guint anc_mark = g_struct_anc_attrs->len;
+    if (incr_sheet_newly_seen(g_struct_serials, ua)) {
+        incr_collect_struct_keys(ua);
+        incr_collect_name_keys(ua);
+    }
+    for (gsize i = 0; i < n; i++) {
+        if (!incr_sheet_newly_seen(g_struct_serials, author[i])) continue;
+        incr_collect_struct_keys(author[i]);
+        incr_collect_name_keys(author[i]);
+    }
+    incr_own_attr_deps_from(g_struct_attrs, attrs_mark);
+    incr_own_attr_deps_from(g_struct_anc_attrs, anc_mark);
+    return TRUE;
+}
+
 static void
 incr_ensure_struct_keys(const ns_css_stylesheet *ua,
                         const ns_css_stylesheet *const *author, gsize n,
                         guint64 sig)
 {
     if (g_struct_ready && g_struct_sig == sig) return;
+    if (incr_struct_keys_extend(ua, author, n)) {
+        g_struct_sig = sig;
+        return;
+    }
+    if (g_struct_serials) g_hash_table_remove_all(g_struct_serials);
+    else g_struct_serials = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                                  g_free, NULL);
+    incr_sheet_newly_seen(g_struct_serials, ua);
+    for (gsize i = 0; i < n; i++)
+        incr_sheet_newly_seen(g_struct_serials, author[i]);
     if (g_struct_keys) g_hash_table_remove_all(g_struct_keys);
     else g_struct_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, NULL);
@@ -30678,6 +30729,21 @@ doc_sheets_new(const ns_css_stylesheet *const *sheets,
     return map;
 }
 
+static GPtrArray *
+host_scoped_sheets(const ns_node *node, const ns_css_stylesheet *const *author,
+                   gsize n_author)
+{
+    if (!g_doc_sheets || node->kind != NS_NODE_ELEMENT) return NULL;
+    const GPtrArray *own = g_hash_table_lookup(g_doc_sheets, node);
+    if (!own || own->len == 0) return NULL;
+    GPtrArray *all = g_ptr_array_sized_new((guint)n_author + own->len);
+    for (gsize i = 0; i < n_author; i++)
+        g_ptr_array_add(all, (gpointer)author[i]);
+    for (guint i = 0; i < own->len; i++)
+        g_ptr_array_add(all, g_ptr_array_index(own, i));
+    return all;
+}
+
 /* The elements of a document are styled by its own sheets only, not by
  * those of the document its frame is in, nor by those of its frames'
  * documents. */
@@ -30722,6 +30788,11 @@ cascade_walk(ns_node *node,
         }
     }
     doc_own_sheets(node, &author, &n_author);
+    GPtrArray *host_sheets = host_scoped_sheets(node, author, n_author);
+    if (host_sheets) {
+        author = (const ns_css_stylesheet *const *)host_sheets->pdata;
+        n_author = host_sheets->len;
+    }
     const ns_style *child_parent_style = parent_style;
     const ns_style *child_layout_parent = layout_parent;
     gboolean nd_recurse_dirty = under_dirty;
@@ -31072,6 +31143,7 @@ cascade_walk(ns_node *node,
         g_viewport_w = frame_vw;
         g_viewport_h = frame_vh;
     }
+    if (host_sheets) g_ptr_array_free(host_sheets, TRUE);
     depth--;
 }
 
@@ -31594,9 +31666,18 @@ ns_css_relayout_leave(void)
     if (g_css_relayout_depth > 0) g_css_relayout_depth--;
 }
 
+static guint g_stylesheet_cache_generation;
+
+guint
+ns_css_stylesheet_cache_generation(void)
+{
+    return g_stylesheet_cache_generation;
+}
+
 void
 ns_css_stylesheet_cache_drop(void)
 {
+    g_stylesheet_cache_generation++;
     if (g_style_el_cache) g_hash_table_remove_all(g_style_el_cache);
     if (g_merged_style_cache) g_hash_table_remove_all(g_merged_style_cache);
     if (g_link_sheet_cache) g_hash_table_remove_all(g_link_sheet_cache);
@@ -31609,7 +31690,7 @@ ns_css_style_element_cache_begin(void)
     if (g_css_relayout_depth > 1) return;
     if (g_style_el_cache && g_hash_table_size(g_style_el_cache) > 2048)
         g_hash_table_remove_all(g_style_el_cache);
-    ns_merged_style_cache_trim(G_MAXUINT64);
+    ns_merged_style_cache_trim(g_merged_style_pass_start);
     g_merged_style_pass_start = g_merged_style_cache_clock;
     if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 256)
         g_hash_table_remove_all(g_link_sheet_cache);
@@ -31851,13 +31932,23 @@ ns_css_compute(ns_node *doc,
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
     if (sig != g_incr_has_sig) {
-        if (g_has_anchors) g_ptr_array_set_size(g_has_anchors, 0);
-        else g_has_anchors =
-            g_ptr_array_new_with_free_func(incr_has_anchor_free);
-        g_has_cq_loose = FALSE;
-        incr_collect_has_cq_keys(cached_ua);
+        gboolean extend = g_has_anchors && g_has_serials &&
+            g_hash_table_size(g_has_serials) <= 2 * (n_sheets + 1) + 64;
+        if (!extend) {
+            if (g_has_anchors) g_ptr_array_set_size(g_has_anchors, 0);
+            else g_has_anchors =
+                g_ptr_array_new_with_free_func(incr_has_anchor_free);
+            if (g_has_serials) g_hash_table_remove_all(g_has_serials);
+            else g_has_serials = g_hash_table_new_full(g_int64_hash,
+                                                       g_int64_equal,
+                                                       g_free, NULL);
+            g_has_cq_loose = FALSE;
+        }
+        if (incr_sheet_newly_seen(g_has_serials, cached_ua))
+            incr_collect_has_cq_keys(cached_ua);
         for (gsize i = 0; i < n_sheets; i++)
-            incr_collect_has_cq_keys(author_sheets[i]);
+            if (incr_sheet_newly_seen(g_has_serials, author_sheets[i]))
+                incr_collect_has_cq_keys(author_sheets[i]);
         g_incr_eligible = !g_has_cq_loose;
         g_incr_has_sig = sig;
     }

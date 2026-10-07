@@ -943,6 +943,7 @@ gboolean           ns_css_supports_condition(const char *condition,
 ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
 char              *ns_css_shadow_adopted_css(ns_node *root);
+guint              ns_css_stylesheet_cache_generation(void);
 ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
                                                const char *base_url);
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
@@ -1170,8 +1171,9 @@ void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
 void ns_css_append_unescaped(GString *out, const char **pp);
 
-/* sheet_docs, when not NULL, holds the document of each author sheet; a
-   sheet then styles the elements of its own document only. */
+/* sheet_docs, when not NULL, holds the document of each author sheet, or
+   the shadow host of a sheet from a shadow tree; a sheet then styles the
+   elements of its own document, or of its host's subtree, only. */
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            const ns_node *const    *sheet_docs,
