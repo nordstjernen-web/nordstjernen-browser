@@ -26101,6 +26101,27 @@ static int js_parse_skip_parens_token(JSParseState *s, int *pbits, bool no_line_
     return tok;
 }
 
+static bool js_parse_paren_may_open_params(JSParseState *s)
+{
+    int c = peek_token(s, false);
+    if (c >= '0' && c <= '9')
+        return false;
+    switch (c) {
+    case TOK_FUNCTION:
+    case '"':
+    case '\'':
+    case '`':
+    case '(':
+    case '!':
+    case '~':
+    case '+':
+    case '-':
+        return false;
+    default:
+        return true;
+    }
+}
+
 static void set_object_name(JSParseState *s, JSAtom name)
 {
     JSFunctionDef *fd = s->cur_func;
@@ -29348,7 +29369,7 @@ static __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
             emit_label(s, label_next);
         }
         return 0;
-    } else if (s->token.val == '(' &&
+    } else if (s->token.val == '(' && js_parse_paren_may_open_params(s) &&
                js_parse_skip_parens_token(s, NULL, true) == TOK_ARROW) {
         return js_parse_function_decl(s, JS_PARSE_FUNC_ARROW,
                                       JS_FUNC_NORMAL, JS_ATOM_NULL,
@@ -29370,7 +29391,7 @@ static __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
         js_parse_get_pos(s, &pos);
         if (next_token(s))
             return -1;
-        if ((s->token.val == '(' &&
+        if ((s->token.val == '(' && js_parse_paren_may_open_params(s) &&
              js_parse_skip_parens_token(s, NULL, true) == TOK_ARROW) ||
             (s->token.val == TOK_IDENT && !s->token.u.ident.is_reserved &&
              peek_token(s, true) == TOK_ARROW)) {
