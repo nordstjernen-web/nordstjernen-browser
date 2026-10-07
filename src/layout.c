@@ -11314,8 +11314,11 @@ layout_flex_column(ns_box *box, double cw,
             for (guint k = 0; k < ln->count; k++) {
                 ns_box *c = items->pdata[ln->start + k];
                 if (!c->style) continue;
-                if (keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto"))
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto")) {
                     c->margin.top += share;
+                    shift_box_tree(c, 0, share);
+                    c->y -= share;
+                }
                 if (keyword_is(c->style->values[NS_CSS_MARGIN_BOTTOM], "auto"))
                     c->margin.bottom += share;
             }
