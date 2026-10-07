@@ -51,6 +51,28 @@ ns_engine_layout_perf(guint64 *relayouts, double *total_ms)
     if (total_ms)  *total_ms  = g_engine_relayout_us / 1000.0;
 }
 
+static guint64 g_engine_blocking_count;
+static gint64  g_engine_blocking_us;
+
+static void
+engine_blocking_wait(GMainLoop *loop)
+{
+    gboolean outermost = g_engine_blocking_depth == 0;
+    gint64 t0 = g_get_monotonic_time();
+    g_engine_blocking_depth++;
+    g_main_loop_run(loop);
+    g_engine_blocking_depth--;
+    g_engine_blocking_count++;
+    if (outermost) g_engine_blocking_us += g_get_monotonic_time() - t0;
+}
+
+void
+ns_engine_blocking_perf(guint64 *waits, double *total_ms)
+{
+    if (waits)    *waits    = g_engine_blocking_count;
+    if (total_ms) *total_ms = g_engine_blocking_us / 1000.0;
+}
+
 static void
 on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -80,9 +102,7 @@ engine_request_blocking(const char *url, const char *top_url,
     ns_net_request_async(url, top_url, method, body, body_len, content_type,
                          headers,
                          NULL, on_fetch_done, &st);
-    g_engine_blocking_depth++;
-    g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
+    engine_blocking_wait(st.loop);
     g_main_loop_unref(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
@@ -1285,9 +1305,7 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
             ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
             on_image_fetch_done, item);
     }
-    g_engine_blocking_depth++;
-    g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
+    engine_blocking_wait(st.loop);
     g_main_loop_unref(st.loop);
     g_hash_table_destroy(wanted);
 }

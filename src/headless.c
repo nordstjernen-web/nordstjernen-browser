@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -39,6 +40,74 @@
 #include "wpt_hook.h"
 
 static char *g_headless_doc_charset;
+
+typedef struct headless_timing {
+    gint64 start_us;
+    gint64 start_cpu_us;
+    gint64 fetch_us;
+    gint64 parse_us;
+    gint64 style_us;
+    gint64 script_us;
+    gint64 settle_us;
+    gint64 images_us;
+    gint64 paint_us;
+    gint64 first_render_us;
+    gint64 first_render_cpu_us;
+    int    hops;
+    int    status;
+    guint  nodes;
+} headless_timing;
+
+static headless_timing g_timing;
+
+static gint64
+headless_thread_cpu_us(void)
+{
+#ifdef CLOCK_THREAD_CPUTIME_ID
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
+        return (gint64)ts.tv_sec * G_USEC_PER_SEC + ts.tv_nsec / 1000;
+#endif
+    return 0;
+}
+
+static guint
+headless_count_elements(const ns_node *n)
+{
+    guint count = 0;
+    for (const ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling)
+        count += (c->kind == NS_NODE_ELEMENT) + headless_count_elements(c);
+    return count;
+}
+
+static void
+headless_print_timing(void)
+{
+    gint64 total = g_get_monotonic_time() - g_timing.start_us;
+    gint64 cpu = headless_thread_cpu_us() - g_timing.start_cpu_us;
+    guint64 relayouts = 0, net_waits = 0;
+    double relayout_ms = 0, net_wait_ms = 0;
+    ns_engine_layout_perf(&relayouts, &relayout_ms);
+    ns_engine_blocking_perf(&net_waits, &net_wait_ms);
+    fprintf(stdout,
+            "timing: {\"total_ms\":%.1f,\"busy_ms\":%.1f,\"cpu_ms\":%.1f,"
+            "\"first_render_ms\":%.1f,\"first_render_cpu_ms\":%.1f,"
+            "\"fetch_ms\":%.1f,\"parse_ms\":%.1f,\"style_ms\":%.1f,"
+            "\"script_ms\":%.1f,\"images_ms\":%.1f,\"paint_ms\":%.1f,"
+            "\"settle_ms\":%.1f,\"relayouts\":%" G_GUINT64_FORMAT ","
+            "\"relayout_ms\":%.1f,\"net_waits\":%" G_GUINT64_FORMAT ","
+            "\"net_wait_ms\":%.1f,\"hops\":%d,\"status\":%d,"
+            "\"nodes\":%u}\n",
+            total / 1000.0, (total - g_timing.settle_us) / 1000.0, cpu / 1000.0,
+            g_timing.first_render_us / 1000.0,
+            g_timing.first_render_cpu_us / 1000.0,
+            g_timing.fetch_us / 1000.0, g_timing.parse_us / 1000.0,
+            g_timing.style_us / 1000.0, g_timing.script_us / 1000.0,
+            g_timing.images_us / 1000.0, g_timing.paint_us / 1000.0,
+            g_timing.settle_us / 1000.0, relayouts, relayout_ms, net_waits,
+            net_wait_ms, g_timing.hops, g_timing.status, g_timing.nodes);
+    fflush(stdout);
+}
 
 static gboolean
 settle_quit_cb(gpointer user_data)
@@ -658,10 +727,15 @@ ns_headless_run(const ns_headless_opts *opts)
     if (opts->debug_levels)
         dlog_sub = ns_debug_log_subscribe(headless_dlog_listener,
                                           GUINT_TO_POINTER(opts->debug_levels));
-    int rc = ns_headless_renderer_capable(opts)
+    memset(&g_timing, 0, sizeof g_timing);
+    g_timing.start_us = g_get_monotonic_time();
+    g_timing.start_cpu_us = headless_thread_cpu_us();
+    gboolean via_renderer = ns_headless_renderer_capable(opts);
+    int rc = via_renderer
              ? ns_headless_run_via_renderer(opts)
              : ns_headless_run_one(opts, opts->url, 0, NULL,
                                    NULL, 0, NULL);
+    if (opts->timing && !via_renderer) headless_print_timing();
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
@@ -818,6 +892,7 @@ static void
 settle_main_loop(int ms, headless_flush_ctx *fc)
 {
     if (ms <= 0 || !fc) return;
+    gint64 started = g_get_monotonic_time();
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     g_timeout_add(ms, settle_quit_cb, loop);
     settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
@@ -825,6 +900,7 @@ settle_main_loop(int ms, headless_flush_ctx *fc)
     g_main_loop_run(loop);
     g_source_remove(raf_id);
     g_main_loop_unref(loop);
+    g_timing.settle_us += g_get_monotonic_time() - started;
 }
 
 static const char *const ns_wpt_poll_js =
@@ -1860,10 +1936,14 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                     gsize post_len, const char *post_ct)
 {
     GError *err = NULL;
+    gint64 phase_t0 = g_get_monotonic_time();
     ns_response *resp = post_body
         ? ns_engine_navigate_post_blocking(fetch_url, top_url, post_body,
                                            post_len, post_ct, hop == 0, &err)
         : ns_engine_navigate_blocking(fetch_url, top_url, hop == 0, &err);
+    g_timing.fetch_us += g_get_monotonic_time() - phase_t0;
+    g_timing.hops++;
+    g_timing.status = resp ? (int)resp->status : 0;
     if (!resp) {
         const char *emsg = err ? err->message : "unknown error";
         fprintf(stderr, "headless: fetch failed: %s\n", emsg);
@@ -1960,6 +2040,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         }
     }
 
+    phase_t0 = g_get_monotonic_time();
     const char *raw = resp->body ? (const char *)resp->body->data : "";
     gsize raw_len = resp->body ? resp->body->len : 0;
     g_free(g_headless_doc_charset);
@@ -1976,6 +2057,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                                        decoded ? (gssize)strlen(decoded) : 0,
                                        FALSE);
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
+    g_timing.parse_us += g_get_monotonic_time() - phase_t0;
 
     ns_print_setup_default(&g_headless_print_setup);
     ns_css_set_print_media(opts->dump == NS_DUMP_PRINT);
@@ -1997,11 +2079,13 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     GHashTable *css_cache =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                               (GDestroyNotify)g_bytes_unref);
+    phase_t0 = g_get_monotonic_time();
     GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache, NULL);
 
     ns_anim *anim = ns_anim_new();
     ns_engine_load_keyframes(anim, doc, page_url, css_cache);
     ns_engine_anim_observe(anim, styles, g_get_monotonic_time());
+    g_timing.style_us += g_get_monotonic_time() - phase_t0;
 
     headless_nav_capture nav_cap = {0};
     ns_js_navigation_timing navigation_timing = {
@@ -2043,8 +2127,11 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
-        if (scripting_on)
+        if (scripting_on) {
+            phase_t0 = g_get_monotonic_time();
             ns_js_run_scripts_in_doc(js, doc, resp->final_url);
+            g_timing.script_us += g_get_monotonic_time() - phase_t0;
+        }
     }
 
     if (opts->settle_ms > 0) settle_main_loop(opts->settle_ms, &flush_ctx);
@@ -2144,8 +2231,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     case NS_DUMP_PRINT: {
         const char *base = resp->final_url ? resp->final_url : opts->url;
         if (!image_cache) image_cache = ns_image_cache_new();
+        phase_t0 = g_get_monotonic_time();
         ns_engine_fetch_images(layout, base, image_cache);
         headless_relayout(&flush_ctx);
+        g_timing.images_us += g_get_monotonic_time() - phase_t0;
         if (opts->dump == NS_DUMP_PRINT) {
             ns_print_setup_apply_page_rule(&g_headless_print_setup,
                                            ns_render_page_rule());
@@ -2167,7 +2256,13 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_anim_tick(anim, 0);
         ns_paint_set_anim(anim);
         char *initial_path = ns_engine_suffix_before_ext(opts->out_path, "-initial");
+        phase_t0 = g_get_monotonic_time();
         rc = write_capture(layout, initial_path, opts->dump);
+        gint64 painted = g_get_monotonic_time();
+        g_timing.paint_us += painted - phase_t0;
+        g_timing.first_render_us = painted - g_timing.start_us - g_timing.settle_us;
+        g_timing.first_render_cpu_us = headless_thread_cpu_us() - g_timing.start_cpu_us;
+        g_timing.nodes = headless_count_elements(doc);
         fprintf(stderr, "[headless] initial render -> %s\n", initial_path);
         g_free(initial_path);
 

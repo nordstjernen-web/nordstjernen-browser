@@ -35,6 +35,7 @@ typedef struct ns_headless_opts {
     const char       *inspect_at;
     gboolean          wpt;
     int               wpt_timeout_ms;
+    gboolean          timing;
 } ns_headless_opts;
 
 unsigned ns_headless_debug_mask(const char *spec);
