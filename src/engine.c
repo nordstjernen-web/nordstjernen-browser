@@ -169,6 +169,13 @@ engine_remember_linked_css(const char *url, GBytes *bytes)
     g_hash_table_insert(g_linked_css, g_strdup(url), g_bytes_ref(bytes));
 }
 
+gboolean
+ns_engine_linked_css_known(const char *url)
+{
+    return url && *url && g_linked_css &&
+           g_hash_table_contains(g_linked_css, url);
+}
+
 char *
 ns_engine_linked_css_text(const char *url)
 {
