@@ -2974,6 +2974,11 @@ about_diagnostics_html(void)
 #else
     diag_feature(s, "AVIF images", FALSE);
 #endif
+#ifdef NS_HAVE_JXL
+    diag_feature(s, "JPEG XL images", TRUE);
+#else
+    diag_feature(s, "JPEG XL images", FALSE);
+#endif
     diag_feature(s, "SVG images", TRUE);
 #ifdef NS_HAVE_POPPLER
     diag_feature(s, "Inline PDF viewer", TRUE);
@@ -5446,7 +5451,11 @@ static const char *const ns_style_accept_headers[] = {
 };
 
 static const char *const ns_image_accept_headers[] = {
+#ifdef NS_HAVE_JXL
+    "Accept: image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#else
     "Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#endif
     "X-ND-Fetch-Dest: image",
     NULL
 };

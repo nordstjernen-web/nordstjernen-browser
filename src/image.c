@@ -20,6 +20,9 @@ ns_image_builtin_supports_mime(const char *bare)
 #ifdef NS_HAVE_AVIF
     if (g_str_equal(bare, "image/avif")) return TRUE;
 #endif
+#ifdef NS_HAVE_JXL
+    if (g_str_equal(bare, "image/jxl")) return TRUE;
+#endif
     return FALSE;
 }
 #include <math.h>
@@ -38,17 +41,22 @@ ns_image_mime_blocked_on_platform(const char *bare)
            g_str_equal(bare, "image/heif")  ||
            g_str_equal(bare, "image/heic")  ||
            g_str_equal(bare, "image/heif-sequence") ||
-           g_str_equal(bare, "image/heic-sequence") ||
-           g_str_equal(bare, "image/jxl");
+           g_str_equal(bare, "image/heic-sequence")
+#ifndef NS_HAVE_JXL
+           || g_str_equal(bare, "image/jxl")
+#endif
+           ;
 }
 
 static gboolean
 ns_image_bytes_blocked_on_platform(const guchar *data, gsize len)
 {
     if (!data || len < 12) return FALSE;
+#ifndef NS_HAVE_JXL
     if (memcmp(data, "\xFF\x0A", 2) == 0) return TRUE;
     if (memcmp(data, "\x00\x00\x00", 3) == 0 &&
         memcmp(data + 4, "JXL ", 4) == 0) return TRUE;
+#endif
     if (memcmp(data + 4, "ftyp", 4) != 0) return FALSE;
     static const char *const brands[] = {
         "avif", "avis", "heic", "heix", "hevc", "hevx",
@@ -269,6 +277,13 @@ ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
     }
 #endif
 
+#ifdef NS_HAVE_JXL
+    if (ns_image_jxl_supports_bytes(data, len)) {
+        ns_texture *tex = ns_image_decode_jxl(data, len, out_w, out_h);
+        if (tex) return tex;
+    }
+#endif
+
 #ifdef G_OS_WIN32
     if (ns_image_bytes_blocked_on_platform(data, len)) return NULL;
 #endif
@@ -351,6 +366,17 @@ ns_image_decode_bytes_to_pixels(const guchar *data, gsize len,
     }
 #endif
 
+#ifdef NS_HAVE_JXL
+    if (ns_image_jxl_supports_bytes(data, len)) {
+        guint8 *pix = ns_image_jxl_decode_to_bgra(data, len, out_w, out_h,
+                                                  out_stride, out_buf_len);
+        if (pix) {
+            if (out_format) *out_format = NS_TEXTURE_BGRA_PREMULTIPLIED;
+            return pix;
+        }
+    }
+#endif
+
 #ifdef G_OS_WIN32
     if (ns_image_bytes_blocked_on_platform(data, len)) return NULL;
 #endif
@@ -421,6 +447,10 @@ ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
         return ns_image_decode_wuffs_anim_to_pixels(data, len, out_w, out_h);
     if (ns_image_webp_supports_bytes(data, len))
         return ns_image_decode_webp_anim_to_pixels(data, len, out_w, out_h);
+#ifdef NS_HAVE_JXL
+    if (ns_image_jxl_supports_bytes(data, len))
+        return ns_image_decode_jxl_anim_to_pixels(data, len, out_w, out_h);
+#endif
     return NULL;
 }
 

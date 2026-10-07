@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* JPEG XL images are displayed, as Chrome now does. `.jxl` files decode
+  through libjxl, an optional dependency like libavif, in `<img>`, CSS
+  backgrounds and `<picture>` sources typed `image/jxl`; transparency is
+  kept, lossy images are decoded to sRGB, and animated JPEG XL
+  plays like an animated GIF or WebP. Image requests advertise
+  `image/jxl` in their `Accept` header so servers can pick it. A build
+  without libjxl, or with `-Djxl=disabled`, carries no JPEG XL code.
 * A page that declares several `@font-face` rules for one family is
   rendered with the same faces on every load. A variable font file named
   by one rule per weight had every named instance in it registered as

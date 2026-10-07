@@ -124,6 +124,10 @@ if have_avif
   nordstjernen_engine_sources += files('image_avif.c')
 endif
 
+if have_jxl
+  nordstjernen_engine_sources += files('image_jxl.c')
+endif
+
 if have_woff2
   nordstjernen_engine_sources += files('woff2.c')
 endif
@@ -203,6 +207,10 @@ else
 
   if have_avif
     nordstjernen_deps += [libavif]
+  endif
+
+  if have_jxl
+    nordstjernen_deps += [libjxl]
   endif
 
   if have_enchant

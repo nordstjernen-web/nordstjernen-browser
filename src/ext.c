@@ -1132,7 +1132,7 @@ ns_dnr_infer_type(const char *url)
         { "css", "stylesheet" },
         { "png", "image" }, { "jpg", "image" }, { "jpeg", "image" },
         { "gif", "image" }, { "webp", "image" }, { "svg", "image" },
-        { "ico", "image" }, { "bmp", "image" }, { "avif", "image" },
+        { "ico", "image" }, { "bmp", "image" }, { "avif", "image" }, { "jxl", "image" },
         { "apng", "image" },
         { "woff", "font" }, { "woff2", "font" }, { "ttf", "font" },
         { "otf", "font" }, { "eot", "font" },

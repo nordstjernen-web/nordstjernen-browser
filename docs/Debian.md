@@ -88,7 +88,7 @@ The Debian build needs (these mirror `Linux.md`):
     sudo apt install build-essential debhelper devscripts meson ninja-build \
         pkg-config libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
         libuchardet-dev libpsl-dev libsqlite3-dev libseccomp-dev \
-        libwebp-dev libavif-dev libsdl2-dev libenchant-2-dev \
+        libwebp-dev libavif-dev libjxl-dev libsdl2-dev libenchant-2-dev \
         libpango1.0-dev libfontconfig-dev \
         libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
         libswresample-dev
