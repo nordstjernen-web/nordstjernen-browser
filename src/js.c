@@ -51757,6 +51757,30 @@ ns_document_get_applets(JSContext *ctx, JSValueConst this_val)
 }
 
 static void
+ns_js_fonts_dispatch_loadingdone(ns_js *js)
+{
+    static const char src[] =
+        "(function(set){"
+        "var E=typeof FontFaceSetLoadEvent==='function'?FontFaceSetLoadEvent:Event;"
+        "var ev=new E('loadingdone',{fontfaces:[]});"
+        "if(typeof set.dispatchEvent==='function')set.dispatchEvent(ev);"
+        "if(typeof set.onloadingdone==='function')set.onloadingdone.call(set,ev);"
+        "})";
+    if (!js || !JS_IsObject(js->fonts_set)) return;
+    JSValue fn = JS_Eval(js->ctx, src, sizeof(src) - 1, "<fonts-loadingdone>",
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(fn)) {
+        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+        return;
+    }
+    JSValue r = JS_Call(js->ctx, fn, JS_UNDEFINED, 1,
+                        (JSValueConst[]){ js->fonts_set });
+    if (JS_IsException(r)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+    JS_FreeValue(js->ctx, fn);
+}
+
+static void
 ns_js_fonts_idle(gpointer user_data)
 {
     ns_js *js = user_data;
@@ -51774,6 +51798,7 @@ ns_js_fonts_idle(gpointer user_data)
         JS_FreeValue(js->ctx, value);
     }
     g_array_free(resolvers, TRUE);
+    ns_js_fonts_dispatch_loadingdone(js);
     ns_drain_microtasks(js);
 }
 
@@ -51813,10 +51838,24 @@ ns_fontfaceset_load(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
-    JSValue fs = JS_NewObject(ctx);
+    gboolean main_doc = js && js->ctx == ctx && js->current_doc &&
+                        ns_document_root_for(ctx, this_val) == js->current_doc;
+    JSValue fs;
+    if (main_doc && JS_IsObject(js->fonts_set)) {
+        fs = JS_DupValue(ctx, js->fonts_set);
+    } else {
+        fs = JS_NewObject(ctx);
+        ns_bind_fn(ctx, fs, "check",   ns_event_true,       1);
+        ns_bind_fn(ctx, fs, "load",    ns_fontfaceset_load, 2);
+        ns_bind_fn(ctx, fs, "add",     ns_event_noop,       1);
+        ns_bind_fn(ctx, fs, "delete",  ns_event_noop,       1);
+        ns_bind_fn(ctx, fs, "clear",   ns_event_noop,       0);
+        ns_bind_fn(ctx, fs, "forEach", ns_event_noop,       1);
+        JS_SetPropertyStr(ctx, fs, "size", JS_NewInt32(ctx, 0));
+        if (main_doc) js->fonts_set = JS_DupValue(ctx, fs);
+    }
     JSValue resolvers[2];
     JSValue ready = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(ready)) { JS_FreeValue(ctx, fs); return ready; }
@@ -51826,13 +51865,6 @@ ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
     JS_SetPropertyStr(ctx, fs, "ready",  ready);
     JS_SetPropertyStr(ctx, fs, "status",
                       JS_NewString(ctx, loading ? "loading" : "loaded"));
-    ns_bind_fn(ctx, fs, "check", ns_event_true,                    1);
-    ns_bind_fn(ctx, fs, "load",  ns_fontfaceset_load,              2);
-    ns_bind_fn(ctx, fs, "add",   ns_event_noop,                    1);
-    ns_bind_fn(ctx, fs, "delete",  ns_event_noop, 1);
-    ns_bind_fn(ctx, fs, "clear",   ns_event_noop, 0);
-    ns_bind_fn(ctx, fs, "forEach", ns_event_noop, 1);
-    JS_SetPropertyStr(ctx, fs, "size", JS_NewInt32(ctx, 0));
     return fs;
 }
 
@@ -55828,6 +55860,9 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
         " normalize('UserActivation',globalThis.navigator&&navigator.userActivation,'UserActivation',false);"
         " normalize('StorageManager',globalThis.navigator&&navigator.storage,'StorageManager',false);"
         " normalize('WakeLock',globalThis.navigator&&navigator.wakeLock,'WakeLock',false);"
+        " var FS=globalThis.FontFaceSet&&FontFaceSet.prototype;"
+        " if(FS&&typeof EventTarget==='function'&&EventTarget.prototype)"
+        "  try{Object.setPrototypeOf(FS,EventTarget.prototype);}catch(e){}"
         " var PS=globalThis.PermissionStatus&&PermissionStatus.prototype;"
         " if(PS&&typeof EventTarget==='function'&&EventTarget.prototype)"
         "  try{Object.setPrototypeOf(PS,EventTarget.prototype);"
@@ -61941,6 +61976,7 @@ ns_js_free(ns_js *js)
     ns_storage_free_deferred_events(js);
     JS_FreeValue(js->ctx, js->pending_fullscreen_resolve);
     JS_FreeValue(js->ctx, js->pristine_promise);
+    JS_FreeValue(js->ctx, js->fonts_set);
     if (js->dom_protos_set) {
         JS_FreeValue(js->ctx, js->proto_node);
         JS_FreeValue(js->ctx, js->proto_element);
