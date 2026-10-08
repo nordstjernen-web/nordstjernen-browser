@@ -111,9 +111,12 @@ their geometry, font size, weight, family and colours.
   Chrome processes after load.
 
 Sites that answer headless Chrome with a bot challenge or an error page
-instead of their content (detected from the page title and first text)
+instead of their content (detected from the page title and first text,
+or a challenge redirect such as `?js_challenge=` on a near-empty page)
 are marked in the report and left out of the averages, since there is
-nothing to compare against.
+nothing to compare against. A site that shows one of the compared
+Nordstjernen builds a challenge is left out too, so that every column
+averages the same sites.
 
 The report lists, per site, the screenshots side by side with a
 difference heatmap, Chrome's filmstrip, both full pages, the
