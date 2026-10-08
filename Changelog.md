@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* `canvas.toBlob()` hands its callback a real `Blob`, from a task. The
+  callback ran synchronously, before `toBlob()` returned, and received a
+  plain object carrying `size` and `type` but not `Blob.prototype`, so
+  `instanceof Blob`, `blob.arrayBuffer()`, `URL.createObjectURL()` and
+  `createImageBitmap()` rejected it — three.js's screenshot and texture
+  export code paths failed.
 * New WebGL renderbuffers start cleared, as the WebGL specification
   requires: depth to 1.0, color and stencil to 0. The storage came from
   the driver uninitialised, usually zero, so a render target whose depth

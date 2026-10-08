@@ -47299,6 +47299,16 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_canvas_blob_callback_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    (void)argc;
+    JSValue r = JS_Call(ctx, argv[0], JS_UNDEFINED, 1, &argv[1]);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
@@ -47318,24 +47328,26 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
         if (s == CAIRO_STATUS_SUCCESS) {
             JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
             JSValue global = JS_GetGlobalObject(ctx);
-            JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
+            JSValue blob_ctor = JS_GetPropertyStr(ctx, global, "Blob");
             JS_FreeValue(ctx, global);
-            JSValueConst u8args[1] = { ab };
-            JSValue u8a = JS_CallConstructor(ctx, u8c, 1, u8args);
-            JS_FreeValue(ctx, u8c);
-            JS_FreeValue(ctx, ab);
-            blob = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, blob, "__ndBlobBytes", u8a);
-            JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
-            JS_SetPropertyStr(ctx, blob, "type",
-                              JS_NewString(ctx, "image/png"));
+            JSValue parts = JS_NewArray(ctx);
+            JS_SetPropertyUint32(ctx, parts, 0, ab);
+            JSValue opts = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, opts, "type", JS_NewString(ctx, "image/png"));
+            JSValueConst blob_args[2] = { parts, opts };
+            blob = JS_CallConstructor(ctx, blob_ctor, 2, blob_args);
+            if (JS_IsException(blob)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                blob = JS_NULL;
+            }
+            JS_FreeValue(ctx, opts);
+            JS_FreeValue(ctx, parts);
+            JS_FreeValue(ctx, blob_ctor);
         }
         g_byte_array_free(buf, TRUE);
     }
-    JSValueConst cb_args[1] = { blob };
-    JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 1, cb_args);
-    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-    JS_FreeValue(ctx, r);
+    JSValueConst job_args[2] = { cb, blob };
+    ns_js_queue_message_task(ctx, ns_canvas_blob_callback_job, 2, job_args);
     JS_FreeValue(ctx, blob);
     JS_FreeValue(ctx, cb);
     return JS_UNDEFINED;
