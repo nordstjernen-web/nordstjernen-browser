@@ -13383,6 +13383,47 @@ ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
     return ns_audio_make_node(ctx, kind);
 }
 
+static JSValue ns_audio_make_buffer(JSContext *ctx, uint32_t channels,
+                                    uint32_t length, double sample_rate);
+static JSValue ns_audio_buffer_getChannelData(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv);
+
+static JSValue
+ns_audio_create_script_processor(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    int32_t size = 0, ins = 2, outs = 2;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) JS_ToInt32(ctx, &size, argv[0]);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToInt32(ctx, &ins, argv[1]);
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToInt32(ctx, &outs, argv[2]);
+    if (size == 0) size = 1024;
+    if (size < 256 || size > 16384 || (size & (size - 1)) != 0)
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "createScriptProcessor: buffer size must be a power of two "
+            "between 256 and 16384");
+    if (ins < 0 || ins > 32 || outs < 0 || outs > 32 || (ins == 0 && outs == 0))
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "createScriptProcessor: channel counts out of range");
+    double rate = 44100.0;
+    JSValue r = JS_GetPropertyStr(ctx, this_val, "sampleRate");
+    JS_ToFloat64(ctx, &rate, r);
+    JS_FreeValue(ctx, r);
+    JSValue n = ns_audio_make_node(ctx, "scriptprocessor");
+    JS_SetPropertyStr(ctx, n, "bufferSize", JS_NewInt32(ctx, size));
+    JS_SetPropertyStr(ctx, n, "onaudioprocess", JS_NULL);
+    JS_SetPropertyStr(ctx, n, "context", JS_DupValue(ctx, this_val));
+    JSValue out = ns_audio_make_buffer(ctx, (uint32_t)(outs ? outs : 1),
+                                       (uint32_t)size, rate);
+    ns_bind_fn(ctx, out, "getChannelData", ns_audio_buffer_getChannelData, 1);
+    JS_SetPropertyStr(ctx, n, "_rtOut", out);
+    JSValue in = ns_audio_make_buffer(ctx, (uint32_t)(ins ? ins : 1),
+                                      (uint32_t)size, rate);
+    ns_bind_fn(ctx, in, "getChannelData", ns_audio_buffer_getChannelData, 1);
+    JS_SetPropertyStr(ctx, n, "_rtIn", in);
+    return n;
+}
+
 static JSValue
 ns_audio_create_mediastream_source(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
@@ -13562,8 +13603,89 @@ ns_audio_context_build(JSContext *ctx, double sample_rate)
                                  JS_CFUNC_generic_magic, (int)i));
     ns_bind_fn(ctx, a, "createMediaStreamSource",
                ns_audio_create_mediastream_source, 1);
+    ns_bind_fn(ctx, a, "createScriptProcessor",
+               ns_audio_create_script_processor, 3);
+    ns_bind_fn(ctx, a, "createJavaScriptNode",
+               ns_audio_create_script_processor, 3);
     ns_set_tostring_tag(ctx, a, "AudioContext");
     return a;
+}
+
+static gboolean
+ns_webaudio_pump_cb(gpointer data)
+{
+    ns_js *js = data;
+    if (js->halted) {
+        js->webaudio_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    if (js->in_pump || ns_engine_in_blocking_fetch()) return G_SOURCE_CONTINUE;
+    gboolean keep = ns_webaudio_rt_pump(js);
+    ns_drain_microtasks(js);
+    if (!keep) {
+        js->webaudio_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static JSValue
+ns_audio_context_set_state(JSContext *ctx, JSValueConst this_val,
+                           const char *state)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (js) {
+        ns_webaudio_rt_set_state(js, this_val, state);
+        if (strcmp(state, "running") == 0 && !js->webaudio_source)
+            js->webaudio_source =
+                ns_js_attach_timeout(js, 20, ns_webaudio_pump_cb, js);
+    }
+    return ns_promise_resolve_take(ctx, JS_UNDEFINED);
+}
+
+static JSValue
+ns_audio_context_resume(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && !js->user_ever_activated)
+        return ns_promise_resolve_take(ctx, JS_UNDEFINED);
+    return ns_audio_context_set_state(ctx, this_val, "running");
+}
+
+static JSValue
+ns_audio_context_suspend(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_audio_context_set_state(ctx, this_val, "suspended");
+}
+
+static JSValue
+ns_audio_context_close(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_audio_context_set_state(ctx, this_val, "closed");
+}
+
+static void
+ns_audio_context_go_live(JSContext *ctx, JSValueConst a, double sample_rate)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return;
+    gboolean running = js->user_ever_activated;
+    JS_SetPropertyStr(ctx, a, "state",
+                      JS_NewString(ctx, running ? "running" : "suspended"));
+    ns_bind_fn(ctx, a, "resume",  ns_audio_context_resume,  0);
+    ns_bind_fn(ctx, a, "suspend", ns_audio_context_suspend, 0);
+    ns_bind_fn(ctx, a, "close",   ns_audio_context_close,   0);
+    ns_webaudio_rt_add(js, ctx, a, sample_rate > 0 ? sample_rate : 44100.0,
+                       running);
+    if (running && !js->webaudio_source)
+        js->webaudio_source =
+            ns_js_attach_timeout(js, 20, ns_webaudio_pump_cb, js);
 }
 
 static JSValue
@@ -13571,7 +13693,9 @@ ns_audio_context_ctor(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
-    return ns_audio_context_build(ctx, 44100.0);
+    JSValue a = ns_audio_context_build(ctx, 44100.0);
+    if (!JS_IsException(a)) ns_audio_context_go_live(ctx, a, 44100.0);
+    return a;
 }
 
 static JSValue
@@ -33191,6 +33315,8 @@ ns_js_needs_tick(const ns_js *js)
     if (js->message_tasks && !g_queue_is_empty(js->message_tasks))
         return TRUE;
     if (ns_js_image_loads_pending(js))
+        return TRUE;
+    if (ns_webaudio_rt_busy((ns_js *)js))
         return TRUE;
     return FALSE;
 }
@@ -61997,6 +62123,11 @@ ns_js_free(ns_js *js)
         g_array_free(js->font_ready_resolvers, TRUE);
         js->font_ready_resolvers = NULL;
     }
+    if (js->webaudio_source) {
+        ns_js_source_remove(js, js->webaudio_source);
+        js->webaudio_source = 0;
+    }
+    ns_webaudio_rt_free(js);
     if (js->lifecycle_source) {
         ns_js_source_remove(js, js->lifecycle_source);
         js->lifecycle_source = 0;
