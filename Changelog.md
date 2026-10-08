@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU adapters and devices report `core-features-and-limits`.
+  wgpu-native is a full core implementation on Vulkan, Direct3D 12 and
+  Metal but does not list the feature, so three.js took the device for a
+  compatibility-mode one and generated compatibility WGSL: depth
+  textures bound as `texture_2d<f32>` and gathered without a component,
+  which naga rejects. `webgpu_postprocessing_ao` and other depth-reading
+  passes failed to build their pipelines. The feature is now listed on
+  every non-OpenGL backend, and a `requiredFeatures` entry for it is
+  accepted there.
 * Large progressive JPEGs decode. Wuffs needs a work buffer of about
   nine bytes per pixel for a progressive JPEG, and the decoder refused
   any work buffer over 64 MiB, so a 4096x2048 texture such as three.js's
