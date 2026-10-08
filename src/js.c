@@ -23551,9 +23551,11 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             "      return a; })();"
             " }"
             " function isStream(v){ return v && typeof v.getReader === 'function'; }"
+            " function isAB(v){ try { return !!v && typeof v === 'object' &&"
+            "  Object.prototype.toString.call(v) === '[object ArrayBuffer]'; } catch(e){ return false; } }"
             " function dropRaw(r){try{if(Object.prototype.hasOwnProperty.call(r,'body'))delete r.body;}catch(e){}}"
             " function normalize(r){"
-            "  if (r._bodyBuffer instanceof ArrayBuffer || r._bodyStream) {"
+            "  if (isAB(r._bodyBuffer) || r._bodyStream) {"
             "   if (!('_bodyNull' in r))"
             "    try { Object.defineProperty(r,'_bodyNull',{value:false,configurable:true}); } catch(e){}"
             "   dropRaw(r);"
@@ -23575,11 +23577,11 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             "  dropRaw(r);"
             " }"
             " function bytes(r){"
-            "  return (r._bodyBuffer instanceof ArrayBuffer)"
+            "  return isAB(r._bodyBuffer)"
             "   ? new Uint8Array(r._bodyBuffer) : new Uint8Array(0);"
             " }"
             " function readAll(r){"
-            "  if (r._bodyBuffer instanceof ArrayBuffer) return Promise.resolve(new Uint8Array(r._bodyBuffer));"
+            "  if (isAB(r._bodyBuffer)) return Promise.resolve(new Uint8Array(r._bodyBuffer));"
             "  if (!r._bodyStream) return Promise.resolve(new Uint8Array(0));"
             "  var rd = r._bodyStream.getReader(), chunks = [], total = 0;"
             "  return (function pump(){ return rd.read().then(function(x){"
@@ -23619,7 +23621,7 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             " function clone(){var r=this;var c=Object.create(Object.getPrototypeOf(r));"
             "  Object.getOwnPropertyNames(r).forEach(function(k){if(k!=='body'&&k!=='bodyUsed')"
             "   try{Object.defineProperty(c,k,Object.getOwnPropertyDescriptor(r,k));}catch(e){}});"
-            "  if(r._bodyBuffer instanceof ArrayBuffer)"
+            "  if(isAB(r._bodyBuffer))"
             "   try{Object.defineProperty(c,'_bodyBuffer',{value:r._bodyBuffer,configurable:true});}catch(e){}"
             "  if(r._bodyStream)"
             "   try{Object.defineProperty(c,'_bodyStream',{value:r._bodyStream,configurable:true});}catch(e){}"
@@ -49503,7 +49505,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch){"
     "  var url = initialURL || 'about:blank';"
     /* An initial about:blank or srcdoc document shows about:blank or
      * about:srcdoc as its URL while url, the creator's, stays its base URL
@@ -49607,10 +49609,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('history',    { value: hist, writable: true, enumerable: true });"
     "  def('location',   { enumerable: true, get: function(){ return loc; },"
     "                      set: function(v){ loc.href = v; } });"
-    "  def('fetch', { writable: true, value: function(input, init){"
-    "      var req = input;"
-    "      try { if (typeof input === 'string') { var u = mk(input); if (u) req = u.href; } } catch(e){}"
-    "      return realWin.fetch.call(win, req, init); } });"
+    "  def('fetch', { writable: true, value: nativeFetch });"
     "  def('onhashchange', { get: function(){ return onhash; }, set: function(v){ onhash=v; } });"
     "  def('onpopstate',   { get: function(){ return onpop; }, set: function(v){ onpop=v; } });"
     "  def('onmessage',    { get: function(){ return onmsg; }, set: function(v){ onmsg=v; } });"
@@ -50667,6 +50666,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                                            : JS_UNDEFINED;
         JSValue realm_clone = JS_NewCFunction(fctx, ns_realm_clone_fn,
                                               "realmClone", 1);
+        JSValue native_fetch = JS_NewCFunction(fctx, ns_js_fetch, "fetch", 1);
         JSValue window_events = JS_NewObjectProto(fctx, JS_NULL);
         JS_SetPropertyStr(fctx, window_events, "add",
             JS_NewCFunction(fctx, ns_window_addEventListener,
@@ -50677,11 +50677,12 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JS_SetPropertyStr(fctx, window_events, "dispatch",
             JS_NewCFunction(fctx, ns_window_dispatchEvent,
                             "dispatchEvent", 1));
-        JSValueConst args[13] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValueConst args[14] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
-                                  realm_clone, window_events };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 13, args);
+                                  realm_clone, window_events, native_fetch };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 14, args);
+        JS_FreeValue(fctx, native_fetch);
         JS_FreeValue(fctx, window_events);
         JS_FreeValue(fctx, realm_clone);
         JS_FreeValue(fctx, docv);
