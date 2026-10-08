@@ -2108,6 +2108,29 @@ ns_style_is_nowrap(const ns_style *style)
             strcmp(ws->u.keyword, "pre") == 0);
 }
 
+gboolean
+ns_paint_text_ellipsizes(const ns_style *style)
+{
+    return style && ns_style_is_nowrap(style) &&
+           keyword_is(style->values[NS_CSS_TEXT_OVERFLOW], "ellipsis");
+}
+
+void
+ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text)
+{
+    static const char line_sep[] = "\xe2\x80\xa8";
+    if (!text || ns_pango_layout_get_ellipsize(layout) == NS_PANGO_ELLIPSIZE_NONE ||
+        ns_pango_layout_get_height(layout) != -1 || !strstr(text, line_sep)) {
+        ns_pango_layout_set_text(layout, text, -1);
+        return;
+    }
+    char *paragraphs = g_strdup(text);
+    for (char *p = strstr(paragraphs, line_sep); p; p = strstr(p + 3, line_sep))
+        p[2] = '\xa9';
+    ns_pango_layout_set_text(layout, paragraphs, -1);
+    g_free(paragraphs);
+}
+
 static double
 normal_line_height_from_metrics(const ns_style *s, const char *family,
                                 double font_size)
@@ -3271,8 +3294,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     NsPangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
 
-    if (ns_style_is_nowrap(s) &&
-        !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_style_is_nowrap(s) && !ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
@@ -3284,7 +3306,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         if (ti > 0)
             ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
         const ns_css_value *lc = s ? s->values[NS_CSS_LINE_CLAMP] : NULL;
@@ -3293,7 +3315,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
-    ns_pango_layout_set_text(layout, b->text, -1);
+    ns_paint_layout_set_inline_text(layout, b->text);
 
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
@@ -4401,8 +4423,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 
     NsPangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
-    if (ns_style_is_nowrap(s) &&
-        !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_style_is_nowrap(s) && !ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
@@ -4413,7 +4434,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
         double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
         const ns_css_value *lc = s ? s->values[NS_CSS_LINE_CLAMP] : NULL;
@@ -4422,7 +4443,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
-    ns_pango_layout_set_text(layout, b->text, -1);
+    ns_paint_layout_set_inline_text(layout, b->text);
 
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
