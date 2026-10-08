@@ -196,6 +196,56 @@ ns_font_family_loaded(const char *family)
     return FALSE;
 }
 
+#ifdef NS_HAVE_FONTCONFIG
+static gboolean
+ns_font_request_prefers_color(const char *family)
+{
+    FcPattern *pattern = FcPatternCreate();
+    FcBool color = FcFalse;
+    FcPatternAddString(pattern, FC_FAMILY, (const FcChar8 *)family);
+    FcConfigSubstitute(NULL, pattern, FcMatchPattern);
+    if (FcPatternGetBool(pattern, FC_COLOR, 0, &color) != FcResultMatch)
+        color = FcFalse;
+    FcPatternDestroy(pattern);
+    return color == FcTrue;
+}
+#endif
+
+static char *
+ns_font_private_family(const char *family)
+{
+    return g_strconcat("NS face ", family, NULL);
+}
+
+char *
+ns_font_family_for_text(const char *family)
+{
+    if (ns_font_family_is_emoji(family) && ns_font_family_loaded(family))
+        return ns_font_private_family(family);
+    return g_strdup(family);
+}
+
+gboolean
+ns_font_family_is_emoji(const char *family)
+{
+#ifdef NS_HAVE_FONTCONFIG
+    static __thread GHashTable *known;
+    if (!family || !*family) return FALSE;
+    if (!known)
+        known = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    gpointer cached = NULL;
+    if (g_hash_table_lookup_extended(known, family, NULL, &cached))
+        return GPOINTER_TO_INT(cached);
+    gboolean emoji = ns_font_request_prefers_color(family);
+    if (g_hash_table_size(known) >= 1024) g_hash_table_remove_all(known);
+    g_hash_table_insert(known, g_strdup(family), GINT_TO_POINTER(emoji));
+    return emoji;
+#else
+    (void)family;
+    return FALSE;
+#endif
+}
+
 static const char *
 ns_font_extension_for(const char *url, char *buf, gsize buflen)
 {
@@ -450,13 +500,13 @@ ns_font_pattern_named(const FcPattern *pat, const char *family)
 
 static void
 ns_font_add_under_family(FcFontSet *app_fonts, const FcPattern *scanned,
-                         const ns_font_entry *face)
+                         const ns_font_entry *face, const char *family)
 {
     FcPattern *pat = FcPatternDuplicate(scanned);
     if (!pat) return;
     FcPatternDel(pat, FC_FAMILY);
     FcPatternDel(pat, FC_FAMILYLANG);
-    FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)face->family);
+    FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)family);
     ns_font_describe_face(pat, face);
     if (!FcFontSetAdd(app_fonts, pat))
         FcPatternDestroy(pat);
@@ -479,6 +529,19 @@ ns_font_drop_variable_instances(FcFontSet *app_fonts, int first_added)
 }
 
 static void
+ns_font_add_private_copies(FcFontSet *app_fonts, int first_added,
+                           const ns_font_entry *face)
+{
+    char *private_family = ns_font_private_family(face->family);
+    int added = app_fonts->nfont;
+    for (int i = first_added; i < added; i++)
+        if (ns_font_pattern_named(app_fonts->fonts[i], face->family))
+            ns_font_add_under_family(app_fonts, app_fonts->fonts[i], face,
+                                     private_family);
+    g_free(private_family);
+}
+
+static void
 ns_font_describe_added(FcFontSet *app_fonts, int first_added,
                        const ns_font_entry *face)
 {
@@ -490,9 +553,11 @@ ns_font_describe_added(FcFontSet *app_fonts, int first_added,
             ns_font_describe_face(pat, face);
         } else {
             ns_font_set_order(pat, face->declared);
-            ns_font_add_under_family(app_fonts, pat, face);
+            ns_font_add_under_family(app_fonts, pat, face, face->family);
         }
     }
+    if (ns_font_family_is_emoji(face->family))
+        ns_font_add_private_copies(app_fonts, first_added, face);
 }
 
 static void

@@ -3,6 +3,23 @@ Changelog:
 
 1.0.30:
 ======
+* Text falls back through the page's own `font-family` list. Only one
+  family of the list was handed to the text engine, so a character that
+  family lacks came from the system's fallback font and never from the
+  next family the page names: in `font-family: Icons, Georgia, serif`
+  the letters were in neither Georgia nor a serif. Every available
+  family of the list and its generic family are now passed on in the
+  page's order. With that the list is also followed past a missing
+  Arial, Helvetica, Segoe UI, Roboto or SF Pro name, which used to end
+  it with a stand-in, the default sans-serif font or for SF Pro the
+  system font: `'Segoe UI', SegoeUI, Arial` never reached the page's
+  own `SegoeUI` web font, and `'Roboto Mono', monospace` was drawn in a
+  proportional font. System emoji fonts named in the list are left out,
+  emoji being drawn in the emoji font wherever they stand, so text in
+  `font-family: 'Apple Color Emoji'` is no longer a row of boxes; a
+  page's own font under an emoji font's name, such as Google Fonts'
+  Noto Emoji, keeps its place in the list. A bare `fangsong` is a
+  family name like any other, as in Chrome.
 * JPEG XL images are displayed, as Chrome now does. `.jxl` files decode
   through libjxl, an optional dependency like libavif, in `<img>`, CSS
   backgrounds and `<picture>` sources typed `image/jxl`; transparency is
