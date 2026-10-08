@@ -928,8 +928,10 @@ headless_flush_style(gpointer ud)
                                           NULL);
     c->relaying = FALSE;
     if (!fresh) return;
-    g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
-    c->retired_styles = *c->styles;
+    if (c->retired_styles)
+        g_hash_table_destroy(*c->styles);
+    else
+        c->retired_styles = *c->styles;
     *c->styles = fresh;
     c->styles_serial = ns_js_mutation_serial(c->js);
 }
@@ -2453,6 +2455,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (js)            ns_js_set_style_table(js, NULL);
     if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
     if (styles)        g_hash_table_destroy(styles);
+    g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
     if (css_cache)     g_hash_table_destroy(css_cache);
     if (js)            ns_js_free(js);
     if (doc)           ns_node_free(doc);
