@@ -98,7 +98,11 @@ os_mem_commit(void *ptr, size_t size, int flags);
 void
 os_mem_decommit(void *ptr, size_t size);
 
+#if defined(__GNUC__)
+#define os_thread_local_attribute __thread
+#else
 #define os_thread_local_attribute __declspec(thread)
+#endif
 
 #define strncasecmp _strnicmp
 #define strcasecmp _stricmp
