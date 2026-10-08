@@ -597,8 +597,8 @@ shadow_bands(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
                           shadow_corner_h(c->br, c->brv));
     *dx = shadow_band_excess(x0, w, surf_w, pad, k->radius, left_r, right_r);
     *dy = shadow_band_excess(y0, h, surf_h, pad, k->radius, top_r, bottom_r);
-    *mid_x = shadow_band_first(x0, pad, k->radius, left_r);
-    *mid_y = shadow_band_first(y0, pad, k->radius, top_r);
+    *mid_x = *dx > 0 ? shadow_band_first(x0, pad, k->radius, left_r) : 0;
+    *mid_y = *dy > 0 ? shadow_band_first(y0, pad, k->radius, top_r) : 0;
     return *dx > 0 || *dy > 0;
 }
 
