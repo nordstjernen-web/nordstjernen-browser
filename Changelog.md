@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU bind groups support cube-map, array and 3D texture bindings,
+  multisampled and integer textures, storage textures and dynamic buffer
+  offsets; every texture binding used to be declared as a plain 2D
+  texture, so cube-mapped reflections and skyboxes failed to bind, and
+  dynamic offsets passed to `setBindGroup()` were dropped. A buffer
+  binding with an offset but no size now covers the rest of the buffer
+  instead of overrunning it, and a texture or buffer can be bound
+  directly.
 * The WebGPU interface objects (`GPUDevice`, `GPUTexture`,
   `GPURenderPassEncoder`, `GPURenderBundleEncoder` and the rest) exist
   as globals, as in other browsers. three.js tests command encoders
