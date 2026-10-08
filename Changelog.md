@@ -3,6 +3,16 @@ Changelog:
 
 1.0.30:
 ======
+* WebGL 2 `readPixels()` reads into a bound `PIXEL_PACK_BUFFER` and
+  honours the destination offset, and `IMPLEMENTATION_COLOR_READ_FORMAT`
+  / `_TYPE` describe the bound read framebuffer. The offset form of
+  `readPixels()` was dropped, and with a pack buffer bound a typed-array
+  destination was passed to GL as a buffer offset; the read format was
+  queried from the driver, which answers 0 for integer render targets.
+  three.js's `readRenderTargetPixelsAsync()` uses all three, so GPU
+  picking (`webgl_interactive_cubes_gpu`) threw on every frame. Integer
+  targets now report `RGBA_INTEGER` with `INT` or `UNSIGNED_INT`, float
+  targets `RGBA`/`FLOAT`, others `RGBA`/`UNSIGNED_BYTE`.
 * `toDataURL()` and `toBlob()` export what a WebGL or WebGPU canvas
   shows. Both read the canvas's 2D drawing surface, which a 3D canvas
   never draws to, so screenshots of a WebGL or WebGPU scene (three.js
