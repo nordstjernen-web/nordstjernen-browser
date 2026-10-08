@@ -62,6 +62,11 @@ void ns_engine_preload_script(const char *url, const char *top_url);
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                                       GHashTable *css_cache, ns_anim *anim);
 
+GHashTable *ns_engine_restyle(ns_node *doc, const char *base_url,
+                              int viewport_width, double viewport_height,
+                              ns_image_cache *images, ns_anim *anim,
+                              ns_js *js, GHashTable *css_cache,
+                              const ns_node *focused, const ns_node *hover);
 GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                int viewport_width, double viewport_height,
                                ns_image_cache *images, ns_anim *anim,

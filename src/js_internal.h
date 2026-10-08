@@ -107,6 +107,7 @@ struct ns_js {
     ns_js_repaint_cb repaint_cb;
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
+    ns_js_layout_flush_cb style_flush_cb;
     gpointer      layout_flush_user_data;
     ns_js_viewport_scroll_cb viewport_scroll_cb;
     gpointer      viewport_scroll_user_data;
@@ -141,6 +142,7 @@ struct ns_js {
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
+    guint64       mutation_serial;
     GHashTable   *timers;
     GMainContext *main_context;
     GPtrArray    *workers;

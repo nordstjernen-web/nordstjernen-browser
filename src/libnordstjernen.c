@@ -47,6 +47,8 @@ struct ns_browser {
     ns_node        *doc;
     ns_box         *layout;
     GHashTable     *styles;
+    GHashTable     *retired_styles;
+    guint64         styles_serial;
     ns_js          *js;
     ns_anim        *anim;
     ns_image_cache *images;
@@ -267,6 +269,7 @@ browser_relayout(ns_browser *b)
         b->sb_node = NULL;
         b->sb_dragging = FALSE;
     }
+    g_clear_pointer(&b->retired_styles, g_hash_table_destroy);
     if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
     browser_prune_cached_nodes(b);
@@ -288,6 +291,7 @@ browser_relayout(ns_browser *b)
                                    &b->layout);
     b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
     b->relaying = FALSE;
+    b->styles_serial = b->js ? ns_js_mutation_serial(b->js) : 0;
     if (g_hash_table_size(scroll_save) > 0)
         browser_restore_scroll(b->layout, scroll_save);
     g_hash_table_destroy(scroll_save);
@@ -488,6 +492,36 @@ browser_flush(gpointer user_data)
         browser_relayout(b);
         b->dirty = FALSE;
     }
+}
+
+static void
+browser_flush_style(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    if (!b || !b->js || b->relaying) return;
+    if (!b->layout || !b->styles) {
+        browser_flush(user_data);
+        return;
+    }
+    if (ns_js_consume_mutated(b->js))
+        b->dirty = TRUE;
+    if (!b->cascade_dirty && b->styles_serial == ns_js_mutation_serial(b->js))
+        return;
+    b->relaying = TRUE;
+    ns_css_set_viewport((double)b->vw, b->vh);
+    ns_css_set_doc_language(b->doc_language);
+    GHashTable *fresh = ns_engine_restyle(b->doc, b->base_url, b->vw, b->vh,
+                                          b->images, b->anim, b->js,
+                                          b->css_cache,
+                                          ns_js_focused_node(b->js),
+                                          b->hover_node);
+    b->relaying = FALSE;
+    if (!fresh) return;
+    g_clear_pointer(&b->retired_styles, g_hash_table_destroy);
+    b->retired_styles = b->styles;
+    b->styles = fresh;
+    b->styles_serial = ns_js_mutation_serial(b->js);
+    b->dirty = TRUE;
 }
 
 static char *
@@ -1261,6 +1295,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_anim(b->js, b->anim);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_set_style_flush_cb(b->js, browser_flush_style);
         ns_js_set_viewport_scroll_cb(b->js, browser_js_viewport_scroll, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
@@ -4449,6 +4484,7 @@ ns_browser_close(ns_browser *browser)
     if (browser->anim) ns_anim_free(browser->anim);
     if (browser->layout) { ns_paint_3d_invalidate(); ns_box_free(browser->layout); }
     if (browser->styles) g_hash_table_destroy(browser->styles);
+    g_clear_pointer(&browser->retired_styles, g_hash_table_destroy);
     if (browser->css_cache) g_hash_table_destroy(browser->css_cache);
     if (browser->js) ns_js_free(browser->js);
     if (browser->doc) ns_node_free(browser->doc);

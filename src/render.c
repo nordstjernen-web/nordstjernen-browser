@@ -622,14 +622,9 @@ render_effective_viewport_width(const ns_render_ctx *c)
     return width;
 }
 
-GHashTable *
-ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
-                           ns_render_profile *profile)
+static double
+render_pass_begin(const ns_render_ctx *c)
 {
-    if (out_layout) *out_layout = NULL;
-    if (!c || !out_layout) return NULL;
-    if (profile) memset(profile, 0, sizeof *profile);
-
     double viewport_width = render_effective_viewport_width(c);
     ns_css_set_viewport(viewport_width, c->viewport_height);
     ns_css_set_focus_node(c->focused_input);
@@ -651,6 +646,42 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     for (guint i = 0; i < c->n_sheets && !uses_active; i++)
         uses_active = ns_css_stylesheet_has_active_rules(c->sheets[i]);
     g_render_page_uses_active = uses_active;
+    return viewport_width;
+}
+
+GHashTable *
+ns_render_restyle(const ns_render_ctx *c)
+{
+    if (!c) return NULL;
+    double viewport_width = render_pass_begin(c);
+    ns_css_set_render_zoom(c->zoom > 0 ? c->zoom : 1.0);
+    gboolean uses_cq_units = FALSE;
+    gboolean want_cq = render_cq_wanted(c, &uses_cq_units);
+    GHashTable *predicted =
+        render_cq_predicted_map(c->doc, viewport_width, want_cq);
+    gboolean cache_selectors = render_selector_cache_wanted(c, predicted);
+    if (cache_selectors) ns_css_selector_cache_begin();
+    ns_css_set_container_map(predicted);
+    GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->sheet_docs,
+                                        c->n_sheets);
+    ns_css_set_container_map(NULL);
+    render_style_pass(c, styles);
+    if (cache_selectors) ns_css_selector_cache_end();
+    ns_css_set_focus_node(NULL);
+    ns_css_set_hover_node(NULL);
+    if (c->js) ns_js_set_style_table(c->js, styles);
+    return styles;
+}
+
+GHashTable *
+ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
+                           ns_render_profile *profile)
+{
+    if (out_layout) *out_layout = NULL;
+    if (!c || !out_layout) return NULL;
+    if (profile) memset(profile, 0, sizeof *profile);
+
+    double viewport_width = render_pass_begin(c);
 
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     ns_css_set_render_zoom(c->zoom > 0 ? c->zoom : 1.0);

@@ -17109,6 +17109,25 @@ ns_computed_initial_value(const char *name)
     return ns_css_initial_value_text(name);
 }
 
+static gboolean
+ns_computed_needs_layout(const char *name)
+{
+    static const char *const exact[] = {
+        "width", "height", "block-size", "inline-size", "top", "right",
+        "bottom", "left", "inset", "transform", "transform-origin",
+        "perspective-origin", "grid", "grid-template", "grid-template-columns",
+        "grid-template-rows", "border-width",
+    };
+    static const char *const prefixes[] = {
+        "margin", "padding", "inset-",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(exact); i++)
+        if (strcmp(name, exact[i]) == 0) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(prefixes); i++)
+        if (g_str_has_prefix(name, prefixes[i])) return TRUE;
+    return g_str_has_prefix(name, "border-") && g_str_has_suffix(name, "-width");
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name);
 
@@ -17910,7 +17929,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             "grid-auto-columns",
         };
         ns_js *grid_js = js_from_ctx(ctx);
-        if (grid_js) ns_js_flush_style(grid_js);
+        if (grid_js) ns_js_flush_layout(grid_js);
         if (!grid_js || !grid_js->style_table ||
             !g_hash_table_lookup(grid_js->style_table, n))
             return g_strdup("");
@@ -17934,9 +17953,13 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     }
 
     ns_js *js = js_from_ctx(ctx);
-    if (js) ns_js_flush_layout(js);
+    gboolean needs_layout = ns_computed_needs_layout(name);
+    if (js) {
+        if (needs_layout) ns_js_flush_layout(js);
+        else ns_js_flush_style(js);
+    }
     const char *style = ns_element_get_attr(n, "style");
-    const struct ns_box *lbox = (js && js->layout_root)
+    const struct ns_box *lbox = (needs_layout && js && js->layout_root)
         ? ns_box_find_by_dom(js->layout_root, n) : NULL;
     const ns_style *computed = (js && js->style_table)
         ? g_hash_table_lookup(js->style_table, n) : NULL;
@@ -18901,7 +18924,7 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
         const ns_node *node = ns_unwrap_element(argv[0]);
         ns_js *style_js = js_from_ctx(ctx);
         if (node && style_js) {
-            ns_js_flush_layout(style_js);
+            ns_js_flush_style(style_js);
             const ns_style *style = style_js->style_table
                 ? g_hash_table_lookup(style_js->style_table, node) : NULL;
             if (style && style->vars)
@@ -66392,10 +66415,24 @@ ns_js_flush_layout(ns_js *js)
     js->in_layout_flush = FALSE;
 }
 
+void
+ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb)
+{
+    if (js) js->style_flush_cb = cb;
+}
+
 static void
 ns_js_flush_style(ns_js *js)
 {
-    ns_js_flush_layout(js);
+    if (!js || js->in_layout_flush) return;
+    if (!js->style_flush_cb) {
+        ns_js_flush_layout(js);
+        return;
+    }
+    ns_js_commit_cssom(js);
+    js->in_layout_flush = TRUE;
+    js->style_flush_cb(js->layout_flush_user_data);
+    js->in_layout_flush = FALSE;
 }
 
 
@@ -66453,7 +66490,14 @@ ns_js_consume_mutated(ns_js *js)
     if (!js) return FALSE;
     gboolean m = js->mutated;
     js->mutated = FALSE;
+    if (m) js->mutation_serial++;
     return m;
+}
+
+guint64
+ns_js_mutation_serial(const ns_js *js)
+{
+    return js ? js->mutation_serial : 0;
 }
 
 char *
