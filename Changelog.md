@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* Mistakes in a page's WebGPU commands no longer abort the renderer. A
+  command buffer that failed validation, for example because a shader
+  did not compile, or one submitted a second time used to stop the
+  process inside wgpu-native, which took three.js's ambient-occlusion
+  example down; they are now reported as validation errors and skipped.
+  Destroying an occlusion query set, as three.js's occlusion example
+  does every frame, also aborted the renderer.
 * WebGPU reports errors the way pages expect. `pushErrorScope()` and
   `popErrorScope()` capture real validation, out-of-memory and internal
   errors as `GPUValidationError`, `GPUOutOfMemoryError` and
