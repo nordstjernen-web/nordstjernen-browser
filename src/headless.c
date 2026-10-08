@@ -727,7 +727,7 @@ static gboolean
 ns_headless_renderer_capable(const ns_headless_opts *opts)
 {
     if (g_getenv("NS_HEADLESS_LEGACY")) return FALSE;
-    if (opts->wpt) return FALSE;
+    if (opts->wpt || opts->timing) return FALSE;
     if (opts->inspect && *opts->inspect) return FALSE;
     if (opts->inspect_at && *opts->inspect_at) return FALSE;
     if (opts->dump == NS_DUMP_PNG || opts->dump == NS_DUMP_PDF ||
@@ -760,7 +760,7 @@ ns_headless_run(const ns_headless_opts *opts)
              ? ns_headless_run_via_renderer(opts)
              : ns_headless_run_one(opts, opts->url, 0, NULL,
                                    NULL, 0, NULL);
-    if (opts->timing && !via_renderer) headless_print_timing();
+    if (opts->timing) headless_print_timing();
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
