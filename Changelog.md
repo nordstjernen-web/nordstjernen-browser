@@ -141,6 +141,15 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Calling `Intl.DateTimeFormat()` and the other Intl constructors
+  without `new` no longer leaves a stray TypeError behind. The
+  constructor read `prototype` off its undefined receiver, failed
+  silently and returned a working object, and the pending error then
+  surfaced in whatever script ran next: on microsoft.com, Microsoft
+  Clarity's call aborted a web-component module mid-evaluation.
+  `MutationObserver`, `IntersectionObserver`, `ResizeObserver` and
+  `PerformanceObserver` called without `new` now throw a TypeError as in
+  Chrome, and module load failures are logged with their stack.
 * Headless page loads fetch images while the page settles, as the
   browser window does: each new layout requests the images it now needs,
   and their `load` events fire as they arrive. Images used to be fetched
