@@ -534,7 +534,20 @@ def ratio_cell(v):
     return f'<td data-v="{v:.4f}" class="{cls}">{v:.2f}×</td>'
 
 
-def write_html(rows, agg, labels, base_label, meta, path):
+SUMMARY_ROWS = [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
+                ("Median SSIM", "ssimMedian", 3), ("Median first paint ms", "firstRenderMedianMs", 0),
+                ("First paint ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
+                ("Images loaded ÷ Chrome load", "imagesLoadedVsLoadGeomean", 2),
+                ("Main-thread CPU ÷ Chrome", "mainThreadVsChromeGeomean", 2),
+                ("Peak memory ÷ Chrome", "memoryVsChromeGeomean", 2),
+                ("Sites painting before Chrome FCP", "fasterFirstRender", 0),
+                ("JS errors", "jsErrors", 0)]
+
+PHASE_KEYS = ("fetchMs", "parseMs", "styleMs", "scriptMs", "layoutMs", "imagesMs", "paintMs",
+              "netWaitMs", "processCpuMs", "maxRssMb", "nodes")
+
+
+def html_summary(rows, agg, labels, meta):
     e = html.escape
     out = [f"<!doctype html><html lang=en><head><meta charset=utf-8>"
            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -544,14 +557,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
                f"viewport {e(meta['viewport'])} · {len(rows)} sites · {e(meta['generated'])}</p>")
     out.append("<h2>Summary</h2><div class=wrap><table><thead><tr><th>Metric</th>" +
                "".join(f"<th>{e(label)}</th>" for label in labels) + "</tr></thead><tbody>")
-    for title, key, digits in [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
-                               ("Median SSIM", "ssimMedian", 3), ("Median first paint ms", "firstRenderMedianMs", 0),
-                               ("First paint ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
-                               ("Images loaded ÷ Chrome load", "imagesLoadedVsLoadGeomean", 2),
-                               ("Main-thread CPU ÷ Chrome", "mainThreadVsChromeGeomean", 2),
-                               ("Peak memory ÷ Chrome", "memoryVsChromeGeomean", 2),
-                               ("Sites painting before Chrome FCP", "fasterFirstRender", 0),
-                               ("JS errors", "jsErrors", 0)]:
+    for title, key, digits in SUMMARY_ROWS:
         out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[label].get(key), digits) for label in labels) + "</tr>")
     out.append("</tbody></table></div>")
     c = agg["chrome"]
@@ -562,9 +568,26 @@ def write_html(rows, agg, labels, base_label, meta, path):
         out.append("<p class=muted>Also left out, so every column averages the same sites, because at least "
                    "one Nordstjernen run was shown a bot challenge or an error page: "
                    + e(", ".join(c["nsExcluded"])) + ".</p>")
+    return out
 
-    out.append("<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
-               "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>")
+
+def html_engine_cells(en):
+    if not en:
+        return "<td>–</td>" * 9
+    v = en["visual"]
+    comp = v.get("components") or {}
+    placed = comp.get("placedRate")
+    return (cell(v.get("parity"), 1, "bad" if en.get("error") else "") + cell(v.get("ssim"), 3) +
+            cell(None if placed is None else round(placed * 100), 0) +
+            cell(en.get("firstPaintMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
+            cell(en.get("settledMainThreadMs")) + ratio_cell(en["vsChrome"]["mainThread"]) +
+            cell(en.get("settledMaxRssMb")) + cell(en.get("jsErrors")))
+
+
+def html_site_table(rows, labels):
+    e = html.escape
+    out = ["<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
+           "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>"]
     for label in labels:
         out.append(f"<th>{e(label)} parity</th><th>SSIM</th><th>Placed</th><th>First paint</th>"
                    f"<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
@@ -576,97 +599,129 @@ def write_html(rows, agg, labels, base_label, meta, path):
         out.append(cell(ch.get("fcp")) + cell(ch.get("lcp")) + cell(ch.get("load")) + cell(ch.get("speedIndex")) +
                    cell(ch.get("mainThreadMs")) + cell(ch.get("browserRssMb")))
         for label in labels:
-            en = r["engines"].get(label)
-            if not en:
-                out.append("<td>–</td>" * 9)
-                continue
-            v = en["visual"]
-            comp = v.get("components") or {}
-            placed = comp.get("placedRate")
-            out.append(cell(v.get("parity"), 1, "bad" if en.get("error") else "") + cell(v.get("ssim"), 3) +
-                       cell(None if placed is None else round(placed * 100), 0) +
-                       cell(en.get("firstPaintMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
-                       cell(en.get("settledMainThreadMs")) + ratio_cell(en["vsChrome"]["mainThread"]) +
-                       cell(en.get("settledMaxRssMb")) + cell(en.get("jsErrors")))
+            out.append(html_engine_cells(r["engines"].get(label)))
         out.append("</tr>")
     out.append("</tbody></table></div>")
+    return out
 
+
+def html_site_notes(r, ch, labels):
+    e = html.escape
+    out = []
+    if ch.get("error"):
+        out.append(f"<p class=bad>Chrome: {e(ch['error'])}</p>")
+    if ch.get("blocked"):
+        out.append(f"<p class=bad>Chrome was shown a {e(ch['blocked'])} page; this site is left out "
+                   f"of the aggregates.</p>")
+    for label in labels:
+        en = r["engines"].get(label)
+        if en and en.get("blocked"):
+            out.append(f"<p class=bad>{e(label)} was shown a {e(en['blocked'])} page.</p>")
+    return out
+
+
+def html_engine_figure(site_id, label, en):
+    e = html.escape
+    v = en["visual"]
+    error = f" · <span class=bad>{e(en['error'])}</span>" if en.get("error") else ""
+    return (f"<figure><img loading=lazy src='img/{e(site_id)}-{e(label)}.jpg' alt=''>"
+            f"<figcaption>{e(label)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
+            f"first paint {fmt(en.get('firstPaintMs'))} ms · images loaded {fmt(en.get('firstRenderMs'))} ms"
+            + error + "</figcaption></figure>")
+
+
+def html_site_shots(r, ch, labels, base_label):
+    e = html.escape
+    out = ["<div class=shots>",
+           f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}.jpg' alt=''>"
+           f"<figcaption>Chrome · FCP {fmt(ch.get('fcp'))} ms · LCP {fmt(ch.get('lcp'))} ms · "
+           f"load {fmt(ch.get('load'))} ms · CLS {fmt(ch.get('cls'), 3)}</figcaption></figure>"]
+    for label in labels:
+        en = r["engines"].get(label)
+        if en:
+            out.append(html_engine_figure(r["id"], label, en))
+    if labels and labels[-1] in r["engines"]:
+        out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(labels[-1])}-diff.jpg' alt=''>"
+                   f"<figcaption>difference vs Chrome ({e(labels[-1])})</figcaption></figure>")
+    out.append("</div>")
+    if r.get("film"):
+        out.append("<p class=muted>Chrome filmstrip</p><div class=film>" + "".join(
+            f"<figure><img loading=lazy src='img/{e(f['file'])}' alt=''><figcaption>{f['ms']} ms</figcaption></figure>"
+            for f in r["film"]) + "</div>")
+    return out
+
+
+def html_full_pages(r, ch, labels, base_label):
+    e = html.escape
+    out = ["<details><summary>Full page</summary><div class=fulls>",
+           f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}-full.jpg' alt=''>"
+           f"<figcaption>Chrome · {fmt(ch.get('docH'))} px</figcaption></figure>"]
+    for label in labels:
+        en = r["engines"].get(label)
+        if en:
+            out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}-full.jpg' alt=''>"
+                       f"<figcaption>{e(label)} · {fmt(en.get('docH'))} px</figcaption></figure>")
+    out.append("</div></details>")
+    return out
+
+
+def html_component_tables(comp):
+    e = html.escape
+    style_rate = comp.get("styleRate")
+    style_txt = "–" if style_rate is None else f"{style_rate * 100:.0f}%"
+    out = [f"<p>{comp['found']}/{comp['count']} Chrome components found, {comp['placed']} placed "
+           f"(IoU ≥ 0.5); style agreement {style_txt}</p>",
+           "<div class=wrap><table><thead><tr><th>Component</th><th>Chrome x,y,w,h</th>"
+           "<th>NS x,y,w,h</th><th>IoU</th></tr></thead><tbody>"]
+    for w in comp.get("worst", []):
+        out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td><td>{e(str(w['chrome']))}</td>"
+                   f"<td>{e(str(w.get('ns', 'missing')))}</td><td>{fmt(w.get('iou'), 2)}</td></tr>")
+    out.append("</tbody></table></div>")
+    if comp.get("styleDiffs"):
+        out.append("<div class=wrap><table><thead><tr><th>Element</th><th>Property</th><th>Chrome</th>"
+                   "<th>NS</th></tr></thead><tbody>")
+        for d in comp["styleDiffs"]:
+            out.append(f"<tr><td>{e(d['tag'])} “{e(d['text'])}”</td><td>{e(d['prop'])}</td>"
+                       f"<td>{e(str(d['chrome']))}</td><td>{e(str(d['ns']))}</td></tr>")
+        out.append("</tbody></table></div>")
+    return out
+
+
+def html_engine_details(label, en):
+    e = html.escape
+    comp = en["visual"].get("components") or {}
+    out = [f"<details><summary>{e(label)}: phases, components and styles</summary>",
+           "<p><code>" + e(" · ".join(f"{k} {fmt(en.get(k))}" for k in PHASE_KEYS)) + "</code></p>"]
+    if comp:
+        out.extend(html_component_tables(comp))
+    if en.get("jsErrorSample"):
+        out.append("<pre>" + e("\n".join(en["jsErrorSample"])) + "</pre>")
+    out.append("</details>")
+    return out
+
+
+def html_site_section(r, labels, base_label):
+    e = html.escape
+    ch = r.get("chrome") or {}
+    site = r.get("site") or {}
+    out = [f"<section class=site id='{e(r['id'])}'><h2>{e(r['id'])} "
+           f"<span class=muted>· <a href='{e(site.get('url', ''))}'>{e(site.get('url', ''))}</a></span></h2>"]
+    out.extend(html_site_notes(r, ch, labels))
+    out.extend(html_site_shots(r, ch, labels, base_label))
+    out.extend(html_full_pages(r, ch, labels, base_label))
+    for label in labels:
+        en = r["engines"].get(label)
+        if en:
+            out.extend(html_engine_details(label, en))
+    out.append("</section>")
+    return out
+
+
+def write_html(rows, agg, labels, base_label, meta, path):
+    out = html_summary(rows, agg, labels, meta)
+    out.extend(html_site_table(rows, labels))
     for r in rows:
-        ch = r.get("chrome") or {}
-        site = r.get("site") or {}
-        out.append(f"<section class=site id='{e(r['id'])}'><h2>{e(r['id'])} "
-                   f"<span class=muted>· <a href='{e(site.get('url', ''))}'>{e(site.get('url', ''))}</a></span></h2>")
-        if ch.get("error"):
-            out.append(f"<p class=bad>Chrome: {e(ch['error'])}</p>")
-        if ch.get("blocked"):
-            out.append(f"<p class=bad>Chrome was shown a {e(ch['blocked'])} page; this site is left out "
-                       f"of the aggregates.</p>")
-        for label in labels:
-            en = r["engines"].get(label)
-            if en and en.get("blocked"):
-                out.append(f"<p class=bad>{e(label)} was shown a {e(en['blocked'])} page.</p>")
-        out.append("<div class=shots>")
-        out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}.jpg' alt=''>"
-                   f"<figcaption>Chrome · FCP {fmt(ch.get('fcp'))} ms · LCP {fmt(ch.get('lcp'))} ms · "
-                   f"load {fmt(ch.get('load'))} ms · CLS {fmt(ch.get('cls'), 3)}</figcaption></figure>")
-        for label in labels:
-            en = r["engines"].get(label)
-            if not en:
-                continue
-            v = en["visual"]
-            out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}.jpg' alt=''>"
-                       f"<figcaption>{e(label)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
-                       f"first paint {fmt(en.get('firstPaintMs'))} ms · images loaded {fmt(en.get('firstRenderMs'))} ms"
-                       + (f" · <span class=bad>{e(en['error'])}</span>" if en.get("error") else "") +
-                       "</figcaption></figure>")
-        if labels and labels[-1] in r["engines"]:
-            out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(labels[-1])}-diff.jpg' alt=''>"
-                       f"<figcaption>difference vs Chrome ({e(labels[-1])})</figcaption></figure>")
-        out.append("</div>")
-        if r.get("film"):
-            out.append("<p class=muted>Chrome filmstrip</p><div class=film>" + "".join(
-                f"<figure><img loading=lazy src='img/{e(f['file'])}' alt=''><figcaption>{f['ms']} ms</figcaption></figure>"
-                for f in r["film"]) + "</div>")
-        out.append("<details><summary>Full page</summary><div class=fulls>")
-        out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}-full.jpg' alt=''>"
-                   f"<figcaption>Chrome · {fmt(ch.get('docH'))} px</figcaption></figure>")
-        for label in labels:
-            en = r["engines"].get(label)
-            if en:
-                out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}-full.jpg' alt=''>"
-                           f"<figcaption>{e(label)} · {fmt(en.get('docH'))} px</figcaption></figure>")
-        out.append("</div></details>")
-        for label in labels:
-            en = r["engines"].get(label)
-            if not en:
-                continue
-            comp = en["visual"].get("components") or {}
-            out.append(f"<details><summary>{e(label)}: phases, components and styles</summary>")
-            out.append("<p><code>" + e(" · ".join(f"{k} {fmt(en.get(k))}" for k in (
-                "fetchMs", "parseMs", "styleMs", "scriptMs", "layoutMs", "imagesMs", "paintMs",
-                "netWaitMs", "processCpuMs", "maxRssMb", "nodes"))) + "</code></p>")
-            if comp:
-                style_rate = comp.get("styleRate")
-                style_txt = "–" if style_rate is None else f"{style_rate * 100:.0f}%"
-                out.append(f"<p>{comp['found']}/{comp['count']} Chrome components found, {comp['placed']} placed "
-                           f"(IoU ≥ 0.5); style agreement {style_txt}</p>")
-                out.append("<div class=wrap><table><thead><tr><th>Component</th><th>Chrome x,y,w,h</th>"
-                           "<th>NS x,y,w,h</th><th>IoU</th></tr></thead><tbody>")
-                for w in comp.get("worst", []):
-                    out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td><td>{e(str(w['chrome']))}</td>"
-                               f"<td>{e(str(w.get('ns', 'missing')))}</td><td>{fmt(w.get('iou'), 2)}</td></tr>")
-                out.append("</tbody></table></div>")
-                if comp.get("styleDiffs"):
-                    out.append("<div class=wrap><table><thead><tr><th>Element</th><th>Property</th><th>Chrome</th>"
-                               "<th>NS</th></tr></thead><tbody>")
-                    for d in comp["styleDiffs"]:
-                        out.append(f"<tr><td>{e(d['tag'])} “{e(d['text'])}”</td><td>{e(d['prop'])}</td>"
-                                   f"<td>{e(str(d['chrome']))}</td><td>{e(str(d['ns']))}</td></tr>")
-                    out.append("</tbody></table></div>")
-            if en.get("jsErrorSample"):
-                out.append("<pre>" + e("\n".join(en["jsErrorSample"])) + "</pre>")
-            out.append("</details>")
-        out.append("</section>")
+        out.extend(html_site_section(r, labels, base_label))
     out.append(f"<script>{SORT_JS}</script></main></body></html>")
     Path(path).write_text("".join(out), encoding="utf-8", errors="replace")
 

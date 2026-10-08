@@ -137,8 +137,7 @@ function cpuTimesMs() {
   return os.cpus().reduce((acc, c) => acc + c.times.user + c.times.sys, 0);
 }
 
-async function captureRun(browser, site, o, dir, visual, browserPid) {
-  const probeSrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+async function openPage(browser, o) {
   const ctx = await browser.newContext({
     viewport: { width: o.width, height: o.height },
     deviceScaleFactor: 1,
@@ -151,7 +150,10 @@ async function captureRun(browser, site, o, dir, visual, browserPid) {
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Performance.enable', { timeDomain: 'threadTicks' });
   await cdp.send('Network.enable');
+  return { ctx, page, cdp };
+}
 
+function trackNetwork(cdp) {
   const net = { requests: 0, failed: 0, bytes: 0, byType: {} };
   const reqType = new Map();
   cdp.on('Network.requestWillBeSent', e => reqType.set(e.requestId, e.type || 'Other'));
@@ -164,111 +166,138 @@ async function captureRun(browser, site, o, dir, visual, browserPid) {
     b.bytes += e.encodedDataLength || 0;
   });
   cdp.on('Network.loadingFailed', () => { net.failed++; });
+  return net;
+}
 
+function trackConsole(page) {
   const consoleErrors = [];
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 300)); });
   page.on('pageerror', e => consoleErrors.push(String(e && e.message || e).slice(0, 300)));
+  return consoleErrors;
+}
 
+async function startFilmstrip(cdp, o) {
   const frames = [];
-  if (visual && o.filmstrip) {
-    cdp.on('Page.screencastFrame', f => {
-      frames.push({ t: f.metadata.timestamp * 1000, data: f.data });
-      cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
-    });
-    await cdp.send('Page.startScreencast', {
-      format: 'jpeg', quality: 70, maxWidth: Math.round(o.width / 2), maxHeight: Math.round(o.height / 2),
-      everyNthFrame: 1,
-    });
-  }
+  cdp.on('Page.screencastFrame', f => {
+    frames.push({ t: f.metadata.timestamp * 1000, data: f.data });
+    cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
+  });
+  await cdp.send('Page.startScreencast', {
+    format: 'jpeg', quality: 70, maxWidth: Math.round(o.width / 2), maxHeight: Math.round(o.height / 2),
+    everyNthFrame: 1,
+  });
+  return frames;
+}
 
-  const cpu0 = cpuTimesMs();
-  const t0 = Date.now();
-  let status = null;
-  let error = null;
-  let loadWallMs = null;
+async function loadPage(page, site, o, t0) {
+  const out = { status: null, error: null, loadWallMs: null };
   try {
     const resp = await page.goto(site.url, { waitUntil: 'load', timeout: o.timeoutMs });
-    status = resp ? resp.status() : null;
-    loadWallMs = Date.now() - t0;
+    out.status = resp ? resp.status() : null;
+    out.loadWallMs = Date.now() - t0;
   } catch (e) {
-    error = String(e.message || e).split('\n')[0];
+    out.error = String(e.message || e).split('\n')[0];
   }
   if (o.settleMs > 0) {
     await page.waitForLoadState('networkidle', { timeout: o.settleMs }).catch(() => {});
   }
   await page.waitForTimeout(500);
-  const settledWallMs = Date.now() - t0;
-  const cpuMs = cpuTimesMs() - cpu0;
+  return out;
+}
 
-  if (visual && o.filmstrip) await cdp.send('Page.stopScreencast').catch(() => {});
-
+async function readPerfMetrics(cdp) {
   const perf = {};
   try {
     for (const m of (await cdp.send('Performance.getMetrics')).metrics) perf[m.name] = m.value;
   } catch (e) {}
-  let probe = null;
+  return perf;
+}
+
+async function runProbe(page, probeSrc) {
   try {
-    probe = JSON.parse(await page.evaluate(probeSrc));
+    return { probe: JSON.parse(await page.evaluate(probeSrc)), error: null };
   } catch (e) {
-    error = error || `probe: ${String(e.message || e).split('\n')[0]}`;
+    return { probe: null, error: `probe: ${String(e.message || e).split('\n')[0]}` };
   }
-  const timeOrigin = await page.evaluate('performance.timeOrigin').catch(() => t0);
-  const rssKb = processTreeRssKb(browserPid);
+}
 
-  if (visual) {
-    await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
-    await page.screenshot({ path: path.join(dir, 'viewport.png'), timeout: 15000 }).catch(e => {
-      error = error || `screenshot: ${e.message.split('\n')[0]}`;
-    });
-    const docH = Math.min(Math.max(probe ? probe.docH : o.height, o.height), o.fullMax);
-    await page.screenshot({
-      path: path.join(dir, 'full.png'), fullPage: true, timeout: 30000,
-      clip: { x: 0, y: 0, width: o.width, height: docH },
-    }).catch(() => {});
-    if (frames.length) {
-      const fdir = path.join(dir, 'frames');
-      fs.rmSync(fdir, { recursive: true, force: true });
-      fs.mkdirSync(fdir, { recursive: true });
-      let lastBucket = -1;
-      const index = [];
-      for (const f of frames) {
-        const ms = Math.max(0, Math.round(f.t - timeOrigin));
-        const bucket = Math.floor(ms / 100);
-        if (bucket === lastBucket) index.pop();
-        lastBucket = bucket;
-        index.push({ ms, file: `${String(ms).padStart(6, '0')}.jpg`, data: f.data });
-      }
-      for (const f of index) fs.writeFileSync(path.join(fdir, f.file), Buffer.from(f.data, 'base64'));
-      fs.writeFileSync(path.join(fdir, 'index.json'),
-        JSON.stringify(index.map(f => ({ ms: f.ms, file: f.file }))));
-    }
+async function saveScreenshots(page, dir, o, probe) {
+  let error = null;
+  await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+  await page.screenshot({ path: path.join(dir, 'viewport.png'), timeout: 15000 }).catch(e => {
+    error = `screenshot: ${e.message.split('\n')[0]}`;
+  });
+  const docH = Math.min(Math.max(probe ? probe.docH : o.height, o.height), o.fullMax);
+  await page.screenshot({
+    path: path.join(dir, 'full.png'), fullPage: true, timeout: 30000,
+    clip: { x: 0, y: 0, width: o.width, height: docH },
+  }).catch(() => {});
+  return error;
+}
+
+function writeFrames(fdir, frames, timeOrigin) {
+  fs.rmSync(fdir, { recursive: true, force: true });
+  fs.mkdirSync(fdir, { recursive: true });
+  let lastBucket = -1;
+  const index = [];
+  for (const f of frames) {
+    const ms = Math.max(0, Math.round(f.t - timeOrigin));
+    const bucket = Math.floor(ms / 100);
+    if (bucket === lastBucket) index.pop();
+    lastBucket = bucket;
+    index.push({ ms, file: `${String(ms).padStart(6, '0')}.jpg`, data: f.data });
   }
-  await ctx.close();
+  for (const f of index) fs.writeFileSync(path.join(fdir, f.file), Buffer.from(f.data, 'base64'));
+  fs.writeFileSync(path.join(fdir, 'index.json'),
+    JSON.stringify(index.map(f => ({ ms: f.ms, file: f.file }))));
+}
 
-  const obs = probe && probe.observed || {};
-  const fcp = probe && probe.paint ? probe.paint['first-contentful-paint'] : null;
-  const tbt = (obs.longTasks || [])
+function nullable(v, f) {
+  return v != null ? f(v) : null;
+}
+
+function field(obj, key) {
+  return obj ? obj[key] : null;
+}
+
+function blockingTimeMs(obs, fcp) {
+  return (obs.longTasks || [])
     .filter(([start]) => fcp == null || start >= fcp)
     .reduce((acc, [, d]) => acc + Math.max(0, d - 50), 0);
+}
+
+function perfSummary(perf) {
+  const ms = v => Math.round(v * 1000);
+  const same = v => v;
   return {
-    status, error, loadWallMs, settledWallMs,
-    ttfb: probe && probe.nav ? probe.nav.ttfb : null,
-    fp: probe && probe.paint ? probe.paint['first-paint'] : null,
+    mainThreadMs: nullable(perf.TaskDuration, ms),
+    scriptMs: nullable(perf.ScriptDuration, ms),
+    styleMs: nullable(perf.RecalcStyleDuration, ms),
+    layoutMs: nullable(perf.LayoutDuration, ms),
+    layoutCount: nullable(perf.LayoutCount, same),
+    styleCount: nullable(perf.RecalcStyleCount, same),
+    jsHeapMb: nullable(perf.JSHeapUsedSize, v => Math.round(v / 1048576 * 10) / 10),
+  };
+}
+
+function runSummary(run, probe, perf, net, consoleErrors) {
+  const obs = probe && probe.observed || {};
+  const nav = probe && probe.nav;
+  const paint = probe && probe.paint;
+  const fcp = field(paint, 'first-contentful-paint');
+  return {
+    status: run.status, error: run.error, loadWallMs: run.loadWallMs, settledWallMs: run.settledWallMs,
+    ttfb: field(nav, 'ttfb'),
+    fp: field(paint, 'first-paint'),
     fcp,
-    lcp: obs.lcp != null ? obs.lcp : null,
-    cls: obs.cls != null ? Math.round(obs.cls * 1000) / 1000 : null,
-    tbt,
-    dcl: probe && probe.nav ? probe.nav.dcl : null,
-    load: probe && probe.nav ? probe.nav.load : null,
-    mainThreadMs: perf.TaskDuration != null ? Math.round(perf.TaskDuration * 1000) : null,
-    scriptMs: perf.ScriptDuration != null ? Math.round(perf.ScriptDuration * 1000) : null,
-    styleMs: perf.RecalcStyleDuration != null ? Math.round(perf.RecalcStyleDuration * 1000) : null,
-    layoutMs: perf.LayoutDuration != null ? Math.round(perf.LayoutDuration * 1000) : null,
-    layoutCount: perf.LayoutCount != null ? perf.LayoutCount : null,
-    styleCount: perf.RecalcStyleCount != null ? perf.RecalcStyleCount : null,
-    jsHeapMb: perf.JSHeapUsedSize != null ? Math.round(perf.JSHeapUsedSize / 1048576 * 10) / 10 : null,
-    systemCpuMs: Math.round(cpuMs),
-    browserRssMb: rssKb != null ? Math.round(rssKb / 1024) : null,
+    lcp: nullable(obs.lcp, v => v),
+    cls: nullable(obs.cls, v => Math.round(v * 1000) / 1000),
+    tbt: blockingTimeMs(obs, fcp),
+    dcl: field(nav, 'dcl'),
+    load: field(nav, 'load'),
+    ...perfSummary(perf),
+    systemCpuMs: Math.round(run.cpuMs),
+    browserRssMb: nullable(run.rssKb, v => Math.round(v / 1024)),
     requests: net.requests, failedRequests: net.failed, bytes: net.bytes, byType: net.byType,
     consoleErrors: consoleErrors.length,
     consoleSample: consoleErrors.slice(0, 5),
@@ -276,15 +305,42 @@ async function captureRun(browser, site, o, dir, visual, browserPid) {
   };
 }
 
+async function captureRun(browser, site, o, dir, visual, browserPid) {
+  const probeSrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+  const { ctx, page, cdp } = await openPage(browser, o);
+  const net = trackNetwork(cdp);
+  const consoleErrors = trackConsole(page);
+  const filmstrip = visual && o.filmstrip;
+  const frames = filmstrip ? await startFilmstrip(cdp, o) : [];
+
+  const cpu0 = cpuTimesMs();
+  const t0 = Date.now();
+  const run = await loadPage(page, site, o, t0);
+  run.settledWallMs = Date.now() - t0;
+  run.cpuMs = cpuTimesMs() - cpu0;
+
+  if (filmstrip) await cdp.send('Page.stopScreencast').catch(() => {});
+
+  const perf = await readPerfMetrics(cdp);
+  const probed = await runProbe(page, probeSrc);
+  run.error = run.error || probed.error;
+  const timeOrigin = await page.evaluate('performance.timeOrigin').catch(() => t0);
+  run.rssKb = processTreeRssKb(browserPid);
+
+  if (visual) {
+    const shotError = await saveScreenshots(page, dir, o, probed.probe);
+    run.error = run.error || shotError;
+    if (frames.length) writeFrames(path.join(dir, 'frames'), frames, timeOrigin);
+  }
+  await ctx.close();
+  return runSummary(run, probed.probe, perf, net, consoleErrors);
+}
+
 const SUMMARY_KEYS = ['loadWallMs', 'settledWallMs', 'ttfb', 'fp', 'fcp', 'lcp', 'cls', 'tbt', 'dcl', 'load',
   'mainThreadMs', 'scriptMs', 'styleMs', 'layoutMs', 'layoutCount', 'styleCount', 'jsHeapMb',
   'systemCpuMs', 'browserRssMb', 'requests', 'bytes', 'consoleErrors'];
 
-async function main() {
-  const o = parseArgs(process.argv.slice(2));
-  const { chromium } = loadPlaywright();
-  const sites = readSites(o.sites, o.only, o.category);
-  if (!sites.length) { console.error('chrome-capture: no sites selected'); process.exit(2); }
+async function launchBrowser(chromium, o) {
   const launch = {
     headless: true,
     channel: o.channel || 'chromium',
@@ -293,41 +349,60 @@ async function main() {
   };
   if (o.executable) launch.executablePath = o.executable;
   const browser = await chromium.launch(launch);
-  const version = browser.version();
-  const browserPid = process.pid;
   const bcdp = await browser.newBrowserCDPSession();
   o.userAgent = (await bcdp.send('Browser.getVersion')).userAgent.replace('HeadlessChrome', 'Chrome');
   await bcdp.detach();
-  console.log(`chrome-capture: ${version}, ${sites.length} sites, viewport ${o.width}x${o.height}, runs ${o.runs}`);
+  return browser;
+}
 
-  for (const site of sites) {
-    const dir = path.join(o.out, o.label, site.id);
-    if (o.skipExisting && fs.existsSync(path.join(dir, 'metrics.json'))) continue;
-    fs.mkdirSync(dir, { recursive: true });
-    const runs = [];
-    for (let r = 0; r < o.runs; r++) {
-      try {
-        runs.push(await captureRun(browser, site, o, dir, r === 0, browserPid));
-      } catch (e) {
-        runs.push({ error: String(e.message || e).split('\n')[0] });
-      }
+async function captureRuns(browser, site, o, dir, browserPid) {
+  const runs = [];
+  for (let r = 0; r < o.runs; r++) {
+    try {
+      runs.push(await captureRun(browser, site, o, dir, r === 0, browserPid));
+    } catch (e) {
+      runs.push({ error: String(e.message || e).split('\n')[0] });
     }
-    const first = runs[0] || {};
-    const summary = {};
-    for (const k of SUMMARY_KEYS) summary[k] = median(runs.map(r => r[k]));
-    const result = {
-      engine: 'chrome', version, site, viewport: { width: o.width, height: o.height },
-      capturedAt: new Date().toISOString(), host: os.hostname(), cpus: os.cpus().length,
-      status: first.status, error: first.error || null,
-      summary, runs: runs.map(r => { const c = Object.assign({}, r); delete c.probe; return c; }),
-    };
-    fs.writeFileSync(path.join(dir, 'metrics.json'), JSON.stringify(result, null, 1));
-    if (first.probe) fs.writeFileSync(path.join(dir, 'probe.json'), JSON.stringify(first.probe));
-    console.log(`${site.id.padEnd(20)} ${String(first.status || '-').padEnd(4)} ` +
-      `fcp=${summary.fcp ?? '-'} lcp=${summary.lcp ?? '-'} load=${summary.load ?? '-'} ` +
-      `main=${summary.mainThreadMs ?? '-'}ms req=${summary.requests ?? '-'}` +
-      (first.error ? `  ERR ${first.error}` : ''));
   }
+  return runs;
+}
+
+function logSite(site, first, summary) {
+  console.log(`${site.id.padEnd(20)} ${String(first.status || '-').padEnd(4)} ` +
+    `fcp=${summary.fcp ?? '-'} lcp=${summary.lcp ?? '-'} load=${summary.load ?? '-'} ` +
+    `main=${summary.mainThreadMs ?? '-'}ms req=${summary.requests ?? '-'}` +
+    (first.error ? `  ERR ${first.error}` : ''));
+}
+
+async function captureSite(browser, version, site, o, browserPid) {
+  const dir = path.join(o.out, o.label, site.id);
+  if (o.skipExisting && fs.existsSync(path.join(dir, 'metrics.json'))) return;
+  fs.mkdirSync(dir, { recursive: true });
+  const runs = await captureRuns(browser, site, o, dir, browserPid);
+  const first = runs[0] || {};
+  const summary = {};
+  for (const k of SUMMARY_KEYS) summary[k] = median(runs.map(r => r[k]));
+  const result = {
+    engine: 'chrome', version, site, viewport: { width: o.width, height: o.height },
+    capturedAt: new Date().toISOString(), host: os.hostname(), cpus: os.cpus().length,
+    status: first.status, error: first.error || null,
+    summary, runs: runs.map(r => { const c = Object.assign({}, r); delete c.probe; return c; }),
+  };
+  fs.writeFileSync(path.join(dir, 'metrics.json'), JSON.stringify(result, null, 1));
+  if (first.probe) fs.writeFileSync(path.join(dir, 'probe.json'), JSON.stringify(first.probe));
+  logSite(site, first, summary);
+}
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  const { chromium } = loadPlaywright();
+  const sites = readSites(o.sites, o.only, o.category);
+  if (!sites.length) { console.error('chrome-capture: no sites selected'); process.exit(2); }
+  const browser = await launchBrowser(chromium, o);
+  const version = browser.version();
+  const browserPid = process.pid;
+  console.log(`chrome-capture: ${version}, ${sites.length} sites, viewport ${o.width}x${o.height}, runs ${o.runs}`);
+  for (const site of sites) await captureSite(browser, version, site, o, browserPid);
   await browser.close();
 }
 
