@@ -2961,10 +2961,11 @@ about_diagnostics_html(void)
     diag_feature(s, "WebGL (3D canvas)", FALSE);
 #endif
 #ifdef ND_HAVE_WEBGPU
-    diag_kv(s, "WebGPU (experimental)",
-            g_getenv("NS_WEBGPU_ALLOW")
-                ? "Enabled (--enable-webgpu)"
-                : "Built \xe2\x80\x94 start with --enable-webgpu");
+    diag_kv(s, "WebGPU",
+            g_getenv("NS_WEBGPU_ALLOW") ? "Enabled (--enable-webgpu)"
+            : ns_config_get() && ns_config_get()->webgpu_enabled
+                ? "Enabled (Settings)"
+                : "Built \xe2\x80\x94 enable it in Settings or with --enable-webgpu");
 #else
     diag_feature(s, "WebGPU (experimental)", FALSE);
 #endif
@@ -4625,6 +4626,9 @@ SETTINGS_SWITCH("javascript_enabled",
 SETTINGS_SWITCH("webgl_enabled",
     "WebGL",
     "Allow 3D graphics in the canvas element.")
+SETTINGS_SWITCH("webgpu_enabled",
+    "WebGPU",
+    "Allow pages to use the graphics card directly for 3D and compute work.")
 SETTINGS_SWITCH("local_storage_enabled",
     "Local storage",
     "Let sites keep data on this device.")
@@ -4652,7 +4656,7 @@ SETTINGS_SWITCH("cache_enabled",
 "{n:'Wikipedia',u:'https://en.wikipedia.org/w/index.php?search=%s'}];\n"
 "var toggles=['do_not_track','global_privacy_control',"
 "'strip_tracking_params','https_first','images_enabled',"
-"'javascript_enabled','webgl_enabled','local_storage_enabled',"
+"'javascript_enabled','webgl_enabled','webgpu_enabled','local_storage_enabled',"
 "'cache_enabled'];\n"
 "var loaded=false,toastTimer=0;\n"
 "function toast(t){var s=$('status');s.textContent=t;s.className='toast show';"
@@ -4739,7 +4743,7 @@ about_settings_json(void)
         "\"do_not_track\":%s,\"global_privacy_control\":%s,"
         "\"strip_tracking_params\":%s,\"https_first\":%s,"
         "\"images_enabled\":%s,\"javascript_enabled\":%s,"
-        "\"webgl_enabled\":%s,"
+        "\"webgl_enabled\":%s,\"webgpu_enabled\":%s,"
         "\"local_storage_enabled\":%s,\"cache_enabled\":%s}",
         home, eng, c ? (int)c->cookie_policy : 1,
         (c && c->do_not_track) ? "true" : "false",
@@ -4749,6 +4753,7 @@ about_settings_json(void)
         (c && c->images_enabled) ? "true" : "false",
         (c && c->javascript_enabled) ? "true" : "false",
         (c && c->webgl_enabled) ? "true" : "false",
+        (c && c->webgpu_enabled) ? "true" : "false",
         (c && c->local_storage_enabled) ? "true" : "false",
         (c && c->cache_enabled) ? "true" : "false");
     ns_config_unlock();
@@ -4790,6 +4795,8 @@ about_settings_save(const char *form)
         c->javascript_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "webgl_enabled")))
         c->webgl_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "webgpu_enabled")))
+        c->webgpu_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "local_storage_enabled")))
         c->local_storage_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "cache_enabled")))

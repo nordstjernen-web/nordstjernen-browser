@@ -47,6 +47,8 @@ typedef struct ns_webgl {
     JSContext     *ctx;
     JSValue        js_obj;
     JSValue        canvas_obj;
+    JSValue        extensions;
+    gboolean       lost;
     const ns_node *canvas;
     int            version;
     ns_gl_context *gl;
@@ -360,6 +362,7 @@ ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
     g->gl = gl;
     g->js_obj = JS_UNDEFINED;
     g->canvas_obj = JS_UNDEFINED;
+    g->extensions = JS_UNDEFINED;
     g->alpha     = ns_webgl_attr(ctx, attrs, "alpha", TRUE);
     g->depth     = ns_webgl_attr(ctx, attrs, "depth", TRUE);
     g->stencil   = ns_webgl_attr(ctx, attrs, "stencil", FALSE);
@@ -439,6 +442,7 @@ ns_webgl_finalizer(JSRuntime *rt, JSValue val)
     if (g_webgl_by_node)
         g_hash_table_remove(g_webgl_by_node, g->canvas);
     JS_FreeValueRT(rt, g->canvas_obj);
+    JS_FreeValueRT(rt, g->extensions);
     ns_webgl_free(g);
 }
 
@@ -446,7 +450,10 @@ static void
 ns_webgl_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
 {
     ns_webgl *g = JS_GetOpaque(val, ns_webgl_class_id);
-    if (g) JS_MarkValue(rt, g->canvas_obj, mark_func);
+    if (g) {
+        JS_MarkValue(rt, g->canvas_obj, mark_func);
+        JS_MarkValue(rt, g->extensions, mark_func);
+    }
 }
 
 static JSClassDef ns_webgl_class = {
@@ -1391,6 +1398,9 @@ wgl_param_cap(GLenum pname)
     }
 }
 
+static int wgl_enabled_compressed_formats(JSContext *ctx, ns_webgl *g,
+                                          GLint *out, int cap);
+
 static JSValue
 wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -1454,8 +1464,10 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         JS_FreeValue(ctx, a);
         return ta;
     }
-    case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
-        return JS_NewInt32(ctx, 0);
+    case GL_NUM_COMPRESSED_TEXTURE_FORMATS: {
+        GLint formats[64];
+        return JS_NewInt32(ctx, wgl_enabled_compressed_formats(ctx, g, formats, 64));
+    }
     case GL_STENCIL_WRITEMASK:
     case GL_STENCIL_BACK_WRITEMASK:
     case GL_STENCIL_VALUE_MASK:
@@ -1476,8 +1488,10 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     case GL_DITHER:
         return JS_NewBool(ctx, glIsEnabled(pname));
     case GL_COMPRESSED_TEXTURE_FORMATS: {
-        GLint none = 0;
-        JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)&none, 0);
+        GLint formats[64];
+        int n = wgl_enabled_compressed_formats(ctx, g, formats, 64);
+        JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)formats,
+                                          (size_t)n * sizeof(GLint));
         JSValue ta = wgl_typed_array(ctx, a, JS_TYPED_ARRAY_UINT32);
         JS_FreeValue(ctx, a);
         return ta;
@@ -1517,29 +1531,327 @@ static JSValue
 wgl_isContextLost(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
-    return JS_NewBool(ctx, FALSE);
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
+    return JS_NewBool(ctx, g->lost);
 }
 
 static void set_const(JSContext *ctx, JSValueConst obj, const char *name,
                       int value);
 
-static const char *const wgl_supported_extensions[] = {
-    "WEBGL_debug_renderer_info",
-    "EXT_texture_filter_anisotropic",
-    NULL,
+static JSValue wgl_drawArraysInstanced(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_drawElementsInstanced(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_vertexAttribDivisor(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_createVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_deleteVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_isVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_bindVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+
+static gboolean
+wgl_has_any_ext(const char *a, const char *b)
+{
+    return epoxy_is_desktop_gl() || epoxy_has_gl_extension(a) ||
+           (b && epoxy_has_gl_extension(b));
+}
+
+static gboolean wgl_ext_always(void) { return TRUE; }
+static gboolean wgl_ext_float_rt(void)
+{ return wgl_has_any_ext("GL_EXT_color_buffer_float", NULL); }
+static gboolean wgl_ext_half_float_rt(void)
+{ return wgl_has_any_ext("GL_EXT_color_buffer_half_float", "GL_EXT_color_buffer_float"); }
+static gboolean wgl_ext_float_linear(void)
+{ return wgl_has_any_ext("GL_OES_texture_float_linear", NULL); }
+static gboolean wgl_ext_float_blend(void)
+{ return wgl_has_any_ext("GL_EXT_float_blend", NULL); }
+static gboolean wgl_ext_derivatives(void)
+{ return wgl_has_any_ext("GL_OES_standard_derivatives", NULL); }
+static gboolean wgl_ext_s3tc(void)
+{
+    return epoxy_has_gl_extension("GL_EXT_texture_compression_s3tc") ||
+           epoxy_has_gl_extension("GL_ANGLE_texture_compression_dxt5");
+}
+static gboolean wgl_ext_s3tc_srgb(void)
+{
+    return wgl_ext_s3tc() &&
+           (epoxy_has_gl_extension("GL_EXT_texture_compression_s3tc_srgb") ||
+            (epoxy_is_desktop_gl() && epoxy_has_gl_extension("GL_EXT_texture_sRGB")) ||
+            (epoxy_is_desktop_gl() && epoxy_gl_version() >= 21));
+}
+static gboolean wgl_ext_rgtc(void)
+{
+    return (epoxy_is_desktop_gl() && epoxy_gl_version() >= 30) ||
+           epoxy_has_gl_extension("GL_EXT_texture_compression_rgtc") ||
+           epoxy_has_gl_extension("GL_ARB_texture_compression_rgtc");
+}
+static gboolean wgl_ext_bptc(void)
+{
+    return (epoxy_is_desktop_gl() && epoxy_gl_version() >= 42) ||
+           epoxy_has_gl_extension("GL_EXT_texture_compression_bptc") ||
+           epoxy_has_gl_extension("GL_ARB_texture_compression_bptc");
+}
+static gboolean wgl_ext_etc(void)
+{
+    return !epoxy_is_desktop_gl() || epoxy_gl_version() >= 43 ||
+           epoxy_has_gl_extension("GL_ARB_ES3_compatibility");
+}
+static gboolean wgl_ext_astc(void)
+{
+    return epoxy_has_gl_extension("GL_KHR_texture_compression_astc_ldr");
+}
+static gboolean wgl_ext_vao(void)
+{
+#ifdef NS_HAVE_CGL
+    return FALSE;
+#else
+    return TRUE;
+#endif
+}
+
+static JSValue
+wgl_ext_trampoline(JSContext *ctx, JSValueConst this_val, int argc,
+                   JSValueConst *argv, int magic, JSValueConst *data)
+{
+    (void)this_val;
+    static JSCFunction *const fns[] = {
+        wgl_drawArraysInstanced, wgl_drawElementsInstanced,
+        wgl_vertexAttribDivisor, wgl_createVertexArray, wgl_deleteVertexArray,
+        wgl_isVertexArray, wgl_bindVertexArray,
+    };
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(fns)) return JS_UNDEFINED;
+    return fns[magic](ctx, data[0], argc, argv);
+}
+
+static void
+wgl_dispatch_context_event(JSContext *ctx, ns_webgl *g, const char *type)
+{
+    if (!JS_IsObject(g->canvas_obj)) return;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Event");
+    JSValue name = JS_NewString(ctx, type);
+    JSValue ev = JS_CallConstructor(ctx, ctor, 1, (JSValueConst *)&name);
+    JS_FreeValue(ctx, name);
+    if (!JS_IsException(ev)) {
+        JSValue dispatch = JS_GetPropertyStr(ctx, g->canvas_obj, "dispatchEvent");
+        JS_FreeValue(ctx, JS_Call(ctx, dispatch, g->canvas_obj, 1,
+                                  (JSValueConst *)&ev));
+        JS_FreeValue(ctx, dispatch);
+    }
+    if (JS_IsException(ev)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, ev);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
+static JSValue
+wgl_lose_context(JSContext *ctx, JSValueConst this_val, int argc,
+                 JSValueConst *argv, int magic, JSValueConst *data)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_webgl *g = JS_GetOpaque(data[0], ns_webgl_class_id);
+    if (!g || g->lost == !magic) return JS_UNDEFINED;
+    g->lost = !magic;
+    wgl_dispatch_context_event(ctx, g, magic ? "webglcontextrestored"
+                                             : "webglcontextlost");
+    return JS_UNDEFINED;
+}
+
+typedef struct { const char *name; int value; } wgl_ext_const;
+typedef struct { const char *name; int argc; int magic; } wgl_ext_method;
+
+typedef struct {
+    const char           *name;
+    int                   versions;
+    gboolean            (*available)(void);
+    const wgl_ext_const  *consts;
+    const wgl_ext_method *methods;
+} wgl_extension;
+
+static const wgl_ext_const wgl_c_debug_info[] = {
+    { "UNMASKED_VENDOR_WEBGL", NS_UNMASKED_VENDOR_WEBGL },
+    { "UNMASKED_RENDERER_WEBGL", NS_UNMASKED_RENDERER_WEBGL }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_aniso[] = {
+    { "MAX_TEXTURE_MAX_ANISOTROPY_EXT", NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT },
+    { "TEXTURE_MAX_ANISOTROPY_EXT", NS_TEXTURE_MAX_ANISOTROPY_EXT }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_instanced[] = {
+    { "VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE", 0x88FE }, { NULL, 0 } };
+static const wgl_ext_method wgl_m_instanced[] = {
+    { "drawArraysInstancedANGLE", 4, 0 }, { "drawElementsInstancedANGLE", 5, 1 },
+    { "vertexAttribDivisorANGLE", 2, 2 }, { NULL, 0, 0 } };
+static const wgl_ext_const wgl_c_vao[] = {
+    { "VERTEX_ARRAY_BINDING_OES", 0x85B5 }, { NULL, 0 } };
+static const wgl_ext_method wgl_m_vao[] = {
+    { "createVertexArrayOES", 0, 3 }, { "deleteVertexArrayOES", 1, 4 },
+    { "isVertexArrayOES", 1, 5 }, { "bindVertexArrayOES", 1, 6 }, { NULL, 0, 0 } };
+static const wgl_ext_const wgl_c_derivatives[] = {
+    { "FRAGMENT_SHADER_DERIVATIVE_HINT_OES", 0x8B8B }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_half_float[] = {
+    { "HALF_FLOAT_OES", 0x8D61 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_depth_texture[] = {
+    { "UNSIGNED_INT_24_8_WEBGL", 0x84FA }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_minmax[] = {
+    { "MIN_EXT", 0x8007 }, { "MAX_EXT", 0x8008 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_color_float[] = {
+    { "RGBA32F_EXT", 0x8814 },
+    { "FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211 },
+    { "UNSIGNED_NORMALIZED_EXT", 0x8C17 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_color_half_float[] = {
+    { "RGBA16F_EXT", 0x881A }, { "RGB16F_EXT", 0x881B },
+    { "FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211 },
+    { "UNSIGNED_NORMALIZED_EXT", 0x8C17 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_s3tc[] = {
+    { "COMPRESSED_RGB_S3TC_DXT1_EXT", 0x83F0 },
+    { "COMPRESSED_RGBA_S3TC_DXT1_EXT", 0x83F1 },
+    { "COMPRESSED_RGBA_S3TC_DXT3_EXT", 0x83F2 },
+    { "COMPRESSED_RGBA_S3TC_DXT5_EXT", 0x83F3 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_s3tc_srgb[] = {
+    { "COMPRESSED_SRGB_S3TC_DXT1_EXT", 0x8C4C },
+    { "COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT", 0x8C4D },
+    { "COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT", 0x8C4E },
+    { "COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT", 0x8C4F }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_rgtc[] = {
+    { "COMPRESSED_RED_RGTC1_EXT", 0x8DBB },
+    { "COMPRESSED_SIGNED_RED_RGTC1_EXT", 0x8DBC },
+    { "COMPRESSED_RED_GREEN_RGTC2_EXT", 0x8DBD },
+    { "COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT", 0x8DBE }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_bptc[] = {
+    { "COMPRESSED_RGBA_BPTC_UNORM_EXT", 0x8E8C },
+    { "COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT", 0x8E8D },
+    { "COMPRESSED_RGB_BPTC_SIGNED_FLOAT_EXT", 0x8E8E },
+    { "COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT", 0x8E8F }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_etc[] = {
+    { "COMPRESSED_R11_EAC", 0x9270 }, { "COMPRESSED_SIGNED_R11_EAC", 0x9271 },
+    { "COMPRESSED_RG11_EAC", 0x9272 }, { "COMPRESSED_SIGNED_RG11_EAC", 0x9273 },
+    { "COMPRESSED_RGB8_ETC2", 0x9274 }, { "COMPRESSED_SRGB8_ETC2", 0x9275 },
+    { "COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2", 0x9276 },
+    { "COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2", 0x9277 },
+    { "COMPRESSED_RGBA8_ETC2_EAC", 0x9278 },
+    { "COMPRESSED_SRGB8_ALPHA8_ETC2_EAC", 0x9279 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_astc[] = {
+    { "COMPRESSED_RGBA_ASTC_4x4_KHR", 0x93B0 }, { "COMPRESSED_RGBA_ASTC_5x4_KHR", 0x93B1 },
+    { "COMPRESSED_RGBA_ASTC_5x5_KHR", 0x93B2 }, { "COMPRESSED_RGBA_ASTC_6x5_KHR", 0x93B3 },
+    { "COMPRESSED_RGBA_ASTC_6x6_KHR", 0x93B4 }, { "COMPRESSED_RGBA_ASTC_8x5_KHR", 0x93B5 },
+    { "COMPRESSED_RGBA_ASTC_8x6_KHR", 0x93B6 }, { "COMPRESSED_RGBA_ASTC_8x8_KHR", 0x93B7 },
+    { "COMPRESSED_RGBA_ASTC_10x5_KHR", 0x93B8 }, { "COMPRESSED_RGBA_ASTC_10x6_KHR", 0x93B9 },
+    { "COMPRESSED_RGBA_ASTC_10x8_KHR", 0x93BA }, { "COMPRESSED_RGBA_ASTC_10x10_KHR", 0x93BB },
+    { "COMPRESSED_RGBA_ASTC_12x10_KHR", 0x93BC }, { "COMPRESSED_RGBA_ASTC_12x12_KHR", 0x93BD },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR", 0x93D0 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR", 0x93D1 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR", 0x93D2 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR", 0x93D3 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR", 0x93D4 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR", 0x93D5 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR", 0x93D6 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR", 0x93D7 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR", 0x93D8 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR", 0x93D9 },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR", 0x93DA },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR", 0x93DB },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR", 0x93DC },
+    { "COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR", 0x93DD }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_parallel[] = {
+    { "COMPLETION_STATUS_KHR", 0x91B1 }, { NULL, 0 } };
+
+#define WGL_V1 1
+#define WGL_V2 2
+
+static const wgl_extension wgl_extensions[] = {
+    { "ANGLE_instanced_arrays", WGL_V1, wgl_ext_always, wgl_c_instanced, wgl_m_instanced },
+    { "EXT_blend_minmax", WGL_V1, wgl_ext_always, wgl_c_minmax, NULL },
+    { "EXT_color_buffer_float", WGL_V2, wgl_ext_float_rt, NULL, NULL },
+    { "EXT_color_buffer_half_float", WGL_V1 | WGL_V2, wgl_ext_half_float_rt,
+      wgl_c_color_half_float, NULL },
+    { "EXT_float_blend", WGL_V1 | WGL_V2, wgl_ext_float_blend, NULL, NULL },
+    { "EXT_texture_filter_anisotropic", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_aniso, NULL },
+    { "KHR_parallel_shader_compile", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_parallel, NULL },
+    { "OES_element_index_uint", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_standard_derivatives", WGL_V1, wgl_ext_derivatives, wgl_c_derivatives, NULL },
+    { "OES_texture_float", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_texture_float_linear", WGL_V1 | WGL_V2, wgl_ext_float_linear, NULL, NULL },
+    { "OES_texture_half_float", WGL_V1, wgl_ext_always, wgl_c_half_float, NULL },
+    { "OES_texture_half_float_linear", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_vertex_array_object", WGL_V1, wgl_ext_vao, wgl_c_vao, wgl_m_vao },
+    { "WEBGL_color_buffer_float", WGL_V1, wgl_ext_float_rt, wgl_c_color_float, NULL },
+    { "WEBGL_debug_renderer_info", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_debug_info, NULL },
+    { "WEBGL_depth_texture", WGL_V1, wgl_ext_always, wgl_c_depth_texture, NULL },
+    { "WEBGL_lose_context", WGL_V1 | WGL_V2, wgl_ext_always, NULL, NULL },
+    { "WEBGL_compressed_texture_s3tc", WGL_V1 | WGL_V2, wgl_ext_s3tc, wgl_c_s3tc, NULL },
+    { "WEBGL_compressed_texture_s3tc_srgb", WGL_V1 | WGL_V2, wgl_ext_s3tc_srgb,
+      wgl_c_s3tc_srgb, NULL },
+    { "EXT_texture_compression_rgtc", WGL_V1 | WGL_V2, wgl_ext_rgtc, wgl_c_rgtc, NULL },
+    { "EXT_texture_compression_bptc", WGL_V1 | WGL_V2, wgl_ext_bptc, wgl_c_bptc, NULL },
+    { "WEBGL_compressed_texture_etc", WGL_V1 | WGL_V2, wgl_ext_etc, wgl_c_etc, NULL },
+    { "WEBGL_compressed_texture_astc", WGL_V1 | WGL_V2, wgl_ext_astc, wgl_c_astc, NULL },
 };
+
+static gboolean
+wgl_extension_enabled(const ns_webgl *g, const wgl_extension *e)
+{
+    return (e->versions & (g->version >= 2 ? WGL_V2 : WGL_V1)) && e->available();
+}
 
 static JSValue
 wgl_getSupportedExtensions(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
+    ns_webgl *g = wgl_cur(ctx, this_val);
+    if (!g) return JS_NULL;
     JSValue arr = JS_NewArray(ctx);
-    for (int i = 0; wgl_supported_extensions[i]; i++)
-        JS_SetPropertyUint32(ctx, arr, (uint32_t)i,
-                             JS_NewString(ctx, wgl_supported_extensions[i]));
+    uint32_t n = 0;
+    for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions); i++)
+        if (wgl_extension_enabled(g, &wgl_extensions[i]))
+            JS_SetPropertyUint32(ctx, arr, n++,
+                                 JS_NewString(ctx, wgl_extensions[i].name));
     return arr;
+}
+
+static int
+wgl_enabled_compressed_formats(JSContext *ctx, ns_webgl *g, GLint *out, int cap)
+{
+    int n = 0;
+    if (!JS_IsObject(g->extensions)) return 0;
+    for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions); i++) {
+        const wgl_extension *e = &wgl_extensions[i];
+        if (!strstr(e->name, "compress")) continue;
+        JSValue v = JS_GetPropertyStr(ctx, g->extensions, e->name);
+        gboolean on = JS_IsObject(v);
+        JS_FreeValue(ctx, v);
+        for (const wgl_ext_const *c = e->consts; on && c && c->name && n < cap; c++)
+            out[n++] = c->value;
+    }
+    return n;
+}
+
+static JSValue
+wgl_astc_profiles(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue arr = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, arr, 0, JS_NewString(ctx, "ldr"));
+    return arr;
+}
+
+static JSValue
+wgl_make_extension(JSContext *ctx, JSValueConst gl, const wgl_extension *e)
+{
+    JSValue ext = JS_NewObject(ctx);
+    for (const wgl_ext_const *c = e->consts; c && c->name; c++)
+        set_const(ctx, ext, c->name, c->value);
+    for (const wgl_ext_method *m = e->methods; m && m->name; m++)
+        JS_SetPropertyStr(ctx, ext, m->name,
+                          JS_NewCFunctionData(ctx, wgl_ext_trampoline, m->argc,
+                                              m->magic, 1, &gl));
+    if (strcmp(e->name, "WEBGL_compressed_texture_astc") == 0)
+        JS_SetPropertyStr(ctx, ext, "getSupportedProfiles",
+                          JS_NewCFunction(ctx, wgl_astc_profiles,
+                                          "getSupportedProfiles", 0));
+    if (strcmp(e->name, "WEBGL_lose_context") == 0) {
+        JS_SetPropertyStr(ctx, ext, "loseContext",
+                          JS_NewCFunctionData(ctx, wgl_lose_context, 0, 0, 1, &gl));
+        JS_SetPropertyStr(ctx, ext, "restoreContext",
+                          JS_NewCFunctionData(ctx, wgl_lose_context, 0, 1, 1, &gl));
+    }
+    return ext;
 }
 
 static JSValue
@@ -1547,21 +1859,23 @@ wgl_getExtension(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
     if (argc < 1) return JS_NULL;
+    ns_webgl *g = wgl_cur(ctx, this_val);
+    if (!g) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
-    JSValue ext = JS_NULL;
-    if (g_ascii_strcasecmp(name, "WEBGL_debug_renderer_info") == 0) {
-        ext = JS_NewObject(ctx);
-        set_const(ctx, ext, "UNMASKED_VENDOR_WEBGL", NS_UNMASKED_VENDOR_WEBGL);
-        set_const(ctx, ext, "UNMASKED_RENDERER_WEBGL", NS_UNMASKED_RENDERER_WEBGL);
-    } else if (g_ascii_strcasecmp(name, "EXT_texture_filter_anisotropic") == 0) {
-        ext = JS_NewObject(ctx);
-        set_const(ctx, ext, "MAX_TEXTURE_MAX_ANISOTROPY_EXT",
-                  NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-        set_const(ctx, ext, "TEXTURE_MAX_ANISOTROPY_EXT",
-                  NS_TEXTURE_MAX_ANISOTROPY_EXT);
-    }
+    const wgl_extension *e = NULL;
+    for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions) && !e; i++)
+        if (g_ascii_strcasecmp(name, wgl_extensions[i].name) == 0 &&
+            wgl_extension_enabled(g, &wgl_extensions[i]))
+            e = &wgl_extensions[i];
     JS_FreeCString(ctx, name);
+    if (!e) return JS_NULL;
+    if (!JS_IsObject(g->extensions)) g->extensions = JS_NewObject(ctx);
+    JSValue ext = JS_GetPropertyStr(ctx, g->extensions, e->name);
+    if (JS_IsObject(ext)) return ext;
+    JS_FreeValue(ctx, ext);
+    ext = wgl_make_extension(ctx, this_val, e);
+    JS_SetPropertyStr(ctx, g->extensions, e->name, JS_DupValue(ctx, ext));
     return ext;
 }
 
@@ -1632,6 +1946,7 @@ wgl_getShaderParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
+    if (pname == 0x91B1) return JS_TRUE;
     glGetShaderiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_COMPILE_STATUS || pname == GL_DELETE_STATUS)
         return JS_NewBool(ctx, v);
@@ -1732,6 +2047,7 @@ wgl_getProgramParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
+    if (pname == 0x91B1) return JS_TRUE;
     glGetProgramiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_LINK_STATUS || pname == GL_VALIDATE_STATUS ||
         pname == GL_DELETE_STATUS)
@@ -2414,6 +2730,32 @@ wgl_unpack_restore(ns_webgl *g, const wgl_unpack_state *saved)
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, saved->skip_pixels);
 }
 
+static GLenum
+wgl_upload_type(const ns_webgl *g, GLenum type)
+{
+    return g->version < 2 && type == GL_HALF_FLOAT_OES ? GL_HALF_FLOAT : type;
+}
+
+static void
+wgl_webgl1_sized_format(const ns_webgl *g, GLint *internalformat, GLenum format,
+                        GLenum *type)
+{
+    if (g->version >= 2) return;
+    if (*type == GL_HALF_FLOAT_OES) {
+        *type = GL_HALF_FLOAT;
+        if (*internalformat == GL_RGBA) *internalformat = GL_RGBA16F;
+        else if (*internalformat == GL_RGB) *internalformat = GL_RGB16F;
+    } else if (*type == GL_FLOAT) {
+        if (*internalformat == GL_RGBA) *internalformat = GL_RGBA32F;
+        else if (*internalformat == GL_RGB) *internalformat = GL_RGB32F;
+    } else if (format == GL_DEPTH_COMPONENT && *internalformat == GL_DEPTH_COMPONENT) {
+        *internalformat = *type == GL_UNSIGNED_INT ? GL_DEPTH_COMPONENT24
+                                                   : GL_DEPTH_COMPONENT16;
+    } else if (format == GL_DEPTH_STENCIL && *internalformat == GL_DEPTH_STENCIL) {
+        *internalformat = GL_DEPTH24_STENCIL8;
+    }
+}
+
 static JSValue
 wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -2438,6 +2780,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
             return JS_UNDEFINED;
         }
+        wgl_webgl1_sized_format(g, &internalformat, format, &type);
         uint8_t *flipped = NULL;
         uint8_t *zero = NULL;
         if (!px) {
@@ -2465,6 +2808,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
+            wgl_webgl1_sized_format(g, &internalformat, format, &type);
             uint8_t *flipped = NULL;
             if (wgl_flip_safe(g, w, h, format, type, need, len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
@@ -2523,7 +2867,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             if (flipped) px = flipped;
         }
         if (px)
-            glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, px);
+            glTexSubImage2D(target, level, xoff, yoff, w, h, format,
+                            wgl_upload_type(g, type), px);
         g_free(flipped);
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return JS_UNDEFINED;
@@ -2545,7 +2890,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
-            glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, px);
+            glTexSubImage2D(target, level, xoff, yoff, w, h, format,
+                            wgl_upload_type(g, type), px);
             g_free(flipped);
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (px) {
@@ -3714,14 +4060,149 @@ wgl_getAttachedShaders(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     return arr;
 }
 
-static JSValue
-wgl_compressed_unsupported(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+static gboolean
+wgl_compressed_block(GLenum fmt, int *bw, int *bh, int *bytes)
 {
-    (void)argc; (void)argv;
+    *bw = *bh = 4;
+    switch (fmt) {
+    case 0x83F0: case 0x83F1: case 0x8C4C: case 0x8C4D:
+    case 0x8DBB: case 0x8DBC:
+    case 0x9270: case 0x9271: case 0x9274: case 0x9275: case 0x9276: case 0x9277:
+        *bytes = 8; return TRUE;
+    case 0x83F2: case 0x83F3: case 0x8C4E: case 0x8C4F:
+    case 0x8DBD: case 0x8DBE:
+    case 0x8E8C: case 0x8E8D: case 0x8E8E: case 0x8E8F:
+    case 0x9272: case 0x9273: case 0x9278: case 0x9279:
+        *bytes = 16; return TRUE;
+    }
+    static const unsigned char astc[14][2] = {
+        { 4, 4 }, { 5, 4 }, { 5, 5 }, { 6, 5 }, { 6, 6 }, { 8, 5 }, { 8, 6 },
+        { 8, 8 }, { 10, 5 }, { 10, 6 }, { 10, 8 }, { 10, 10 }, { 12, 10 }, { 12, 12 },
+    };
+    int idx = fmt >= 0x93B0 && fmt <= 0x93BD ? (int)(fmt - 0x93B0)
+            : fmt >= 0x93D0 && fmt <= 0x93DD ? (int)(fmt - 0x93D0) : -1;
+    if (idx < 0) return FALSE;
+    *bw = astc[idx][0];
+    *bh = astc[idx][1];
+    *bytes = 16;
+    return TRUE;
+}
+
+static gboolean
+wgl_compressed_size(GLenum fmt, GLsizei w, GLsizei h, GLsizei d, size_t *out)
+{
+    int bw, bh, bytes;
+    if (w < 0 || h < 0 || d < 0 || !wgl_compressed_block(fmt, &bw, &bh, &bytes))
+        return FALSE;
+    size_t blocks_x = ((size_t)w + (size_t)bw - 1) / (size_t)bw;
+    size_t blocks_y = ((size_t)h + (size_t)bh - 1) / (size_t)bh;
+    size_t n;
+    if (__builtin_mul_overflow(blocks_x, blocks_y, &n) ||
+        __builtin_mul_overflow(n, (size_t)bytes, &n) ||
+        __builtin_mul_overflow(n, (size_t)(d ? d : 1), &n))
+        return FALSE;
+    *out = n;
+    return TRUE;
+}
+
+static const uint8_t *
+wgl_compressed_source(JSContext *ctx, int argc, JSValueConst *argv, int i,
+                      size_t *len, JSValue *hold)
+{
+    *hold = JS_UNDEFINED;
+    if (i >= argc || !JS_IsObject(argv[i])) return NULL;
+    size_t total = 0;
+    const uint8_t *px = view_bytes(ctx, argv[i], &total, hold);
+    if (!px) return NULL;
+    size_t view_off = 0, view_len = 0, bpe = 1;
+    JSValue tb = JS_GetTypedArrayBuffer(ctx, argv[i], &view_off, &view_len, &bpe);
+    if (JS_IsException(tb)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, tb);
+    if (bpe == 0) bpe = 1;
+    int64_t off = 0, override = 0;
+    if (argc > i + 1) JS_ToInt64(ctx, &off, argv[i + 1]);
+    if (argc > i + 2) JS_ToInt64(ctx, &override, argv[i + 2]);
+    uint64_t elems = total / bpe;
+    if (off < 0 || override < 0 || (uint64_t)off > elems) return NULL;
+    uint64_t count = override ? (uint64_t)override : elems - (uint64_t)off;
+    if ((uint64_t)off + count > elems) return NULL;
+    *len = (size_t)(count * bpe);
+    return px + (size_t)off * bpe;
+}
+
+static JSValue
+wgl_compressed_upload(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv, gboolean sub, gboolean three_d)
+{
     WGL_GET(0);
-    g->injected_error = GL_INVALID_ENUM;
+    int dims = three_d ? 3 : 2;
+    int base = sub ? 2 + dims : 2;
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    GLint level = argi(ctx, argc, argv, 1);
+    GLint off[3] = { 0, 0, 0 };
+    if (sub)
+        for (int k = 0; k < dims; k++) off[k] = argi(ctx, argc, argv, 2 + k);
+    GLenum fmt = (GLenum)argi(ctx, argc, argv, sub ? base + dims : 2);
+    int size_at = sub ? base : 3;
+    GLsizei w = argi(ctx, argc, argv, size_at);
+    GLsizei h = argi(ctx, argc, argv, size_at + 1);
+    GLsizei d = three_d ? argi(ctx, argc, argv, size_at + 2) : 1;
+    int data_at = sub ? base + dims + 1 : 3 + dims + 1;
+    size_t need = 0;
+    if (!wgl_compressed_size(fmt, w, h, d, &need)) {
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_UNDEFINED;
+    }
+    if (data_at < argc && JS_IsNumber(argv[data_at])) {
+        GLsizei image_size = argi(ctx, argc, argv, data_at);
+        GLintptr pbo_off = (GLintptr)argi(ctx, argc, argv, data_at + 1);
+        const void *ptr = (const void *)pbo_off;
+        if (three_d && sub)
+            glCompressedTexSubImage3D(target, level, off[0], off[1], off[2], w, h, d,
+                                      fmt, image_size, ptr);
+        else if (three_d)
+            glCompressedTexImage3D(target, level, fmt, w, h, d, 0, image_size, ptr);
+        else if (sub)
+            glCompressedTexSubImage2D(target, level, off[0], off[1], w, h, fmt,
+                                      image_size, ptr);
+        else
+            glCompressedTexImage2D(target, level, fmt, w, h, 0, image_size, ptr);
+        return JS_UNDEFINED;
+    }
+    size_t len = 0;
+    JSValue hold;
+    const uint8_t *px = wgl_compressed_source(ctx, argc, argv, data_at, &len, &hold);
+    if (!px || len != need || len > NS_WEBGL_MAX_ALLOC) {
+        if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
+        g->injected_error = GL_INVALID_VALUE;
+        return JS_UNDEFINED;
+    }
+    if (three_d && sub)
+        glCompressedTexSubImage3D(target, level, off[0], off[1], off[2], w, h, d,
+                                  fmt, (GLsizei)len, px);
+    else if (three_d)
+        glCompressedTexImage3D(target, level, fmt, w, h, d, 0, (GLsizei)len, px);
+    else if (sub)
+        glCompressedTexSubImage2D(target, level, off[0], off[1], w, h, fmt,
+                                  (GLsizei)len, px);
+    else
+        glCompressedTexImage2D(target, level, fmt, w, h, 0, (GLsizei)len, px);
+    if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
     return JS_UNDEFINED;
 }
+
+static JSValue
+wgl_compressedTexImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ return wgl_compressed_upload(ctx, this_val, argc, argv, FALSE, FALSE); }
+static JSValue
+wgl_compressedTexSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ return wgl_compressed_upload(ctx, this_val, argc, argv, TRUE, FALSE); }
+static JSValue
+wgl_compressedTexImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ return wgl_compressed_upload(ctx, this_val, argc, argv, FALSE, TRUE); }
+static JSValue
+wgl_compressedTexSubImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ return wgl_compressed_upload(ctx, this_val, argc, argv, TRUE, TRUE); }
 
 static JSValue
 wgl_getIndexedParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -4349,8 +4830,8 @@ static const ns_gl_method wgl_methods[] = {
     { "vertexAttrib2fv", wgl_vertexAttrib2fv, 2 },
     { "vertexAttrib3fv", wgl_vertexAttrib3fv, 2 },
     { "vertexAttrib4fv", wgl_vertexAttrib4fv, 2 },
-    { "compressedTexImage2D", wgl_compressed_unsupported, 7 },
-    { "compressedTexSubImage2D", wgl_compressed_unsupported, 8 },
+    { "compressedTexImage2D", wgl_compressedTexImage2D, 7 },
+    { "compressedTexSubImage2D", wgl_compressedTexSubImage2D, 8 },
     { "getAttachedShaders", wgl_getAttachedShaders, 1 },
     { "drawingBufferStorage", wgl_drawingBufferStorage, 3 },
     { "makeXRCompatible", wgl_makeXRCompatible, 0 },
@@ -4440,8 +4921,8 @@ static const ns_gl_method wgl2_methods[] = {
     { "clientWaitSync", wgl_clientWaitSync, 3 },
     { "waitSync", wgl_waitSync, 3 },
     { "getSyncParameter", wgl_getSyncParameter, 2 },
-    { "compressedTexImage3D", wgl_compressed_unsupported, 8 },
-    { "compressedTexSubImage3D", wgl_compressed_unsupported, 10 },
+    { "compressedTexImage3D", wgl_compressedTexImage3D, 8 },
+    { "compressedTexSubImage3D", wgl_compressedTexSubImage3D, 10 },
     { "getIndexedParameter", wgl_getIndexedParameter, 2 },
     { "getSamplerParameter", wgl_getSamplerParameter, 2 },
     { "getTransformFeedbackVarying", wgl_getTransformFeedbackVarying, 2 },

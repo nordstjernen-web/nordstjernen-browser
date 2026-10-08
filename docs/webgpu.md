@@ -1,55 +1,33 @@
-# WebGPU (experimental)
+# WebGPU
 
-Nordstjernen has an **experimental** WebGPU (`navigator.gpu`)
-implementation. Unlike WebGL — which is in the standard build and mapped
-onto the in-tree GLES path — WebGPU is layered on the external
-[wgpu-native](https://github.com/gfx-rs/wgpu-native) library. It exists for
-experimentation and is kept behind a runtime gate because wgpu-native is a
-large dependency that does not fit the minimalism of the rest of the engine.
-
-The `webgpu` meson feature is `auto`: the binding is **compiled in whenever
-wgpu-native is present** and silently skipped when it is not. So a stock
-build on a machine without wgpu-native contains **no** WebGPU symbol, code,
-or dependency — `navigator.gpu` is simply `undefined`, exactly as before —
-while a machine that has wgpu-native gets a WebGPU-capable binary without
-needing to pass any extra build flag. Even then the API stays **off at
-runtime** until the browser is started with `--enable-webgpu`.
+Nordstjernen implements WebGPU (`navigator.gpu`) in `src/webgpu.c`, layered on
+the external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library. Like
+WebGL it is a required part of the desktop build; unlike WebGL it stays off at
+runtime until the browser is started with `--enable-webgpu`.
 
 ## Building with WebGPU
 
-WebGPU is gated by the `webgpu` meson feature (`auto` by default). Building
-it requires the wgpu-native library and headers; once those are reachable,
-the default `auto` setting picks them up automatically.
+The `webgpu` meson feature (`auto` by default) resolves wgpu-native in this
+order:
 
-1. Get a wgpu-native release for your platform from
-   <https://github.com/gfx-rs/wgpu-native/releases> and extract it. A
-   release contains `lib/libwgpu_native.{so,a}` and
-   `include/webgpu/{webgpu.h,wgpu.h}`. The C API headers are also vendored
-   in-tree under `third_party/wgpu-native/` (pinned to the supported
-   release — currently **v29.0.1.1**); only the library is fetched
-   externally.
+1. a `wgpu_native` pkg-config file;
+2. `-Dwgpu_native_root=/path/to/extracted/release` (expects
+   `lib/libwgpu_native.{so,a,dylib}`), which the Linux packaging scripts use to
+   bundle the shared library (`scripts/fetch-wgpu-native.sh`);
+3. on glibc Linux, macOS (x86_64/aarch64) and Windows x86_64 (MinGW), the
+   pinned release downloaded by `subprojects/wgpu-native-<platform>.wrap` and
+   linked **statically**, so no extra shared library ships beside the binary.
 
-2. Configure pointing at the extracted release:
+On those platforms a missing wgpu-native is a configure error — WebGPU is part
+of the build. On the BSDs, musl and the mobile engine builds, where wgpu-native
+publishes no release, the feature is optional and skipped when not found.
+`-Dwebgpu=enabled` hard-requires it everywhere; `-Dwebgpu=disabled` drops it
+everywhere.
 
-   ```sh
-   meson setup builddir -Dwgpu_native_root=/path/to/wgpu-native-release
-   meson compile -C builddir
-   ```
-
-   If your distribution ships a `wgpu_native` pkg-config file, `auto` finds
-   the library automatically and `-Dwgpu_native_root` is unnecessary. Pass
-   `-Dwebgpu=enabled` to make a missing wgpu-native a hard configure error
-   (useful in CI), or `-Dwebgpu=disabled` to force the binding out even when
-   the library is installed.
-
-   At runtime the shared library must be on the loader path (e.g.
-   `LD_LIBRARY_PATH=/path/to/release/lib`) unless it is installed
-   system-wide.
-
-The headers are pinned in-tree so the binding always compiles against a
-known API version; to move to a newer wgpu-native, replace the two headers
-under `third_party/wgpu-native/include/webgpu/` with the matching release
-and rebuild.
+The C API headers are vendored under `third_party/wgpu-native/` and pinned to
+release **v29.0.1.1**. To move to a newer release, replace those two headers,
+bump the version, URLs and hashes in the `subprojects/wgpu-native-*.wrap`
+files and `scripts/fetch-wgpu-native.sh`, and rebuild.
 
 ## Runtime gating
 
@@ -57,6 +35,8 @@ Even in a build that contains WebGPU, the API is **denied by default**.
 `navigator.gpu.requestAdapter()` resolves to `null` unless WebGPU is
 explicitly enabled, by either:
 
+- turning on **WebGPU** on `about:settings` (the `webgpu_enabled` config
+  key, off by default), which applies to pages loaded afterwards,
 - starting the browser with the **`--enable-webgpu`** command-line flag, or
 - setting the environment variable **`NS_WEBGPU_ALLOW=1`** (what the flag
   does internally).
@@ -147,15 +127,49 @@ are resolved by polling wgpu-native's event loop synchronously, so
 `await navigator.gpu.requestAdapter()` works without integrating with the
 page event loop.
 
+### Since the first cut
+
+- Every interface (`GPUDevice`, `GPUBuffer`, `GPURenderPassEncoder`,
+  `GPURenderBundleEncoder`, ...) is a global interface object whose
+  prototype carries the methods; `instanceof` checks work.
+- `adapter.limits`/`device.limits` and `features` are the real ones;
+  `requestDevice()` honours `requiredFeatures` and `requiredLimits`.
+- Render passes: up to eight colour attachments, full depth/stencil
+  attachment state, `setViewport`, `setScissorRect`, `setBlendConstant`,
+  `setStencilReference`, occlusion queries, `drawIndirect`,
+  `drawIndexedIndirect` and `executeBundles`. Render bundles are complete.
+- Pipelines: all vertex formats, primitive state, stencil faces, depth bias,
+  multisample mask / alpha-to-coverage, override constants, omitted entry
+  points, and `create{Render,Compute}PipelineAsync`.
+- All 99 texture formats; textures report their real attributes;
+  `viewFormats`; `rgba16float` canvases.
+- Bind group layouts: every view dimension, multisampled and integer
+  textures, storage textures, dynamic offsets.
+- Encoders: `copyBufferToTexture`, `copyTextureToBuffer`, `clearBuffer`,
+  `dispatchWorkgroupsIndirect`; `queue.onSubmittedWorkDone()`.
+- Errors: real error scopes, `GPUValidationError` / `GPUOutOfMemoryError` /
+  `GPUInternalError`, `uncapturederror` events on the device (an
+  `EventTarget`), `device.destroy()` resolving `device.lost`.
+
+### Guarding wgpu-native
+
+wgpu-native aborts the process instead of reporting an error in several
+places, so `src/webgpu.c` keeps such input from reaching it: unknown usage
+bits become a validation error, zero copy strides become
+`WGPU_COPY_STRIDE_UNDEFINED`, popping an empty error scope rejects in
+JavaScript, `GPUQuerySet.destroy()` releases instead of destroying,
+`wgpuTextureGetTextureBindingViewDimension` (unimplemented upstream) is
+never called, and a command buffer that failed validation at `finish()`
+or was already submitted is never passed to `wgpuQueueSubmit`.
+
 ### Not yet implemented
 
-What remains: real timestamp queries, render bundles, explicit blend state,
-storage textures, and 3D/cube/array texture-view descriptors (views default
-to 2D). Geometry, vertex colours, uniforms/transforms, texture-mapped
-geometry, and GPU compute all work; heavier three.js material examples (PBR
-clearcoat, environment maps) still drive the software backend into feature
-paths that `wgpu-native` itself panics on, which need the missing pieces
-above. This document and feature-detection reflect exactly what runs.
+Real timestamp queries (accepted, but they record nothing), compilation
+messages from `getCompilationInfo()`, external textures
+(`importExternalTexture`), and `mapAsync` that resolves asynchronously
+rather than by polling. Some three.js shaders use WGSL that naga rejects;
+the pipeline then reports a validation error and the affected pass is
+skipped.
 
 ## Architecture & security notes
 

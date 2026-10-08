@@ -16,8 +16,8 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.16.2 plus the browser hooks | release 2026-06-04, pinned by commit, plus one sort patch |
-| About page | `QuickJS 0.16.2` | `QuickJS 2026-06-04` |
+| Version | quickjs-ng 0.17.0 (master `60984dc`) plus the browser hooks | release 2026-06-04, pinned by commit, plus one sort patch |
+| About page | `QuickJS 0.17.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
 Both builds carry the same Web API surface. The whole binding — `src/js.c`
@@ -61,7 +61,9 @@ is a plain include. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
   constructor reads three arguments whatever `argc` says. These are macros
   over functions in `src/ns_quickjs.c`. The promise-rejection tracker's `is_handled` argument
   is `ns_js_bool`, which is `bool` on quickjs-ng and `JS_BOOL` on the
-  original.
+  original, and the interrupt handler's first argument is
+  `ns_js_interrupt_arg`, a `JSContext` on quickjs-ng and a `JSRuntime` on
+  the original.
 - **quickjs-ng additions.** `JS_IsArrayBuffer`, `JS_IsDataView` and
   `JS_GetTypedArrayType` compare class IDs learned once, from objects made
   in the first context. `JS_ToObject`, `JS_NewStringUTF16`,

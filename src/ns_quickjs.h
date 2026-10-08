@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 typedef JS_BOOL ns_js_bool;
+typedef JSRuntime ns_js_interrupt_arg;
 
 typedef enum JSBrandMode {
     JS_BRAND_THROW,
@@ -207,6 +208,7 @@ JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
 #else
 
 typedef bool ns_js_bool;
+typedef JSContext ns_js_interrupt_arg;
 
 #endif
 

@@ -1104,8 +1104,7 @@ font_family_map_generic(const char *token)
     else if (strcmp(lo, "cursive") == 0 ||
              strcmp(lo, "fantasy") == 0 ||
              strcmp(lo, "emoji") == 0 ||
-             strcmp(lo, "math") == 0 ||
-             strcmp(lo, "fangsong") == 0)
+             strcmp(lo, "math") == 0)
         ret = g_strdup(lo);
     g_free(lo);
     return ret;
@@ -1130,6 +1129,7 @@ font_family_substitute(const char *token)
 
 static gboolean (*g_font_available_cb)(const char *family);
 static char *(*g_font_alias_cb)(const char *family);
+static char *(*g_font_family_name_cb)(const char *family);
 static guint64 (*g_font_generation_cb)(void);
 static guint g_font_oracle_serial;
 
@@ -1221,6 +1221,13 @@ ns_css_set_font_alias_cb(char *(*cb)(const char *family))
 }
 
 void
+ns_css_set_font_family_name_cb(char *(*cb)(const char *family))
+{
+    g_font_family_name_cb = cb;
+    g_font_oracle_serial++;
+}
+
+void
 ns_css_set_font_generation_cb(guint64 (*cb)(void))
 {
     g_font_generation_cb = cb;
@@ -1272,76 +1279,135 @@ legacy_em_normalize(double *val, ns_css_unit *unit)
     }
 }
 
+static const char *
+font_family_token_end(const char *p)
+{
+    char quote = 0;
+    for (; *p; p++) {
+        if (quote) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == quote) quote = 0;
+        } else if (*p == '"' || *p == '\'') {
+            quote = *p;
+        } else if (*p == ',') {
+            break;
+        }
+    }
+    return p;
+}
+
+static gboolean
+font_family_token_is_skipped(const char *lo)
+{
+    return strcmp(lo, "inherit") == 0 ||
+           strcmp(lo, "initial") == 0 ||
+           strcmp(lo, "unset") == 0 ||
+           strcmp(lo, "revert") == 0 ||
+           strcmp(lo, "revert-layer") == 0 ||
+           strcmp(lo, "emoji") == 0 ||
+           strstr(lo, "linux libertine") != NULL ||
+           g_str_has_prefix(lo, "libertinus") ||
+           g_str_has_prefix(lo, "var(");
+}
+
+static gboolean
+font_family_token_is_system_alias(const char *lo)
+{
+    return strcmp(lo, "-apple-system") == 0 ||
+           strcmp(lo, "blinkmacsystemfont") == 0;
+}
+
+static gboolean
+font_family_is_generic_name(const char *family)
+{
+    char *generic = font_family_map_generic(family);
+    gboolean is_generic = generic != NULL;
+    g_free(generic);
+    return is_generic;
+}
+
+static char *
+font_family_text_name(const char *family)
+{
+    return g_font_family_name_cb ? g_font_family_name_cb(family)
+                                 : g_strdup(family);
+}
+
+static char *
+font_family_resolve_token(const char *token, char **substitute, gboolean *ends)
+{
+    char *lo = g_ascii_strdown(token, -1);
+    gboolean skipped = font_family_token_is_skipped(lo);
+    gboolean system_alias = font_family_token_is_system_alias(lo);
+    g_free(lo);
+    if (skipped) return NULL;
+    if (system_alias && !platform_has_system_font()) return NULL;
+    char *generic = system_alias ? g_strdup("system-ui")
+                                 : font_family_map_generic(token);
+    if (generic) {
+        char *family = g_strdup(platform_family_for_generic(generic));
+        *ends = font_family_is_generic_name(family);
+        g_free(generic);
+        return family;
+    }
+    if (!g_font_available_cb || g_font_available_cb(token))
+        return font_family_text_name(token);
+    char *alias = g_font_alias_cb ? g_font_alias_cb(token) : NULL;
+    if (alias) {
+        char *family = font_family_text_name(alias);
+        g_free(alias);
+        return family;
+    }
+    if (!*substitute) *substitute = font_family_substitute(token);
+    return NULL;
+}
+
+static gboolean
+font_family_list_has(const GString *list, const char *family)
+{
+    gsize n = strlen(family);
+    const char *p = list->str;
+    while (*p) {
+        const char *end = strchr(p, ',');
+        gsize len = end ? (gsize)(end - p) : strlen(p);
+        if (len == n && g_ascii_strncasecmp(p, family, n) == 0) return TRUE;
+        if (!end) break;
+        p = end + 1;
+    }
+    return FALSE;
+}
+
+static void
+font_family_list_add(GString *list, const char *family)
+{
+    if (font_family_list_has(list, family)) return;
+    if (list->len) g_string_append_c(list, ',');
+    g_string_append(list, family);
+}
+
 static char *
 font_family_resolve(const char *css_family)
 {
-    char *fallback = NULL;
+    GString *list = g_string_new(NULL);
+    char *substitute = NULL;
+    gboolean ends = FALSE;
     const char *p = css_family;
-    while (*p) {
+    while (*p && !ends) {
         while (*p == ',') p++;
-        const char *start = p;
-        char quote = 0;
-        while (*p) {
-            if (quote) {
-                if (*p == '\\' && p[1]) p++;
-                else if (*p == quote) quote = 0;
-            } else if (*p == '"' || *p == '\'') {
-                quote = *p;
-            } else if (*p == ',') {
-                break;
-            }
-            p++;
-        }
-        char *token = font_family_token_clean(start, (gsize)(p - start));
-        if (token && *token) {
-            char *lo = g_ascii_strdown(token, -1);
-            gboolean skip = strcmp(lo, "inherit") == 0 ||
-                            strcmp(lo, "initial") == 0 ||
-                            strcmp(lo, "unset") == 0 ||
-                            strcmp(lo, "revert") == 0 ||
-                            strcmp(lo, "revert-layer") == 0 ||
-                            strstr(lo, "linux libertine") != NULL ||
-                            g_str_has_prefix(lo, "libertinus") ||
-                            g_str_has_prefix(lo, "var(");
-            gboolean system_alias = strcmp(lo, "-apple-system") == 0 ||
-                                    strcmp(lo, "blinkmacsystemfont") == 0;
-            g_free(lo);
-            if (system_alias && platform_has_system_font()) {
-                g_free(token);
-                g_free(fallback);
-                return g_strdup("system-ui");
-            } else if (system_alias) {
-                if (!fallback) fallback = g_strdup("sans-serif");
-            } else if (!skip) {
-                char *mapped = font_family_map_generic(token);
-                if (mapped) {
-                    g_free(token);
-                    g_free(fallback);
-                    return mapped;
-                }
-                if (!g_font_available_cb || g_font_available_cb(token)) {
-                    g_free(fallback);
-                    return token;
-                }
-                char *alias = g_font_alias_cb ? g_font_alias_cb(token) : NULL;
-                if (alias) {
-                    g_free(token);
-                    g_free(fallback);
-                    return alias;
-                }
-                char *substitute = font_family_substitute(token);
-                if (substitute) {
-                    g_free(token);
-                    g_free(fallback);
-                    return substitute;
-                }
-                if (!fallback) fallback = g_strdup("sans-serif");
-            }
-        }
+        const char *end = font_family_token_end(p);
+        char *token = font_family_token_clean(p, (gsize)(end - p));
+        char *family = token && *token
+            ? font_family_resolve_token(token, &substitute, &ends) : NULL;
+        if (family) font_family_list_add(list, family);
+        g_free(family);
         g_free(token);
-        if (*p == ',') p++;
+        p = *end == ',' ? end + 1 : end;
     }
-    return fallback ? fallback : g_strdup("sans-serif");
+    if (!list->len)
+        font_family_list_add(list, platform_family_for_generic(
+                                       substitute ? substitute : "sans-serif"));
+    g_free(substitute);
+    return g_string_free(list, FALSE);
 }
 
 static int
@@ -1371,11 +1437,19 @@ ns_css_font_family_for_pango(const char *css_family)
     }
     const char *hit = g_hash_table_lookup(memo, css_family);
     if (hit) return g_strdup(hit);
-    char *generic = font_family_resolve(css_family);
-    char *resolved = g_strdup(platform_family_for_generic(generic));
-    g_free(generic);
+    char *resolved = font_family_resolve(css_family);
     g_hash_table_insert(memo, g_strdup(css_family), g_strdup(resolved));
     return resolved;
+}
+
+char *
+ns_css_font_family_first_for_pango(const char *css_family)
+{
+    if (!css_family) return NULL;
+    char *families = ns_css_font_family_for_pango(css_family);
+    char *comma = strchr(families, ',');
+    if (comma) *comma = '\0';
+    return families;
 }
 
 int

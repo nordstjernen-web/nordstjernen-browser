@@ -228,6 +228,157 @@ Changelog:
   renderer: the in-process video frame buffer is padded for swscale's
   vector writes. The sandbox lets the renderer read a CA bundle named by
   `CURL_CA_BUNDLE` or `SSL_CERT_FILE`.
+* quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
+  use-after-free in `AsyncDisposableStack`, a reference-count bug in
+  `Promise.withResolvers`, an out-of-bounds read when creating typed
+  arrays and a use-after-free when a context runs out of memory.
+  `Reflect.set` with an undefined receiver returns false instead of
+  throwing, bound functions keep their target's prototype, `Date.parse`
+  accepts the narrow no-break space that locale-formatted times contain,
+  and `Iterator.from` gives a string's or plain iterable's iterator the
+  helper methods. Integer-keyed objects no longer pile into a few hash
+  buckets, and the interpreter stays fast when built with GCC 14 or later.
+  IndexedDB records stored by earlier builds remain readable, although
+  the engine's serialization format changed.
+* WebGPU can be switched on in Settings, next to WebGL, instead of only
+  by starting the browser with `--enable-webgpu`. It stays off unless
+  turned on, and `about:nordstjernen` says how it was enabled.
+* WebGL can upload compressed textures: the S3TC/DXT (also sRGB), RGTC,
+  BPTC, ETC2/EAC and ASTC extensions are offered wherever the graphics
+  driver decodes those formats, and `compressedTexImage2D()`,
+  `compressedTexSubImage2D()` and their 3D forms work instead of always
+  failing. Games, map viewers and three.js scenes that ship DDS or KTX2
+  textures show them instead of untextured surfaces.
+* A WebGPU canvas is copied back from the GPU only when the page has
+  drawn into it since the last paint, through a buffer kept for the
+  canvas, instead of a full new copy into a freshly allocated buffer on
+  every repaint of the page. `getCurrentTexture()` returns the same
+  texture until the canvas is next presented, as the specification
+  requires.
+* Mistakes in a page's WebGPU commands no longer abort the renderer. A
+  command buffer that failed validation, for example because a shader
+  did not compile, or one submitted a second time used to stop the
+  process inside wgpu-native, which took three.js's ambient-occlusion
+  example down; they are now reported as validation errors and skipped.
+  Destroying an occlusion query set, as three.js's occlusion example
+  does every frame, also aborted the renderer.
+* WebGPU reports errors the way pages expect. `pushErrorScope()` and
+  `popErrorScope()` capture real validation, out-of-memory and internal
+  errors as `GPUValidationError`, `GPUOutOfMemoryError` and
+  `GPUInternalError` objects (they always reported "no error"), errors
+  outside a scope fire an `uncapturederror` event on the device (the
+  device is now an `EventTarget`, with `onuncapturederror`), and only
+  unhandled ones are written to the log, at most twenty per device.
+  `device.destroy()` destroys the device and resolves `device.lost`, and
+  popping an empty error-scope stack rejects instead of aborting the
+  renderer.
+* WebGPU render bundles work: `device.createRenderBundleEncoder()`, the
+  `GPURenderBundleEncoder` drawing commands and `executeBundles()` on a
+  render pass. three.js records the passes that build texture mipmaps as
+  bundles, so every textured three.js WebGPU scene, including its
+  sprite, material and model examples, stopped at the first texture with
+  "not a function"; they now render. Textures also report
+  `textureBindingViewDimension`.
+* WebGL offers the common extensions: instanced drawing, vertex array
+  objects, 32-bit indices, float and half-float textures with linear
+  filtering, depth textures, min/max blending, standard derivatives and
+  float render targets in WebGL 1, and float and half-float render
+  targets, float blending, parallel shader compilation and context-loss
+  simulation in both versions. Only the debug-renderer and anisotropic-
+  filtering extensions existed, so WebGL 1 pages that need instancing or
+  float textures fell back or failed, and three.js could not render to
+  the HDR targets its post-processing uses.
+* The Linux and macOS clang builds compile again: WebGPU limit fields,
+  half-float canvas readback and dynamic bind-group offsets were read
+  through misaligned pointer casts that `-Wcast-align` rejects; they
+  are now copied with `memcpy`.
+* Pages that upload WebGPU textures without giving `rowsPerImage`, which
+  three.js does for every texture, no longer abort the renderer: the
+  missing value reached wgpu-native as an invalid zero and it stopped
+  the process. `writeTexture()` writes to the mip level, layer and
+  position the page names instead of always the top-left of the first
+  layer, origins given as `{x, y, z}` are read correctly, and command
+  encoders gain `copyBufferToTexture()`, `copyTextureToBuffer()` and
+  `clearBuffer()`. Render passes support `drawIndirect()` and
+  `drawIndexedIndirect()`, compute passes
+  `dispatchWorkgroupsIndirect()`, and `queue.onSubmittedWorkDone()`
+  exists.
+* WebGPU bind groups support cube-map, array and 3D texture bindings,
+  multisampled and integer textures, storage textures and dynamic buffer
+  offsets; every texture binding used to be declared as a plain 2D
+  texture, so cube-mapped reflections and skyboxes failed to bind, and
+  dynamic offsets passed to `setBindGroup()` were dropped. A buffer
+  binding with an offset but no size now covers the rest of the buffer
+  instead of overrunning it, and a texture or buffer can be bound
+  directly.
+* The WebGPU interface objects (`GPUDevice`, `GPUTexture`,
+  `GPURenderPassEncoder`, `GPURenderBundleEncoder` and the rest) exist
+  as globals, as in other browsers. three.js tests command encoders
+  against them, so its WebGPU renderer stopped on a `ReferenceError` at
+  its first frame; the instancing and custom-lighting examples now
+  render. WebGPU methods live on the interfaces' prototypes, so creating
+  a render pass or a buffer no longer builds a fresh set of functions
+  each time.
+* WebGPU knows every texture format of the specification, including the
+  signed-normalised, integer, packed, depth/stencil and BC, ETC2 and
+  ASTC compressed formats; unknown names used to turn silently into
+  `bgra8unorm`. Textures report their real `format`, `dimension`,
+  `mipLevelCount`, `sampleCount`, `usage` and `depthOrArrayLayers`,
+  `viewFormats` are honoured, and a canvas can be configured as
+  `rgba16float` (HDR) as well as `bgra8unorm` or `rgba8unorm`.
+* WebGPU render pipelines honour their full state: stencil tests and
+  operations, depth bias (used against shadow acne), front-face winding,
+  strip index formats, unclipped depth, multisample masks and alpha-to-
+  coverage, and overridable shader constants. Vertex buffers can use
+  every WebGPU vertex format; previously anything but a few float and
+  uint32 formats was read as three floats, which scrambled packed
+  normals, colours and skinning weights. A shader stage without an
+  `entryPoint` uses its module's only entry point, and
+  `createRenderPipelineAsync()` and `createComputePipelineAsync()`
+  exist.
+* WebGPU render passes honour `setViewport()`, `setScissorRect()`,
+  `setBlendConstant()` and `setStencilReference()`, which were ignored,
+  so split views, UI overlays and the stencil effects of three.js draw
+  where the page asks. A render pass can write to several colour targets
+  at once, as deferred shading and three.js multiple-render-target
+  effects need, and its depth/stencil attachment honours the stencil
+  load, store and clear values and the read-only flags. Occlusion
+  queries can be started and ended inside a pass.
+* A WebGPU canvas keeps showing what was drawn into it after the page
+  lets go of its context object; it used to go blank at the next garbage
+  collection, and calling `getContext('webgpu')` again created a second,
+  empty context. WebGL contexts are kept alive by their canvas the same
+  way. `device.limits` reports the device's real limits instead of
+  zeros, `adapter.features` and `device.features` list what the GPU
+  supports, and `requestDevice()` honours `requiredFeatures` and
+  `requiredLimits`, so three.js can use compressed textures and float32
+  filtering. Invalid usage flags on a buffer or texture are reported as
+  a validation error instead of aborting the page's renderer, and a
+  failed `mapAsync()` rejects its promise.
+* WebGPU is now part of every Linux, macOS and Windows build, as WebGL
+  already was. When wgpu-native is not installed, the build downloads
+  the pinned release for the platform and links it into the browser, so
+  no extra library has to ship beside it. FreeBSD, NetBSD, musl-based
+  Linux, Android and iOS, which wgpu-native publishes no release for,
+  still build without it. WebGPU stays off until the browser is started
+  with `--enable-webgpu`.
+* Text falls back through the page's own `font-family` list. Only one
+  family of the list was handed to the text engine, so a character that
+  family lacks came from the system's fallback font and never from the
+  next family the page names: in `font-family: Icons, Georgia, serif`
+  the letters were in neither Georgia nor a serif. Every available
+  family of the list and its generic family are now passed on in the
+  page's order. With that the list is also followed past a missing
+  Arial, Helvetica, Segoe UI, Roboto or SF Pro name, which used to end
+  it with a stand-in, the default sans-serif font or for SF Pro the
+  system font: `'Segoe UI', SegoeUI, Arial` never reached the page's
+  own `SegoeUI` web font, and `'Roboto Mono', monospace` was drawn in a
+  proportional font. System emoji fonts named in the list are left out,
+  emoji being drawn in the emoji font wherever they stand, so text in
+  `font-family: 'Apple Color Emoji'` is no longer a row of boxes; a
+  page's own font under an emoji font's name, such as Google Fonts'
+  Noto Emoji, keeps its place in the list. A bare `fangsong` is a
+  family name like any other, as in Chrome.
 * JPEG XL images are displayed, as Chrome now does. `.jxl` files decode
   through libjxl, an optional dependency like libavif, in `<img>`, CSS
   backgrounds and `<picture>` sources typed `image/jxl`; transparency is

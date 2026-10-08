@@ -149,6 +149,38 @@ Everything above, plus:
   objects (`fenceSync`, `clientWaitSync`, `waitSync`, `getSyncParameter`).
 - The WebGL 2 enum constants.
 
+### Extensions
+
+`getExtension()` returns one cached object per extension and context;
+extensions that depend on the driver are advertised only when the GL context
+can honour them (desktop GL always can).
+
+- WebGL 1 only: `ANGLE_instanced_arrays`, `OES_vertex_array_object` (not on
+  macOS), `OES_element_index_uint`, `OES_standard_derivatives`,
+  `OES_texture_float`, `OES_texture_half_float`,
+  `OES_texture_half_float_linear`, `WEBGL_depth_texture`, `EXT_blend_minmax`,
+  `WEBGL_color_buffer_float`. Because the context underneath is GLES 3 or
+  desktop GL, WebGL 1 float, half-float and depth uploads with an unsized
+  internal format are mapped to the matching sized format (`RGBA32F`,
+  `RGBA16F`, `DEPTH_COMPONENT16/24`, `DEPTH24_STENCIL8`) and `HALF_FLOAT_OES`
+  to `HALF_FLOAT`.
+- WebGL 2 only: `EXT_color_buffer_float`.
+- Compressed textures, each offered when the driver can decode the format:
+  `WEBGL_compressed_texture_s3tc`, `WEBGL_compressed_texture_s3tc_srgb`,
+  `EXT_texture_compression_rgtc`, `EXT_texture_compression_bptc`,
+  `WEBGL_compressed_texture_etc` and `WEBGL_compressed_texture_astc`.
+  `compressedTex(Sub)Image2D/3D` check that the data is exactly the size the
+  format and dimensions require (or read from a bound unpack buffer in
+  WebGL 2), and `COMPRESSED_TEXTURE_FORMATS` lists the formats of the enabled
+  extensions.
+- Both: `EXT_color_buffer_half_float`, `EXT_float_blend`,
+  `OES_texture_float_linear`, `EXT_texture_filter_anisotropic`,
+  `KHR_parallel_shader_compile` (compilation is synchronous, so
+  `COMPLETION_STATUS_KHR` is always true), `WEBGL_debug_renderer_info` and
+  `WEBGL_lose_context` (`loseContext()` / `restoreContext()` flip
+  `isContextLost()` and fire `webglcontextlost` / `webglcontextrestored` on
+  the canvas).
+
 ## Security
 
 The original cut shipped with "no security measures"; this is the

@@ -576,9 +576,9 @@ ns_js_eval_budget_us(void)
 #define NS_JS_MONITOR_LIMIT_US (60LL * 1000000LL)
 
 static int
-ns_js_interrupt_cb(JSRuntime *rt, void *opaque)
+ns_js_interrupt_cb(ns_js_interrupt_arg *arg, void *opaque)
 {
-    (void)rt;
+    (void)arg;
     ns_js *js = opaque;
     if (!js) return 0;
     if (js->halted) return 1;
