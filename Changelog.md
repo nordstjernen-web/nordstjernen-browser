@@ -148,8 +148,9 @@ Changelog:
   page's module scripts start fetching their graphs when parsing ends.
   Deferred scripts that are ready run back to back instead of one per
   event-loop turn with a relayout between each. On microsoft.com, which
-  has 224 module scripts, three times as many modules run in the same
-  time and its main-thread CPU drops from 8.3 s to 7.2 s.
+  has 224 module scripts, 27 of them run within the benchmark's settle
+  window instead of 17, and its main-thread CPU drops from 9.9 s to
+  7.4 s.
 * Calling `Intl.DateTimeFormat()` and the other Intl constructors
   without `new` no longer leaves a stray TypeError behind. The
   constructor read `prototype` off its undefined receiver, failed
