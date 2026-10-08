@@ -24068,17 +24068,26 @@ inline_longhands_of(const char *name)
         g_free(key);
         return set;
     }
+    static const inline_longhand_set no_longhands;
     set = g_new0(inline_longhand_set, 1);
+    gboolean known = FALSE;
     if (key[0] != '-' || key[1] != '-') {
         const ns_css_stylesheet *sheet = inline_declaration_sheet(key, "initial");
         for (guint ri = 0; sheet && ri < sheet->rules->len; ri++) {
             ns_css_rule *rule = g_ptr_array_index(sheet->rules, ri);
             for (guint di = 0; di < rule->decls->len; di++) {
                 guint id = g_array_index(rule->decls, ns_css_decl, di).prop;
-                if (id < NS_CSS_PROP_COUNT)
+                if (id < NS_CSS_PROP_COUNT) {
                     set->bits[id / 64] |= G_GUINT64_CONSTANT(1) << (id % 64);
+                    known = TRUE;
+                }
             }
         }
+    }
+    if (!known) {
+        g_free(set);
+        g_free(key);
+        return &no_longhands;
     }
     g_hash_table_insert(g_inline_longhand_sets, key, set);
     return set;
