@@ -24857,7 +24857,7 @@ static JSClassDef ns_worker_class = {
 };
 
 #define NS_WORKER_SCRIPT_BYTES_MAX  (32u * 1024u * 1024u)
-#define NS_WORKER_MESSAGE_BYTES_MAX (16u * 1024u * 1024u)
+#define NS_WORKER_MESSAGE_BYTES_MAX (256u * 1024u * 1024u)
 
 static ns_worker_host *
 ns_worker_host_ref(ns_worker_host *host)
