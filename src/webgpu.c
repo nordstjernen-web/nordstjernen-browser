@@ -487,6 +487,35 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+typedef struct { int done; } wg_work_wait;
+
+static void
+wg_on_work_done(WGPUQueueWorkDoneStatus status, WGPUStringView message,
+                void *u1, void *u2)
+{
+    (void)status; (void)message; (void)u2;
+    ((wg_work_wait *)u1)->done = 1;
+}
+
+static JSValue
+wg_queue_onSubmittedWorkDone(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_wg_queue *q = wg_queue_unwrap(this_val);
+    if (!q) return wg_promise_rejected(ctx, "onSubmittedWorkDone: queue");
+    wg_work_wait wait = { 0 };
+    WGPUQueueWorkDoneCallbackInfo ci;
+    memset(&ci, 0, sizeof ci);
+    ci.mode = WGPUCallbackMode_AllowProcessEvents;
+    ci.callback = wg_on_work_done;
+    ci.userdata1 = &wait;
+    wgpuQueueOnSubmittedWorkDone(q->queue, ci);
+    for (int i = 0; i < 4000 && !wait.done; i++)
+        wgpuInstanceProcessEvents(ns_webgpu_instance());
+    return wg_promise_resolved(ctx, JS_UNDEFINED);
+}
+
 static JSValue
 wg_queue_submit(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
@@ -1544,6 +1573,40 @@ wg_pass_draw(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     if (argc >= 3) JS_ToUint32(ctx, &fv, argv[2]);
     if (argc >= 4) JS_ToUint32(ctx, &fi, argv[3]);
     wgpuRenderPassEncoderDraw(p->pass, vc, ic, fv, fi);
+    return JS_UNDEFINED;
+}
+
+static ns_wg_buffer *
+wg_indirect_args(JSContext *ctx, int argc, JSValueConst *argv, uint64_t *offset)
+{
+    if (argc < 1) return NULL;
+    ns_wg_buffer *b = JS_GetOpaque(argv[0], g_buffer_class);
+    int64_t off = 0;
+    if (argc >= 2) JS_ToInt64(ctx, &off, argv[1]);
+    *offset = off > 0 ? (uint64_t)off : 0;
+    return b && b->buffer ? b : NULL;
+}
+
+static JSValue
+wg_pass_drawIndirect(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    uint64_t off = 0;
+    ns_wg_buffer *b = wg_indirect_args(ctx, argc, argv, &off);
+    if (p && p->pass && b) wgpuRenderPassEncoderDrawIndirect(p->pass, b->buffer, off);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_drawIndexedIndirect(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    uint64_t off = 0;
+    ns_wg_buffer *b = wg_indirect_args(ctx, argc, argv, &off);
+    if (p && p->pass && b)
+        wgpuRenderPassEncoderDrawIndexedIndirect(p->pass, b->buffer, off);
     return JS_UNDEFINED;
 }
 
@@ -2746,6 +2809,38 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static uint32_t
+wg_copy_stride(JSContext *ctx, JSValueConst obj, const char *key)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    uint32_t stride = WGPU_COPY_STRIDE_UNDEFINED;
+    if (!JS_IsUndefined(v)) {
+        uint32_t x = 0;
+        JS_ToUint32(ctx, &x, v);
+        if (x != 0) stride = x;
+    }
+    JS_FreeValue(ctx, v);
+    return stride;
+}
+
+static void
+wg_read_buffer_layout(JSContext *ctx, JSValueConst v,
+                      WGPUTexelCopyBufferLayout *out)
+{
+    memset(out, 0, sizeof *out);
+    out->bytesPerRow = WGPU_COPY_STRIDE_UNDEFINED;
+    out->rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
+    if (!JS_IsObject(v)) return;
+    JSValue jo = JS_GetPropertyStr(ctx, v, "offset");
+    if (!JS_IsUndefined(jo)) {
+        int64_t off = 0; JS_ToInt64(ctx, &off, jo);
+        out->offset = off > 0 ? (uint64_t)off : 0;
+    }
+    JS_FreeValue(ctx, jo);
+    out->bytesPerRow = wg_copy_stride(ctx, v, "bytesPerRow");
+    out->rowsPerImage = wg_copy_stride(ctx, v, "rowsPerImage");
+}
+
 static ns_wg_texture *
 wg_read_texcopy(JSContext *ctx, JSValueConst v, WGPUTexelCopyTextureInfo *out,
                 wg_hold *hold)
@@ -2760,16 +2855,23 @@ wg_read_texcopy(JSContext *ctx, JSValueConst v, WGPUTexelCopyTextureInfo *out,
     JSValue jmip = JS_GetPropertyStr(ctx, v, "mipLevel");
     if (!JS_IsUndefined(jmip)) JS_ToUint32(ctx, &out->mipLevel, jmip);
     JS_FreeValue(ctx, jmip);
+    char *aspect = wg_get_string(ctx, v, "aspect");
+    if (aspect && strcmp(aspect, "depth-only") == 0)
+        out->aspect = WGPUTextureAspect_DepthOnly;
+    else if (aspect && strcmp(aspect, "stencil-only") == 0)
+        out->aspect = WGPUTextureAspect_StencilOnly;
+    g_free(aspect);
     JSValue jorigin = JS_GetPropertyStr(ctx, v, "origin");
-    if (JS_IsObject(jorigin)) {
-        WGPUExtent3D e;
-        wg_read_extent(ctx, jorigin, &e);
-        out->origin.x = e.width; out->origin.y = e.height; out->origin.z = 0;
-        JSValue jz = JS_GetPropertyStr(ctx, jorigin, "z");
-        if (!JS_IsUndefined(jz)) JS_ToUint32(ctx, &out->origin.z, jz);
-        JS_FreeValue(ctx, jz);
+    uint32_t xyz[3] = { 0, 0, 0 };
+    static const char *const keys[3] = { "x", "y", "z" };
+    for (uint32_t i = 0; i < 3 && JS_IsObject(jorigin); i++) {
+        JSValue c = JS_IsArray(jorigin) ? JS_GetPropertyUint32(ctx, jorigin, i)
+                                        : JS_GetPropertyStr(ctx, jorigin, keys[i]);
+        if (!JS_IsUndefined(c)) JS_ToUint32(ctx, &xyz[i], c);
+        JS_FreeValue(ctx, c);
     }
     JS_FreeValue(ctx, jorigin);
+    out->origin.x = xyz[0]; out->origin.y = xyz[1]; out->origin.z = xyz[2];
     return t;
 }
 
@@ -2792,19 +2894,103 @@ wg_encoder_copyTextureToTexture(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+wg_read_buffer_copy(JSContext *ctx, JSValueConst v, WGPUTexelCopyBufferInfo *out,
+                    wg_hold *hold)
+{
+    memset(out, 0, sizeof *out);
+    if (!JS_IsObject(v)) return FALSE;
+    JSValue jbuf = JS_GetPropertyStr(ctx, v, "buffer");
+    ns_wg_buffer *b = wg_hold_opaque(hold, jbuf, g_buffer_class);
+    JS_FreeValue(ctx, jbuf);
+    if (!b || !b->buffer) return FALSE;
+    out->buffer = b->buffer;
+    wg_read_buffer_layout(ctx, v, &out->layout);
+    return TRUE;
+}
+
+static JSValue
+wg_encoder_copyBufferToTexture(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc || argc < 3) return JS_UNDEFINED;
+    wg_hold hold = { ctx, NULL };
+    WGPUTexelCopyBufferInfo src;
+    WGPUTexelCopyTextureInfo dst;
+    gboolean have_src = wg_read_buffer_copy(ctx, argv[0], &src, &hold);
+    wg_read_texcopy(ctx, argv[1], &dst, &hold);
+    if (have_src && dst.texture) {
+        WGPUExtent3D size;
+        wg_read_extent(ctx, argv[2], &size);
+        wgpuCommandEncoderCopyBufferToTexture(e->enc, &src, &dst, &size);
+    }
+    wg_hold_release(&hold);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_encoder_copyTextureToBuffer(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc || argc < 3) return JS_UNDEFINED;
+    wg_hold hold = { ctx, NULL };
+    WGPUTexelCopyTextureInfo src;
+    WGPUTexelCopyBufferInfo dst;
+    wg_read_texcopy(ctx, argv[0], &src, &hold);
+    gboolean have_dst = wg_read_buffer_copy(ctx, argv[1], &dst, &hold);
+    if (src.texture && have_dst) {
+        WGPUExtent3D size;
+        wg_read_extent(ctx, argv[2], &size);
+        wgpuCommandEncoderCopyTextureToBuffer(e->enc, &src, &dst, &size);
+    }
+    wg_hold_release(&hold);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_encoder_clearBuffer(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc || argc < 1) return JS_UNDEFINED;
+    ns_wg_buffer *b = JS_GetOpaque(argv[0], g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    int64_t off = 0, size = -1;
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToInt64(ctx, &off, argv[1]);
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToInt64(ctx, &size, argv[2]);
+    if (off < 0) off = 0;
+    wgpuCommandEncoderClearBuffer(e->enc, b->buffer, (uint64_t)off,
+                                  size < 0 ? WGPU_WHOLE_SIZE : (uint64_t)size);
+    return JS_UNDEFINED;
+}
+
 static JSValue
 wg_encoder_copyBufferToBuffer(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
     ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
-    if (!e || !e->enc || argc < 5) return JS_UNDEFINED;
+    if (!e || !e->enc || argc < 4) return JS_UNDEFINED;
+    if (argc < 5) {
+        JSValueConst args[5] = { argv[0], argv[1], argv[2], argv[3], JS_UNDEFINED };
+        if (argc == 3) {
+            args[1] = JS_NewInt32(ctx, 0);
+            args[2] = argv[1];
+            args[3] = JS_NewInt32(ctx, 0);
+            args[4] = argv[2];
+        }
+        return wg_encoder_copyBufferToBuffer(ctx, this_val, 5, args);
+    }
     ns_wg_buffer *src = JS_GetOpaque(argv[0], g_buffer_class);
     ns_wg_buffer *dst = JS_GetOpaque(argv[2], g_buffer_class);
     if (!src || !dst) return JS_UNDEFINED;
     int64_t soff = 0, doff = 0, size = 0;
     JS_ToInt64(ctx, &soff, argv[1]);
     JS_ToInt64(ctx, &doff, argv[3]);
-    JS_ToInt64(ctx, &size, argv[4]);
+    if (JS_IsUndefined(argv[4])) size = (int64_t)src->size - soff;
+    else JS_ToInt64(ctx, &size, argv[4]);
+    if (soff < 0 || doff < 0 || size < 0) return JS_UNDEFINED;
     wgpuCommandEncoderCopyBufferToBuffer(e->enc, src->buffer, (uint64_t)soff,
                                          dst->buffer, (uint64_t)doff,
                                          (uint64_t)size);
@@ -2971,29 +3157,15 @@ wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
     ns_wg_queue *q = wg_queue_unwrap(this_val);
     if (!q || argc < 4 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
     wg_hold hold = { ctx, NULL };
-    JSValue jtex = JS_GetPropertyStr(ctx, argv[0], "texture");
-    ns_wg_texture *tex = wg_hold_opaque(&hold, jtex, g_texture_class);
-    JS_FreeValue(ctx, jtex);
-    if (!tex || !tex->texture) {
+    WGPUTexelCopyTextureInfo dst;
+    wg_read_texcopy(ctx, argv[0], &dst, &hold);
+    if (!dst.texture) {
         wg_hold_release(&hold);
         return JS_UNDEFINED;
     }
 
-    WGPUTexelCopyTextureInfo dst;
-    memset(&dst, 0, sizeof dst);
-    dst.texture = tex->texture;
-    dst.aspect = WGPUTextureAspect_All;
-
     WGPUTexelCopyBufferLayout layout;
-    memset(&layout, 0, sizeof layout);
-    if (JS_IsObject(argv[2])) {
-        JSValue jbpr = JS_GetPropertyStr(ctx, argv[2], "bytesPerRow");
-        if (!JS_IsUndefined(jbpr)) { uint32_t b = 0; JS_ToUint32(ctx, &b, jbpr); layout.bytesPerRow = b; }
-        JS_FreeValue(ctx, jbpr);
-        JSValue jrpi = JS_GetPropertyStr(ctx, argv[2], "rowsPerImage");
-        if (!JS_IsUndefined(jrpi)) { uint32_t r = 0; JS_ToUint32(ctx, &r, jrpi); layout.rowsPerImage = r; }
-        JS_FreeValue(ctx, jrpi);
-    }
+    wg_read_buffer_layout(ctx, argv[2], &layout);
     WGPUExtent3D ext;
     wg_read_extent(ctx, argv[3], &ext);
 
@@ -3289,6 +3461,18 @@ wg_compute_pass_dispatch(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+wg_compute_pass_dispatchIndirect(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    ns_wg_compute_pass *p = JS_GetOpaque(this_val, g_compute_pass_class);
+    uint64_t off = 0;
+    ns_wg_buffer *b = wg_indirect_args(ctx, argc, argv, &off);
+    if (p && p->pass && b)
+        wgpuComputePassEncoderDispatchWorkgroupsIndirect(p->pass, b->buffer, off);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 wg_compute_pass_end(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
@@ -3320,6 +3504,7 @@ static const JSCFunctionListEntry wg_queue_proto[] = {
     JS_CFUNC_DEF("writeTexture", 4, wg_queue_writeTexture),
     JS_CFUNC_DEF("copyExternalImageToTexture", 3, wg_queue_copyExternalImageToTexture),
     JS_CFUNC_DEF("submit", 1, wg_queue_submit),
+    JS_CFUNC_DEF("onSubmittedWorkDone", 0, wg_queue_onSubmittedWorkDone),
 };
 
 static const JSCFunctionListEntry wg_buffer_proto[] = {
@@ -3375,6 +3560,8 @@ static const JSCFunctionListEntry wg_pass_proto[] = {
     JS_CFUNC_DEF("insertDebugMarker", 1, wg_debug_noop),
     JS_CFUNC_DEF("draw", 4, wg_pass_draw),
     JS_CFUNC_DEF("drawIndexed", 5, wg_pass_drawIndexed),
+    JS_CFUNC_DEF("drawIndirect", 2, wg_pass_drawIndirect),
+    JS_CFUNC_DEF("drawIndexedIndirect", 2, wg_pass_drawIndexedIndirect),
 };
 
 static const JSCFunctionListEntry wg_encoder_proto[] = {
@@ -3382,6 +3569,13 @@ static const JSCFunctionListEntry wg_encoder_proto[] = {
     JS_CFUNC_DEF("beginComputePass", 1, wg_encoder_beginComputePass),
     JS_CFUNC_DEF("copyTextureToTexture", 3, wg_encoder_copyTextureToTexture),
     JS_CFUNC_DEF("copyBufferToBuffer", 5, wg_encoder_copyBufferToBuffer),
+    JS_CFUNC_DEF("copyBufferToTexture", 3, wg_encoder_copyBufferToTexture),
+    JS_CFUNC_DEF("copyTextureToBuffer", 3, wg_encoder_copyTextureToBuffer),
+    JS_CFUNC_DEF("clearBuffer", 3, wg_encoder_clearBuffer),
+    JS_CFUNC_DEF("writeTimestamp", 2, wg_debug_noop),
+    JS_CFUNC_DEF("pushDebugGroup", 1, wg_debug_noop),
+    JS_CFUNC_DEF("popDebugGroup", 0, wg_debug_noop),
+    JS_CFUNC_DEF("insertDebugMarker", 1, wg_debug_noop),
     JS_CFUNC_DEF("resolveQuerySet", 5, wg_encoder_resolveQuerySet),
     JS_CFUNC_DEF("finish", 0, wg_encoder_finish),
 };
@@ -3406,6 +3600,10 @@ static const JSCFunctionListEntry wg_compute_pass_proto[] = {
     JS_CFUNC_DEF("setPipeline", 1, wg_compute_pass_setPipeline),
     JS_CFUNC_DEF("setBindGroup", 2, wg_compute_pass_setBindGroup),
     JS_CFUNC_DEF("dispatchWorkgroups", 3, wg_compute_pass_dispatch),
+    JS_CFUNC_DEF("dispatchWorkgroupsIndirect", 2, wg_compute_pass_dispatchIndirect),
+    JS_CFUNC_DEF("pushDebugGroup", 1, wg_debug_noop),
+    JS_CFUNC_DEF("popDebugGroup", 0, wg_debug_noop),
+    JS_CFUNC_DEF("insertDebugMarker", 1, wg_debug_noop),
     JS_CFUNC_DEF("end", 0, wg_compute_pass_end),
 };
 
