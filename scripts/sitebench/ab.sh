@@ -7,8 +7,12 @@ ROOT=$(cd "$HERE/../.." && pwd)
 OUT=${OUT:-$ROOT/sitebench-out/ab}
 RUNS=${RUNS:-3}
 VIEWPORT=${VIEWPORT:-1280x800}
+SITES=${SITES:-$HERE/sites.tsv}
 BEFORE_LABEL=${BEFORE_LABEL:-before}
 AFTER_LABEL=${AFTER_LABEL:-after}
+CHROME_OPTS=()
+[ -n "${CHROME_CHANNEL:-}" ] && CHROME_OPTS+=(--channel="$CHROME_CHANNEL")
+[ -n "${CHROME_EXECUTABLE:-}" ] && CHROME_OPTS+=(--executable="$CHROME_EXECUTABLE")
 
 usage() {
     cat <<EOF
@@ -23,9 +27,13 @@ environment:
   OUT=DIR            capture + report root (default: sitebench-out/ab)
   RUNS=N             cold load runs per site and browser (default: 3)
   VIEWPORT=WxH       viewport for both browsers (default: 1280x800)
+  SITES=FILE         site list (default: scripts/sitebench/sites.tsv)
   BEFORE_LABEL=NAME  label of the first build (default: before)
   AFTER_LABEL=NAME   label of the second build (default: after)
   NS_LOCALE=NAME     locale both builds run under (default: en_US.UTF-8)
+  CHROME_CHANNEL=NAME     Playwright channel to launch, e.g. chrome for the installed
+                          Google Chrome (default: Playwright's own Chromium)
+  CHROME_EXECUTABLE=PATH  Chrome or Chromium binary to launch instead
 EOF
 }
 
@@ -42,7 +50,7 @@ done
 if [ "${#BINS[@]}" -ne 2 ]; then usage >&2; exit 2; fi
 
 mkdir -p "$OUT"
-ids=$(python3 - "$HERE/sites.tsv" ${FILTER[@]+"${FILTER[@]}"} <<'EOF'
+ids=$(python3 - "$SITES" ${FILTER[@]+"${FILTER[@]}"} <<'EOF'
 import sys
 path, args = sys.argv[1], sys.argv[2:]
 only = {x for a in args if a.startswith("--only=") for x in a[7:].split(",") if x}
@@ -62,11 +70,11 @@ EOF
 for id in $ids; do
     echo "== $id"
     node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --viewport="$VIEWPORT" \
-        --only="$id" --skip-existing
+        --only="$id" --skip-existing --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"}
     python3 "$HERE/ns-capture.py" --bin="${BINS[0]}" --out="$OUT" --label="$BEFORE_LABEL" \
-        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing
+        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing --sites="$SITES"
     python3 "$HERE/ns-capture.py" --bin="${BINS[1]}" --out="$OUT" --label="$AFTER_LABEL" \
-        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing
+        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing --sites="$SITES"
 done
 
 python3 "$HERE/compare.py" --out="$OUT" --labels="$BEFORE_LABEL,$AFTER_LABEL" \
