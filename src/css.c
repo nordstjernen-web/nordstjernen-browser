@@ -17072,6 +17072,27 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "text-decoration") == 0 ||
             strcmp(pname, "text-decoration-line") == 0) {
             gboolean line_only = strcmp(pname, "text-decoration-line") == 0;
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            if (wide) {
+                const ns_css_prop props[] = {
+                    NS_CSS_TEXT_DECORATION,
+                    NS_CSS_TEXT_DECORATION_STYLE,
+                    NS_CSS_TEXT_DECORATION_COLOR,
+                };
+                for (gsize i = 0; i < (line_only ? 1 : G_N_ELEMENTS(props)); i++) {
+                    ns_css_decl d = {
+                        .prop = props[i],
+                        .value = ns_css_value_dup(wide),
+                        .important = important
+                    };
+                    g_array_append_val(decls_out, d);
+                }
+                ns_css_value_free(wide);
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
             char *tokens[8] = {0};
             int n = split_ws(vtext, tokens);
             GString *lines = g_string_new(NULL);
