@@ -414,11 +414,27 @@ static const struct { const char *name; WGPUFeatureName feature; } wg_feature_na
     { "primitive-index", WGPUFeatureName_PrimitiveIndex },
 };
 
+static gboolean
+wg_adapter_is_core(WGPUAdapter adapter)
+{
+    WGPUAdapterInfo info; memset(&info, 0, sizeof info);
+    if (wgpuAdapterGetInfo(adapter, &info) != WGPUStatus_Success) return FALSE;
+    gboolean core = info.backendType != WGPUBackendType_OpenGL &&
+                    info.backendType != WGPUBackendType_OpenGLES;
+    wgpuAdapterInfoFreeMembers(info);
+    return core;
+}
+
 static JSValue
-wg_feature_set(JSContext *ctx, const WGPUSupportedFeatures *f)
+wg_feature_set(JSContext *ctx, const WGPUSupportedFeatures *f, gboolean core)
 {
     JSValue set = wg_new_feature_set(ctx);
     JSValue add = JS_GetPropertyStr(ctx, set, "add");
+    if (core) {
+        JSValue name = JS_NewString(ctx, "core-features-and-limits");
+        JS_FreeValue(ctx, JS_Call(ctx, add, set, 1, (JSValueConst *)&name));
+        JS_FreeValue(ctx, name);
+    }
     for (size_t i = 0; f && i < f->featureCount; i++) {
         for (size_t k = 0; k < G_N_ELEMENTS(wg_feature_names); k++) {
             if (wg_feature_names[k].feature != f->features[i]) continue;
@@ -905,7 +921,8 @@ wg_link_event_target(JSContext *ctx, JSValueConst device)
 }
 
 static JSValue
-wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink)
+wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink,
+               gboolean core)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_device_class);
     if (JS_IsException(obj)) return obj;
@@ -930,7 +947,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink)
     }
     WGPUSupportedFeatures features; memset(&features, 0, sizeof features);
     wgpuDeviceGetFeatures(device, &features);
-    JS_SetPropertyStr(ctx, obj, "features", wg_feature_set(ctx, &features));
+    JS_SetPropertyStr(ctx, obj, "features", wg_feature_set(ctx, &features, core));
     wgpuSupportedFeaturesFreeMembers(features);
     WGPULimits limits = WGPU_LIMITS_INIT;
     wgpuDeviceGetLimits(device, &limits);
@@ -1073,6 +1090,14 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, jfeat);
         if (!ok)
             return wg_promise_rejected(ctx, "requestDevice: unsupported feature");
+        size_t kept = 0;
+        for (size_t i = 0; i < required_count; i++) {
+            if (required[i] != WGPUFeatureName_CoreFeaturesAndLimits)
+                required[kept++] = required[i];
+            else if (!wg_adapter_is_core(a->adapter))
+                return wg_promise_rejected(ctx, "requestDevice: unsupported feature");
+        }
+        required_count = kept;
         JSValue jlim = JS_GetPropertyStr(ctx, argv[0], "requiredLimits");
         have_limits = wg_read_required_limits(ctx, jlim, &limits);
         JS_FreeValue(ctx, jlim);
@@ -1096,7 +1121,8 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     if (!wait.device)
         return wg_promise_rejected(ctx, "requestDevice: no device");
-    return wg_promise_resolved(ctx, wg_make_device(ctx, wait.device, sink));
+    return wg_promise_resolved(ctx, wg_make_device(ctx, wait.device, sink,
+                                                   wg_adapter_is_core(a->adapter)));
 }
 
 static JSValue
@@ -1141,7 +1167,8 @@ wg_make_adapter(JSContext *ctx, WGPUAdapter adapter)
     JS_SetPropertyStr(ctx, obj, "info", wg_adapter_info(ctx, adapter));
     WGPUSupportedFeatures features; memset(&features, 0, sizeof features);
     wgpuAdapterGetFeatures(adapter, &features);
-    JS_SetPropertyStr(ctx, obj, "features", wg_feature_set(ctx, &features));
+    JS_SetPropertyStr(ctx, obj, "features",
+                      wg_feature_set(ctx, &features, wg_adapter_is_core(adapter)));
     wgpuSupportedFeaturesFreeMembers(features);
     WGPULimits limits = WGPU_LIMITS_INIT;
     wgpuAdapterGetLimits(adapter, &limits);
