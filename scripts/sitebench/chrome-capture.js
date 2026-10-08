@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 
 const HERE = __dirname;
+const LOCALE = 'en-US';
 
 function loadPlaywright() {
   try {
@@ -142,7 +143,7 @@ async function openPage(browser, o) {
     viewport: { width: o.width, height: o.height },
     deviceScaleFactor: 1,
     userAgent: o.userAgent,
-    locale: 'en-US',
+    locale: LOCALE,
     timezoneId: 'UTC',
   });
   const page = await ctx.newPage();
@@ -383,7 +384,7 @@ async function captureSite(browser, version, site, o, browserPid) {
   const summary = {};
   for (const k of SUMMARY_KEYS) summary[k] = median(runs.map(r => r[k]));
   const result = {
-    engine: 'chrome', version, site, viewport: { width: o.width, height: o.height },
+    engine: 'chrome', version, locale: LOCALE, site, viewport: { width: o.width, height: o.height },
     capturedAt: new Date().toISOString(), host: os.hostname(), cpus: os.cpus().length,
     status: first.status, error: first.error || null,
     summary, runs: runs.map(r => { const c = Object.assign({}, r); delete c.probe; return c; }),

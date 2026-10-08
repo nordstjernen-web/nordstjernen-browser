@@ -434,9 +434,31 @@ def fmt_ratio(v):
     return "–" if v is None else f"{v:.2f}×"
 
 
+def capture_info(label_dir, ids):
+    metrics = [load_json(label_dir / i / "metrics.json") or {} for i in ids]
+    locales = sorted({m.get("locale") for m in metrics} - {None})
+    if any(m and "locale" not in m for m in metrics):
+        locales.append("not recorded")
+    return {"versions": sorted({m.get("version") for m in metrics} - {None}), "locales": locales}
+
+
+def with_locale(text, locale):
+    return f"{text} ({locale})" if locale else text
+
+
+def describe_builds(meta):
+    parts = [with_locale(meta.get("chromeVersion") or "Chrome", meta.get("chromeLocale"))]
+    for label in meta["labels"]:
+        build = meta["builds"].get(label) or {}
+        if build.get("versions"):
+            parts.append(with_locale(f"{label}: " + ", ".join(build["versions"]),
+                                     ", ".join(build.get("locales") or [])))
+    return " · ".join(parts)
+
+
 def write_markdown(rows, agg, labels, base_label, meta, path):
     lines = ["# Site benchmark: Nordstjernen vs Chrome", ""]
-    lines.append(f"Chrome {meta.get('chromeVersion', '?')} · viewport {meta['viewport']} · "
+    lines.append(f"{describe_builds(meta)} · viewport {meta['viewport']} · "
                  f"{len(rows)} sites · generated {meta['generated']}")
     lines.append("")
     lines.append("Parity is a 0–100 visual similarity score against Chrome "
@@ -553,7 +575,7 @@ def html_summary(rows, agg, labels, meta):
            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
            f"<title>Site Benchmark Report</title><style>{CSS}</style></head><body><main>"]
     out.append("<h1>Nordstjernen vs Chrome — site benchmark</h1>")
-    out.append(f"<p class=muted>{e(meta.get('chromeVersion', ''))} · {e(', '.join(meta.get('nsVersions', [])))} · "
+    out.append(f"<p class=muted>{e(describe_builds(meta))} · "
                f"viewport {e(meta['viewport'])} · {len(rows)} sites · {e(meta['generated'])}</p>")
     out.append("<h2>Summary</h2><div class=wrap><table><thead><tr><th>Metric</th>" +
                "".join(f"<th>{e(label)}</th>" for label in labels) + "</tr></thead><tbody>")
@@ -752,12 +774,13 @@ def main():
     rows = [analyse_site(i, out, a.base, labels, img_dir, vw, vh) for i in ids]
     agg = aggregate(rows, labels)
 
-    chrome_versions = {(load_json(out / a.base / i / "metrics.json") or {}).get("version") for i in ids} - {None}
-    ns_versions = sorted({(load_json(out / label / i / "metrics.json") or {}).get("version")
-                          for label in labels for i in ids} - {None})
+    chrome = capture_info(out / a.base, ids)
+    builds = {label: capture_info(out / label, ids) for label in labels}
     meta = {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "chromeVersion": "Chrome " + ", ".join(sorted(chrome_versions)) if chrome_versions else "",
-            "nsVersions": ns_versions, "viewport": a.viewport, "labels": labels}
+            "chromeVersion": "Chrome " + ", ".join(chrome["versions"]) if chrome["versions"] else "",
+            "chromeLocale": ", ".join(chrome["locales"]),
+            "nsVersions": sorted({v for b in builds.values() for v in b["versions"]}), "builds": builds,
+            "viewport": a.viewport, "labels": labels}
     (report / "summary.json").write_text(json.dumps({"meta": meta, "aggregate": agg, "sites": rows}, indent=1),
                                          encoding="utf-8", errors="replace")
     write_markdown(rows, agg, labels, a.base, meta, report / "summary.md")

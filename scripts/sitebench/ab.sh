@@ -25,6 +25,7 @@ environment:
   VIEWPORT=WxH       viewport for both browsers (default: 1280x800)
   BEFORE_LABEL=NAME  label of the first build (default: before)
   AFTER_LABEL=NAME   label of the second build (default: after)
+  NS_LOCALE=NAME     locale both builds run under (default: en_US.UTF-8)
 EOF
 }
 
