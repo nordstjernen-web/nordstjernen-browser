@@ -14,6 +14,7 @@
 enum {
     NS_WUFFS_MAX_DIM    = 16384,
     NS_WUFFS_MAX_PIXELS = 64 * 1024 * 1024,
+    NS_WUFFS_MAX_WORKBUF = 256 * 1024 * 1024,
 };
 
 typedef enum {
@@ -143,7 +144,7 @@ ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
         wuffs_base__image_decoder__workbuf_len(dec).max_incl;
     uint8_t *workbuf = NULL;
     if (workbuf_len) {
-        if (workbuf_len > 64u * 1024u * 1024u) {
+        if (workbuf_len > (uint64_t)NS_WUFFS_MAX_WORKBUF) {
             g_free(pix); free(dec); return NULL;
         }
         workbuf = g_try_malloc((gsize)workbuf_len);
@@ -261,7 +262,7 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         wuffs_base__image_decoder__workbuf_len(dec).max_incl;
     uint8_t *workbuf = NULL;
     if (workbuf_len) {
-        if (workbuf_len > 64u * 1024u * 1024u) {
+        if (workbuf_len > (uint64_t)NS_WUFFS_MAX_WORKBUF) {
             g_free(pix); free(dec); return NULL;
         }
         workbuf = g_try_malloc((gsize)workbuf_len);

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* Large progressive JPEGs decode. Wuffs needs a work buffer of about
+  nine bytes per pixel for a progressive JPEG, and the decoder refused
+  any work buffer over 64 MiB, so a 4096x2048 texture such as three.js's
+  `earth_day_4096.jpg` failed with "could not decode image". The cap is
+  now 256 MiB, matching the largest pixel buffer the decoder accepts.
 * SVG elements that never draw anything report no box to scripts.
   `getBoundingClientRect()` of an `<animate>`, `<set>`,
   `<animateTransform>` or `<animateMotion>` returned a 0x0 rectangle at
