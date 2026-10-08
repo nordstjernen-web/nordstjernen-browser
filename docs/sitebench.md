@@ -354,6 +354,80 @@ three times Chrome's main-thread CPU and scores 71 of 100 for looking
 like it: the cascade and layout on large, script-built pages are where
 the next work is.
 
+## Frozen snapshots
+
+Live sites change from one load to the next, so the scores above move by a
+few points on their own, and a fix that corrects one kind of element can
+vanish in them. `snapshot.py` measures layout on a fixed input instead: it
+saves a script-free copy of each site once, then compares the box of every
+element on those copies in Nordstjernen and in Chrome. It needs Python 3,
+curl and an installed Chrome or Chromium, and runs on Linux and macOS.
+
+```sh
+scripts/sitebench/snapshot.py freeze                       # every site in sites.tsv
+scripts/sitebench/snapshot.py freeze --only=wikipedia-article,bbc
+scripts/sitebench/snapshot.py score                        # builddir's build against Chrome
+scripts/sitebench/snapshot.py ab /path/to/old/nordstjernen builddir/src/gtk/nordstjernen
+```
+
+- `freeze` loads the live page in headless Chrome over the DevTools
+  protocol, with the flags, user agent, language and time zone that
+  `chrome-capture.js` gives Chrome. Once the page has loaded, the network
+  has gone quiet and `--settle-ms` has passed, it writes the style rules
+  that scripts added or changed through the CSSOM, as CSS-in-JS libraries
+  do, into their style elements and the state scripts gave form controls,
+  such as a checked radio button, into their attributes, and takes the DOM
+  with its doctype, so a page in quirks mode stays in quirks mode. It drops scripts, iframes and
+  event handler attributes, inlines the style sheets with their imports,
+  saves the images and fonts they use next to the page in
+  `sitebench-out/snapshots/<id>/`, removes `loading="lazy"` so that both
+  browsers load every image, and stops CSS animations and transitions, so
+  that every measurement sees the same page. A file that cannot be
+  fetched, or that comes back as an error or bot-check page, counts as
+  missing; it and any video, audio or embedded object point to a missing
+  local file. The copies hold the sites' own content: they stay out of the
+  repository, and are shared only privately. `freeze` exits with status 1
+  when it could freeze none of the sites.
+- `score` serves the copies from a local web server, records the box of
+  every element under `body` in Chrome and in the build, with any request
+  to another host refused, and counts the elements that match: width,
+  height and offset in the parent all within 2 px of Chrome's, for the
+  element at the same place in the DOM. Chrome's boxes are kept in
+  `sitebench-out/snapshot-chrome/`, per Chrome version, viewport and
+  locale, and measured again when a copy changes. It exits with status 1
+  when the build crashes, times out or prints no elements on a site, or,
+  with `--min-share=P`, when fewer than P percent of the elements match.
+- `ab` renders the old build twice and the new one once. The difference
+  between the two renders of the old build is the noise, and a site counts
+  as changed when its change is larger than half its noise plus 2
+  elements. It counts the elements each site won and lost, lists examples
+  of the lost ones for every site that got worse, and exits with status 1
+  when the new build matches fewer elements than the old one beyond the
+  noise, when it crashes, times out or prints no elements on a site, or,
+  with `--max-site-loss=N`, when it loses more than N of the elements the
+  old build matched on one site, beyond that site's noise. A site the old
+  build fails on is left out and listed.
+
+Both commands exit with status 2 on usage errors and when they fail to
+run at all.
+
+Both reports (`sitebench-out/report/snapshots.md` and `snapshots.json`)
+also rank where the build fails most. Every failing element is traced to
+the failure it most likely follows from: a wrong width to the parent's
+wrong width, a wrong height to the child that grew, a wrong offset to the
+earlier sibling that failed, a missing element to its missing parent. The
+sources with the most failing elements behind them are listed by site,
+kind and element. A weight counts the failing elements traced to a
+source: an estimate of what fixing it would win, since a fix can also
+correct elements traced to another source.
+
+Nordstjernen runs in a throwaway home directory under `--locale` (default
+`en_US.UTF-8`, or `NS_LOCALE`), and Chrome in the same language;
+`--viewport` (default `VIEWPORT` or `1280x800`), `--jobs`, `--settle-ms`
+and `--chrome` (or `CHROME_BIN`) set the rest. Element boxes depend on the
+installed fonts, so compare numbers only between runs on the same machine,
+against the same Chrome.
+
 ## Adding sites
 
 `sites.tsv` is `id<TAB>category<TAB>url`. Keep ids short and stable; they
