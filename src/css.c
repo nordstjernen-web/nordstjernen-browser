@@ -1123,6 +1123,7 @@ static char *(*g_font_family_name_cb)(const char *family);
 static guint64 (*g_font_generation_cb)(void);
 static guint g_font_oracle_serial;
 
+#ifndef __APPLE__
 static char *
 font_family_installed_as(const char *family)
 {
@@ -1131,7 +1132,6 @@ font_family_installed_as(const char *family)
     return g_font_alias_cb ? g_font_alias_cb(family) : NULL;
 }
 
-#ifndef __APPLE__
 static const char *
 browser_default_for_generic(const char *generic)
 {
