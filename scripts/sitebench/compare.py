@@ -19,7 +19,8 @@ except ImportError:
 CHALLENGE = re.compile(
     r"just a moment|attention required|access denied|403 forbidden|confirm you are human|"
     r"security verification|are you a robot|robot check|pardon our interruption|request blocked|"
-    r"verify you are human|you've been blocked|blocked by network security|captcha", re.I)
+    r"verify you are human|you've been blocked|blocked by network security|captcha|"
+    r"click the button below to continue shopping", re.I)
 
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
