@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* YouTube videos no longer jump back and stutter about 20 seconds in.
+  The video helper decodes the MSE stream from a file that grows as the
+  page appends segments, but the MP4 and WebM demuxers stop at the size
+  they saw when the file was opened. The helper then reopened the file,
+  sought to a keyframe a few seconds back and decoded those frames
+  again, so up to 230 frames were dropped and the picture went back in
+  time. Now only the demuxer is reopened: the decoder keeps its state
+  and continues with the packet after the last one it received.
 * Videos decoded by the video helper are scaled on the GPU. The window
   drew every frame through cairo, which scaled it on the CPU and then
   uploaded the result, about 20 ms per 1080p frame, so a 60 fps YouTube
