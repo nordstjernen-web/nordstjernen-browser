@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* Canvases drawn from timers update on screen by themselves. The
+  renderer only reported a new frame after `requestAnimationFrame`
+  callbacks, animations, images or layout changes, and the repaint a
+  WebGL draw asks for went nowhere, so a game whose main loop runs on
+  `setTimeout` (Qwasm, Emscripten builds with vsync off) showed a new
+  frame only when a click forced a repaint. The same request now also
+  lets media play, mute and volume changes repaint at once.
 * A `MessagePort` that leads to a worker can carry other ports and
   `File`s. Such a port encoded every message as if nothing were being
   transferred, so a port in the message failed with "DataCloneError:
