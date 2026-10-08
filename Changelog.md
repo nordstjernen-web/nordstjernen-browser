@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* WebAssembly runs in more than one thread at a time on Windows. The
+  WAMR runtime marks its per-thread state `__declspec(thread)`, which
+  MinGW GCC ignores, so the stack boundary of the first thread to run
+  WebAssembly was used for every other one, and the "current execution
+  environment" was shared between threads. A module called from a second
+  worker failed at once with "native stack overflow" — three.js's Draco
+  mesh decoder, which runs in a pool of workers, never decoded a model
+  (`webgl_animation_keyframes` stayed empty). GCC builds now use
+  `__thread`.
 * WebGPU adapters and devices report `core-features-and-limits`.
   wgpu-native is a full core implementation on Vulkan, Direct3D 12 and
   Metal but does not list the feature, so three.js took the device for a
