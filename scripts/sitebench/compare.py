@@ -27,6 +27,7 @@ ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an
 
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
+UNSTABLE_SPREAD = 2.0
 
 
 def load_json(path):
@@ -283,10 +284,176 @@ def full_thumb(src, dest, width=320, max_h=2400):
         return False
 
 
+def visual_scores(chrome_img, chrome_probe, img, probe):
+    visual = {}
+    if img is not None and chrome_img is not None:
+        visual["ssim"] = round(ssim(chrome_img, img), 3)
+        visual["hist"] = round(hist_similarity(chrome_img, img), 3)
+        visual["layout"] = round(layout_iou(chrome_img, img), 3)
+    visual["components"] = component_scores(chrome_probe, probe)
+    visual["textRatio"] = closeness((chrome_probe or {}).get("textLen"), (probe or {}).get("textLen"))
+    visual["heightRatio"] = closeness((chrome_probe or {}).get("docH"), (probe or {}).get("docH"))
+    visual["parity"] = parity(visual) if img is not None else 0.0
+    return visual
+
+
+def load_runs(capture_dir, metrics, records_key, vw, vh):
+    metrics = metrics or {}
+    records = metrics.get(records_key) or []
+    count = (metrics.get("settings") or {}).get("visualRuns") or 1
+    runs = []
+    for k in range(1, count + 1):
+        run_dir = capture_dir if k == 1 else capture_dir / f"visual-{k}"
+        record = (records[k - 1] if k <= len(records) else None) or {}
+        runs.append({"run": k, "img": load_viewport(run_dir, vw, vh, (vw // 2, vh // 2)),
+                     "probe": load_json(run_dir / "probe.json"),
+                     "status": metrics.get("status") if k == 1 else record.get("status") or metrics.get("status"),
+                     "error": metrics.get("error") if k == 1 else record.get("error")})
+    return runs
+
+
+def chrome_reference(runs):
+    shot = [r for r in runs if r["img"] is not None]
+    if len(shot) < 2:
+        return (shot or runs)[0], None
+    scores = {(a["run"], b["run"]): visual_scores(a["img"], a["probe"], b["img"], b["probe"])["parity"] or 0.0
+              for a in shot for b in shot if a is not b}
+    ref = max(shot, key=lambda a: sum(scores[(a["run"], b["run"])] for b in shot if b is not a))
+    for r in runs:
+        r["parity"] = 100.0 if r is ref else scores.get((ref["run"], r["run"]))
+    return ref, round(100.0 - min(r["parity"] for r in shot), 1)
+
+
+def run_failure(r):
+    if r["error"]:
+        return r["error"]
+    return None if r["img"] is not None else "no screenshot"
+
+
+def median_run(runs):
+    scored = sorted((r for r in runs if r["visual"]["parity"] is not None),
+                    key=lambda r: (r["visual"]["parity"], r["run"]))
+    if not scored:
+        return runs[0], None, None
+    values = [r["visual"]["parity"] for r in scored]
+    loaded = [r["visual"]["parity"] for r in scored if not run_failure(r)]
+    spread = round(loaded[-1] - loaded[0], 1) if len(loaded) > 1 else None
+    middle = values[(len(values) - 1) // 2]
+    shown = next(r for r in scored if r["visual"]["parity"] == middle)
+    return shown, round(med(values), 1), spread
+
+
+def run_records(runs, scores):
+    return [{"run": r["run"], "parity": scores(r), "screenshot": r["img"] is not None, "error": r["error"],
+             "blocked": blocked_reason(r["probe"], r["status"])} for r in runs]
+
+
+def save_run_thumbs(runs, img_dir, name, vw, vh):
+    for r in runs:
+        if r["img"] is not None:
+            save_jpeg(r["img"], img_dir / f"{name}-run{r['run']}.jpg", (vw // 4, vh // 4))
+
+
+def save_filmstrip(chrome_dir, img_dir, name, vw, vh):
+    film = []
+    index = load_json(chrome_dir / "frames" / "index.json") or []
+    for ms in FILM_MS:
+        pick = [f for f in index if f["ms"] <= ms]
+        if pick:
+            dest = img_dir / f"{name}-film-{ms}.jpg"
+            img = load_rgb(chrome_dir / "frames" / pick[-1]["file"], (vw // 4, vh // 4))
+            if img is not None:
+                save_jpeg(img, dest)
+                film.append({"ms": ms, "file": dest.name})
+    return film
+
+
+def save_label_images(site_id, label, ns_dir, shown, ref, img_dir, vw, vh):
+    if shown["img"] is None:
+        return
+    save_jpeg(shown["img"], img_dir / f"{site_id}-{label}.jpg")
+    full_thumb(ns_dir / "full.png", img_dir / f"{site_id}-{label}-full.jpg")
+    initial = ns_dir / "full-initial.png"
+    if initial.exists():
+        with Image.open(initial) as im:
+            im = im.convert("RGB").crop((0, 0, vw, vh)).resize((vw // 4, vh // 4), Image.BILINEAR)
+            im.save(img_dir / f"{site_id}-{label}-initial.jpg", "JPEG", quality=75)
+    if ref["img"] is not None:
+        diff_heatmap(ref["img"], shown["img"]).save(img_dir / f"{site_id}-{label}-diff.jpg", "JPEG", quality=75)
+
+
+def analyse_label(site_id, label, ns_dir, ns, chrome, ref, img_dir, vw, vh):
+    runs = load_runs(ns_dir, ns, "visualRuns", vw, vh)
+    for r in runs:
+        r["visual"] = visual_scores(ref["img"], ref["probe"], r["img"], r["probe"])
+    shown, median, spread = median_run(runs)
+    failed = [r for r in runs if run_failure(r)]
+    error = runs[0]["error"]
+    if len(runs) > 1 and failed and not error:
+        error = f"run {failed[0]['run']}: {run_failure(failed[0])}"
+    ns_probe = runs[0]["probe"]
+    s = dict(ns["summary"])
+    vt = ns.get("visualTiming") or {}
+    if isinstance(vt.get("cpu_ms"), (int, float)):
+        s["settledMainThreadMs"] = round(max(vt["cpu_ms"] - (vt.get("encode_ms") or 0), 0), 1)
+    entry = dict(s, status=ns.get("status"), error=error,
+                 docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
+                 jsErrorSample=ns.get("jsErrorSample", []),
+                 blocked=blocked_reason(shown["probe"], shown["status"]))
+    save_label_images(site_id, label, ns_dir, shown, ref, img_dir, vw, vh)
+    entry["visual"] = dict(shown["visual"], parity=median)
+    c = chrome or {}
+    first_paint = s.get("firstPaintMs") or s.get("firstRenderMs")
+    entry["firstPaintMs"] = first_paint
+    entry["vsChrome"] = {
+        "firstRender": ratio(first_paint, c.get("fcp")),
+        "imagesLoaded": ratio(s.get("firstRenderMs"), c.get("load")),
+        "mainThread": ratio(s.get("settledMainThreadMs"), c.get("mainThreadMs")),
+        "memory": ratio(s.get("settledMaxRssMb"), c.get("browserRssMb")),
+    }
+    if len(runs) > 1:
+        entry.update(paritySpread=spread, shownRun=shown["run"], failedRuns=len(failed),
+                     visualRuns=run_records(runs, lambda r: r["visual"]["parity"]))
+        save_run_thumbs(runs, img_dir, f"{site_id}-{label}", vw, vh)
+    return entry
+
+
+def more_failed_runs(first, last):
+    if "failedRuns" not in first or "failedRuns" not in last:
+        return 0
+    return last["failedRuns"] - first["failedRuns"]
+
+
+def mark_stability(row, labels):
+    chrome_spread = (row.get("chrome") or {}).get("paritySpread")
+    spreads = [chrome_spread] + [e.get("paritySpread") for e in row["engines"].values()]
+    known = [s for s in spreads if s is not None]
+    if known:
+        row["unstable"] = max(known) > UNSTABLE_SPREAD
+    if len(labels) < 2:
+        return
+    first, last = row["engines"].get(labels[0]), row["engines"].get(labels[-1])
+    if not first or not last:
+        return
+    a, b = first["visual"].get("parity"), last["visual"].get("parity")
+    noise = [s for s in (chrome_spread, first.get("paritySpread"), last.get("paritySpread")) if s is not None]
+    more = more_failed_runs(first, last)
+    if a is None or b is None or not (noise or more):
+        return
+    change = round(b - a, 1)
+    noise = max(noise) if noise else None
+    row["parityChange"] = {"change": change, "noise": noise,
+                           "beyondNoise": bool(more) or (noise is not None and abs(change) > noise)}
+    if more:
+        row["parityChange"]["moreFailedRuns"] = more
+
+
 def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
     chrome_dir = out / base_label / site_id
     chrome = load_json(chrome_dir / "metrics.json")
-    chrome_probe = load_json(chrome_dir / "probe.json")
+    runs = load_runs(chrome_dir, chrome, "runs", vw, vh)
+    ref, spread = chrome_reference(runs)
+    chrome_probe = runs[0]["probe"]
     row = {"id": site_id, "chrome": None, "engines": {}}
     if chrome:
         cs = chrome["summary"]
@@ -296,23 +463,16 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
                              speedIndex=si, visuallyComplete=vc,
                              docH=(chrome_probe or {}).get("docH"),
                              textLen=(chrome_probe or {}).get("textLen"),
-                             blocked=blocked_reason(chrome_probe, chrome.get("status")))
-    size = (vw // 2, vh // 2)
-    chrome_img = load_viewport(chrome_dir, vw, vh, size)
-    if chrome_img is not None:
-        save_jpeg(chrome_img, img_dir / f"{site_id}-{base_label}.jpg")
+                             blocked=blocked_reason(ref["probe"], ref["status"]))
+        if len(runs) > 1:
+            row["chrome"].update(paritySpread=spread, reference=ref["run"],
+                                 visualRuns=run_records(runs, lambda r: r.get("parity")))
+    if ref["img"] is not None:
+        save_jpeg(ref["img"], img_dir / f"{site_id}-{base_label}.jpg")
         full_thumb(chrome_dir / "full.png", img_dir / f"{site_id}-{base_label}-full.jpg")
-    film = []
-    index = load_json(chrome_dir / "frames" / "index.json") or []
-    for ms in FILM_MS:
-        pick = [f for f in index if f["ms"] <= ms]
-        if pick:
-            dest = img_dir / f"{site_id}-{base_label}-film-{ms}.jpg"
-            img = load_rgb(chrome_dir / "frames" / pick[-1]["file"], (vw // 4, vh // 4))
-            if img is not None:
-                save_jpeg(img, dest)
-                film.append({"ms": ms, "file": dest.name})
-    row["film"] = film
+    if len(runs) > 1:
+        save_run_thumbs(runs, img_dir, f"{site_id}-{base_label}", vw, vh)
+    row["film"] = save_filmstrip(chrome_dir, img_dir, f"{site_id}-{base_label}", vw, vh)
 
     for label in labels:
         ns_dir = out / label / site_id
@@ -321,45 +481,8 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
             continue
         if "site" not in row:
             row["site"] = ns["site"]
-        ns_probe = load_json(ns_dir / "probe.json")
-        s = dict(ns["summary"])
-        vt = ns.get("visualTiming") or {}
-        if isinstance(vt.get("cpu_ms"), (int, float)):
-            s["settledMainThreadMs"] = round(max(vt["cpu_ms"] - (vt.get("encode_ms") or 0), 0), 1)
-        entry = dict(s, status=ns.get("status"), error=ns.get("error"),
-                     docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
-                     jsErrorSample=ns.get("jsErrorSample", []),
-                     blocked=blocked_reason(ns_probe, ns.get("status")))
-        ns_img = load_viewport(ns_dir, vw, vh, size)
-        visual = {}
-        if ns_img is not None:
-            save_jpeg(ns_img, img_dir / f"{site_id}-{label}.jpg")
-            full_thumb(ns_dir / "full.png", img_dir / f"{site_id}-{label}-full.jpg")
-            initial = ns_dir / "full-initial.png"
-            if initial.exists():
-                with Image.open(initial) as im:
-                    im = im.convert("RGB").crop((0, 0, vw, vh)).resize((vw // 4, vh // 4), Image.BILINEAR)
-                    im.save(img_dir / f"{site_id}-{label}-initial.jpg", "JPEG", quality=75)
-        if ns_img is not None and chrome_img is not None:
-            visual["ssim"] = round(ssim(chrome_img, ns_img), 3)
-            visual["hist"] = round(hist_similarity(chrome_img, ns_img), 3)
-            visual["layout"] = round(layout_iou(chrome_img, ns_img), 3)
-            diff_heatmap(chrome_img, ns_img).save(img_dir / f"{site_id}-{label}-diff.jpg", "JPEG", quality=75)
-        visual["components"] = component_scores(chrome_probe, ns_probe)
-        visual["textRatio"] = closeness((chrome_probe or {}).get("textLen"), (ns_probe or {}).get("textLen"))
-        visual["heightRatio"] = closeness((chrome_probe or {}).get("docH"), (ns_probe or {}).get("docH"))
-        visual["parity"] = parity(visual) if ns_img is not None else 0.0
-        entry["visual"] = visual
-        c = row["chrome"] or {}
-        first_paint = s.get("firstPaintMs") or s.get("firstRenderMs")
-        entry["firstPaintMs"] = first_paint
-        entry["vsChrome"] = {
-            "firstRender": ratio(first_paint, c.get("fcp")),
-            "imagesLoaded": ratio(s.get("firstRenderMs"), c.get("load")),
-            "mainThread": ratio(s.get("settledMainThreadMs"), c.get("mainThreadMs")),
-            "memory": ratio(s.get("settledMaxRssMb"), c.get("browserRssMb")),
-        }
-        row["engines"][label] = entry
+        row["engines"][label] = analyse_label(site_id, label, ns_dir, ns, row["chrome"], ref, img_dir, vw, vh)
+    mark_stability(row, labels)
     return row
 
 
@@ -382,21 +505,29 @@ def comparable(row):
     return bool(row.get("chrome")) and not row["chrome"].get("blocked")
 
 
+def mean_parity(es):
+    return round(sum(e["visual"]["parity"] or 0 for e in es) / len(es), 1) if es else None
+
+
 def aggregate(rows, labels):
     agg = {}
+    repeats = any("unstable" in r for r in rows)
     blocked = [r["id"] for r in rows if not comparable(r)]
     rows = [r for r in rows if comparable(r)]
     ns_blocked = [r["id"] for r in rows
                   if any((r["engines"].get(label) or {}).get("blocked") for label in labels)]
     common = [r for r in rows if r["id"] not in ns_blocked]
+    stable = [r for r in common if not r.get("unstable")]
+    unstable = [r for r in common if r.get("unstable")]
     for label in labels:
         es = [r["engines"][label] for r in common if label in r["engines"]]
+        vs = [r["engines"][label] for r in stable if label in r["engines"]]
         ok = [e for e in es if not e.get("error")]
         agg[label] = {
             "sites": len(es), "loaded": len(ok),
-            "parityMean": round(sum(e["visual"]["parity"] or 0 for e in es) / len(es), 1) if es else None,
-            "ssimMedian": med([e["visual"].get("ssim") for e in es]),
-            "componentsPlacedMedian": med([(e["visual"].get("components") or {}).get("placedRate") for e in es]),
+            "parityMean": mean_parity(vs),
+            "ssimMedian": med([e["visual"].get("ssim") for e in vs]),
+            "componentsPlacedMedian": med([(e["visual"].get("components") or {}).get("placedRate") for e in vs]),
             "firstRenderMedianMs": med([e.get("firstPaintMs") for e in ok]),
             "imagesLoadedMedianMs": med([e.get("firstRenderMs") for e in ok]),
             "imagesLoadedVsLoadGeomean": geomean([e["vsChrome"]["imagesLoaded"] for e in ok]),
@@ -407,6 +538,9 @@ def aggregate(rows, labels):
             "jsErrors": sum(e.get("jsErrors") or 0 for e in es),
             "nsBlocked": sum(1 for r in rows if (r["engines"].get(label) or {}).get("blocked")),
         }
+        if repeats:
+            us = [r["engines"][label] for r in unstable if label in r["engines"]]
+            agg[label].update(stableSites=len(vs), unstableSites=len(us), parityMeanUnstable=mean_parity(us))
     chrome = [r["chrome"] for r in rows if r.get("chrome")]
     agg["chrome"] = {
         "sites": len(chrome),
@@ -417,6 +551,11 @@ def aggregate(rows, labels):
         "loadMedianMs": med([c.get("load") for c in chrome]),
         "mainThreadMedianMs": med([c.get("mainThreadMs") for c in chrome]),
     }
+    if repeats:
+        changes = [r for r in common if r.get("parityChange")]
+        agg["chrome"].update(stableSites=len(stable), unstable=[r["id"] for r in unstable],
+                             changed=[r["id"] for r in changes if r["parityChange"]["beyondNoise"]],
+                             withinNoise=[r["id"] for r in changes if not r["parityChange"]["beyondNoise"]])
     return agg
 
 
@@ -456,7 +595,136 @@ def describe_builds(meta):
     return " · ".join(parts)
 
 
+def sites(n, noun="site"):
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
+def spread_text(r, labels):
+    spreads = [("Chrome", (r.get("chrome") or {}).get("paritySpread"))]
+    spreads += [(label, (r["engines"].get(label) or {}).get("paritySpread")) for label in labels]
+    return ", ".join(f"{name} {fmt(s, 1)}" for name, s in spreads if s is not None)
+
+
+def change_text(change):
+    if not change:
+        return "–"
+    text = "0.0" if change["change"] == 0 else f"{change['change']:+.1f}"
+    more = change.get("moreFailedRuns")
+    if more:
+        return text + f" ({abs(more)} {'more' if more > 0 else 'fewer'} failed run{'' if abs(more) == 1 else 's'})"
+    if change["change"] == 0:
+        return text
+    return text + ("" if change["beyondNoise"] else " (noise)")
+
+
+def failed_runs_note(rows, labels):
+    failed = []
+    for r in rows:
+        counts = []
+        for label in labels:
+            e = r["engines"].get(label) or {}
+            if e.get("failedRuns"):
+                counts.append(f"{label} {e['failedRuns']} of {len(e['visualRuns'])}")
+        if counts:
+            failed.append(f"{r['id']} ({', '.join(counts)})")
+    if not failed:
+        return []
+    return ["Failed visual runs, which count in the median but not in the spread: " + ", ".join(failed) + "."]
+
+
+def stability_notes(rows, agg, labels):
+    c = agg["chrome"]
+    if "unstable" not in c:
+        return []
+    by_id = {r["id"]: r for r in rows}
+    notes = ["A site's parity is the median over its visual runs, each scored against Chrome's reference run, "
+             "the Chrome run closest to Chrome's other runs. A build's failed run, one with a load error or "
+             "without a screenshot, counts in the median (as 0 without a screenshot) but not in the spread. "
+             "A site is unstable when the runs of one build, or "
+             f"Chrome's runs against its reference, spread over more than {UNSTABLE_SPREAD:g} parity points; "
+             "unstable sites are left out of the mean visual parity, median SSIM and median components placed, "
+             "and averaged on a row of their own."]
+    if c["unstable"]:
+        notes.append("Unstable, with the spreads in parity points: " + ", ".join(
+            f"{i} ({spread_text(by_id[i], labels)})" for i in c["unstable"]) + ".")
+    else:
+        notes.append("No site was unstable.")
+    notes += failed_runs_note(rows, labels)
+    if len(labels) > 1 and (c["changed"] or c["withinNoise"]):
+        notes.append(change_note(by_id, c, labels))
+    return notes
+
+
+def change_note(by_id, c, labels):
+    head = f"{labels[-1]} against {labels[0]}"
+    within = len(c["withinNoise"])
+    if not c["changed"]:
+        return (f"{head}: parity stayed within each site's noise, the largest of its spreads "
+                f"({sites(within)} compared).")
+    changes = [by_id[i]["parityChange"] for i in c["changed"]]
+    moved = [f"{i} {change_text(ch)}" + ("" if ch.get("moreFailedRuns") else f" (noise {fmt(ch['noise'], 1)})")
+             for i, ch in zip(c["changed"], changes)]
+    failed = any(ch.get("moreFailedRuns") for ch in changes)
+    failures = ", or the number of failed visual runs changed," if failed else ","
+    return (f"{head}: parity moved by more than the site's noise, the largest of its spreads{failures} on "
+            f"{sites(len(c['changed']))}: " + ", ".join(moved) + f"; {within} stayed within it.")
+
+
+def markdown_site_table(rows, labels, repeats):
+    both = repeats and len(labels) > 1
+    spread_head = "Chrome spread | " if repeats else ""
+    lines = ["| Site | Chrome FCP | Chrome main | " + spread_head + " | ".join(
+        f"{label} parity | " + (f"{label} spread | " if repeats else "") + f"{label} first paint | {label} main CPU"
+        for label in labels) + (f" | {labels[-1]} − {labels[0]}" if both else "") + " |"]
+    col = "---:|" if repeats else ""
+    lines.append("|---|---:|---:|" + col + ("---:|" + col + "---:|---:|") * len(labels) + ("---:|" if both else ""))
+    for r in rows:
+        ch = r.get("chrome") or {}
+        site_id = (r["id"] + (" (Chrome blocked)" if ch.get("blocked") else "")
+                   + (" (unstable)" if r.get("unstable") else ""))
+        cells = [site_id, fmt(ch.get("fcp")), fmt(ch.get("mainThreadMs"))]
+        if repeats:
+            cells.append(fmt(ch.get("paritySpread"), 1))
+        for label in labels:
+            e = r["engines"].get(label)
+            if not e:
+                cells += ["–"] * (4 if repeats else 3)
+                continue
+            mark = " ⚠" if e.get("error") or e.get("blocked") else ""
+            cells.append(fmt(e["visual"].get("parity"), 1) + mark)
+            if repeats:
+                cells.append(fmt(e.get("paritySpread"), 1))
+            cells += [fmt(e.get("firstPaintMs")), fmt(e.get("settledMainThreadMs"))]
+        if both:
+            cells.append(change_text(r.get("parityChange")))
+        lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
+def parity_rows(agg, labels):
+    c = agg["chrome"]
+    if "unstable" not in c:
+        return [("Mean visual parity", "parityMean", None)]
+    kinds = [("stable", "parityMean", "stableSites")]
+    if c["unstable"]:
+        kinds.append(("unstable", "parityMeanUnstable", "unstableSites"))
+    rows = []
+    for kind, key, count_key in kinds:
+        counts = {agg[label][count_key] for label in labels}
+        if len(counts) == 1:
+            rows.append((f"Mean visual parity ({sites(counts.pop(), kind + ' site')})", key, None))
+        else:
+            rows.append((f"Mean visual parity ({kind} sites)", key, count_key))
+    return rows
+
+
+def parity_note(g, count_key):
+    return f" ({sites(g[count_key])})" if count_key else ""
+
+
 def write_markdown(rows, agg, labels, base_label, meta, path):
+    c = agg["chrome"]
+    repeats = "unstable" in c
     lines = ["# Site benchmark: Nordstjernen vs Chrome", ""]
     lines.append(f"{describe_builds(meta)} · viewport {meta['viewport']} · "
                  f"{len(rows)} sites · generated {meta['generated']}")
@@ -467,8 +735,10 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
     lines.append("")
     lines.append("| | " + " | ".join(labels) + " |")
     lines.append("|---|" + "---|" * len(labels))
-    keys = [("Sites loaded", "loaded", lambda v: fmt(v)),
-            ("Mean visual parity", "parityMean", lambda v: fmt(v, 1)),
+    parity = parity_rows(agg, labels)
+    counts = {title: count_key for title, _, count_key in parity}
+    keys = [("Sites loaded", "loaded", lambda v: fmt(v))] + [(title, key, lambda v: fmt(v, 1))
+                                                           for title, key, _ in parity] + [
             ("Median viewport SSIM", "ssimMedian", lambda v: fmt(v, 3)),
             ("Median components placed", "componentsPlacedMedian",
              lambda v: "–" if v is None else f"{v * 100:.0f}%"),
@@ -481,8 +751,8 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
             ("JS errors (all sites)", "jsErrors", lambda v: fmt(v)),
             ("Sites showing a bot challenge", "nsBlocked", lambda v: fmt(v))]
     for title, key, f in keys:
-        lines.append(f"| {title} | " + " | ".join(f(agg[label].get(key)) for label in labels) + " |")
-    c = agg["chrome"]
+        lines.append(f"| {title} | " + " | ".join(f(agg[label].get(key)) + parity_note(agg[label], counts.get(title))
+                                                   for label in labels) + " |")
     lines.append("")
     lines.append(f"Chrome medians: FCP {fmt(c['fcpMedianMs'])} ms, LCP {fmt(c['lcpMedianMs'])} ms, "
                  f"load {fmt(c['loadMedianMs'])} ms, main thread {fmt(c['mainThreadMedianMs'])} ms.")
@@ -495,24 +765,10 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
         lines.append("Also left out, so every column averages the same sites, because at least one "
                      "Nordstjernen run was shown a bot challenge or an error page: "
                      + ", ".join(c["nsExcluded"]) + ".")
+    for note in stability_notes(rows, agg, labels):
+        lines += ["", note]
     lines.append("")
-    head = "| Site | Chrome FCP | Chrome main | " + " | ".join(
-        f"{label} parity | {label} first paint | {label} main CPU" for label in labels) + " |"
-    lines.append(head)
-    lines.append("|---|---:|---:|" + "---:|---:|---:|" * len(labels))
-    for r in rows:
-        ch = r.get("chrome") or {}
-        site_id = r["id"] + (" (Chrome blocked)" if ch.get("blocked") else "")
-        cells = [site_id, fmt(ch.get("fcp")), fmt(ch.get("mainThreadMs"))]
-        for label in labels:
-            e = r["engines"].get(label)
-            if not e:
-                cells += ["–", "–", "–"]
-                continue
-            mark = " ⚠" if e.get("error") or e.get("blocked") else ""
-            cells += [fmt(e["visual"].get("parity"), 1) + mark,
-                      fmt(e.get("firstPaintMs")), fmt(e.get("settledMainThreadMs"))]
-        lines.append("| " + " | ".join(cells) + " |")
+    lines += markdown_site_table(rows, labels, repeats)
     lines.append("")
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8", errors="replace")
 
@@ -544,9 +800,9 @@ return d==='a'?c:-c});r.forEach(function(x){b.appendChild(x)})})});
 """
 
 
-def cell(v, digits=0, cls=""):
+def cell(v, digits=0, cls="", note=""):
     num = "" if v is None else f' data-v="{v}"'
-    return f'<td{num} class="{cls}">{html.escape(fmt(v, digits))}</td>'
+    return f'<td{num} class="{cls}">{html.escape(fmt(v, digits) + note)}</td>'
 
 
 def ratio_cell(v):
@@ -554,6 +810,19 @@ def ratio_cell(v):
         return '<td data-v="">–</td>'
     cls = "good" if v < 1 else "bad"
     return f'<td data-v="{v:.4f}" class="{cls}">{v:.2f}×</td>'
+
+
+def change_cell(change):
+    if not change:
+        return '<td data-v="">–</td>'
+    more = change.get("moreFailedRuns") or 0
+    if not change["beyondNoise"]:
+        cls = "muted"
+    elif more:
+        cls = "bad" if more > 0 else "good"
+    else:
+        cls = "good" if change["change"] > 0 else "bad"
+    return f'<td data-v="{change["change"]}" class="{cls}">{html.escape(change_text(change))}</td>'
 
 
 SUMMARY_ROWS = [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
@@ -564,6 +833,13 @@ SUMMARY_ROWS = [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMea
                 ("Peak memory ÷ Chrome", "memoryVsChromeGeomean", 2),
                 ("Sites painting before Chrome FCP", "fasterFirstRender", 0),
                 ("JS errors", "jsErrors", 0)]
+
+
+def summary_rows(agg, labels):
+    return ([row + (None,) for row in SUMMARY_ROWS[:1]]
+            + [(title, key, 1, count_key) for title, key, count_key in parity_rows(agg, labels)]
+            + [row + (None,) for row in SUMMARY_ROWS[2:]])
+
 
 PHASE_KEYS = ("fetchMs", "parseMs", "styleMs", "scriptMs", "layoutMs", "imagesMs", "paintMs",
               "netWaitMs", "processCpuMs", "maxRssMb", "nodes")
@@ -579,10 +855,12 @@ def html_summary(rows, agg, labels, meta):
                f"viewport {e(meta['viewport'])} · {len(rows)} sites · {e(meta['generated'])}</p>")
     out.append("<h2>Summary</h2><div class=wrap><table><thead><tr><th>Metric</th>" +
                "".join(f"<th>{e(label)}</th>" for label in labels) + "</tr></thead><tbody>")
-    for title, key, digits in SUMMARY_ROWS:
-        out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[label].get(key), digits) for label in labels) + "</tr>")
-    out.append("</tbody></table></div>")
     c = agg["chrome"]
+    for title, key, digits, count_key in summary_rows(agg, labels):
+        out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[label].get(key), digits,
+                                                              note=parity_note(agg[label], count_key))
+                                                         for label in labels) + "</tr>")
+    out.append("</tbody></table></div>")
     if c.get("excluded"):
         out.append("<p class=muted>Left out of the summary because headless Chrome was shown a bot challenge "
                    "or an error page: " + e(", ".join(c["excluded"])) + ".</p>")
@@ -590,38 +868,51 @@ def html_summary(rows, agg, labels, meta):
         out.append("<p class=muted>Also left out, so every column averages the same sites, because at least "
                    "one Nordstjernen run was shown a bot challenge or an error page: "
                    + e(", ".join(c["nsExcluded"])) + ".</p>")
+    for note in stability_notes(rows, agg, labels):
+        out.append(f"<p class=muted>{e(note)}</p>")
     return out
 
 
-def html_engine_cells(en):
+def html_engine_cells(en, repeats):
     if not en:
-        return "<td>–</td>" * 9
+        return "<td>–</td>" * (10 if repeats else 9)
     v = en["visual"]
     comp = v.get("components") or {}
     placed = comp.get("placedRate")
-    return (cell(v.get("parity"), 1, "bad" if en.get("error") else "") + cell(v.get("ssim"), 3) +
+    spread = en.get("paritySpread")
+    spread_cell = cell(spread, 1, "bad" if (spread or 0) > UNSTABLE_SPREAD else "") if repeats else ""
+    return (cell(v.get("parity"), 1, "bad" if en.get("error") else "") + spread_cell + cell(v.get("ssim"), 3) +
             cell(None if placed is None else round(placed * 100), 0) +
             cell(en.get("firstPaintMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
             cell(en.get("settledMainThreadMs")) + ratio_cell(en["vsChrome"]["mainThread"]) +
             cell(en.get("settledMaxRssMb")) + cell(en.get("jsErrors")))
 
 
-def html_site_table(rows, labels):
+def html_site_table(rows, labels, repeats):
     e = html.escape
+    both = repeats and len(labels) > 1
+    spread_head = "<th>Spread</th>" if repeats else ""
     out = ["<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
-           "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>"]
+           "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>" + spread_head]
     for label in labels:
-        out.append(f"<th>{e(label)} parity</th><th>SSIM</th><th>Placed</th><th>First paint</th>"
-                   f"<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
+        out.append(f"<th>{e(label)} parity</th>" + spread_head + "<th>SSIM</th><th>Placed</th><th>First paint</th>"
+                   "<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
+    if both:
+        out.append(f"<th>{e(labels[-1])} − {e(labels[0])}</th>")
     out.append("</tr></thead><tbody>")
     for r in rows:
         ch = r.get("chrome") or {}
         site = r.get("site") or {}
-        out.append(f"<tr><td><a href='#{e(r['id'])}'>{e(r['id'])}</a></td><td>{e(site.get('category', ''))}</td>")
+        mark = " <span class=bad>unstable</span>" if r.get("unstable") else ""
+        out.append(f"<tr><td><a href='#{e(r['id'])}'>{e(r['id'])}</a>{mark}</td>"
+                   f"<td>{e(site.get('category', ''))}</td>")
         out.append(cell(ch.get("fcp")) + cell(ch.get("lcp")) + cell(ch.get("load")) + cell(ch.get("speedIndex")) +
-                   cell(ch.get("mainThreadMs")) + cell(ch.get("browserRssMb")))
+                   cell(ch.get("mainThreadMs")) + cell(ch.get("browserRssMb")) +
+                   (cell(ch.get("paritySpread"), 1) if repeats else ""))
         for label in labels:
-            out.append(html_engine_cells(r["engines"].get(label)))
+            out.append(html_engine_cells(r["engines"].get(label), repeats))
+        if both:
+            out.append(change_cell(r.get("parityChange")))
         out.append("</tr>")
     out.append("</tbody></table></div>")
     return out
@@ -639,6 +930,13 @@ def html_site_notes(r, ch, labels):
         en = r["engines"].get(label)
         if en and en.get("blocked"):
             out.append(f"<p class=bad>{e(label)} was shown a {e(en['blocked'])} page.</p>")
+        if en and en.get("failedRuns"):
+            count = "it counts" if en["failedRuns"] == 1 else "they count"
+            out.append(f"<p class=bad>{e(label)} failed in {en['failedRuns']} of {len(en['visualRuns'])} visual runs "
+                       f"({e(en['error'])}); {count} in its median but not in its spread.</p>")
+    if r.get("unstable"):
+        out.append(f"<p class=bad>Unstable: its visual runs spread over more than {UNSTABLE_SPREAD:g} parity points "
+                   f"({e(spread_text(r, labels))}); this site is left out of the visual aggregates.</p>")
     return out
 
 
@@ -646,18 +944,22 @@ def html_engine_figure(site_id, label, en):
     e = html.escape
     v = en["visual"]
     error = f" · <span class=bad>{e(en['error'])}</span>" if en.get("error") else ""
+    runs = en.get("visualRuns")
+    shown = f" · median of {len(runs)} runs, run {en['shownRun']} shown" if runs else ""
     return (f"<figure><img loading=lazy src='img/{e(site_id)}-{e(label)}.jpg' alt=''>"
             f"<figcaption>{e(label)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
             f"first paint {fmt(en.get('firstPaintMs'))} ms · images loaded {fmt(en.get('firstRenderMs'))} ms"
-            + error + "</figcaption></figure>")
+            + shown + error + "</figcaption></figure>")
 
 
 def html_site_shots(r, ch, labels, base_label):
     e = html.escape
+    runs = ch.get("visualRuns")
+    reference = f" · reference run {ch['reference']} of {len(runs)}" if runs else ""
     out = ["<div class=shots>",
            f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}.jpg' alt=''>"
            f"<figcaption>Chrome · FCP {fmt(ch.get('fcp'))} ms · LCP {fmt(ch.get('lcp'))} ms · "
-           f"load {fmt(ch.get('load'))} ms · CLS {fmt(ch.get('cls'), 3)}</figcaption></figure>"]
+           f"load {fmt(ch.get('load'))} ms · CLS {fmt(ch.get('cls'), 3)}{reference}</figcaption></figure>"]
     for label in labels:
         en = r["engines"].get(label)
         if en:
@@ -684,6 +986,38 @@ def html_full_pages(r, ch, labels, base_label):
             out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}-full.jpg' alt=''>"
                        f"<figcaption>{e(label)} · {fmt(en.get('docH'))} px</figcaption></figure>")
     out.append("</div></details>")
+    return out
+
+
+def html_run_figure(name, title, run, caption):
+    e = html.escape
+    img = f"<img loading=lazy src='img/{e(name)}-run{run['run']}.jpg' alt=''>" if run.get("screenshot") else ""
+    notes = [f"{run['blocked']} page" if run.get("blocked") else None, run.get("error")]
+    extra = "".join(f" · <span class=bad>{e(n)}</span>" for n in notes if n)
+    return f"<figure>{img}<figcaption>{e(title)} run {run['run']} · {e(caption)}{extra}</figcaption></figure>"
+
+
+def html_visual_runs(r, labels, base_label):
+    ch = r.get("chrome") or {}
+    groups = []
+    if ch.get("visualRuns"):
+        groups.append((base_label, "Chrome", [
+            (x, "reference" if x["run"] == ch.get("reference") else f"{fmt(x.get('parity'), 1)} against the reference")
+            for x in ch["visualRuns"]]))
+    for label in labels:
+        en = r["engines"].get(label) or {}
+        if en.get("visualRuns"):
+            groups.append((label, label, [
+                (x, f"parity {fmt(x.get('parity'), 1)}" + (", shown" if x["run"] == en.get("shownRun") else ""))
+                for x in en["visualRuns"]]))
+    if not groups:
+        return []
+    failed = any(e.get("failedRuns") for e in r["engines"].values())
+    out = [f"<details{' open' if r.get('unstable') or failed else ''}><summary>Visual runs</summary>"]
+    for name, title, runs in groups:
+        out.append("<div class=film>" + "".join(html_run_figure(f"{r['id']}-{name}", title, x, caption)
+                                                 for x, caption in runs) + "</div>")
+    out.append("</details>")
     return out
 
 
@@ -731,6 +1065,7 @@ def html_site_section(r, labels, base_label):
     out.extend(html_site_notes(r, ch, labels))
     out.extend(html_site_shots(r, ch, labels, base_label))
     out.extend(html_full_pages(r, ch, labels, base_label))
+    out.extend(html_visual_runs(r, labels, base_label))
     for label in labels:
         en = r["engines"].get(label)
         if en:
@@ -741,7 +1076,7 @@ def html_site_section(r, labels, base_label):
 
 def write_html(rows, agg, labels, base_label, meta, path):
     out = html_summary(rows, agg, labels, meta)
-    out.extend(html_site_table(rows, labels))
+    out.extend(html_site_table(rows, labels, "unstable" in agg["chrome"]))
     for r in rows:
         out.extend(html_site_section(r, labels, base_label))
     out.append(f"<script>{SORT_JS}</script></main></body></html>")

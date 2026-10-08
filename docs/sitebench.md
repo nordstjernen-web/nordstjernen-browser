@@ -161,18 +161,58 @@ so dates and times a page prints read the same in both.
 - *Peak memory ÷ Chrome*: Nordstjernen's peak RSS over the RSS of all
   Chrome processes after load.
 
+Pages change between loads (a consent banner, a rotating top story), so
+one load can mislead; the visual runs measure how much. Every
+Nordstjernen run is scored against one Chrome run, the *reference*: the
+Chrome run whose screenshot and probe score highest, on average, as the
+reference for Chrome's other runs (the first on a tie). A site's parity
+is the median over a build's runs, and the build's *median run* is the
+run with that parity (the lower of the two middle runs for an even
+count). Its *spread* is the highest minus the lowest parity of the runs
+that loaded; Chrome's spread is 100 minus the lowest score of its other
+runs against the reference. A build's *failed* run, one that ended with
+a load error or without a screenshot, counts in the median (as 0 when it
+has no screenshot) but not in the spread, which measures how much the
+rendered page changes between loads; the site is marked ⚠ for that
+build and, as after a failed single load, left out of its sites loaded
+and its timing aggregates. A site is *unstable* when Chrome's spread or
+the spread of any compared build is above 2 points. Unstable sites are
+marked in both reports and left out of the mean visual parity, the
+median SSIM and the median components placed, which then cover the
+stable sites only, and get a mean parity row of their own; the summary
+gives the number of sites each mean covers, and the other figures still
+cover every compared site. When two or more builds are compared, the
+per-site tables show the newest build's parity minus the oldest's, and
+a difference no larger than the site's noise, the largest of Chrome's
+spread and the two builds' spreads, is marked as noise, unless the
+newest build failed in more or fewer runs than the oldest, which is
+shown instead; the summary lists the sites that moved by more or whose
+failed runs changed. A capture with one visual run per browser has no
+spread, and its report is the same as before visual runs were repeated.
+A Chrome capture taken with one visual run, which `run.sh`
+(`CHROME=auto`) and a resumed `ab.sh` keep when they find it, has no
+spread either, so the builds' spreads alone decide stability and noise
+for that site until Chrome is captured again (`CHROME=1`, or a new
+`OUT` for `ab.sh`).
+
 Sites that answer headless Chrome with a bot challenge or an error page
 instead of their content (detected from the page title and first text,
 or a challenge redirect such as `?js_challenge=` on a near-empty page)
 are marked in the report and left out of the averages, since there is
 nothing to compare against. A site that shows one of the compared
 Nordstjernen builds a challenge is left out too, so that every column
-averages the same sites.
+averages the same sites. Challenges are judged on Chrome's reference
+run and on each build's median run.
 
 The report lists, per site, the screenshots side by side with a
 difference heatmap, Chrome's filmstrip, both full pages, the
 worst-placed components and the computed-style mismatches, which is
-usually enough to point at the engine feature at fault.
+usually enough to point at the engine feature at fault. With repeated
+visual runs, the screenshots, the heatmap, the components and the style
+mismatches are those of Chrome's reference run and each build's median
+run, while the filmstrip and the full pages come from the first run;
+*Visual runs* adds every run's screenshot and score, and is open for
+unstable sites.
 
 ## Results
 
