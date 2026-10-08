@@ -3155,6 +3155,9 @@ wgl_readPixels(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_UNDEFINED;
     }
     if (!JS_IsObject(argv[6])) return JS_UNDEFINED;
+    int64_t dst_off = 0;
+    if (argc >= 8 && JS_ToInt64(ctx, &dst_off, argv[7]))
+        return JS_EXCEPTION;
     JSValue hold;
     size_t len = 0;
     uint8_t *p = (uint8_t *)view_bytes(ctx, argv[6], &len, &hold);
@@ -3163,8 +3166,6 @@ wgl_readPixels(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         JSValue ab = JS_GetTypedArrayBuffer(ctx, argv[6], &view_off, &view_len, &bpe);
         if (JS_IsException(ab)) JS_FreeValue(ctx, JS_GetException(ctx));
         else JS_FreeValue(ctx, ab);
-        int64_t dst_off = 0;
-        JS_ToInt64(ctx, &dst_off, argv[7]);
         size_t skip = dst_off > 0 ? (size_t)dst_off * bpe : 0;
         if (skip > len) {
             g->injected_error = GL_INVALID_VALUE;
@@ -4277,6 +4278,9 @@ wgl_compressed_source(JSContext *ctx, int argc, JSValueConst *argv, int i,
 {
     *hold = JS_UNDEFINED;
     if (i >= argc || !JS_IsObject(argv[i])) return NULL;
+    int64_t off = 0, override = 0;
+    if (argc > i + 1 && JS_ToInt64(ctx, &off, argv[i + 1])) return NULL;
+    if (argc > i + 2 && JS_ToInt64(ctx, &override, argv[i + 2])) return NULL;
     size_t total = 0;
     const uint8_t *px = view_bytes(ctx, argv[i], &total, hold);
     if (!px) return NULL;
@@ -4285,9 +4289,6 @@ wgl_compressed_source(JSContext *ctx, int argc, JSValueConst *argv, int i,
     if (JS_IsException(tb)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, tb);
     if (bpe == 0) bpe = 1;
-    int64_t off = 0, override = 0;
-    if (argc > i + 1) JS_ToInt64(ctx, &off, argv[i + 1]);
-    if (argc > i + 2) JS_ToInt64(ctx, &override, argv[i + 2]);
     uint64_t elems = total / bpe;
     if (off < 0 || override < 0 || (uint64_t)off > elems) return NULL;
     uint64_t count = override ? (uint64_t)override : elems - (uint64_t)off;
@@ -4322,6 +4323,13 @@ wgl_compressed_upload(JSContext *ctx, JSValueConst this_val, int argc,
     if (data_at < argc && JS_IsNumber(argv[data_at])) {
         GLsizei image_size = argi(ctx, argc, argv, data_at);
         GLintptr pbo_off = (GLintptr)argi(ctx, argc, argv, data_at + 1);
+        GLint unpack_buffer = 0;
+        if (g->version >= 2)
+            glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
+        if (!unpack_buffer || image_size < 0 || pbo_off < 0) {
+            g->injected_error = GL_INVALID_OPERATION;
+            return JS_UNDEFINED;
+        }
         const void *ptr = (const void *)pbo_off;
         if (three_d && sub)
             glCompressedTexSubImage3D(target, level, off[0], off[1], off[2], w, h, d,
