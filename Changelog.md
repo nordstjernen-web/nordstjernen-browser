@@ -141,6 +141,14 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* `getComputedStyle()` resolves colours that default to `currentcolor`
+  - the border, outline, column-rule and text-decoration colours, and
+  `caret-color: auto` - to the element's colour, where it returned an
+  empty string or `auto`, and serializes the `border`, `border-top`
+  (and the other sides) and `outline` shorthands as Chrome does
+  (`2px solid rgb(10, 20, 30)`, `rgb(10, 20, 30) solid 1px`, an empty
+  string for `border` when the sides differ). Shorthands such as
+  `border` and `outline` read as strings instead of `undefined`.
 * `<slot>` is `display: contents`, as in every browser's default style
   sheet, and lays out the nodes assigned to it in place: slotted
   elements become flex or grid items of the shadow tree's container, a

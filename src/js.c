@@ -17757,6 +17757,30 @@ ns_computed_radius_shorthand(JSContext *ctx, const ns_node *n)
     return out;
 }
 
+static gboolean
+ns_computed_defaults_to_currentcolor(int pid)
+{
+    return pid == NS_CSS_BORDER_TOP_COLOR || pid == NS_CSS_BORDER_RIGHT_COLOR ||
+           pid == NS_CSS_BORDER_BOTTOM_COLOR || pid == NS_CSS_BORDER_LEFT_COLOR ||
+           pid == NS_CSS_OUTLINE_COLOR || pid == NS_CSS_COLUMN_RULE_COLOR ||
+           pid == NS_CSS_TEXT_DECORATION_COLOR || pid == NS_CSS_CARET_COLOR;
+}
+
+static char *
+ns_computed_join3(JSContext *ctx, const ns_node *n, const char *a,
+                  const char *b, const char *c)
+{
+    char *x = ns_computed_lookup(ctx, n, a);
+    char *y = ns_computed_lookup(ctx, n, b);
+    char *z = ns_computed_lookup(ctx, n, c);
+    char *out = g_strdup_printf("%s %s %s", x ? x : "", y ? y : "",
+                                z ? z : "");
+    g_free(x);
+    g_free(y);
+    g_free(z);
+    return out;
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
@@ -17825,6 +17849,39 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "inset") == 0)
         return ns_computed_box_shorthand(ctx, n, "top", "right",
                                          "bottom", "left");
+    static const char *const border_sides[4] = {
+        "top", "right", "bottom", "left",
+    };
+    for (int i = 0; i < 4; i++) {
+        if (strncmp(name, "border-", 7) != 0 ||
+            strcmp(name + 7, border_sides[i]) != 0)
+            continue;
+        char *width = g_strdup_printf("border-%s-width", border_sides[i]);
+        char *bstyle = g_strdup_printf("border-%s-style", border_sides[i]);
+        char *color = g_strdup_printf("border-%s-color", border_sides[i]);
+        char *out = ns_computed_join3(ctx, n, width, bstyle, color);
+        g_free(width);
+        g_free(bstyle);
+        g_free(color);
+        return out;
+    }
+    if (strcmp(name, "border") == 0) {
+        char *sides[4];
+        for (int i = 0; i < 4; i++) {
+            char *side = g_strdup_printf("border-%s", border_sides[i]);
+            sides[i] = ns_computed_lookup(ctx, n, side);
+            g_free(side);
+        }
+        gboolean same = sides[0] != NULL;
+        for (int i = 1; i < 4 && same; i++)
+            same = sides[i] && strcmp(sides[i], sides[0]) == 0;
+        char *out = g_strdup(same ? sides[0] : "");
+        for (int i = 0; i < 4; i++) g_free(sides[i]);
+        return out;
+    }
+    if (strcmp(name, "outline") == 0)
+        return ns_computed_join3(ctx, n, "outline-color", "outline-style",
+                                 "outline-width");
     if (strcmp(name, "border-image") == 0) {
         char *source = ns_computed_lookup(ctx, n, "border-image-source");
         char *slice = ns_computed_lookup(ctx, n, "border-image-slice");
@@ -18123,6 +18180,17 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             if (r) return r;
         }
         return g_strdup("none");
+    }
+    if (ns_computed_defaults_to_currentcolor(pid)) {
+        const ns_style *s = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, n) : NULL;
+        char *text = s && s->values[pid]
+            ? ns_css_value_serialize(s->values[pid]) : NULL;
+        if (text && *text && g_ascii_strcasecmp(text, "currentcolor") != 0 &&
+            !(pid == NS_CSS_CARET_COLOR && g_ascii_strcasecmp(text, "auto") == 0))
+            return text;
+        g_free(text);
+        return ns_computed_lookup(ctx, n, "color");
     }
     const char *canonical = pid >= 0 ? ns_css_prop_name(pid) : name;
     if (pid >= 0 && js && js->style_table) {
@@ -18486,7 +18554,19 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_FALSE;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_FALSE;
+    static const char *const shorthands[] = {
+        "animation", "background", "border", "border-block", "border-bottom",
+        "border-color", "border-image", "border-inline", "border-left",
+        "border-radius", "border-right", "border-style", "border-top",
+        "border-width", "column-rule", "columns", "flex", "flex-flow", "font",
+        "gap", "grid", "grid-area", "grid-column", "grid-row",
+        "grid-template", "inset", "list-style", "margin", "outline",
+        "overflow", "padding", "place-content", "place-items", "place-self",
+        "text-decoration", "transition",
+    };
     gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
+    for (gsize i = 0; !ok && i < G_N_ELEMENTS(shorthands); i++)
+        ok = strcmp(name, shorthands[i]) == 0;
     JS_FreeCString(ctx, name);
     return JS_NewBool(ctx, ok);
 }
