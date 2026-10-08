@@ -28391,20 +28391,8 @@ pending_parse_cache_trim(void)
 }
 
 static GArray *
-pending_parse_cached(const char *pname, const char *value_text)
+pending_parse_synth(const char *synth)
 {
-    if (!g_pending_parse_cache) {
-        g_pending_parse_cache = g_hash_table_new_full(
-            g_str_hash, g_str_equal, g_free, pending_parse_entry_free);
-        g_pending_parse_vw = g_viewport_w;
-        g_pending_parse_vh = g_viewport_h;
-    }
-    char *synth = g_strdup_printf("%s: %s;}", pname, value_text);
-    GArray *hit = g_hash_table_lookup(g_pending_parse_cache, synth);
-    if (hit) {
-        g_free(synth);
-        return hit;
-    }
     GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
     const char *sp = synth;
     parse_declaration_block(&sp, synth + strlen(synth), temp, NULL);
@@ -28423,19 +28411,48 @@ pending_parse_cached(const char *pname, const char *value_text)
         g_array_append_val(kept, *d);
     }
     g_array_free(temp, TRUE);
+    return kept;
+}
+
+static GArray *
+pending_parse_cached(const char *pname, const char *value_text)
+{
+    if (!g_pending_parse_cache) {
+        g_pending_parse_cache = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, pending_parse_entry_free);
+        g_pending_parse_vw = g_viewport_w;
+        g_pending_parse_vh = g_viewport_h;
+    }
+    char *synth = g_strdup_printf("%s: %s;}", pname, value_text);
+    GArray *hit = g_hash_table_lookup(g_pending_parse_cache, synth);
+    if (hit) {
+        g_free(synth);
+        return hit;
+    }
+    GArray *kept = pending_parse_synth(synth);
     g_hash_table_insert(g_pending_parse_cache, synth, kept);
     return kept;
+}
+
+static GArray *
+pending_parse_uncached(const char *pname, const char *value_text)
+{
+    char *synth = g_strdup_printf("%s: %s;}", pname, value_text);
+    GArray *decls = pending_parse_synth(synth);
+    g_free(synth);
+    return decls;
 }
 
 static gboolean
 append_pending_decls(const pending_match *pm, const char *value_text,
                      GArray *matches, GPtrArray *owned_values)
 {
-    (void)owned_values;
-    GArray *temp = pending_parse_cached(pm->pd->pname, value_text);
-    gboolean any = FALSE;
-    for (guint i = 0; i < temp->len; i++) {
-        ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
+    gboolean per_element = css_value_has_container_unit(value_text);
+    GArray *decls = per_element
+        ? pending_parse_uncached(pm->pd->pname, value_text)
+        : pending_parse_cached(pm->pd->pname, value_text);
+    for (guint i = 0; i < decls->len; i++) {
+        ns_css_decl *d = &g_array_index(decls, ns_css_decl, i);
         match_entry me = {
             .origin = pm->origin,
             .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
@@ -28451,8 +28468,10 @@ append_pending_decls(const pending_match *pm, const char *value_text,
             .prop  = d->prop,
         };
         g_array_append_val(matches, me);
-        any = TRUE;
+        if (per_element) g_ptr_array_add(owned_values, d->value);
     }
+    gboolean any = decls->len > 0;
+    if (per_element) g_array_free(decls, TRUE);
     return any;
 }
 
