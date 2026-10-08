@@ -3,6 +3,10 @@ Changelog:
 
 1.0.31:
 ======
+* `EventSource` follows CORS. A page could open an event stream on any
+  other origin, including services on localhost or the local network,
+  and read every event; a cross-origin stream now opens only when the
+  response's `Access-Control-Allow-Origin` is `*` or the page's origin.
 * The JavaScript bytecode cache can no longer load a half-written file.
   Every process writing the same script used one temporary file name, so
   two tabs compiling the same library at once could publish a file

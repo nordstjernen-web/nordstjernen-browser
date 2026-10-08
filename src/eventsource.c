@@ -152,6 +152,8 @@ typedef struct {
     gboolean    opened;
     gboolean    fatal;
     gboolean    is_event_stream;
+    char       *allow_origin;
+    CURL       *curl;
 } ns_es_parse;
 
 static void
@@ -245,6 +247,19 @@ ns_es_feed(ns_es_parse *p, const char *buf, gsize len)
     }
 }
 
+static gboolean
+ns_es_cors_allows(const ns_es_parse *p)
+{
+    char *final_url = NULL;
+    curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &final_url);
+    const char *origin = p->es->origin;
+    if (final_url && origin && ns_url_same_origin(origin, final_url))
+        return TRUE;
+    return p->allow_origin &&
+           (strcmp(p->allow_origin, "*") == 0 ||
+            (origin && strcmp(p->allow_origin, origin) == 0));
+}
+
 static size_t
 ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
@@ -268,13 +283,21 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         }
         p->status = code;
         p->is_event_stream = FALSE;
+        g_clear_pointer(&p->allow_origin, g_free);
+    } else if (total >= 28 &&
+               !g_ascii_strncasecmp(buffer, "Access-Control-Allow-Origin:", 28)) {
+        g_free(p->allow_origin);
+        p->allow_origin = g_strstrip(g_strndup(buffer + 28, total - 28));
     } else if (total >= 13 &&
                !g_ascii_strncasecmp(buffer, "Content-Type:", 13)) {
         if (g_strstr_len(buffer, total, "text/event-stream"))
             p->is_event_stream = TRUE;
     } else if (total <= 2) {
         if (!p->opened) {
-            if (p->status == 200 && p->is_event_stream) {
+            if (p->status == 200 && p->is_event_stream &&
+                !ns_es_cors_allows(p)) {
+                p->fatal = TRUE;
+            } else if (p->status == 200 && p->is_event_stream) {
                 p->opened = TRUE;
                 ns_es_post(p->es, ns_es_invoke_open, NULL, NULL);
             } else if (p->status >= 200 &&
@@ -317,6 +340,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     p.line = g_byte_array_new();
     p.data = g_string_new(NULL);
     p.status = 0;
+    p.curl = curl;
 
     curl_easy_setopt(curl, CURLOPT_URL, es->url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
@@ -324,6 +348,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, es->url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 20L);
 #ifdef CURLOPT_PROTOCOLS_STR
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
 #endif
@@ -369,6 +394,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     g_byte_array_free(p.line, TRUE);
     g_string_free(p.data, TRUE);
     g_free(p.event_type);
+    g_free(p.allow_origin);
     return !fatal;
 }
 
