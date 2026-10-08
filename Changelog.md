@@ -3,6 +3,17 @@ Changelog:
 
 1.0.30:
 ======
+* Pages that upload WebGPU textures without giving `rowsPerImage`, which
+  three.js does for every texture, no longer abort the renderer: the
+  missing value reached wgpu-native as an invalid zero and it stopped
+  the process. `writeTexture()` writes to the mip level, layer and
+  position the page names instead of always the top-left of the first
+  layer, origins given as `{x, y, z}` are read correctly, and command
+  encoders gain `copyBufferToTexture()`, `copyTextureToBuffer()` and
+  `clearBuffer()`. Render passes support `drawIndirect()` and
+  `drawIndexedIndirect()`, compute passes
+  `dispatchWorkgroupsIndirect()`, and `queue.onSubmittedWorkDone()`
+  exists.
 * WebGPU bind groups support cube-map, array and 3D texture bindings,
   multisampled and integer textures, storage textures and dynamic buffer
   offsets; every texture binding used to be declared as a plain 2D
