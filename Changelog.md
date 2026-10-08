@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* WebGPU is on by default, like WebGL. Pages got `null` from
+  `navigator.gpu.requestAdapter()` unless WebGPU was switched on in
+  Settings or the browser was started with `--enable-webgpu`, so three.js
+  fell back to its WebGL2 backend ("WebGPU is not available, running
+  under WebGL2 backend"). The Settings switch still turns it off. The
+  setting is now saved as `webgpu`; the old `webgpu_enabled` line that
+  earlier releases wrote out with every save is ignored, so existing
+  installs get the new default too.
 * Google Maps draws its map on NVIDIA graphics. WebGL 1 shaders have
   no `#version` line, and on desktop OpenGL they went to the driver
   as-is; Intel's driver read them as GLSL ES anyway, but NVIDIA's read

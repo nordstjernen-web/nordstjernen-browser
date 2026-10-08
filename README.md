@@ -88,7 +88,7 @@ DirectComposition). Every other platform builds from source — see
 - **WebGL / WebGPU / WebAssembly** — WebGL 1/2 mapped onto OpenGL ES, on by
   default ([docs/webgl.md](docs/webgl.md)); `navigator.gpu` over
   wgpu-native (fetched and linked statically on Linux, macOS and Windows),
-  gated behind `--enable-webgpu` ([docs/webgpu.md](docs/webgpu.md)); the full
+  on by default and switchable in Settings ([docs/webgpu.md](docs/webgpu.md)); the full
   WebAssembly JS API over a vendored WAMR interpreter
   ([docs/webassembly.md](docs/webassembly.md)).
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)

@@ -2,8 +2,8 @@
 
 Nordstjernen implements WebGPU (`navigator.gpu`) in `src/webgpu.c`, layered on
 the external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library. Like
-WebGL it is a required part of the desktop build; unlike WebGL it stays off at
-runtime until the browser is started with `--enable-webgpu`.
+WebGL it is a required part of the desktop build and, like WebGL, it is on at
+runtime by default; it can be switched off in Settings.
 
 ## Building with WebGPU
 
@@ -31,21 +31,24 @@ files and `scripts/fetch-wgpu-native.sh`, and rebuild.
 
 ## Runtime gating
 
-Even in a build that contains WebGPU, the API is **denied by default**.
-`navigator.gpu.requestAdapter()` resolves to `null` unless WebGPU is
-explicitly enabled, by either:
+In a build that contains WebGPU, the API is **available by default**.
+`navigator.gpu.requestAdapter()` resolves to `null` only when WebGPU is
+switched off on `about:settings` (the `webgpu` config key, on by default;
+the change applies to pages loaded afterwards). Even then it can be turned
+on for one run by:
 
-- turning on **WebGPU** on `about:settings` (the `webgpu_enabled` config
-  key, off by default), which applies to pages loaded afterwards,
 - starting the browser with the **`--enable-webgpu`** command-line flag, or
 - setting the environment variable **`NS_WEBGPU_ALLOW=1`** (what the flag
   does internally).
 
+Releases up to 1.0.30 kept WebGPU off by default and saved the setting as
+`webgpu_enabled`; that key is no longer read, so those installs pick up the
+new default.
+
 The shell sets the variable before the sandboxed renderer is spawned, so the
 renderer — where the page's JS and `src/webgpu.c` actually run — inherits the
 permission. On a build without WebGPU, `--enable-webgpu` prints a one-line
-notice and is otherwise ignored. Unlike WebGL, which is enabled by default,
-this keeps the large native GPU stack dormant unless explicitly requested.
+notice and is otherwise ignored.
 
 ## Implemented surface
 
