@@ -1,5 +1,6 @@
 /* probe.js — page inventory evaluated identically in Chrome and Nordstjernen. */
 (function (maxComponents) {
+  var started = Date.now();
   var MAX_COMPONENTS = maxComponents > 0 ? maxComponents : 3000;
   var TAGS = wordSet('header nav main footer aside section article h1 h2 h3 h4 p a button input select ' +
     'textarea label img picture svg video iframe canvas form ul ol li table');
@@ -198,6 +199,7 @@
     observed: safe(function () { return window.__sitebench || null; }, null),
     components: inv.components,
     moreComponents: inv.more,
-    inventory: { max: MAX_COMPONENTS, capped: inv.capped }
+    inventory: { max: MAX_COMPONENTS, capped: inv.capped },
+    probeMs: Date.now() - started
   });
 })

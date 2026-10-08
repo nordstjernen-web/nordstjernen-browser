@@ -228,7 +228,13 @@ so dates and times a page prints read the same in both.
   the settled load, over Chrome's main-thread task time for the same
   window. The time Nordstjernen spends compressing its screenshot dumps
   to PNG (`encode_ms`) is left out, as Chrome's screenshots are not
-  taken on its main thread.
+  taken on its main thread. So is the time the probe itself takes
+  (`probeMs` in `probe.json`), since Chrome's figure is read before the
+  probe runs. Only the serialisation of the probe's result stays in,
+  which even with a full inventory does not show above the difference
+  between two loads. Captures made before the probe recorded its time
+  count it in, and a report that compares them with newer ones names
+  them.
 - *Peak memory ÷ Chrome*: Nordstjernen's peak RSS over the RSS of all
   Chrome processes after load.
 
@@ -339,6 +345,8 @@ error page, and TikTok showed one to Nordstjernen. The before build
 aborted with heap corruption on claude.com and Discord (an inline VP9
 video overran its frame buffer), which counts as parity 0 in its mean;
 over the 42 sites both builds loaded, parity went from 67.3 to 71.0.
+Nordstjernen's main-thread CPU in this run still includes the time the
+probe took, which later versions leave out.
 
 Nordstjernen paints before Chrome's first contentful paint on 13 sites
 and uses less than a third of Chrome's memory, but still spends about
