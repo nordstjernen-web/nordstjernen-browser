@@ -538,21 +538,28 @@ blurred_shadow_cached(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
 }
 
 static int
-shadow_band_excess(double len, int pad, int radius, double start_r, double end_r)
+shadow_band_first(double start, int pad, int radius, double start_r)
 {
-    int first = (int)ceil(pad + start_r) + radius * 3 + 1;
-    int last = (int)floor(pad + len - end_r) - radius * 3 - 1;
+    return MAX((int)ceil(pad + start + start_r) + radius * 3 + 1, pad);
+}
+
+static int
+shadow_band_excess(double start, double len, int surf_len, int pad, int radius,
+                   double start_r, double end_r)
+{
+    int first = shadow_band_first(start, pad, radius, start_r);
+    int last = MIN((int)floor(pad + start + len - end_r) - radius * 3 - 1,
+                   surf_len - pad - 1);
     int uniform = last - first;
     return uniform > 1 ? uniform - 1 : 0;
 }
 
 static gboolean
-shadow_radii_fit(const shadow_blur_key *k)
+shadow_radii_fit(const corner_radii *c, double w, double h)
 {
-    const corner_radii *c = &k->radii;
     const double sums[4] = { c->tl + c->tr, c->trv + c->brv,
                              c->br + c->bl, c->tlv + c->blv };
-    const double lens[4] = { k->sw, k->sh, k->sw, k->sh };
+    const double lens[4] = { w, h, w, h };
     for (int i = 0; i < 4; i++)
         if (sums[i] > 0 && lens[i] / sums[i] < 1.0) return FALSE;
     return TRUE;
@@ -571,11 +578,14 @@ shadow_corner_h(double w, double h)
 }
 
 static gboolean
-shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
-             int *mid_x, int *mid_y)
+shadow_bands(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
+             int *dx, int *dy, int *mid_x, int *mid_y)
 {
     *dx = *dy = 0;
-    if (!(k->sw > 0) || !(k->sh > 0) || !shadow_radii_fit(k)) return FALSE;
+    double x0 = k->inset ? k->hole_x : 0, y0 = k->inset ? k->hole_y : 0;
+    double w = k->inset ? k->hole_w : k->sw, h = k->inset ? k->hole_h : k->sh;
+    if (!(w > 0) || !(h > 0) || !shadow_radii_fit(&k->radii, w, h))
+        return FALSE;
     const corner_radii *c = &k->radii;
     double left_r = MAX(shadow_corner_w(c->tl, c->tlv),
                         shadow_corner_w(c->bl, c->blv));
@@ -585,10 +595,10 @@ shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
                        shadow_corner_h(c->tr, c->trv));
     double bottom_r = MAX(shadow_corner_h(c->bl, c->blv),
                           shadow_corner_h(c->br, c->brv));
-    *dx = shadow_band_excess(k->sw, pad, k->radius, left_r, right_r);
-    *dy = shadow_band_excess(k->sh, pad, k->radius, top_r, bottom_r);
-    *mid_x = (int)ceil(pad + left_r) + k->radius * 3 + 1;
-    *mid_y = (int)ceil(pad + top_r) + k->radius * 3 + 1;
+    *dx = shadow_band_excess(x0, w, surf_w, pad, k->radius, left_r, right_r);
+    *dy = shadow_band_excess(y0, h, surf_h, pad, k->radius, top_r, bottom_r);
+    *mid_x = shadow_band_first(x0, pad, k->radius, left_r);
+    *mid_y = shadow_band_first(y0, pad, k->radius, top_r);
     return *dx > 0 || *dy > 0;
 }
 
@@ -630,7 +640,7 @@ static cairo_surface_t *
 blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h)
 {
     int dx, dy, mid_x, mid_y;
-    if (!shadow_bands(k, pad, &dx, &dy, &mid_x, &mid_y))
+    if (!shadow_bands(k, pad, surf_w, surf_h, &dx, &dy, &mid_x, &mid_y))
         return blurred_shadow_cached(k, pad, surf_w, surf_h, FALSE);
     if (g_shadow_blur_cache) {
         cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
@@ -639,6 +649,10 @@ blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h
     shadow_blur_key small_key = *k;
     small_key.sw -= dx;
     small_key.sh -= dy;
+    if (k->inset) {
+        small_key.hole_w -= dx;
+        small_key.hole_h -= dy;
+    }
     cairo_surface_t *small = blurred_shadow_cached(&small_key, pad, surf_w - dx,
                                                    surf_h - dy, TRUE);
     if (!small) return NULL;
@@ -838,7 +852,7 @@ paint_inset_box_shadow(cairo_t *cr, const ns_css_shadow *sh,
         key.hole_w = hole_w;
         key.hole_h = hole_h;
         cairo_surface_t *surf =
-            blurred_shadow_cached(&key, pad, surf_w, surf_h, FALSE);
+            blurred_shadow_surface(&key, pad, surf_w, surf_h);
         if (surf) {
             cairo_set_source_surface(cr, surf, px - pad, py - pad);
             cairo_paint(cr);
@@ -4898,18 +4912,22 @@ box_blur_argb(guchar *data, int stride, int w, int h, int radius)
             }
         }
     }
-    for (int x = 0; x < w; x++) {
-        for (int c = 0; c < 4; c++) {
-            int sum = 0;
-            for (int i = -radius; i <= radius; i++)
-                sum += tmp[clamp_i(i, 0, h - 1) * stride + x * 4 + c];
-            for (int y = 0; y < h; y++) {
-                data[y * stride + x * 4 + c] = (guchar)(sum / win);
-                sum += tmp[clamp_i(y + radius + 1, 0, h - 1) * stride + x * 4 + c]
-                     - tmp[clamp_i(y - radius, 0, h - 1) * stride + x * 4 + c];
-            }
+    int row_bytes = w * 4;
+    int *sums = g_new0(int, row_bytes);
+    for (int i = -radius; i <= radius; i++) {
+        const guchar *row = tmp + (gsize)clamp_i(i, 0, h - 1) * stride;
+        for (int x = 0; x < row_bytes; x++) sums[x] += row[x];
+    }
+    for (int y = 0; y < h; y++) {
+        guchar *d = data + (gsize)y * stride;
+        const guchar *add = tmp + (gsize)clamp_i(y + radius + 1, 0, h - 1) * stride;
+        const guchar *sub = tmp + (gsize)clamp_i(y - radius, 0, h - 1) * stride;
+        for (int x = 0; x < row_bytes; x++) {
+            d[x] = (guchar)(sums[x] / win);
+            sums[x] += add[x] - sub[x];
         }
     }
+    g_free(sums);
     g_free(tmp);
 }
 
