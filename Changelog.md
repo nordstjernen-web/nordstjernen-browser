@@ -34,6 +34,16 @@ Changelog:
   values are no longer expanded just to check for CSS-wide keywords. A
   full restyle of GitHub's front page drops from 230 to about 110 ms and
   Stack Overflow's from 108 to 56 ms.
+* A `:has()` rule no longer makes every DOM change restyle the whole
+  page. Stack Overflow's `html:has(.disable-document-scroll)` made each
+  inserted node - including every node the parser hands back after a
+  script - mark the entire document dirty. Like Chrome, a mutation now
+  invalidates `:has()` anchors only when it touches an element carrying
+  a class, id, tag or attribute named inside a `:has()` argument;
+  arguments with sibling combinators, structural pseudo-classes or
+  unkeyed compounds keep the conservative behaviour. A script that
+  inserts nodes and reads a computed style 200 times under such a rule
+  went from 4.2 s to about 0.7 s.
 * `getComputedStyle()` lays the page out only when it has to. Reading a
   property whose value does not depend on layout (colour, display,
   fonts and most others) now recomputes styles alone, so a script that

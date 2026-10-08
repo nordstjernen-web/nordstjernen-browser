@@ -1184,6 +1184,8 @@ void ns_css_selector_cache_end(void);
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
 void ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added);
+void ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
+                                  guint n_removed);
 void ns_css_mark_attr_dirty(ns_node *target, const char *name,
                             const char *old_value);
 gboolean ns_css_attr_may_affect_style(const ns_node *target, const char *name);
