@@ -141,6 +141,11 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* A web component whose host is `display: inline-block`, `inline-flex`
+  or `inline-grid` sits in the line like any inline block. Elements with
+  a shadow root were treated as blocks whenever their display generated
+  a box of their own, so a row of such components stacked one per line,
+  and MSN's shortcut icons rendered as empty circles.
 * Identical CSS declaration blocks are parsed once. Web components that
   carry the same stylesheet in every shadow root - Reddit puts one
   239 KB sheet in 93 of them - had that sheet rewritten for each host
