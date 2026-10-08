@@ -90,7 +90,9 @@ their geometry, font size, weight, family and colours.
   over Chrome's `load` event.
 - *Main-thread CPU ÷ Chrome*: CPU time of Nordstjernen's main thread over
   the settled load, over Chrome's main-thread task time for the same
-  window.
+  window. The time Nordstjernen spends compressing its screenshot dumps
+  to PNG (`encode_ms`) is left out, as Chrome's screenshots are not
+  taken on its main thread.
 - *Peak memory ÷ Chrome*: Nordstjernen's peak RSS over the RSS of all
   Chrome processes after load.
 
