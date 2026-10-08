@@ -313,6 +313,15 @@ ns_webgl_alloc_storage(ns_webgl *g, int w, int h)
 }
 
 static void
+wgl_resolve_blit(int w, int h)
+{
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+}
+
+static void
 ns_webgl_sync_size(ns_webgl *g)
 {
     guint32 gen = g->canvas ? g->canvas->attr_gen : 0;
@@ -3163,8 +3172,7 @@ wgl_readPixels(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (g->samples > 1 && (GLuint)bound == g->draw_fbo) {
             wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->draw_fbo);
             wgl_bind_framebuffer(g, GL_DRAW_FRAMEBUFFER, g->fbo);
-            glBlitFramebuffer(0, 0, g->w, g->h, 0, 0, g->w, g->h,
-                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            wgl_resolve_blit(g->w, g->h);
             wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->fbo);
             resolved = TRUE;
         }
@@ -5440,8 +5448,7 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     if (g->samples > 1) {
         wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->draw_fbo);
         wgl_bind_framebuffer(g, GL_DRAW_FRAMEBUFFER, g->fbo);
-        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        wgl_resolve_blit(w, h);
     }
     wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->fbo);
 

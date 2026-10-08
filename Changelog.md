@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* An antialiased WebGL canvas shows everything drawn to it when the page
+  leaves the scissor test on. The canvas renders into a multisampled
+  buffer that is resolved with a framebuffer blit before it is shown or
+  read back, and blits honour the scissor test, so only the last scissor
+  rectangle reached the screen. Pages that draw several views into one
+  canvas with `setScissor()` (three.js's multiple-views and
+  `webgl_loader_texture_ktx2` examples) showed a single tile. The
+  resolve now runs with the scissor test off.
 * WebGPU supports the `subgroups` feature. wgpu-native implements
   subgroup operations on Vulkan, Direct3D 12 and Metal but offers them
   as a native feature rather than the standard one, so `subgroups` was
