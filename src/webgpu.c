@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <math.h>
 
 #include "webgpu/webgpu.h"
 #include "webgpu/wgpu.h"
@@ -68,6 +69,9 @@ typedef struct {
     WGPUQueue      queue;
     WGPUTexture    target;
     WGPUTextureFormat format;
+    WGPUTextureFormat view_formats[8];
+    size_t         view_format_count;
+    uint32_t       usage;
     int            w, h;
     gboolean       configured;
     gboolean       opaque;
@@ -105,8 +109,8 @@ static JSValue wg_device_createSampler(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static JSValue wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
-static JSValue wg_make_texture(JSContext *ctx, WGPUTexture texture, uint32_t w,
-                               uint32_t h, WGPUTextureFormat format);
+static JSValue wg_make_texture(JSContext *ctx, WGPUTexture texture);
+static JSValue wg_array_from(JSContext *ctx, JSValueConst iterable);
 static JSValue wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
                                      int argc, JSValueConst *argv);
 static JSValue wg_queue_copyExternalImageToTexture(JSContext *ctx,
@@ -965,32 +969,151 @@ wg_canvas_dim(const ns_node *canvas, const char *name, int defv)
     return (int)v;
 }
 
+static const struct { const char *name; WGPUTextureFormat fmt; } wg_texture_formats[] = {
+    { "r8unorm", WGPUTextureFormat_R8Unorm },
+    { "r8snorm", WGPUTextureFormat_R8Snorm },
+    { "r8uint", WGPUTextureFormat_R8Uint },
+    { "r8sint", WGPUTextureFormat_R8Sint },
+    { "r16unorm", WGPUTextureFormat_R16Unorm },
+    { "r16snorm", WGPUTextureFormat_R16Snorm },
+    { "r16uint", WGPUTextureFormat_R16Uint },
+    { "r16sint", WGPUTextureFormat_R16Sint },
+    { "r16float", WGPUTextureFormat_R16Float },
+    { "rg8unorm", WGPUTextureFormat_RG8Unorm },
+    { "rg8snorm", WGPUTextureFormat_RG8Snorm },
+    { "rg8uint", WGPUTextureFormat_RG8Uint },
+    { "rg8sint", WGPUTextureFormat_RG8Sint },
+    { "r32float", WGPUTextureFormat_R32Float },
+    { "r32uint", WGPUTextureFormat_R32Uint },
+    { "r32sint", WGPUTextureFormat_R32Sint },
+    { "rg16unorm", WGPUTextureFormat_RG16Unorm },
+    { "rg16snorm", WGPUTextureFormat_RG16Snorm },
+    { "rg16uint", WGPUTextureFormat_RG16Uint },
+    { "rg16sint", WGPUTextureFormat_RG16Sint },
+    { "rg16float", WGPUTextureFormat_RG16Float },
+    { "rgba8unorm", WGPUTextureFormat_RGBA8Unorm },
+    { "rgba8unorm-srgb", WGPUTextureFormat_RGBA8UnormSrgb },
+    { "rgba8snorm", WGPUTextureFormat_RGBA8Snorm },
+    { "rgba8uint", WGPUTextureFormat_RGBA8Uint },
+    { "rgba8sint", WGPUTextureFormat_RGBA8Sint },
+    { "bgra8unorm", WGPUTextureFormat_BGRA8Unorm },
+    { "bgra8unorm-srgb", WGPUTextureFormat_BGRA8UnormSrgb },
+    { "rgb10a2uint", WGPUTextureFormat_RGB10A2Uint },
+    { "rgb10a2unorm", WGPUTextureFormat_RGB10A2Unorm },
+    { "rg11b10ufloat", WGPUTextureFormat_RG11B10Ufloat },
+    { "rgb9e5ufloat", WGPUTextureFormat_RGB9E5Ufloat },
+    { "rg32float", WGPUTextureFormat_RG32Float },
+    { "rg32uint", WGPUTextureFormat_RG32Uint },
+    { "rg32sint", WGPUTextureFormat_RG32Sint },
+    { "rgba16unorm", WGPUTextureFormat_RGBA16Unorm },
+    { "rgba16snorm", WGPUTextureFormat_RGBA16Snorm },
+    { "rgba16uint", WGPUTextureFormat_RGBA16Uint },
+    { "rgba16sint", WGPUTextureFormat_RGBA16Sint },
+    { "rgba16float", WGPUTextureFormat_RGBA16Float },
+    { "rgba32float", WGPUTextureFormat_RGBA32Float },
+    { "rgba32uint", WGPUTextureFormat_RGBA32Uint },
+    { "rgba32sint", WGPUTextureFormat_RGBA32Sint },
+    { "stencil8", WGPUTextureFormat_Stencil8 },
+    { "depth16unorm", WGPUTextureFormat_Depth16Unorm },
+    { "depth24plus", WGPUTextureFormat_Depth24Plus },
+    { "depth24plus-stencil8", WGPUTextureFormat_Depth24PlusStencil8 },
+    { "depth32float", WGPUTextureFormat_Depth32Float },
+    { "depth32float-stencil8", WGPUTextureFormat_Depth32FloatStencil8 },
+    { "bc1-rgba-unorm", WGPUTextureFormat_BC1RGBAUnorm },
+    { "bc1-rgba-unorm-srgb", WGPUTextureFormat_BC1RGBAUnormSrgb },
+    { "bc2-rgba-unorm", WGPUTextureFormat_BC2RGBAUnorm },
+    { "bc2-rgba-unorm-srgb", WGPUTextureFormat_BC2RGBAUnormSrgb },
+    { "bc3-rgba-unorm", WGPUTextureFormat_BC3RGBAUnorm },
+    { "bc3-rgba-unorm-srgb", WGPUTextureFormat_BC3RGBAUnormSrgb },
+    { "bc4-r-unorm", WGPUTextureFormat_BC4RUnorm },
+    { "bc4-r-snorm", WGPUTextureFormat_BC4RSnorm },
+    { "bc5-rg-unorm", WGPUTextureFormat_BC5RGUnorm },
+    { "bc5-rg-snorm", WGPUTextureFormat_BC5RGSnorm },
+    { "bc6h-rgb-ufloat", WGPUTextureFormat_BC6HRGBUfloat },
+    { "bc6h-rgb-float", WGPUTextureFormat_BC6HRGBFloat },
+    { "bc7-rgba-unorm", WGPUTextureFormat_BC7RGBAUnorm },
+    { "bc7-rgba-unorm-srgb", WGPUTextureFormat_BC7RGBAUnormSrgb },
+    { "etc2-rgb8unorm", WGPUTextureFormat_ETC2RGB8Unorm },
+    { "etc2-rgb8unorm-srgb", WGPUTextureFormat_ETC2RGB8UnormSrgb },
+    { "etc2-rgb8a1unorm", WGPUTextureFormat_ETC2RGB8A1Unorm },
+    { "etc2-rgb8a1unorm-srgb", WGPUTextureFormat_ETC2RGB8A1UnormSrgb },
+    { "etc2-rgba8unorm", WGPUTextureFormat_ETC2RGBA8Unorm },
+    { "etc2-rgba8unorm-srgb", WGPUTextureFormat_ETC2RGBA8UnormSrgb },
+    { "eac-r11unorm", WGPUTextureFormat_EACR11Unorm },
+    { "eac-r11snorm", WGPUTextureFormat_EACR11Snorm },
+    { "eac-rg11unorm", WGPUTextureFormat_EACRG11Unorm },
+    { "eac-rg11snorm", WGPUTextureFormat_EACRG11Snorm },
+    { "astc-4x4-unorm", WGPUTextureFormat_ASTC4x4Unorm },
+    { "astc-4x4-unorm-srgb", WGPUTextureFormat_ASTC4x4UnormSrgb },
+    { "astc-5x4-unorm", WGPUTextureFormat_ASTC5x4Unorm },
+    { "astc-5x4-unorm-srgb", WGPUTextureFormat_ASTC5x4UnormSrgb },
+    { "astc-5x5-unorm", WGPUTextureFormat_ASTC5x5Unorm },
+    { "astc-5x5-unorm-srgb", WGPUTextureFormat_ASTC5x5UnormSrgb },
+    { "astc-6x5-unorm", WGPUTextureFormat_ASTC6x5Unorm },
+    { "astc-6x5-unorm-srgb", WGPUTextureFormat_ASTC6x5UnormSrgb },
+    { "astc-6x6-unorm", WGPUTextureFormat_ASTC6x6Unorm },
+    { "astc-6x6-unorm-srgb", WGPUTextureFormat_ASTC6x6UnormSrgb },
+    { "astc-8x5-unorm", WGPUTextureFormat_ASTC8x5Unorm },
+    { "astc-8x5-unorm-srgb", WGPUTextureFormat_ASTC8x5UnormSrgb },
+    { "astc-8x6-unorm", WGPUTextureFormat_ASTC8x6Unorm },
+    { "astc-8x6-unorm-srgb", WGPUTextureFormat_ASTC8x6UnormSrgb },
+    { "astc-8x8-unorm", WGPUTextureFormat_ASTC8x8Unorm },
+    { "astc-8x8-unorm-srgb", WGPUTextureFormat_ASTC8x8UnormSrgb },
+    { "astc-10x5-unorm", WGPUTextureFormat_ASTC10x5Unorm },
+    { "astc-10x5-unorm-srgb", WGPUTextureFormat_ASTC10x5UnormSrgb },
+    { "astc-10x6-unorm", WGPUTextureFormat_ASTC10x6Unorm },
+    { "astc-10x6-unorm-srgb", WGPUTextureFormat_ASTC10x6UnormSrgb },
+    { "astc-10x8-unorm", WGPUTextureFormat_ASTC10x8Unorm },
+    { "astc-10x8-unorm-srgb", WGPUTextureFormat_ASTC10x8UnormSrgb },
+    { "astc-10x10-unorm", WGPUTextureFormat_ASTC10x10Unorm },
+    { "astc-10x10-unorm-srgb", WGPUTextureFormat_ASTC10x10UnormSrgb },
+    { "astc-12x10-unorm", WGPUTextureFormat_ASTC12x10Unorm },
+    { "astc-12x10-unorm-srgb", WGPUTextureFormat_ASTC12x10UnormSrgb },
+    { "astc-12x12-unorm", WGPUTextureFormat_ASTC12x12Unorm },
+    { "astc-12x12-unorm-srgb", WGPUTextureFormat_ASTC12x12UnormSrgb },
+};
+
 static WGPUTextureFormat
 wg_format_from_str(const char *s)
 {
-    if (!s) return WGPUTextureFormat_BGRA8Unorm;
-    static const struct { const char *name; WGPUTextureFormat fmt; } map[] = {
-        { "bgra8unorm", WGPUTextureFormat_BGRA8Unorm },
-        { "bgra8unorm-srgb", WGPUTextureFormat_BGRA8UnormSrgb },
-        { "rgba8unorm", WGPUTextureFormat_RGBA8Unorm },
-        { "rgba8unorm-srgb", WGPUTextureFormat_RGBA8UnormSrgb },
-        { "rgba16float", WGPUTextureFormat_RGBA16Float },
-        { "rgba32float", WGPUTextureFormat_RGBA32Float },
-        { "r8unorm", WGPUTextureFormat_R8Unorm },
-        { "rg8unorm", WGPUTextureFormat_RG8Unorm },
-        { "r16float", WGPUTextureFormat_R16Float },
-        { "rg16float", WGPUTextureFormat_RG16Float },
-        { "r32float", WGPUTextureFormat_R32Float },
-        { "rg32float", WGPUTextureFormat_RG32Float },
-        { "rgb10a2unorm", WGPUTextureFormat_RGB10A2Unorm },
-        { "depth16unorm", WGPUTextureFormat_Depth16Unorm },
-        { "depth24plus", WGPUTextureFormat_Depth24Plus },
-        { "depth24plus-stencil8", WGPUTextureFormat_Depth24PlusStencil8 },
-        { "depth32float", WGPUTextureFormat_Depth32Float },
-    };
-    for (size_t i = 0; i < G_N_ELEMENTS(map); i++)
-        if (strcmp(s, map[i].name) == 0) return map[i].fmt;
-    return WGPUTextureFormat_BGRA8Unorm;
+    for (size_t i = 0; s && i < G_N_ELEMENTS(wg_texture_formats); i++)
+        if (strcmp(s, wg_texture_formats[i].name) == 0)
+            return wg_texture_formats[i].fmt;
+    return WGPUTextureFormat_Undefined;
+}
+
+static const char *
+wg_format_name(WGPUTextureFormat fmt)
+{
+    for (size_t i = 0; i < G_N_ELEMENTS(wg_texture_formats); i++)
+        if (wg_texture_formats[i].fmt == fmt) return wg_texture_formats[i].name;
+    return "";
+}
+
+#define NS_WG_MAX_VIEW_FORMATS 8
+
+static size_t
+wg_read_view_formats(JSContext *ctx, JSValueConst desc, WGPUTextureFormat *out)
+{
+    JSValue v = JS_GetPropertyStr(ctx, desc, "viewFormats");
+    size_t n = 0;
+    if (JS_IsObject(v)) {
+        JSValue list = wg_array_from(ctx, v);
+        uint32_t len = 0;
+        JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+        JS_ToUint32(ctx, &len, jl);
+        JS_FreeValue(ctx, jl);
+        for (uint32_t i = 0; i < len && n < NS_WG_MAX_VIEW_FORMATS; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, list, i);
+            const char *name = JS_ToCString(ctx, e);
+            out[n++] = wg_format_from_str(name);
+            if (name) JS_FreeCString(ctx, name);
+            JS_FreeValue(ctx, e);
+        }
+        JS_FreeValue(ctx, list);
+    }
+    JS_FreeValue(ctx, v);
+    return n;
 }
 
 static WGPUCompareFunction
@@ -1178,23 +1301,35 @@ wg_texture_finalizer(JSRuntime *rt, JSValue val)
 }
 
 static JSValue
-wg_make_texture(JSContext *ctx, WGPUTexture texture, uint32_t w, uint32_t h,
-                WGPUTextureFormat format)
+wg_make_texture(JSContext *ctx, WGPUTexture texture)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_texture_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_texture *t = g_new0(ns_wg_texture, 1);
     t->texture = texture;
-    t->w = w; t->h = h; t->format = format;
+    t->w = wgpuTextureGetWidth(texture);
+    t->h = wgpuTextureGetHeight(texture);
+    t->format = wgpuTextureGetFormat(texture);
     JS_SetOpaque(obj, t);
     wg_bind(ctx, obj, "createView", wg_texture_createView, 1);
     wg_bind(ctx, obj, "destroy", wg_texture_destroy, 0);
-    JS_SetPropertyStr(ctx, obj, "width", JS_NewUint32(ctx, w));
-    JS_SetPropertyStr(ctx, obj, "height", JS_NewUint32(ctx, h));
-    JS_SetPropertyStr(ctx, obj, "depthOrArrayLayers", JS_NewUint32(ctx, 1));
+    WGPUTextureDimension dim = wgpuTextureGetDimension(texture);
+    JS_SetPropertyStr(ctx, obj, "width", JS_NewUint32(ctx, t->w));
+    JS_SetPropertyStr(ctx, obj, "height", JS_NewUint32(ctx, t->h));
+    JS_SetPropertyStr(ctx, obj, "depthOrArrayLayers",
+                      JS_NewUint32(ctx, wgpuTextureGetDepthOrArrayLayers(texture)));
+    JS_SetPropertyStr(ctx, obj, "mipLevelCount",
+                      JS_NewUint32(ctx, wgpuTextureGetMipLevelCount(texture)));
+    JS_SetPropertyStr(ctx, obj, "sampleCount",
+                      JS_NewUint32(ctx, wgpuTextureGetSampleCount(texture)));
+    JS_SetPropertyStr(ctx, obj, "dimension",
+                      JS_NewString(ctx, dim == WGPUTextureDimension_1D ? "1d"
+                                      : dim == WGPUTextureDimension_3D ? "3d" : "2d"));
+    JS_SetPropertyStr(ctx, obj, "usage",
+                      JS_NewUint32(ctx, (uint32_t)wgpuTextureGetUsage(texture)));
     JS_SetPropertyStr(ctx, obj, "format",
-                      JS_NewString(ctx, format == WGPUTextureFormat_RGBA8Unorm
-                                   ? "rgba8unorm" : "bgra8unorm"));
+                      JS_NewString(ctx, wg_format_name(t->format)));
+    JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
     return obj;
 }
 
@@ -1699,8 +1834,10 @@ wg_ctx_ensure_target(ns_wg_context *c)
 
     WGPUTextureDescriptor td;
     memset(&td, 0, sizeof td);
-    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc |
-               WGPUTextureUsage_TextureBinding;
+    td.usage = c->usage | WGPUTextureUsage_RenderAttachment |
+               WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding;
+    td.viewFormatCount = c->view_format_count;
+    td.viewFormats = c->view_formats;
     td.dimension = WGPUTextureDimension_2D;
     td.size.width = (uint32_t)w;
     td.size.height = (uint32_t)h;
@@ -1736,7 +1873,15 @@ wg_ctx_configure(JSContext *ctx, JSValueConst this_val,
     wgpuDeviceAddRef(d->device);
     c->device = d->device;
     c->queue = wgpuDeviceGetQueue(d->device);
-    c->format = wg_format_from_str(fmt);
+    c->format = fmt ? wg_format_from_str(fmt) : WGPUTextureFormat_BGRA8Unorm;
+    c->view_format_count = wg_read_view_formats(ctx, argv[0], c->view_formats);
+    JSValue jusage = JS_GetPropertyStr(ctx, argv[0], "usage");
+    c->usage = WGPUTextureUsage_RenderAttachment;
+    if (!JS_IsUndefined(jusage)) {
+        uint32_t u = 0; JS_ToUint32(ctx, &u, jusage);
+        c->usage = u & 0x1Fu;
+    }
+    JS_FreeValue(ctx, jusage);
     c->opaque = !(alpha && strcmp(alpha, "premultiplied") == 0);
     c->configured = TRUE;
     wg_ctx_release_gpu(c);
@@ -1770,8 +1915,7 @@ wg_ctx_getCurrentTexture(JSContext *ctx, JSValueConst this_val,
     if (!wg_ctx_ensure_target(c))
         return JS_ThrowInternalError(ctx, "getCurrentTexture: no target");
     wgpuTextureAddRef(c->target);
-    return wg_make_texture(ctx, c->target, (uint32_t)c->w, (uint32_t)c->h,
-                           c->format);
+    return wg_make_texture(ctx, c->target);
 }
 
 static JSValue
@@ -1782,9 +1926,8 @@ wg_ctx_getConfiguration(JSContext *ctx, JSValueConst this_val,
     ns_wg_context *c = JS_GetOpaque(this_val, g_context_class);
     if (!c || !c->configured) return JS_NULL;
     JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "format",
-                      JS_NewString(ctx, c->format == WGPUTextureFormat_RGBA8Unorm
-                                   ? "rgba8unorm" : "bgra8unorm"));
+    JS_SetPropertyStr(ctx, o, "format", JS_NewString(ctx, wg_format_name(c->format)));
+    JS_SetPropertyStr(ctx, o, "usage", JS_NewUint32(ctx, c->usage));
     JS_SetPropertyStr(ctx, o, "alphaMode",
                       JS_NewString(ctx, c->opaque ? "opaque" : "premultiplied"));
     return o;
@@ -2770,6 +2913,9 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
     desc.format = wg_format_from_str(fmt);
     if (fmt) JS_FreeCString(ctx, fmt);
     JS_FreeValue(ctx, jfmt);
+    WGPUTextureFormat view_formats[NS_WG_MAX_VIEW_FORMATS];
+    desc.viewFormatCount = wg_read_view_formats(ctx, argv[0], view_formats);
+    desc.viewFormats = view_formats;
 
     JSValue jmip = JS_GetPropertyStr(ctx, argv[0], "mipLevelCount");
     if (!JS_IsUndefined(jmip)) { uint32_t m = 1; JS_ToUint32(ctx, &m, jmip); desc.mipLevelCount = m ? m : 1; }
@@ -2786,7 +2932,7 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
 
     WGPUTexture tex = wgpuDeviceCreateTexture(d->device, &desc);
     if (!tex) return JS_ThrowInternalError(ctx, "createTexture failed");
-    return wg_make_texture(ctx, tex, desc.size.width, desc.size.height, desc.format);
+    return wg_make_texture(ctx, tex);
 }
 
 static JSValue
@@ -2872,8 +3018,8 @@ wg_queue_copyExternalImageToTexture(JSContext *ctx, JSValueConst this_val,
         cairo_surface_destroy(s);
         return JS_UNDEFINED;
     }
-    gboolean to_rgba = tw && (tw->format == WGPUTextureFormat_RGBA8Unorm ||
-                              tw->format == WGPUTextureFormat_RGBA8UnormSrgb);
+    gboolean to_rgba = tw && tw->format != WGPUTextureFormat_BGRA8Unorm &&
+                       tw->format != WGPUTextureFormat_BGRA8UnormSrgb;
 
     JSValue jpremul = JS_GetPropertyStr(ctx, argv[0], "premultipliedAlpha");
     gboolean premultiply = JS_ToBool(ctx, jpremul);
@@ -3284,6 +3430,18 @@ ns_webgpu_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     return obj;
 }
 
+static uint8_t
+wg_half_to_u8(uint16_t h)
+{
+    if (h & 0x8000u) return 0;
+    uint32_t exp = (h >> 10) & 0x1Fu, mant = h & 0x3FFu;
+    double v = exp == 0 ? ldexp((double)mant, -24)
+             : exp == 31 ? 1.0
+             : ldexp((double)(mant | 0x400u), (int)exp - 25);
+    if (v >= 1.0) return 255;
+    return (uint8_t)(v * 255.0 + 0.5);
+}
+
 cairo_surface_t *
 ns_webgpu_canvas_surface(const ns_node *canvas)
 {
@@ -3294,7 +3452,9 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
     int w = c->w, h = c->h;
     if (w <= 0 || h <= 0) return NULL;
 
-    uint32_t bytes_per_row = ((uint32_t)w * 4u + 255u) & ~255u;
+    gboolean half = c->format == WGPUTextureFormat_RGBA16Float;
+    uint32_t bpp = half ? 8u : 4u;
+    uint32_t bytes_per_row = ((uint32_t)w * bpp + 255u) & ~255u;
     uint64_t buf_size = (uint64_t)bytes_per_row * (uint64_t)h;
 
     WGPUBufferDescriptor bd;
@@ -3341,21 +3501,27 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
             cairo_surface_flush(c->surf);
             int stride = cairo_image_surface_get_stride(c->surf);
             uint8_t *dstp = cairo_image_surface_get_data(c->surf);
-            gboolean swap = (c->format == WGPUTextureFormat_RGBA8Unorm);
+            gboolean bgra = c->format == WGPUTextureFormat_BGRA8Unorm ||
+                            c->format == WGPUTextureFormat_BGRA8UnormSrgb;
             for (int y = 0; y < h; y++) {
                 const uint8_t *s = map + (size_t)y * bytes_per_row;
                 uint8_t *d = dstp + (size_t)y * stride;
                 for (int x = 0; x < w; x++) {
-                    uint8_t r = s[x * 4 + 0], g = s[x * 4 + 1];
-                    uint8_t b = s[x * 4 + 2], a = s[x * 4 + 3];
-                    if (swap) {
-                        d[x * 4 + 0] = b; d[x * 4 + 1] = g;
-                        d[x * 4 + 2] = r;
+                    uint8_t px[4];
+                    if (half) {
+                        const uint16_t *hp = (const uint16_t *)(s + (size_t)x * 8);
+                        for (int k = 0; k < 4; k++) px[k] = wg_half_to_u8(hp[k]);
+                    } else if (bgra) {
+                        px[0] = s[x * 4 + 2]; px[1] = s[x * 4 + 1];
+                        px[2] = s[x * 4 + 0]; px[3] = s[x * 4 + 3];
                     } else {
-                        d[x * 4 + 0] = r; d[x * 4 + 1] = g;
-                        d[x * 4 + 2] = b;
+                        memcpy(px, s + (size_t)x * 4, 4);
                     }
-                    d[x * 4 + 3] = c->opaque ? 255u : a;
+                    uint8_t a = c->opaque ? 255u : px[3];
+                    d[x * 4 + 0] = MIN(px[2], a);
+                    d[x * 4 + 1] = MIN(px[1], a);
+                    d[x * 4 + 2] = MIN(px[0], a);
+                    d[x * 4 + 3] = a;
                 }
             }
             cairo_surface_mark_dirty(c->surf);
