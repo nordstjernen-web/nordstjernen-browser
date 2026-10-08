@@ -1477,6 +1477,46 @@ wg_pass_setIndexBuffer(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+#define NS_WG_MAX_DYNAMIC_OFFSETS 32
+
+static size_t
+wg_read_dynamic_offsets(JSContext *ctx, int argc, JSValueConst *argv,
+                        uint32_t *out)
+{
+    if (argc < 3 || !JS_IsObject(argv[2])) return 0;
+    size_t view_off = 0, view_len = 0, bpe = 0;
+    JSValue abuf = JS_GetTypedArrayBuffer(ctx, argv[2], &view_off, &view_len, &bpe);
+    if (!JS_IsException(abuf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
+        JS_FreeValue(ctx, abuf);
+        if (!base || bpe != 4) return 0;
+        const uint32_t *data = (const uint32_t *)(base + view_off);
+        size_t len = view_len / 4;
+        int64_t start = 0, count = (int64_t)len;
+        if (argc >= 4) JS_ToInt64(ctx, &start, argv[3]);
+        if (argc >= 5) JS_ToInt64(ctx, &count, argv[4]);
+        if (start < 0 || count < 0 || (uint64_t)start + (uint64_t)count > len)
+            return 0;
+        if (count > NS_WG_MAX_DYNAMIC_OFFSETS) count = NS_WG_MAX_DYNAMIC_OFFSETS;
+        memcpy(out, data + start, (size_t)count * 4);
+        return (size_t)count;
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    uint32_t len = 0;
+    JSValue jl = JS_GetPropertyStr(ctx, argv[2], "length");
+    JS_ToUint32(ctx, &len, jl);
+    JS_FreeValue(ctx, jl);
+    if (len > NS_WG_MAX_DYNAMIC_OFFSETS) len = NS_WG_MAX_DYNAMIC_OFFSETS;
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue e = JS_GetPropertyUint32(ctx, argv[2], i);
+        out[i] = 0;
+        JS_ToUint32(ctx, &out[i], e);
+        JS_FreeValue(ctx, e);
+    }
+    return len;
+}
+
 static JSValue
 wg_pass_setBindGroup(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -1486,8 +1526,10 @@ wg_pass_setBindGroup(JSContext *ctx, JSValueConst this_val,
     uint32_t index = 0;
     JS_ToUint32(ctx, &index, argv[0]);
     ns_wg_bindgroup *bg = JS_GetOpaque(argv[1], g_bindgroup_class);
+    uint32_t offsets[NS_WG_MAX_DYNAMIC_OFFSETS];
+    size_t n = wg_read_dynamic_offsets(ctx, argc, argv, offsets);
     wgpuRenderPassEncoderSetBindGroup(p->pass, index,
-                                      bg ? bg->group : NULL, 0, NULL);
+                                      bg ? bg->group : NULL, n, offsets);
     return JS_UNDEFINED;
 }
 
@@ -2473,25 +2515,30 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
             JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
             JSValue jsamp = JS_GetPropertyStr(ctx, e, "sampler");
             JSValue jtex = JS_GetPropertyStr(ctx, e, "texture");
+            JSValue jstore = JS_GetPropertyStr(ctx, e, "storageTexture");
             if (JS_IsObject(jbuf)) {
-                JSValue jt = JS_GetPropertyStr(ctx, jbuf, "type");
-                const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
+                char *ts = wg_get_string(ctx, jbuf, "type");
                 entries[i].buffer.type = wg_buffer_binding_type(ts);
-                if (ts) JS_FreeCString(ctx, ts);
-                JS_FreeValue(ctx, jt);
+                g_free(ts);
+                JSValue jd = JS_GetPropertyStr(ctx, jbuf, "hasDynamicOffset");
+                entries[i].buffer.hasDynamicOffset = JS_ToBool(ctx, jd);
+                JS_FreeValue(ctx, jd);
+                JSValue jm = JS_GetPropertyStr(ctx, jbuf, "minBindingSize");
+                if (!JS_IsUndefined(jm)) {
+                    int64_t m = 0; JS_ToInt64(ctx, &m, jm);
+                    entries[i].buffer.minBindingSize = m > 0 ? (uint64_t)m : 0;
+                }
+                JS_FreeValue(ctx, jm);
             } else if (JS_IsObject(jsamp)) {
-                JSValue jt = JS_GetPropertyStr(ctx, jsamp, "type");
-                const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
+                char *ts = wg_get_string(ctx, jsamp, "type");
                 entries[i].sampler.type = (ts && strcmp(ts, "non-filtering") == 0)
                     ? WGPUSamplerBindingType_NonFiltering
                     : (ts && strcmp(ts, "comparison") == 0)
                     ? WGPUSamplerBindingType_Comparison
                     : WGPUSamplerBindingType_Filtering;
-                if (ts) JS_FreeCString(ctx, ts);
-                JS_FreeValue(ctx, jt);
+                g_free(ts);
             } else if (JS_IsObject(jtex)) {
-                JSValue jst = JS_GetPropertyStr(ctx, jtex, "sampleType");
-                const char *ss = JS_IsString(jst) ? JS_ToCString(ctx, jst) : NULL;
+                char *ss = wg_get_string(ctx, jtex, "sampleType");
                 entries[i].texture.sampleType =
                     (ss && strcmp(ss, "unfilterable-float") == 0)
                         ? WGPUTextureSampleType_UnfilterableFloat
@@ -2499,11 +2546,35 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
                         ? WGPUTextureSampleType_Depth
                     : (ss && strcmp(ss, "uint") == 0)
                         ? WGPUTextureSampleType_Uint
+                    : (ss && strcmp(ss, "sint") == 0)
+                        ? WGPUTextureSampleType_Sint
                     : WGPUTextureSampleType_Float;
-                if (ss) JS_FreeCString(ctx, ss);
-                JS_FreeValue(ctx, jst);
-                entries[i].texture.viewDimension = WGPUTextureViewDimension_2D;
+                g_free(ss);
+                char *vd = wg_get_string(ctx, jtex, "viewDimension");
+                entries[i].texture.viewDimension = vd ? wg_view_dimension(vd)
+                                                      : WGPUTextureViewDimension_2D;
+                g_free(vd);
+                JSValue jms = JS_GetPropertyStr(ctx, jtex, "multisampled");
+                entries[i].texture.multisampled = JS_ToBool(ctx, jms);
+                JS_FreeValue(ctx, jms);
+            } else if (JS_IsObject(jstore)) {
+                char *acc = wg_get_string(ctx, jstore, "access");
+                entries[i].storageTexture.access =
+                    (acc && strcmp(acc, "read-only") == 0)
+                        ? WGPUStorageTextureAccess_ReadOnly
+                    : (acc && strcmp(acc, "read-write") == 0)
+                        ? WGPUStorageTextureAccess_ReadWrite
+                    : WGPUStorageTextureAccess_WriteOnly;
+                g_free(acc);
+                char *fmt = wg_get_string(ctx, jstore, "format");
+                entries[i].storageTexture.format = wg_format_from_str(fmt);
+                g_free(fmt);
+                char *vd = wg_get_string(ctx, jstore, "viewDimension");
+                entries[i].storageTexture.viewDimension =
+                    vd ? wg_view_dimension(vd) : WGPUTextureViewDimension_2D;
+                g_free(vd);
             }
+            JS_FreeValue(ctx, jstore);
             JS_FreeValue(ctx, jbuf);
             JS_FreeValue(ctx, jsamp);
             JS_FreeValue(ctx, jtex);
@@ -2602,6 +2673,8 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
 
     WGPUBindGroupEntry entries[NS_WG_MAX_BGL_ENTRY];
     memset(entries, 0, sizeof entries);
+    WGPUTextureView owned_views[NS_WG_MAX_BGL_ENTRY];
+    size_t n_owned_views = 0;
     uint32_t n = 0;
     JSValue jentries = JS_GetPropertyStr(ctx, argv[0], "entries");
     if (JS_IsArray(jentries)) {
@@ -2618,24 +2691,33 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
             JSValue jres = JS_GetPropertyStr(ctx, e, "resource");
             ns_wg_view *vw = wg_hold_opaque(&hold, jres, g_view_class);
             ns_wg_sampler *smp = wg_hold_opaque(&hold, jres, g_sampler_class);
+            ns_wg_texture *tex = wg_hold_opaque(&hold, jres, g_texture_class);
+            ns_wg_buffer *whole = wg_hold_opaque(&hold, jres, g_buffer_class);
+            entries[i].size = WGPU_WHOLE_SIZE;
             if (vw) {
                 entries[i].textureView = vw->view;
             } else if (smp) {
                 entries[i].sampler = smp->sampler;
+            } else if (tex && tex->texture) {
+                entries[i].textureView = wgpuTextureCreateView(tex->texture, NULL);
+                if (n_owned_views < NS_WG_MAX_BGL_ENTRY)
+                    owned_views[n_owned_views++] = entries[i].textureView;
+            } else if (whole) {
+                entries[i].buffer = whole->buffer;
             } else if (JS_IsObject(jres)) {
                 JSValue jbuf = JS_GetPropertyStr(ctx, jres, "buffer");
                 ns_wg_buffer *buf = wg_hold_opaque(&hold, jbuf, g_buffer_class);
                 if (buf) {
                     entries[i].buffer = buf->buffer;
-                    int64_t off = 0, sz = (int64_t)buf->size;
+                    int64_t off = 0, sz = -1;
                     JSValue jo = JS_GetPropertyStr(ctx, jres, "offset");
                     if (!JS_IsUndefined(jo)) JS_ToInt64(ctx, &off, jo);
                     JS_FreeValue(ctx, jo);
                     JSValue js = JS_GetPropertyStr(ctx, jres, "size");
                     if (!JS_IsUndefined(js)) JS_ToInt64(ctx, &sz, js);
                     JS_FreeValue(ctx, js);
-                    entries[i].offset = (uint64_t)off;
-                    entries[i].size = (uint64_t)sz;
+                    entries[i].offset = off > 0 ? (uint64_t)off : 0;
+                    if (sz >= 0) entries[i].size = (uint64_t)sz;
                 }
                 JS_FreeValue(ctx, jbuf);
             }
@@ -2652,6 +2734,8 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     desc.entries = entries;
     WGPUBindGroup group = wgpuDeviceCreateBindGroup(d->device, &desc);
     wg_hold_release(&hold);
+    for (size_t i = 0; i < n_owned_views; i++)
+        if (owned_views[i]) wgpuTextureViewRelease(owned_views[i]);
     if (!group) return JS_ThrowInternalError(ctx, "createBindGroup failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_bindgroup_class);
@@ -3183,8 +3267,10 @@ wg_compute_pass_setBindGroup(JSContext *ctx, JSValueConst this_val,
     uint32_t index = 0;
     JS_ToUint32(ctx, &index, argv[0]);
     ns_wg_bindgroup *bg = JS_GetOpaque(argv[1], g_bindgroup_class);
+    uint32_t offsets[NS_WG_MAX_DYNAMIC_OFFSETS];
+    size_t n = wg_read_dynamic_offsets(ctx, argc, argv, offsets);
     wgpuComputePassEncoderSetBindGroup(p->pass, index,
-                                       bg ? bg->group : NULL, 0, NULL);
+                                       bg ? bg->group : NULL, n, offsets);
     return JS_UNDEFINED;
 }
 
