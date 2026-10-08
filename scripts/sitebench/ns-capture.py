@@ -220,11 +220,53 @@ def isolated_env(home, locale):
     return env
 
 
+def load_error(visual, timeout):
+    error = fetch_error(visual["stderr"])
+    if visual["timed_out"]:
+        error = error or f"timed out after {timeout}s"
+    elif visual["rc"] not in (0, None) and not visual["shot"]:
+        error = error or f"exit code {visual['rc']}"
+    return error
+
+
+def visual_load(site, a, probe_src, run_dir, keep_full):
+    run_dir.mkdir(parents=True, exist_ok=True)
+    home = tempfile.mkdtemp(prefix="ns-sitebench-")
+    try:
+        full = run_dir / "full.png" if keep_full else Path(home) / "full.png"
+        for stale in ("full.png", "full-initial.png", "viewport.png"):
+            (run_dir / stale).unlink(missing_ok=True)
+        cmd = [a.bin, "--headless", "--timing", f"--viewport={a.width}x{a.height}", f"--settle-ms={a.settle_ms}",
+               f"--time-ms={a.time_ms}", f"--dump=png:{full}", f"--eval={probe_src}", site["url"]]
+        visual = run_with_rusage(cmd, isolated_env(home, a.locale), a.timeout)
+        visual["shot"] = full.exists()
+        if visual["shot"]:
+            crop_viewport(full, run_dir / "viewport.png", a.width, a.height)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    (run_dir / "stderr.log").write_text(visual["stderr"][-200000:], encoding="utf-8", errors="replace")
+    visual["probe"] = parse_prefixed_json(visual["stdout"], "eval: ")
+    visual["timing"] = parse_prefixed_json(visual["stdout"], "timing: ") or {}
+    if visual["probe"] is not None:
+        (run_dir / "probe.json").write_text(json.dumps(visual["probe"]), encoding="utf-8", errors="replace")
+    visual["error"] = load_error(visual, a.timeout)
+    return visual
+
+
+def visual_record(visual):
+    return {"rc": visual["rc"], "timed_out": visual["timed_out"], "wall_ms": visual["wall_ms"],
+            "usage": visual["usage"], "status": visual["timing"].get("status"), "error": visual["error"],
+            "jsErrors": js_errors(visual["stderr"])[0]}
+
+
 def capture_site(site, a, probe_src):
     out_dir = Path(a.out) / a.label / site["id"]
     if a.skip_existing and (out_dir / "metrics.json").exists():
         return None
     out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in out_dir.iterdir():
+        if re.fullmatch(r"visual-\d+", stale.name):
+            shutil.rmtree(stale, ignore_errors=True)
     viewport = f"--viewport={a.width}x{a.height}"
     perf_runs = []
     for _ in range(a.runs):
@@ -242,23 +284,12 @@ def capture_site(site, a, probe_src):
             "usage": r["usage"], "timing": timing,
         })
 
-    home = tempfile.mkdtemp(prefix="ns-sitebench-")
-    try:
-        full = out_dir / "full.png"
-        for stale in ("full.png", "full-initial.png", "viewport.png"):
-            (out_dir / stale).unlink(missing_ok=True)
-        cmd = [a.bin, "--headless", "--timing", viewport, f"--settle-ms={a.settle_ms}",
-               f"--time-ms={a.time_ms}", f"--dump=png:{full}", f"--eval={probe_src}", site["url"]]
-        visual = run_with_rusage(cmd, isolated_env(home, a.locale), a.timeout)
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
-    (out_dir / "stderr.log").write_text(visual["stderr"][-200000:], encoding="utf-8", errors="replace")
-    probe = parse_prefixed_json(visual["stdout"], "eval: ")
-    vtiming = parse_prefixed_json(visual["stdout"], "timing: ") or {}
-    if probe is not None:
-        (out_dir / "probe.json").write_text(json.dumps(probe), encoding="utf-8", errors="replace")
-    if full.exists():
-        crop_viewport(full, out_dir / "viewport.png", a.width, a.height)
+    visuals = [visual_load(site, a, probe_src, out_dir, True)]
+    for k in range(2, a.visual_runs + 1):
+        visuals.append(visual_load(site, a, probe_src, out_dir / f"visual-{k}", False))
+    visual = visuals[0]
+    probe = visual["probe"]
+    vtiming = visual["timing"]
     n_err, err_sample = js_errors(visual["stderr"])
 
     summary = {
@@ -288,20 +319,15 @@ def capture_site(site, a, probe_src):
     }
     status = vtiming.get("status") or next((p["timing"].get("status") for p in perf_runs
                                              if p["timing"].get("status")), None)
-    error = fetch_error(visual["stderr"])
-    if visual["timed_out"]:
-        error = error or f"timed out after {a.timeout}s"
-    elif visual["rc"] not in (0, None) and not full.exists():
-        error = error or f"exit code {visual['rc']}"
     result = {
         "engine": "nordstjernen", "version": a.version, "locale": a.locale, "site": site,
         "viewport": {"width": a.width, "height": a.height},
         "capturedAt": datetime.now(timezone.utc).isoformat(), "host": platform.node(),
-        "cpus": os.cpu_count(), "status": status, "error": error,
-        "settings": {"settleMs": a.settle_ms, "timeMs": a.time_ms, "runs": a.runs},
+        "cpus": os.cpu_count(), "status": status, "error": visual["error"],
+        "settings": {"settleMs": a.settle_ms, "timeMs": a.time_ms, "runs": a.runs, "visualRuns": a.visual_runs},
         "summary": summary, "perfRuns": perf_runs, "visualTiming": vtiming,
         "visualRc": visual["rc"], "visualTimedOut": visual["timed_out"],
-        "jsErrorSample": err_sample,
+        "jsErrorSample": err_sample, "visualRuns": [visual_record(v) for v in visuals],
     }
     (out_dir / "metrics.json").write_text(json.dumps(result, indent=1), encoding="utf-8", errors="replace")
     return result
@@ -319,6 +345,8 @@ def main():
     p.add_argument("--locale", default=os.environ.get("NS_LOCALE") or "en_US.UTF-8",
                    help="LANG and LC_ALL for Nordstjernen (default en_US.UTF-8, as Chrome runs en-US)")
     p.add_argument("--runs", type=int, default=1, help="cold first-render runs per site (median reported)")
+    p.add_argument("--visual-runs", type=int, default=1,
+                   help="settled loads per site for screenshots and the probe (each one is scored)")
     p.add_argument("--settle-ms", type=int, default=2000)
     p.add_argument("--time-ms", type=int, default=1000)
     p.add_argument("--timeout", type=int, default=120, help="seconds per browser invocation")
@@ -329,6 +357,7 @@ def main():
     if not m:
         sys.exit("ns-capture: --viewport wants WxH")
     a.width, a.height = int(m.group(1)), int(m.group(2))
+    a.visual_runs = max(1, a.visual_runs)
     if not os.path.exists(a.bin):
         sys.exit(f"ns-capture: browser binary not found: {a.bin} (build it or pass --bin)")
     only = set(filter(None, a.only.split(",")))
@@ -339,7 +368,7 @@ def main():
     a.version = engine_version(a.bin)
     probe_src = (HERE / "probe.js").read_text(encoding="utf-8", errors="replace")
     print(f"ns-capture: {a.version}, locale {a.locale}, {len(sites)} sites, viewport {a.width}x{a.height}, "
-          f"runs {a.runs}, jobs {a.jobs}", flush=True)
+          f"runs {a.runs}, visual runs {a.visual_runs}, jobs {a.jobs}", flush=True)
 
     def report(site, res):
         if res is None:
