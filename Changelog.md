@@ -141,6 +141,10 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Image requests advertise only the formats the build can decode. The
+  `Accept` header always listed `image/avif`, so in a build without
+  libavif, CDNs that negotiate formats (AliExpress served 50 of its
+  images this way) sent AVIF that then failed to decode.
 * `text-decoration: inherit` works, so Tailwind's preflight removes the
   underline from links (Yahoo's navigation and headlines were all
   underlined), and outlines follow `border-radius` like Chrome's (pill
