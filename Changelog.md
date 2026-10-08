@@ -3,6 +3,10 @@ Changelog:
 
 1.0.30:
 ======
+* The Linux and macOS clang builds compile again: WebGPU limit fields,
+  half-float canvas readback and dynamic bind-group offsets were read
+  through misaligned pointer casts that `-Wcast-align` rejects; they
+  are now copied with `memcpy`.
 * Pages that upload WebGPU textures without giving `rowsPerImage`, which
   three.js does for every texture, no longer abort the renderer: the
   missing value reached wgpu-native as an invalid zero and it stopped
