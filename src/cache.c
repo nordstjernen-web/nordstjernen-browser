@@ -235,7 +235,7 @@ cache_harden(sqlite3 *db)
 #endif
 }
 
-#define NS_CACHE_SCHEMA_VERSION 2
+#define NS_CACHE_SCHEMA_VERSION 3
 
 static int
 cache_user_version(void)
@@ -272,6 +272,7 @@ cache_schema(void)
                       "status INTEGER NOT NULL,"
                       "content_type TEXT,"
                       "cors_allow_origin TEXT,"
+                      "policy_headers TEXT,"
                       "etag TEXT,"
                       "last_modified TEXT,"
                       "vary TEXT,"
@@ -404,6 +405,7 @@ ns_cache_entry_free(ns_cache_entry *e)
     g_free(e->final_url);
     g_free(e->content_type);
     g_free(e->cors_allow_origin);
+    g_free(e->policy_headers);
     g_free(e->etag);
     g_free(e->last_modified);
     if (e->body) g_byte_array_unref(e->body);
@@ -550,8 +552,8 @@ ns_cache_get(const char *url, const char *partition,
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(g_cache_db,
             "SELECT final_url,status,content_type,cors_allow_origin,"
-            "etag,last_modified,expires_at,fetched_at,body_size "
-            "FROM entries WHERE key=?",
+            "etag,last_modified,expires_at,fetched_at,body_size,"
+            "policy_headers FROM entries WHERE key=?",
             -1, &st, NULL) != SQLITE_OK)
         return NULL;
     sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
@@ -581,6 +583,7 @@ ns_cache_get(const char *url, const char *partition,
     e->last_modified    = column_dup(st, 5);
     e->expires_at       = sqlite3_column_int64(st, 6);
     e->fetched_at       = sqlite3_column_int64(st, 7);
+    e->policy_headers   = column_dup(st, 9);
     if (!e->final_url) e->final_url = g_strdup(url);
     sqlite3_finalize(st);
 
@@ -638,6 +641,7 @@ ns_cache_put(const char *url,
              long status,
              const char *content_type,
              const char *cors_allow_origin,
+             const char *policy_headers,
              const char *etag,
              const char *last_modified,
              const char *cache_control,
@@ -663,7 +667,8 @@ ns_cache_put(const char *url,
     if (sqlite3_prepare_v2(g_cache_db,
             "INSERT INTO entries(key,base_key,url,final_url,status,content_type,"
             "cors_allow_origin,etag,last_modified,vary,expires_at,fetched_at,"
-            "last_used,body_size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "last_used,body_size,policy_headers) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(key) DO UPDATE SET "
             "url=excluded.url,final_url=excluded.final_url,status=excluded.status,"
             "content_type=excluded.content_type,"
@@ -671,7 +676,8 @@ ns_cache_put(const char *url,
             "last_modified=excluded.last_modified,vary=excluded.vary,"
             "expires_at=excluded.expires_at,"
             "fetched_at=excluded.fetched_at,last_used=excluded.last_used,"
-            "body_size=excluded.body_size",
+            "body_size=excluded.body_size,"
+            "policy_headers=excluded.policy_headers",
             -1, &st, NULL) != SQLITE_OK)
         return;
     gint64 now = now_seconds();
@@ -689,6 +695,7 @@ ns_cache_put(const char *url,
     sqlite3_bind_int64(st, 12, now);
     sqlite3_bind_int64(st, 13, now);
     sqlite3_bind_int64(st, 14, (gint64)body_len);
+    sqlite3_bind_text (st, 15, policy_headers,   -1, SQLITE_TRANSIENT);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return;

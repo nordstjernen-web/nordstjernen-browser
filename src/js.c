@@ -21290,6 +21290,26 @@ ns_xhr_setRequestHeader(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_xhr_header_line_allowed(const char *line)
+{
+    const char *colon = line ? strchr(line, ':') : NULL;
+    if (!colon || colon == line) return FALSE;
+    g_autofree char *name = g_strndup(line, (gsize)(colon - line));
+    return ns_header_name_is_token(name) &&
+           !ns_header_name_is_forbidden(name) &&
+           ns_header_value_is_safe(colon + 1);
+}
+
+static gboolean
+ns_xhr_method_allowed(const char *method)
+{
+    return method && ns_header_name_is_token(method) &&
+           g_ascii_strcasecmp(method, "CONNECT") != 0 &&
+           g_ascii_strcasecmp(method, "TRACE") != 0 &&
+           g_ascii_strcasecmp(method, "TRACK") != 0;
+}
+
 /* The type of a Blob body, or NULL for an untyped Blob or a buffer. */
 static char *
 ns_xhr_blob_type(JSContext *ctx, JSValueConst body)
@@ -21469,6 +21489,12 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     JSValue method_v = JS_GetPropertyStr(ctx, this_val, "_method");
     const char *method = JS_ToCString(ctx, method_v);
     JS_FreeValue(ctx, method_v);
+    if (!ns_xhr_method_allowed(method)) {
+        if (method) JS_FreeCString(ctx, method);
+        JS_FreeCString(ctx, url);
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                                      "XMLHttpRequest.send: forbidden method");
+    }
     gboolean send_body = method &&
                          g_ascii_strcasecmp(method, "GET") != 0 &&
                          g_ascii_strcasecmp(method, "HEAD") != 0;
@@ -21526,7 +21552,8 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                 JSValue ev = JS_GetPropertyUint32(ctx, headers_arr, i);
                 const char *s = JS_ToCString(ctx, ev);
                 if (s) {
-                    g_ptr_array_add(hdrs, g_strdup(s));
+                    if (ns_xhr_header_line_allowed(s))
+                        g_ptr_array_add(hdrs, g_strdup(s));
                     JS_FreeCString(ctx, s);
                 }
                 JS_FreeValue(ctx, ev);
