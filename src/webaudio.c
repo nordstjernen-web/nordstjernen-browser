@@ -159,14 +159,15 @@ ns_wa_buffer_source(JSContext *ctx, JSValueConst node, uint32_t frames,
     uint32_t pick = walk->realtime && nch > 0 && (uint32_t)walk->channel < nch
                   ? (uint32_t)walk->channel : (nch > 0 ? nch - 1 : 0);
     if (!walk->realtime) pick = 0;
+    double start_time = walk->realtime
+        ? ns_wa_num(ctx, node, "_startTime", 0.0) : 0.0;
     JSValue ch0 = JS_GetPropertyUint32(ctx, chans, pick);
     uint32_t n = 0;
     const float *src = ns_wa_float32(ctx, ch0, &n);
     if (src && n) {
         double pos = 0.0;
         if (walk->realtime) {
-            double since = walk->t0 + first / rate -
-                           ns_wa_num(ctx, node, "_startTime", 0.0);
+            double since = walk->t0 + first / rate - start_time;
             pos = since > 0 ? since * rate * step : 0.0;
             if (pos >= n && !loop) first = last;
         }

@@ -3,6 +3,17 @@ Changelog:
 
 1.0.31:
 ======
+* WebGL, WebGPU and Web Audio no longer touch memory a page has freed.
+  `readPixels`, `compressedTexImage*`/`compressedTexSubImage*`,
+  `setBindGroup` and realtime `AudioBufferSourceNode` rendering took a
+  pointer into a page's ArrayBuffer and then converted a later argument
+  (or read a property) whose `valueOf` or getter could transfer or
+  resize that buffer, leaving the pointer dangling for a GPU write or
+  read. Arguments are now converted before the pointer is taken. A
+  numeric data argument to `compressedTexImage*` was handed to OpenGL as
+  an unpack-buffer offset even with no unpack buffer bound, where the
+  driver reads it as a raw memory address; that now raises
+  `INVALID_OPERATION`.
 * The Linux renderer sandbox no longer lets a compromised renderer talk
   to local services. Landlock does not cover `connect()` on UNIX
   sockets, and the seccomp filter allowed `socket()` of any family, so

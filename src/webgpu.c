@@ -1801,18 +1801,20 @@ wg_read_dynamic_offsets(JSContext *ctx, int argc, JSValueConst *argv,
                         uint32_t *out)
 {
     if (argc < 3 || !JS_IsObject(argv[2])) return 0;
+    int64_t start = 0, count = -1;
+    if (argc >= 4 && JS_ToInt64(ctx, &start, argv[3])) return 0;
+    if (argc >= 5 && JS_ToInt64(ctx, &count, argv[4])) return 0;
     size_t view_off = 0, view_len = 0, bpe = 0;
     JSValue abuf = JS_GetTypedArrayBuffer(ctx, argv[2], &view_off, &view_len, &bpe);
     if (!JS_IsException(abuf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
         JS_FreeValue(ctx, abuf);
-        if (!base || bpe != 4) return 0;
+        if (!base || bpe != 4 || view_off > total || view_len > total - view_off)
+            return 0;
         const uint8_t *data = base + view_off;
         size_t len = view_len / 4;
-        int64_t start = 0, count = (int64_t)len;
-        if (argc >= 4) JS_ToInt64(ctx, &start, argv[3]);
-        if (argc >= 5) JS_ToInt64(ctx, &count, argv[4]);
+        if (argc < 5) count = (int64_t)len;
         if (start < 0 || count < 0 || (uint64_t)start + (uint64_t)count > len)
             return 0;
         if (count > NS_WG_MAX_DYNAMIC_OFFSETS) count = NS_WG_MAX_DYNAMIC_OFFSETS;
