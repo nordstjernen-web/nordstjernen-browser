@@ -9,6 +9,7 @@
 #ifdef ND_HAVE_WEBGPU
 
 #include <string.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "webgpu/webgpu.h"
@@ -60,6 +61,7 @@ typedef struct { WGPUSampler sampler; } ns_wg_sampler;
 
 typedef struct {
     const ns_node *canvas;
+    JSValue        self;
     WGPUDevice     device;
     WGPUQueue      queue;
     WGPUTexture    target;
@@ -138,13 +140,14 @@ ns_webgpu_instance(void)
     return g_wg_instance;
 }
 
-typedef struct { int done; } wg_map_wait;
+typedef struct { int done; WGPUMapAsyncStatus status; } wg_map_wait;
 
 static void
 wg_on_map(WGPUMapAsyncStatus status, WGPUStringView message, void *u1, void *u2)
 {
-    (void)status; (void)message; (void)u2;
+    (void)message; (void)u2;
     wg_map_wait *w = u1;
+    w->status = status;
     w->done = 1;
 }
 
@@ -233,37 +236,177 @@ wg_new_feature_set(JSContext *ctx)
     return set;
 }
 
+#define WG_LIMIT32(name) { #name, offsetof(WGPULimits, name), FALSE }
+#define WG_LIMIT64(name) { #name, offsetof(WGPULimits, name), TRUE }
+
+static const struct { const char *name; size_t offset; gboolean wide; } wg_limit_fields[] = {
+    WG_LIMIT32(maxTextureDimension1D),
+    WG_LIMIT32(maxTextureDimension2D),
+    WG_LIMIT32(maxTextureDimension3D),
+    WG_LIMIT32(maxTextureArrayLayers),
+    WG_LIMIT32(maxBindGroups),
+    WG_LIMIT32(maxBindGroupsPlusVertexBuffers),
+    WG_LIMIT32(maxBindingsPerBindGroup),
+    WG_LIMIT32(maxDynamicUniformBuffersPerPipelineLayout),
+    WG_LIMIT32(maxDynamicStorageBuffersPerPipelineLayout),
+    WG_LIMIT32(maxSampledTexturesPerShaderStage),
+    WG_LIMIT32(maxSamplersPerShaderStage),
+    WG_LIMIT32(maxStorageBuffersPerShaderStage),
+    WG_LIMIT32(maxStorageTexturesPerShaderStage),
+    WG_LIMIT32(maxUniformBuffersPerShaderStage),
+    WG_LIMIT64(maxUniformBufferBindingSize),
+    WG_LIMIT64(maxStorageBufferBindingSize),
+    WG_LIMIT32(minUniformBufferOffsetAlignment),
+    WG_LIMIT32(minStorageBufferOffsetAlignment),
+    WG_LIMIT32(maxVertexBuffers),
+    WG_LIMIT64(maxBufferSize),
+    WG_LIMIT32(maxVertexAttributes),
+    WG_LIMIT32(maxVertexBufferArrayStride),
+    WG_LIMIT32(maxInterStageShaderVariables),
+    WG_LIMIT32(maxColorAttachments),
+    WG_LIMIT32(maxColorAttachmentBytesPerSample),
+    WG_LIMIT32(maxComputeWorkgroupStorageSize),
+    WG_LIMIT32(maxComputeInvocationsPerWorkgroup),
+    WG_LIMIT32(maxComputeWorkgroupSizeX),
+    WG_LIMIT32(maxComputeWorkgroupSizeY),
+    WG_LIMIT32(maxComputeWorkgroupSizeZ),
+    WG_LIMIT32(maxComputeWorkgroupsPerDimension),
+};
+
 static JSValue
 wg_limits_object(JSContext *ctx, const WGPULimits *l)
 {
     JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "maxTextureDimension1D",
-                      JS_NewUint32(ctx, l->maxTextureDimension1D));
-    JS_SetPropertyStr(ctx, o, "maxTextureDimension2D",
-                      JS_NewUint32(ctx, l->maxTextureDimension2D));
-    JS_SetPropertyStr(ctx, o, "maxTextureDimension3D",
-                      JS_NewUint32(ctx, l->maxTextureDimension3D));
-    JS_SetPropertyStr(ctx, o, "maxTextureArrayLayers",
-                      JS_NewUint32(ctx, l->maxTextureArrayLayers));
-    JS_SetPropertyStr(ctx, o, "maxBindGroups",
-                      JS_NewUint32(ctx, l->maxBindGroups));
-    JS_SetPropertyStr(ctx, o, "maxBindingsPerBindGroup",
-                      JS_NewUint32(ctx, l->maxBindingsPerBindGroup));
-    JS_SetPropertyStr(ctx, o, "maxUniformBufferBindingSize",
-                      JS_NewFloat64(ctx, (double)l->maxUniformBufferBindingSize));
-    JS_SetPropertyStr(ctx, o, "maxStorageBufferBindingSize",
-                      JS_NewFloat64(ctx, (double)l->maxStorageBufferBindingSize));
-    JS_SetPropertyStr(ctx, o, "maxBufferSize",
-                      JS_NewFloat64(ctx, (double)l->maxBufferSize));
-    JS_SetPropertyStr(ctx, o, "maxComputeWorkgroupSizeX",
-                      JS_NewUint32(ctx, l->maxComputeWorkgroupSizeX));
-    JS_SetPropertyStr(ctx, o, "maxComputeWorkgroupSizeY",
-                      JS_NewUint32(ctx, l->maxComputeWorkgroupSizeY));
-    JS_SetPropertyStr(ctx, o, "maxComputeWorkgroupSizeZ",
-                      JS_NewUint32(ctx, l->maxComputeWorkgroupSizeZ));
-    JS_SetPropertyStr(ctx, o, "maxComputeInvocationsPerWorkgroup",
-                      JS_NewUint32(ctx, l->maxComputeInvocationsPerWorkgroup));
+    for (size_t i = 0; i < G_N_ELEMENTS(wg_limit_fields); i++) {
+        const char *field = (const char *)l + wg_limit_fields[i].offset;
+        double v = wg_limit_fields[i].wide ? (double)*(const uint64_t *)field
+                                           : (double)*(const uint32_t *)field;
+        JS_DefinePropertyValueStr(ctx, o, wg_limit_fields[i].name,
+                                  JS_NewFloat64(ctx, v), JS_PROP_ENUMERABLE);
+    }
+    JS_PreventExtensions(ctx, o);
     return o;
+}
+
+static gboolean
+wg_read_required_limits(JSContext *ctx, JSValueConst v, WGPULimits *out)
+{
+    WGPULimits init = WGPU_LIMITS_INIT;
+    *out = init;
+    if (!JS_IsObject(v)) return FALSE;
+    gboolean any = FALSE;
+    for (size_t i = 0; i < G_N_ELEMENTS(wg_limit_fields); i++) {
+        JSValue jv = JS_GetPropertyStr(ctx, v, wg_limit_fields[i].name);
+        double d = -1;
+        if (!JS_IsUndefined(jv)) JS_ToFloat64(ctx, &d, jv);
+        JS_FreeValue(ctx, jv);
+        if (!(d >= 0)) continue;
+        char *field = (char *)out + wg_limit_fields[i].offset;
+        if (wg_limit_fields[i].wide)
+            *(uint64_t *)field = d >= 1.8e19 ? UINT64_MAX - 1 : (uint64_t)d;
+        else
+            *(uint32_t *)field = d >= 4294967294.0 ? UINT32_MAX - 1 : (uint32_t)d;
+        any = TRUE;
+    }
+    return any;
+}
+
+static const struct { const char *name; WGPUFeatureName feature; } wg_feature_names[] = {
+    { "core-features-and-limits", WGPUFeatureName_CoreFeaturesAndLimits },
+    { "depth-clip-control", WGPUFeatureName_DepthClipControl },
+    { "depth32float-stencil8", WGPUFeatureName_Depth32FloatStencil8 },
+    { "texture-compression-bc", WGPUFeatureName_TextureCompressionBC },
+    { "texture-compression-bc-sliced-3d", WGPUFeatureName_TextureCompressionBCSliced3D },
+    { "texture-compression-etc2", WGPUFeatureName_TextureCompressionETC2 },
+    { "texture-compression-astc", WGPUFeatureName_TextureCompressionASTC },
+    { "texture-compression-astc-sliced-3d", WGPUFeatureName_TextureCompressionASTCSliced3D },
+    { "timestamp-query", WGPUFeatureName_TimestampQuery },
+    { "indirect-first-instance", WGPUFeatureName_IndirectFirstInstance },
+    { "shader-f16", WGPUFeatureName_ShaderF16 },
+    { "rg11b10ufloat-renderable", WGPUFeatureName_RG11B10UfloatRenderable },
+    { "bgra8unorm-storage", WGPUFeatureName_BGRA8UnormStorage },
+    { "float32-filterable", WGPUFeatureName_Float32Filterable },
+    { "float32-blendable", WGPUFeatureName_Float32Blendable },
+    { "clip-distances", WGPUFeatureName_ClipDistances },
+    { "dual-source-blending", WGPUFeatureName_DualSourceBlending },
+    { "subgroups", WGPUFeatureName_Subgroups },
+    { "texture-formats-tier1", WGPUFeatureName_TextureFormatsTier1 },
+    { "texture-formats-tier2", WGPUFeatureName_TextureFormatsTier2 },
+    { "primitive-index", WGPUFeatureName_PrimitiveIndex },
+};
+
+static JSValue
+wg_feature_set(JSContext *ctx, const WGPUSupportedFeatures *f)
+{
+    JSValue set = wg_new_feature_set(ctx);
+    JSValue add = JS_GetPropertyStr(ctx, set, "add");
+    for (size_t i = 0; f && i < f->featureCount; i++) {
+        for (size_t k = 0; k < G_N_ELEMENTS(wg_feature_names); k++) {
+            if (wg_feature_names[k].feature != f->features[i]) continue;
+            JSValue name = JS_NewString(ctx, wg_feature_names[k].name);
+            JS_FreeValue(ctx, JS_Call(ctx, add, set, 1, (JSValueConst *)&name));
+            JS_FreeValue(ctx, name);
+            break;
+        }
+    }
+    JS_FreeValue(ctx, add);
+    return set;
+}
+
+static gboolean
+wg_feature_from_name(const char *name, WGPUFeatureName *out)
+{
+    for (size_t k = 0; name && k < G_N_ELEMENTS(wg_feature_names); k++) {
+        if (strcmp(wg_feature_names[k].name, name) == 0) {
+            *out = wg_feature_names[k].feature;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static JSValue
+wg_array_from(JSContext *ctx, JSValueConst iterable)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue array = JS_GetPropertyStr(ctx, global, "Array");
+    JSValue from = JS_GetPropertyStr(ctx, array, "from");
+    JSValue list = JS_Call(ctx, from, array, 1, &iterable);
+    JS_FreeValue(ctx, from);
+    JS_FreeValue(ctx, array);
+    JS_FreeValue(ctx, global);
+    return list;
+}
+
+static gboolean
+wg_read_required_features(JSContext *ctx, JSValueConst v, WGPUFeatureName *out,
+                          size_t cap, size_t *count)
+{
+    *count = 0;
+    if (!JS_IsObject(v)) return TRUE;
+    JSValue list = wg_array_from(ctx, v);
+    if (JS_IsException(list)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    uint32_t n = 0;
+    JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+    JS_ToUint32(ctx, &n, jl);
+    JS_FreeValue(ctx, jl);
+    gboolean ok = TRUE;
+    for (uint32_t i = 0; i < n && ok; i++) {
+        JSValue e = JS_GetPropertyUint32(ctx, list, i);
+        const char *name = JS_ToCString(ctx, e);
+        WGPUFeatureName f;
+        ok = wg_feature_from_name(name, &f);
+        gboolean dup = FALSE;
+        for (size_t k = 0; ok && k < *count; k++) dup |= out[k] == f;
+        if (ok && !dup && *count < cap) out[(*count)++] = f;
+        if (name) JS_FreeCString(ctx, name);
+        JS_FreeValue(ctx, e);
+    }
+    JS_FreeValue(ctx, list);
+    return ok;
 }
 
 static ns_wg_queue *
@@ -490,11 +633,15 @@ wg_buffer_mapAsync(JSContext *ctx, JSValueConst this_val,
     mci.mode = WGPUCallbackMode_AllowProcessEvents;
     mci.callback = wg_on_map;
     mci.userdata1 = &wait;
+    if (mode != WGPUMapMode_Read && mode != WGPUMapMode_Write)
+        return wg_promise_rejected(ctx, "OperationError: mapAsync: invalid mode");
     wgpuBufferMapAsync(b->buffer, (WGPUMapMode)mode, (size_t)offset, sz, mci);
     for (int i = 0; i < 4000 && !wait.done; i++) {
         if (b->device) wgpuDevicePoll(b->device, 1, NULL);
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     }
+    if (!wait.done || wait.status != WGPUMapAsyncStatus_Success)
+        return wg_promise_rejected(ctx, "OperationError: mapAsync failed");
     return wg_promise_resolved(ctx, JS_UNDEFINED);
 }
 
@@ -520,7 +667,7 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
     WGPUBufferDescriptor desc;
     memset(&desc, 0, sizeof desc);
     desc.size = (uint64_t)(size < 0 ? 0 : size);
-    desc.usage = (WGPUBufferUsage)usage;
+    desc.usage = (WGPUBufferUsage)(usage & ~0x3FFu ? 0 : usage);
     desc.mappedAtCreation = mapped ? 1 : 0;
     WGPUBuffer wbuf = wgpuDeviceCreateBuffer(d->device, &desc);
     if (!wbuf)
@@ -594,8 +741,12 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
         JS_FreeValue(ctx, lost_funcs[1]);
         JS_SetPropertyStr(ctx, obj, "lost", lost);
     }
-    JS_SetPropertyStr(ctx, obj, "features", wg_new_feature_set(ctx));
-    WGPULimits limits; memset(&limits, 0, sizeof limits);
+    WGPUSupportedFeatures features; memset(&features, 0, sizeof features);
+    wgpuDeviceGetFeatures(device, &features);
+    JS_SetPropertyStr(ctx, obj, "features", wg_feature_set(ctx, &features));
+    wgpuSupportedFeaturesFreeMembers(features);
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    wgpuDeviceGetLimits(device, &limits);
     JS_SetPropertyStr(ctx, obj, "limits", wg_limits_object(ctx, &limits));
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
     wg_bind(ctx, obj, "createBuffer", wg_device_createBuffer, 1);
@@ -641,9 +792,25 @@ static JSValue
 wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    (void)argc; (void)argv;
     ns_wg_adapter *a = JS_GetOpaque(this_val, g_adapter_class);
     if (!a) return wg_promise_rejected(ctx, "requestDevice: invalid adapter");
+
+    WGPUFeatureName required[G_N_ELEMENTS(wg_feature_names)];
+    size_t required_count = 0;
+    WGPULimits limits;
+    gboolean have_limits = FALSE;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSValue jfeat = JS_GetPropertyStr(ctx, argv[0], "requiredFeatures");
+        gboolean ok = wg_read_required_features(ctx, jfeat, required,
+                                                G_N_ELEMENTS(required),
+                                                &required_count);
+        JS_FreeValue(ctx, jfeat);
+        if (!ok)
+            return wg_promise_rejected(ctx, "requestDevice: unsupported feature");
+        JSValue jlim = JS_GetPropertyStr(ctx, argv[0], "requiredLimits");
+        have_limits = wg_read_required_limits(ctx, jlim, &limits);
+        JS_FreeValue(ctx, jlim);
+    }
 
     wg_device_wait wait; memset(&wait, 0, sizeof wait);
     WGPURequestDeviceCallbackInfo ci; memset(&ci, 0, sizeof ci);
@@ -652,6 +819,9 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
     ci.userdata1 = &wait;
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof dd);
     dd.uncapturedErrorCallbackInfo.callback = wg_on_uncaptured_error;
+    dd.requiredFeatureCount = required_count;
+    dd.requiredFeatures = required_count ? required : NULL;
+    dd.requiredLimits = have_limits ? &limits : NULL;
     wgpuAdapterRequestDevice(a->adapter, &dd, ci);
     for (int i = 0; i < 2000 && !wait.done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
@@ -700,8 +870,11 @@ wg_make_adapter(JSContext *ctx, WGPUAdapter adapter)
     JS_SetOpaque(obj, a);
 
     JS_SetPropertyStr(ctx, obj, "info", wg_adapter_info(ctx, adapter));
-    JS_SetPropertyStr(ctx, obj, "features", wg_new_feature_set(ctx));
-    WGPULimits limits; memset(&limits, 0, sizeof limits);
+    WGPUSupportedFeatures features; memset(&features, 0, sizeof features);
+    wgpuAdapterGetFeatures(adapter, &features);
+    JS_SetPropertyStr(ctx, obj, "features", wg_feature_set(ctx, &features));
+    wgpuSupportedFeaturesFreeMembers(features);
+    WGPULimits limits = WGPU_LIMITS_INIT;
     wgpuAdapterGetLimits(adapter, &limits);
     JS_SetPropertyStr(ctx, obj, "limits", wg_limits_object(ctx, &limits));
     JS_SetPropertyStr(ctx, obj, "isFallbackAdapter", JS_FALSE);
@@ -1741,7 +1914,7 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
                 JSValue jwm = JS_GetPropertyStr(ctx, jtg, "writeMask");
                 if (!JS_IsUndefined(jwm)) {
                     uint32_t wm = 0xF; JS_ToUint32(ctx, &wm, jwm);
-                    targets[i].writeMask = wm;
+                    targets[i].writeMask = wm & 0xFu;
                 }
                 JS_FreeValue(ctx, jwm);
                 JSValue jblend = JS_GetPropertyStr(ctx, jtg, "blend");
@@ -1850,7 +2023,7 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
             JSValue jv = JS_GetPropertyStr(ctx, e, "visibility");
             JS_ToUint32(ctx, &vis, jv); JS_FreeValue(ctx, jv);
             entries[i].binding = binding;
-            entries[i].visibility = vis;
+            entries[i].visibility = vis & 0x7u;
             JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
             JSValue jsamp = JS_GetPropertyStr(ctx, e, "sampler");
             JSValue jtex = JS_GetPropertyStr(ctx, e, "texture");
@@ -2232,7 +2405,7 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
 
     JSValue jusage = JS_GetPropertyStr(ctx, argv[0], "usage");
     uint32_t usage = 0; JS_ToUint32(ctx, &usage, jusage); JS_FreeValue(ctx, jusage);
-    desc.usage = (WGPUTextureUsage)usage;
+    desc.usage = (WGPUTextureUsage)(usage & ~0x1Fu ? 0 : usage);
 
     JSValue jfmt = JS_GetPropertyStr(ctx, argv[0], "format");
     const char *fmt = JS_IsString(jfmt) ? JS_ToCString(ctx, jfmt) : NULL;
@@ -2725,11 +2898,15 @@ ns_webgpu_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     if (!g_context_class) return JS_NULL;
     if (!g_webgpu_ctx_by_node)
         g_webgpu_ctx_by_node = g_hash_table_new(g_direct_hash, g_direct_equal);
+    ns_wg_context *existing = g_hash_table_lookup(g_webgpu_ctx_by_node, canvas);
+    if (existing)
+        return JS_DupValue(ctx, existing->self);
 
     JSValue obj = JS_NewObjectClass(ctx, g_context_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_context *c = g_new0(ns_wg_context, 1);
     c->canvas = canvas;
+    c->self = obj;
     c->format = WGPUTextureFormat_BGRA8Unorm;
     c->opaque = TRUE;
     JS_SetOpaque(obj, c);
@@ -2790,7 +2967,7 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     }
 
-    const uint8_t *map = wait.done
+    const uint8_t *map = wait.done && wait.status == WGPUMapAsyncStatus_Success
         ? wgpuBufferGetConstMappedRange(rb, 0, (size_t)buf_size) : NULL;
     if (map) {
         if (!c->surf)
