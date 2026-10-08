@@ -7,6 +7,7 @@ import json
 import math
 import re
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,8 @@ try:
     import numpy as np
     from PIL import Image
 except ImportError:
-    sys.exit("compare: needs Pillow and numpy (pip install pillow numpy)")
+    print("compare: needs Pillow and numpy (pip install pillow numpy)", file=sys.stderr)
+    sys.exit(2)
 
 CHALLENGE = re.compile(
     r"just a moment|attention required|access denied|403 forbidden|confirm you are human|"
@@ -1083,20 +1085,129 @@ def write_html(rows, agg, labels, base_label, meta, path):
     Path(path).write_text("".join(out), encoding="utf-8", errors="replace")
 
 
-def main():
-    p = argparse.ArgumentParser(description="Compare Nordstjernen captures with the Chrome baseline.")
+def gated_rows(rows, labels):
+    return [r for r in rows if comparable(r) and not r.get("unstable")
+            and not any((r["engines"].get(label) or {}).get("blocked") for label in labels)]
+
+
+def site_drops(rows, labels, max_drop):
+    oldest, newest = labels[0], labels[-1]
+    gated = {r["id"] for r in gated_rows(rows, labels)}
+    lines = []
+    for r in rows:
+        first, last = r["engines"].get(oldest), r["engines"].get(newest)
+        if not first or not last:
+            continue
+        if more_failed_runs(first, last) > 0:
+            lines.append(f"--max-drop={max_drop:g}: {r['id']}: {newest} failed in {last['failedRuns']} of "
+                         f"{len(last['visualRuns'])} visual runs, {oldest} in {first['failedRuns']} of "
+                         f"{len(first['visualRuns'])}")
+        if r["id"] not in gated:
+            continue
+        a, b = first["visual"].get("parity"), last["visual"].get("parity")
+        if a is None or b is None:
+            continue
+        noise = (r.get("parityChange") or {}).get("noise") or 0.0
+        beyond = round(a - b - noise, 1)
+        if beyond > max_drop:
+            lines.append(f"--max-drop={max_drop:g}: {r['id']}: {newest} parity {b} is {round(a - b, 1)} below "
+                         f"{oldest}'s {a}, {beyond} beyond the site's noise of {noise}")
+    return lines
+
+
+def threshold_failures(rows, agg, labels, min_parity, max_drop):
+    oldest, newest = labels[0], labels[-1]
+    failures = []
+    if min_parity is not None:
+        mean = agg[newest]["parityMean"]
+        count = sum(1 for r in gated_rows(rows, labels) if newest in r["engines"])
+        if mean is None:
+            failures.append(f"--min-parity={min_parity:g}: {newest} has no stable site to average")
+        elif mean < min_parity:
+            failures.append(f"--min-parity={min_parity:g}: {newest} mean visual parity {mean} over "
+                            f"{sites(count, 'stable site')} is below {min_parity:g}")
+    if max_drop is not None:
+        both = [r for r in gated_rows(rows, labels) if oldest in r["engines"] and newest in r["engines"]]
+        before = mean_parity([r["engines"][oldest] for r in both])
+        after = mean_parity([r["engines"][newest] for r in both])
+        if not both:
+            failures.append(f"--max-drop={max_drop:g}: no stable site that both {oldest} and {newest} captured")
+        elif round(before - after, 1) > max_drop:
+            failures.append(f"--max-drop={max_drop:g}: {newest} mean visual parity {after} is "
+                            f"{round(before - after, 1)} below {oldest}'s {before} over the "
+                            f"{sites(len(both), 'stable site')} both captured")
+        failures += site_drops(rows, labels, max_drop)
+    return failures
+
+
+def site_set_warning(rows, labels):
+    oldest, newest = labels[0], labels[-1]
+    gaps = []
+    for have, lack in ((oldest, newest), (newest, oldest)):
+        ids = [r["id"] for r in rows if comparable(r) and have in r["engines"] and lack not in r["engines"]]
+        if ids:
+            gaps.append(f"only {have} has {', '.join(ids)}")
+    if gaps:
+        print(f"compare: {'; '.join(gaps)}; --max-drop compares the sites both have", file=sys.stderr)
+
+
+def check_thresholds(rows, agg, labels, min_parity, max_drop):
+    if min_parity is None and max_drop is None:
+        return 0
+    checked = [labels[-1]] if max_drop is None else [labels[0], labels[-1]]
+    missing = [label for label in dict.fromkeys(checked) if not agg[label]["sites"]]
+    if missing:
+        print(f"compare: no comparable captures of {', '.join(missing)} to check the thresholds against",
+              file=sys.stderr)
+        return 2
+    if max_drop is not None:
+        site_set_warning(rows, labels)
+    failures = threshold_failures(rows, agg, labels, min_parity, max_drop)
+    for line in failures:
+        print(f"FAIL {line}")
+    if not failures:
+        given = [f"--min-parity={min_parity:g}" if min_parity is not None else "",
+                 f"--max-drop={max_drop:g}" if max_drop is not None else ""]
+        print("thresholds met: " + " ".join(x for x in given if x))
+    return 1 if failures else 0
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Compare Nordstjernen captures with the Chrome baseline. Exits 1 when "
+                                            "a threshold fails, 2 on usage errors, missing captures or an "
+                                            "unexpected error.")
     p.add_argument("--out", default="sitebench-out", help="capture root containing one directory per label")
     p.add_argument("--base", default="chrome")
     p.add_argument("--labels", default="nordstjernen", help="comma-separated Nordstjernen labels, oldest first")
     p.add_argument("--report", default=None, help="report directory (default OUT/report)")
     p.add_argument("--viewport", default="1280x800")
+    p.add_argument("--min-parity", type=float, default=None, metavar="P",
+                   help="fail when the newest label's mean visual parity is below P")
+    p.add_argument("--max-drop", type=float, default=None, metavar="D",
+                   help="fail when the newest label's mean visual parity over the stable sites both labels have "
+                        "is more than D below the oldest's, or a stable site's parity is, beyond the site's "
+                        "noise, or when a site failed in more of the newest label's visual runs")
     a = p.parse_args()
+    a.labels = [label for label in a.labels.split(",") if label]
+    m = re.fullmatch(r"(\d+)x(\d+)", a.viewport)
+    if not m:
+        p.error("--viewport wants WxH")
+    a.width, a.height = int(m.group(1)), int(m.group(2))
+    if a.min_parity is not None and not (a.labels and 0 <= a.min_parity <= 100):
+        p.error("--min-parity wants a value from 0 to 100 and at least one label")
+    if a.max_drop is not None and not (len(a.labels) >= 2 and a.max_drop >= 0):
+        p.error("--max-drop wants a value of 0 or more and two labels to compare")
+    return a
+
+
+def main():
+    a = parse_args()
     out = Path(a.out)
-    labels = [label for label in a.labels.split(",") if label]
+    labels = a.labels
     report = Path(a.report) if a.report else out / "report"
     img_dir = report / "img"
     img_dir.mkdir(parents=True, exist_ok=True)
-    vw, vh = (int(x) for x in a.viewport.split("x"))
+    vw, vh = a.width, a.height
 
     ids = []
     for d in [out / a.base] + [out / label for label in labels]:
@@ -1105,7 +1216,8 @@ def main():
                 if (sub / "metrics.json").exists() and sub.name not in ids:
                     ids.append(sub.name)
     if not ids:
-        sys.exit(f"compare: no captures under {out}")
+        print(f"compare: no captures under {out}", file=sys.stderr)
+        sys.exit(2)
     rows = [analyse_site(i, out, a.base, labels, img_dir, vw, vh) for i in ids]
     agg = aggregate(rows, labels)
 
@@ -1127,7 +1239,12 @@ def main():
               f"main CPU ÷ Chrome {fmt_ratio(g['mainThreadVsChromeGeomean'])}, "
               f"memory ÷ Chrome {fmt_ratio(g['memoryVsChromeGeomean'])}")
     print(f"report: {report / 'index.html'}")
+    sys.exit(check_thresholds(rows, agg, labels, a.min_parity, a.max_drop))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        sys.exit(2)
