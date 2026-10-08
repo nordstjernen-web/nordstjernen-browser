@@ -2264,7 +2264,7 @@ emit_attr_styled(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize end,
 static gboolean
 inline_run_at_line_start(const GString *out)
 {
-    if (!out || out->len == 0) return TRUE;
+    if (out->len == 0) return TRUE;
     gsize i = out->len;
     while (i > 0) {
         if ((guchar)out->str[i - 1] == ' ') { i--; continue; }
