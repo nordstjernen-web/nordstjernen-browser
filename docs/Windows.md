@@ -379,9 +379,12 @@ so we don't ship a bundled copy there.
   startup leaves no console output to read. Two things now make this
   diagnosable:
   - A diagnostic log is written to
-    `%LOCALAPPDATA%\Nordstjernen\nordstjernen-debug.log` (override with
-    `NS_LOG_FILE=<path>`, disable with `NS_NO_LOG_FILE=1`). GTK/GLib
-    startup warnings and errors land there even with no console.
+    `%LOCALAPPDATA%\Nordstjernen\nordstjernen-debug.log` (disable with
+    `NS_NO_LOG_FILE=1`). GTK/GLib startup warnings and errors land there
+    even with no console. By default it keeps only warnings and errors,
+    so no page address or console output reaches the disk, and it starts
+    over once it passes 4 MiB. Setting `NS_LOG_FILE=<path>` writes the
+    full event log, page loads and console lines included, to that path.
   - When the watchdog gives up after repeated child crashes — or can't
     spawn the browser at all — it pops a message box pointing at that
     log instead of exiting silently.

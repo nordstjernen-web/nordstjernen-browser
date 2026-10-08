@@ -3,6 +3,22 @@ Changelog:
 
 1.0.31:
 ======
+* Web pages can no longer change settings or wipe browsing data. A page
+  that navigated to `about:settings-save` (a link, `location`, a form
+  POST, a `Refresh`) reached it with no referrer, which the about-page
+  handler took for the browser's own UI, so any site could set the home
+  page and search engine, turn off HTTPS-First, or clear history and
+  cookies through `about:settings-clear`. Navigations from web content to
+  `about:settings*`, `about:config`, `about:history` and `view-source:`
+  are now refused unless they start from a browser page, and the save
+  and clear endpoints only act on a POST. The safe-browsing "continue
+  anyway" link likewise only works from the warning page for that host.
+* The Windows diagnostic log no longer records browsing. The log file
+  that is on by default on Windows also received every document address,
+  every connection's origin and every `console.log` line, in private
+  windows too, and grew without limit. By default it now keeps only
+  warnings and errors and starts over past 4 MiB; `NS_LOG_FILE=<path>`
+  still writes the full event log.
 * WebGPU is on by default, like WebGL. Pages got `null` from
   `navigator.gpu.requestAdapter()` unless WebGPU was switched on in
   Settings or the browser was started with `--enable-webgpu`, so three.js

@@ -11,6 +11,7 @@
 #include <glib/gstdio.h>
 
 #define NS_DLOG_CAPACITY 1024
+#define NS_DLOG_FILE_MAX_BYTES (4 * 1024 * 1024)
 
 typedef struct ns_dlog_sub {
     guint              id;
@@ -53,17 +54,28 @@ ns_debug_log_file_path(void)
     return g_dlog_file_path;
 }
 
+static gboolean
+ns_dlog_file_wants(ns_dlog_level level)
+{
+    if (!ns_dlog_file_enabled()) return FALSE;
+    if (g_getenv("NS_LOG_FILE")) return TRUE;
+    return level == NS_DLOG_WARN || level == NS_DLOG_ERROR;
+}
+
 static void
 ns_dlog_file_write(const ns_dlog_entry *e)
 {
-    if (!ns_dlog_file_enabled()) return;
+    if (!ns_dlog_file_wants(e->level)) return;
     if (!g_dlog_file && !g_dlog_file_tried) {
         g_dlog_file_tried = TRUE;
         const char *path = ns_debug_log_file_path();
         if (path) {
             char *dir = g_path_get_dirname(path);
             if (dir) { g_mkdir_with_parents(dir, 0700); g_free(dir); }
-            g_dlog_file = g_fopen(path, "a");
+            GStatBuf st;
+            gboolean oversized = g_stat(path, &st) == 0 &&
+                                 st.st_size > NS_DLOG_FILE_MAX_BYTES;
+            g_dlog_file = g_fopen(path, oversized ? "w" : "a");
         }
     }
     if (!g_dlog_file) return;
