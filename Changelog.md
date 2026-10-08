@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* WebGL `drawBuffers([gl.BACK])` and `readBuffer(gl.BACK)` work on the
+  default framebuffer. A WebGL canvas draws into an offscreen
+  framebuffer object, where `GL_BACK` is not a valid draw or read
+  buffer, so the call failed with `INVALID_ENUM` — three.js makes it
+  whenever it switches back from a multiple-render-target pass to the
+  canvas. `GL_BACK` now maps to the canvas's color attachment.
 * WebAssembly runs in more than one thread at a time on Windows. The
   WAMR runtime marks its per-thread state `__declspec(thread)`, which
   MinGW GCC ignores, so the stack boundary of the first thread to run
