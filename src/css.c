@@ -28312,6 +28312,8 @@ static const char *kUa =
     ":is(input[type=\"reset\" i], input[type=\"button\" i], "
     "input[type=\"submit\" i], button) { text-align: center; }\n"
     "input, textarea, select { display: inline-block; }\n"
+    "input[type=checkbox i] { margin: 3px 3px 3px 4px; }\n"
+    "input[type=radio i] { margin: 3px 3px 0px 5px; }\n"
     "input, textarea, select { padding: 1px 2px; background-color: #ffffff; "
     "border-top-width: 2px; border-right-width: 2px; "
     "border-bottom-width: 2px; border-left-width: 2px; "

@@ -383,6 +383,31 @@ style_is_grid_container(const ns_style *s)
     return ns_display_is_grid_container(ns_css_display_of(s));
 }
 
+static gboolean
+box_is_form_widget(const ns_box *box)
+{
+    if (!box || box->kind != NS_BOX_BLOCK || !box->dom ||
+        box->dom->kind != NS_NODE_ELEMENT || !box->dom->name)
+        return FALSE;
+    return strcmp(box->dom->name, "input") == 0 ||
+           strcmp(box->dom->name, "textarea") == 0 ||
+           strcmp(box->dom->name, "select") == 0;
+}
+
+static gboolean
+box_is_flex_container(const ns_box *box)
+{
+    return box && !box_is_form_widget(box) &&
+           style_is_flex_container(box->style);
+}
+
+static gboolean
+box_is_grid_container(const ns_box *box)
+{
+    return box && !box_is_form_widget(box) &&
+           style_is_grid_container(box->style);
+}
+
 static const char *
 keyword_or(const ns_style *s, ns_css_prop p, const char *fallback)
 {
@@ -3463,13 +3488,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                            g_ascii_strcasecmp(type, "tel") == 0 ||
                            g_ascii_strcasecmp(type, "number") == 0;
         if (is_text) {
-            if (!inline_run_at_line_start(ctx->out))
+            gboolean boxed = n == g_form_control_inline;
+            if (!boxed && !inline_run_at_line_start(ctx->out))
                 g_string_append(ctx->out, "\xc2\xa0\xc2\xa0\xc2\xa0");
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, "\xc2\xa0");
-            int leading = text_input_leading_spaces(s);
-            for (int i = 0; i < leading; i++)
+            if (!boxed) {
                 g_string_append(ctx->out, "\xc2\xa0");
+                int leading = text_input_leading_spaces(s);
+                for (int i = 0; i < leading; i++)
+                    g_string_append(ctx->out, "\xc2\xa0");
+            }
             const char *real_value = ns_input_used_value(n);
             const char *v = real_value;
             gboolean is_placeholder = FALSE;
@@ -3619,19 +3647,17 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         } else if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {
             gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, checked ? "\xe2\x98\x91" : "\xe2\x98\x90");
+            g_string_append(ctx->out, "\xef\xbf\xbc");
             emit_form_attr_sized(ctx->attrs,
                 checked ? NS_INLINE_CHECKBOX_CHECKED : NS_INLINE_CHECKBOX,
                 start, ctx->out->len, n, ctx->styles);
-            g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "radio") == 0) {
             gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, checked ? "\xe2\x97\x89" : "\xe2\x97\x8b");
+            g_string_append(ctx->out, "\xef\xbf\xbc");
             emit_form_attr_sized(ctx->attrs,
                 checked ? NS_INLINE_RADIO_CHECKED : NS_INLINE_RADIO,
                 start, ctx->out->len, n, ctx->styles);
-            g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "file") == 0) {
             gsize start = ctx->out->len;
             g_string_append(ctx->out, "\xc2\xa0" "Choose File" "\xc2\xa0");
@@ -6286,10 +6312,55 @@ field_attr_is_text_input(const ns_inline_attr *r)
         g_ascii_strcasecmp(type, "password") == 0;
 }
 
+gboolean
+ns_inline_toggle_geometry(const ns_inline_attr *r, double *side,
+                          double margins[4])
+{
+    if (r->kind != NS_INLINE_CHECKBOX && r->kind != NS_INLINE_CHECKBOX_CHECKED &&
+        r->kind != NS_INLINE_RADIO && r->kind != NS_INLINE_RADIO_CHECKED)
+        return FALSE;
+    double edge = 13;
+    if (r->box_w > 0 || r->box_h > 0) {
+        double bw = r->box_w > 0 ? r->box_w : r->box_h;
+        double bh = r->box_h > 0 ? r->box_h : r->box_w;
+        edge = MIN(bw, bh);
+    }
+    *side = edge;
+    static const ns_css_prop sides[4] = {
+        NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_RIGHT,
+        NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_LEFT,
+    };
+    for (int i = 0; i < 4; i++)
+        margins[i] = r->style ? length_or(r->style->values[sides[i]], 0) : 0;
+    return TRUE;
+}
+
+static void
+inline_apply_toggle_shapes(NsPangoAttrList *list, const ns_box *box)
+{
+    if (!box->attrs) return;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        double side, m[4];
+        if (!ns_inline_toggle_geometry(r, &side, m) || r->len == 0) continue;
+        double w = MAX(0, m[3] + side + m[1]);
+        double h = MAX(0, m[0] + side + m[2]);
+        NsPangoRectangle rect = {
+            0, (int)(-(m[0] + side) * NS_PANGO_SCALE),
+            (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE)
+        };
+        NsPangoAttribute *attr = ns_pango_attr_shape_new(&rect, &rect);
+        attr->start_index = (guint)r->start;
+        attr->end_index = (guint)(r->start + r->len);
+        ns_pango_attr_list_insert(list, attr);
+    }
+}
+
 void
 ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
 {
     if (!box) return;
+    inline_apply_toggle_shapes(list, box);
     if (box->inline_atomics) {
         double max_asc = 0;
         for (guint i = 0; i < box->inline_atomics->len; i++) {
@@ -6388,7 +6459,11 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (r->kind == NS_INLINE_SPACER && r->len > 0)
+        gboolean toggle = r->kind == NS_INLINE_CHECKBOX ||
+                          r->kind == NS_INLINE_CHECKBOX_CHECKED ||
+                          r->kind == NS_INLINE_RADIO ||
+                          r->kind == NS_INLINE_RADIO_CHECKED;
+        if ((r->kind == NS_INLINE_SPACER || toggle) && r->len > 0)
             inline_insert_line_height(list, 0, (guint)r->start,
                                       (guint)(r->start + r->len));
     }
@@ -7790,11 +7865,11 @@ box_establishes_bfc(const ns_box *box)
     if (float_side_of(box->style) >= 0 ||
         style_is_absolute_or_fixed(box->style) ||
         style_is_multicol(box->style) ||
-        style_is_flex_container(box->style) ||
-        style_is_grid_container(box->style))
+        box_is_flex_container(box) ||
+        box_is_grid_container(box))
         return TRUE;
-    if (style_is_flex_container(box->parent->style) ||
-        style_is_grid_container(box->parent->style))
+    if (box_is_flex_container(box->parent) ||
+        box_is_grid_container(box->parent))
         return TRUE;
     if (box->is_rendered_legend ||
         ns_node_is_element_named(box->dom, "fieldset"))
@@ -8045,7 +8120,7 @@ layout_image(ns_box *box, double parent_content_width)
     const char *parent_flex_dir = box->parent
         ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     double pct_width_base = parent_content_width;
@@ -8453,8 +8528,8 @@ box_inline_size_is_definite(const ns_box *box)
         if (style_is_absolute_or_fixed(s) || float_side_of(s) >= 0 ||
             ns_display_is_atomic_inline(ns_css_display_of(s)))
             return FALSE;
-        if (b->parent && (style_is_flex_container(b->parent->style) ||
-                          style_is_grid_container(b->parent->style)))
+        if (b->parent && (box_is_flex_container(b->parent) ||
+                          box_is_grid_container(b->parent)))
             return FALSE;
     }
     return TRUE;
@@ -8494,7 +8569,7 @@ replaced_containing_box(const ns_box *box)
 static gboolean
 replaced_containing_block_is_definite(const ns_box *box)
 {
-    if (box->parent && style_is_grid_container(box->parent->style))
+    if (box->parent && box_is_grid_container(box->parent))
         return FALSE;
     const ns_box *cb = replaced_containing_box(box);
     return cb && box_inline_size_is_definite(cb);
@@ -8829,11 +8904,11 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
     const ns_style *child_style = box->style ? box->style : parent_style;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(box, child_style, FALSE);
-    if (box->style && style_is_grid_container(box->style)) {
+    if (box->style && box_is_grid_container(box)) {
         double gw = grid_natural_width(box, child_style);
         if (gw > 0) return gw;
     }
-    gboolean flex_row = style_is_flex_container(box->style) &&
+    gboolean flex_row = box_is_flex_container(box) &&
         strncmp(flex_direction_of(box->style), "row", 3) == 0;
     double max_child = 0;
     double float_row = 0;
@@ -9049,12 +9124,12 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
-    if (box->style && style_is_grid_container(box->style) &&
+    if (box->style && box_is_grid_container(box) &&
         grid_flows_by_column(box->style)) {
         double gw = grid_column_flow_width(box, box->style, TRUE);
         if (gw >= 0) return gw;
     }
-    if (box->style && style_is_grid_container(box->style)) {
+    if (box->style && box_is_grid_container(box)) {
         const ns_css_value *cv =
             box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
         if (cv && cv->kind == NS_CSS_V_TRACKS && cv->u.tracks.n > 0 &&
@@ -9089,7 +9164,7 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         }
     }
     const ns_style *child_style = box->style ? box->style : parent_style;
-    gboolean single_line_row = style_is_flex_container(box->style) &&
+    gboolean single_line_row = box_is_flex_container(box) &&
         strncmp(flex_direction_of(box->style), "row", 3) == 0 &&
         !flex_wraps(box->style);
     double max_child = 0;
@@ -10001,7 +10076,7 @@ estimate_natural_width(const ns_box *b, double cap)
     } else {
         int flow_children = 0;
         gboolean column_flex = b->style &&
-            style_is_flex_container(b->style) &&
+            box_is_flex_container(b) &&
             (strcmp(flex_direction_of(b->style),
                     "column") == 0 ||
              strcmp(flex_direction_of(b->style),
@@ -10024,7 +10099,7 @@ estimate_natural_width(const ns_box *b, double cap)
             }
             flow_children++;
         }
-        if (flow_children > 1 && style_is_flex_container(b->style) &&
+        if (flow_children > 1 && box_is_flex_container(b) &&
             strcmp(flex_direction_of(b->style),
                    "column") != 0 &&
             strcmp(flex_direction_of(b->style),
@@ -10960,7 +11035,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             if (eh >= 0) eh = flex_wrap_clamp_height(box, eh, cw);
         }
         gboolean flexed_item = box->parent &&
-            style_is_flex_container(box->parent->style) &&
+            box_is_flex_container(box->parent) &&
             box_read_definite_height(box) > 0;
         if ((eh < 0 || flexed_item) && box->definite_height > 0 &&
             lines->len > 0)
@@ -13069,7 +13144,7 @@ layout_grid(ns_box *box, double cw,
             if (item_w < 0) item_w = 0;
         }
         ns_subgrid_cols subctx = {0};
-        if (sp >= 1 && style_is_grid_container(c->style) &&
+        if (sp >= 1 && box_is_grid_container(c) &&
             style_columns_are_subgrid(c->style)) {
             subctx.n = sp;
             subctx.gap = col_gap;
@@ -13082,7 +13157,7 @@ layout_grid(ns_box *box, double cw,
         ns_subgrid_rows subrowctx = {0};
         int sub_rs = MIN(rs, NS_CSS_TRACKS_MAX);
         if (sub_rs >= 1 && placed_row + sub_rs <= n_rows &&
-            style_is_grid_container(c->style) &&
+            box_is_grid_container(c) &&
             style_rows_are_subgrid(c->style)) {
             gboolean usable = TRUE;
             for (int k = 0; k < sub_rs; k++) {
@@ -13813,8 +13888,8 @@ static double
 block_align_content_shift(const ns_box *box, double free_space)
 {
     if (!box->style || free_space == 0) return 0;
-    if (style_is_flex_container(box->style) ||
-        style_is_grid_container(box->style))
+    if (box_is_flex_container(box) ||
+        box_is_grid_container(box))
         return 0;
     const char *acont = keyword_or(box->style, NS_CSS_ALIGN_CONTENT, "normal");
     gboolean unsafe = g_str_has_prefix(acont, "unsafe ");
@@ -13855,11 +13930,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     const char *parent_flex_dir = box->parent
         ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     gboolean flex_col_item_stretch = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "column") == 0 ||
          strcmp(parent_flex_dir, "column-reverse") == 0);
     if (flex_col_item_stretch) {
@@ -14020,10 +14095,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         box->parent && !box_establishes_bfc(box) &&
         block_height_is_auto(box, parent_content_width);
 
-    if (style_is_flex_container(box->style) || style_is_grid_container(box->style))
+    if (box_is_flex_container(box) || box_is_grid_container(box))
         reorder_children_by_order(box);
 
-    if (style_is_flex_container(box->style)) {
+    if (box_is_flex_container(box)) {
         const char *dir = flex_direction_of(box->style);
         gboolean is_row = strcmp(dir, "row") == 0 || strcmp(dir, "row-reverse") == 0;
         gboolean is_col = strcmp(dir, "column") == 0 || strcmp(dir, "column-reverse") == 0;
@@ -14045,7 +14120,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         }
     }
 
-    if (style_is_grid_container(box->style) &&
+    if (box_is_grid_container(box) &&
         g_grid_nesting < NS_GRID_NESTING_MAX) {
         g_grid_nesting++;
         layout_grid(box, cw, inner_x, inner_y, child_inherited, &cursor_y);
@@ -15210,7 +15285,7 @@ static gboolean
 flex_static_position(ns_box *abox, const ns_box *fc, double *out_x,
                      double *out_y)
 {
-    if (!fc || !fc->style || !style_is_flex_container(fc->style)) return FALSE;
+    if (!fc || !fc->style || !box_is_flex_container(fc)) return FALSE;
 
     double origin_x = fc->x + fc->margin.left + fc->border.left +
                       fc->padding.left;
@@ -17464,7 +17539,8 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
                 &g_array_index(root->attrs, ns_inline_attr, i);
             if (r->dom != target || r->len == 0) continue;
             double ex, ey, ew, eh;
-            if (!ns_paint_inline_range_extents(root, r->start, r->len,
+            if (!ns_paint_inline_toggle_rect(root, r, &ex, &ey, &ew, &eh) &&
+                !ns_paint_inline_range_extents(root, r->start, r->len,
                                                inline_attr_element(r),
                                                &ex, &ey, &ew, &eh))
                 continue;
