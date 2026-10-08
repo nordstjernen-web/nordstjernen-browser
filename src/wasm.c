@@ -76,6 +76,7 @@ typedef struct {
     JSValue memory_obj;
     JSValue pending_exc;
     ns_wasm_linkage linkage;
+    GHashTable *funcs;
     gboolean has_pending;
     guint call_depth;
     guint calls_since_reclaim;
@@ -541,6 +542,12 @@ static JSValue
 ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
                   wasm_function_inst_t func)
 {
+    ns_wasm_instance *wi = ns_wasm_instance_opaque(instance);
+    if (wi && wi->funcs) {
+        JSValue *known = g_hash_table_lookup(wi->funcs, func);
+        if (known)
+            return JS_DupValue(ctx, *known);
+    }
     JSValue obj = JS_NewObjectClass(ctx, ns_wasm_func_class_id);
     if (JS_IsException(obj))
         return obj;
@@ -549,12 +556,16 @@ ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
     f->instance = JS_DupValue(ctx, instance);
     f->func = func;
     JS_SetOpaque(obj, f);
-    ns_wasm_instance *wi = ns_wasm_instance_opaque(instance);
     if (wi && wi->inst) {
         guint n_params = wasm_func_get_param_count(func, wi->inst);
         JS_DefinePropertyValueStr(ctx, obj, "length",
                                   JS_NewInt32(ctx, (int)n_params),
                                   JS_PROP_CONFIGURABLE);
+        if (!wi->funcs)
+            wi->funcs = g_hash_table_new(g_direct_hash, g_direct_equal);
+        JSValue *slot = g_new(JSValue, 1);
+        *slot = JS_DupValue(ctx, obj);
+        g_hash_table_insert(wi->funcs, func, slot);
     }
     return obj;
 }
@@ -1193,6 +1204,16 @@ ns_wasm_instance_finalizer(JSRuntime *rt, JSValue val)
         wasm_runtime_deinstantiate(wi->inst);
     }
     ns_wasm_linkage_clear(rt, &wi->linkage);
+    if (wi->funcs) {
+        GHashTableIter it;
+        gpointer key, value;
+        g_hash_table_iter_init(&it, wi->funcs);
+        while (g_hash_table_iter_next(&it, &key, &value)) {
+            JS_FreeValueRT(rt, *(JSValue *)value);
+            g_free(value);
+        }
+        g_hash_table_destroy(wi->funcs);
+    }
     JS_FreeValueRT(rt, wi->module_obj);
     JS_FreeValueRT(rt, wi->exports);
     JS_FreeValueRT(rt, wi->memory_obj);
@@ -1212,6 +1233,13 @@ ns_wasm_instance_gc_mark(JSRuntime *rt, JSValueConst val,
     JS_MarkValue(rt, wi->memory_obj, mark_func);
     JS_MarkValue(rt, wi->pending_exc, mark_func);
     ns_wasm_linkage_gc_mark(rt, &wi->linkage, mark_func);
+    if (wi->funcs) {
+        GHashTableIter it;
+        gpointer key, value;
+        g_hash_table_iter_init(&it, wi->funcs);
+        while (g_hash_table_iter_next(&it, &key, &value))
+            JS_MarkValue(rt, *(JSValue *)value, mark_func);
+    }
 }
 
 static const JSClassDef ns_wasm_instance_class = {
