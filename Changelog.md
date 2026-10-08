@@ -3,6 +3,17 @@ Changelog:
 
 1.0.30:
 ======
+* SVG elements that never draw anything report no box to scripts.
+  `getBoundingClientRect()` of an `<animate>`, `<set>`,
+  `<animateTransform>` or `<animateMotion>` returned a 0x0 rectangle at
+  its parent's origin and `getClientRects()` one entry, so about 520
+  animation elements in IMDb's icons had boxes that Chrome does not give
+  them. The same held for `<mpath>`, `<discard>`, `<view>`, unknown SVG
+  elements and everything inside them, and a `<tspan>` hidden by
+  `display: none` or `systemLanguage` reported the box of its whole
+  `<text>`. Now only the element types SVG 2 lists as renderable, with
+  rendered ancestors, get a box; the others report `0,0 0x0` and an
+  empty list, as in Chrome.
 * quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
   use-after-free in `AsyncDisposableStack`, a reference-count bug in
   `Promise.withResolvers`, an out-of-bounds read when creating typed
