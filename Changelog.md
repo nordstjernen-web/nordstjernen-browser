@@ -3,6 +3,90 @@ Changelog:
 
 1.0.30:
 ======
+* A site benchmark compares Nordstjernen with Chrome on sixty of the most
+  visited sites (`scripts/sitebench/`, see `docs/sitebench.md`). It
+  captures each site in headless Chrome and in Nordstjernen, scores
+  visual parity from screenshots, component placement and text, and
+  compares first paint with Chrome's First Contentful Paint, main-thread
+  CPU and peak memory, writing an HTML and Markdown report with
+  side-by-side shots and filmstrips. Sites that show headless Chrome a
+  bot challenge are reported but kept out of the averages.
+  `nordstjernen --headless --timing` now prints per-phase timings
+  (fetch, parse, style, script, layout, images, paint) and the time of
+  the first painted frame.
+* Restyling after a DOM change touches only what the change can affect.
+  A class, id or attribute change used to restyle the changed element's
+  whole subtree whenever any selector named it in an ancestor position,
+  so toggling a theme class on `<body>` recomputed every style on the
+  page; inserting a child under a parent that `:first-child`-style
+  selectors watch did the same. Changes now follow Chrome's
+  invalidation sets: only descendants matching the affected selectors'
+  subjects are restyled, an element whose computed style comes out
+  unchanged leaves its subtree alone, and an insertion restyles the
+  parent's children rather than its subtree. `:has()` rules without an
+  ancestor key no longer switch incremental restyling off for the page.
+* A full restyle costs half as much on design-system-heavy pages. Rules
+  whose subject is `:root` or an `:is()`/`:where()` of keyed selectors
+  are indexed instead of being tried against every element, stylesheets
+  whose keys cannot match an element are skipped, `var()`-substituted
+  declarations are parsed once per pass, identical custom-property maps
+  are shared instead of chained as deep as the DOM, and custom-property
+  values are no longer expanded just to check for CSS-wide keywords. A
+  full restyle of GitHub's front page drops from 230 to about 110 ms and
+  Stack Overflow's from 108 to 56 ms.
+* `getComputedStyle()` lays the page out only when it has to. Reading a
+  property whose value does not depend on layout (colour, display,
+  fonts and most others) now recomputes styles alone, so a script that
+  toggles a class and reads a computed colour in a loop runs about five
+  times faster; width, height, margins, paddings, insets, transforms and
+  grid tracks still trigger layout as in other browsers.
+* Scripts inserted by other scripts are fetched in parallel and run when
+  they arrive, instead of being fetched one after another and run
+  inline; component stylesheets are no longer re-parsed on every
+  relayout, CSSOM rule insertion is batched, CSS property names are
+  looked up in a hash table, libcurl keeps the CA store between
+  connections, and font-family and `lang`/`dir` lookups are memoised per
+  pass. BBC's front page loads in 3.3 s instead of 25 s.
+* Fonts resolve the way Chrome resolves them on Linux and Windows:
+  generic `serif` and `sans-serif` map to Times New Roman and Arial (or
+  their metric-compatible Liberation equivalents), so text wraps at the
+  same widths as in Chrome.
+* Yahoo's front page no longer goes blank. `onerror` was missing from
+  the event-handler accessors on `HTMLElement.prototype`, so an
+  ad-recovery script that wraps that accessor threw on every script's
+  `onerror` assignment and wiped the page.
+* Reddit renders. A `<slot>` inside an inline element of a shadow tree
+  (`<devvit-wrapper><slot></slot></devvit-wrapper>` around the whole
+  app) dropped every block-level element slotted into it, and inline
+  slotted text was lost too; slots now pass their assigned content
+  through, and an inline shadow host joins the line it sits in.
+* `var()` substitution keeps token boundaries, so a minified value such
+  as `var(--weight)var(--size)/var(--line-height)var(--font)` no longer
+  fuses into one invalid token: Roblox's headings were 16px instead of
+  56px. A custom property declared empty (`--x:;`) substitutes to
+  nothing instead of invalidating the declaration, and a `font`
+  shorthand containing `var()` keeps its weight and line height.
+* Netflix's "Get Started" button and email field are styled. Rules
+  inserted through `insertRule()` (CSS-in-JS libraries) lost a
+  shorthand set with `var()` after earlier values of the same property,
+  and `cssText` folded `border-color: var(--b)` into a resolved colour.
+* `text-decoration: inherit` works, so Tailwind's preflight removes the
+  underline from links (Yahoo's navigation and headlines were all
+  underlined), and outlines follow `border-radius` like Chrome's (pill
+  search boxes drawn with `outline` were square).
+* `text-overflow: ellipsis` only clips text that cannot wrap. Wrapping
+  text (`normal`, `pre-line`, `pre-wrap`) wraps as in other browsers
+  instead of being cut to one line with a visible line-break glyph, and
+  a `<br>` in non-wrapping ellipsized text starts a new line.
+* A column flex item with `margin-top: auto` moves its content down with
+  it (Google's logo sat at the top of its box), stylesheet `<link>`s
+  inserted by the HTML parser fire `load`, and `document.fonts` is a
+  single per-document `FontFaceSet` that dispatches loading events, which
+  claude.ai waits for before showing its app.
+* Pages with WebM background video (claude.com) no longer crash the
+  renderer: the in-process video frame buffer is padded for swscale's
+  vector writes. The sandbox lets the renderer read a CA bundle named by
+  `CURL_CA_BUNDLE` or `SSL_CERT_FILE`.
 * JPEG XL images are displayed, as Chrome now does. `.jxl` files decode
   through libjxl, an optional dependency like libavif, in `<img>`, CSS
   backgrounds and `<picture>` sources typed `image/jxl`; transparency is
