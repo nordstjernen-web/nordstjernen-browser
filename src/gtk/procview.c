@@ -2797,11 +2797,21 @@ push_history(NsProcView *v, const char *url)
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
 }
 
+static gboolean
+pv_same_document_url(const char *from, const char *to)
+{
+    if (!from || !to) return FALSE;
+    gsize from_len = strcspn(from, "#"), to_len = strcspn(to, "#");
+    if (from_len == to_len && strncmp(from, to, from_len) == 0) return TRUE;
+    return ns_url_same_origin(from, to);
+}
+
 static void
 pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
                               const char *title)
 {
-    if (url && *url && g_strcmp0(url, v->current_url) != 0) {
+    if (url && *url && g_strcmp0(url, v->current_url) != 0 &&
+        pv_same_document_url(v->current_url, url)) {
         if (pushed || v->hist_index < 0) {
             push_history(v, url);
         } else {
