@@ -37,13 +37,22 @@ Changelog:
 * A `:has()` rule no longer makes every DOM change restyle the whole
   page. Stack Overflow's `html:has(.disable-document-scroll)` made each
   inserted node - including every node the parser hands back after a
-  script - mark the entire document dirty. Like Chrome, a mutation now
-  invalidates `:has()` anchors only when it touches an element carrying
-  a class, id, tag or attribute named inside a `:has()` argument;
-  arguments with sibling combinators, structural pseudo-classes or
-  unkeyed compounds keep the conservative behaviour. A script that
-  inserts nodes and reads a computed style 200 times under such a rule
-  went from 4.2 s to about 0.7 s.
+  script - mark the entire document dirty, and CNN's 600 `:has()` rules
+  did the same to whole page sections. Like Chrome, a mutation now
+  invalidates a `:has()` anchor only when it touches an element carrying
+  a class, id, tag or attribute named in that anchor's own `:has()`
+  argument (arguments with sibling combinators, structural
+  pseudo-classes or unkeyed compounds stay conservative), and only what
+  the rule can reach is restyled: the anchor itself when it is the
+  rule's subject, the descendants matching the subject's key when only
+  descendant combinators follow it, and its following siblings only
+  when sibling combinators do. Anchors are looked up by key instead of
+  being tested one by one against every ancestor of every change.
+  Removing an element between `.a` and `.b` now re-matches
+  `.a:has(+ .b)`. A script that inserts nodes and reads a computed style
+  200 times under such a rule went from 4.2 s to about 0.7 s; on CNN's
+  front page script time drops from 14 to 9 s and first paint from
+  15.6 to 10.6 s.
 * A style flush after a small DOM change costs a fraction of what it did.
   Subtrees with nothing dirty in them are no longer walked element by
   element - their previous styles are carried over in one pass - the

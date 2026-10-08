@@ -28852,7 +28852,8 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
 {
     ns_js_index_child_change(js, parent, added, removed);
     if (!added && removed)
-        ns_css_mark_childlist_removed(parent, &removed, 1);
+        ns_css_mark_childlist_removed(parent, &removed, 1, next_sibling,
+                                      previous_sibling);
     else
         ns_css_mark_childlist_dirty(parent, added);
     ns_mut_record_emit(js, "childList", parent, added, removed,
@@ -28916,7 +28917,8 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
         ? g_ptr_array_index(added, 0) : NULL;
     if (!first_added && removed && removed->len > 0)
         ns_css_mark_childlist_removed(parent, (ns_node *const *)removed->pdata,
-                                      removed->len);
+                                      removed->len, next_sibling,
+                                      previous_sibling);
     else
         ns_css_mark_childlist_dirty(parent, first_added);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
