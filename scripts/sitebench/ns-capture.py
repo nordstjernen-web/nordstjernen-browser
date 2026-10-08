@@ -210,11 +210,11 @@ def capture_site(site, a, probe_src):
         visual = run_with_rusage(cmd, isolated_env(home), a.timeout)
     finally:
         shutil.rmtree(home, ignore_errors=True)
-    (out_dir / "stderr.log").write_text(visual["stderr"][-200000:], encoding="utf-8")
+    (out_dir / "stderr.log").write_text(visual["stderr"][-200000:], encoding="utf-8", errors="replace")
     probe = parse_prefixed_json(visual["stdout"], "eval: ")
     vtiming = parse_prefixed_json(visual["stdout"], "timing: ") or {}
     if probe is not None:
-        (out_dir / "probe.json").write_text(json.dumps(probe), encoding="utf-8")
+        (out_dir / "probe.json").write_text(json.dumps(probe), encoding="utf-8", errors="replace")
     if full.exists():
         crop_viewport(full, out_dir / "viewport.png", a.width, a.height)
     n_err, err_sample = js_errors(visual["stderr"])
@@ -260,7 +260,7 @@ def capture_site(site, a, probe_src):
         "visualRc": visual["rc"], "visualTimedOut": visual["timed_out"],
         "jsErrorSample": err_sample,
     }
-    (out_dir / "metrics.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
+    (out_dir / "metrics.json").write_text(json.dumps(result, indent=1), encoding="utf-8", errors="replace")
     return result
 
 
@@ -292,7 +292,7 @@ def main():
     if not sites:
         sys.exit("ns-capture: no sites selected")
     a.version = engine_version(a.bin)
-    probe_src = (HERE / "probe.js").read_text(encoding="utf-8")
+    probe_src = (HERE / "probe.js").read_text(encoding="utf-8", errors="replace")
     print(f"ns-capture: {a.version}, {len(sites)} sites, viewport {a.width}x{a.height}, "
           f"runs {a.runs}, jobs {a.jobs}", flush=True)
 
