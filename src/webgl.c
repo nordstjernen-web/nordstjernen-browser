@@ -1403,12 +1403,44 @@ wgl_param_cap(GLenum pname)
 static int wgl_enabled_compressed_formats(JSContext *ctx, ns_webgl *g,
                                           GLint *out, int cap);
 
+static void
+wgl_read_format(ns_webgl *g, GLint *format, GLint *type)
+{
+    *format = GL_RGBA;
+    *type = GL_UNSIGNED_BYTE;
+    if (!g->user_read_fbo) return;
+    GLint buffer = GL_NONE, object = GL_NONE, component = GL_NONE;
+    glGetIntegerv(GL_READ_BUFFER, &buffer);
+    if (buffer == GL_NONE) return;
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, (GLenum)buffer,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object);
+    if (object == GL_NONE) return;
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, (GLenum)buffer,
+        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &component);
+    if (component == GL_INT) {
+        *format = GL_RGBA_INTEGER;
+        *type = GL_INT;
+    } else if (component == GL_UNSIGNED_INT) {
+        *format = GL_RGBA_INTEGER;
+        *type = GL_UNSIGNED_INT;
+    } else if (component == GL_FLOAT) {
+        *type = GL_FLOAT;
+    }
+}
+
 static JSValue
 wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 0);
     switch (pname) {
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE: {
+        GLint format, type;
+        wgl_read_format(g, &format, &type);
+        return JS_NewInt32(ctx, pname == GL_IMPLEMENTATION_COLOR_READ_FORMAT
+                                ? format : type);
+    }
     case GL_VENDOR:
         return JS_NewString(ctx, "WebKit");
     case NS_UNMASKED_VENDOR_WEBGL:
@@ -3091,10 +3123,38 @@ wgl_readPixels(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     GLsizei h = argi(ctx, argc, argv, 3);
     GLenum format = (GLenum)argi(ctx, argc, argv, 4);
     GLenum type = (GLenum)argi(ctx, argc, argv, 5);
-    if (argc < 7 || !JS_IsObject(argv[6])) return JS_UNDEFINED;
+    if (argc < 7) return JS_UNDEFINED;
+    GLint pack_buffer = 0;
+    if (g->version >= 2) glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pack_buffer);
+    if (pack_buffer) {
+        int64_t offset = 0;
+        if (JS_IsObject(argv[6]) || JS_ToInt64(ctx, &offset, argv[6]) || offset < 0) {
+            g->injected_error = GL_INVALID_OPERATION;
+            return JS_UNDEFINED;
+        }
+        glReadPixels(x, y, w, h, format, type, (void *)(intptr_t)offset);
+        return JS_UNDEFINED;
+    }
+    if (!JS_IsObject(argv[6])) return JS_UNDEFINED;
     JSValue hold;
     size_t len = 0;
-    const uint8_t *p = view_bytes(ctx, argv[6], &len, &hold);
+    uint8_t *p = (uint8_t *)view_bytes(ctx, argv[6], &len, &hold);
+    if (p && argc >= 8) {
+        size_t view_off = 0, view_len = 0, bpe = 1;
+        JSValue ab = JS_GetTypedArrayBuffer(ctx, argv[6], &view_off, &view_len, &bpe);
+        if (JS_IsException(ab)) JS_FreeValue(ctx, JS_GetException(ctx));
+        else JS_FreeValue(ctx, ab);
+        int64_t dst_off = 0;
+        JS_ToInt64(ctx, &dst_off, argv[7]);
+        size_t skip = dst_off > 0 ? (size_t)dst_off * bpe : 0;
+        if (skip > len) {
+            g->injected_error = GL_INVALID_VALUE;
+            if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
+            return JS_UNDEFINED;
+        }
+        p += skip;
+        len -= skip;
+    }
     size_t need = wgl_transfer_bytes(g, w, h, 1, format, type, TRUE);
     if (p && len >= need && need > 0) {
         GLint bound = 0;
