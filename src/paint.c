@@ -2747,6 +2747,8 @@ ns_paint_font_available(const char *family)
     return has;
 }
 
+#define NS_FONT_ALIAS_CACHE_MAX 1024
+
 static char *
 ns_paint_font_alias(const char *family)
 {
@@ -2770,6 +2772,8 @@ ns_paint_font_alias(const char *family)
         alias = NULL;
     }
     g_mutex_lock(&lock);
+    if (g_hash_table_size(aliases) >= NS_FONT_ALIAS_CACHE_MAX)
+        g_hash_table_remove_all(aliases);
     g_hash_table_replace(aliases, key, g_strdup(alias));
     g_mutex_unlock(&lock);
     return alias;
