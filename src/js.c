@@ -1564,12 +1564,19 @@ ns_js_run_due_timers(ns_js *js)
 }
 
 static void
+ns_report_mutations(ns_js *js)
+{
+    if (!js->mutated) return;
+    js->mutation_serial++;
+    if (js->mut_cb) js->mut_cb(js->mut_user_data);
+    js->mutated = FALSE;
+}
+
+static void
 ns_drain_mutations(ns_js *js)
 {
     ns_drain_microtasks(js);
-    if (js->mutated && js->mut_cb)
-        js->mut_cb(js->mut_user_data);
-    js->mutated = FALSE;
+    ns_report_mutations(js);
     ns_storage_schedule_flush(js);
     ns_js_run_due_timers(js);
 }
@@ -32507,9 +32514,7 @@ ns_dispatch_finish_mutations(ns_js *js)
     if (js->eval_depth == 0 && js->callback_depth == 0 && !js->in_pump) {
         ns_drain_mutations(js);
     } else {
-        if (js->mutated && js->mut_cb)
-            js->mut_cb(js->mut_user_data);
-        js->mutated = FALSE;
+        ns_report_mutations(js);
         ns_storage_schedule_flush(js);
     }
 }
