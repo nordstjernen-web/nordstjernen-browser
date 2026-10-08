@@ -3,6 +3,15 @@ Changelog:
 
 1.0.31:
 ======
+* Google Maps draws its map on NVIDIA graphics. WebGL 1 shaders have
+  no `#version` line, and on desktop OpenGL they went to the driver
+  as-is; Intel's driver read them as GLSL ES anyway, but NVIDIA's read
+  them as desktop GLSL 1.10, where `precision highp float;` and
+  `invariant gl_Position;` are errors. Every map program failed to link
+  and the map stayed an empty beige page, while laptops whose browser
+  ran on the integrated GPU were fine. Shaders without `#version` are
+  now marked `#version 100` (GLSL ES 1.00) on every desktop OpenGL
+  driver, as on macOS before.
 * Web Audio plays sound. `AudioContext` was a stand-in: `resume()` did
   nothing, `currentTime` stayed at 0 and no sample reached the speakers,
   so games and players built on it, Qwasm's Quake among them, were
