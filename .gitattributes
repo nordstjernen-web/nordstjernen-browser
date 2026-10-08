@@ -32,3 +32,6 @@ CMakeLists.txt text eol=lf
 *.exe        binary
 *.so         binary
 *.dylib      binary
+
+# Developer tooling configuration stays out of git archive source releases
+/.claude     export-ignore

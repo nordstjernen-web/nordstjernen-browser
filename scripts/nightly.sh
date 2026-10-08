@@ -435,7 +435,7 @@ gha_collect() {
     conclusion=$(gh run view "$rid" --json conclusion --jq '.conclusion' 2>/dev/null || echo unknown)
     local dst="$STAGEOUT/$plat"
     mkdir -p "$dst"
-    retry "$NIGHTLY_GH_RETRIES" gh run download "$rid" -D "$dst" 2>/dev/null || true
+    retry "$NIGHTLY_GH_RETRIES" gh run download "$rid" -D "$dst" -p 'nordstjernen-*' 2>/dev/null || true
     if [ "$conclusion" = success ] && has_artifacts "$dst"; then
         publish_stage "$dst" "$OUTDIR/$plat"
         ok "$key"

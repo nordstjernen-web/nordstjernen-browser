@@ -10,13 +10,30 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILDDIR="${BUILDDIR:-$REPO_ROOT/builddir}"
+BUILDDIR="${BUILDDIR:-$REPO_ROOT/builddir-java}"
 : "${JAVA_HOME:?set JAVA_HOME to a JDK 21}"
+
+release_build_or_die() {
+    local cfg
+    cfg=$(meson configure "$1" 2>/dev/null |
+          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{printf " %s=%s", $1, $2}')
+    case "$cfg " in
+        *" buildtype=release "*|*" buildtype=minsize "*) ;;
+        *) echo "$(basename "$0"): $1 is not a release build ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+    case "$cfg " in
+        *" debug=true "*|*" b_sanitize="[!n]*)
+           echo "$(basename "$0"): $1 carries debug info or sanitizers ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+}
 
 if [ ! -e "$BUILDDIR/build.ninja" ]; then
     meson setup "$BUILDDIR" "$REPO_ROOT" -Ddefault_library=shared
 fi
 meson compile -C "$BUILDDIR"
+release_build_or_die "$BUILDDIR"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"

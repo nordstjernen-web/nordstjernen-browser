@@ -47,6 +47,22 @@ if [ ! -s "$RUNTIME" ]; then
         "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}"
 fi
 
+release_build_or_die() {
+    local cfg
+    cfg=$(meson configure "$1" 2>/dev/null |
+          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{printf " %s=%s", $1, $2}')
+    case "$cfg " in
+        *" buildtype=release "*|*" buildtype=minsize "*) ;;
+        *) echo "$(basename "$0"): $1 is not a release build ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+    case "$cfg " in
+        *" debug=true "*|*" b_sanitize="[!n]*)
+           echo "$(basename "$0"): $1 carries debug info or sanitizers ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+}
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" \
         --prefix=/usr \
@@ -56,6 +72,7 @@ if [ ! -d "$BUILDDIR" ]; then
         --strip
 fi
 meson compile -C "$BUILDDIR"
+release_build_or_die "$BUILDDIR"
 
 rm -rf "$APPDIR"
 DESTDIR="$APPDIR" meson install -C "$BUILDDIR"
