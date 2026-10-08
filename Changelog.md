@@ -3,6 +3,18 @@ Changelog:
 
 1.0.31:
 ======
+* Web Audio plays sound. `AudioContext` was a stand-in: `resume()` did
+  nothing, `currentTime` stayed at 0 and no sample reached the speakers,
+  so games and players built on it, Qwasm's Quake among them, were
+  silent. A running context now renders its graph in 256-frame blocks
+  about 120 ms ahead of its clock and streams the result as PCM to the
+  `nordstjernen-audio` helper, which resamples it into its mixer.
+  `ScriptProcessorNode` calls `onaudioprocess` once per buffer (the path
+  Emscripten's SDL2 audio uses), `AudioBufferSourceNode`s and oscillators
+  start and stop at their scheduled times, and stereo buffers keep both
+  channels. As in Chrome, a context starts suspended until the page has
+  had a user gesture; `suspend()` and `close()` work. Offline rendering
+  is unchanged.
 * A YouTube video no longer skips its first seconds. The window took
   frames from the video helper only while drawing the video, and while
   the page was still loading it drew no page layers and so no video.

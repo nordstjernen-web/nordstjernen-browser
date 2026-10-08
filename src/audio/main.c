@@ -53,6 +53,10 @@
 #define NS_AUDIO_DEVICE_RATE 44100
 #define NS_AUDIO_MAX_BYTES   (256u * 1024u * 1024u)
 #define NS_AUDIO_MAX_FLOATS  ((size_t)200u * 1024u * 1024u)
+#define NS_AUDIO_MAX_STREAMS 8
+#define NS_AUDIO_STREAM_FRAMES (NS_AUDIO_DEVICE_RATE * 2)
+#define NS_AUDIO_STREAM_HIGH   (NS_AUDIO_DEVICE_RATE / 2)
+#define NS_AUDIO_STREAM_KEEP   (NS_AUDIO_DEVICE_RATE / 5)
 
 typedef struct {
     char    token[64];
@@ -90,8 +94,20 @@ typedef struct {
 #endif
 } ns_audio_player;
 
+typedef struct {
+    char             token[64];
+    int              used;
+    int              rate;
+    int              channels;
+    SDL_AudioStream *conv;
+    float           *ring;
+    size_t           rd;
+    size_t           fill;
+} ns_audio_stream;
+
 static SDL_AudioDeviceID g_dev;
 static int               g_dev_ok;
+static ns_audio_stream   g_streams[NS_AUDIO_MAX_STREAMS];
 static SDL_mutex        *g_null_lock;
 static SDL_Thread       *g_null_thread;
 static SDL_atomic_t      g_null_quit;
@@ -331,6 +347,19 @@ audio_cb(void *userdata, Uint8 *stream, int len)
             p->cursor++;
         }
         if (!p->playing) audio_clock_store(p, 0);
+    }
+
+    for (int i = 0; i < NS_AUDIO_MAX_STREAMS; i++) {
+        ns_audio_stream *st = &g_streams[i];
+        if (!st->used || !st->ring) continue;
+        size_t n = st->fill < (size_t)nframes ? st->fill : (size_t)nframes;
+        for (size_t f = 0; f < n; f++) {
+            size_t at = (st->rd + f) % NS_AUDIO_STREAM_FRAMES;
+            out[f * 2 + 0] += st->ring[at * 2 + 0];
+            out[f * 2 + 1] += st->ring[at * 2 + 1];
+        }
+        st->rd = (st->rd + n) % NS_AUDIO_STREAM_FRAMES;
+        st->fill -= n;
     }
 
     int total = nframes * 2;
@@ -1500,9 +1529,142 @@ cmd_loop(const char *token, int on)
     audio_unlock();
 }
 
+static char *next_token(char **cursor);
+
+static ns_audio_stream *
+stream_find(const char *token)
+{
+    for (int i = 0; i < NS_AUDIO_MAX_STREAMS; i++)
+        if (g_streams[i].used && strcmp(g_streams[i].token, token) == 0)
+            return &g_streams[i];
+    return NULL;
+}
+
+static void
+stream_release(ns_audio_stream *st)
+{
+    audio_lock();
+    st->used = 0;
+    st->fill = 0;
+    audio_unlock();
+    if (st->conv) SDL_FreeAudioStream(st->conv);
+    free(st->ring);
+    memset(st, 0, sizeof *st);
+}
+
+static ns_audio_stream *
+stream_open(const char *token, int rate, int channels)
+{
+    ns_audio_stream *st = stream_find(token);
+    if (st && (st->rate != rate || st->channels != channels)) {
+        SDL_FreeAudioStream(st->conv);
+        st->conv = SDL_NewAudioStream(AUDIO_S16LSB, (Uint8)channels, rate,
+                                      AUDIO_F32SYS, 2, NS_AUDIO_DEVICE_RATE);
+        st->rate = rate;
+        st->channels = channels;
+        return st->conv ? st : NULL;
+    }
+    if (st) return st;
+    for (int i = 0; i < NS_AUDIO_MAX_STREAMS && !st; i++)
+        if (!g_streams[i].used) st = &g_streams[i];
+    if (!st) return NULL;
+    float *ring = calloc((size_t)NS_AUDIO_STREAM_FRAMES * 2, sizeof(float));
+    SDL_AudioStream *conv = SDL_NewAudioStream(AUDIO_S16LSB, (Uint8)channels,
+                                               rate, AUDIO_F32SYS, 2,
+                                               NS_AUDIO_DEVICE_RATE);
+    if (!ring || !conv) {
+        free(ring);
+        if (conv) SDL_FreeAudioStream(conv);
+        return NULL;
+    }
+    snprintf(st->token, sizeof st->token, "%s", token);
+    st->rate = rate;
+    st->channels = channels;
+    st->conv = conv;
+    st->ring = ring;
+    st->rd = 0;
+    st->fill = 0;
+    audio_lock();
+    st->used = 1;
+    audio_unlock();
+    return st;
+}
+
+static int
+b64_value(int c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static size_t
+b64_decode(const char *in, unsigned char *out, size_t cap)
+{
+    size_t n = 0;
+    unsigned int acc = 0;
+    int bits = 0;
+    for (; *in && *in != '='; in++) {
+        int v = b64_value((unsigned char)*in);
+        if (v < 0) continue;
+        acc = (acc << 6) | (unsigned int)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (n < cap) out[n++] = (unsigned char)(acc >> bits);
+            acc &= (1u << bits) - 1u;
+        }
+    }
+    return n;
+}
+
+static void
+cmd_pcm(const char *token, char *rest)
+{
+    char *rate_s = next_token(&rest);
+    char *ch_s = next_token(&rest);
+    char *data = next_token(&rest);
+    if (!rate_s || !ch_s || !data) return;
+    int rate = atoi(rate_s), channels = atoi(ch_s);
+    if (rate < 3000 || rate > 192000 || channels < 1 || channels > 2) return;
+    ns_audio_stream *st = stream_open(token, rate, channels);
+    if (!st) return;
+    unsigned char bytes[3072];
+    size_t n = b64_decode(data, bytes, sizeof bytes);
+    n -= n % (size_t)(2 * channels);
+    if (!n || SDL_AudioStreamPut(st->conv, bytes, (int)n) != 0) return;
+    float conv[4096 * 2];
+    int got;
+    while ((got = SDL_AudioStreamGet(st->conv, conv, (int)sizeof conv)) > 0) {
+        size_t frames = (size_t)got / (2 * sizeof(float));
+        audio_lock();
+        for (size_t f = 0; f < frames; f++) {
+            if (st->fill == NS_AUDIO_STREAM_FRAMES) {
+                st->rd = (st->rd + 1) % NS_AUDIO_STREAM_FRAMES;
+                st->fill--;
+            }
+            size_t at = (st->rd + st->fill) % NS_AUDIO_STREAM_FRAMES;
+            st->ring[at * 2 + 0] = conv[f * 2 + 0];
+            st->ring[at * 2 + 1] = conv[f * 2 + 1];
+            st->fill++;
+        }
+        if (st->fill > NS_AUDIO_STREAM_HIGH) {
+            size_t drop = st->fill - NS_AUDIO_STREAM_KEEP;
+            st->rd = (st->rd + drop) % NS_AUDIO_STREAM_FRAMES;
+            st->fill -= drop;
+        }
+        audio_unlock();
+    }
+}
+
 static void
 cmd_stop(const char *token)
 {
+    ns_audio_stream *st = stream_find(token);
+    if (st) stream_release(st);
     ns_audio_player *p = player_find(token);
     if (!p) return;
     audio_lock();
@@ -1622,7 +1784,9 @@ main(void)
         char *token = next_token(&cur);
         if (!token) continue;
 
-        if (strcmp(op, "open") == 0) {
+        if (strcmp(op, "pcm") == 0) {
+            cmd_pcm(token, cur);
+        } else if (strcmp(op, "open") == 0) {
             while (*cur == ' ') cur++;
             cmd_open(token, cur);
         } else if (strcmp(op, "play") == 0) {
@@ -1658,6 +1822,8 @@ main(void)
     }
     for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++)
         if (g_players[i].used) player_release(&g_players[i]);
+    for (int i = 0; i < NS_AUDIO_MAX_STREAMS; i++)
+        if (g_streams[i].used) stream_release(&g_streams[i]);
     audio_clock_destroy();
     SDL_Quit();
     curl_global_cleanup();
