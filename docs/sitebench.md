@@ -59,9 +59,11 @@ per site and browser whose screenshot and probe are kept and scored;
 default 3), `VIEWPORT` (default `1280x800`), `OUT` (default
 `sitebench-out`), `SITES` (the site list; default `sites.tsv`),
 `NS_LOCALE` (the locale Nordstjernen runs under, see below; default
-`en_US.UTF-8`). The three steps can also be run on their own; each has
-`--help`, and the capture scripts take `--runs` and `--visual-runs`
-(both default 1).
+`en_US.UTF-8`), `MAX_COMPONENTS` (the most components inventoried per
+page in each browser, see below; default 3000). The three steps can
+also be run on their own; each has `--help`, and the capture scripts
+take `--runs` and `--visual-runs` (both default 1) and the inventory
+cap, a positive number, as `--max-components=N`.
 
 The comparison can also gate a change. `MIN_PARITY=P` fails the run
 when the newest label's mean visual parity, which covers the stable
@@ -102,14 +104,40 @@ proxy.
 Both browsers load each site cold (fresh profile, empty cache) in a
 1280×800 viewport. Both evaluate the same probe, `probe.js`, after the
 page settles: document size, DOM size, text length, navigation timing,
-and an inventory of up to 500 visible components in the first three
-screens (headings, links, buttons, inputs, images, media, landmarks) with
-their geometry, font size, weight, family and colours. Each component
-also carries its DOM path, the chain of `tag:n` steps below the
-document element down to it, such as `body>div:2>main>p:3>sup>a`, where
-`n` counts the elements of that tag among its siblings and is left out
-for the first. The probe builds the path while it walks the tree, so both
-browsers compute it the same way.
+and an inventory of the visible components with their geometry, font
+size, weight, family and colours, in two parts:
+
+- `components`: up to 500 headings, links, buttons, inputs, images,
+  media and landmarks in the first three screens, as in earlier
+  versions. The first-screen scores use only these, so they stay
+  comparable with earlier runs.
+- `moreComponents`: the rest of the page. The same kinds further down or
+  past those 500, and the elements that hold text themselves: `sup`,
+  `sub`, `td`, `th`, and `span` and `div` with text of their own.
+  Components lying entirely left or right of the viewport are left out.
+
+`moreComponents` stops once the two parts hold `MAX_COMPONENTS`
+components together, and on a longer page the rest of it, in document
+order, is left out. `components` is collected in full regardless, so a
+capture can hold a few more than `MAX_COMPONENTS`, and with a cap below
+500 the first part alone may exceed it. The two browsers can stop at
+different points of the page, as one may lay out components the other
+hides. The whole-page score then covers the page only up to where the
+first of the two inventories stopped, the last component of a capped
+inventory that the other one holds too, and leaves out the components
+past that point instead of counting them as missing. The larger
+inventory costs probe time and disk: on frozen copies of four large
+pages (Booking, The New York Times, Stack Overflow and a long Wikipedia
+article) the probe takes 4 to 14 ms longer in Chrome and 50 to 360 ms
+longer in Nordstjernen than for `components` alone, and `probe.json`
+grows from 25–145 KB to 0.4–0.9 MB. The Wikipedia article has about 7400
+components, of which the default inventory keeps 3000.
+
+Each component also carries its DOM path, the chain of `tag:n` steps
+below the document element down to it, such as
+`body>div:2>main>p:3>sup>a`, where `n` counts the elements of that tag
+among its siblings and is left out for the first. The probe builds the
+path while it walks the tree, so both browsers compute it the same way.
 
 **Chrome** (`chrome-capture.js`, Playwright + DevTools protocol):
 
@@ -177,6 +205,21 @@ so dates and times a page prints read the same in both.
   intersection (15%), overlap of the content regions (20%), the share of
   Chrome's identifiable first-screen components that Nordstjernen places
   with IoU ≥ 0.5 (25%) and text coverage (10%).
+- *Whole-page placement*: the share of Chrome's identifiable components
+  in the whole inventory, `components` and `moreComponents` together,
+  that Nordstjernen places with IoU ≥ 0.5 in their surroundings. Before
+  the overlap is taken, the Nordstjernen component is moved back by the
+  offset between the two browsers of the nearest component above it
+  under the same parent that has a partner, or, when there is none, of
+  its nearest enclosing component in the inventory that has one. A
+  component that overlaps Chrome's at the same place on the page counts
+  as placed as well. So a difference in height, which moves everything
+  below it, counts once, where it arises, and not again for every
+  component further down, and a container whose edge moved while its
+  content stayed does not misplace that content. The report also gives
+  the share of components at the same place on the page. Both are
+  reported next to the first-screen share and are not part of visual
+  parity.
 - *First paint ÷ FCP*: Nordstjernen's first painted frame over Chrome's
   first contentful paint. Below 1.00× Nordstjernen paints first.
 - *Images loaded ÷ load*: Nordstjernen's first frame with its images in
@@ -206,37 +249,40 @@ build and, as after a failed single load, left out of its sites loaded
 and its timing aggregates. A site is *unstable* when Chrome's spread or
 the spread of any compared build is above 2 points. Unstable sites are
 marked in both reports and left out of the mean visual parity, the
-median SSIM and the median components placed, which then cover the
-stable sites only, and get a mean parity row of their own; the summary
-gives the number of sites each mean covers, and the other figures still
-cover every compared site. When two or more builds are compared, the
-per-site tables show the newest build's parity minus the oldest's, and
-a difference no larger than the site's noise, the largest of Chrome's
-spread and the two builds' spreads, is marked as noise, unless the
-newest build failed in more or fewer runs than the oldest, which is
-shown instead; the summary lists the sites that moved by more or whose
-failed runs changed. A capture with one visual run per browser has no
-spread, and its report is the same as before visual runs were repeated.
-A Chrome capture taken with one visual run, which `run.sh`
-(`CHROME=auto`) and a resumed `ab.sh` keep when they find it, has no
-spread either, so the builds' spreads alone decide stability and noise
-for that site until Chrome is captured again (`CHROME=1`, or a new
-`OUT` for `ab.sh`).
+median SSIM and both medians of components placed (first screen and
+whole page), which then cover the stable sites only, and get a mean
+parity row of their own; the summary gives the number of sites each mean
+covers, and the other figures still cover every compared site. When two
+or more builds are compared, the per-site tables show the newest build's
+parity minus the oldest's, and a difference no larger than the site's
+noise, the largest of Chrome's spread and the two builds' spreads, is
+marked as noise, unless the newest build failed in more or fewer runs
+than the oldest, which is shown instead; the summary lists the sites
+that moved by more or whose failed runs changed. A capture with one
+visual run per browser has no spread, and its report is the same as
+before visual runs were repeated. A Chrome capture taken with one visual
+run, which `run.sh` (`CHROME=auto`) and a resumed `ab.sh` keep when they
+find it, has no spread either, so the builds' spreads alone decide
+stability and noise for that site until Chrome is captured again
+(`CHROME=1`, or a new `OUT` for `ab.sh`).
 
 To place Chrome's components, `compare.py` pairs each one with at most
 one Nordstjernen component, and each Nordstjernen component serves at
 most one Chrome component. Components with the same DOM path and the
 same key, that is tag, text (digits ignored) and id, are paired first.
 The rest are paired by key: pairs that overlap more go first, and what
-is left of each key is paired in document order. This finds a
-component whose path changed because an element before it exists in
-only one browser, such as a placeholder image or a banner a script
-inserted. Last, components still unpaired that share a DOM path are
-paired by path alone: mostly the same element with another text, such
-as a headline that changed between the two loads or text decoded in
-another charset. A Chrome component without a partner counts as not
-found. Captures made before components had paths are paired by key
-alone.
+is left of each key is paired in the order the probe listed them. This
+finds a component whose path changed because an element before it
+exists in only one browser, such as a placeholder image or a banner a
+script inserted. Last, components still unpaired that share a DOM path
+are paired by path alone: mostly the same element with another text,
+such as a headline that changed between the two loads or text decoded
+in another charset. A Chrome component without a partner counts as not
+found. The first-screen scores pair `components` with `components`, the
+whole-page score the two whole inventories. Captures made before
+components had paths are paired by key alone, and there is no
+whole-page score unless both captures have `moreComponents`, so a
+Chrome capture kept from an earlier version needs `CHROME=1` once.
 
 Sites that answer headless Chrome with a bot challenge or an error page
 instead of their content (detected from the page title and first text,
@@ -254,13 +300,16 @@ usually enough to point at the engine feature at fault. Each listed
 component shows the end of its DOM path (hover it for the whole path),
 the path of the Nordstjernen component it was paired with when that one
 sits elsewhere in the tree, and whether it was paired by path, by key
-or by path alone. Above the list, the report counts the first-screen
-components paired each way and those left unpaired in each browser.
-With repeated visual runs, the screenshots, the heatmap, the components
-and the style mismatches are those of Chrome's reference run and each
-build's median run, while the filmstrip and the full pages come from the
-first run; *Visual runs* adds every run's screenshot and score, and is
-open for unstable sites.
+or by path alone. Above the list, the report counts, for the first
+screen and for the whole page, the components paired each way and those
+left unpaired in each browser. It names each capture whose inventory
+reached `MAX_COMPONENTS`, and counts the components of each browser that
+the whole-page score leaves out past the point where the other's
+inventory stopped. With repeated visual runs, the screenshots, the
+heatmap, the components and the style mismatches are those of Chrome's
+reference run and each build's median run, while the filmstrip and the
+full pages come from the first run; *Visual runs* adds every run's
+screenshot and score, and is open for unstable sites.
 
 ## Results
 

@@ -352,7 +352,11 @@ def main():
     p.add_argument("--timeout", type=int, default=120, help="seconds per browser invocation")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--skip-existing", action="store_true")
+    p.add_argument("--max-components", type=int, default=None,
+                   help="most components the probe inventories per page, a positive number (default: 3000)")
     a = p.parse_args()
+    if a.max_components is not None and a.max_components < 1:
+        sys.exit("ns-capture: --max-components wants a positive number")
     m = re.fullmatch(r"(\d+)x(\d+)", a.viewport)
     if not m:
         sys.exit("ns-capture: --viewport wants WxH")
@@ -366,7 +370,8 @@ def main():
     if not sites:
         sys.exit("ns-capture: no sites selected")
     a.version = engine_version(a.bin)
-    probe_src = (HERE / "probe.js").read_text(encoding="utf-8", errors="replace")
+    probe_src = (HERE / "probe.js").read_text(encoding="utf-8", errors="replace").strip()
+    probe_src += f"({a.max_components or ''})"
     print(f"ns-capture: {a.version}, locale {a.locale}, {len(sites)} sites, viewport {a.width}x{a.height}, "
           f"runs {a.runs}, visual runs {a.visual_runs}, jobs {a.jobs}", flush=True)
 

@@ -2,6 +2,7 @@
 """compare.py — scores Nordstjernen captures against the Chrome baseline and writes an HTML + Markdown report."""
 
 import argparse
+import bisect
 import html
 import json
 import math
@@ -272,6 +273,12 @@ def placement(chrome, ns, pairs, base):
     }
 
 
+def ns_unpaired(ns, pairs, in_region):
+    paired = {j for j, _ in pairs.values()}
+    region = [j for j, o in enumerate(ns) if scored(o) and in_region(o)]
+    return {"nsCount": len(region), "nsUnmatched": sum(1 for j in region if j not in paired)}
+
+
 def component_scores(chrome_probe, ns_probe):
     if not chrome_probe or not ns_probe:
         return None
@@ -282,11 +289,95 @@ def component_scores(chrome_probe, ns_probe):
         return None
     ns = ns_probe.get("components", [])
     pairs = match_components(chrome, ns)
-    paired = {j for j, _ in pairs.values()}
     ns_vh = ns_probe.get("vh") or vh
-    ns_first = [j for j, o in enumerate(ns) if scored(o) and o["y"] < ns_vh]
-    return dict(placement(chrome, ns, pairs, base), nsCount=len(ns_first),
-                nsUnmatched=sum(1 for j in ns_first if j not in paired))
+    return dict(placement(chrome, ns, pairs, base), **ns_unpaired(ns, pairs, lambda o: o["y"] < ns_vh))
+
+
+def on_page(c, vw):
+    return c["x"] < vw and c["x"] + c["w"] > 0
+
+
+def inventory_cap(probe):
+    inv = (probe or {}).get("inventory") or {}
+    return inv.get("max") if inv.get("capped") else None
+
+
+def within_reach(probe, other):
+    more = probe.get("moreComponents") or []
+    if not inventory_cap(other):
+        return more
+    held = {(o.get("path"), o["tag"]) for o in other.get("moreComponents") or []}
+    last = max((k for k, c in enumerate(more) if (c.get("path"), c["tag"]) in held), default=-1)
+    return more[:last + 1] if last >= 0 else more
+
+
+def left_out(probe, kept, vw):
+    return sum(1 for c in (probe.get("moreComponents") or [])[len(kept):] if scored(c) and on_page(c, vw))
+
+
+def parent_path(c):
+    return (c.get("path") or "").rpartition(">")[0]
+
+
+def container_offset(c, offset, by_path):
+    path = c.get("path") or ""
+    while ">" in path:
+        path = path.rsplit(">", 1)[0]
+        if by_path.get(path) in offset:
+            return offset[by_path[path]]
+    return 0, 0
+
+
+def horizontal_gap(a, b):
+    return max(a["x"] - b["x"] - b["w"], b["x"] - a["x"] - a["w"], 0)
+
+
+def nearest_above(c, siblings, chrome):
+    bottoms, ids = siblings
+    k = bisect.bisect_right(bottoms, c["y"])
+    if not k:
+        return None
+    level = ids[bisect.bisect_left(bottoms, bottoms[k - 1]):k]
+    return min(level, key=lambda j: (horizontal_gap(chrome[j], c), j))
+
+
+def placed_in_surroundings(chrome, ns, pairs, base):
+    offset = {i: (ns[j]["x"] - chrome[i]["x"], ns[j]["y"] - chrome[i]["y"]) for i, (j, _) in pairs.items()}
+    by_path = {c["path"]: i for i, c in enumerate(chrome) if c.get("path")}
+    siblings = {}
+    for i in sorted(offset, key=lambda k: (chrome[k]["y"] + chrome[k]["h"], k)):
+        bottoms, ids = siblings.setdefault(parent_path(chrome[i]), ([], []))
+        bottoms.append(chrome[i]["y"] + chrome[i]["h"])
+        ids.append(i)
+    placed = 0
+    for i in base:
+        if i not in pairs:
+            continue
+        c, o = chrome[i], ns[pairs[i][0]]
+        k = nearest_above(c, siblings.get(parent_path(c), ([], [])), chrome)
+        dx, dy = offset[k] if k is not None else container_offset(c, offset, by_path)
+        placed += rect_iou(c, o) >= 0.5 or rect_iou(c, dict(o, x=o["x"] - dx, y=o["y"] - dy)) >= 0.5
+    return placed
+
+
+def page_scores(chrome_probe, ns_probe):
+    if not (chrome_probe or {}).get("inventory") or not (ns_probe or {}).get("inventory"):
+        return None
+    vw = chrome_probe.get("vw") or 1280
+    ns_vw = ns_probe.get("vw") or vw
+    chrome_more, ns_more = within_reach(chrome_probe, ns_probe), within_reach(ns_probe, chrome_probe)
+    chrome = [c for c in (chrome_probe.get("components") or []) + chrome_more if scored(c)]
+    base = [i for i, c in enumerate(chrome) if on_page(c, vw)]
+    if not base:
+        return None
+    ns = (ns_probe.get("components") or []) + ns_more
+    pairs = match_components(chrome, ns)
+    res = {k: v for k, v in placement(chrome, ns, pairs, base).items() if k not in ("worst", "styleDiffs")}
+    placed = placed_in_surroundings(chrome, ns, pairs, base)
+    return dict(res, placed=placed, placedRate=placed / len(base),
+                placedOnPage=res["placed"], placedOnPageRate=res["placedRate"],
+                leftOut=left_out(chrome_probe, chrome_more, vw), nsLeftOut=left_out(ns_probe, ns_more, ns_vw),
+                **ns_unpaired(ns, pairs, lambda o: on_page(o, ns_vw)))
 
 
 def rect_iou(a, b):
@@ -368,6 +459,7 @@ def visual_scores(chrome_img, chrome_probe, img, probe):
         visual["hist"] = round(hist_similarity(chrome_img, img), 3)
         visual["layout"] = round(layout_iou(chrome_img, img), 3)
     visual["components"] = component_scores(chrome_probe, probe)
+    visual["page"] = page_scores(chrome_probe, probe)
     visual["textRatio"] = closeness((chrome_probe or {}).get("textLen"), (probe or {}).get("textLen"))
     visual["heightRatio"] = closeness((chrome_probe or {}).get("docH"), (probe or {}).get("docH"))
     visual["parity"] = parity(visual) if img is not None else 0.0
@@ -476,7 +568,8 @@ def analyse_label(site_id, label, ns_dir, ns, chrome, ref, img_dir, vw, vh):
     entry = dict(s, status=ns.get("status"), error=error,
                  docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
                  jsErrorSample=ns.get("jsErrorSample", []),
-                 blocked=blocked_reason(shown["probe"], shown["status"]))
+                 blocked=blocked_reason(shown["probe"], shown["status"]),
+                 inventoryCap=inventory_cap(shown["probe"]))
     save_label_images(site_id, label, ns_dir, shown, ref, img_dir, vw, vh)
     entry["visual"] = dict(shown["visual"], parity=median)
     c = chrome or {}
@@ -540,7 +633,8 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
                              speedIndex=si, visuallyComplete=vc,
                              docH=(chrome_probe or {}).get("docH"),
                              textLen=(chrome_probe or {}).get("textLen"),
-                             blocked=blocked_reason(ref["probe"], ref["status"]))
+                             blocked=blocked_reason(ref["probe"], ref["status"]),
+                             inventoryCap=inventory_cap(ref["probe"]))
         if len(runs) > 1:
             row["chrome"].update(paritySpread=spread, reference=ref["run"],
                                  visualRuns=run_records(runs, lambda r: r.get("parity")))
@@ -605,6 +699,8 @@ def aggregate(rows, labels):
             "parityMean": mean_parity(vs),
             "ssimMedian": med([e["visual"].get("ssim") for e in vs]),
             "componentsPlacedMedian": med([(e["visual"].get("components") or {}).get("placedRate") for e in vs]),
+            "pagePlacedMedian": med([(e["visual"].get("page") or {}).get("placedRate") for e in vs]),
+            "pageOnPageMedian": med([(e["visual"].get("page") or {}).get("placedOnPageRate") for e in vs]),
             "firstRenderMedianMs": med([e.get("firstPaintMs") for e in ok]),
             "imagesLoadedMedianMs": med([e.get("firstRenderMs") for e in ok]),
             "imagesLoadedVsLoadGeomean": geomean([e["vsChrome"]["imagesLoaded"] for e in ok]),
@@ -719,8 +815,8 @@ def stability_notes(rows, agg, labels):
              "without a screenshot, counts in the median (as 0 without a screenshot) but not in the spread. "
              "A site is unstable when the runs of one build, or "
              f"Chrome's runs against its reference, spread over more than {UNSTABLE_SPREAD:g} parity points; "
-             "unstable sites are left out of the mean visual parity, median SSIM and median components placed, "
-             "and averaged on a row of their own."]
+             "unstable sites are left out of the mean visual parity, median SSIM and both medians of components "
+             "placed, and averaged on a row of their own."]
     if c["unstable"]:
         notes.append("Unstable, with the spreads in parity points: " + ", ".join(
             f"{i} ({spread_text(by_id[i], labels)})" for i in c["unstable"]) + ".")
@@ -799,6 +895,26 @@ def parity_note(g, count_key):
     return f" ({sites(g[count_key])})" if count_key else ""
 
 
+def fmt_pct(v):
+    return "–" if v is None else f"{v * 100:.0f}%"
+
+
+def inventory_caps(r, labels):
+    caps = [("Chrome", (r.get("chrome") or {}).get("inventoryCap"))]
+    caps += [(label, (r["engines"].get(label) or {}).get("inventoryCap")) for label in labels]
+    return [(name, cap) for name, cap in caps if cap]
+
+
+def cap_note(rows, labels):
+    capped = [f"{r['id']} (" + ", ".join(f"{name} at {cap}" for name, cap in inventory_caps(r, labels)) + ")"
+              for r in rows if inventory_caps(r, labels)]
+    if not capped:
+        return None
+    return ("The component inventory reached its cap on " + "; ".join(capped) + ". There the whole-page "
+            "placement covers the page only up to where the first of the two compared inventories stopped, "
+            "and leaves out the components past that point.")
+
+
 def write_markdown(rows, agg, labels, base_label, meta, path):
     c = agg["chrome"]
     repeats = "unstable" in c
@@ -817,8 +933,9 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
     keys = [("Sites loaded", "loaded", lambda v: fmt(v))] + [(title, key, lambda v: fmt(v, 1))
                                                            for title, key, _ in parity] + [
             ("Median viewport SSIM", "ssimMedian", lambda v: fmt(v, 3)),
-            ("Median components placed", "componentsPlacedMedian",
-             lambda v: "–" if v is None else f"{v * 100:.0f}%"),
+            ("Median components placed", "componentsPlacedMedian", fmt_pct),
+            ("Median components placed in their surroundings, whole page", "pagePlacedMedian", fmt_pct),
+            ("Median components at the same place on the page, whole page", "pageOnPageMedian", fmt_pct),
             ("Median first paint (ms)", "firstRenderMedianMs", lambda v: fmt(v)),
             ("First paint ÷ Chrome FCP (geomean)", "firstRenderVsFcpGeomean", fmt_ratio),
             ("Sites painting before Chrome FCP", "fasterFirstRender", lambda v: fmt(v)),
@@ -842,7 +959,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
         lines.append("Also left out, so every column averages the same sites, because at least one "
                      "Nordstjernen run was shown a bot challenge or an error page: "
                      + ", ".join(c["nsExcluded"]) + ".")
-    for note in stability_notes(rows, agg, labels):
+    for note in stability_notes(rows, agg, labels) + [n for n in [cap_note(rows, labels)] if n]:
         lines += ["", note]
     lines.append("")
     lines += markdown_site_table(rows, labels, repeats)
@@ -903,7 +1020,11 @@ def change_cell(change):
 
 
 SUMMARY_ROWS = [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
-                ("Median SSIM", "ssimMedian", 3), ("Median first paint ms", "firstRenderMedianMs", 0),
+                ("Median SSIM", "ssimMedian", 3),
+                ("Median components placed, first screen %", "componentsPlacedMedian", "%"),
+                ("Median components placed in their surroundings, whole page %", "pagePlacedMedian", "%"),
+                ("Median components at the same place on the page, whole page %", "pageOnPageMedian", "%"),
+                ("Median first paint ms", "firstRenderMedianMs", 0),
                 ("First paint ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
                 ("Images loaded ÷ Chrome load", "imagesLoadedVsLoadGeomean", 2),
                 ("Main-thread CPU ÷ Chrome", "mainThreadVsChromeGeomean", 2),
@@ -922,6 +1043,14 @@ PHASE_KEYS = ("fetchMs", "parseMs", "styleMs", "scriptMs", "layoutMs", "imagesMs
               "netWaitMs", "processCpuMs", "maxRssMb", "nodes")
 
 
+def percent(v):
+    return None if v is None else round(v * 100)
+
+
+def summary_cell(v, digits, note=""):
+    return cell(percent(v), 0, note=note) if digits == "%" else cell(v, digits, note=note)
+
+
 def html_summary(rows, agg, labels, meta):
     e = html.escape
     out = [f"<!doctype html><html lang=en><head><meta charset=utf-8>"
@@ -934,8 +1063,8 @@ def html_summary(rows, agg, labels, meta):
                "".join(f"<th>{e(label)}</th>" for label in labels) + "</tr></thead><tbody>")
     c = agg["chrome"]
     for title, key, digits, count_key in summary_rows(agg, labels):
-        out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[label].get(key), digits,
-                                                              note=parity_note(agg[label], count_key))
+        out.append(f"<tr><td>{e(title)}</td>" + "".join(summary_cell(agg[label].get(key), digits,
+                                                                      parity_note(agg[label], count_key))
                                                          for label in labels) + "</tr>")
     out.append("</tbody></table></div>")
     if c.get("excluded"):
@@ -945,21 +1074,20 @@ def html_summary(rows, agg, labels, meta):
         out.append("<p class=muted>Also left out, so every column averages the same sites, because at least "
                    "one Nordstjernen run was shown a bot challenge or an error page: "
                    + e(", ".join(c["nsExcluded"])) + ".</p>")
-    for note in stability_notes(rows, agg, labels):
+    for note in stability_notes(rows, agg, labels) + [n for n in [cap_note(rows, labels)] if n]:
         out.append(f"<p class=muted>{e(note)}</p>")
     return out
 
 
 def html_engine_cells(en, repeats):
     if not en:
-        return "<td>–</td>" * (10 if repeats else 9)
+        return "<td>–</td>" * (11 if repeats else 10)
     v = en["visual"]
-    comp = v.get("components") or {}
-    placed = comp.get("placedRate")
     spread = en.get("paritySpread")
     spread_cell = cell(spread, 1, "bad" if (spread or 0) > UNSTABLE_SPREAD else "") if repeats else ""
     return (cell(v.get("parity"), 1, "bad" if en.get("error") else "") + spread_cell + cell(v.get("ssim"), 3) +
-            cell(None if placed is None else round(placed * 100), 0) +
+            cell(percent((v.get("components") or {}).get("placedRate")), 0) +
+            cell(percent((v.get("page") or {}).get("placedRate")), 0) +
             cell(en.get("firstPaintMs")) + ratio_cell(en["vsChrome"]["firstRender"]) +
             cell(en.get("settledMainThreadMs")) + ratio_cell(en["vsChrome"]["mainThread"]) +
             cell(en.get("settledMaxRssMb")) + cell(en.get("jsErrors")))
@@ -972,8 +1100,9 @@ def html_site_table(rows, labels, repeats):
     out = ["<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
            "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>" + spread_head]
     for label in labels:
-        out.append(f"<th>{e(label)} parity</th>" + spread_head + "<th>SSIM</th><th>Placed</th><th>First paint</th>"
-                   "<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
+        out.append(f"<th>{e(label)} parity</th>" + spread_head + "<th>SSIM</th><th>Placed</th>"
+                   "<th>Page placed</th><th>First paint</th><th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th>"
+                   "<th>RSS MB</th><th>JS err</th>")
     if both:
         out.append(f"<th>{e(labels[-1])} − {e(labels[0])}</th>")
     out.append("</tr></thead><tbody>")
@@ -1014,6 +1143,9 @@ def html_site_notes(r, ch, labels):
     if r.get("unstable"):
         out.append(f"<p class=bad>Unstable: its visual runs spread over more than {UNSTABLE_SPREAD:g} parity points "
                    f"({e(spread_text(r, labels))}); this site is left out of the visual aggregates.</p>")
+    for name, cap in inventory_caps(r, labels):
+        out.append(f"<p class=muted>{e(name)}'s component inventory stopped at its cap of {cap}; the whole-page "
+                   f"placement leaves out the part of the page past that point.</p>")
     return out
 
 
@@ -1117,14 +1249,28 @@ def pairing_text(comp):
             f"in Nordstjernen")
 
 
-def html_component_tables(comp):
-    e = html.escape
+def placement_text(title, comp):
     style_rate = comp.get("styleRate")
     style_txt = "–" if style_rate is None else f"{style_rate * 100:.0f}%"
-    out = [f"<p>{comp['found']}/{comp['count']} Chrome components found, {comp['placed']} placed "
-           f"(IoU ≥ 0.5){e(pairing_text(comp))}; style agreement {style_txt}</p>",
-           "<div class=wrap><table><thead><tr><th>Component</th><th>DOM path</th><th>Chrome x,y,w,h</th>"
-           "<th>NS x,y,w,h</th><th>IoU</th><th>Paired by</th></tr></thead><tbody>"]
+    placed = f"{comp['placed']} placed"
+    if "placedOnPage" in comp:
+        placed += f" in their surroundings and {comp['placedOnPage']} at the same place on the page"
+    left = ""
+    if comp.get("leftOut") or comp.get("nsLeftOut"):
+        left = (f"; left out {comp['leftOut']} Chrome and {comp['nsLeftOut']} Nordstjernen components past "
+                f"the point where the other browser's inventory stopped at its cap")
+    return (f"{title}: {comp['found']}/{comp['count']} Chrome components found, {placed} "
+            f"(IoU ≥ 0.5){pairing_text(comp)}{left}; style agreement {style_txt}")
+
+
+def html_component_tables(comp, page):
+    e = html.escape
+    texts = [placement_text(title, c) for title, c in (("First screen", comp), ("Whole page", page)) if c]
+    out = ["<p>" + "<br>".join(e(t) for t in texts) + "</p>"]
+    if not comp:
+        return out
+    out.append("<div class=wrap><table><thead><tr><th>Component</th><th>DOM path</th><th>Chrome x,y,w,h</th>"
+               "<th>NS x,y,w,h</th><th>IoU</th><th>Paired by</th></tr></thead><tbody>")
     for w in comp.get("worst", []):
         out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td>{path_cell(w.get('path'), w.get('nsPath'))}"
                    f"<td>{e(str(w['chrome']))}</td>"
@@ -1144,10 +1290,11 @@ def html_component_tables(comp):
 def html_engine_details(label, en):
     e = html.escape
     comp = en["visual"].get("components") or {}
+    page = en["visual"].get("page")
     out = [f"<details><summary>{e(label)}: phases, components and styles</summary>",
            "<p><code>" + e(" · ".join(f"{k} {fmt(en.get(k))}" for k in PHASE_KEYS)) + "</code></p>"]
-    if comp:
-        out.extend(html_component_tables(comp))
+    if comp or page:
+        out.extend(html_component_tables(comp, page))
     if en.get("jsErrorSample"):
         out.append("<pre>" + e("\n".join(en["jsErrorSample"])) + "</pre>")
     out.append("</details>")
