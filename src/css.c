@@ -31518,7 +31518,7 @@ incr_has_apply_list(ns_node *n, const GPtrArray *list)
             break;
         case INCR_HAS_SUBTREE:
             g_hash_table_add(g_incr_dirty, n);
-            return TRUE;
+            break;
         case INCR_HAS_REGION:
             incr_mark_has_region(n);
             return TRUE;
