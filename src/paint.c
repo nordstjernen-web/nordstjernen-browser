@@ -715,34 +715,50 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
 }
 
 static gboolean
-box_paints_native_text_field(const ns_box *b)
+box_is_input_block(const ns_box *b)
 {
-    const ns_style *s = b ? b->style : NULL;
-    if (!s || b->kind != NS_BOX_BLOCK || !b->dom ||
-        b->dom->kind != NS_NODE_ELEMENT || !b->dom->name ||
-        strcmp(b->dom->name, "input") != 0)
-        return FALSE;
-    if (keyword_is(s->values[NS_CSS_APPEARANCE], "none")) return FALSE;
+    return b && b->style && b->kind == NS_BOX_BLOCK && b->dom &&
+           b->dom->kind == NS_NODE_ELEMENT && b->dom->name &&
+           strcmp(b->dom->name, "input") == 0;
+}
+
+static gboolean
+box_has_native_field_border(const ns_box *b)
+{
     static const ns_css_prop side_styles[4] = {
         NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
         NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
     };
     for (int i = 0; i < 4; i++)
-        if (!keyword_is(s->values[side_styles[i]], "inset")) return FALSE;
+        if (!keyword_is(b->style->values[side_styles[i]], "inset"))
+            return FALSE;
     const double widths[4] = {
         b->border.top, b->border.right, b->border.bottom, b->border.left,
     };
     for (int i = 0; i < 4; i++)
         if (widths[i] != 2) return FALSE;
-    const char *type = ns_element_get_attr(b->dom, "type");
-    return !type || !*type ||
-        g_ascii_strcasecmp(type, "text") == 0 ||
-        g_ascii_strcasecmp(type, "search") == 0 ||
-        g_ascii_strcasecmp(type, "email") == 0 ||
-        g_ascii_strcasecmp(type, "url") == 0 ||
-        g_ascii_strcasecmp(type, "tel") == 0 ||
-        g_ascii_strcasecmp(type, "number") == 0 ||
-        g_ascii_strcasecmp(type, "password") == 0;
+    return TRUE;
+}
+
+static gboolean
+input_type_is_text_field(const char *type)
+{
+    static const char *const text_types[] = {
+        "text", "search", "email", "url", "tel", "number", "password",
+    };
+    if (!type || !*type) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(text_types); i++)
+        if (g_ascii_strcasecmp(type, text_types[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+box_paints_native_text_field(const ns_box *b)
+{
+    if (!box_is_input_block(b)) return FALSE;
+    if (keyword_is(b->style->values[NS_CSS_APPEARANCE], "none")) return FALSE;
+    if (!box_has_native_field_border(b)) return FALSE;
+    return input_type_is_text_field(ns_element_get_attr(b->dom, "type"));
 }
 
 static gboolean

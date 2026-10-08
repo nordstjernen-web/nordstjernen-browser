@@ -954,42 +954,64 @@ typedef struct {
     gboolean            pending_mutation;
 } settle_state;
 
-static gboolean
-settle_raf_tick(gpointer user_data)
+static void
+settle_tick_media(headless_flush_ctx *fc, gint64 now)
 {
-    settle_state *s = user_data;
-    headless_flush_ctx *fc = s->fc;
-    gint64 now = g_get_monotonic_time();
     if (fc->image_cache) ns_image_cache_tick(fc->image_cache, now);
     if (fc->video_cache) {
         if (*fc->layout)
             ns_video_cache_discover(fc->video_cache, *fc->layout, fc->doc, now);
         ns_video_cache_tick(fc->video_cache, now);
     }
+}
+
+static gboolean
+settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
+{
     if (fc->anim && ns_anim_tick(fc->anim, now)) {
         g_headless_styles_stale = TRUE;
         if (ns_anim_needs_layout(fc->anim)) g_headless_layout_dirty = TRUE;
     }
     if (fc->anim && fc->js) ns_js_dispatch_anim_events(fc->js, fc->anim);
     if (fc->js) ns_js_run_animation_frame(fc->js);
-    if (fc->js && ns_js_consume_mutated(fc->js)) {
-        s->pending_mutation = TRUE;
-        g_headless_styles_stale = TRUE;
-    }
+    if (!fc->js || !ns_js_consume_mutated(fc->js)) return FALSE;
+    g_headless_styles_stale = TRUE;
+    return TRUE;
+}
+
+static void
+settle_tick_flush(settle_state *s, gint64 now)
+{
     if (g_headless_layout_dirty) s->pending_mutation = TRUE;
-    if (s->pending_mutation && now - s->last_flush_us >= 200000) {
-        g_headless_layout_dirty = FALSE;
-        g_headless_styles_stale = FALSE;
-        headless_relayout(fc);
-        s->pending_mutation = FALSE;
-        s->last_flush_us = g_get_monotonic_time();
-    }
-    if (g_headless_images_arrived && !s->pending_mutation &&
-        !g_headless_layout_dirty && *fc->layout) {
-        g_headless_images_arrived = FALSE;
-        if (fc->js) ns_js_fire_media_load_events(fc->js, *fc->layout);
-    }
-    headless_stream_images(fc);
+    if (!s->pending_mutation || now - s->last_flush_us < 200000) return;
+    g_headless_layout_dirty = FALSE;
+    g_headless_styles_stale = FALSE;
+    headless_relayout(s->fc);
+    s->pending_mutation = FALSE;
+    s->last_flush_us = g_get_monotonic_time();
+}
+
+static void
+settle_tick_media_loads(settle_state *s)
+{
+    headless_flush_ctx *fc = s->fc;
+    if (!g_headless_images_arrived || s->pending_mutation ||
+        g_headless_layout_dirty || !*fc->layout)
+        return;
+    g_headless_images_arrived = FALSE;
+    if (fc->js) ns_js_fire_media_load_events(fc->js, *fc->layout);
+}
+
+static gboolean
+settle_raf_tick(gpointer user_data)
+{
+    settle_state *s = user_data;
+    gint64 now = g_get_monotonic_time();
+    settle_tick_media(s->fc, now);
+    if (settle_tick_scripts(s->fc, now)) s->pending_mutation = TRUE;
+    settle_tick_flush(s, now);
+    settle_tick_media_loads(s);
+    headless_stream_images(s->fc);
     return G_SOURCE_CONTINUE;
 }
 

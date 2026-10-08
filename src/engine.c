@@ -830,6 +830,54 @@ adopted_sheet_entry_free(gpointer data)
     g_free(e);
 }
 
+typedef struct {
+    gsize       len;
+    const char *host_id;
+    double      vw;
+    double      vh;
+    guint       generation;
+} adopted_sheet_key;
+
+static adopted_sheet_key
+adopted_sheet_key_now(gsize len, const char *host_id)
+{
+    adopted_sheet_key key = {
+        .len = len,
+        .host_id = host_id,
+        .vw = ns_css_media_viewport_current_w(),
+        .vh = ns_css_media_viewport_current_h(),
+        .generation = ns_css_stylesheet_cache_generation(),
+    };
+    return key;
+}
+
+static gboolean
+adopted_sheet_entry_matches(const adopted_sheet_entry *e,
+                            const adopted_sheet_key *key)
+{
+    return e->len == key->len && e->vw == key->vw && e->vh == key->vh &&
+           e->generation == key->generation &&
+           g_strcmp0(e->host_id, key->host_id) == 0;
+}
+
+static adopted_sheet_entry *
+adopted_sheet_entry_new(guint64 hash, const adopted_sheet_key *key,
+                        gboolean viewport_media, ns_css_stylesheet *sheet)
+{
+    sheet->cached = TRUE;
+    adopted_sheet_entry *e = g_new0(adopted_sheet_entry, 1);
+    e->hash = hash;
+    e->len = key->len;
+    e->host_id = g_strdup(key->host_id);
+    e->vw = key->vw;
+    e->vh = key->vh;
+    e->generation = key->generation;
+    e->pass = g_adopted_pass;
+    e->viewport_media = viewport_media;
+    e->sheet = sheet;
+    return e;
+}
+
 static guint64
 adopted_text_hash(const char *s, gsize n)
 {
@@ -893,6 +941,29 @@ style_shadow_host_id(const ns_node *style)
     return NULL;
 }
 
+static adopted_sheet_entry *
+large_style_entry(ns_node *style, guint64 hash, gsize len)
+{
+    if (!g_large_style_sheets)
+        g_large_style_sheets = g_hash_table_new_full(g_direct_hash,
+                                                     g_direct_equal, NULL,
+                                                     adopted_sheet_entry_free);
+    adopted_sheet_key key = adopted_sheet_key_now(len,
+                                                  style_shadow_host_id(style));
+    adopted_sheet_entry *e = g_hash_table_lookup(g_large_style_sheets, style);
+    if (e && e->hash == hash && adopted_sheet_entry_matches(e, &key))
+        return e;
+    char *css = ns_css_style_element_text(style);
+    if (!css) return NULL;
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(css, -1);
+    gboolean media_dep = css_has_viewport_media(css);
+    g_free(css);
+    if (!sheet) return NULL;
+    e = adopted_sheet_entry_new(hash, &key, media_dep, sheet);
+    g_hash_table_replace(g_large_style_sheets, style, e);
+    return e;
+}
+
 static gboolean
 collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
 {
@@ -903,36 +974,8 @@ collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
     if (len < SHEET_RUN_CHUNK_ALONE) return FALSE;
     const char *media = ns_element_get_attr(style, "media");
     if (media && *media && !ns_css_media_query_matches(media)) return TRUE;
-    if (!g_large_style_sheets)
-        g_large_style_sheets = g_hash_table_new_full(g_direct_hash,
-                                                     g_direct_equal, NULL,
-                                                     adopted_sheet_entry_free);
-    double vw = ns_css_media_viewport_current_w();
-    double vh = ns_css_media_viewport_current_h();
-    guint generation = ns_css_stylesheet_cache_generation();
-    const char *host_id = style_shadow_host_id(style);
-    adopted_sheet_entry *e = g_hash_table_lookup(g_large_style_sheets, style);
-    if (!e || e->hash != hash || e->len != len || e->vw != vw ||
-        e->vh != vh || e->generation != generation ||
-        g_strcmp0(e->host_id, host_id) != 0) {
-        char *css = ns_css_style_element_text(style);
-        if (!css) return TRUE;
-        ns_css_stylesheet *sheet = ns_css_stylesheet_parse(css, -1);
-        gboolean media_dep = css_has_viewport_media(css);
-        g_free(css);
-        if (!sheet) return TRUE;
-        sheet->cached = TRUE;
-        e = g_new0(adopted_sheet_entry, 1);
-        e->hash = hash;
-        e->len = len;
-        e->host_id = g_strdup(style_shadow_host_id(style));
-        e->vw = vw;
-        e->vh = vh;
-        e->generation = generation;
-        e->viewport_media = media_dep;
-        e->sheet = sheet;
-        g_hash_table_replace(g_large_style_sheets, style, e);
-    }
+    adopted_sheet_entry *e = large_style_entry(style, hash, len);
+    if (!e) return TRUE;
     e->pass = g_adopted_pass;
     if (e->viewport_media) cc->media_seen = TRUE;
     sheet_run_flush(cc);
@@ -944,6 +987,34 @@ collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
     return TRUE;
 }
 
+static guint64
+adopted_sheet_hash(const char *css, gsize len, const char *host_id)
+{
+    guint64 hash = adopted_text_hash(css, len);
+    if (host_id)
+        hash ^= adopted_text_hash(host_id, strlen(host_id)) * 31;
+    return hash;
+}
+
+static ns_css_stylesheet *
+adopted_sheet_parse(ns_node *root, const char *css, adopted_sheet_key *key,
+                    gboolean *viewport_media)
+{
+    char *scoped = ns_css_shadow_adopted_css(root);
+    if (!scoped) return NULL;
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(scoped, -1);
+    gboolean media = css_has_viewport_media(scoped);
+    g_free(scoped);
+    if (!sheet) return NULL;
+    *viewport_media = media;
+    key->host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
+    if (!key->host_id) return sheet;
+    adopted_sheet_entry *e = adopted_sheet_entry_new(
+        adopted_sheet_hash(css, key->len, key->host_id), key, media, sheet);
+    g_hash_table_replace(g_adopted_sheets, &e->hash, e);
+    return sheet;
+}
+
 static ns_css_stylesheet *
 adopted_sheet_for(ns_node *root, gboolean *viewport_media)
 {
@@ -953,46 +1024,16 @@ adopted_sheet_for(ns_node *root, gboolean *viewport_media)
         g_adopted_sheets = g_hash_table_new_full(g_int64_hash, g_int64_equal,
                                                  NULL, adopted_sheet_entry_free);
     gsize len = strlen(css);
-    double vw = ns_css_media_viewport_current_w();
-    double vh = ns_css_media_viewport_current_h();
     const char *host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
-    guint64 hash = adopted_text_hash(css, len);
-    if (host_id)
-        hash ^= adopted_text_hash(host_id, strlen(host_id)) * 31;
+    adopted_sheet_key key = adopted_sheet_key_now(len, host_id);
+    guint64 hash = adopted_sheet_hash(css, len, host_id);
     adopted_sheet_entry *e = g_hash_table_lookup(g_adopted_sheets, &hash);
-    guint generation = ns_css_stylesheet_cache_generation();
-    if (e && host_id && e->len == len && e->vw == vw && e->vh == vh &&
-        e->generation == generation && g_strcmp0(e->host_id, host_id) == 0) {
+    if (e && host_id && adopted_sheet_entry_matches(e, &key)) {
         e->pass = g_adopted_pass;
         *viewport_media = e->viewport_media;
         return e->sheet;
     }
-    char *scoped = ns_css_shadow_adopted_css(root);
-    if (!scoped) return NULL;
-    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(scoped, -1);
-    gboolean media = css_has_viewport_media(scoped);
-    g_free(scoped);
-    if (!sheet) return NULL;
-    host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
-    if (!host_id) {
-        *viewport_media = media;
-        return sheet;
-    }
-    sheet->cached = TRUE;
-    e = g_new0(adopted_sheet_entry, 1);
-    e->hash = adopted_text_hash(css, len) ^
-              adopted_text_hash(host_id, strlen(host_id)) * 31;
-    e->len = len;
-    e->host_id = g_strdup(host_id);
-    e->vw = vw;
-    e->vh = vh;
-    e->generation = generation;
-    e->pass = g_adopted_pass;
-    e->viewport_media = media;
-    e->sheet = sheet;
-    g_hash_table_replace(g_adopted_sheets, &e->hash, e);
-    *viewport_media = media;
-    return sheet;
+    return adopted_sheet_parse(root, css, &key, viewport_media);
 }
 
 static void
