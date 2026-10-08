@@ -82,36 +82,25 @@ work; `build-engine.sh` and the app consume it.
 
 ## CI
 
-`.github/workflows/ios.yml` has two jobs:
-
-* **engine-portability** — builds the GTK-free desktop engine on a macOS runner
-  (for `compile_commands.json` and generated headers) and cross-checks **every
-  engine translation unit against the real iOS SDK** — device and simulator —
-  via `ios/scripts/check-ios-sources.sh`. This is the iOS analogue of
-  `android/scripts/check-android-sources.sh` and needs no dependency sysroot.
-* **app** — fetches the prebuilt sysroot, cross-compiles the engine for device
-  and simulator, and assembles the unsigned UIKit app for the iOS Simulator,
-  uploading the built `.app` as the `nordstjernen-ios-simulator-app` artifact.
-  (It skips with a notice only if the sysroot release is unavailable.)
+iOS is not built in CI; the former `ios.yml` workflow was removed. On a Mac,
+`ios/scripts/check-ios-sources.sh` cross-checks every engine translation unit
+against the iOS SDK (device and simulator), and `fetch-prebuilt-deps.sh`,
+`build-engine.sh` and `xcodebuild` assemble the unsigned simulator app.
 
 ## Status
 
-* **Builds end-to-end in CI (macOS):** on every push, `ios.yml` fetches the
-  published dependency sysroot, cross-compiles the engine to `libnordstjernen.a`
-  for device and simulator, and assembles the unsigned UIKit app for the iOS
-  Simulator with `xcodebuild` — uploaded as the `nordstjernen-ios-simulator-app`
-  artifact. The UIKit/Swift app, the C bridge, the XcodeGen project,
-  `build-engine.sh`, `fetch-prebuilt-deps.sh`, and the iOS dependency-sysroot
-  build in `nordstjernen-dependencies-build` are all exercised by this green
-  build.
+* **Built end-to-end on macOS (no longer in CI):** the published dependency
+  sysroot is fetched, the engine cross-compiles to `libnordstjernen.a` for
+  device and simulator, and `xcodebuild` assembles the unsigned UIKit app for
+  the iOS Simulator.
 * **Done & verified on Linux:** the engine builds GTK-free for the iOS
   configuration — `meson.build`'s `is_mobile` predicate produces an
   engine-library-only build (no GTK shell, renderer, audio/video helpers),
   confirmed by configuring `-Dios=true` and by a clean desktop build after the
   refactor. The macOS-Seatbelt-sandbox `TARGET_OS_IPHONE` guard is in place.
-* **Wired, runs in CI:** the engine iOS-portability check (device + simulator)
-  on every push via `ios.yml`.
+* **Manual:** the engine iOS-portability check (device + simulator),
+  `ios/scripts/check-ios-sources.sh`.
 * **Not yet done:** a signed on-device build (needs a signing identity +
   provisioning profile); booting and driving the app in a simulator and
-  real-world browsing validation (CI builds but does not run the app); App Store
+  real-world browsing validation; App Store
   submission.
