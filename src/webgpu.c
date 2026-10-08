@@ -449,18 +449,15 @@ wg_feature_set(JSContext *ctx, const WGPUSupportedFeatures *f, gboolean core)
     return set;
 }
 
-static gboolean
-wg_feature_from_name(WGPUAdapter adapter, const char *name, WGPUFeatureName *out)
+static const WGPUFeatureName *
+wg_feature_from_name(WGPUAdapter adapter, const char *name)
 {
-    gboolean known = FALSE;
+    const WGPUFeatureName *known = NULL;
     for (size_t k = 0; name && k < G_N_ELEMENTS(wg_feature_names); k++) {
         if (strcmp(wg_feature_names[k].name, name) != 0) continue;
-        if (!known) *out = wg_feature_names[k].feature;
-        known = TRUE;
-        if (adapter && wgpuAdapterHasFeature(adapter, wg_feature_names[k].feature)) {
-            *out = wg_feature_names[k].feature;
-            return TRUE;
-        }
+        if (!known) known = &wg_feature_names[k].feature;
+        if (adapter && wgpuAdapterHasFeature(adapter, wg_feature_names[k].feature))
+            return &wg_feature_names[k].feature;
     }
     return known;
 }
@@ -497,11 +494,13 @@ wg_read_required_features(JSContext *ctx, WGPUAdapter adapter, JSValueConst v,
     for (uint32_t i = 0; i < n && ok; i++) {
         JSValue e = JS_GetPropertyUint32(ctx, list, i);
         const char *name = JS_ToCString(ctx, e);
-        WGPUFeatureName f;
-        ok = wg_feature_from_name(adapter, name, &f);
-        gboolean dup = FALSE;
-        for (size_t k = 0; ok && k < *count; k++) dup |= out[k] == f;
-        if (ok && !dup && *count < cap) out[(*count)++] = f;
+        const WGPUFeatureName *f = wg_feature_from_name(adapter, name);
+        ok = f != NULL;
+        if (f) {
+            gboolean dup = FALSE;
+            for (size_t k = 0; k < *count; k++) dup |= out[k] == *f;
+            if (!dup && *count < cap) out[(*count)++] = *f;
+        }
         if (name) JS_FreeCString(ctx, name);
         JS_FreeValue(ctx, e);
     }
