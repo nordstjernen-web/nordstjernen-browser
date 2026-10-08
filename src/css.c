@@ -30472,15 +30472,33 @@ incr_has_mut_end(gboolean began)
     g_hash_table_remove_all(g_has_mut.attrs);
 }
 
+static void
+incr_has_mut_add_nodes(ns_node *const *nodes, guint n, gboolean following,
+                       guint *budget)
+{
+    for (guint i = 0; i < n; i++)
+        for (const ns_node *c = nodes[i]; c;
+             c = following ? c->next_sibling : NULL)
+            incr_has_mut_add_subtree(c, budget);
+}
+
 static gboolean
 incr_has_mut_begin_nodes(ns_node *const *nodes, guint n, gboolean following)
 {
     if (!incr_has_mut_begin()) return FALSE;
     guint budget = 4096;
-    for (guint i = 0; i < n; i++)
-        for (const ns_node *c = nodes[i]; c;
-             c = following ? c->next_sibling : NULL)
-            incr_has_mut_add_subtree(c, &budget);
+    incr_has_mut_add_nodes(nodes, n, following, &budget);
+    return TRUE;
+}
+
+static gboolean
+incr_has_mut_begin_replaced(ns_node *added, ns_node *const *removed,
+                            guint n_removed)
+{
+    if (!incr_has_mut_begin()) return FALSE;
+    guint budget = 4096;
+    incr_has_mut_add_nodes(&added, 1, TRUE, &budget);
+    incr_has_mut_add_nodes(removed, n_removed, FALSE, &budget);
     return TRUE;
 }
 
@@ -31643,8 +31661,16 @@ incr_mark_childlist(ns_node *parent, ns_node *added)
 void
 ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
 {
+    ns_css_mark_childlist_replaced(parent, added, NULL, 0);
+}
+
+void
+ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
+                               ns_node *const *removed, guint n_removed)
+{
     if (!parent) return;
-    gboolean gated = added && incr_has_mut_begin_nodes(&added, 1, TRUE);
+    gboolean gated = added &&
+                     incr_has_mut_begin_replaced(added, removed, n_removed);
     incr_mark_childlist(parent, added);
     incr_has_mut_end(gated);
 }
