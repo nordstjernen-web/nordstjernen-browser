@@ -20,7 +20,8 @@ CHALLENGE = re.compile(
     r"just a moment|attention required|access denied|403 forbidden|confirm you are human|"
     r"security verification|are you a robot|robot check|pardon our interruption|request blocked|"
     r"verify you are human|you've been blocked|blocked by network security|captcha|"
-    r"click the button below to continue shopping", re.I)
+    r"click the button below to continue", re.I)
+ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an error occurred", re.I)
 
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
@@ -130,6 +131,8 @@ def blocked_reason(probe, status):
     first_text = " ".join(c.get("text") or "" for c in (probe.get("components") or [])[:12])
     if CHALLENGE.search(probe.get("title") or "") or CHALLENGE.search(first_text):
         return "bot challenge"
+    if any(ERROR_PAGE.search(c.get("text") or "") for c in (probe.get("components") or [])[:6]):
+        return "error"
     if status in (401, 403, 429) and (probe.get("nodes") or 0) < 200:
         return f"HTTP {status}"
     return None
@@ -363,8 +366,11 @@ def aggregate(rows, labels):
     agg = {}
     blocked = [r["id"] for r in rows if not comparable(r)]
     rows = [r for r in rows if comparable(r)]
+    ns_blocked = [r["id"] for r in rows
+                  if any((r["engines"].get(l) or {}).get("blocked") for l in labels)]
+    common = [r for r in rows if r["id"] not in ns_blocked]
     for label in labels:
-        es = [r["engines"][label] for r in rows if label in r["engines"]]
+        es = [r["engines"][label] for r in common if label in r["engines"]]
         ok = [e for e in es if not e.get("error")]
         agg[label] = {
             "sites": len(es), "loaded": len(ok),
@@ -379,12 +385,13 @@ def aggregate(rows, labels):
             "memoryVsChromeGeomean": geomean([e["vsChrome"]["memory"] for e in ok]),
             "fasterFirstRender": sum(1 for e in ok if (e["vsChrome"]["firstRender"] or 9) < 1.0),
             "jsErrors": sum(e.get("jsErrors") or 0 for e in es),
-            "nsBlocked": sum(1 for e in es if e.get("blocked")),
+            "nsBlocked": sum(1 for r in rows if (r["engines"].get(label) or {}).get("blocked")),
         }
     chrome = [r["chrome"] for r in rows if r.get("chrome")]
     agg["chrome"] = {
         "sites": len(chrome),
         "excluded": blocked,
+        "nsExcluded": ns_blocked,
         "fcpMedianMs": med([c.get("fcp") for c in chrome]),
         "lcpMedianMs": med([c.get("lcp") for c in chrome]),
         "loadMedianMs": med([c.get("load") for c in chrome]),
@@ -441,6 +448,11 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
         lines.append("")
         lines.append("Left out of the aggregates because headless Chrome was shown a bot challenge or "
                      "an error page instead of the site: " + ", ".join(c["excluded"]) + ".")
+    if c.get("nsExcluded"):
+        lines.append("")
+        lines.append("Also left out, so every column averages the same sites, because at least one "
+                     "Nordstjernen run was shown a bot challenge or an error page: "
+                     + ", ".join(c["nsExcluded"]) + ".")
     lines.append("")
     head = "| Site | Chrome FCP | Chrome main | " + " | ".join(
         f"{l} parity | {l} first paint | {l} main CPU" for l in labels) + " |"
@@ -522,6 +534,14 @@ def write_html(rows, agg, labels, base_label, meta, path):
                                ("JS errors", "jsErrors", 0)]:
         out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[l].get(key), digits) for l in labels) + "</tr>")
     out.append("</tbody></table></div>")
+    c = agg["chrome"]
+    if c.get("excluded"):
+        out.append("<p class=muted>Left out of the summary because headless Chrome was shown a bot challenge "
+                   "or an error page: " + e(", ".join(c["excluded"])) + ".</p>")
+    if c.get("nsExcluded"):
+        out.append("<p class=muted>Also left out, so every column averages the same sites, because at least "
+                   "one Nordstjernen run was shown a bot challenge or an error page: "
+                   + e(", ".join(c["nsExcluded"])) + ".</p>")
 
     out.append("<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
                "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>")
