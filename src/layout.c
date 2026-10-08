@@ -1139,8 +1139,11 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (node_has_media_metadata(n)) return FALSE;
     if (layout_shadow_root(n)) {
         const ns_style *hs = g_hash_table_lookup(styles, n);
-        if (!hs || style_is_none(hs) || style_is_block(hs) ||
-            style_is_absolute_or_fixed(hs) || contains_block_media(n, styles))
+        if (!hs || style_is_none(hs) || style_is_block_level(hs) ||
+            style_is_absolute_or_fixed(hs))
+            return FALSE;
+        if (!display_is_atomic_inline_container(ns_css_display_of(hs)) &&
+            contains_block_media(n, styles))
             return FALSE;
     }
     if (is_replaced_block_tag(n->name)) {
