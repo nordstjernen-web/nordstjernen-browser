@@ -301,6 +301,9 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
         const char *an = g_ptr_array_index(anames, i);
         const char *av = g_ptr_array_index(avals, i);
         const char *acolon = strchr(an, ':');
+        if (ns_attr_name_is_internal(an) ||
+            (acolon && ns_attr_name_is_internal(acolon + 1)))
+            continue;
         if (strcmp(an, "xmlns") == 0) {
             ns_element_set_attr_ns(el, XML_NS_XMLNS, NULL, "xmlns", "xmlns", av);
         } else if (acolon) {
