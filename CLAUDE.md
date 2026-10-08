@@ -28,17 +28,18 @@ Update Changelog.md
   `src/webgpu.c` over the external
   [wgpu-native](https://github.com/gfx-rs/wgpu-native) library (the
   `webgpu.h`/`wgpu.h` headers are vendored in-tree under
-  `third_party/wgpu-native/`). The `webgpu` meson feature is `auto`: it is
-  built whenever wgpu-native is present (its pkg-config file, or
-  `-Dwgpu_native_root` pointing at an extracted release) and silently skipped
-  otherwise — so a stock build on a machine without wgpu-native still carries
-  **no** WebGPU symbol or dependency, exactly as before. `-Dwebgpu=enabled`
-  hard-requires it; `-Dwebgpu=disabled` never builds it. Even in a build that
-  contains it, WebGPU is **off at runtime** until the browser is started with
+  `third_party/wgpu-native/`). Like WebGL it is a **required** part of the
+  build on glibc Linux, macOS and Windows (x86_64/aarch64): meson takes
+  wgpu-native from its pkg-config file, from `-Dwgpu_native_root`, or else
+  fetches the pinned release through `subprojects/wgpu-native-<platform>.wrap`
+  and links it statically. On the BSDs, musl, Android and iOS — where
+  wgpu-native publishes no release — it stays optional, and `-Dwebgpu=disabled`
+  drops it anywhere. WebGPU is **off at runtime** until it is turned on in
+  Settings (`webgpu_enabled`) or the browser is started with
   `--enable-webgpu` (which sets `NS_WEBGPU_ALLOW=1`, inherited by the
-  sandboxed renderer); without that flag `navigator.gpu.requestAdapter()`
-  resolves to `null`. wgpu-native is a large dependency and deliberately
-  stays an opt-in build input, never vendored. See `docs/webgpu.md`.
+  sandboxed renderer); otherwise `navigator.gpu.requestAdapter()` resolves to
+  `null`. The library is fetched, never committed. See
+  `docs/webgpu.md`.
 - The **one vendored, in-tree** video codec is MPEG-1, decoded by the
   vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
   single-file decoder (`subprojects/plmpeg/`, wrapped by
@@ -423,14 +424,12 @@ don't add `meson test` targets.
   anti-pattern.
 - Don't add AI-style web-API surface area, even as stubs. WebGL is a
   deliberate exception — extend `src/webgl.c`, don't re-architect it.
-- WebGPU is an experimental exception layered over external wgpu-native
-  (`src/webgpu.c`, `docs/webgpu.md`). The `webgpu` feature is `auto`: built
-  only when wgpu-native is actually present, so a machine without it still
-  gets a build with no WebGPU surface or dependency. Keep it behind the
-  `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate, and don't make
-  wgpu-native a hard/default dependency or vendor its library into the tree
-  (headers only) — a stock `meson setup builddir` on a clean machine must
-  still produce a WebGPU-free binary.
+- WebGPU is layered over external wgpu-native (`src/webgpu.c`,
+  `docs/webgpu.md`): required on glibc Linux, macOS and Windows (fetched by
+  the pinned wraps when not installed), optional on the platforms wgpu-native
+  does not ship for. Keep it behind the Settings switch /
+  `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate, and never commit its library into the tree
+  (headers only).
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`

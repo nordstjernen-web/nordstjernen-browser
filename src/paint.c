@@ -2330,7 +2330,7 @@ normal_line_height_fallback(const char *family, double font_size)
         { "Menlo", 1.164, TRUE },
         { "System Font", 1.19, TRUE },
     };
-    char *resolved = family ? ns_css_font_family_for_pango(family) : NULL;
+    char *resolved = ns_css_font_family_first_for_pango(family);
     double factor = 1.2;
     gboolean rounded = FALSE;
     for (gsize i = 0; resolved && i < G_N_ELEMENTS(known); i++) {
@@ -2759,6 +2759,13 @@ ns_paint_font_alias(const char *family)
     return alias;
 }
 
+static gboolean
+ns_paint_text_family_available(const char *family)
+{
+    if (!ns_paint_font_available(family)) return FALSE;
+    return !ns_font_family_is_emoji(family) || ns_font_family_loaded(family);
+}
+
 typedef struct {
     char    *family;
     double   size_px;
@@ -2842,9 +2849,11 @@ font_metrics_measure(const char *family, double size_px, int weight,
     ns_pango_font_description_set_absolute_size(
         fd, ns_paint_pango_font_size(size_px));
     ns_pango_layout_set_font_description(l, fd);
-    font_vertical_metrics(ns_pango_layout_get_context(l), fd, ns_pango_family,
-                          out);
     g_free(ns_pango_family);
+    char *first_family = ns_css_font_family_first_for_pango(family);
+    font_vertical_metrics(ns_pango_layout_get_context(l), fd, first_family,
+                          out);
+    g_free(first_family);
 
     NsPangoRectangle ink;
     ns_pango_layout_set_text(l, "x", -1);
@@ -2929,8 +2938,9 @@ ns_paint_font_generation(void)
 void
 ns_paint_register_font_oracle(void)
 {
-    ns_css_set_font_available_cb(ns_paint_font_available);
+    ns_css_set_font_available_cb(ns_paint_text_family_available);
     ns_css_set_font_alias_cb(ns_paint_font_alias);
+    ns_css_set_font_family_name_cb(ns_font_family_for_text);
     ns_css_set_font_generation_cb(ns_paint_font_generation);
     ns_css_set_font_metrics_cb(ns_paint_font_metrics);
 }

@@ -197,6 +197,8 @@ typedef struct JSThreadState {
 #endif // USE_WORKER
     JSClassID std_file_class_id;
     JSClassID worker_class_id;
+    JSInterruptHandler *prev_interrupt_handler;
+    void *prev_interrupt_opaque;
 } JSThreadState;
 
 static uint64_t os_pending_signals;
@@ -1083,9 +1085,15 @@ static JSValue js_std_gc(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static int interrupt_handler(JSRuntime *rt, void *opaque)
+static int interrupt_handler(JSContext *ctx, void *opaque)
 {
-    return (os_pending_signals >> SIGINT) & 1;
+    JSThreadState *ts = opaque;
+
+    if (1 & (os_pending_signals >> SIGINT))
+        return 1;
+    if (ts->prev_interrupt_handler)
+        return ts->prev_interrupt_handler(ctx, ts->prev_interrupt_opaque);
+    return 0;
 }
 
 static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
@@ -1148,7 +1156,14 @@ static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
     }
     if (!ts->recv_pipe && ++ts->eval_script_recurse == 1) {
         /* install the interrupt handler */
-        JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, NULL);
+        ts->prev_interrupt_handler =
+            (JSInterruptHandler *)js_std_cmd(/*GetInterruptHandler*/5, rt);
+        ts->prev_interrupt_opaque =
+            (void *)js_std_cmd(/*GetInterruptOpaque*/6, rt);
+        // FIXME(bnoordhuis) Questionable hack to make the REPL interruptible.
+        // Ideally qjs installs a signal handler + interrupt handler but then
+        // scripts can intercept it with os.signal(SIGINT).
+        JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, ts);
     }
     flags = compile_module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
     if (backtrace_barrier)
@@ -1166,7 +1181,11 @@ static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, str);
     if (!ts->recv_pipe && --ts->eval_script_recurse == 0) {
         /* remove the interrupt handler */
-        JS_SetInterruptHandler(JS_GetRuntime(ctx), NULL, NULL);
+        JS_SetInterruptHandler(JS_GetRuntime(ctx),
+                               ts->prev_interrupt_handler,
+                               ts->prev_interrupt_opaque);
+        ts->prev_interrupt_handler = NULL;
+        ts->prev_interrupt_opaque = NULL;
         os_pending_signals &= ~((uint64_t)1 << SIGINT);
         /* convert the uncatchable "interrupted" error into a normal error
            so that it can be caught by the REPL */
@@ -2834,7 +2853,7 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSThreadState *ts = js_get_thread_state(rt);
-    int r, w, ret, nfds, min_delay;
+    int r, w, ret, nfds, min_delay, poll_nfds;
     JSOSRWHandler *rh;
     struct list_head *el;
     struct pollfd *pfd, *pfds, pfds_local[64];
@@ -2928,12 +2947,14 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
     // linear-ish in practice because we bail out on the first hit,
     // i.e., it's probably good enough for now
     ret = 0;
+    /* poll() returns the number of ready descriptors, not the array length. */
+    poll_nfds = nfds;
     nfds = poll(pfds, nfds, min_delay);
     if (nfds < 0) {
         ret = -1;
         goto done;
     }
-    for (pfd = pfds; nfds-- > 0; pfd++) {
+    for (pfd = pfds; poll_nfds-- > 0; pfd++) {
         rh = find_rh(ts, pfd->fd);
         if (rh) {
             r = (POLLERR|POLLHUP|POLLNVAL|POLLIN) * !JS_IsNull(rh->rw_func[0]);

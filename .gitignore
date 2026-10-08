@@ -54,6 +54,7 @@ compile_commands.json
 /subprojects/packagecache/
 /subprojects/ns-pango/
 /subprojects/quickjs/
+/subprojects/wgpu-native-*/
 
 # CMake (in case)
 CMakeCache.txt
