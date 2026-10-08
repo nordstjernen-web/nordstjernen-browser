@@ -29215,6 +29215,10 @@ static JSValue
 ns_window_observer_ctor(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'MutationObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "MutationObserver callback must be callable");
@@ -29964,6 +29968,10 @@ static JSValue
 ns_intersection_observer_ctor(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'IntersectionObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "IntersectionObserver callback must be callable");
@@ -30376,6 +30384,10 @@ static JSValue
 ns_resize_observer_ctor(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'ResizeObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "ResizeObserver callback must be callable");
@@ -63223,6 +63235,27 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
 }
 
 static void
+ns_js_log_module_failure(ns_js *js, JSContext *ctx, const char *what,
+                         const char *origin, JSValueConst ex)
+{
+    if (!js->log_cb) return;
+    const char *msg = JS_ToCString(ctx, ex);
+    if (!msg) return;
+    JSValue stack = JS_IsObject(ex) ? JS_GetPropertyStr(ctx, ex, "stack")
+                                    : JS_UNDEFINED;
+    const char *stack_s = JS_IsString(stack) ? JS_ToCString(ctx, stack) : NULL;
+    char *line = g_strdup_printf("JS module %s in %s: %s%s%s", what,
+                                 origin ? origin : "module", msg,
+                                 stack_s && *stack_s ? "\n" : "",
+                                 stack_s ? stack_s : "");
+    js->log_cb(line, js->log_user_data);
+    g_free(line);
+    if (stack_s) JS_FreeCString(ctx, stack_s);
+    JS_FreeValue(ctx, stack);
+    JS_FreeCString(ctx, msg);
+}
+
+static void
 ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
 {
     ns_budget_guard bg = {0};
@@ -63254,28 +63287,13 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
                    origin ? origin : "module");
     if (JS_IsException(v)) {
         JSValue ex = JS_GetException(ctx);
-        const char *msg = JS_ToCString(ctx, ex);
-        if (msg && js->log_cb) {
-            char *line = g_strdup_printf("JS module error in %s: %s",
-                                         origin ? origin : "module", msg);
-            js->log_cb(line, js->log_user_data);
-            g_free(line);
-        }
-        if (msg) JS_FreeCString(ctx, msg);
+        ns_js_log_module_failure(js, ctx, "error", origin, ex);
         JS_FreeValue(ctx, ex);
     } else {
         JSPromiseStateEnum st = JS_PromiseState(ctx, v);
         if (st == JS_PROMISE_REJECTED) {
             JSValue reason = JS_PromiseResult(ctx, v);
-            const char *msg = JS_ToCString(ctx, reason);
-            if (msg && js->log_cb) {
-                char *line = g_strdup_printf(
-                    "JS module rejected in %s: %s",
-                    origin ? origin : "module", msg);
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-            }
-            if (msg) JS_FreeCString(ctx, msg);
+            ns_js_log_module_failure(js, ctx, "rejected", origin, reason);
             JS_FreeValue(ctx, reason);
         }
     }

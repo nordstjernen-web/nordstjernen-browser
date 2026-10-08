@@ -55,7 +55,8 @@ tmp_this(JSContext *ctx, JSValueConst v, int kind)
 static ns_temporal *
 tmp_alloc(JSContext *ctx, JSValueConst this_val, int kind, JSValue *out)
 {
-    JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
+    JSValue proto = JS_IsObject(this_val)
+        ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_UNDEFINED;
     JSValue obj = JS_IsObject(proto)
         ? JS_NewObjectProtoClass(ctx, proto, ns_temporal_class_id)
         : JS_NewObjectClass(ctx, ns_temporal_class_id);
