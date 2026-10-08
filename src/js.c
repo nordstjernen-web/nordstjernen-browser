@@ -13966,7 +13966,7 @@ ns_port_onmessage_set(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue ns_port_bridge_send(JSContext *ctx, JSValueConst port,
-                                   guint64 id, JSValueConst data);
+                                   guint64 id, int argc, JSValueConst *argv);
 
 static guint64
 ns_port_bridge_id(JSContext *ctx, JSValueConst port)
@@ -14006,7 +14006,7 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
 
     guint64 bridge_id = ns_port_bridge_id(ctx, this_val);
     if (bridge_id)
-        return ns_port_bridge_send(ctx, this_val, bridge_id, data);
+        return ns_port_bridge_send(ctx, this_val, bridge_id, argc, argv);
 
     JSValue transfer = JS_UNDEFINED;
     if (argc >= 2 && JS_IsArray(argv[1])) {
@@ -26090,7 +26090,7 @@ ns_worker_deliver_owner(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     JSValue data_v = JS_UNDEFINED;
-    JSValue ports = msg->is_error || msg->port_id
+    JSValue ports = msg->is_error
         ? JS_NewArray(ctx) : ns_worker_message_ports(ctx, msg, host->owner_obj);
     const char *type = msg->is_error ? "error" : "message";
     if (!msg->is_error) {
@@ -26521,8 +26521,7 @@ ns_worker_deliver_worker(gpointer data)
     JSContext *ctx = js->ctx;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
-    JSValue ports = msg->port_id ? JS_NewArray(ctx)
-                                 : ns_worker_message_ports(ctx, msg, JS_UNDEFINED);
+    JSValue ports = ns_worker_message_ports(ctx, msg, JS_UNDEFINED);
     JSValue data_v = ns_worker_message_value(ctx, msg, ports);
     const char *type = "message";
     if (JS_IsException(data_v)) {
@@ -26581,24 +26580,43 @@ ns_worker_msg_send(ns_worker_host *host, ns_worker_message *msg,
 
 static JSValue
 ns_port_bridge_send(JSContext *ctx, JSValueConst port, guint64 id,
-                    JSValueConst data)
+                    int argc, JSValueConst *argv)
 {
     ns_js *js = js_from_ctx(ctx);
     ns_worker_host *host = NULL;
     gboolean to_owner = FALSE;
+    JSValue bridge_worker = JS_UNDEFINED;
     if (js && js->worker_host) {
         host = js->worker_host;
         to_owner = TRUE;
     } else {
-        JSValue w = JS_GetPropertyStr(ctx, port, "_bridge_worker");
-        if (JS_IsObject(w)) host = JS_GetOpaque(w, ns_worker_class_id);
-        JS_FreeValue(ctx, w);
+        bridge_worker = JS_GetPropertyStr(ctx, port, "_bridge_worker");
+        if (JS_IsObject(bridge_worker))
+            host = JS_GetOpaque(bridge_worker, ns_worker_class_id);
     }
-    if (!host || g_atomic_int_get(&host->closing)) return JS_UNDEFINED;
-    ns_worker_message *msg = ns_worker_message_new(ctx, host, data,
-                                                   JS_UNDEFINED);
-    if (!msg) return JS_EXCEPTION;
+    if (!host || g_atomic_int_get(&host->closing)) {
+        JS_FreeValue(ctx, bridge_worker);
+        return JS_UNDEFINED;
+    }
+    gboolean bad_transfer = FALSE;
+    ns_worker_walk_transfers(ctx, argc, argv, FALSE, &bad_transfer, NULL,
+                             bridge_worker);
+    if (bad_transfer) {
+        JS_FreeValue(ctx, bridge_worker);
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "MessagePort.postMessage: a value in the transfer list is not "
+            "transferable");
+    }
+    JSValue ports = ns_worker_transfer_ports(ctx, argc, argv);
+    ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0], ports);
+    JS_FreeValue(ctx, ports);
+    if (!msg) {
+        JS_FreeValue(ctx, bridge_worker);
+        return JS_EXCEPTION;
+    }
     msg->port_id = id;
+    ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL, msg, bridge_worker);
+    JS_FreeValue(ctx, bridge_worker);
     ns_worker_msg_send(host, msg, to_owner);
     return JS_UNDEFINED;
 }
