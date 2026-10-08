@@ -1227,6 +1227,88 @@ ns_net_hsts_should_upgrade(const char *host)
     return hit;
 }
 
+static gboolean
+ns_hsts_parse_header(const char *value, gint64 *max_age, gboolean *subdomains)
+{
+    gboolean have_age = FALSE;
+    *subdomains = FALSE;
+    g_auto(GStrv) parts = g_strsplit(value ? value : "", ";", -1);
+    for (int i = 0; parts[i]; i++) {
+        char *d = g_strstrip(parts[i]);
+        if (g_ascii_strcasecmp(d, "includeSubDomains") == 0) {
+            *subdomains = TRUE;
+        } else if (g_ascii_strncasecmp(d, "max-age", 7) == 0) {
+            const char *v = d + 7;
+            while (*v == ' ' || *v == '\t') v++;
+            if (*v++ != '=') return FALSE;
+            while (*v == ' ' || *v == '\t') v++;
+            gboolean quoted = *v == '"';
+            if (quoted) v++;
+            if (!g_ascii_isdigit(*v)) return FALSE;
+            char *end = NULL;
+            guint64 n = g_ascii_strtoull(v, &end, 10);
+            if (quoted && *end == '"') end++;
+            if (*end) return FALSE;
+            *max_age = (gint64)MIN(n, (guint64)(400 * 24 * 3600));
+            have_age = TRUE;
+        }
+    }
+    return have_age;
+}
+
+void
+ns_net_hsts_note(const char *url, const char *header_value)
+{
+    if (!url || !g_str_has_prefix(url, "https://")) return;
+    gint64 max_age = 0;
+    gboolean subdomains = FALSE;
+    if (!ns_hsts_parse_header(header_value, &max_age, &subdomains)) return;
+    g_autofree char *host = ns_url_host_from(url);
+    if (!host || !*host || g_hostname_is_ip_address(host)) return;
+    g_autofree char *lower = g_ascii_strdown(host, -1);
+    const char *path = ns_net_hsts_curl_path();
+    if (!path) return;
+
+    g_mutex_lock(&g_hsts_lock);
+    char *content = NULL;
+    g_file_get_contents(path, &content, NULL, NULL);
+    GString *out = g_string_new(NULL);
+    g_auto(GStrv) lines = g_strsplit(content ? content : "", "\n", -1);
+    g_free(content);
+    for (int i = 0; lines[i]; i++) {
+        const char *line = lines[i];
+        if (!*line) continue;
+        const char *name = *line == '.' ? line + 1 : line;
+        gsize hl = strlen(lower);
+        if (g_ascii_strncasecmp(name, lower, hl) == 0 && name[hl] == ' ')
+            continue;
+        g_string_append(out, line);
+        g_string_append_c(out, '\n');
+    }
+    if (max_age > 0) {
+        g_autoptr(GDateTime) expires =
+            g_date_time_new_from_unix_utc(g_get_real_time() / G_USEC_PER_SEC +
+                                          max_age);
+        g_autofree char *stamp = expires
+            ? g_date_time_format(expires, "%Y%m%d %H:%M:%S") : NULL;
+        if (stamp)
+            g_string_append_printf(out, "%s%s \"%s\"\n",
+                                   subdomains ? "." : "", lower, stamp);
+    }
+    if (g_file_set_contents_full(path, out->str, (gssize)out->len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT, 0600, NULL) &&
+        g_hsts_cache) {
+        if (max_age > 0)
+            g_hash_table_replace(g_hsts_cache, g_strdup(lower),
+                                 GINT_TO_POINTER(subdomains ? 2 : 1));
+        else
+            g_hash_table_remove(g_hsts_cache, lower);
+        g_hsts_cache_mtime_us = file_mtime_us(path);
+    }
+    g_string_free(out, TRUE);
+    g_mutex_unlock(&g_hsts_lock);
+}
+
 char *
 ns_net_hsts_upgrade(const char *url)
 {
