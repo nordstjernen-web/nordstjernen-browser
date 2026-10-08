@@ -27475,9 +27475,17 @@ append_pending_decls(const pending_match *pm, const char *value_text,
     parse_declaration_block(&sp, synth + strlen(synth), temp, NULL);
     g_free(synth);
     gboolean any = FALSE;
-    for (guint i = 0; i < temp->len; i++) {
+    guint8 seen[NS_CSS_PROP_COUNT] = {0};
+    for (guint i = temp->len; i-- > 0; ) {
         ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
         if (!d->value) continue;
+        if ((guint)d->prop < NS_CSS_PROP_COUNT) {
+            if (seen[d->prop]) {
+                ns_css_value_free(d->value);
+                continue;
+            }
+            seen[d->prop] = 1;
+        }
         g_ptr_array_add(owned_values, d->value);
         match_entry me = {
             .origin = pm->origin,
