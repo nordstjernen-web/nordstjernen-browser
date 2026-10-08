@@ -21,6 +21,7 @@ CHALLENGE = re.compile(
     r"security verification|are you a robot|robot check|pardon our interruption|request blocked|"
     r"verify you are human|you've been blocked|blocked by network security|captcha|"
     r"click the button below to continue", re.I)
+CHALLENGE_URL = re.compile(r"[?&](js_challenge|__cf_chl\w*|captcha\w*)=", re.I)
 ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an error occurred", re.I)
 
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
@@ -142,11 +143,13 @@ def blocked_reason(probe, status):
     if not probe:
         return None
     first_text = " ".join(c.get("text") or "" for c in (probe.get("components") or [])[:12])
-    if CHALLENGE.search(probe.get("title") or "") or CHALLENGE.search(first_text):
+    small = (probe.get("nodes") or 0) < 200
+    if (CHALLENGE.search(probe.get("title") or "") or CHALLENGE.search(first_text)
+            or (small and CHALLENGE_URL.search(probe.get("url") or ""))):
         return "bot challenge"
     if any(ERROR_PAGE.search(c.get("text") or "") for c in (probe.get("components") or [])[:6]):
         return "error"
-    if status in (401, 403, 429) and (probe.get("nodes") or 0) < 200:
+    if status in (401, 403, 429) and small:
         return f"HTTP {status}"
     return None
 
