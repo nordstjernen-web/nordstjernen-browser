@@ -28,32 +28,54 @@
     return squash(el.textContent, 40);
   }
 
+  function visibleRect(el) {
+    var r = safe(function () { return el.getBoundingClientRect(); }, null);
+    if (!r || !(r.width > 0) || !(r.height > 0)) return null;
+    var top = r.top + sy;
+    if (top > vh * SCREENS || r.bottom + sy < 0) return null;
+    return r;
+  }
+
+  function hiddenByStyle(cs) {
+    return !!cs && (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0');
+  }
+
+  function styleSummary(cs) {
+    if (!cs) return { fs: null, fw: '', ff: '', color: '', bg: '', disp: '' };
+    return {
+      fs: num(cs.fontSize),
+      fw: String(cs.fontWeight || ''),
+      ff: squash(String(cs.fontFamily || '').split(',')[0].replace(/["']/g, ''), 40),
+      color: String(cs.color || ''),
+      bg: String(cs.backgroundColor || ''),
+      disp: String(cs.display || '')
+    };
+  }
+
+  function component(el, r, cs) {
+    var tag = el.tagName.toLowerCase();
+    var st = styleSummary(cs);
+    return {
+      tag: tag,
+      id: el.id || '',
+      text: label(el, tag),
+      x: Math.round(r.left), y: Math.round(r.top + sy),
+      w: Math.round(r.width), h: Math.round(r.height),
+      fs: st.fs, fw: st.fw, ff: st.ff, color: st.color, bg: st.bg, disp: st.disp
+    };
+  }
+
   function inventory() {
     var list = safe(function () { return document.querySelectorAll(SELECTOR); }, []);
     var out = [];
     var limit = Math.min(list.length, MAX_SCAN);
     for (var i = 0; i < limit && out.length < MAX_KEEP; i++) {
       var el = list[i];
-      var r = safe(function () { return el.getBoundingClientRect(); }, null);
-      if (!r || !(r.width > 0) || !(r.height > 0)) continue;
-      var top = r.top + sy;
-      if (top > vh * SCREENS || r.bottom + sy < 0) continue;
+      var r = visibleRect(el);
+      if (!r) continue;
       var cs = safe(function () { return getComputedStyle(el); }, null);
-      if (cs && (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0')) continue;
-      var tag = el.tagName.toLowerCase();
-      out.push({
-        tag: tag,
-        id: el.id || '',
-        text: label(el, tag),
-        x: Math.round(r.left), y: Math.round(top),
-        w: Math.round(r.width), h: Math.round(r.height),
-        fs: cs ? num(cs.fontSize) : null,
-        fw: cs ? String(cs.fontWeight || '') : '',
-        ff: cs ? squash(String(cs.fontFamily || '').split(',')[0].replace(/["']/g, ''), 40) : '',
-        color: cs ? String(cs.color || '') : '',
-        bg: cs ? String(cs.backgroundColor || '') : '',
-        disp: cs ? String(cs.display || '') : ''
-      });
+      if (hiddenByStyle(cs)) continue;
+      out.push(component(el, r, cs));
     }
     return out;
   }
