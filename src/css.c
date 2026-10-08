@@ -18865,6 +18865,9 @@ typedef struct {
 static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
 static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
 static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
+static __thread GHashTable *g_reg_reset_cache;
+static __thread GHashTable *g_var_build_cache;
+static __thread GPtrArray  *g_var_build_parents;
 static __thread gboolean    g_container_features_used;
 
 void
@@ -21622,6 +21625,7 @@ typedef struct ns_css_rule_index {
     GHashTable *by_tag;
     GHashTable *by_attr;
     GArray     *universal;
+    GArray     *root_only;
 } ns_css_rule_index;
 
 static void ns_css_rule_index_free(ns_css_rule_index *idx);
@@ -21731,6 +21735,7 @@ ns_css_rule_index_free(ns_css_rule_index *idx)
     if (idx->by_tag)   g_hash_table_destroy(idx->by_tag);
     if (idx->by_attr)  g_hash_table_destroy(idx->by_attr);
     if (idx->universal) g_array_free(idx->universal, TRUE);
+    if (idx->root_only) g_array_free(idx->root_only, TRUE);
     g_free(idx);
 }
 
@@ -21893,6 +21898,86 @@ index_subject_kind(const css_index_counts *counts,
     return kind;
 }
 
+static gboolean
+index_compound_is_root(const ns_css_simple *c)
+{
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++)
+        if (g_array_index(c->pseudos, ns_css_pseudo_pred, i).kind ==
+            NS_CSS_PC_ROOT)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+index_compound_key(const ns_css_simple *c, GHashTable **table,
+                   const char **key, gboolean *lower)
+{
+    *lower = FALSE;
+    if (c->never_match) return FALSE;
+    if (c->id && *c->id) {
+        *key = c->id;
+        *table = NULL;
+        return TRUE;
+    }
+    if (c->classes && c->classes->len > 0 &&
+        g_ptr_array_index(c->classes, 0) &&
+        *(const char *)g_ptr_array_index(c->classes, 0)) {
+        *key = g_ptr_array_index(c->classes, 0);
+        return TRUE;
+    }
+    if (c->attrs && c->attrs->len > 0 &&
+        g_array_index(c->attrs, ns_css_attr_pred, 0).name) {
+        *key = g_array_index(c->attrs, ns_css_attr_pred, 0).name;
+        *lower = TRUE;
+        return TRUE;
+    }
+    if (c->type && *c->type && strcmp(c->type, "*") != 0) {
+        *key = c->type;
+        *lower = TRUE;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+index_add_by_is_arguments(ns_css_rule_index *idx, const ns_css_simple *subj,
+                          guint ri, guint si)
+{
+    if (!subj->matches_any || subj->matches_any->len == 0) return FALSE;
+    const GPtrArray *group = g_ptr_array_index(subj->matches_any, 0);
+    if (!group || group->len == 0) return FALSE;
+    for (guint gi = 0; gi < group->len; gi++) {
+        const ns_css_selector *arg = g_ptr_array_index(group, gi);
+        if (!arg || !arg->compounds || arg->compounds->len == 0 ||
+            arg->pseudo_element != NS_CSS_PE_NONE)
+            return FALSE;
+        GHashTable *table = NULL;
+        const char *key = NULL;
+        gboolean lower = FALSE;
+        if (!index_compound_key(g_ptr_array_index(arg->compounds,
+                                                  arg->compounds->len - 1),
+                                &table, &key, &lower))
+            return FALSE;
+    }
+    for (guint gi = 0; gi < group->len; gi++) {
+        const ns_css_selector *arg = g_ptr_array_index(group, gi);
+        const ns_css_simple *c = g_ptr_array_index(arg->compounds,
+                                                   arg->compounds->len - 1);
+        if (c->id && *c->id)
+            index_add(idx->by_id, c->id, ri, si);
+        else if (c->classes && c->classes->len > 0 &&
+                 g_ptr_array_index(c->classes, 0) &&
+                 *(const char *)g_ptr_array_index(c->classes, 0))
+            index_add(idx->by_class, g_ptr_array_index(c->classes, 0), ri, si);
+        else if (c->attrs && c->attrs->len > 0)
+            index_add_lowercase(idx->by_attr,
+                g_array_index(c->attrs, ns_css_attr_pred, 0).name, ri, si);
+        else
+            index_add_lowercase(idx->by_tag, c->type, ri, si);
+    }
+    return TRUE;
+}
+
 static ns_css_rule_index *
 ns_css_rule_index_build(const ns_css_stylesheet *sheet)
 {
@@ -21902,6 +21987,7 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
     idx->by_tag   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->by_attr  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->universal = g_array_new(FALSE, FALSE, sizeof(css_candidate));
+    idx->root_only = g_array_new(FALSE, FALSE, sizeof(css_candidate));
 
     css_index_counts counts = index_counts_new();
     for (guint ri = 0; ri < sheet->rules->len; ri++) {
@@ -21962,7 +22048,10 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
             case CSS_INDEX_NONE:
                 break;
             }
-            index_add_candidate_array(idx->universal, ri, si);
+            if (index_compound_is_root(subj))
+                index_add_candidate_array(idx->root_only, ri, si);
+            else if (!index_add_by_is_arguments(idx, subj, ri, si))
+                index_add_candidate_array(idx->universal, ri, si);
         }
         if (!had_matchable_selector) continue;
     }
@@ -26563,6 +26652,10 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         }
     }
     CAND_PUSH_ARR(idx->universal);
+    if (el && el->kind == NS_NODE_ELEMENT && el->parent &&
+        el->parent->kind == NS_NODE_DOCUMENT &&
+        !(el->parent->flags & NS_NODE_FRAGMENT))
+        CAND_PUSH_ARR(idx->root_only);
     #undef CAND_PUSH_ARR
 
     guint n_rules = sheet->rules ? sheet->rules->len : 0;
@@ -26857,10 +26950,8 @@ css_collect_property_rules(GHashTable *reg, const ns_css_stylesheet *sh)
 static GHashTable *
 var_prefill_plain_values(GHashTable *own, GArray *matches)
 {
-    GHashTable *last = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, NULL);
-    GHashTable *prefilled = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                  g_free, NULL);
+    GHashTable *last = g_hash_table_new(g_str_hash, g_str_equal);
+    GHashTable *prefilled = g_hash_table_new(g_str_hash, g_str_equal);
     for (guint i = 0; i < matches->len; i++) {
         var_match *vm = &g_array_index(matches, var_match, i);
         if (!vm->name || !vm->text) continue;
@@ -26871,7 +26962,7 @@ var_prefill_plain_values(GHashTable *own, GArray *matches)
         gpointer seen = g_hash_table_lookup(last, vm->name);
         guint state = plain && (!seen || GPOINTER_TO_UINT(seen) & 1u)
             ? ((i + 1) << 1) | 1u : 2u;
-        g_hash_table_replace(last, g_strdup(vm->name), GUINT_TO_POINTER(state));
+        g_hash_table_replace(last, (gpointer)vm->name, GUINT_TO_POINTER(state));
     }
     GHashTableIter it;
     gpointer k, v;
@@ -26881,10 +26972,25 @@ var_prefill_plain_values(GHashTable *own, GArray *matches)
         if (!(state & 1u)) continue;
         var_match *vm = &g_array_index(matches, var_match, (state >> 1) - 1);
         g_hash_table_replace(own, g_strdup(vm->name), g_strdup(vm->text));
-        g_hash_table_add(prefilled, g_strdup(vm->name));
+        g_hash_table_add(prefilled, (gpointer)vm->name);
     }
     g_hash_table_destroy(last);
     return prefilled;
+}
+
+static gboolean
+var_text_mentions_wide_keyword(const char *text)
+{
+    static const char *const words[] = {
+        "inherit", "initial", "unset", "revert",
+    };
+    for (const char *p = text; *p; p++) {
+        if (!g_ascii_isalpha(*p)) continue;
+        for (gsize w = 0; w < G_N_ELEMENTS(words); w++)
+            if (g_ascii_strncasecmp(p, words[w], strlen(words[w])) == 0)
+                return TRUE;
+    }
+    return FALSE;
 }
 
 static void
@@ -26900,7 +27006,8 @@ var_map_apply_unregistered(GHashTable *own, const ns_var_map *parent,
     const char *value_text = resolved->text;
     ns_custom_prop_wide kind = custom_prop_wide_kind(value_text);
     char *expanded = NULL;
-    if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(")) {
+    if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(") &&
+        var_text_mentions_wide_keyword(resolved->text)) {
         ns_var_map scope = { .ref = 1, .own = own,
                              .parent = (ns_var_map *)parent };
         expanded = substitute_vars_with(value_text, &scope, 0);
@@ -26964,6 +27071,37 @@ var_map_reset_registered(GHashTable *own, const ns_var_map *parent)
             g_hash_table_replace(own, g_strdup(k), g_strdup("initial"));
         }
     }
+}
+
+static const char g_reg_reset_root_key;
+
+static void
+reg_reset_key_free(gpointer key)
+{
+    if (key != &g_reg_reset_root_key) ns_var_map_unref(key);
+}
+
+static void
+var_map_reset_registered_cached(GHashTable *own, ns_var_map *parent)
+{
+    if (!g_reg_reset_cache) {
+        var_map_reset_registered(own, parent);
+        return;
+    }
+    gpointer key = parent ? (gpointer)parent : (gpointer)&g_reg_reset_root_key;
+    GHashTable *entries = g_hash_table_lookup(g_reg_reset_cache, key);
+    if (!entries) {
+        entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+        var_map_reset_registered(entries, parent);
+        g_hash_table_insert(g_reg_reset_cache,
+                            parent ? (gpointer)ns_var_map_ref(parent) : key,
+                            entries);
+    }
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, entries);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        g_hash_table_replace(own, g_strdup(k), g_strdup(v));
 }
 
 static void
@@ -27244,8 +27382,78 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
     g_free(current_color);
 }
 
+static gboolean
+var_own_matches_parent(GHashTable *own, const ns_var_map *parent)
+{
+    if (!parent) return g_hash_table_size(own) == 0;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, own);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        if (g_strcmp0(ns_var_map_lookup(parent, k), v) != 0) return FALSE;
+    return TRUE;
+}
+
+static ns_var_map *
+var_map_layer(GHashTable *own, ns_var_map *parent)
+{
+    if (parent && var_own_matches_parent(own, parent)) {
+        g_hash_table_destroy(own);
+        return ns_var_map_ref(parent);
+    }
+    return ns_var_map_new(own, ns_var_map_ref(parent));
+}
+
+static GBytes *
+var_build_key(const ns_var_map *parent, GArray *var_matches)
+{
+    GByteArray *key = g_byte_array_sized_new(16 + var_matches->len * 24);
+    g_byte_array_append(key, (const guint8 *)&parent, sizeof parent);
+    for (guint i = 0; i < var_matches->len; i++) {
+        const var_match *vm = &g_array_index(var_matches, var_match, i);
+        g_byte_array_append(key, (const guint8 *)&vm->name, sizeof vm->name);
+        g_byte_array_append(key, (const guint8 *)&vm->text, sizeof vm->text);
+        guint8 imp = vm->important ? 1 : 0;
+        g_byte_array_append(key, &imp, 1);
+    }
+    return g_byte_array_free_to_bytes(key);
+}
+
+static ns_var_map *build_vars_for_element_uncached(const ns_style *parent_style,
+                                                   GArray *var_matches);
+
 static ns_var_map *
 build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
+{
+    if (!g_var_build_cache || !var_matches || var_matches->len == 0)
+        return build_vars_for_element_uncached(parent_style, var_matches);
+    for (guint i = 0; i < var_matches->len; i++)
+        if (g_array_index(var_matches, var_match, i).inline_style)
+            return build_vars_for_element_uncached(parent_style, var_matches);
+    g_array_sort(var_matches, var_match_cmp);
+    GBytes *key = var_build_key(parent_style ? parent_style->vars : NULL,
+                                var_matches);
+    ns_var_map *hit = g_hash_table_lookup(g_var_build_cache, key);
+    if (hit) {
+        g_bytes_unref(key);
+        return ns_var_map_ref(hit);
+    }
+    ns_var_map *built = build_vars_for_element_uncached(parent_style,
+                                                        var_matches);
+    if (built) {
+        if (parent_style && parent_style->vars)
+            ns_var_map_ref(parent_style->vars);
+        g_hash_table_insert(g_var_build_cache, key, ns_var_map_ref(built));
+        g_ptr_array_add(g_var_build_parents,
+                        parent_style ? parent_style->vars : NULL);
+    } else {
+        g_bytes_unref(key);
+    }
+    return built;
+}
+
+static ns_var_map *
+build_vars_for_element_uncached(const ns_style *parent_style, GArray *var_matches)
 {
     ns_var_map *parent = parent_style ? parent_style->vars : NULL;
     gboolean parent_has = parent != NULL;
@@ -27269,7 +27477,7 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
             var_map_apply_unregistered(own, parent, var_matches, i);
         }
         g_hash_table_destroy(prefilled);
-        return ns_var_map_new(own, ns_var_map_ref(parent));
+        return var_map_layer(own, parent);
     }
 
     if (parent_has && !have_local && g_var_adjust_cache) {
@@ -27278,7 +27486,7 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
     }
     GHashTable *own = g_hash_table_new_full(g_str_hash, g_str_equal,
                                             g_free, g_free);
-    var_map_reset_registered(own, parent);
+    var_map_reset_registered_cached(own, parent);
     if (have_local) {
         g_array_sort(var_matches, var_match_cmp);
         GHashTable *prefilled = var_prefill_plain_values(own, var_matches);
@@ -27295,7 +27503,7 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
         g_hash_table_destroy(own);
         built = ns_var_map_ref(parent);
     } else {
-        built = ns_var_map_new(own, ns_var_map_ref(parent));
+        built = var_map_layer(own, parent);
     }
     if (parent_has && !have_local && g_var_adjust_cache)
         g_hash_table_insert(g_var_adjust_cache, ns_var_map_ref(parent),
@@ -27593,16 +27801,50 @@ pending_uses_attr(const GArray *pending_matches)
     return FALSE;
 }
 
-static gboolean
-append_pending_decls(const pending_match *pm, const char *value_text,
-                     GArray *matches, GPtrArray *owned_values)
+#define PENDING_PARSE_CACHE_MAX 20000
+
+static __thread GHashTable *g_pending_parse_cache;
+static __thread int g_pending_parse_vw, g_pending_parse_vh;
+
+static void
+pending_parse_entry_free(gpointer data)
 {
-    char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, value_text);
+    GArray *decls = data;
+    for (guint i = 0; i < decls->len; i++)
+        ns_css_value_free(g_array_index(decls, ns_css_decl, i).value);
+    g_array_free(decls, TRUE);
+}
+
+static void
+pending_parse_cache_trim(void)
+{
+    if (!g_pending_parse_cache) return;
+    if (g_pending_parse_vw != g_viewport_w || g_pending_parse_vh != g_viewport_h ||
+        g_hash_table_size(g_pending_parse_cache) > PENDING_PARSE_CACHE_MAX)
+        g_hash_table_remove_all(g_pending_parse_cache);
+    g_pending_parse_vw = g_viewport_w;
+    g_pending_parse_vh = g_viewport_h;
+}
+
+static GArray *
+pending_parse_cached(const char *pname, const char *value_text)
+{
+    if (!g_pending_parse_cache) {
+        g_pending_parse_cache = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, pending_parse_entry_free);
+        g_pending_parse_vw = g_viewport_w;
+        g_pending_parse_vh = g_viewport_h;
+    }
+    char *synth = g_strdup_printf("%s: %s;}", pname, value_text);
+    GArray *hit = g_hash_table_lookup(g_pending_parse_cache, synth);
+    if (hit) {
+        g_free(synth);
+        return hit;
+    }
     GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
     const char *sp = synth;
     parse_declaration_block(&sp, synth + strlen(synth), temp, NULL);
-    g_free(synth);
-    gboolean any = FALSE;
+    GArray *kept = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
     guint8 seen[NS_CSS_PROP_COUNT] = {0};
     for (guint i = temp->len; i-- > 0; ) {
         ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
@@ -27614,7 +27856,22 @@ append_pending_decls(const pending_match *pm, const char *value_text,
             }
             seen[d->prop] = 1;
         }
-        g_ptr_array_add(owned_values, d->value);
+        g_array_append_val(kept, *d);
+    }
+    g_array_free(temp, TRUE);
+    g_hash_table_insert(g_pending_parse_cache, synth, kept);
+    return kept;
+}
+
+static gboolean
+append_pending_decls(const pending_match *pm, const char *value_text,
+                     GArray *matches, GPtrArray *owned_values)
+{
+    (void)owned_values;
+    GArray *temp = pending_parse_cached(pm->pd->pname, value_text);
+    gboolean any = FALSE;
+    for (guint i = 0; i < temp->len; i++) {
+        ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
         match_entry me = {
             .origin = pm->origin,
             .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
@@ -27632,7 +27889,6 @@ append_pending_decls(const pending_match *pm, const char *value_text,
         g_array_append_val(matches, me);
         any = TRUE;
     }
-    g_array_free(temp, TRUE);
     return any;
 }
 
@@ -32604,11 +32860,19 @@ ns_css_compute(ns_node *doc,
         g_share_scratch = g_byte_array_sized_new(512);
     g_style_share = g_hash_table_new_full(share_key_hash, share_key_equal,
                                           share_key_free, NULL);
+    g_var_build_cache = g_hash_table_new_full(
+        g_bytes_hash, g_bytes_equal, (GDestroyNotify)g_bytes_unref,
+        (GDestroyNotify)ns_var_map_unref);
+    g_var_build_parents = g_ptr_array_new();
+    g_reg_reset_cache = g_hash_table_new_full(
+        g_direct_hash, g_direct_equal, reg_reset_key_free,
+        (GDestroyNotify)g_hash_table_destroy);
     g_var_adjust_cache = g_hash_table_new_full(
         g_direct_hash, g_direct_equal,
         (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
+    pending_parse_cache_trim();
     ns_css_selector_batch_begin();
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
@@ -32707,6 +32971,12 @@ ns_css_compute(ns_node *doc,
     g_style_share = NULL;
     g_hash_table_destroy(g_var_adjust_cache);
     g_var_adjust_cache = NULL;
+    g_clear_pointer(&g_reg_reset_cache, g_hash_table_destroy);
+    g_clear_pointer(&g_var_build_cache, g_hash_table_destroy);
+    for (guint i = 0; g_var_build_parents && i < g_var_build_parents->len; i++)
+        if (g_ptr_array_index(g_var_build_parents, i))
+            ns_var_map_unref(g_ptr_array_index(g_var_build_parents, i));
+    g_clear_pointer(&g_var_build_parents, g_ptr_array_unref);
     g_hash_table_destroy(layer_ranks);
     g_hash_table_destroy(g_registered_props);
     g_registered_props = NULL;
