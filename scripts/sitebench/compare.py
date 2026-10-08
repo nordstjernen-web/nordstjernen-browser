@@ -563,9 +563,10 @@ def analyse_label(site_id, label, ns_dir, ns, chrome, ref, img_dir, vw, vh):
     ns_probe = runs[0]["probe"]
     s = dict(ns["summary"])
     vt = ns.get("visualTiming") or {}
+    probe_ms = (ns_probe or {}).get("probeMs")
     if isinstance(vt.get("cpu_ms"), (int, float)):
-        s["settledMainThreadMs"] = round(max(vt["cpu_ms"] - (vt.get("encode_ms") or 0), 0), 1)
-    entry = dict(s, status=ns.get("status"), error=error,
+        s["settledMainThreadMs"] = round(max(vt["cpu_ms"] - (vt.get("encode_ms") or 0) - (probe_ms or 0), 0), 1)
+    entry = dict(s, status=ns.get("status"), error=error, probeMs=probe_ms,
                  docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
                  jsErrorSample=ns.get("jsErrorSample", []),
                  blocked=blocked_reason(shown["probe"], shown["status"]),
@@ -915,6 +916,22 @@ def cap_note(rows, labels):
             "and leaves out the components past that point.")
 
 
+def cpu_note(rows, labels):
+    measured = [(label, r["id"], en) for label in labels for r in rows for en in [r["engines"].get(label)]
+                if en and not en.get("error") and en.get("settledMainThreadMs") is not None]
+    older = [(label, site) for label, site, en in measured if en.get("probeMs") is None]
+    if not older or len(older) == len(measured):
+        return None
+    parts = []
+    for label in labels:
+        sites = [site for name, site in older if name == label]
+        total = sum(1 for name, _, _ in measured if name == label)
+        if sites:
+            parts.append(f"{label} (all {total} sites)" if len(sites) == total else f"{label} on " + ", ".join(sites))
+    return ("Nordstjernen's main-thread CPU leaves out the time the probe takes, except in captures made before "
+            "the probe recorded it, which count it in and are not comparable with the rest: " + "; ".join(parts) + ".")
+
+
 def write_markdown(rows, agg, labels, base_label, meta, path):
     c = agg["chrome"]
     repeats = "unstable" in c
@@ -959,7 +976,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
         lines.append("Also left out, so every column averages the same sites, because at least one "
                      "Nordstjernen run was shown a bot challenge or an error page: "
                      + ", ".join(c["nsExcluded"]) + ".")
-    for note in stability_notes(rows, agg, labels) + [n for n in [cap_note(rows, labels)] if n]:
+    for note in stability_notes(rows, agg, labels) + [n for n in (cap_note(rows, labels), cpu_note(rows, labels)) if n]:
         lines += ["", note]
     lines.append("")
     lines += markdown_site_table(rows, labels, repeats)
@@ -1074,7 +1091,7 @@ def html_summary(rows, agg, labels, meta):
         out.append("<p class=muted>Also left out, so every column averages the same sites, because at least "
                    "one Nordstjernen run was shown a bot challenge or an error page: "
                    + e(", ".join(c["nsExcluded"])) + ".</p>")
-    for note in stability_notes(rows, agg, labels) + [n for n in [cap_note(rows, labels)] if n]:
+    for note in stability_notes(rows, agg, labels) + [n for n in (cap_note(rows, labels), cpu_note(rows, labels)) if n]:
         out.append(f"<p class=muted>{e(note)}</p>")
     return out
 
