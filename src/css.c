@@ -24390,56 +24390,167 @@ inline_grid_value(const char *style, gboolean full)
     return r;
 }
 
-#define INLINE_GET_MEMO 32
+#define INLINE_GET_MEMO_MAX 4096
 
-static __thread struct {
-    char *style;
-    char *prop;
-    char *value;
-} g_inline_get_memo[INLINE_GET_MEMO];
-static __thread guint g_inline_get_next;
+static __thread GHashTable *g_inline_get_memo;
 static __thread double g_inline_get_vw, g_inline_get_vh;
+
+static char *
+inline_get_memo_key(const char *style, const char *prop)
+{
+    return g_strconcat(prop, "\x1f", style, NULL);
+}
 
 static gboolean
 inline_get_memo_hit(const char *style, const char *prop, char **out)
 {
-    if (g_inline_get_vw != g_viewport_w || g_inline_get_vh != g_viewport_h) {
-        for (guint i = 0; i < INLINE_GET_MEMO; i++) {
-            g_clear_pointer(&g_inline_get_memo[i].style, g_free);
-            g_clear_pointer(&g_inline_get_memo[i].prop, g_free);
-            g_clear_pointer(&g_inline_get_memo[i].value, g_free);
-        }
+    if (!g_inline_get_memo ||
+        g_inline_get_vw != g_viewport_w || g_inline_get_vh != g_viewport_h ||
+        g_hash_table_size(g_inline_get_memo) > INLINE_GET_MEMO_MAX) {
+        if (g_inline_get_memo) g_hash_table_remove_all(g_inline_get_memo);
+        else g_inline_get_memo = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, g_free);
         g_inline_get_vw = g_viewport_w;
         g_inline_get_vh = g_viewport_h;
         return FALSE;
     }
-    for (guint i = 0; i < INLINE_GET_MEMO; i++)
-        if (g_inline_get_memo[i].style &&
-            strcmp(g_inline_get_memo[i].prop, prop) == 0 &&
-            strcmp(g_inline_get_memo[i].style, style) == 0) {
-            *out = g_strdup(g_inline_get_memo[i].value);
-            return TRUE;
-        }
-    return FALSE;
+    char *key = inline_get_memo_key(style, prop);
+    gpointer value = NULL;
+    gboolean found = g_hash_table_lookup_extended(g_inline_get_memo, key,
+                                                  NULL, &value);
+    g_free(key);
+    if (found) *out = g_strdup(value);
+    return found;
 }
 
 static char *
 inline_get_memo_keep(const char *style, const char *prop, char *value)
 {
-    guint slot = g_inline_get_next++ % INLINE_GET_MEMO;
-    g_free(g_inline_get_memo[slot].style);
-    g_free(g_inline_get_memo[slot].prop);
-    g_free(g_inline_get_memo[slot].value);
-    g_inline_get_memo[slot].style = g_strdup(style);
-    g_inline_get_memo[slot].prop = g_strdup(prop);
-    g_inline_get_memo[slot].value = g_strdup(value);
+    if (g_inline_get_memo)
+        g_hash_table_replace(g_inline_get_memo,
+                             inline_get_memo_key(style, prop),
+                             g_strdup(value));
     return value;
+}
+
+static gboolean
+inline_style_may_declare_all(const char *style)
+{
+    for (const char *p = style; p && *p; p++)
+        if ((p[0] | 0x20) == 'a' && (p[1] | 0x20) == 'l' &&
+            (p[2] | 0x20) == 'l')
+            return TRUE;
+    return FALSE;
+}
+
+#define INLINE_INDEX_SLOTS 4
+
+typedef struct {
+    const char *ptr;
+    char       *copy;
+    gsize       len;
+    GHashTable *winners;
+} inline_custom_index;
+
+static __thread inline_custom_index g_inline_custom_index[INLINE_INDEX_SLOTS];
+static __thread guint g_inline_custom_next;
+
+typedef struct {
+    char    *value;
+    gboolean important;
+} inline_custom_winner;
+
+static void
+inline_custom_winner_free(gpointer data)
+{
+    inline_custom_winner *w = data;
+    g_free(w->value);
+    g_free(w);
+}
+
+static GHashTable *
+inline_custom_index_build(const char *style)
+{
+    GHashTable *winners = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                                inline_custom_winner_free);
+    const char *p = style;
+    const char *end = style + strlen(style);
+    while (p < end) {
+        p = css_skip_ws_comments(p, end);
+        while (p < end && *p == ';') {
+            p++;
+            p = css_skip_ws_comments(p, end);
+        }
+        if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
+        const char *kstart = p;
+        char term = 0;
+        const char *kend = css_scan_until(p, end, ":;", &term);
+        char *key = css_trim_dup_range(kstart, kend);
+        if (term != ':') {
+            g_free(key);
+            p = term == ';' ? kend + 1 : kend;
+            continue;
+        }
+        p = css_skip_ws_comments(kend + 1, end);
+        const char *vstart = p;
+        const char *vend = css_scan_declaration_value(p, end, &term);
+        if (key[0] == '-' && key[1] == '-') {
+            char *value = css_trim_dup_range(vstart, vend);
+            char *probe = g_strdup(value);
+            gboolean important = FALSE;
+            css_strip_important(probe, &important);
+            g_free(probe);
+            inline_custom_winner *prev = g_hash_table_lookup(winners, key);
+            if (!prev || important || !prev->important) {
+                inline_custom_winner *w = g_new0(inline_custom_winner, 1);
+                w->value = value;
+                w->important = important;
+                g_hash_table_replace(winners, key, w);
+                key = NULL;
+            } else {
+                g_free(value);
+            }
+        }
+        g_free(key);
+        p = term == ';' ? vend + 1 : vend;
+    }
+    return winners;
+}
+
+static GHashTable *
+inline_custom_index_for(const char *style)
+{
+    gsize len = strlen(style);
+    for (guint i = 0; i < INLINE_INDEX_SLOTS; i++) {
+        inline_custom_index *slot = &g_inline_custom_index[i];
+        if (slot->ptr == style && slot->len == len &&
+            memcmp(slot->copy, style, len) == 0)
+            return slot->winners;
+    }
+    inline_custom_index *slot =
+        &g_inline_custom_index[g_inline_custom_next++ % INLINE_INDEX_SLOTS];
+    g_free(slot->copy);
+    if (slot->winners) g_hash_table_destroy(slot->winners);
+    slot->ptr = style;
+    slot->len = len;
+    slot->copy = g_memdup2(style, len + 1);
+    slot->winners = inline_custom_index_build(style);
+    return slot->winners;
 }
 
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
     if (!style || !prop) return NULL;
+    if (prop[0] == '-' && prop[1] == '-' && strlen(style) > 256) {
+        inline_custom_winner *w =
+            g_hash_table_lookup(inline_custom_index_for(style), prop);
+        return w ? css_inline_value_canonical(prop, g_strdup(w->value)) : NULL;
+    }
     char *hit = NULL;
     if (inline_get_memo_hit(style, prop, &hit)) return hit;
     char *pending = NULL;
@@ -24454,7 +24565,8 @@ ns_inline_style_get(const char *style, const char *prop)
         return inline_get_memo_keep(style, prop,
             inline_pair_value(style, NS_CSS_OVERFLOW_X, NS_CSS_OVERFLOW_Y,
                               NULL));
-    if (g_ascii_strcasecmp(prop, "font") == 0) {
+    if (g_ascii_strcasecmp(prop, "font") == 0 &&
+        inline_style_may_declare_all(style)) {
         char *font_all = inline_all_value_for(style, "font");
         if (font_all) return inline_get_memo_keep(style, prop, font_all);
     }
@@ -24503,7 +24615,8 @@ ns_inline_style_get(const char *style, const char *prop)
         char *r = inline_grid_value(style, prop[4] == '\0');
         if (r) return inline_get_memo_keep(style, prop, r);
     }
-    if (ns_css_prop_id(prop) < 0 && ns_css_named_property_supported(prop)) {
+    if (ns_css_prop_id(prop) < 0 && inline_style_may_declare_all(style) &&
+        ns_css_named_property_supported(prop)) {
         char *all = inline_all_value(style);
         if (all) return inline_get_memo_keep(style, prop, all);
     }
