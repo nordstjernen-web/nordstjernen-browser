@@ -3,6 +3,18 @@ Changelog:
 
 1.0.30:
 ======
+* quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
+  use-after-free in `AsyncDisposableStack`, a reference-count bug in
+  `Promise.withResolvers`, an out-of-bounds read when creating typed
+  arrays and a use-after-free when a context runs out of memory.
+  `Reflect.set` with an undefined receiver returns false instead of
+  throwing, bound functions keep their target's prototype, `Date.parse`
+  accepts the narrow no-break space that locale-formatted times contain,
+  and `Iterator.from` gives a string's or plain iterable's iterator the
+  helper methods. Integer-keyed objects no longer pile into a few hash
+  buckets, and the interpreter stays fast when built with GCC 14 or later.
+  IndexedDB records stored by earlier builds remain readable, although
+  the engine's serialization format changed.
 * WebGPU can be switched on in Settings, next to WebGL, instead of only
   by starting the browser with `--enable-webgpu`. It stays off unless
   turned on, and `about:nordstjernen` says how it was enabled.

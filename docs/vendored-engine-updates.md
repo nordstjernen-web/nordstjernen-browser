@@ -29,6 +29,102 @@ is classified:
 Sources are listed explicitly in each `meson.build`, so new upstream files
 in unused areas are simply not compiled; the build is the final gate.
 
+## 2026-10-08 — QuickJS 0.16.2 → 60984dc
+
+| | value |
+|---|---|
+| Fork base | `1ab8676` (tag `v0.16.2`) |
+| Updated to | `60984dc` (master, "Tweak new object GC heuristic (#1806)"), sixteen commits past `v0.17.0` |
+| Reported version | `0.16.2` → `0.17.0` (`QJS_VERSION_*` in `quickjs.h`) |
+
+Forty-eight upstream commits, done as a three-way merge of the fork onto
+upstream master (base `v0.16.2`).
+
+- **Memory safety** — a use-after-free in `AsyncDisposableStack` when a
+  promise's reject handler takes no argument (`05b2db9`); a reference-count
+  bug in `Promise.withResolvers` (`49131a6`); an out-of-bounds read in
+  `JS_NewTypedArray` (`3f57bfb`); undefined behaviour in
+  `String.prototype.normalize` (`2c620e4`); `JS_FreeCStringUTF16` on slice
+  strings (`396e1e0`); a use-after-free when `JS_NewContext` runs out of
+  memory (`8e14a39`); a leak in `JSON.stringify` when an array index cannot
+  be converted (`293ba08`).
+- **Language** — `ToPropertyKey` of `obj[key] = value` happens when the value
+  is stored, after the right-hand side, following the specification change
+  (`0db3949`); `Reflect.set` with an undefined or null receiver returns
+  `false` instead of throwing (`970500f`); a bound function takes its
+  target's prototype (`6a9b531`); `Date.parse` reads Unicode spaces, such
+  as the U+202F that locale formatting puts before AM/PM, as spaces
+  (`140b26d`); `"".repeat(n)` no longer fails for a large `n` (`19dbe85`);
+  `Iterator.from` wraps the iterator an iterable returns, so a string's or a
+  plain iterable's iterator gains the helper methods, and reads its `next`
+  once (`7761502`); constructing a BigInt typed array from a Number one, or
+  the reverse, throws even when the source is empty (`5c87424`);
+  `Object.preventExtensions` on a typed array over a resizable buffer throws,
+  and `TypedArray.prototype.at` follows a resized buffer (`9290824`,
+  `3a50dc5`); `import()` records its source position (`a6b82a3`).
+- **Speed** — property keys are hashed before indexing a shape's table, so
+  power-of-two integer keys no longer collide (`cad311e`); a bigger initial
+  atom table (`4355069`); a faster `JS_DeleteGlobalVar` (`02368b6`); a
+  peephole pass folds a negation into the following conditional jump
+  (`03f4950`); `JSValue` writes all 64 bits of its payload, which GCC 14+
+  needs to keep the interpreter fast (`2f0aa72`); a new-object GC heuristic
+  (`60984dc`).
+- **API** — the interrupt handler receives the `JSContext` that is running
+  instead of the runtime (`876442b`); `JSClass` is private to `quickjs.c`
+  (`5e8c99e`); `JS_NewPrivateSymbol`, `JS_GetPropertyValue`,
+  `JS_SetPropertyValue` and `JS_CGETSET_MAGIC_DEF2` are public (`7e322b3`,
+  `9963110`).
+- **Serialization** — `JS_WriteObject` encodes predefined atoms in one or a
+  few bytes, and `BC_VERSION` goes from 27 to 28 (`5301314`). The precompiled
+  builtins (`builtin-*.h`, `gen/*.c`) are upstream's regenerated blobs.
+
+**Local modifications preserved.** `quickjs.h`, `libregexp.c`, `cutils.h`
+and `quickjs-opcode.h` carry the same local delta against upstream as before,
+line for line. In `quickjs.c` eight hunks conflicted; every browser hook
+carried over unchanged.
+
+**Overlapping fixes.** Upstream fixed three things the fork had already
+fixed locally:
+
+- `with` binding lookups. Upstream's `a2ab90a` re-probes the binding object
+  in `with_get_var` and `with_get_ref`, as our `js_with_get_binding_value`
+  already did. Ours stays: it behaves the same and also serves
+  `with_get_ref_undef`.
+- The deferred `ToPropertyKey` in assignments, now upstream's:
+  `strip_eager_propkey_conversion` and `emit_deferred_propkey_conversion` are
+  gone. `get_lvalue` no longer emits the eager conversion, so the helpers had
+  nothing to strip, and the store converts the key after the right-hand side.
+  Evaluation order is unchanged for plain, compound, logical, destructuring,
+  default, `for-in`/`for-of` and `super[key]` targets.
+- The `DOMException` attributes, now upstream's: it makes `name`, `message`
+  and `code` enumerable and the constructor's length 0, as our patch did; they
+  are now defined in WebIDL order (`name`, `message`, `code`).
+
+**Adaptation required.**
+
+- `ns_js_interrupt_cb` in `src/js.c` takes an `ns_js_interrupt_arg`, which
+  `src/ns_quickjs.h` defines as `JSContext` on quickjs-ng and `JSRuntime` on
+  the original engine.
+- `JS_ReadObject` also accepts `BC_VERSION` 27 data, reading the old
+  four-byte predefined atoms, so IndexedDB records stored by an earlier build
+  stay readable.
+- `NS_BYTECODE_CACHE_FORMAT_VERSION` is bumped, so cached script bytecode is
+  compiled again by the new compiler.
+
+### Verification
+
+- The GCC build, a clang build and a `-Dquickjs=quickjs` build compile and
+  link with no new warnings.
+- `./scripts/dev.sh smoke` passes on both engines. A page with an endless
+  loop is interrupted after the eval budget on both engines, and the
+  precompiled `Array.fromAsync`, `Iterator.zip` and `Iterator.zipKeyed` run.
+- test262 at the submodule pin (`5ef1e57`) and at current main (`c8c7988`),
+  run with `run-test262` built from the fork before and after the update:
+  identical results, 11 and 23 failures, none new. `tests.conf` gives the
+  same results before and after.
+- Values written with `qjs:bjson` by the old engine (version 27) read back
+  identically in the new one.
+
 ## 2026-09-27 — Lexbor de1d07a → 327a8b6
 
 | | value |
