@@ -196,7 +196,9 @@ struct NsProcView {
     void             *vring;
     void             *vring_map;
     gsize             vring_bytes;
-    cairo_surface_t  *vid_fallback;
+    GdkTexture       *vid_texture;
+    guint32           vid_tex_sequence;
+    guint32           vid_tex_generation;
     char              vid_token[64];
     char              vid_shm[64];
     double            vid_x, vid_y, vid_w, vid_h;
@@ -1037,49 +1039,12 @@ ns_proc_video_helper_available(void)
 }
 
 static void
-pv_video_fallback_clear(NsProcView *v)
+pv_video_texture_clear(NsProcView *v)
 {
-    if (!v || !v->vid_fallback) return;
-    cairo_surface_destroy(v->vid_fallback);
-    v->vid_fallback = NULL;
-}
-
-static void
-pv_video_snapshot_current(NsProcView *v)
-{
-    if (!v || !v->vring || !v->vid_sequence) return;
-    ns_video_ring_hdr *r = v->vring;
-    guint32 slot = v->vid_slot;
-    guint32 width = __atomic_load_n(&r->width, __ATOMIC_RELAXED);
-    guint32 height = __atomic_load_n(&r->height, __ATOMIC_RELAXED);
-    guint32 stride = __atomic_load_n(&r->stride, __ATOMIC_RELAXED);
-    guint32 frame_bytes = __atomic_load_n(&r->frame_bytes, __ATOMIC_RELAXED);
-    if (r->magic != NS_VIDEO_RING_MAGIC ||
-        r->version != NS_VIDEO_RING_VERSION || slot >= NS_VIDEO_RING_SLOTS ||
-        !width || !height || (guint64)stride < (guint64)width * 4 ||
-        (guint64)stride * height > frame_bytes ||
-        sizeof *r + (gsize)(slot + 1) * frame_bytes > v->vring_bytes)
-        return;
-    ns_video_ring_slot *meta = &r->slots[slot];
-    guint32 sequence = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
-    if (sequence != v->vid_sequence || meta->generation != v->vid_generation)
-        return;
-    cairo_surface_t *copy = cairo_image_surface_create(
-        CAIRO_FORMAT_RGB24, (int)width, (int)height);
-    if (cairo_surface_status(copy) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(copy);
-        return;
-    }
-    unsigned char *src = (unsigned char *)r + sizeof *r +
-                         (gsize)slot * frame_bytes;
-    unsigned char *dst = cairo_image_surface_get_data(copy);
-    int dst_stride = cairo_image_surface_get_stride(copy);
-    for (guint32 y = 0; y < height; y++)
-        memcpy(dst + (gsize)y * dst_stride,
-               src + (gsize)y * stride, (gsize)width * 4);
-    cairo_surface_mark_dirty(copy);
-    pv_video_fallback_clear(v);
-    v->vid_fallback = copy;
+    if (!v) return;
+    g_clear_object(&v->vid_texture);
+    v->vid_tex_sequence = 0;
+    v->vid_tex_generation = 0;
 }
 
 static void
@@ -1161,7 +1126,6 @@ pv_video_handle_line(NsProcView *v, const char *line)
     } else if (n >= 6 && strcmp(tok[0], "shm") == 0) {
         gboolean was_playing = v->vid_playing;
         gboolean had_rect = v->vid_rect_valid;
-        pv_video_snapshot_current(v);
 #ifdef G_OS_WIN32
         pv_vring_unmap(v);
         v->vid_playing = was_playing;
@@ -1225,7 +1189,7 @@ pv_video_handle_line(NsProcView *v, const char *line)
     } else if (n >= 2 && strcmp(tok[0], "closed") == 0) {
         if (strcmp(tok[1], v->vid_token) == 0) {
             pv_vring_unmap(v);
-            pv_video_fallback_clear(v);
+            pv_video_texture_clear(v);
         }
     } else if (n >= 2 && strcmp(tok[0], "playing") == 0) {
         if (strcmp(tok[1], v->vid_token) == 0) {
@@ -1350,7 +1314,11 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
     }
     char cmd_tok[64] = "";
     if (g_str_has_prefix(cmd, "open ")) {
-        sscanf(cmd + 5, "%63s", v->vid_token);
+        char token[64] = "";
+        sscanf(cmd + 5, "%63s", token);
+        if (strcmp(token, v->vid_token) != 0)
+            pv_video_texture_clear(v);
+        g_strlcpy(v->vid_token, token, sizeof v->vid_token);
         v->vid_rect_valid = FALSE;
     } else if (g_str_has_prefix(cmd, "play ")) {
         sscanf(cmd + 5, "%63s", cmd_tok);
@@ -1370,7 +1338,7 @@ static void
 pv_video_shutdown(NsProcView *v)
 {
     pv_vring_unmap(v);
-    pv_video_fallback_clear(v);
+    pv_video_texture_clear(v);
     if (!v->video_proc) return;
     if (v->video_in) {
         g_output_stream_write_all(v->video_in, "quit\n", 5, NULL, NULL, NULL);
@@ -3674,19 +3642,71 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
     return TRUE;
 }
 
-static void
-pv_video_draw_surface(NsProcView *v, cairo_t *cr, cairo_surface_t *surface)
+static GdkTexture *
+pv_video_frame_texture(NsProcView *v)
 {
-    int fw = cairo_image_surface_get_width(surface);
-    int fh = cairo_image_surface_get_height(surface);
-    if (fw <= 0 || fh <= 0) return;
+    ns_video_ring_hdr *r = v->vring;
+    guint32 slot = 0;
+    guint32 sequence = 0;
+    double pts = 0.0;
+    guint32 nslots  = r->nslots;
+    guint32 fw      = r->width;
+    guint32 fh      = r->height;
+    guint32 fstride = r->stride;
+    guint32 fbytes  = r->frame_bytes;
+    if (r->magic != NS_VIDEO_RING_MAGIC ||
+        r->version != NS_VIDEO_RING_VERSION ||
+        !pv_video_pick_frame(v, r, &slot, &sequence, &pts) ||
+        slot >= nslots || fw == 0 || fh == 0 ||
+        (guint64)fstride < (guint64)fw * 4 ||
+        (guint64)fstride * fh > fbytes ||
+        sizeof(ns_video_ring_hdr) + (gsize)(slot + 1) * fbytes
+            > v->vring_bytes)
+        return v->vid_texture;
+    guint32 generation = r->slots[slot].generation;
+    if (v->vid_texture && sequence == v->vid_tex_sequence &&
+        generation == v->vid_tex_generation)
+        return v->vid_texture;
+
+    const unsigned char *px = (const unsigned char *)r +
+                              sizeof(ns_video_ring_hdr) + (gsize)slot * fbytes;
+    GBytes *bytes = g_bytes_new(px, (gsize)fstride * fh);
+    GdkTexture *texture = gdk_memory_texture_new((int)fw, (int)fh,
+                                                 GDK_MEMORY_B8G8R8X8,
+                                                 bytes, fstride);
+    g_bytes_unref(bytes);
+    g_clear_object(&v->vid_texture);
+    v->vid_texture = texture;
+    v->vid_tex_sequence = sequence;
+    v->vid_tex_generation = generation;
+
+    if (sequence != v->vid_sequence) {
+        if (v->vid_sequence && sequence > v->vid_sequence + 1u)
+            v->vid_dropped += sequence - v->vid_sequence - 1u;
+        v->vid_sequence = sequence;
+        v->vid_slot = slot;
+        v->vid_pts = pts;
+        v->vid_presented++;
+    }
+    guint32 released = __atomic_load_n(&r->released, __ATOMIC_ACQUIRE);
+    guint32 target = sequence - 1u;
+    if (target > released)
+        __atomic_store_n(&r->released, target, __ATOMIC_RELEASE);
+    return texture;
+}
+
+static graphene_rect_t
+pv_video_fit_rect(NsProcView *v, GdkTexture *texture, double fs)
+{
+    double fw = gdk_texture_get_width(texture);
+    double fh = gdk_texture_get_height(texture);
     double draw_x = v->vid_x;
     double draw_y = v->vid_y;
     double draw_w = v->vid_w;
     double draw_h = v->vid_h;
     if (v->vid_fit != 0) {
-        double scale_x = v->vid_w / (double)fw;
-        double scale_y = v->vid_h / (double)fh;
+        double scale_x = v->vid_w / fw;
+        double scale_y = v->vid_h / fh;
         double scale = MIN(scale_x, scale_y);
         if (v->vid_fit == 2) scale = MAX(scale_x, scale_y);
         else if (v->vid_fit == 3) scale = 1.0;
@@ -3696,96 +3716,8 @@ pv_video_draw_surface(NsProcView *v, cairo_t *cr, cairo_surface_t *surface)
         draw_x += (v->vid_w - draw_w) * 0.5;
         draw_y += (v->vid_h - draw_h) * 0.5;
     }
-    cairo_save(cr);
-    cairo_rectangle(cr, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
-    cairo_clip(cr);
-    cairo_rectangle(cr, v->vid_clip_x, v->vid_clip_y,
-                    v->vid_clip_w, v->vid_clip_h);
-    cairo_clip(cr);
-    cairo_translate(cr, draw_x, draw_y);
-    cairo_scale(cr, draw_w / (double)fw, draw_h / (double)fh);
-    cairo_set_source_surface(cr, surface, 0, 0);
-    cairo_paint(cr);
-    cairo_restore(cr);
-}
-
-static void
-pv_video_draw(NsProcView *v, cairo_t *cr, double fs)
-{
-    if (v->vring && v->vid_rect_valid) {
-        gboolean frame_drawn = FALSE;
-        cairo_save(cr);
-        cairo_scale(cr, 1.0 / fs, 1.0 / fs);
-        cairo_rectangle(cr, v->vid_clip_x, v->vid_clip_y,
-                        v->vid_clip_w, v->vid_clip_h);
-        cairo_clip(cr);
-        cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
-        cairo_rectangle(cr, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
-        cairo_fill(cr);
-        ns_video_ring_hdr *r = v->vring;
-        guint32 slot = 0;
-        guint32 sequence = 0;
-        double pts = 0.0;
-        guint32 nslots  = r->nslots;
-        guint32 fw      = r->width;
-        guint32 fh      = r->height;
-        guint32 fstride = r->stride;
-        guint32 fbytes  = r->frame_bytes;
-        if (r->magic == NS_VIDEO_RING_MAGIC &&
-            r->version == NS_VIDEO_RING_VERSION &&
-            pv_video_pick_frame(v, r, &slot, &sequence, &pts) &&
-            slot < nslots &&
-            fw > 0 && fh > 0 &&
-            (guint64)fstride >= (guint64)fw * 4 &&
-            (guint64)fstride * fh <= fbytes &&
-            sizeof(ns_video_ring_hdr) + (gsize)(slot + 1) * fbytes
-                <= v->vring_bytes) {
-            unsigned char *px = (unsigned char *)r + sizeof(ns_video_ring_hdr) +
-                                (gsize)slot * fbytes;
-            cairo_surface_t *s = cairo_image_surface_create_for_data(
-                px, CAIRO_FORMAT_RGB24, (int)fw, (int)fh, (int)fstride);
-            if (cairo_surface_status(s) == CAIRO_STATUS_SUCCESS) {
-                pv_video_draw_surface(v, cr, s);
-                frame_drawn = TRUE;
-                pv_video_fallback_clear(v);
-                if (sequence != v->vid_sequence) {
-                    if (v->vid_sequence && sequence > v->vid_sequence + 1u)
-                        v->vid_dropped += sequence - v->vid_sequence - 1u;
-                    v->vid_sequence = sequence;
-                    v->vid_slot = slot;
-                    v->vid_pts = pts;
-                    v->vid_presented++;
-                }
-                guint32 released = __atomic_load_n(&r->released,
-                                                    __ATOMIC_ACQUIRE);
-                guint32 target = sequence - 1u;
-                if (target > released)
-                    __atomic_store_n(&r->released, target, __ATOMIC_RELEASE);
-            }
-            cairo_surface_destroy(s);
-        }
-        if (!frame_drawn && v->vid_fallback) {
-            pv_video_draw_surface(v, cr, v->vid_fallback);
-            frame_drawn = TRUE;
-        }
-        cairo_restore(cr);
-        if (g_getenv("NS_DBG_COMPOSITE")) {
-            static gint64 last_us;
-            static int cdrawn, cblack;
-            if (frame_drawn) cdrawn++; else cblack++;
-            gint64 nowu = g_get_monotonic_time();
-            if (nowu - last_us > 1000000) {
-                last_us = nowu;
-                g_printerr("[composite] drawn=%d/s black=%d/s slot=%u magic=%s "
-                           "%ux%u seq=%u pts=%.3f rect=%.0f,%.0f %.0fx%.0f\n",
-                           cdrawn, cblack, slot,
-                           r->magic == NS_VIDEO_RING_MAGIC ? "ok" : "BAD",
-                           fw, fh, sequence, pts, v->vid_x, v->vid_y,
-                           v->vid_w, v->vid_h);
-                cdrawn = 0; cblack = 0;
-            }
-        }
-    }
+    return GRAPHENE_RECT_INIT((float)(draw_x / fs), (float)(draw_y / fs),
+                              (float)(draw_w / fs), (float)(draw_h / fs));
 }
 
 G_DECLARE_FINAL_TYPE(NsProcViewArea, ns_proc_view_area, NS, PROC_VIEW_AREA,
@@ -3812,11 +3744,40 @@ pv_snapshot_video(NsProcView *v, double fs, GtkSnapshot *snapshot)
     if (!v->vring || !v->vid_rect_valid)
         return;
     graphene_rect_t clip = GRAPHENE_RECT_INIT(
-        v->vid_clip_x / fs, v->vid_clip_y / fs,
-        MAX(v->vid_clip_w, 0.0) / fs, MAX(v->vid_clip_h, 0.0) / fs);
-    cairo_t *cr = gtk_snapshot_append_cairo(snapshot, &clip);
-    pv_video_draw(v, cr, fs);
-    cairo_destroy(cr);
+        (float)(v->vid_clip_x / fs), (float)(v->vid_clip_y / fs),
+        (float)(MAX(v->vid_clip_w, 0.0) / fs),
+        (float)(MAX(v->vid_clip_h, 0.0) / fs));
+    graphene_rect_t box = GRAPHENE_RECT_INIT(
+        (float)(v->vid_x / fs), (float)(v->vid_y / fs),
+        (float)(v->vid_w / fs), (float)(v->vid_h / fs));
+    GdkRGBA letterbox = { 0.10f, 0.10f, 0.10f, 1.0f };
+    gtk_snapshot_push_clip(snapshot, &clip);
+    gtk_snapshot_append_color(snapshot, &letterbox, &box);
+    GdkTexture *texture = pv_video_frame_texture(v);
+    if (texture) {
+        graphene_rect_t dst = pv_video_fit_rect(v, texture, fs);
+        gtk_snapshot_push_clip(snapshot, &box);
+        gtk_snapshot_append_scaled_texture(snapshot, texture,
+                                           GSK_SCALING_FILTER_LINEAR, &dst);
+        gtk_snapshot_pop(snapshot);
+    }
+    gtk_snapshot_pop(snapshot);
+    if (g_getenv("NS_DBG_COMPOSITE")) {
+        static gint64 last_us;
+        static guint64 last_presented;
+        static int draws;
+        draws++;
+        gint64 now_us = g_get_monotonic_time();
+        if (now_us - last_us > 1000000) {
+            last_us = now_us;
+            g_printerr("[composite] draws=%d/s new=%" G_GUINT64_FORMAT
+                       "/s dropped=%" G_GUINT64_FORMAT " seq=%u pts=%.3f\n",
+                       draws, v->vid_presented - last_presented,
+                       v->vid_dropped, v->vid_sequence, v->vid_pts);
+            last_presented = v->vid_presented;
+            draws = 0;
+        }
+    }
 }
 
 static void
