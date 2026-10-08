@@ -27069,7 +27069,7 @@ typedef struct {
     GArray *pending_out;
 } gather_dest;
 
-#define CSS_ELEMENT_KEYS_MAX 48
+#define CSS_ELEMENT_KEYS_INITIAL 48
 
 typedef struct {
     char        kind;
@@ -27079,11 +27079,11 @@ typedef struct {
 } css_element_key;
 
 typedef struct {
-    const ns_node  *el;
-    guint64         pass;
-    guint           n;
-    gboolean        overflow;
-    css_element_key k[CSS_ELEMENT_KEYS_MAX];
+    const ns_node   *el;
+    guint64          pass;
+    guint            n;
+    guint            cap;
+    css_element_key *k;
 } css_element_keys;
 
 static __thread css_element_keys g_element_keys;
@@ -27093,9 +27093,9 @@ static void
 css_element_keys_add(css_element_keys *keys, char kind, const char *text,
                      gsize len, gboolean lower)
 {
-    if (keys->n >= CSS_ELEMENT_KEYS_MAX) {
-        keys->overflow = TRUE;
-        return;
+    if (keys->n == keys->cap) {
+        keys->cap = keys->cap ? keys->cap * 2 : CSS_ELEMENT_KEYS_INITIAL;
+        keys->k = g_renew(css_element_key, keys->k, keys->cap);
     }
     css_element_key *k = &keys->k[keys->n++];
     k->kind = kind;
@@ -27138,7 +27138,6 @@ css_element_keys_for(const ns_node *el)
     keys->el = el;
     keys->pass = g_element_keys_pass;
     keys->n = 0;
-    keys->overflow = FALSE;
     const char *id = ns_element_get_attr(el, "id");
     if (id && *id) css_element_keys_add(keys, '#', id, strlen(id), FALSE);
     css_element_keys_add_classes(keys, ns_element_get_attr(el, "class"));
@@ -27186,7 +27185,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         const css_element_keys *keys = css_element_keys_for(el);
         for (guint ki = 0; ki < keys->n; ki++) {
             const css_element_key *k = &keys->k[ki];
-            if (!keys->overflow && !index_bloom_may_contain(idx->bloom, k->hash))
+            if (!index_bloom_may_contain(idx->bloom, k->hash))
                 continue;
             GArray *bucket = NULL;
             char small[64];
