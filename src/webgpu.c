@@ -101,6 +101,11 @@ typedef struct {
     gboolean       configured;
     gboolean       opaque;
     cairo_surface_t *surf;
+    WGPUBuffer     readback;
+    uint64_t       readback_size;
+    gboolean       pending;
+    JSRuntime     *rt;
+    JSValue        current;
 } ns_wg_context;
 
 static JSValue wg_device_createCommandEncoder(JSContext *ctx,
@@ -165,6 +170,7 @@ static void wg_on_uncaptured_error(WGPUDevice const *device, WGPUErrorType type,
                                    WGPUStringView message, void *u1, void *u2);
 static gboolean wg_pop_internal_scope(WGPUDevice device, WGPUErrorType *type,
                                       char **message);
+static void wg_mark_canvases_pending(void);
 static void wg_report_error(ns_wg_error_sink *sink, WGPUErrorType type,
                             const char *message);
 
@@ -594,6 +600,7 @@ wg_queue_submit(JSContext *ctx, JSValueConst this_val,
                             "already submitted");
     } else if (n > 0) {
         wgpuQueueSubmit(q->queue, n, cmds);
+        wg_mark_canvases_pending();
         for (guint i = 0; i < consumed->len; i++) {
             ns_wg_cmdbuf *cb = g_ptr_array_index(consumed, i);
             wgpuCommandBufferRelease(cb->cmd);
@@ -614,6 +621,19 @@ wg_queue_finalizer(JSRuntime *rt, JSValue val)
     if (!q) return;
     if (q->queue) wgpuQueueRelease(q->queue);
     g_free(q);
+}
+
+static void
+wg_mark_canvases_pending(void)
+{
+    if (!g_webgpu_ctx_by_node) return;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, g_webgpu_ctx_by_node);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        ns_wg_context *c = value;
+        if (c->configured && c->target) c->pending = TRUE;
+    }
 }
 
 static void
@@ -2118,6 +2138,12 @@ wg_ctx_release_gpu(ns_wg_context *c)
 {
     if (c->target) { wgpuTextureRelease(c->target); c->target = NULL; }
     if (c->surf) { cairo_surface_destroy(c->surf); c->surf = NULL; }
+    if (c->readback) { wgpuBufferRelease(c->readback); c->readback = NULL; }
+    c->readback_size = 0;
+    c->pending = FALSE;
+    JSValue cur = c->current;
+    c->current = JS_UNDEFINED;
+    if (c->rt) JS_FreeValueRT(c->rt, cur);
 }
 
 static gboolean
@@ -2211,8 +2237,12 @@ wg_ctx_getCurrentTexture(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "InvalidStateError: getCurrentTexture: not configured");
     if (!wg_ctx_ensure_target(c))
         return JS_ThrowInternalError(ctx, "getCurrentTexture: no target");
+    c->pending = TRUE;
+    if (JS_IsObject(c->current)) return JS_DupValue(ctx, c->current);
     wgpuTextureAddRef(c->target);
-    return wg_make_texture(ctx, c->target);
+    JSValue tex = wg_make_texture(ctx, c->target);
+    if (JS_IsObject(tex)) c->current = JS_DupValue(ctx, tex);
+    return tex;
 }
 
 static JSValue
@@ -4456,6 +4486,8 @@ ns_webgpu_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     ns_wg_context *c = g_new0(ns_wg_context, 1);
     c->canvas = canvas;
     c->self = obj;
+    c->rt = JS_GetRuntime(ctx);
+    c->current = JS_UNDEFINED;
     c->format = WGPUTextureFormat_BGRA8Unorm;
     c->opaque = TRUE;
     JS_SetOpaque(obj, c);
@@ -4486,18 +4518,28 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
         return NULL;
     int w = c->w, h = c->h;
     if (w <= 0 || h <= 0) return NULL;
+    if (c->surf && !c->pending) return c->surf;
 
     gboolean half = c->format == WGPUTextureFormat_RGBA16Float;
     uint32_t bpp = half ? 8u : 4u;
     uint32_t bytes_per_row = ((uint32_t)w * bpp + 255u) & ~255u;
     uint64_t buf_size = (uint64_t)bytes_per_row * (uint64_t)h;
 
-    WGPUBufferDescriptor bd;
-    memset(&bd, 0, sizeof bd);
-    bd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
-    bd.size = buf_size;
-    WGPUBuffer rb = wgpuDeviceCreateBuffer(c->device, &bd);
+    if (!c->readback || c->readback_size != buf_size) {
+        if (c->readback) wgpuBufferRelease(c->readback);
+        WGPUBufferDescriptor bd;
+        memset(&bd, 0, sizeof bd);
+        bd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+        bd.size = buf_size;
+        c->readback = wgpuDeviceCreateBuffer(c->device, &bd);
+        c->readback_size = c->readback ? buf_size : 0;
+    }
+    WGPUBuffer rb = c->readback;
     if (!rb) return c->surf;
+    c->pending = FALSE;
+    JSValue cur = c->current;
+    c->current = JS_UNDEFINED;
+    JS_FreeValueRT(c->rt, cur);
 
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(c->device, NULL);
     WGPUTexelCopyTextureInfo src;
@@ -4566,7 +4608,6 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
     }
     wgpuCommandBufferRelease(cmd);
     wgpuCommandEncoderRelease(enc);
-    wgpuBufferRelease(rb);
     return c->surf;
 }
 
