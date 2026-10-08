@@ -24774,6 +24774,72 @@ inline_custom_index_for(const char *style)
     return slot->winners;
 }
 
+static char *
+inline_declared_winner(const char *style, const char *prop)
+{
+    int pid = ns_css_prop_id(prop);
+    gsize plen = strlen(prop);
+    const char *p = style;
+    const char *end = style + strlen(style);
+    char *winner = NULL;
+    gboolean winner_important = FALSE;
+    while (p < end) {
+        p = css_skip_ws_comments(p, end);
+        while (p < end && *p == ';') {
+            p++;
+            p = css_skip_ws_comments(p, end);
+        }
+        if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
+        const char *kstart = p;
+        char term = 0;
+        const char *kend = css_scan_until(p, end, ":;", &term);
+        char *key = css_trim_dup_range(kstart, kend);
+        if (term != ':') {
+            g_free(key);
+            p = term == ';' ? kend + 1 : kend;
+            continue;
+        }
+        p = css_skip_ws_comments(kend + 1, end);
+        const char *vstart = p;
+        const char *vend = css_scan_declaration_value(p, end, &term);
+        char *value = css_trim_dup_range(vstart, vend);
+        gboolean custom = prop[0] == '-' && prop[1] == '-';
+        gboolean match = strlen(key) == plen &&
+                         (custom ? strcmp(key, prop) == 0
+                                 : g_ascii_strcasecmp(key, prop) == 0);
+        gboolean important = FALSE;
+        char *candidate = NULL;
+        if (match) {
+            char *priority_value = g_strdup(value);
+            css_strip_important(priority_value, &important);
+            g_free(priority_value);
+            candidate = value;
+            value = NULL;
+        } else if (pid >= 0) {
+            candidate = inline_expanded_value(key, value, pid, &important);
+        }
+        g_free(key);
+        if (candidate) {
+            if (!winner || important || !winner_important) {
+                g_free(winner);
+                winner = important && !match
+                    ? g_strconcat(candidate, " !important", NULL) : candidate;
+                if (winner != candidate) g_free(candidate);
+                winner_important = important;
+            } else {
+                g_free(candidate);
+            }
+        }
+        g_free(value);
+        p = term == ';' ? vend + 1 : vend;
+    }
+    return winner;
+}
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
@@ -24852,72 +24918,9 @@ ns_inline_style_get(const char *style, const char *prop)
         char *all = inline_all_value(style);
         if (all) return inline_get_memo_keep(style, prop, all);
     }
-    int pid = ns_css_prop_id(prop);
-    gsize plen = strlen(prop);
-    const char *p = style;
-    const char *end = style + strlen(style);
-    char *winner = NULL;
-    gboolean winner_important = FALSE;
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') {
-            p++;
-            p = css_skip_ws_comments(p, end);
-        }
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        const char *kstart = p;
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *key = css_trim_dup_range(kstart, kend);
-        if (term != ':') {
-            g_free(key);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vstart = p;
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        char *value = css_trim_dup_range(vstart, vend);
-        gboolean custom = prop[0] == '-' && prop[1] == '-';
-        gboolean match = strlen(key) == plen &&
-                         (custom ? strcmp(key, prop) == 0
-                                 : g_ascii_strcasecmp(key, prop) == 0);
-        gboolean important = FALSE;
-        char *candidate = NULL;
-        if (match) {
-            char *priority_value = g_strdup(value);
-            css_strip_important(priority_value, &important);
-            g_free(priority_value);
-            candidate = value;
-            value = NULL;
-        } else if (pid >= 0) {
-            candidate = inline_expanded_value(key, value, pid, &important);
-        }
-        g_free(key);
-        if (candidate) {
-            if (!winner || important || !winner_important) {
-                g_free(winner);
-                winner = important && !match
-                    ? g_strconcat(candidate, " !important", NULL) : candidate;
-                if (winner != candidate) g_free(candidate);
-                winner_important = important;
-            } else {
-                g_free(candidate);
-            }
-        }
-        g_free(value);
-        p = term == ';' ? vend + 1 : vend;
-    }
-
-    if (winner)
-        return inline_get_memo_keep(style, prop,
-                                    css_inline_value_canonical(prop, winner));
-
-    return inline_get_memo_keep(style, prop, NULL);
+    char *winner = inline_declared_winner(style, prop);
+    return inline_get_memo_keep(style, prop,
+        winner ? css_inline_value_canonical(prop, winner) : NULL);
 }
 
 typedef struct {

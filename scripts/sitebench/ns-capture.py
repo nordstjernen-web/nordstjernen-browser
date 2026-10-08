@@ -131,7 +131,7 @@ JS_ERROR = re.compile(r"^\[js\] .*(Error|rejected|unhandled|not a function|is no
 
 
 def js_errors(stderr):
-    errs = [l[5:].strip() for l in stderr.splitlines() if JS_ERROR.match(l)]
+    errs = [line[5:].strip() for line in stderr.splitlines() if JS_ERROR.match(line)]
     seen = []
     for e in errs:
         if e not in seen:

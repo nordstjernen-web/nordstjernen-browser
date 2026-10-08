@@ -387,7 +387,7 @@ def aggregate(rows, labels):
     blocked = [r["id"] for r in rows if not comparable(r)]
     rows = [r for r in rows if comparable(r)]
     ns_blocked = [r["id"] for r in rows
-                  if any((r["engines"].get(l) or {}).get("blocked") for l in labels)]
+                  if any((r["engines"].get(label) or {}).get("blocked") for label in labels)]
     common = [r for r in rows if r["id"] not in ns_blocked]
     for label in labels:
         es = [r["engines"][label] for r in common if label in r["engines"]]
@@ -459,7 +459,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
             ("JS errors (all sites)", "jsErrors", lambda v: fmt(v)),
             ("Sites showing a bot challenge", "nsBlocked", lambda v: fmt(v))]
     for title, key, f in keys:
-        lines.append(f"| {title} | " + " | ".join(f(agg[l].get(key)) for l in labels) + " |")
+        lines.append(f"| {title} | " + " | ".join(f(agg[label].get(key)) for label in labels) + " |")
     c = agg["chrome"]
     lines.append("")
     lines.append(f"Chrome medians: FCP {fmt(c['fcpMedianMs'])} ms, LCP {fmt(c['lcpMedianMs'])} ms, "
@@ -475,15 +475,15 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
                      + ", ".join(c["nsExcluded"]) + ".")
     lines.append("")
     head = "| Site | Chrome FCP | Chrome main | " + " | ".join(
-        f"{l} parity | {l} first paint | {l} main CPU" for l in labels) + " |"
+        f"{label} parity | {label} first paint | {label} main CPU" for label in labels) + " |"
     lines.append(head)
     lines.append("|---|---:|---:|" + "---:|---:|---:|" * len(labels))
     for r in rows:
         ch = r.get("chrome") or {}
         site_id = r["id"] + (" (Chrome blocked)" if ch.get("blocked") else "")
         cells = [site_id, fmt(ch.get("fcp")), fmt(ch.get("mainThreadMs"))]
-        for l in labels:
-            e = r["engines"].get(l)
+        for label in labels:
+            e = r["engines"].get(label)
             if not e:
                 cells += ["–", "–", "–"]
                 continue
@@ -543,7 +543,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
     out.append(f"<p class=muted>{e(meta.get('chromeVersion', ''))} · {e(', '.join(meta.get('nsVersions', [])))} · "
                f"viewport {e(meta['viewport'])} · {len(rows)} sites · {e(meta['generated'])}</p>")
     out.append("<h2>Summary</h2><div class=wrap><table><thead><tr><th>Metric</th>" +
-               "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
+               "".join(f"<th>{e(label)}</th>" for label in labels) + "</tr></thead><tbody>")
     for title, key, digits in [("Sites loaded", "loaded", 0), ("Mean visual parity", "parityMean", 1),
                                ("Median SSIM", "ssimMedian", 3), ("Median first paint ms", "firstRenderMedianMs", 0),
                                ("First paint ÷ Chrome FCP", "firstRenderVsFcpGeomean", 2),
@@ -552,7 +552,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
                                ("Peak memory ÷ Chrome", "memoryVsChromeGeomean", 2),
                                ("Sites painting before Chrome FCP", "fasterFirstRender", 0),
                                ("JS errors", "jsErrors", 0)]:
-        out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[l].get(key), digits) for l in labels) + "</tr>")
+        out.append(f"<tr><td>{e(title)}</td>" + "".join(cell(agg[label].get(key), digits) for label in labels) + "</tr>")
     out.append("</tbody></table></div>")
     c = agg["chrome"]
     if c.get("excluded"):
@@ -565,8 +565,8 @@ def write_html(rows, agg, labels, base_label, meta, path):
 
     out.append("<h2>Per site</h2><div class=wrap><table><thead><tr><th>Site</th><th>Cat</th>"
                "<th>Chrome FCP</th><th>LCP</th><th>Load</th><th>Speed idx</th><th>Main ms</th><th>RSS MB</th>")
-    for l in labels:
-        out.append(f"<th>{e(l)} parity</th><th>SSIM</th><th>Placed</th><th>First paint</th>"
+    for label in labels:
+        out.append(f"<th>{e(label)} parity</th><th>SSIM</th><th>Placed</th><th>First paint</th>"
                    f"<th>÷FCP</th><th>Main CPU</th><th>÷Chrome</th><th>RSS MB</th><th>JS err</th>")
     out.append("</tr></thead><tbody>")
     for r in rows:
@@ -575,8 +575,8 @@ def write_html(rows, agg, labels, base_label, meta, path):
         out.append(f"<tr><td><a href='#{e(r['id'])}'>{e(r['id'])}</a></td><td>{e(site.get('category', ''))}</td>")
         out.append(cell(ch.get("fcp")) + cell(ch.get("lcp")) + cell(ch.get("load")) + cell(ch.get("speedIndex")) +
                    cell(ch.get("mainThreadMs")) + cell(ch.get("browserRssMb")))
-        for l in labels:
-            en = r["engines"].get(l)
+        for label in labels:
+            en = r["engines"].get(label)
             if not en:
                 out.append("<td>–</td>" * 9)
                 continue
@@ -601,21 +601,21 @@ def write_html(rows, agg, labels, base_label, meta, path):
         if ch.get("blocked"):
             out.append(f"<p class=bad>Chrome was shown a {e(ch['blocked'])} page; this site is left out "
                        f"of the aggregates.</p>")
-        for l in labels:
-            en = r["engines"].get(l)
+        for label in labels:
+            en = r["engines"].get(label)
             if en and en.get("blocked"):
-                out.append(f"<p class=bad>{e(l)} was shown a {e(en['blocked'])} page.</p>")
+                out.append(f"<p class=bad>{e(label)} was shown a {e(en['blocked'])} page.</p>")
         out.append("<div class=shots>")
         out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}.jpg' alt=''>"
                    f"<figcaption>Chrome · FCP {fmt(ch.get('fcp'))} ms · LCP {fmt(ch.get('lcp'))} ms · "
                    f"load {fmt(ch.get('load'))} ms · CLS {fmt(ch.get('cls'), 3)}</figcaption></figure>")
-        for l in labels:
-            en = r["engines"].get(l)
+        for label in labels:
+            en = r["engines"].get(label)
             if not en:
                 continue
             v = en["visual"]
-            out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(l)}.jpg' alt=''>"
-                       f"<figcaption>{e(l)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
+            out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}.jpg' alt=''>"
+                       f"<figcaption>{e(label)} · parity {fmt(v.get('parity'), 1)} · SSIM {fmt(v.get('ssim'), 3)} · "
                        f"first paint {fmt(en.get('firstPaintMs'))} ms · images loaded {fmt(en.get('firstRenderMs'))} ms"
                        + (f" · <span class=bad>{e(en['error'])}</span>" if en.get("error") else "") +
                        "</figcaption></figure>")
@@ -630,18 +630,18 @@ def write_html(rows, agg, labels, base_label, meta, path):
         out.append("<details><summary>Full page</summary><div class=fulls>")
         out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(base_label)}-full.jpg' alt=''>"
                    f"<figcaption>Chrome · {fmt(ch.get('docH'))} px</figcaption></figure>")
-        for l in labels:
-            en = r["engines"].get(l)
+        for label in labels:
+            en = r["engines"].get(label)
             if en:
-                out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(l)}-full.jpg' alt=''>"
-                           f"<figcaption>{e(l)} · {fmt(en.get('docH'))} px</figcaption></figure>")
+                out.append(f"<figure><img loading=lazy src='img/{e(r['id'])}-{e(label)}-full.jpg' alt=''>"
+                           f"<figcaption>{e(label)} · {fmt(en.get('docH'))} px</figcaption></figure>")
         out.append("</div></details>")
-        for l in labels:
-            en = r["engines"].get(l)
+        for label in labels:
+            en = r["engines"].get(label)
             if not en:
                 continue
             comp = en["visual"].get("components") or {}
-            out.append(f"<details><summary>{e(l)}: phases, components and styles</summary>")
+            out.append(f"<details><summary>{e(label)}: phases, components and styles</summary>")
             out.append("<p><code>" + e(" · ".join(f"{k} {fmt(en.get(k))}" for k in (
                 "fetchMs", "parseMs", "styleMs", "scriptMs", "layoutMs", "imagesMs", "paintMs",
                 "netWaitMs", "processCpuMs", "maxRssMb", "nodes"))) + "</code></p>")
@@ -680,14 +680,14 @@ def main():
     p.add_argument("--viewport", default="1280x800")
     a = p.parse_args()
     out = Path(a.out)
-    labels = [l for l in a.labels.split(",") if l]
+    labels = [label for label in a.labels.split(",") if label]
     report = Path(a.report) if a.report else out / "report"
     img_dir = report / "img"
     img_dir.mkdir(parents=True, exist_ok=True)
     vw, vh = (int(x) for x in a.viewport.split("x"))
 
     ids = []
-    for d in [out / a.base] + [out / l for l in labels]:
+    for d in [out / a.base] + [out / label for label in labels]:
         if d.is_dir():
             for sub in sorted(d.iterdir()):
                 if (sub / "metrics.json").exists() and sub.name not in ids:
@@ -698,8 +698,8 @@ def main():
     agg = aggregate(rows, labels)
 
     chrome_versions = {(load_json(out / a.base / i / "metrics.json") or {}).get("version") for i in ids} - {None}
-    ns_versions = sorted({(load_json(out / l / i / "metrics.json") or {}).get("version")
-                          for l in labels for i in ids} - {None})
+    ns_versions = sorted({(load_json(out / label / i / "metrics.json") or {}).get("version")
+                          for label in labels for i in ids} - {None})
     meta = {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "chromeVersion": "Chrome " + ", ".join(sorted(chrome_versions)) if chrome_versions else "",
             "nsVersions": ns_versions, "viewport": a.viewport, "labels": labels}
@@ -707,9 +707,9 @@ def main():
                                          encoding="utf-8", errors="replace")
     write_markdown(rows, agg, labels, a.base, meta, report / "summary.md")
     write_html(rows, agg, labels, a.base, meta, report / "index.html")
-    for l in labels:
-        g = agg[l]
-        print(f"{l}: loaded {g['loaded']}/{g['sites']}, parity {g['parityMean']}, "
+    for label in labels:
+        g = agg[label]
+        print(f"{label}: loaded {g['loaded']}/{g['sites']}, parity {g['parityMean']}, "
               f"first paint ÷ FCP {fmt_ratio(g['firstRenderVsFcpGeomean'])}, "
               f"main CPU ÷ Chrome {fmt_ratio(g['mainThreadVsChromeGeomean'])}, "
               f"memory ÷ Chrome {fmt_ratio(g['memoryVsChromeGeomean'])}")
