@@ -29138,6 +29138,7 @@ static GHashTable    *g_id_keys;
 static gboolean       g_class_keys_loose;
 static gboolean       g_id_keys_loose;
 static GPtrArray     *g_has_anchors;
+static GPtrArray     *g_has_subject_anchors;
 static gboolean       g_has_cq_loose;
 static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
@@ -29157,14 +29158,29 @@ incr_mark_has_region(ns_node *anchor)
             g_hash_table_add(g_incr_dirty, n);
 }
 
+static GHashTable    *g_has_subject_docs;
+
+static void
+incr_defer_loose_has_subjects(ns_node *changed)
+{
+    if (!g_has_subject_anchors || g_has_subject_anchors->len == 0) return;
+    ns_node *doc = changed;
+    while (doc->parent) doc = doc->parent;
+    if (doc->kind != NS_NODE_DOCUMENT) return;
+    if (!g_has_subject_docs)
+        g_has_subject_docs = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(g_has_subject_docs, doc);
+}
+
 static void
 incr_mark_has_subjects(ns_node *changed)
 {
     if (!changed || !g_incr_eligible || g_has_cq_loose) return;
-    if (!g_has_anchors || g_has_anchors->len == 0)
-        return;
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    incr_defer_loose_has_subjects(changed);
+    if (!g_has_anchors || g_has_anchors->len == 0)
+        return;
     for (ns_node *a = changed; a; a = a->parent) {
         if (a->kind == NS_NODE_ELEMENT && incr_node_matches_has_cq(a))
             incr_mark_has_region(a);
@@ -29872,6 +29888,44 @@ incr_has_anchor_matches(const ns_node *n, const incr_has_anchor *a)
     return TRUE;
 }
 
+static void
+incr_mark_subject_candidates(GPtrArray *nodes, const incr_has_anchor *a)
+{
+    for (guint i = 0; nodes && i < nodes->len; i++) {
+        ns_node *n = g_ptr_array_index(nodes, i);
+        if (n && n->kind == NS_NODE_ELEMENT && incr_has_anchor_matches(n, a))
+            g_hash_table_add(g_incr_dirty, n);
+    }
+}
+
+static void
+incr_mark_loose_has_subjects(ns_node *doc)
+{
+    if (!g_has_subject_docs || !g_hash_table_remove(g_has_subject_docs, doc))
+        return;
+    if (!g_has_subject_anchors || g_has_subject_anchors->len == 0) return;
+    if (!g_incr_dirty)
+        g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (guint i = 0; i < g_has_subject_anchors->len; i++) {
+        const incr_has_anchor *a = g_ptr_array_index(g_has_subject_anchors, i);
+        if (a->classes->len > 0) {
+            if (!doc->class_index) ns_doc_class_index_build(doc);
+            incr_mark_subject_candidates(
+                ns_doc_class_index_lookup(doc,
+                                          g_ptr_array_index(a->classes, 0)),
+                a);
+        } else if (a->id) {
+            ns_node *n = ns_node_find_by_id(doc, a->id);
+            if (n && incr_has_anchor_matches(n, a))
+                g_hash_table_add(g_incr_dirty, n);
+        } else if (a->type) {
+            if (!doc->tag_index) ns_doc_tag_index_build(doc);
+            incr_mark_subject_candidates(ns_doc_tag_index_lookup(doc, a->type),
+                                         a);
+        }
+    }
+}
+
 static gboolean
 incr_node_matches_has_cq(const ns_node *n)
 {
@@ -30239,6 +30293,31 @@ static gboolean incr_collect_has_anchors_selector(const ns_css_selector *sel,
                                                   int depth);
 
 static gboolean
+incr_add_has_subject_anchor(const incr_has_ctx *at)
+{
+    const incr_has_ctx *top = at;
+    while (top->outer) top = top->outer;
+    if (!top->sel || !top->sel->compounds || top->sel->compounds->len == 0)
+        return FALSE;
+    const ns_css_simple *subject =
+        g_ptr_array_index(top->sel->compounds, top->sel->compounds->len - 1);
+    if (!subject || (!subject->id && !subject->type &&
+                     (!subject->classes || subject->classes->len == 0)))
+        return FALSE;
+    incr_has_anchor *a = incr_has_anchor_from_compound(subject);
+    if (!a) return FALSE;
+    if (!a->id && !a->type && a->classes->len == 0) {
+        incr_has_anchor_free(a);
+        return FALSE;
+    }
+    if (!g_has_subject_anchors)
+        g_has_subject_anchors =
+            g_ptr_array_new_with_free_func(incr_has_anchor_free);
+    g_ptr_array_add(g_has_subject_anchors, a);
+    return TRUE;
+}
+
+static gboolean
 incr_collect_has_anchors_simple(const incr_has_ctx *at, int depth)
 {
     const ns_css_simple *c = g_ptr_array_index(at->sel->compounds, at->idx);
@@ -30246,7 +30325,8 @@ incr_collect_has_anchors_simple(const incr_has_ctx *at, int depth)
     gboolean found = FALSE;
     if (c->has_groups && c->has_groups->len > 0) {
         found = TRUE;
-        if (!incr_add_has_anchor_deps(at, depth))
+        if (!incr_add_has_anchor_deps(at, depth) &&
+            !incr_add_has_subject_anchor(at))
             g_has_cq_loose = TRUE;
     }
     if (c->pseudos)
@@ -31938,6 +32018,8 @@ ns_css_compute(ns_node *doc,
             if (g_has_anchors) g_ptr_array_set_size(g_has_anchors, 0);
             else g_has_anchors =
                 g_ptr_array_new_with_free_func(incr_has_anchor_free);
+            if (g_has_subject_anchors)
+                g_ptr_array_set_size(g_has_subject_anchors, 0);
             if (g_has_serials) g_hash_table_remove_all(g_has_serials);
             else g_has_serials = g_hash_table_new_full(g_int64_hash,
                                                        g_int64_equal,
@@ -31968,6 +32050,7 @@ ns_css_compute(ns_node *doc,
         && g_css_fullscreen_node == g_incr_prev_fullscreen;
     g_incr_reused = 0;
     g_incr_recomputed = 0;
+    incr_mark_loose_has_subjects(doc);
 
     incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
 
