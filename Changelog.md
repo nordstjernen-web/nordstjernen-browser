@@ -3,6 +3,16 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU render pipelines honour their full state: stencil tests and
+  operations, depth bias (used against shadow acne), front-face winding,
+  strip index formats, unclipped depth, multisample masks and alpha-to-
+  coverage, and overridable shader constants. Vertex buffers can use
+  every WebGPU vertex format; previously anything but a few float and
+  uint32 formats was read as three floats, which scrambled packed
+  normals, colours and skinning weights. A shader stage without an
+  `entryPoint` uses its module's only entry point, and
+  `createRenderPipelineAsync()` and `createComputePipelineAsync()`
+  exist.
 * WebGPU render passes honour `setViewport()`, `setScissorRect()`,
   `setBlendConstant()` and `setStencilReference()`, which were ignored,
   so split views, UI overlays and the stencil effects of three.js draw
