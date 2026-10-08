@@ -1,4 +1,4 @@
-# WAMR (wasm-micro-runtime) — vendored subset, classic interpreter with
+# WAMR (wasm-micro-runtime) — vendored subset, fast interpreter with
 # reference-types + bulk-memory, exposed as the `libwamr` declared dependency.
 
 wamr_system = host_machine.system()
@@ -7,7 +7,7 @@ wamr_c_args = cc.get_supported_arguments(['-w']) + [
   '-DBH_MALLOC=wasm_runtime_malloc',
   '-DBH_FREE=wasm_runtime_free',
   '-DWASM_ENABLE_INTERP=1',
-  '-DWASM_ENABLE_FAST_INTERP=0',
+  '-DWASM_ENABLE_FAST_INTERP=1',
   '-DWASM_ENABLE_BULK_MEMORY=1',
   '-DWASM_ENABLE_REF_TYPES=1',
   '-DWASM_ENABLE_MODULE_INST_CONTEXT=1',
@@ -23,7 +23,7 @@ wamr_srcs = files(
   'core/iwasm/common/wasm_memory.c',
   'core/iwasm/common/wasm_native.c',
   'core/iwasm/common/wasm_runtime_common.c',
-  'core/iwasm/interpreter/wasm_interp_classic.c',
+  'core/iwasm/interpreter/wasm_interp_fast.c',
   'core/iwasm/interpreter/wasm_loader.c',
   'core/iwasm/interpreter/wasm_runtime.c',
   'core/shared/mem-alloc/ems/ems_alloc.c',
