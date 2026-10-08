@@ -80,33 +80,24 @@ runner and publishes it as the rolling `ios-sysroot-latest` release, which
 
 ## CI
 
-`.github/workflows/ios.yml`:
-
-- **engine-portability** — cross-checks every engine translation unit against
-  the real iOS SDK (device + simulator) on every push, catching iOS-portability
-  regressions early. Needs no sysroot; the iOS analogue of the Android source
-  check.
-- **app** — fetches the published sysroot, cross-compiles the engine for device
-  and simulator, and assembles the unsigned UIKit app for the iOS Simulator,
-  uploading the resulting `.app` as the `nordstjernen-ios-simulator-app`
-  artifact. (It still skips with a notice if the sysroot release is ever
-  unavailable.)
+iOS is not built in CI. The former `ios.yml` workflow (the engine iOS source
+check and the UIKit simulator app build) was removed; run the same steps by hand
+on a Mac when working on the port: `ios/scripts/check-ios-sources.sh` checks
+every engine translation unit against the iOS SDK, and `fetch-prebuilt-deps.sh`
+plus `build-engine.sh` and `xcodebuild` assemble the simulator app.
 
 ## Status
 
-- **Builds end-to-end in CI (macOS):** the published iOS dependency sysroot is
-  fetched and relocated to the runner, the engine cross-compiles to
+- **Built end-to-end on macOS (no longer in CI):** the published iOS
+  dependency sysroot is fetched and relocated, the engine cross-compiles to
   `libnordstjernen.a` for both device and simulator, and `xcodebuild` assembles
-  the unsigned UIKit app for the iOS Simulator — uploaded as the
-  `nordstjernen-ios-simulator-app` artifact. The engine iOS-portability source
-  check (device + simulator) also runs on every push.
+  the unsigned UIKit app for the iOS Simulator.
 - **Verified (Linux):** the GTK-free `is_mobile` engine build (engine library
   only under `-Dios=true`); the desktop build is unchanged by the refactor; the
   `TARGET_OS_IPHONE` sandbox guard.
 - **Not yet done:** a signed on-device build (needs a signing identity and a
   provisioning profile); booting and driving the app in a simulator, and
-  real-world browsing validation (CI builds the app but does not run it); App
-  Store submission.
+  real-world browsing validation; App Store submission.
 
 ## Distribution (future)
 
