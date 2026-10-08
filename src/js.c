@@ -66552,6 +66552,14 @@ ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data)
 }
 
 void
+ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->repaint_cb = cb;
+    js->repaint_user_data = user_data;
+}
+
+void
 ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
 {
     if (!js) return;

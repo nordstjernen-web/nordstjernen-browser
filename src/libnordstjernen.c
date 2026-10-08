@@ -80,6 +80,7 @@ struct ns_browser {
     gint64          load_delay_deadline_us;
     GHashTable     *img_requested;
     gboolean        dirty;
+    gboolean        repaint_requested;
     double          dppx;
     gboolean        cascade_dirty;
     gboolean        relaying;
@@ -927,6 +928,13 @@ browser_media_seek(const void *node, double seconds, gpointer ud)
 }
 
 static void
+browser_js_repaint(gpointer ud)
+{
+    ns_browser *b = ud;
+    if (b) b->repaint_requested = TRUE;
+}
+
+static void
 browser_media_play(const void *node, gboolean play, gpointer ud)
 {
     ns_browser *b = ud;
@@ -1297,6 +1305,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_image_cache(b->js, b->images);
         ns_js_set_anim(b->js, b->anim);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
+        ns_js_set_repaint_cb(b->js, browser_js_repaint, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style);
         ns_js_set_viewport_scroll_cb(b->js, browser_js_viewport_scroll, b);
@@ -1879,6 +1888,10 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     }
     browser_follow_scroll_anchor(browser);
     if (browser->pending_scroll) changed = TRUE;
+    if (browser->repaint_requested) {
+        browser->repaint_requested = FALSE;
+        changed = TRUE;
+    }
     (void)video_changed;
     (void)other_changed;
     if (!changed && browser->videos &&
@@ -1893,6 +1906,7 @@ ns_browser_animating(ns_browser *browser)
     if (!browser) return 0;
     if (browser->dirty) return 1;
     if (browser->hover_restyle_pending) return 1;
+    if (browser->repaint_requested) return 1;
     if (browser->refresh_due_us || browser->refresh_url) return 1;
     if (browser_images_outstanding(browser) > 0) return 1;
     if (browser->js && ns_js_has_pending_animation_frame(browser->js))
