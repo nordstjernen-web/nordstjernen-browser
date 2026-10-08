@@ -307,8 +307,16 @@ wg_limits_object(JSContext *ctx, const WGPULimits *l)
     JSValue o = JS_NewObject(ctx);
     for (size_t i = 0; i < G_N_ELEMENTS(wg_limit_fields); i++) {
         const char *field = (const char *)l + wg_limit_fields[i].offset;
-        double v = wg_limit_fields[i].wide ? (double)*(const uint64_t *)field
-                                           : (double)*(const uint32_t *)field;
+        double v;
+        if (wg_limit_fields[i].wide) {
+            uint64_t u;
+            memcpy(&u, field, sizeof u);
+            v = (double)u;
+        } else {
+            uint32_t u;
+            memcpy(&u, field, sizeof u);
+            v = (double)u;
+        }
         JS_DefinePropertyValueStr(ctx, o, wg_limit_fields[i].name,
                                   JS_NewFloat64(ctx, v), JS_PROP_ENUMERABLE);
     }
@@ -330,10 +338,13 @@ wg_read_required_limits(JSContext *ctx, JSValueConst v, WGPULimits *out)
         JS_FreeValue(ctx, jv);
         if (!(d >= 0)) continue;
         char *field = (char *)out + wg_limit_fields[i].offset;
-        if (wg_limit_fields[i].wide)
-            *(uint64_t *)field = d >= 1.8e19 ? UINT64_MAX - 1 : (uint64_t)d;
-        else
-            *(uint32_t *)field = d >= 4294967294.0 ? UINT32_MAX - 1 : (uint32_t)d;
+        if (wg_limit_fields[i].wide) {
+            uint64_t u = d >= 1.8e19 ? UINT64_MAX - 1 : (uint64_t)d;
+            memcpy(field, &u, sizeof u);
+        } else {
+            uint32_t u = d >= 4294967294.0 ? UINT32_MAX - 1 : (uint32_t)d;
+            memcpy(field, &u, sizeof u);
+        }
         any = TRUE;
     }
     return any;
@@ -1520,7 +1531,7 @@ wg_read_dynamic_offsets(JSContext *ctx, int argc, JSValueConst *argv,
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
         JS_FreeValue(ctx, abuf);
         if (!base || bpe != 4) return 0;
-        const uint32_t *data = (const uint32_t *)(base + view_off);
+        const uint8_t *data = base + view_off;
         size_t len = view_len / 4;
         int64_t start = 0, count = (int64_t)len;
         if (argc >= 4) JS_ToInt64(ctx, &start, argv[3]);
@@ -1528,7 +1539,7 @@ wg_read_dynamic_offsets(JSContext *ctx, int argc, JSValueConst *argv,
         if (start < 0 || count < 0 || (uint64_t)start + (uint64_t)count > len)
             return 0;
         if (count > NS_WG_MAX_DYNAMIC_OFFSETS) count = NS_WG_MAX_DYNAMIC_OFFSETS;
-        memcpy(out, data + start, (size_t)count * 4);
+        memcpy(out, data + (size_t)start * 4, (size_t)count * 4);
         return (size_t)count;
     }
     JS_FreeValue(ctx, JS_GetException(ctx));
@@ -3902,7 +3913,8 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
                 for (int x = 0; x < w; x++) {
                     uint8_t px[4];
                     if (half) {
-                        const uint16_t *hp = (const uint16_t *)(s + (size_t)x * 8);
+                        uint16_t hp[4];
+                        memcpy(hp, s + (size_t)x * 8, sizeof hp);
                         for (int k = 0; k < 4; k++) px[k] = wg_half_to_u8(hp[k]);
                     } else if (bgra) {
                         px[0] = s[x * 4 + 2]; px[1] = s[x * 4 + 1];
