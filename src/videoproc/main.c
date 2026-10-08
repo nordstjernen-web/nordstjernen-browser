@@ -106,6 +106,11 @@ local_path_for(const char *url)
     return url;
 }
 
+#define NS_VDEC_FRAME     1
+#define NS_VDEC_GREW      2
+#define NS_VDEC_WAITING   3
+#define NS_VDEC_GROWTH_WAIT_US 1000000
+
 typedef struct {
     AVFormatContext *fmt;
     AVCodecContext  *dec;
@@ -118,6 +123,10 @@ typedef struct {
     int64_t   known_size;
     double    default_duration;
     int       draining;
+    int64_t   eof_since_us;
+    int64_t   last_dts;
+    int64_t   resume_after_dts;
+    int       need_key;
 } ns_vdec;
 
 static int64_t
@@ -144,15 +153,34 @@ vdec_close(ns_vdec *d)
     memset(d, 0, sizeof *d);
 }
 
+static AVFormatContext *
+vdec_open_input(const char *path)
+{
+    AVFormatContext *fmt = NULL;
+    AVDictionary *opts = NULL;
+    av_dict_set(&opts, "protocol_whitelist", "file", 0);
+    int rc = avformat_open_input(&fmt, path, NULL, &opts);
+    av_dict_free(&opts);
+    return rc < 0 ? NULL : fmt;
+}
+
+static void
+vdec_forget_position(ns_vdec *d)
+{
+    d->draining = 0;
+    d->eof_since_us = 0;
+    d->last_dts = AV_NOPTS_VALUE;
+    d->resume_after_dts = AV_NOPTS_VALUE;
+    d->need_key = 0;
+}
+
 static int
 vdec_open(ns_vdec *d, const char *path, double *out_dur)
 {
     memset(d, 0, sizeof *d);
-    AVDictionary *opts = NULL;
-    av_dict_set(&opts, "protocol_whitelist", "file", 0);
-    int rc = avformat_open_input(&d->fmt, path, NULL, &opts);
-    av_dict_free(&opts);
-    if (rc < 0) return 0;
+    vdec_forget_position(d);
+    d->fmt = vdec_open_input(path);
+    if (!d->fmt) return 0;
     if (avformat_find_stream_info(d->fmt, NULL) < 0) { vdec_close(d); return 0; }
     d->stream = av_find_best_stream(d->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     if (d->stream < 0) { vdec_close(d); return 0; }
@@ -195,27 +223,79 @@ vdec_open(ns_vdec *d, const char *path, double *out_dur)
 }
 
 static int
+vdec_follow_growth(ns_vdec *d, const char *path)
+{
+    AVFormatContext *fmt = vdec_open_input(path);
+    if (!fmt) return 0;
+    if (d->stream >= (int)fmt->nb_streams ||
+        fmt->streams[d->stream]->codecpar->codec_id != d->dec->codec_id) {
+        avformat_close_input(&fmt);
+        return 0;
+    }
+    avformat_close_input(&d->fmt);
+    d->fmt = fmt;
+    d->known_size = file_size_of(path);
+    d->eof_since_us = 0;
+    if (d->draining) {
+        avcodec_flush_buffers(d->dec);
+        d->draining = 0;
+        d->need_key = 1;
+    }
+    if (d->last_dts != AV_NOPTS_VALUE) {
+        av_seek_frame(fmt, d->stream, d->last_dts, AVSEEK_FLAG_BACKWARD);
+        d->resume_after_dts = d->last_dts;
+    }
+    return 1;
+}
+
+static int
+vdec_packet_wanted(ns_vdec *d, const AVPacket *pkt)
+{
+    if (pkt->stream_index != d->stream) return 0;
+    if (d->resume_after_dts != AV_NOPTS_VALUE) {
+        if (pkt->dts != AV_NOPTS_VALUE && pkt->dts <= d->resume_after_dts)
+            return 0;
+        d->resume_after_dts = AV_NOPTS_VALUE;
+    }
+    if (d->need_key) {
+        if (!(pkt->flags & AV_PKT_FLAG_KEY)) return 0;
+        d->need_key = 0;
+    }
+    return 1;
+}
+
+static int
 vdec_next_frame(ns_vdec *d, const char *path)
 {
     while (1) {
         int rr = avcodec_receive_frame(d->dec, d->frame);
-        if (rr == 0) return 1;
+        if (rr == 0) return NS_VDEC_FRAME;
         if (d->draining)
-            return vdec_file_grew(d, path) ? 2 : 0;
+            return vdec_file_grew(d, path) ? NS_VDEC_GREW : 0;
         if (rr != AVERROR(EAGAIN) && rr != AVERROR_EOF) return -1;
 
         while (1) {
             rr = av_read_frame(d->fmt, d->pkt);
+            if (rr >= 0 && (d->pkt->flags & AV_PKT_FLAG_CORRUPT) &&
+                avio_feof(d->fmt->pb)) {
+                av_packet_unref(d->pkt);
+                rr = AVERROR_EOF;
+            }
             if (rr < 0) {
-                if (vdec_file_grew(d, path)) return 2;
+                if (vdec_file_grew(d, path)) return NS_VDEC_GREW;
+                if (!d->eof_since_us) d->eof_since_us = now_us();
+                if (now_us() - d->eof_since_us < NS_VDEC_GROWTH_WAIT_US)
+                    return NS_VDEC_WAITING;
                 avcodec_send_packet(d->dec, NULL);
                 d->draining = 1;
                 break;
             }
-            if (d->pkt->stream_index != d->stream) {
+            if (!vdec_packet_wanted(d, d->pkt)) {
                 av_packet_unref(d->pkt);
                 continue;
             }
+            if (d->pkt->dts != AV_NOPTS_VALUE) d->last_dts = d->pkt->dts;
+            d->eof_since_us = 0;
             rr = avcodec_send_packet(d->dec, d->pkt);
             av_packet_unref(d->pkt);
             if (rr < 0 && rr != AVERROR(EAGAIN)) return -1;
@@ -413,7 +493,9 @@ player_thread(void *ud)
 
         if (quit) break;
 
-        if (!opened || want_reopen) {
+        int followed = growth_reopen &&
+                       vdec_follow_growth(&d, local_path_for(path));
+        if (!followed && (!opened || want_reopen)) {
             vdec_close(&d);
             double dur = 0.0;
             opened = vdec_open(&d, local_path_for(path), &dur);
@@ -455,7 +537,7 @@ player_thread(void *ud)
             int64_t ts = (int64_t)(seek_to / av_q2d(d.tb));
             av_seek_frame(d.fmt, d.stream, ts, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(d.dec);
-            d.draining = 0;
+            vdec_forget_position(&d);
             double clock_position = growth_reopen ? keep : seek_to;
             pthread_mutex_lock(&p->lock);
             p->cur = clock_position;
@@ -478,7 +560,7 @@ player_thread(void *ud)
         pthread_mutex_unlock(&p->lock);
 
         int rr = vdec_next_frame(&d, local_path_for(path));
-        if (rr == 2) {
+        if (rr == NS_VDEC_GREW) {
             pthread_mutex_lock(&p->lock);
             p->want_reopen = 1;
             pthread_mutex_unlock(&p->lock);
@@ -486,7 +568,7 @@ player_thread(void *ud)
             stalled_reported = 0;
             continue;
         }
-        if (rr <= 0) {
+        if (rr != NS_VDEC_FRAME) {
             if (!eof_since) eof_since = now_us();
             uint32_t published = __atomic_load_n(&p->ring->published,
                                                   __ATOMIC_ACQUIRE);
@@ -497,7 +579,8 @@ player_thread(void *ud)
                 emit("stalled %s", p->token);
                 stalled_reported = 1;
             }
-            msleep(published - released > 1u ? 5 : 50);
+            msleep(rr == NS_VDEC_WAITING || published - released > 1u
+                   ? 5 : 50);
             continue;
         }
 
