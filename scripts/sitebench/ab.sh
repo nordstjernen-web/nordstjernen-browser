@@ -6,6 +6,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 OUT=${OUT:-$ROOT/sitebench-out/ab}
 RUNS=${RUNS:-3}
+VISUAL_RUNS=${VISUAL_RUNS:-3}
 VIEWPORT=${VIEWPORT:-1280x800}
 SITES=${SITES:-$HERE/sites.tsv}
 BEFORE_LABEL=${BEFORE_LABEL:-before}
@@ -26,6 +27,7 @@ interrupted run can be resumed by running it again.
 environment:
   OUT=DIR            capture + report root (default: sitebench-out/ab)
   RUNS=N             cold load runs per site and browser (default: 3)
+  VISUAL_RUNS=N      settled loads per site and browser that are scored (default: 3)
   VIEWPORT=WxH       viewport for both browsers (default: 1280x800)
   SITES=FILE         site list (default: scripts/sitebench/sites.tsv)
   BEFORE_LABEL=NAME  label of the first build (default: before)
@@ -69,12 +71,14 @@ EOF
 
 for id in $ids; do
     echo "== $id"
-    node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --viewport="$VIEWPORT" \
-        --only="$id" --skip-existing --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"}
+    node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --visual-runs="$VISUAL_RUNS" \
+        --viewport="$VIEWPORT" --only="$id" --skip-existing --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"}
     python3 "$HERE/ns-capture.py" --bin="${BINS[0]}" --out="$OUT" --label="$BEFORE_LABEL" \
-        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing --sites="$SITES"
+        --runs="$RUNS" --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" \
+        --skip-existing --sites="$SITES"
     python3 "$HERE/ns-capture.py" --bin="${BINS[1]}" --out="$OUT" --label="$AFTER_LABEL" \
-        --runs="$RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" --skip-existing --sites="$SITES"
+        --runs="$RUNS" --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" \
+        --skip-existing --sites="$SITES"
 done
 
 python3 "$HERE/compare.py" --out="$OUT" --labels="$BEFORE_LABEL,$AFTER_LABEL" \

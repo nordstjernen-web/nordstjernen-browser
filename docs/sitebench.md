@@ -54,11 +54,14 @@ of one checkout apart, since `git describe` describes the checkout's
 current HEAD, which need not be what the binary was built from.
 
 Settings come from the environment: `RUNS` (cold loads per site and
-browser, medians are reported; default 3), `VIEWPORT` (default
-`1280x800`), `OUT` (default `sitebench-out`), `SITES` (the site list;
-default `sites.tsv`), `NS_LOCALE` (the locale Nordstjernen runs under,
-see below; default `en_US.UTF-8`). The three steps can also be run on
-their own; each has `--help`.
+browser, medians are reported; default 3), `VISUAL_RUNS` (settled loads
+per site and browser whose screenshot and probe are kept and scored;
+default 3), `VIEWPORT` (default `1280x800`), `OUT` (default
+`sitebench-out`), `SITES` (the site list; default `sites.tsv`),
+`NS_LOCALE` (the locale Nordstjernen runs under, see below; default
+`en_US.UTF-8`). The three steps can also be run on their own; each has
+`--help`, and the capture scripts take `--runs` and `--visual-runs`
+(both default 1).
 
 To use an installed Google Chrome instead of Playwright's Chromium, set
 `CHROME_CHANNEL=chrome` (or `CHROME_EXECUTABLE=PATH` for a given Chrome
@@ -92,6 +95,12 @@ their geometry, font size, weight, family and colours.
   stays empty);
 - requests, bytes per resource type, failed requests, console errors.
 
+The screenshots and the probe come from Chrome's first `VISUAL_RUNS`
+cold loads: the first load also takes the full page and the filmstrip,
+the others only the viewport. When `VISUAL_RUNS` is above `RUNS`,
+Chrome loads the site that many times, and its medians still cover only
+the first `RUNS` loads.
+
 **Nordstjernen** (`ns-capture.py`, headless mode):
 
 - `RUNS` cold loads with `--settle-ms=0 --timing`: the time to the first
@@ -100,11 +109,24 @@ their geometry, font size, weight, family and colours.
   time until that frame's images are in, each phase (fetch, parse,
   cascade, parser-blocking scripts, layout, image decode, paint), network
   wait, process CPU time and peak RSS;
-- one settled load (`--settle-ms=2000 --time-ms=1000`) for the
-  screenshots, the probe, main-thread CPU over the whole load, and the JS
-  errors reported on stderr. As in the browser window, images are fetched
-  while the page settles, as each new layout asks for them, and their
-  `load` events fire as they arrive.
+- `VISUAL_RUNS` settled loads (`--settle-ms=2000 --time-ms=1000`) for
+  the screenshots and the probe; the first also gives main-thread CPU
+  over the whole load and the JS errors reported on stderr. As in the
+  browser window, images are fetched while the page settles, as each new
+  layout asks for them, and their `load` events fire as they arrive.
+
+Each browser keeps its first visual run where a single run has always
+gone (`viewport.png`, `full.png` and `probe.json` in the site's
+directory). Every further run writes its `viewport.png` and `probe.json`,
+and Nordstjernen's `stderr.log`, to `visual-2/`, `visual-3/` and so on
+in the same directory, without a full-page screenshot; `metrics.json`
+records the count under `settings.visualRuns`. Each run past the first
+costs Nordstjernen one more settled load per site and build, 5 to 20 s
+on an Apple M2 with a median of 7.6 s (10 to 39 s, median 15 s, for the
+two extra runs of the default), and adds 0.1 to 0.6 MB per site and
+browser. Chrome takes its visual runs from loads it makes anyway for
+`RUNS`, so with the defaults its extra cost is one viewport screenshot
+per run.
 
 On Linux and macOS both browsers run in US English, whatever the host's
 locale: Chrome with the `en-US` locale and Nordstjernen under

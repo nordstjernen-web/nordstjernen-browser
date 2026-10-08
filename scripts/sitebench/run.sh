@@ -8,6 +8,7 @@ OUT=${OUT:-$ROOT/sitebench-out}
 LABEL=${LABEL:-nordstjernen}
 LABELS=${LABELS:-$LABEL}
 RUNS=${RUNS:-3}
+VISUAL_RUNS=${VISUAL_RUNS:-3}
 VIEWPORT=${VIEWPORT:-1280x800}
 SITES=${SITES:-$HERE/sites.tsv}
 CHROME=${CHROME:-auto}
@@ -26,6 +27,7 @@ environment:
   LABEL=NAME     label for this Nordstjernen capture (default: nordstjernen)
   LABELS=a,b     labels to compare in the report, oldest first (default: \$LABEL)
   RUNS=N         cold load runs per site and browser, medians reported (default: 3)
+  VISUAL_RUNS=N  settled loads per site and browser that are scored (default: 3)
   VIEWPORT=WxH   viewport for both browsers (default: 1280x800)
   SITES=FILE     site list (default: scripts/sitebench/sites.tsv)
   CHROME=auto|1|0  capture Chrome: only when missing (auto), always (1), never (0)
@@ -51,14 +53,14 @@ mkdir -p "$OUT"
 if [ "$CHROME" != 0 ]; then
     skip=()
     [ "$CHROME" = auto ] && skip=(--skip-existing)
-    node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --viewport="$VIEWPORT" \
-        --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"} ${skip[@]+"${skip[@]}"} \
-        ${FILTER[@]+"${FILTER[@]}"}
+    node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --visual-runs="$VISUAL_RUNS" \
+        --viewport="$VIEWPORT" --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"} \
+        ${skip[@]+"${skip[@]}"} ${FILTER[@]+"${FILTER[@]}"}
 fi
 
 if [ "$NS" != 0 ]; then
     python3 "$HERE/ns-capture.py" --out="$OUT" --label="$LABEL" --runs="$RUNS" \
-        --viewport="$VIEWPORT" --sites="$SITES" ${FILTER[@]+"${FILTER[@]}"}
+        --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --sites="$SITES" ${FILTER[@]+"${FILTER[@]}"}
 fi
 
 python3 "$HERE/compare.py" --out="$OUT" --labels="$LABELS" --viewport="$VIEWPORT"
