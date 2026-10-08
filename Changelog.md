@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* WebGL points take their size from `gl_PointSize`. On desktop OpenGL
+  the vertex shader's point size is ignored unless `PROGRAM_POINT_SIZE`
+  is enabled, and compatibility contexts also need `POINT_SPRITE` for
+  `gl_PointCoord`; WebGL and OpenGL ES always behave as if both were on.
+  Neither was enabled, so every particle drew as a single pixel sampled
+  at one texel and most point-sprite scenes came out empty
+  (`webgl_points_waves`, `webgl_custom_attributes_points`,
+  `webgl_interactive_points`). Both are now enabled when a desktop GL
+  context is created.
 * Worker messages may be up to 256 MiB. `postMessage()` between a page
   and its workers threw `DataCloneError: message is too large` above
   16 MiB, which a decoded mesh easily exceeds: three.js's Draco decoder
