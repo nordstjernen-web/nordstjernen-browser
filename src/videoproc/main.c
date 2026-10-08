@@ -189,8 +189,13 @@ vdec_open(ns_vdec *d, const char *path, double *out_dur)
     if (!codec) { vdec_close(d); return 0; }
     d->dec = avcodec_alloc_context3(codec);
     if (!d->dec ||
-        avcodec_parameters_to_context(d->dec, vs->codecpar) < 0 ||
-        avcodec_open2(d->dec, codec, NULL) < 0) {
+        avcodec_parameters_to_context(d->dec, vs->codecpar) < 0) {
+        vdec_close(d);
+        return 0;
+    }
+    d->dec->thread_count = 0;
+    d->dec->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    if (avcodec_open2(d->dec, codec, NULL) < 0) {
         vdec_close(d);
         return 0;
     }
