@@ -1568,8 +1568,21 @@ anim_prop_needs_relayout(int prop)
            prop != NS_CSS_COLOR && prop != NS_CSS_BACKGROUND_COLOR;
 }
 
-gboolean
-ns_anim_needs_layout(const ns_anim *a)
+static gboolean
+anim_prop_paint_only(int prop)
+{
+    return prop == NS_CSS_OPACITY || prop == NS_CSS_COLOR ||
+           prop == NS_CSS_BACKGROUND_COLOR;
+}
+
+static gboolean
+anim_prop_moves_boxes(int prop)
+{
+    return !anim_prop_paint_only(prop);
+}
+
+static gboolean
+anim_any_active_prop(const ns_anim *a, gboolean (*match)(int prop))
 {
     if (!a || !a->active) return FALSE;
     GHashTableIter it;
@@ -1580,7 +1593,7 @@ ns_anim_needs_layout(const ns_anim *a)
         if (s->chans)
             for (guint i = 0; i < s->chans->len; i++) {
                 const ns_anim_chan *ch = s->chans->pdata[i];
-                if (ch->active && anim_prop_needs_relayout(ch->prop))
+                if (ch->active && match(ch->prop))
                     return TRUE;
             }
         for (int w = 0; w < 2; w++) {
@@ -1593,16 +1606,29 @@ ns_anim_needs_layout(const ns_anim *a)
                 if (r->partials) {
                     g_hash_table_iter_init(&vit, r->partials);
                     while (g_hash_table_iter_next(&vit, &vk, &vv))
-                        if (anim_prop_needs_relayout(GPOINTER_TO_INT(vk))) return TRUE;
+                        if (match(GPOINTER_TO_INT(vk))) return TRUE;
                 }
                 if (!r->values) continue;
                 g_hash_table_iter_init(&vit, r->values);
                 while (g_hash_table_iter_next(&vit, &vk, &vv))
-                    if (anim_prop_needs_relayout(GPOINTER_TO_INT(vk))) return TRUE;
+                    if (match(GPOINTER_TO_INT(vk))) return TRUE;
             }
         }
     }
     return FALSE;
+}
+
+gboolean
+ns_anim_needs_layout(const ns_anim *a)
+{
+    return anim_any_active_prop(a, anim_prop_needs_relayout);
+}
+
+gboolean
+ns_anim_paint_only(const ns_anim *a)
+{
+    return ns_anim_has_active(a) &&
+           !anim_any_active_prop(a, anim_prop_moves_boxes);
 }
 
 static const ns_css_value *

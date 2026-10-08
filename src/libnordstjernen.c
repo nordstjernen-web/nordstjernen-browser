@@ -82,6 +82,7 @@ struct ns_browser {
     gboolean        dirty;
     double          dppx;
     gboolean        cascade_dirty;
+    gboolean        anim_paint_dirty;
     gboolean        relaying;
     char           *pending_nav;
     gboolean        soft_nav_pushed;
@@ -249,6 +250,7 @@ browser_relayout(ns_browser *b)
     if (b->relaying) { b->dirty = TRUE; return; }
     b->relaying = TRUE;
     b->cascade_dirty = FALSE;
+    b->anim_paint_dirty = FALSE;
     if (b->js)
         (void)ns_js_consume_mutated(b->js);
     b->image_arrivals_since_layout = 0;
@@ -316,6 +318,15 @@ browser_relayout(ns_browser *b)
     }
     b->layout_sig[1] = b->layout_sig[0];
     b->layout_sig[0] = sig;
+}
+
+static void
+browser_note_anim_tick(ns_browser *b)
+{
+    if (ns_anim_paint_only(b->anim))
+        b->anim_paint_dirty = TRUE;
+    else
+        b->cascade_dirty = TRUE;
 }
 
 static gboolean
@@ -505,7 +516,8 @@ browser_flush_style(gpointer user_data)
     }
     if (ns_js_consume_mutated(b->js))
         b->dirty = TRUE;
-    if (!b->cascade_dirty && b->styles_serial == ns_js_mutation_serial(b->js))
+    if (!b->cascade_dirty && !b->anim_paint_dirty &&
+        b->styles_serial == ns_js_mutation_serial(b->js))
         return;
     b->relaying = TRUE;
     ns_css_set_viewport((double)b->vw, b->vh);
@@ -524,6 +536,7 @@ browser_flush_style(gpointer user_data)
     b->styles = fresh;
     b->styles_serial = ns_js_mutation_serial(b->js);
     b->cascade_dirty = FALSE;
+    b->anim_paint_dirty = FALSE;
     b->dirty = TRUE;
 }
 
@@ -743,7 +756,7 @@ settle_tick_cb(gpointer user_data)
         ns_video_cache_tick(b->videos, now);
     }
     if (b->anim && ns_anim_tick(b->anim, now)) {
-        b->cascade_dirty = TRUE;
+        browser_note_anim_tick(b);
         if (ns_anim_needs_layout(b->anim)) b->dirty = TRUE;
     }
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
@@ -1838,7 +1851,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (browser->anim && ns_anim_tick(browser->anim, now)) {
             changed = TRUE;
             other_changed = TRUE;
-            browser->cascade_dirty = TRUE;
+            browser_note_anim_tick(browser);
             if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
         }
         if (browser->anim && browser->js)
