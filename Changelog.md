@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* WebAssembly runs on WAMR's fast interpreter instead of its classic
+  one, many times faster: three.js's `webgpu_loader_gltf_compressed`
+  model (Meshopt geometry, five KTX2 textures transcoded by the Basis
+  wasm module) loads in about one second instead of 27, and
+  `webgl_loader_ifc`, whose web-ifc parse used to run into the script
+  time limit, now shows its building. The fast interpreter precompiles
+  each function into a register-based form at load time; the WebAssembly
+  JavaScript API tests pass exactly as before.
 * An antialiased WebGL canvas shows everything drawn to it when the page
   leaves the scissor test on. The canvas renders into a multisampled
   buffer that is resolved with a framebuffer blit before it is shown or
