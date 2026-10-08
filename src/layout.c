@@ -14719,6 +14719,7 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_svg_defs_computed_for_layout = FALSE;
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
+    ns_paint_i18n_memo_begin();
     ns_box *root = ns_layout_build_(doc, styles, viewport_width);
     if (!g_input_columns_for_layout) {
         GHashTable *cols = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -14744,6 +14745,7 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
         g_counters_for_layout = NULL;
     }
     record_frame_viewports(root);
+    ns_paint_i18n_memo_end();
     return root;
 }
 

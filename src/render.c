@@ -40,6 +40,7 @@ ns_render_page_rule(void)
 typedef struct render_font_usage {
     GArray *codepoints;
     GHashTable *seen;
+    guint64 ascii_seen[2];
 } render_font_usage;
 
 static void
@@ -97,11 +98,39 @@ render_font_usage_add_text(render_font_usage *usage, const char *text)
             p++;
             continue;
         }
+        if (cp < 128) {
+            guint64 bit = G_GUINT64_CONSTANT(1) << (cp & 63);
+            if (usage->ascii_seen[cp >> 6] & bit) {
+                p++;
+                continue;
+            }
+            usage->ascii_seen[cp >> 6] |= bit;
+        }
         gpointer key = GUINT_TO_POINTER(cp + 1u);
         if (g_hash_table_add(usage->seen, key))
             g_array_append_val(usage->codepoints, cp);
         p = g_utf8_next_char(p);
     }
+}
+
+static __thread GHashTable *g_font_list_matches;
+
+static GPtrArray *
+render_font_list_matches(const char *list, GHashTable *families)
+{
+    GPtrArray *hit = g_font_list_matches
+        ? g_hash_table_lookup(g_font_list_matches, list) : NULL;
+    if (hit) return hit;
+    hit = g_ptr_array_new();
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init(&iter, families);
+    while (g_hash_table_iter_next(&iter, &key, &val))
+        if (render_font_list_contains(list, key))
+            g_ptr_array_add(hit, val);
+    if (g_font_list_matches)
+        g_hash_table_insert(g_font_list_matches, (gpointer)list, hit);
+    return hit;
 }
 
 static void
@@ -112,13 +141,11 @@ render_font_usage_add_styled(const ns_style *style, const char *text,
         ? style->values[NS_CSS_FONT_FAMILY] : NULL;
     const char *list = value && value->kind == NS_CSS_V_KEYWORD
         ? value->u.keyword : NULL;
-    if (!list) return;
-    GHashTableIter iter;
-    gpointer key, val;
-    g_hash_table_iter_init(&iter, families);
-    while (g_hash_table_iter_next(&iter, &key, &val))
-        if (render_font_list_contains(list, key))
-            render_font_usage_add_text(val, text);
+    if (!list || g_hash_table_size(families) == 0) return;
+    GPtrArray *matches = render_font_list_matches(list, families);
+    for (guint i = 0; i < matches->len; i++)
+        render_font_usage_add_text(g_ptr_array_index(matches, i), text);
+    if (!g_font_list_matches) g_ptr_array_free(matches, TRUE);
 }
 
 static void
@@ -266,7 +293,11 @@ render_request_fonts(const ns_render_ctx *c, GHashTable *styles)
             g_hash_table_insert(families, g_strdup(ff->family), usage);
         }
     }
+    g_font_list_matches = g_hash_table_new_full(
+        g_direct_hash, g_direct_equal, NULL,
+        (GDestroyNotify)g_ptr_array_unref);
     render_collect_font_usage(c->doc, styles, families);
+    g_clear_pointer(&g_font_list_matches, g_hash_table_destroy);
     for (guint i = 0; i < c->n_sheets; i++) {
         const ns_css_stylesheet *sh = c->sheets[i];
         if (!sh || !sh->font_faces) continue;

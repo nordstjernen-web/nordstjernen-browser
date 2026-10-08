@@ -2064,6 +2064,58 @@ find_ci_substring(const char *hay, gsize hay_len,
     return (gsize)-1;
 }
 
+typedef struct {
+    const char *lang;
+    const char *xml_lang;
+    const char *dir;
+} paint_i18n_attrs;
+
+static __thread GHashTable *g_i18n_memo;
+
+void
+ns_paint_i18n_memo_begin(void)
+{
+    if (g_i18n_memo) g_hash_table_remove_all(g_i18n_memo);
+    else g_i18n_memo = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                             NULL, g_free);
+}
+
+void
+ns_paint_i18n_memo_end(void)
+{
+    g_clear_pointer(&g_i18n_memo, g_hash_table_destroy);
+}
+
+static const char *
+own_attr_nonempty(const ns_node *n, const char *attr)
+{
+    const char *v = ns_element_get_attr(n, attr);
+    return v && *v ? v : NULL;
+}
+
+static const paint_i18n_attrs *
+paint_i18n_attrs_for(const ns_node *n)
+{
+    paint_i18n_attrs *hit = g_hash_table_lookup(g_i18n_memo, n);
+    if (hit) return hit;
+    const paint_i18n_attrs *up = NULL;
+    for (const ns_node *p = n->parent; p && !up; p = p->parent)
+        if (p->kind == NS_NODE_ELEMENT) up = paint_i18n_attrs_for(p);
+    paint_i18n_attrs *a = g_new0(paint_i18n_attrs, 1);
+    if (n->kind == NS_NODE_ELEMENT) {
+        a->lang = own_attr_nonempty(n, "lang");
+        a->xml_lang = own_attr_nonempty(n, "xml:lang");
+        a->dir = own_attr_nonempty(n, "dir");
+    }
+    if (up) {
+        if (!a->lang) a->lang = up->lang;
+        if (!a->xml_lang) a->xml_lang = up->xml_lang;
+        if (!a->dir) a->dir = up->dir;
+    }
+    g_hash_table_insert(g_i18n_memo, (gpointer)n, a);
+    return a;
+}
+
 static const char *
 nearest_node_attr(const ns_node *n, const char *attr)
 {
@@ -2263,8 +2315,12 @@ ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
         ih->end_index   = G_MAXUINT;
         ns_pango_attr_list_insert(attrs, ih);
     }
-    const char *lang = dn ? nearest_node_attr(dn, "lang") : NULL;
-    if (!lang && dn) lang = nearest_node_attr(dn, "xml:lang");
+    const paint_i18n_attrs *memo = dn && g_i18n_memo
+        ? paint_i18n_attrs_for(dn) : NULL;
+    const char *lang = memo ? memo->lang
+                     : dn ? nearest_node_attr(dn, "lang") : NULL;
+    if (!lang && dn)
+        lang = memo ? memo->xml_lang : nearest_node_attr(dn, "xml:lang");
     if (lang && attrs) {
         NsPangoAttribute *a = ns_pango_attr_language_new(
             ns_pango_language_from_string(lang));
@@ -2272,7 +2328,8 @@ ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
         a->end_index   = G_MAXUINT;
         ns_pango_attr_list_insert(attrs, a);
     }
-    const char *dir = dn ? nearest_node_attr(dn, "dir") : NULL;
+    const char *dir = memo ? memo->dir
+                    : dn ? nearest_node_attr(dn, "dir") : NULL;
     NsPangoDirection bd = NS_PANGO_DIRECTION_NEUTRAL;
     if (dir) {
         if (g_ascii_strcasecmp(dir, "rtl") == 0) bd = NS_PANGO_DIRECTION_RTL;
