@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* A YouTube video no longer skips its first seconds. The window took
+  frames from the video helper only while drawing the video, and while
+  the page was still loading it drew no page layers and so no video.
+  The helper's eight-frame queue filled, its clock kept running, and
+  when the page appeared about two seconds of video were dropped at
+  once. The window now takes the current frame on every display tick,
+  whether or not it draws.
 * YouTube's player controls work while a video plays. When the video
   helper was playing, the window ignored the page changes the renderer
   reported and repainted the page only every 300 frames (2.5 to 5

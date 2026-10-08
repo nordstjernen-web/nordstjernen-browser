@@ -1079,6 +1079,8 @@ static void print_run(NsProcView *v, GPtrArray *pages,
 static void request_tick(NsProcView *v);
 static void push_req(NsProcView *v, Req *req);
 
+static GdkTexture *pv_video_frame_texture(NsProcView *v);
+
 static gboolean
 pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
@@ -1088,6 +1090,7 @@ pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
         v->vid_tick_id = 0;
         return G_SOURCE_REMOVE;
     }
+    pv_video_frame_texture(v);
     gtk_widget_queue_draw(widget);
     v->vid_tick_count++;
     request_tick(v);
