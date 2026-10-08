@@ -3,6 +3,15 @@ Changelog:
 
 1.0.31:
 ======
+* Builds with the nghttp2 HTTP backend (`-Dhttp_backend=nghttp2`) follow
+  the cookie settings and learn HSTS. That backend sent and stored
+  cookies on every request, so cross-site requests carried the user's
+  session cookies and third parties could set cookies whatever the
+  cookie policy said, and it ignored `Strict-Transport-Security`, so
+  http:// links to HSTS sites were never upgraded. It now attaches and
+  stores cookies only when the policy allows them for the request, and
+  records HSTS from verified HTTPS responses in the same store the curl
+  backend uses.
 * `EventSource` follows CORS. A page could open an event stream on any
   other origin, including services on localhost or the local network,
   and read every event; a cross-origin stream now opens only when the

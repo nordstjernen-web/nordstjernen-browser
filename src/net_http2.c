@@ -351,6 +351,12 @@ struct ns_conn {
 #define NS_POOL_MAX_PER_ORIGIN 8
 #define NS_H2_MAX_HEADER_BYTES (1024 * 1024)
 
+static gboolean
+ns_h2_connection_verified(const ns_h2 *c)
+{
+    return !(c->conn && c->conn->insecure) && !(c->out && c->out->tls_warning);
+}
+
 static void ns_h3_altsvc_note(const char *url, const char *value, size_t vlen);
 #ifdef NS_HTTP_HAVE_HTTP3
 static gboolean ns_h3_should_try(const char *origin);
@@ -886,13 +892,21 @@ ns_h2_on_response_header(ns_h2 *c, const char *name, size_t namelen,
         else if (valuelen == 4 && g_ascii_strncasecmp(value, "zstd", 4) == 0)
             c->encoding = NS_ENC_ZSTD;
     }
-    if (namelen == 10 && g_ascii_strncasecmp(name, "set-cookie", 10) == 0) {
+    if (namelen == 10 && g_ascii_strncasecmp(name, "set-cookie", 10) == 0 &&
+        c->req->cookie_jar_path) {
         char *v = g_strndup(value, valuelen);
         ns_net_store_set_cookie(c->url, v);
         g_free(v);
     }
     if (namelen == 7 && g_ascii_strncasecmp(name, "alt-svc", 7) == 0)
         ns_h3_altsvc_note(c->url, value, valuelen);
+    if (namelen == 25 &&
+        g_ascii_strncasecmp(name, "strict-transport-security", 25) == 0 &&
+        ns_h2_connection_verified(c)) {
+        char *v = g_strndup(value, valuelen);
+        ns_net_hsts_note(c->url, v);
+        g_free(v);
+    }
     char *line = g_strdup_printf("%.*s: %.*s\r\n", (int)namelen, name,
                                  (int)valuelen, value);
     ns_header_sink_feed(c->hctx, line, strlen(line));
@@ -1101,7 +1115,8 @@ ns_h2_submit_locked(ns_conn *conn, ns_h2 *c)
     if (c->req->referer && *c->req->referer)
         ns_h2_add_nv(nva, "referer", c->req->referer);
 
-    char *cookie = ns_net_cookies_for_request(c->url);
+    char *cookie = c->req->cookie_jar_path
+        ? ns_net_cookies_for_request(c->url) : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);
         ns_h2_add_nv(nva, "cookie", cookie);
@@ -1330,7 +1345,8 @@ ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
                            ns_h2_accept_encoding());
     if (c->req->referer && *c->req->referer)
         g_string_append_printf(reqs, "Referer: %s\r\n", c->req->referer);
-    char *cookie = ns_net_cookies_for_request(c->url);
+    char *cookie = c->req->cookie_jar_path
+        ? ns_net_cookies_for_request(c->url) : NULL;
     if (cookie) {
         g_string_append_printf(reqs, "Cookie: %s\r\n", cookie);
         g_free(cookie);
@@ -1421,7 +1437,13 @@ ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
                     clen = g_ascii_strtoll(cl, NULL, 10);
                     have_clen = clen >= 0;
                     g_free(cl);
-                } else if (nlen == 10 &&
+                } else if (nlen == 25 && ns_h2_connection_verified(c) &&
+                    g_ascii_strncasecmp(line, "strict-transport-security",
+                                        25) == 0) {
+                    char *sv = g_strndup(val, vlen);
+                    ns_net_hsts_note(c->url, sv);
+                    g_free(sv);
+                } else if (nlen == 10 && c->req->cookie_jar_path &&
                     g_ascii_strncasecmp(line, "set-cookie", 10) == 0) {
                     char *cv = g_strndup(val, vlen);
                     ns_net_store_set_cookie(c->url, cv);
@@ -2332,7 +2354,8 @@ ns_h3_setup(ns_h3 *h, const char *authority, const char *path,
     NS_H3_ADD("accept-encoding", ns_h2_accept_encoding());
     if (c->req->referer && *c->req->referer)
         NS_H3_ADD("referer", c->req->referer);
-    char *cookie = ns_net_cookies_for_request(c->url);
+    char *cookie = c->req->cookie_jar_path
+        ? ns_net_cookies_for_request(c->url) : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);
         NS_H3_ADD("cookie", cookie);
