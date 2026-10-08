@@ -141,6 +141,13 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Blurred shadows paint up to 16 times faster. Inset shadows now blur
+  a strip of the box and stretch its uniform middle, as outer shadows
+  already did, instead of blurring the full box - Reddit draws one on a
+  1280x2300 element - and the blur's vertical pass runs along rows
+  instead of down columns. A page of assorted inset and outer shadows
+  paints in 49 ms instead of 801 ms, pixel for pixel the same, and
+  Reddit's paint time drops from 1.3 s to 0.1 s.
 * A web component whose host is `display: inline-block`, `inline-flex`
   or `inline-grid` sits in the line like any inline block. Elements with
   a shadow root were treated as blocks whenever their display generated
