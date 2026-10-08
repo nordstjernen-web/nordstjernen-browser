@@ -85,6 +85,11 @@ Changelog:
   rescanning the text. Custom-property reads on long styles go through
   a per-string index, and other reads are memoized; Twitch's headless
   CPU time drops from 22-26 s to about 17 s.
+* Inset box shadows are drawn as specified: inside the padding box, with
+  the offset and spread shaping the unshadowed hole, its corners
+  following the shrunken radii, and blur softening the edge. They were a
+  fixed 4px stroke along the border edge that ignored spread, so the
+  common `inset 0 0 0 1px` focus or field ring came out 2px wide.
 * `text-decoration: inherit` works, so Tailwind's preflight removes the
   underline from links (Yahoo's navigation and headlines were all
   underlined), and outlines follow `border-radius` like Chrome's (pill
