@@ -1,23 +1,31 @@
 name: release
 
+# The repository has immutable releases enabled: once a release is published
+# nothing can be attached to it. So the packages are built from a pushed
+# version tag and attached to a *draft* release, which is published by hand
+# after review. Push the tag (git push origin 1.2.3) and do not publish a
+# release for it yourself; this workflow creates the draft, or fills one that
+# was saved as a draft for the tag.
+
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to build Linux packages for
+        description: Existing tag to build Linux packages and a draft release for
         required: true
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
-  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   linux:
@@ -96,7 +104,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Attach to the release
+    name: Attach to a draft release
     needs: linux
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -104,6 +112,13 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          sparse-checkout: Changelog.md
+          sparse-checkout-cone-mode: false
+
       - name: Download packages
         uses: actions/download-artifact@v8
         with:
@@ -111,12 +126,38 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Upload release assets
+      - name: Release notes from the changelog
+        run: |
+          awk -v tag="$TAG" '
+            $0 == tag ":" { take = 1; getline; next }
+            take && /^[0-9]+\.[0-9]+\.[0-9]+:$/ { exit }
+            take { print }
+          ' Changelog.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Nordstjernen $TAG" > release-notes.md
+          fi
+
+      - name: Create or fill the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
           sha256sum -- *.deb *.zip > SHA256SUMS
           cat SHA256SUMS
-          gh release upload "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
-            --clobber --repo "$GITHUB_REPOSITORY"
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+                       --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::Release $TAG is already published. Releases are" \
+                   "immutable here, so its packages can no longer be attached." \
+                   "Push the tag and let this workflow create the draft, then" \
+                   "publish the draft."
+              exit 1
+            fi
+            gh release upload "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
+              --draft --verify-tag --title "$TAG" \
+              --notes-file ../release-notes.md --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "Draft release $TAG has its packages; review and publish it."
