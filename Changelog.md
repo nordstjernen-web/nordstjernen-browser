@@ -141,6 +141,13 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Unquoted font family names may contain a generic family keyword after
+  their first word, as in `font-family: BBC Reith Serif, serif`. Any
+  such word made the whole declaration invalid, so BBC's headlines and
+  body text fell back to the default font instead of BBC Reith Serif. A
+  name is now rejected only when its first word is `serif`,
+  `sans-serif`, `cursive`, `fantasy`, `monospace`, `system-ui`, `math`
+  or `-webkit-body`, which is where Chrome draws the line.
 * `querySelectorAll` and `querySelector` with a selector list over the
   document use the class and tag indexes when every selector ends in a
   class or a type, checking only the elements that carry them instead of

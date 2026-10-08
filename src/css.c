@@ -5535,16 +5535,17 @@ ns_css_font_family_canonical(const char *text)
                 while (q < qend && !is_ws(*q)) q++;
                 gsize tlen = (gsize)(q - tok);
                 if (tlen == 0) break;
-                static const char *const strict_generic[] = {
+                static const char *const leading_generic[] = {
                     "serif", "sans-serif", "cursive", "fantasy", "monospace",
+                    "system-ui", "math", "-webkit-body",
                 };
-                gboolean strict = FALSE;
-                for (gsize k = 0; k < G_N_ELEMENTS(strict_generic); k++)
-                    if (strlen(strict_generic[k]) == tlen &&
-                        g_ascii_strncasecmp(tok, strict_generic[k], tlen) == 0)
-                        strict = TRUE;
-                if (!font_family_ident_valid(tok, tlen) ||
-                    ((!first || q < qend) && strict)) {
+                gboolean generic_head = FALSE;
+                for (gsize k = 0; first && q < qend &&
+                                  k < G_N_ELEMENTS(leading_generic); k++)
+                    if (strlen(leading_generic[k]) == tlen &&
+                        g_ascii_strncasecmp(tok, leading_generic[k], tlen) == 0)
+                        generic_head = TRUE;
+                if (!font_family_ident_valid(tok, tlen) || generic_head) {
                     g_string_free(out, TRUE);
                     return NULL;
                 }
