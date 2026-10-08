@@ -20484,6 +20484,171 @@ css_skip_invalid_qualified_rule(const char *p, const char *end,
     return end;
 }
 
+typedef struct css_decl_block {
+    char       *text;
+    gsize       len;
+    guint       hash;
+    GArray     *decls;
+    GHashTable *vars;
+    GHashTable *var_important;
+    GArray     *pending;
+} css_decl_block;
+
+#define CSS_DECL_BLOCK_CACHE_BYTES (16u << 20)
+#define CSS_DECL_BLOCK_MAX_LEN     (64u << 10)
+
+static __thread GHashTable *g_decl_blocks;
+static __thread gsize       g_decl_block_bytes;
+static __thread guint       g_decl_block_generation;
+static __thread double      g_decl_block_vw, g_decl_block_vh;
+
+static guint
+css_text_range_hash(const char *text, gsize len)
+{
+    guint32 h = 2166136261u;
+    for (gsize i = 0; i < len; i++)
+        h = (h ^ (guchar)text[i]) * 16777619u;
+    return h;
+}
+
+static guint
+css_decl_block_hash(gconstpointer key)
+{
+    return ((const css_decl_block *)key)->hash;
+}
+
+static gboolean
+css_decl_block_equal(gconstpointer a, gconstpointer b)
+{
+    const css_decl_block *x = a, *y = b;
+    return x->len == y->len && memcmp(x->text, y->text, x->len) == 0;
+}
+
+static void
+css_decl_block_free(gpointer data)
+{
+    css_decl_block *b = data;
+    for (guint i = 0; i < b->decls->len; i++)
+        ns_css_value_free(g_array_index(b->decls, ns_css_decl, i).value);
+    g_array_free(b->decls, TRUE);
+    if (b->vars) g_hash_table_destroy(b->vars);
+    if (b->var_important) g_hash_table_destroy(b->var_important);
+    if (b->pending) g_array_free(b->pending, TRUE);
+    g_free(b->text);
+    g_free(b);
+}
+
+static gboolean
+css_decls_hold_urls(const GArray *decls)
+{
+    for (guint i = 0; i < decls->len; i++)
+        for (const ns_css_value *v = g_array_index(decls, ns_css_decl, i).value;
+             v; v = v->next_layer)
+            if (v->kind == NS_CSS_V_URL) return TRUE;
+    return FALSE;
+}
+
+static GHashTable *
+css_string_set_copy(GHashTable *src, gboolean with_values)
+{
+    if (!src) return NULL;
+    GHashTable *dst = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                            with_values ? g_free : NULL);
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, src);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        g_hash_table_insert(dst, g_strdup(k), with_values ? g_strdup(v) : NULL);
+    return dst;
+}
+
+static void
+css_decls_copy(const GArray *decls, GHashTable *vars,
+               GHashTable *var_important, const GArray *pending,
+               GArray *out_decls, GHashTable **out_vars,
+               GHashTable **out_var_important, GArray **out_pending)
+{
+    for (guint i = 0; i < decls->len; i++) {
+        ns_css_decl d = g_array_index(decls, ns_css_decl, i);
+        d.value = ns_css_value_dup(d.value);
+        g_array_append_val(out_decls, d);
+    }
+    *out_vars = css_string_set_copy(vars, TRUE);
+    *out_var_important = css_string_set_copy(var_important, FALSE);
+    if (!pending) return;
+    *out_pending = g_array_sized_new(FALSE, FALSE, sizeof(ns_css_pending_decl),
+                                     pending->len);
+    g_array_set_clear_func(*out_pending, pending_decl_clear);
+    for (guint i = 0; i < pending->len; i++) {
+        ns_css_pending_decl pd = g_array_index(pending, ns_css_pending_decl, i);
+        pd.pname = g_strdup(pd.pname);
+        pd.raw_vtext = g_strdup(pd.raw_vtext);
+        g_array_append_val(*out_pending, pd);
+    }
+}
+
+static GHashTable *
+css_decl_blocks(void)
+{
+    guint generation = ns_css_stylesheet_cache_generation();
+    if (g_decl_blocks &&
+        (g_decl_block_generation != generation ||
+         g_decl_block_vw != g_viewport_w || g_decl_block_vh != g_viewport_h ||
+         g_decl_block_bytes > CSS_DECL_BLOCK_CACHE_BYTES)) {
+        g_hash_table_remove_all(g_decl_blocks);
+        g_decl_block_bytes = 0;
+    }
+    if (!g_decl_blocks)
+        g_decl_blocks = g_hash_table_new_full(css_decl_block_hash,
+                                              css_decl_block_equal,
+                                              css_decl_block_free, NULL);
+    g_decl_block_generation = generation;
+    g_decl_block_vw = g_viewport_w;
+    g_decl_block_vh = g_viewport_h;
+    return g_decl_blocks;
+}
+
+static void
+parse_rule_declarations(const char **pp, const char *end, const char *open,
+                        ns_css_rule *rule)
+{
+    const char *start = *pp;
+    const char *block_end = css_skip_to_block_end(open, end);
+    gsize len = (gsize)(css_block_body_end(start, block_end) - start);
+    if (rule->decls->len || rule->vars || rule->pending ||
+        len > CSS_DECL_BLOCK_MAX_LEN) {
+        parse_declaration_block(pp, end, rule->decls, rule);
+        return;
+    }
+    GHashTable *blocks = css_decl_blocks();
+    css_decl_block probe = {
+        .text = (char *)start,
+        .len = len,
+        .hash = css_text_range_hash(start, len),
+    };
+    const css_decl_block *hit = g_hash_table_lookup(blocks, &probe);
+    if (hit) {
+        css_decls_copy(hit->decls, hit->vars, hit->var_important, hit->pending,
+                       rule->decls, &rule->vars, &rule->var_important,
+                       &rule->pending);
+        *pp = block_end;
+        return;
+    }
+    parse_declaration_block(pp, end, rule->decls, rule);
+    if (*pp != block_end || css_decls_hold_urls(rule->decls)) return;
+    css_decl_block *b = g_new0(css_decl_block, 1);
+    b->text = g_strndup(start, len);
+    b->len = len;
+    b->hash = probe.hash;
+    b->decls = g_array_sized_new(FALSE, FALSE, sizeof(ns_css_decl),
+                                 rule->decls->len);
+    css_decls_copy(rule->decls, rule->vars, rule->var_important, rule->pending,
+                   b->decls, &b->vars, &b->var_important, &b->pending);
+    g_decl_block_bytes += len + sizeof *b +
+                          rule->decls->len * sizeof(ns_css_decl);
+    g_hash_table_add(blocks, b);
+}
+
 static void
 parse_rules_until(const char **pp, const char *end,
                   ns_css_stylesheet *sh, int *source_order,
@@ -21101,7 +21266,7 @@ parse_rules_until(const char **pp, const char *end,
             continue;
         }
         p = sel_end + 1;
-        parse_declaration_block(&p, end, rule->decls, rule);
+        parse_rule_declarations(&p, end, sel_end, rule);
         g_ptr_array_add(sh->rules, rule);
     }
     *pp = p;

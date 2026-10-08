@@ -141,6 +141,13 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Identical CSS declaration blocks are parsed once. Web components that
+  carry the same stylesheet in every shadow root - Reddit puts one
+  239 KB sheet in 93 of them - had that sheet rewritten for each host
+  and every declaration reparsed, a quarter of the page's CPU time.
+  Parsed blocks are now kept by their text and shared between rules;
+  Reddit's main-thread CPU drops from 18 s to 13.5 s, and a page with 40
+  such components loads in 1.2 s of CPU instead of 4.7 s.
 * Image requests advertise only the formats the build can decode. The
   `Accept` header always listed `image/avif`, so in a build without
   libavif, CDNs that negotiate formats (AliExpress served 50 of its
