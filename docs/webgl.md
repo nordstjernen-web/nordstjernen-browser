@@ -165,6 +165,14 @@ can honour them (desktop GL always can).
   `RGBA16F`, `DEPTH_COMPONENT16/24`, `DEPTH24_STENCIL8`) and `HALF_FLOAT_OES`
   to `HALF_FLOAT`.
 - WebGL 2 only: `EXT_color_buffer_float`.
+- Compressed textures, each offered when the driver can decode the format:
+  `WEBGL_compressed_texture_s3tc`, `WEBGL_compressed_texture_s3tc_srgb`,
+  `EXT_texture_compression_rgtc`, `EXT_texture_compression_bptc`,
+  `WEBGL_compressed_texture_etc` and `WEBGL_compressed_texture_astc`.
+  `compressedTex(Sub)Image2D/3D` check that the data is exactly the size the
+  format and dimensions require (or read from a bound unpack buffer in
+  WebGL 2), and `COMPRESSED_TEXTURE_FORMATS` lists the formats of the enabled
+  extensions.
 - Both: `EXT_color_buffer_half_float`, `EXT_float_blend`,
   `OES_texture_float_linear`, `EXT_texture_filter_anisotropic`,
   `KHR_parallel_shader_compile` (compilation is synchronous, so

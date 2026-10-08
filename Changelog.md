@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* WebGL can upload compressed textures: the S3TC/DXT (also sRGB), RGTC,
+  BPTC, ETC2/EAC and ASTC extensions are offered wherever the graphics
+  driver decodes those formats, and `compressedTexImage2D()`,
+  `compressedTexSubImage2D()` and their 3D forms work instead of always
+  failing. Games, map viewers and three.js scenes that ship DDS or KTX2
+  textures show them instead of untextured surfaces.
 * A WebGPU canvas is copied back from the GPU only when the page has
   drawn into it since the last paint, through a buffer kept for the
   canvas, instead of a full new copy into a freshly allocated buffer on
