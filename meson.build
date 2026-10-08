@@ -213,6 +213,9 @@ if not is_mobile
   # EGL/GLES context in the renderer, with no toolkit involved.
   epoxy      = dependency('epoxy')
   have_egl   = cc.has_header('epoxy/egl.h', dependencies: epoxy)
+  if host_machine.system() == 'linux' and not have_egl
+    error('WebGL needs libepoxy built with EGL support (epoxy/egl.h)')
+  endif
 endif
 
 have_gtk = false
@@ -315,21 +318,38 @@ if not is_mobile
 endif
 
 # WebGPU (navigator.gpu) layers src/webgpu.c over the external wgpu-native
-# library; the webgpu.h/wgpu.h headers are vendored in-tree (pinned API) while
-# the library is located via pkg-config (wgpu_native) or an extracted release
-# passed with -Dwgpu_native_root. The feature is 'auto': it is built whenever
-# wgpu-native is found and skipped otherwise, so the default build does not
-# hard-require the dependency. Even when built, WebGPU stays off at runtime
-# until the browser is launched with --enable-webgpu (or NS_WEBGPU_ALLOW=1).
+# library; the webgpu.h/wgpu.h headers are vendored in-tree (pinned API). The
+# library comes from pkg-config (wgpu_native), an extracted release passed with
+# -Dwgpu_native_root, or -- on the desktop platforms wgpu-native publishes
+# glibc/macOS/MinGW releases for -- the pinned release fetched by the
+# subprojects/wgpu-native-<platform>.wrap and linked statically. On those
+# platforms WebGPU, like WebGL, is a required part of the build; elsewhere
+# (the BSDs, musl, Android, iOS) it stays optional. -Dwebgpu=disabled always
+# drops it. At runtime it stays off until --enable-webgpu (NS_WEBGPU_ALLOW=1).
 have_webgpu = false
 webgpu_dep = declare_dependency()
 webgpu_feature = get_option('webgpu')
+wgpu_platform = ''
+if host_machine.cpu_family() in ['x86_64', 'aarch64']
+  if host_machine.system() == 'linux' and cc.get_define('__GLIBC__',
+      prefix: '#include <features.h>') != ''
+    wgpu_platform = 'linux-' + host_machine.cpu_family()
+  elif host_machine.system() == 'darwin'
+    wgpu_platform = 'macos-' + host_machine.cpu_family()
+  elif host_machine.system() == 'windows' and host_machine.cpu_family() == 'x86_64'
+    wgpu_platform = 'windows-x86_64-gnu'
+  endif
+endif
+webgpu_required = wgpu_platform != '' or webgpu_feature.enabled()
 if not webgpu_feature.disabled() and not is_mobile
   wgpu_lib = dependency('wgpu_native', required: false)
   wgpu_root = get_option('wgpu_native_root')
   if not wgpu_lib.found() and wgpu_root != ''
     wgpu_lib = cc.find_library('wgpu_native', dirs: [wgpu_root / 'lib'],
                                required: false)
+  endif
+  if not wgpu_lib.found() and wgpu_platform != ''
+    wgpu_lib = subproject('wgpu-native-' + wgpu_platform).get_variable('wgpu_native_dep')
   endif
   if wgpu_lib.found()
     webgpu_dep = declare_dependency(
@@ -343,13 +363,14 @@ if not webgpu_feature.disabled() and not is_mobile
     )
     add_project_arguments('-DND_HAVE_WEBGPU=1', language: 'c')
     have_webgpu = true
-    message('WebGPU: built (wgpu-native found) — experimental, runtime-gated by --enable-webgpu')
-  elif webgpu_feature.enabled()
-    error('-Dwebgpu=enabled needs wgpu-native: install its pkg-config file ' +
-          '(wgpu_native) or pass -Dwgpu_native_root=/path/to/extracted/release')
+    message('WebGPU: built over wgpu-native -- runtime-gated by --enable-webgpu')
+  elif webgpu_required
+    error('WebGPU needs wgpu-native: install its pkg-config file (wgpu_native), ' +
+          'pass -Dwgpu_native_root=/path/to/extracted/release, or ' +
+          '-Dwebgpu=disabled to build without it')
   else
-    message('WebGPU: not built (wgpu-native not found; pass -Dwgpu_native_root ' +
-            'or install its pkg-config to enable)')
+    message('WebGPU: not built (wgpu-native has no release for this platform; ' +
+            'pass -Dwgpu_native_root or install its pkg-config to enable)')
   endif
 endif
 

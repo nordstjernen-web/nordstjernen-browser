@@ -1,0 +1,7 @@
+[wrap-file]
+directory = wgpu-native-linux-x86_64-v29.0.1.1
+source_url = https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-linux-x86_64-release.zip
+source_filename = wgpu-linux-x86_64-release-v29.0.1.1.zip
+source_hash = 95a4d90c071005a98d03eab348beaa6b07e16eb00d1dcdb9f8348f75eb97ec5a
+lead_directory_missing = true
+patch_directory = wgpu-native
