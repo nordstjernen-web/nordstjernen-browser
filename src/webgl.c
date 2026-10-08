@@ -354,6 +354,19 @@ ns_webgl_attr(JSContext *ctx, JSValueConst attrs, const char *name, gboolean def
 
 static void ns_webgl_free(ns_webgl *g);
 
+static void
+wgl_enable_shader_point_size(void)
+{
+    if (!epoxy_is_desktop_gl()) return;
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    GLint profile = 0;
+    if (epoxy_gl_version() >= 32)
+        glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &profile);
+    if (epoxy_gl_version() < 32 || (profile & GL_CONTEXT_COMPATIBILITY_PROFILE_BIT))
+        glEnable(GL_POINT_SPRITE);
+    while (glGetError() != GL_NO_ERROR) {}
+}
+
 static ns_webgl *
 ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
               JSValueConst attrs)
@@ -406,6 +419,7 @@ ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
     glViewport(0, 0, g->w, g->h);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
+    wgl_enable_shader_point_size();
     return g;
 }
 
