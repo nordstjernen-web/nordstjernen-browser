@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* Opacity and colour animations no longer make scripts relayout the
+  page. Each animation tick marked the computed styles stale, and the
+  next geometry read (`clientWidth`, `getBoundingClientRect()`, ...)
+  restyled and laid out the whole page. YouTube reads `clientWidth`
+  twice in every animation frame while its ambient-mode canvases fade,
+  so the renderer spent 40% of its time in full relayouts during
+  playback. These animations are painted from the animation engine, so
+  they now only mark computed styles stale for `getComputedStyle()`.
 * An animation tick counts as a page change only when an animated value
   moves. Every running transition or animation reported a change on
   every tick, so the page was repainted 60 times a second even when the
