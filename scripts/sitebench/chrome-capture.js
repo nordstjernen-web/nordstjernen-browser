@@ -40,6 +40,7 @@ function parseArgs(argv) {
     executable: null,
     filmstrip: true,
     skipExisting: false,
+    maxComponents: null,
   };
   for (const a of argv) {
     const [k, v] = a.includes('=') ? [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)] : [a, ''];
@@ -59,10 +60,12 @@ function parseArgs(argv) {
       case '--executable': o.executable = v; break;
       case '--no-filmstrip': o.filmstrip = false; break;
       case '--skip-existing': o.skipExisting = true; break;
+      case '--max-components': o.maxComponents = v; break;
       case '-h': case '--help':
         console.log('usage: node chrome-capture.js [--sites=FILE] [--out=DIR] [--only=id,..] [--category=c,..]\n' +
                     '  [--viewport=WxH] [--runs=N] [--visual-runs=N] [--timeout-ms=N] [--settle-ms=N]\n' +
-                    '  [--full-max=PX] [--channel=chrome] [--executable=PATH] [--no-filmstrip] [--skip-existing]');
+                    '  [--full-max=PX] [--channel=chrome] [--executable=PATH] [--no-filmstrip] [--skip-existing]\n' +
+                    '  [--max-components=N]');
         process.exit(0);
         break;
       default:
@@ -72,6 +75,10 @@ function parseArgs(argv) {
   }
   const m = /^(\d+)x(\d+)$/.exec(o.viewport);
   if (!m) { console.error('chrome-capture: --viewport wants WxH'); process.exit(2); }
+  if (o.maxComponents !== null && !/^[1-9]\d*$/.test(o.maxComponents)) {
+    console.error('chrome-capture: --max-components wants a positive number');
+    process.exit(2);
+  }
   o.width = +m[1];
   o.height = +m[2];
   return o;
@@ -343,8 +350,12 @@ function clearVisualDirs(dir) {
   }
 }
 
+function probeCall(o) {
+  return fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8').trim() + `(${o.maxComponents || ''})`;
+}
+
 async function captureRun(browser, site, o, dir, index, browserPid) {
-  const probeSrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+  const probeSrc = probeCall(o);
   const { ctx, page, cdp } = await openPage(browser, o);
   const net = trackNetwork(cdp);
   const consoleErrors = trackConsole(page);

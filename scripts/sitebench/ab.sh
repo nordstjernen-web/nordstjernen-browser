@@ -17,6 +17,8 @@ MAX_DROP=${MAX_DROP:-}
 CHROME_OPTS=()
 [ -n "${CHROME_CHANNEL:-}" ] && CHROME_OPTS+=(--channel="$CHROME_CHANNEL")
 [ -n "${CHROME_EXECUTABLE:-}" ] && CHROME_OPTS+=(--executable="$CHROME_EXECUTABLE")
+CAP=()
+[ -n "${MAX_COMPONENTS:-}" ] && CAP=(--max-components="$MAX_COMPONENTS")
 
 usage() {
     cat <<EOF
@@ -43,6 +45,7 @@ environment:
   MAX_DROP=D         fail when AFTER_BIN's parity is more than D below BEFORE_BIN's,
                      in the mean or, beyond the site's noise, on a stable site, or
                      when it failed in more of a site's visual runs
+  MAX_COMPONENTS=N   most components inventoried per page in each browser (default: 3000)
 
 Exits with compare.py's status: 1 when a threshold fails, 2 on usage errors,
 missing captures or a capture or comparison that fails, 0 otherwise.
@@ -93,13 +96,14 @@ EOF
 for id in $ids; do
     echo "== $id"
     node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --visual-runs="$VISUAL_RUNS" \
-        --viewport="$VIEWPORT" --only="$id" --skip-existing --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"}
+        --viewport="$VIEWPORT" --only="$id" --skip-existing --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"} \
+        ${CAP[@]+"${CAP[@]}"}
     python3 "$HERE/ns-capture.py" --bin="${BINS[0]}" --out="$OUT" --label="$BEFORE_LABEL" \
         --runs="$RUNS" --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" \
-        --skip-existing --sites="$SITES"
+        --skip-existing --sites="$SITES" ${CAP[@]+"${CAP[@]}"}
     python3 "$HERE/ns-capture.py" --bin="${BINS[1]}" --out="$OUT" --label="$AFTER_LABEL" \
         --runs="$RUNS" --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --jobs=1 --only="$id" \
-        --skip-existing --sites="$SITES"
+        --skip-existing --sites="$SITES" ${CAP[@]+"${CAP[@]}"}
 done
 
 CHECKS=()

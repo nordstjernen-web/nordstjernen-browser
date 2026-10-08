@@ -20,6 +20,8 @@ FILTER=()
 CHROME_OPTS=()
 [ -n "${CHROME_CHANNEL:-}" ] && CHROME_OPTS+=(--channel="$CHROME_CHANNEL")
 [ -n "${CHROME_EXECUTABLE:-}" ] && CHROME_OPTS+=(--executable="$CHROME_EXECUTABLE")
+CAP=()
+[ -n "${MAX_COMPONENTS:-}" ] && CAP=(--max-components="$MAX_COMPONENTS")
 
 usage() {
     cat <<EOF
@@ -44,6 +46,7 @@ environment:
   MAX_DROP=D     fail when the newest label's parity is more than D below the oldest's,
                  in the mean over the sites both have or, beyond the site's noise, on a
                  stable site, or when it failed in more of a site's visual runs
+  MAX_COMPONENTS=N  most components inventoried per page in each browser (default: 3000)
 
 Exits with compare.py's status: 1 when a threshold fails, 2 on usage errors,
 missing captures or a capture or comparison that fails, 0 otherwise.
@@ -81,12 +84,13 @@ if [ "$CHROME" != 0 ]; then
     [ "$CHROME" = auto ] && skip=(--skip-existing)
     node "$HERE/chrome-capture.js" --out="$OUT" --runs="$RUNS" --visual-runs="$VISUAL_RUNS" \
         --viewport="$VIEWPORT" --sites="$SITES" ${CHROME_OPTS[@]+"${CHROME_OPTS[@]}"} \
-        ${skip[@]+"${skip[@]}"} ${FILTER[@]+"${FILTER[@]}"}
+        ${skip[@]+"${skip[@]}"} ${CAP[@]+"${CAP[@]}"} ${FILTER[@]+"${FILTER[@]}"}
 fi
 
 if [ "$NS" != 0 ]; then
     python3 "$HERE/ns-capture.py" --out="$OUT" --label="$LABEL" --runs="$RUNS" \
-        --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --sites="$SITES" ${FILTER[@]+"${FILTER[@]}"}
+        --visual-runs="$VISUAL_RUNS" --viewport="$VIEWPORT" --sites="$SITES" ${CAP[@]+"${CAP[@]}"} \
+        ${FILTER[@]+"${FILTER[@]}"}
 fi
 
 CHECKS=()
