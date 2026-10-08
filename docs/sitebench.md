@@ -45,6 +45,14 @@ NS_BIN=/path/to/old/builddir/src/gtk/nordstjernen LABEL=before scripts/sitebench
 LABEL=after LABELS=before,after scripts/sitebench/run.sh
 ```
 
+The report header names each build by the first twelve hex digits of
+its SHA-256, after `git describe` of the Nordstjernen checkout it sits
+in or, for a build copied out of its checkout, the version compiled into
+it: `nordstjernen 1.0.29-114-ge2d59b3d sha256:478226592b3f` or
+`nordstjernen 1.0.30-dev sha256:478226592b3f`. The hash tells two builds
+of one checkout apart, since `git describe` describes the checkout's
+current HEAD, which need not be what the binary was built from.
+
 Settings come from the environment: `RUNS` (cold loads per site and
 browser, medians are reported; default 3), `VIEWPORT` (default
 `1280x800`), `OUT` (default `sitebench-out`), `SITES` (the site list;

@@ -3,6 +3,7 @@
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import platform
@@ -46,13 +47,40 @@ def read_sites(path, only, category):
     return sites
 
 
-def engine_version(binary):
+def git_output(cwd, *args):
     try:
-        rev = subprocess.run(["git", "-C", str(Path(binary).resolve().parent), "describe", "--always",
-                              "--dirty", "--tags"], capture_output=True, text=True, timeout=10).stdout.strip()
+        return subprocess.run(["git", "--no-optional-locks", "-C", str(cwd), *args], capture_output=True,
+                              text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
-        rev = ""
-    return f"nordstjernen {rev}".strip()
+        return ""
+
+
+def source_tree(binary):
+    top = git_output(Path(binary).resolve().parent, "rev-parse", "--show-toplevel")
+    try:
+        meson = (Path(top) / "meson.build").read_text(encoding="utf-8", errors="replace") if top else ""
+    except OSError:
+        return None
+    return top if re.search(r"^project\(\s*'nordstjernen'", meson, re.M) else None
+
+
+def checkout_revision(binary):
+    tree = source_tree(binary)
+    if not tree:
+        return ""
+    rev = git_output(tree, "describe", "--always", "--tags")
+    if rev and git_output(tree, "status", "--porcelain", "--untracked-files=no"):
+        rev += "-dirty"
+    return rev
+
+
+def engine_version(binary):
+    data = Path(binary).read_bytes()
+    rev = checkout_revision(binary)
+    version = None if rev else re.search(rb"\x00(\d+\.\d+\.\d+[\w.+-]*) \(built [\d-]*\)\x00", data)
+    parts = ["nordstjernen", rev or (version.group(1).decode("ascii") if version else ""),
+             "sha256:" + hashlib.sha256(data).hexdigest()[:12]]
+    return " ".join(p for p in parts if p)
 
 
 def run_measured(cmd, env, timeout_s):
