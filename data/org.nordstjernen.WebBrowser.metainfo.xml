@@ -60,6 +60,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.30" date="2026-10-08">
+      <description>
+        <p>WebGL, WebGPU and WebAssembly release.</p>
+        <ul>
+          <li>WebGPU is part of every desktop build and can be switched on in Settings; it gains render bundles, error scopes, every texture format, full pipeline state and subgroups, and page mistakes no longer crash the renderer.</li>
+          <li>WebGL offers compressed textures and the common extensions, and fixes black environment-lit scenes, invisible particles and multi-view canvases.</li>
+          <li>WebAssembly runs on a much faster interpreter and works from several workers at once, so Draco, Basis and IFC models in three.js load in seconds.</li>
+          <li>WebGL and WebGPU canvases can be saved with toDataURL and toBlob.</li>
+          <li>Restyling after DOM changes is much faster, and scripts and JavaScript modules load in parallel.</li>
+          <li>Form controls, inline boxes, shadows and fonts look and measure as in Chrome; Reddit, Yahoo, Netflix and Twitch render correctly.</li>
+          <li>JPEG XL images are displayed.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.29" date="2026-10-05">
       <description>
         <p>Sharp HiDPI rendering, smooth scrolling, layout and security release.</p>
