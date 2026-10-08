@@ -22,7 +22,8 @@ CHALLENGE = re.compile(
     r"verify you are human|you've been blocked|blocked by network security|captcha|"
     r"click the button below to continue", re.I)
 CHALLENGE_URL = re.compile(r"[?&](js_challenge|__cf_chl\w*|captcha\w*)=", re.I)
-ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an error occurred", re.I)
+ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an error occurred|"
+                        r"^this page (couldn.t|could not|can.t) (load|be reached)", re.I)
 
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
