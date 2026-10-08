@@ -46,7 +46,24 @@ static GHashTable *g_webgpu_ctx_by_node;
 #define NS_WG_MAX_COLOR_ATTACHMENTS 8
 
 typedef struct { WGPUAdapter adapter; } ns_wg_adapter;
-typedef struct { WGPUDevice device; WGPUQueue queue; } ns_wg_device;
+typedef struct {
+    JSContext *ctx;
+    JSValue    device_obj;
+    GPtrArray *pending;
+    gboolean   job_queued;
+    guint      logged;
+} ns_wg_error_sink;
+
+typedef struct {
+    WGPUDevice        device;
+    WGPUQueue         queue;
+    ns_wg_error_sink *sink;
+    JSValue           lost_resolve;
+    guint             error_scopes;
+    gboolean          destroyed;
+} ns_wg_device;
+
+typedef struct { WGPUErrorType type; char *message; } ns_wg_pending_error;
 typedef struct { WGPUQueue queue; } ns_wg_queue;
 typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean range_escaped; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
@@ -765,42 +782,88 @@ wg_device_getQueue(JSContext *ctx, JSValueConst this_val,
     return wg_make_queue(ctx, d->queue);
 }
 
+static void
+wg_device_resolve_lost(JSContext *ctx, ns_wg_device *d, const char *reason,
+                       const char *message)
+{
+    if (!JS_IsFunction(ctx, d->lost_resolve)) return;
+    JSValue info = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, info, "reason", JS_NewString(ctx, reason));
+    JS_SetPropertyStr(ctx, info, "message", JS_NewString(ctx, message));
+    JSValue resolve = d->lost_resolve;
+    d->lost_resolve = JS_UNDEFINED;
+    JS_FreeValue(ctx, JS_Call(ctx, resolve, JS_UNDEFINED, 1, (JSValueConst *)&info));
+    JS_FreeValue(ctx, resolve);
+    JS_FreeValue(ctx, info);
+}
+
 static JSValue
 wg_device_destroy(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)argc; (void)argv;
-    (void)this_val;
+    (void)argc; (void)argv;
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || d->destroyed) return JS_UNDEFINED;
+    d->destroyed = TRUE;
+    wgpuDeviceDestroy(d->device);
+    wg_device_resolve_lost(ctx, d, "destroyed", "Device was destroyed.");
     return JS_UNDEFINED;
 }
 
 static void
 wg_device_finalizer(JSRuntime *rt, JSValue val)
 {
-    (void)rt;
     ns_wg_device *d = JS_GetOpaque(val, g_device_class);
     if (!d) return;
+    if (d->sink) {
+        d->sink->ctx = NULL;
+        d->sink->device_obj = JS_UNDEFINED;
+    }
+    JS_FreeValueRT(rt, d->lost_resolve);
     if (d->queue) wgpuQueueRelease(d->queue);
     if (d->device) wgpuDeviceRelease(d->device);
     g_free(d);
 }
 
+static void
+wg_link_event_target(JSContext *ctx, JSValueConst device)
+{
+    JSValue proto = JS_GetPrototype(ctx, device);
+    JSValue parent = JS_GetPrototype(ctx, proto);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue et = JS_GetPropertyStr(ctx, global, "EventTarget");
+    JSValue et_proto = JS_IsFunction(ctx, et)
+        ? JS_GetPropertyStr(ctx, et, "prototype") : JS_UNDEFINED;
+    if (JS_IsObject(et_proto) && JS_VALUE_GET_PTR(parent) != JS_VALUE_GET_PTR(et_proto))
+        JS_SetPrototype(ctx, proto, et_proto);
+    JS_FreeValue(ctx, et_proto);
+    JS_FreeValue(ctx, et);
+    JS_FreeValue(ctx, global);
+    JS_FreeValue(ctx, parent);
+    JS_FreeValue(ctx, proto);
+}
+
 static JSValue
-wg_make_device(JSContext *ctx, WGPUDevice device)
+wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_device_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_device *d = g_new0(ns_wg_device, 1);
     d->device = device;
     d->queue = wgpuDeviceGetQueue(device);
+    d->sink = sink;
+    d->lost_resolve = JS_UNDEFINED;
+    sink->ctx = ctx;
+    sink->device_obj = obj;
     JS_SetOpaque(obj, d);
+    wg_link_event_target(ctx, obj);
 
     wgpuQueueAddRef(d->queue);
     JS_SetPropertyStr(ctx, obj, "queue", wg_make_queue(ctx, d->queue));
     {
         JSValue lost_funcs[2];
         JSValue lost = JS_NewPromiseCapability(ctx, lost_funcs);
-        JS_FreeValue(ctx, lost_funcs[0]);
+        d->lost_resolve = lost_funcs[0];
         JS_FreeValue(ctx, lost_funcs[1]);
         JS_SetPropertyStr(ctx, obj, "lost", lost);
     }
@@ -827,13 +890,107 @@ wg_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
     w->done = 1;
 }
 
+static JSValue
+wg_new_error(JSContext *ctx, WGPUErrorType type, const char *message)
+{
+    const char *cls = type == WGPUErrorType_OutOfMemory ? "GPUOutOfMemoryError"
+                    : type == WGPUErrorType_Validation ? "GPUValidationError"
+                    : "GPUInternalError";
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, cls);
+    JSValue msg = JS_NewString(ctx, message ? message : "");
+    JSValue err = JS_IsFunction(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 1, (JSValueConst *)&msg) : JS_NewError(ctx);
+    if (JS_IsException(err)) err = JS_GetException(ctx);
+    JS_FreeValue(ctx, msg);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    return err;
+}
+
+static GPtrArray *g_wg_signalled_sinks;
+
+static void
+wg_dispatch_sink(JSContext *ctx, ns_wg_error_sink *sink)
+{
+    sink->job_queued = FALSE;
+    GPtrArray *pending = sink->pending;
+    sink->pending = NULL;
+    if (!pending) return;
+    for (guint i = 0; i < pending->len; i++) {
+        ns_wg_pending_error *pe = g_ptr_array_index(pending, i);
+        if (sink->ctx == ctx && JS_IsObject(sink->device_obj)) {
+            JSValue dev = JS_DupValue(ctx, sink->device_obj);
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue ctor = JS_GetPropertyStr(ctx, global, "GPUUncapturedErrorEvent");
+            JSValue init = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, init, "error", wg_new_error(ctx, pe->type, pe->message));
+            JS_SetPropertyStr(ctx, init, "cancelable", JS_TRUE);
+            JSValue args[2] = { JS_NewString(ctx, "uncapturederror"), init };
+            JSValue ev = JS_CallConstructor(ctx, ctor, 2, args);
+            gboolean handled = FALSE;
+            if (!JS_IsException(ev)) {
+                JSValue dispatch = JS_GetPropertyStr(ctx, dev, "dispatchEvent");
+                JSValue r = JS_IsFunction(ctx, dispatch)
+                    ? JS_Call(ctx, dispatch, dev, 1, (JSValueConst *)&ev) : JS_TRUE;
+                handled = JS_IsBool(r) && !JS_ToBool(ctx, r);
+                JSValue dp = JS_GetPropertyStr(ctx, ev, "defaultPrevented");
+                handled |= JS_ToBool(ctx, dp);
+                JS_FreeValue(ctx, dp);
+                JS_FreeValue(ctx, r);
+                JS_FreeValue(ctx, dispatch);
+            }
+            if (JS_IsException(ev) || JS_HasException(ctx))
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            if (!handled && sink->logged++ < 20)
+                g_warning("[webgpu] %s", pe->message);
+            JS_FreeValue(ctx, ev);
+            JS_FreeValue(ctx, args[0]);
+            JS_FreeValue(ctx, init);
+            JS_FreeValue(ctx, ctor);
+            JS_FreeValue(ctx, global);
+            JS_FreeValue(ctx, dev);
+        }
+        g_free(pe->message);
+        g_free(pe);
+    }
+    g_ptr_array_free(pending, TRUE);
+}
+
+static JSValue
+wg_dispatch_uncaptured(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    if (!g_wg_signalled_sinks) return JS_UNDEFINED;
+    GPtrArray *sinks = g_wg_signalled_sinks;
+    g_wg_signalled_sinks = NULL;
+    for (guint i = 0; i < sinks->len; i++)
+        wg_dispatch_sink(ctx, g_ptr_array_index(sinks, i));
+    g_ptr_array_free(sinks, TRUE);
+    return JS_UNDEFINED;
+}
+
 static void
 wg_on_uncaptured_error(WGPUDevice const *device, WGPUErrorType type,
                        WGPUStringView message, void *u1, void *u2)
 {
-    (void)device; (void)type; (void)u1; (void)u2;
-    g_warning("[webgpu] %.*s", (int)message.length,
-              message.data ? message.data : "uncaptured error");
+    (void)device; (void)u2;
+    ns_wg_error_sink *sink = u1;
+    if (!sink || !sink->ctx) return;
+    if (!sink->pending) sink->pending = g_ptr_array_new();
+    if (sink->pending->len >= 64) return;
+    ns_wg_pending_error *pe = g_new0(ns_wg_pending_error, 1);
+    pe->type = type;
+    pe->message = wg_sv_dup(message);
+    g_ptr_array_add(sink->pending, pe);
+    if (!sink->job_queued) {
+        sink->job_queued = TRUE;
+        if (!g_wg_signalled_sinks) {
+            g_wg_signalled_sinks = g_ptr_array_new();
+            JS_EnqueueJob(sink->ctx, wg_dispatch_uncaptured, 0, NULL);
+        }
+        g_ptr_array_add(g_wg_signalled_sinks, sink);
+    }
 }
 
 static JSValue
@@ -866,7 +1023,10 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
     ci.callback = wg_on_device;
     ci.userdata1 = &wait;
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof dd);
+    ns_wg_error_sink *sink = g_new0(ns_wg_error_sink, 1);
+    sink->device_obj = JS_UNDEFINED;
     dd.uncapturedErrorCallbackInfo.callback = wg_on_uncaptured_error;
+    dd.uncapturedErrorCallbackInfo.userdata1 = sink;
     dd.requiredFeatureCount = required_count;
     dd.requiredFeatures = required_count ? required : NULL;
     dd.requiredLimits = have_limits ? &limits : NULL;
@@ -875,7 +1035,7 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     if (!wait.device)
         return wg_promise_rejected(ctx, "requestDevice: no device");
-    return wg_promise_resolved(ctx, wg_make_device(ctx, wait.device));
+    return wg_promise_resolved(ctx, wg_make_device(ctx, wait.device, sink));
 }
 
 static JSValue
@@ -3037,16 +3197,71 @@ static JSValue
 wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d) return JS_UNDEFINED;
+    char *f = argc >= 1 && JS_IsString(argv[0]) ? (char *)JS_ToCString(ctx, argv[0]) : NULL;
+    WGPUErrorFilter filter;
+    if (f && strcmp(f, "validation") == 0) filter = WGPUErrorFilter_Validation;
+    else if (f && strcmp(f, "out-of-memory") == 0) filter = WGPUErrorFilter_OutOfMemory;
+    else if (f && strcmp(f, "internal") == 0) filter = WGPUErrorFilter_Internal;
+    else {
+        if (f) JS_FreeCString(ctx, f);
+        return JS_ThrowTypeError(ctx, "pushErrorScope: invalid filter");
+    }
+    JS_FreeCString(ctx, f);
+    wgpuDevicePushErrorScope(d->device, filter);
+    d->error_scopes++;
     return JS_UNDEFINED;
+}
+
+typedef struct {
+    int done;
+    WGPUPopErrorScopeStatus status;
+    WGPUErrorType type;
+    char *message;
+} wg_scope_wait;
+
+static void
+wg_on_pop_scope(WGPUPopErrorScopeStatus status, WGPUErrorType type,
+                WGPUStringView message, void *u1, void *u2)
+{
+    (void)u2;
+    wg_scope_wait *w = u1;
+    w->status = status;
+    w->type = type;
+    w->message = wg_sv_dup(message);
+    w->done = 1;
 }
 
 static JSValue
 wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    return wg_promise_resolved(ctx, JS_NULL);
+    (void)argc; (void)argv;
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d) return wg_promise_rejected(ctx, "popErrorScope: device");
+    if (d->error_scopes == 0)
+        return wg_promise_rejected(ctx, "OperationError: popErrorScope: the error scope stack is empty");
+    d->error_scopes--;
+    wg_scope_wait wait;
+    memset(&wait, 0, sizeof wait);
+    WGPUPopErrorScopeCallbackInfo ci;
+    memset(&ci, 0, sizeof ci);
+    ci.mode = WGPUCallbackMode_AllowProcessEvents;
+    ci.callback = wg_on_pop_scope;
+    ci.userdata1 = &wait;
+    wgpuDevicePopErrorScope(d->device, ci);
+    for (int i = 0; i < 2000 && !wait.done; i++)
+        wgpuInstanceProcessEvents(ns_webgpu_instance());
+    JSValue result;
+    if (!wait.done || wait.status != WGPUPopErrorScopeStatus_Success)
+        result = wg_promise_rejected(ctx, "OperationError: popErrorScope: the error scope stack is empty");
+    else if (wait.type == WGPUErrorType_NoError)
+        result = wg_promise_resolved(ctx, JS_NULL);
+    else
+        result = wg_promise_resolved(ctx, wg_new_error(ctx, wait.type, wait.message));
+    g_free(wait.message);
+    return result;
 }
 
 static void
@@ -3948,6 +4163,56 @@ static const char *const wg_plain_interfaces[] = {
     "GPUCompilationMessage", "GPUDeviceLostInfo",
 };
 
+static const char wg_error_classes_js[] =
+    "(() => {\n"
+    "  const g = globalThis;\n"
+    "  class GPUError {\n"
+    "    #message;\n"
+    "    constructor(message) { this.#message = String(message ?? ''); }\n"
+    "    get message() { return this.#message; }\n"
+    "  }\n"
+    "  class GPUValidationError extends GPUError {}\n"
+    "  class GPUOutOfMemoryError extends GPUError {}\n"
+    "  class GPUInternalError extends GPUError {}\n"
+    "  class GPUPipelineError extends Error {\n"
+    "    constructor(message, options) {\n"
+    "      super(message); this.name = 'GPUPipelineError';\n"
+    "      this.reason = options && options.reason;\n"
+    "    }\n"
+    "  }\n"
+    "  for (const c of [GPUError, GPUValidationError, GPUOutOfMemoryError,\n"
+    "                   GPUInternalError, GPUPipelineError])\n"
+    "    Object.defineProperty(g, c.name, { value: c, writable: true, configurable: true });\n"
+    "  const settle = v => Object.defineProperty(g, 'GPUUncapturedErrorEvent',\n"
+    "    { value: v, writable: true, configurable: true });\n"
+    "  Object.defineProperty(g, 'GPUUncapturedErrorEvent', {\n"
+    "    configurable: true,\n"
+    "    get() {\n"
+    "      const C = class GPUUncapturedErrorEvent extends g.Event {\n"
+    "        #error;\n"
+    "        constructor(type, init) { super(type, init); this.#error = init && init.error; }\n"
+    "        get error() { return this.#error; }\n"
+    "      };\n"
+    "      settle(C);\n"
+    "      return C;\n"
+    "    },\n"
+    "    set(v) { settle(v); }\n"
+    "  });\n"
+    "  if (g.GPUDevice) {\n"
+    "    const handlers = new WeakMap();\n"
+    "    Object.defineProperty(g.GPUDevice.prototype, 'onuncapturederror', {\n"
+    "      configurable: true, enumerable: true,\n"
+    "      get() { return handlers.get(this) ?? null; },\n"
+    "      set(fn) {\n"
+    "        const old = handlers.get(this);\n"
+    "        if (old) this.removeEventListener('uncapturederror', old);\n"
+    "        if (typeof fn === 'function') { handlers.set(this, fn); this.addEventListener('uncapturederror', fn); }\n"
+    "        else handlers.delete(this);\n"
+    "      }\n"
+    "    });\n"
+    "  }\n"
+    "})();\n";
+
 static JSValue
 wg_illegal_constructor(JSContext *ctx, JSValueConst new_target,
                        int argc, JSValueConst *argv)
@@ -4055,6 +4320,10 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
 
     JSValue global = JS_GetGlobalObject(ctx);
     wg_install_interfaces(ctx, global);
+    JSValue r = JS_Eval(ctx, wg_error_classes_js, strlen(wg_error_classes_js),
+                        "<webgpu>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
 
     JSValue buf_usage = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, buf_usage, "MAP_READ", JS_NewInt32(ctx, 0x0001));
