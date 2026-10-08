@@ -450,6 +450,8 @@ typedef struct shadow_blur_key {
     corner_radii radii;
     double       r, g, b, a;
     int          radius;
+    int          inset;
+    double       hole_x, hole_y, hole_w, hole_h;
 } shadow_blur_key;
 
 #define NS_SHADOW_BLUR_CACHE_BYTES (32u << 20)
@@ -485,7 +487,15 @@ blurred_shadow_surface_new(const shadow_blur_key *k, int pad,
         return NULL;
     }
     cairo_t *scr = cairo_create(surf);
-    rounded_rect_path(scr, pad, pad, k->sw, k->sh, k->radii);
+    if (k->inset) {
+        cairo_rectangle(scr, 0, 0, surf_w, surf_h);
+        if (k->hole_w > 0 && k->hole_h > 0)
+            rounded_rect_path(scr, pad + k->hole_x, pad + k->hole_y,
+                              k->hole_w, k->hole_h, k->radii);
+        cairo_set_fill_rule(scr, CAIRO_FILL_RULE_EVEN_ODD);
+    } else {
+        rounded_rect_path(scr, pad, pad, k->sw, k->sh, k->radii);
+    }
     cairo_set_source_rgba(scr, k->r, k->g, k->b, k->a);
     cairo_fill(scr);
     cairo_destroy(scr);
@@ -759,6 +769,61 @@ outline_radii(corner_radii c, double w, double h, double grow)
     for (int i = 0; i < 8; i++)
         if (*r[i] > 0) *r[i] = MAX(0, *r[i] + grow);
     return c;
+}
+
+static void
+paint_inset_box_shadow(cairo_t *cr, const ns_css_shadow *sh,
+                       double px, double py, double pw, double ph,
+                       corner_radii pad_radii)
+{
+    if (!(pw > 0) || !(ph > 0)) return;
+    double hole_x = sh->x + sh->spread;
+    double hole_y = sh->y + sh->spread;
+    double hole_w = pw - 2 * sh->spread;
+    double hole_h = ph - 2 * sh->spread;
+    corner_radii hole_radii = outline_radii(pad_radii, pw, ph, -sh->spread);
+    cairo_save(cr);
+    rounded_rect_path(cr, px, py, pw, ph, pad_radii);
+    cairo_clip(cr);
+    cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
+                          sh->a / 255.0);
+    int radius = (int)(sh->blur * 0.5 + 0.5);
+    int pad = radius * 3 + 2;
+    int surf_w = (int)ceil(pw) + pad * 2, surf_h = (int)ceil(ph) + pad * 2;
+    if (sh->blur > 0 && radius <= 256 && surf_w <= 4096 && surf_h <= 4096) {
+        shadow_blur_key key;
+        memset(&key, 0, sizeof key);
+        key.sw = pw;
+        key.sh = ph;
+        key.radii = hole_radii;
+        key.r = sh->r / 255.0;
+        key.g = sh->g / 255.0;
+        key.b = sh->b / 255.0;
+        key.a = sh->a / 255.0;
+        key.radius = radius;
+        key.inset = 1;
+        key.hole_x = hole_x;
+        key.hole_y = hole_y;
+        key.hole_w = hole_w;
+        key.hole_h = hole_h;
+        cairo_surface_t *surf =
+            blurred_shadow_cached(&key, pad, surf_w, surf_h, FALSE);
+        if (surf) {
+            cairo_set_source_surface(cr, surf, px - pad, py - pad);
+            cairo_paint(cr);
+            cairo_surface_destroy(surf);
+        }
+    } else if (hole_w > 0 && hole_h > 0) {
+        cairo_new_path(cr);
+        cairo_rectangle(cr, px - 1, py - 1, pw + 2, ph + 2);
+        rounded_rect_path(cr, px + hole_x, py + hole_y, hole_w, hole_h,
+                          hole_radii);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        cairo_fill(cr);
+    } else {
+        cairo_paint(cr);
+    }
+    cairo_restore(cr);
 }
 
 static gboolean
@@ -1839,16 +1904,12 @@ paint_block(cairo_t *cr, const ns_box *b)
         for (int si = sl->n - 1; si >= 0; si--) {
             const ns_css_shadow *sh = &sl->s[si];
             if (!sh->inset) continue;
-            cairo_save(cr);
-            rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_clip(cr);
-            cairo_set_source_rgba(cr,
-                sh->r / 255.0, sh->g / 255.0, sh->b / 255.0, sh->a / 255.0);
-            cairo_set_line_width(cr, sh->blur > 0 ? sh->blur : 4);
-            cairo_translate(cr, sh->x, sh->y);
-            rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            paint_inset_box_shadow(cr, sh,
+                border_x + b->border.left, border_y + b->border.top,
+                border_w - b->border.left - b->border.right,
+                border_h - b->border.top - b->border.bottom,
+                corner_radii_inset(radii, b->border.top, b->border.right,
+                                   b->border.bottom, b->border.left));
         }
     }
 
