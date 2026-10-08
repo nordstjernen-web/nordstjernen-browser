@@ -3,6 +3,17 @@ Changelog:
 
 1.0.30:
 ======
+* A WebGPU canvas keeps showing what was drawn into it after the page
+  lets go of its context object; it used to go blank at the next garbage
+  collection, and calling `getContext('webgpu')` again created a second,
+  empty context. WebGL contexts are kept alive by their canvas the same
+  way. `device.limits` reports the device's real limits instead of
+  zeros, `adapter.features` and `device.features` list what the GPU
+  supports, and `requestDevice()` honours `requiredFeatures` and
+  `requiredLimits`, so three.js can use compressed textures and float32
+  filtering. Invalid usage flags on a buffer or texture are reported as
+  a validation error instead of aborting the page's renderer, and a
+  failed `mapAsync()` rejects its promise.
 * WebGPU is now part of every Linux, macOS and Windows build, as WebGL
   already was. When wgpu-native is not installed, the build downloads
   the pinned release for the platform and links it into the browser, so

@@ -3201,6 +3201,14 @@ ns_canvas_get_2d(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_node *
     return obj;
 }
 
+static void
+ns_canvas_keep_context(JSContext *ctx, JSValueConst canvas_obj, JSValueConst context)
+{
+    if (!JS_IsObject(canvas_obj) || !JS_IsObject(context)) return;
+    JS_DefinePropertyValueStr(ctx, canvas_obj, "__nd_context",
+                              JS_DupValue(ctx, context), JS_PROP_CONFIGURABLE);
+}
+
 static JSValue
 ns_canvas_get_webgl(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_node *el,
                     JSValueConst canvas_obj, int version, JSValueConst options)
@@ -3208,7 +3216,10 @@ ns_canvas_get_webgl(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_nod
     if (st->context_kind == 1 || st->context_kind == 3 || js->worker_host)
         return JS_NULL;
     JSValue gl = ns_webgl_get_context(ctx, js, canvas_obj, el, version, options);
-    if (!JS_IsNull(gl)) st->context_kind = 2;
+    if (!JS_IsNull(gl)) {
+        st->context_kind = 2;
+        ns_canvas_keep_context(ctx, canvas_obj, gl);
+    }
     return gl;
 }
 
@@ -3219,7 +3230,10 @@ ns_canvas_get_webgpu(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_no
 #ifdef ND_HAVE_WEBGPU
     if (!st->context_kind || st->context_kind == 3) {
         JSValue gpu = ns_webgpu_get_context(ctx, js, canvas_obj, el);
-        if (!JS_IsNull(gpu)) st->context_kind = 3;
+        if (JS_IsObject(gpu)) {
+            st->context_kind = 3;
+            ns_canvas_keep_context(ctx, canvas_obj, gpu);
+        }
         return gpu;
     }
 #else
