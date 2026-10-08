@@ -3,6 +3,11 @@ Changelog:
 
 1.0.30:
 ======
+* Worker messages may be up to 256 MiB. `postMessage()` between a page
+  and its workers threw `DataCloneError: message is too large` above
+  16 MiB, which a decoded mesh easily exceeds: three.js's Draco decoder
+  posts the vertex arrays of a large model back from its worker, so
+  `webgpu_postprocessing_sss` never showed its statue.
 * Type selectors with capital letters match case-sensitive elements
   wherever they sit in a selector. Selector type names are stored
   lowercased, and elements outside the HTML namespace (XML documents,
