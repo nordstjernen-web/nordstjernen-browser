@@ -4699,14 +4699,18 @@ SETTINGS_SWITCH("cache_enabled",
 "load();\n"
 "</script></body></html>";
 
-static char *
-about_request_form(const char *url, const char *method,
-                   const void *body, gsize body_len)
+static gboolean
+about_request_is_post(const char *method)
 {
-    if (method && g_ascii_strcasecmp(method, "POST") == 0 && body && body_len)
+    return method && g_ascii_strcasecmp(method, "POST") == 0;
+}
+
+static char *
+about_request_form(const char *method, const void *body, gsize body_len)
+{
+    if (about_request_is_post(method) && body && body_len)
         return g_strndup((const char *)body, body_len);
-    const char *qs = strchr(url, '?');
-    return g_strdup(qs ? qs + 1 : "");
+    return NULL;
 }
 
 static void
@@ -4994,13 +4998,18 @@ synthesize_about_response(const char *url, const char *top_url,
     } else if (g_str_has_prefix(what, "settings-data")) {
         about_emit_json(resp, about_settings_json());
     } else if (g_str_has_prefix(what, "settings-save")) {
-        char *form = about_request_form(url, method, req_body, req_body_len);
+        char *form = about_request_form(method, req_body, req_body_len);
+        gboolean saved = form != NULL;
         about_settings_save(form);
         g_free(form);
-        about_emit_json(resp, g_strdup("{\"ok\":true}"));
+        about_emit_json(resp, g_strdup(saved ? "{\"ok\":true}"
+                                             : "{\"ok\":false}"));
     } else if (g_str_has_prefix(what, "settings-clear")) {
-        about_settings_clear();
-        about_emit_json(resp, g_strdup("{\"ok\":true}"));
+        gboolean post = about_request_is_post(method);
+        if (post)
+            about_settings_clear();
+        about_emit_json(resp, g_strdup(post ? "{\"ok\":true}"
+                                            : "{\"ok\":false}"));
     } else {
         const char *body = "<!doctype html><title>Nordstjernen</title>";
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));

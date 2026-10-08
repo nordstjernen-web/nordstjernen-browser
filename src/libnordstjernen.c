@@ -820,10 +820,51 @@ browser_js_log(const char *line, gpointer ud)
 static void browser_js_mutated(gpointer ud) { ns_browser *b = ud; if (b) b->dirty = TRUE; }
 
 static gboolean
+browser_url_is_chrome_page(const char *url)
+{
+    if (!url || g_ascii_strncasecmp(url, "about:", 6) != 0) return FALSE;
+    const char *page = url + 6;
+    gsize len = strcspn(page, "?#");
+    if (len == 5 && g_ascii_strncasecmp(page, "blank", 5) == 0) return FALSE;
+    if (len == 6 && g_ascii_strncasecmp(page, "srcdoc", 6) == 0) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+browser_url_is_privileged_page(const char *url)
+{
+    if (!url) return FALSE;
+    if (g_ascii_strncasecmp(url, "view-source:", 12) == 0) return TRUE;
+    if (g_ascii_strncasecmp(url, "about:", 6) != 0) return FALSE;
+    const char *page = url + 6;
+    return g_ascii_strncasecmp(page, "settings", 8) == 0 ||
+           g_ascii_strncasecmp(page, "config", 6) == 0 ||
+           g_ascii_strncasecmp(page, "history", 7) == 0 ||
+           g_ascii_strncasecmp(page, "ai", 2) == 0;
+}
+
+static gboolean
+browser_url_continues_interstitial(const char *url, const char *from)
+{
+    const char *rest = url + strlen(NS_UNSAFE_CONTINUE_SCHEME);
+    g_autofree char *target_host = ns_url_host_from(rest);
+    g_autofree char *from_host = from ? ns_url_host_from(from) : NULL;
+    return target_host && from_host && *target_host &&
+           g_ascii_strcasecmp(target_host, from_host) == 0;
+}
+
+static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
 {
-    if (!url || !g_str_has_prefix(url, "file:")) return TRUE;
-    return b && b->base_url && g_str_has_prefix(b->base_url, "file:");
+    if (!url) return TRUE;
+    const char *from = b ? b->base_url : NULL;
+    if (g_ascii_strncasecmp(url, "file:", 5) == 0)
+        return from && g_ascii_strncasecmp(from, "file:", 5) == 0;
+    if (browser_url_is_privileged_page(url))
+        return browser_url_is_chrome_page(from);
+    if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME))
+        return browser_url_continues_interstitial(url, from);
+    return TRUE;
 }
 
 static char *
