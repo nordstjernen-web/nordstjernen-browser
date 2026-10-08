@@ -123,6 +123,41 @@ difference heatmap, Chrome's filmstrip, both full pages, the
 worst-placed components and the computed-style mismatches, which is
 usually enough to point at the engine feature at fault.
 
+## Results
+
+The run that measured the engine work on the branch that added this
+benchmark (8 October 2026, `ab.sh`, 3 cold loads per site and browser,
+4-core VM, software rendering). *before* is `main` at d81f5de with the
+benchmark's own `--timing` reporting added, *after* is the branch head.
+Chrome is headless Chromium 141.
+
+| | before | after |
+|---|---|---|
+| Sites loaded | 42 of 44 | 44 of 44 |
+| Mean visual parity | 64.3 | 70.7 |
+| Median first paint (ms) | 1590 | 1357 |
+| First paint ÷ Chrome FCP (geomean) | 1.47× | 1.29× |
+| Sites painting before Chrome FCP | 10 | 13 |
+| Images loaded ÷ Chrome load event (geomean) | 1.05× | 0.88× |
+| Main-thread CPU ÷ Chrome (geomean) | 4.48× | 3.56× |
+| Main-thread CPU, sum over the 42 sites both builds loaded | 472 s | 260 s |
+| Peak memory ÷ Chrome (geomean) | 0.28× | 0.29× |
+| JS errors (all sites) | 147 | 136 |
+
+Chrome spent 90 s of main-thread time on the same 42 sites, with a
+median FCP of 1048 ms and a median load event at 1936 ms. Sixteen sites
+are left out: fifteen showed headless Chrome a bot challenge or an
+error page, and TikTok showed one to Nordstjernen. The before build
+aborted with heap corruption on claude.com and Discord (an inline VP9
+video overran its frame buffer), which counts as parity 0 in its mean;
+over the 42 sites both builds loaded, parity went from 67.3 to 71.0.
+
+Nordstjernen paints before Chrome's first contentful paint on 13 sites
+and uses less than a third of Chrome's memory, but still spends about
+three times Chrome's main-thread CPU and scores 71 of 100 for looking
+like it: the cascade and layout on large, script-built pages are where
+the next work is.
+
 ## Adding sites
 
 `sites.tsv` is `id<TAB>category<TAB>url`. Keep ids short and stable; they
