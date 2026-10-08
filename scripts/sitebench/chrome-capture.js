@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnSync } = require('child_process');
 
 const HERE = __dirname;
 const LOCALE = 'en-US';
@@ -109,7 +110,30 @@ function median(xs) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
+function psTreeRssKb(rootPid) {
+  const ps = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,rss='], { encoding: 'utf8' });
+  if (ps.status !== 0) return null;
+  const children = new Map();
+  const rss = new Map();
+  for (const line of ps.stdout.split('\n')) {
+    const [pid, ppid, kb] = line.trim().split(/\s+/).map(Number);
+    if (!pid || pid === ps.pid) continue;
+    rss.set(pid, kb || 0);
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+  }
+  let total = 0;
+  const stack = [...(children.get(rootPid) || [])];
+  while (stack.length) {
+    const pid = stack.pop();
+    total += rss.get(pid);
+    for (const c of children.get(pid) || []) stack.push(c);
+  }
+  return total;
+}
+
 function processTreeRssKb(rootPid) {
+  if (process.platform === 'darwin' && rootPid) return psTreeRssKb(rootPid);
   if (process.platform !== 'linux' || !rootPid) return null;
   const children = new Map();
   for (const name of fs.readdirSync('/proc')) {

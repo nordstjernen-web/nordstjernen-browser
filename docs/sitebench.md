@@ -87,7 +87,9 @@ their geometry, font size, weight, family and colours.
 - TTFB, first paint, FCP, LCP, CLS, total blocking time, DOMContentLoaded
   and load;
 - main-thread task, script, style and layout time (`Performance.getMetrics`),
-  JS heap, the RSS of all Chrome processes;
+  JS heap, the RSS of all Chrome processes (read from `/proc` on Linux and
+  from `ps` on macOS; elsewhere it is not measured and the memory ratio
+  stays empty);
 - requests, bytes per resource type, failed requests, console errors.
 
 **Nordstjernen** (`ns-capture.py`, headless mode):
