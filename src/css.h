@@ -743,6 +743,7 @@ typedef struct ns_css_pseudo_pred {
 
 typedef struct ns_css_simple {
     char *type;
+    char *type_cased;
     char *id;
     GPtrArray *classes;
     GArray    *class_lens;

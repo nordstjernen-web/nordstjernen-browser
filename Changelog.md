@@ -3,6 +3,16 @@ Changelog:
 
 1.0.30:
 ======
+* Type selectors with capital letters match case-sensitive elements
+  wherever they sit in a selector. Selector type names are stored
+  lowercased, and elements outside the HTML namespace (XML documents,
+  SVG) are compared case-sensitively, so `Link href` or `Folder Link`
+  never matched in a `DOMParser` XML document, nor `linearGradient stop`
+  in SVG; a lone `Link` only worked through a fast path. three.js's
+  `KMZLoader` finds its model with
+  `querySelector('Placemark Model Link href')` and failed with
+  "Couldn't find .dae file". The name as written is now kept beside the
+  lowercased one and used for those comparisons.
 * WebAssembly runs on WAMR's fast interpreter instead of its classic
   one, many times faster: three.js's `webgpu_loader_gltf_compressed`
   model (Meshopt geometry, five KTX2 textures transcoded by the Basis
