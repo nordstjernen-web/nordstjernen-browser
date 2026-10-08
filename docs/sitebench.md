@@ -47,13 +47,16 @@ LABEL=after LABELS=before,after scripts/sitebench/run.sh
 
 Settings come from the environment: `RUNS` (cold loads per site and
 browser, medians are reported; default 3), `VIEWPORT` (default
-`1280x800`), `OUT` (default `sitebench-out`), `NS_LOCALE` (the locale
-Nordstjernen runs under, see below; default `en_US.UTF-8`). The three
-steps can also be run on their own; each has `--help`.
+`1280x800`), `OUT` (default `sitebench-out`), `SITES` (the site list;
+default `sites.tsv`), `NS_LOCALE` (the locale Nordstjernen runs under,
+see below; default `en_US.UTF-8`). The three steps can also be run on
+their own; each has `--help`.
 
-To use an installed Google Chrome instead of Playwright's Chromium, run
-`node scripts/sitebench/chrome-capture.js --channel=chrome` (or
-`--executable=PATH`).
+To use an installed Google Chrome instead of Playwright's Chromium, set
+`CHROME_CHANNEL=chrome` (or `CHROME_EXECUTABLE=PATH` for a given Chrome
+or Chromium binary); `run.sh` and `ab.sh` pass it to `chrome-capture.js`
+as `--channel` (`--executable`), and `npx playwright install chromium`
+is then not needed.
 
 Running as root (a container) sets `NS_ALLOW_ROOT=1` for Nordstjernen. A
 CA bundle named by `CURL_CA_BUNDLE` or `SSL_CERT_FILE` is readable from
@@ -175,4 +178,6 @@ the next work is.
 ## Adding sites
 
 `sites.tsv` is `id<TAB>category<TAB>url`. Keep ids short and stable; they
-name the output directories.
+name the output directories. `SITES=FILE` runs another list in the same
+format, such as saved copies of pages served from a local server, which
+unlike the live sites stay the same from run to run.
