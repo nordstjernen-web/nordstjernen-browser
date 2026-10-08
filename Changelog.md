@@ -141,6 +141,15 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* JavaScript modules load their import graphs in parallel. Each import
+  used to be fetched only when the engine reached it, one round trip
+  after another; now every module source is scanned for its static
+  imports as soon as it arrives and those are requested at once, and a
+  page's module scripts start fetching their graphs when parsing ends.
+  Deferred scripts that are ready run back to back instead of one per
+  event-loop turn with a relayout between each. On microsoft.com, which
+  has 224 module scripts, three times as many modules run in the same
+  time and its main-thread CPU drops from 8.3 s to 7.2 s.
 * Calling `Intl.DateTimeFormat()` and the other Intl constructors
   without `new` no longer leaves a stray TypeError behind. The
   constructor read `prototype` off its undefined receiver, failed

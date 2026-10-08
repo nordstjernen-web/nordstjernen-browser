@@ -6312,7 +6312,7 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx);
 }
 
-#define NS_PRELOAD_MAX_ENTRIES 64
+#define NS_PRELOAD_MAX_ENTRIES 512
 #define NS_PRELOAD_MAX_BYTES   (16u * 1024u * 1024u)
 #define NS_FETCH_JOIN_MAX_WAIT_S (NS_MAX_TIMEOUT_S + 5)
 
@@ -6407,6 +6407,21 @@ ns_preload_store_locked(const char *key, const ns_response *resp)
     if (g_hash_table_contains(g_preload_store, key)) return;
     g_preload_bytes += resp->body->len;
     g_hash_table_insert(g_preload_store, g_strdup(key), ns_response_copy(resp));
+}
+
+void
+ns_net_preload_keep(const char *key, const ns_response *resp)
+{
+    if (!key || !resp) return;
+    g_mutex_lock(&g_fetch_mutex);
+    if (!g_preload_store || !g_hash_table_contains(g_preload_store, key)) {
+        if (!g_preload_expected)
+            g_preload_expected = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, NULL);
+        g_hash_table_add(g_preload_expected, g_strdup(key));
+        ns_preload_store_locked(key, resp);
+    }
+    g_mutex_unlock(&g_fetch_mutex);
 }
 
 typedef enum {

@@ -166,6 +166,7 @@ char *ns_net_request_key(const char        *url,
                          const char *const *extra_headers);
 
 void         ns_net_preload_expect(const char *key);
+void         ns_net_preload_keep(const char *key, const ns_response *resp);
 void         ns_net_preload_clear(void);
 
 ns_response *ns_net_fetch_blocking(const char   *url,

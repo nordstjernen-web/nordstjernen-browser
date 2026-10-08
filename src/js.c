@@ -63052,10 +63052,175 @@ ns_js_module_set_import_meta(JSContext *ctx, JSValueConst module,
     return 0;
 }
 
+#define NS_MODULE_PREFETCH_MAX 512
+#define NS_DEFERRED_SCRIPT_SLICE_US 50000
+
+static GHashTable *g_module_prefetch_seen;
+static const ns_js *g_module_prefetch_owner;
+
+static gboolean
+ns_module_ident_char(char c)
+{
+    return g_ascii_isalnum(c) || c == '_' || c == '$';
+}
+
+static gboolean
+ns_module_specifier_fetchable(const char *s, gsize n)
+{
+    return (n >= 2 && s[0] == '.' && s[1] == '/') ||
+           (n >= 3 && s[0] == '.' && s[1] == '.' && s[2] == '/') ||
+           (n >= 1 && s[0] == '/') ||
+           (n >= 7 && g_ascii_strncasecmp(s, "http://", 7) == 0) ||
+           (n >= 8 && g_ascii_strncasecmp(s, "https://", 8) == 0);
+}
+
+static const char *
+ns_module_quoted_after_from(const char *q, const char *end)
+{
+    static const char *const declarations[] = {
+        "function", "const", "let", "var", "class", "default", "async",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(declarations); i++) {
+        gsize n = strlen(declarations[i]);
+        if ((gsize)(end - q) > n && memcmp(q, declarations[i], n) == 0 &&
+            !ns_module_ident_char(q[n]))
+            return NULL;
+    }
+    const char *limit = end - q > 4096 ? q + 4096 : end;
+    for (const char *r = q; r + 4 < limit; r++) {
+        if (*r == ';') return NULL;
+        if (memcmp(r, "from", 4) != 0 || ns_module_ident_char(r[4]) ||
+            (r > q && ns_module_ident_char(r[-1])))
+            continue;
+        const char *s = r + 4;
+        while (s < limit && g_ascii_isspace(*s)) s++;
+        if (s < limit && (*s == '"' || *s == '\'')) return s;
+    }
+    return NULL;
+}
+
+static void
+ns_module_scan_imports(const char *src, gsize len, GPtrArray *out)
+{
+    const char *end = src + len;
+    for (const char *p = src; p + 6 < end; p++) {
+        gboolean is_import = memcmp(p, "import", 6) == 0;
+        if (!is_import && memcmp(p, "export", 6) != 0) continue;
+        if ((p > src && (ns_module_ident_char(p[-1]) || p[-1] == '.')) ||
+            ns_module_ident_char(p[6]))
+            continue;
+        const char *q = p + 6;
+        while (q < end && g_ascii_isspace(*q)) q++;
+        if (q >= end) break;
+        if (is_import && (*q == '(' || *q == '.')) continue;
+        const char *spec = is_import && (*q == '"' || *q == '\'')
+            ? q : ns_module_quoted_after_from(q, end);
+        if (!spec) continue;
+        const char *body = spec + 1;
+        gsize room = (gsize)(end - body) < 512 ? (gsize)(end - body) : 512;
+        const char *close = memchr(body, *spec, room);
+        if (!close) continue;
+        if (ns_module_specifier_fetchable(body, (gsize)(close - body)))
+            g_ptr_array_add(out, g_strndup(body, (gsize)(close - body)));
+        p = close;
+    }
+}
+
+static void ns_module_prefetch_imports(const char *module_url, const char *src,
+                                       gsize len, const char *top_url);
+
+static gboolean
+ns_module_prefetch_claim(const char *url)
+{
+    if (!g_module_prefetch_seen)
+        g_module_prefetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, NULL);
+    if (g_hash_table_size(g_module_prefetch_seen) >= NS_MODULE_PREFETCH_MAX ||
+        g_hash_table_contains(g_module_prefetch_seen, url))
+        return FALSE;
+    g_hash_table_add(g_module_prefetch_seen, g_strdup(url));
+    return TRUE;
+}
+
+static void
+on_module_prefetched(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)src;
+    char **target = user_data;
+    ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp && !resp->error && resp->status == 200 && resp->body &&
+        g_module_prefetch_seen &&
+        g_hash_table_contains(g_module_prefetch_seen, target[0])) {
+        char *key = ns_net_request_key(target[0], target[1], "GET",
+            ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT));
+        ns_net_preload_keep(key, resp);
+        g_free(key);
+        ns_module_prefetch_imports(target[0], (const char *)resp->body->data,
+                                   resp->body->len, target[1]);
+    }
+    if (resp) ns_response_free(resp);
+    g_strfreev(target);
+}
+
+static void
+ns_module_prefetch_url(const char *url, const char *top_url)
+{
+    if (!ns_module_prefetch_claim(url)) return;
+    const char *const *headers = ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
+    char *key = ns_net_request_key(url, top_url, "GET", headers);
+    if (!key) return;
+    ns_net_preload_expect(key);
+    g_free(key);
+    char **target = g_new0(char *, 3);
+    target[0] = g_strdup(url);
+    target[1] = g_strdup(top_url);
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
+                         on_module_prefetched, target);
+}
+
+static void
+ns_module_prefetch_imports(const char *module_url, const char *src, gsize len,
+                           const char *top_url)
+{
+    if (!module_url || !src || !top_url ||
+        !ns_url_is_http_or_https(module_url))
+        return;
+    GPtrArray *specs = g_ptr_array_new_with_free_func(g_free);
+    ns_module_scan_imports(src, len, specs);
+    for (guint i = 0; i < specs->len; i++) {
+        char *abs_url = ns_url_resolve(module_url, g_ptr_array_index(specs, i));
+        if (abs_url && ns_url_is_http_or_https(abs_url))
+            ns_module_prefetch_url(abs_url, top_url);
+        g_free(abs_url);
+    }
+    g_ptr_array_free(specs, TRUE);
+}
+
+static void
+ns_js_module_prefetch_owner(ns_js *js)
+{
+    if (g_module_prefetch_owner == js) return;
+    g_module_prefetch_owner = js;
+    if (g_module_prefetch_seen) g_hash_table_remove_all(g_module_prefetch_seen);
+}
+
+static void
+ns_js_module_prefetch_begin(ns_js *js, const char *module_url,
+                            const char *src, gsize len)
+{
+    if (!js || js->worker_host || !js->current_url) return;
+    ns_js_module_prefetch_owner(js);
+    if (module_url && ns_url_is_http_or_https(module_url) &&
+        g_module_prefetch_seen)
+        g_hash_table_add(g_module_prefetch_seen, g_strdup(module_url));
+    ns_module_prefetch_imports(module_url, src, len, js->current_url);
+}
+
 static JSValue
 ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
                             const char *module_name)
 {
+    ns_js_module_prefetch_begin(js_from_ctx(ctx), module_name, src, len);
     gsize  name_len = module_name ? strlen(module_name) : 0;
     gsize  key_len  = name_len + 1 + len;
     char  *key      = g_malloc(key_len);
@@ -63790,6 +63955,24 @@ ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
     }
     if (holding) ns_js_parser_release(js, &hold);
     ns_ce_upgrade_subtree_all(js, js->current_doc);
+}
+
+static void
+ns_js_module_prefetch_scripts(ns_js *js, GArray *tasks, const char *origin)
+{
+    if (!js || js->worker_host || !js->current_url || !tasks) return;
+    ns_js_module_prefetch_owner(js);
+    for (guint i = 0; i < tasks->len; i++) {
+        const ns_node *n = g_array_index(tasks, ns_script_task, i).node;
+        const char *src = n ? ns_element_get_attr(n, "src") : NULL;
+        if (!src || !*src || !ns_script_type_is_module(n) ||
+            ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
+            continue;
+        char *abs_url = ns_url_resolve(origin, src);
+        if (abs_url && ns_url_is_http_or_https(abs_url))
+            ns_module_prefetch_url(abs_url, js->current_url);
+        g_free(abs_url);
+    }
 }
 
 static void
@@ -65895,6 +66078,7 @@ ns_js_lifecycle_tick(gpointer data)
     const char *origin = js->lifecycle_origin && *js->lifecycle_origin
         ? js->lifecycle_origin : "inline";
     if (js->lifecycle_phase == 0) {
+        ns_js_module_prefetch_scripts(js, js->lifecycle_tasks, origin);
         ns_js_set_navigation_milestone(js,
             &js->navigation_timing.dom_interactive_ms, "domInteractive");
         js->ready_state = 1;
@@ -65904,8 +66088,17 @@ ns_js_lifecycle_tick(gpointer data)
         return G_SOURCE_REMOVE;
     }
     if (js->lifecycle_phase == 1) {
-        if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
-                                           NS_SCRIPT_DEFERRED, origin)) {
+        gint64 slice_end = g_get_monotonic_time() + NS_DEFERRED_SCRIPT_SLICE_US;
+        g_autofree char *slice_origin = g_strdup(origin);
+        gboolean ran = FALSE;
+        while (!js->halted && js->lifecycle_doc == doc && js->lifecycle_tasks &&
+               ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
+                                              NS_SCRIPT_DEFERRED,
+                                              slice_origin)) {
+            ran = TRUE;
+            if (g_get_monotonic_time() >= slice_end) break;
+        }
+        if (ran) {
             ns_js_lifecycle_schedule(js);
             return G_SOURCE_REMOVE;
         }
