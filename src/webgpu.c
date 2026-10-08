@@ -40,6 +40,8 @@ static JSClassID g_compute_pass_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
+#define NS_WG_MAX_COLOR_ATTACHMENTS 8
+
 typedef struct { WGPUAdapter adapter; } ns_wg_adapter;
 typedef struct { WGPUDevice device; WGPUQueue queue; } ns_wg_device;
 typedef struct { WGPUQueue queue; } ns_wg_queue;
@@ -1189,10 +1191,101 @@ wg_pass_end(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static double
+wg_arg_f64(JSContext *ctx, int argc, JSValueConst *argv, int i, double defv)
+{
+    double v = defv;
+    if (i < argc && !JS_IsUndefined(argv[i])) JS_ToFloat64(ctx, &v, argv[i]);
+    return v;
+}
+
+static uint32_t
+wg_arg_u32(JSContext *ctx, int argc, JSValueConst *argv, int i, uint32_t defv)
+{
+    uint32_t v = defv;
+    if (i < argc && !JS_IsUndefined(argv[i])) JS_ToUint32(ctx, &v, argv[i]);
+    return v;
+}
+
 static JSValue
-wg_pass_noop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+wg_pass_setViewport(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 6) return JS_UNDEFINED;
+    float v[6];
+    for (int i = 0; i < 6; i++) v[i] = (float)wg_arg_f64(ctx, argc, argv, i, 0);
+    wgpuRenderPassEncoderSetViewport(p->pass, v[0], v[1], v[2], v[3], v[4], v[5]);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_setScissorRect(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 4) return JS_UNDEFINED;
+    wgpuRenderPassEncoderSetScissorRect(p->pass,
+        wg_arg_u32(ctx, argc, argv, 0, 0), wg_arg_u32(ctx, argc, argv, 1, 0),
+        wg_arg_u32(ctx, argc, argv, 2, 0), wg_arg_u32(ctx, argc, argv, 3, 0));
+    return JS_UNDEFINED;
+}
+
+static double wg_color_component(JSContext *ctx, JSValueConst color,
+                                 const char *key, int idx);
+
+static JSValue
+wg_pass_beginOcclusionQuery(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass) return JS_UNDEFINED;
+    wgpuRenderPassEncoderBeginOcclusionQuery(p->pass,
+                                             wg_arg_u32(ctx, argc, argv, 0, 0));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_endOcclusionQuery(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)argc; (void)argv;
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (p && p->pass) wgpuRenderPassEncoderEndOcclusionQuery(p->pass);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_debug_noop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_setBlendConstant(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 1) return JS_UNDEFINED;
+    WGPUColor c = {
+        wg_color_component(ctx, argv[0], "r", 0),
+        wg_color_component(ctx, argv[0], "g", 1),
+        wg_color_component(ctx, argv[0], "b", 2),
+        wg_color_component(ctx, argv[0], "a", 3),
+    };
+    wgpuRenderPassEncoderSetBlendConstant(p->pass, &c);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_setStencilReference(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass) return JS_UNDEFINED;
+    wgpuRenderPassEncoderSetStencilReference(p->pass,
+                                             wg_arg_u32(ctx, argc, argv, 0, 0));
     return JS_UNDEFINED;
 }
 
@@ -1312,8 +1405,15 @@ wg_make_pass(JSContext *ctx, WGPURenderPassEncoder pass)
     wg_bind(ctx, obj, "setBindGroup", wg_pass_setBindGroup, 2);
     wg_bind(ctx, obj, "setVertexBuffer", wg_pass_setVertexBuffer, 2);
     wg_bind(ctx, obj, "setIndexBuffer", wg_pass_setIndexBuffer, 2);
-    wg_bind(ctx, obj, "setViewport", wg_pass_noop, 6);
-    wg_bind(ctx, obj, "setScissorRect", wg_pass_noop, 4);
+    wg_bind(ctx, obj, "setViewport", wg_pass_setViewport, 6);
+    wg_bind(ctx, obj, "setScissorRect", wg_pass_setScissorRect, 4);
+    wg_bind(ctx, obj, "setBlendConstant", wg_pass_setBlendConstant, 1);
+    wg_bind(ctx, obj, "setStencilReference", wg_pass_setStencilReference, 1);
+    wg_bind(ctx, obj, "beginOcclusionQuery", wg_pass_beginOcclusionQuery, 1);
+    wg_bind(ctx, obj, "endOcclusionQuery", wg_pass_endOcclusionQuery, 0);
+    wg_bind(ctx, obj, "pushDebugGroup", wg_debug_noop, 1);
+    wg_bind(ctx, obj, "popDebugGroup", wg_debug_noop, 0);
+    wg_bind(ctx, obj, "insertDebugMarker", wg_debug_noop, 1);
     wg_bind(ctx, obj, "draw", wg_pass_draw, 4);
     wg_bind(ctx, obj, "drawIndexed", wg_pass_drawIndexed, 5);
     return obj;
@@ -1356,6 +1456,96 @@ wg_color_component(JSContext *ctx, JSValueConst color, const char *key, int idx)
     return out;
 }
 
+static WGPULoadOp
+wg_load_op(JSContext *ctx, JSValueConst obj, const char *key)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    const char *s = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL;
+    WGPULoadOp op = !s ? WGPULoadOp_Undefined
+                  : strcmp(s, "load") == 0 ? WGPULoadOp_Load : WGPULoadOp_Clear;
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, v);
+    return op;
+}
+
+static WGPUStoreOp
+wg_store_op(JSContext *ctx, JSValueConst obj, const char *key)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    const char *s = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL;
+    WGPUStoreOp op = !s ? WGPUStoreOp_Undefined
+                   : strcmp(s, "discard") == 0 ? WGPUStoreOp_Discard
+                                               : WGPUStoreOp_Store;
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, v);
+    return op;
+}
+
+static gboolean
+wg_read_color_attachment(JSContext *ctx, JSValueConst a,
+                         WGPURenderPassColorAttachment *color, wg_hold *hold)
+{
+    color->depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    if (!JS_IsObject(a)) return FALSE;
+    JSValue jview = JS_GetPropertyStr(ctx, a, "view");
+    ns_wg_view *vw = wg_hold_opaque(hold, jview, g_view_class);
+    JS_FreeValue(ctx, jview);
+    if (!vw) return FALSE;
+    color->view = vw->view;
+    color->loadOp = wg_load_op(ctx, a, "loadOp");
+    if (color->loadOp == WGPULoadOp_Undefined) color->loadOp = WGPULoadOp_Clear;
+    color->storeOp = wg_store_op(ctx, a, "storeOp");
+    if (color->storeOp == WGPUStoreOp_Undefined) color->storeOp = WGPUStoreOp_Store;
+    JSValue jslice = JS_GetPropertyStr(ctx, a, "depthSlice");
+    if (!JS_IsUndefined(jslice)) JS_ToUint32(ctx, &color->depthSlice, jslice);
+    JS_FreeValue(ctx, jslice);
+    JSValue jclear = JS_GetPropertyStr(ctx, a, "clearValue");
+    color->clearValue.r = wg_color_component(ctx, jclear, "r", 0);
+    color->clearValue.g = wg_color_component(ctx, jclear, "g", 1);
+    color->clearValue.b = wg_color_component(ctx, jclear, "b", 2);
+    color->clearValue.a = wg_color_component(ctx, jclear, "a", 3);
+    JS_FreeValue(ctx, jclear);
+    JSValue jresolve = JS_GetPropertyStr(ctx, a, "resolveTarget");
+    ns_wg_view *rv = wg_hold_opaque(hold, jresolve, g_view_class);
+    if (rv) color->resolveTarget = rv->view;
+    JS_FreeValue(ctx, jresolve);
+    return TRUE;
+}
+
+static gboolean
+wg_read_depth_attachment(JSContext *ctx, JSValueConst jds,
+                         WGPURenderPassDepthStencilAttachment *depth,
+                         wg_hold *hold)
+{
+    if (!JS_IsObject(jds)) return FALSE;
+    JSValue jview = JS_GetPropertyStr(ctx, jds, "view");
+    ns_wg_view *dv = wg_hold_opaque(hold, jview, g_view_class);
+    JS_FreeValue(ctx, jview);
+    if (!dv) return FALSE;
+    depth->view = dv->view;
+    depth->depthLoadOp = wg_load_op(ctx, jds, "depthLoadOp");
+    depth->depthStoreOp = wg_store_op(ctx, jds, "depthStoreOp");
+    depth->stencilLoadOp = wg_load_op(ctx, jds, "stencilLoadOp");
+    depth->stencilStoreOp = wg_store_op(ctx, jds, "stencilStoreOp");
+    depth->depthClearValue = WGPU_DEPTH_CLEAR_VALUE_UNDEFINED;
+    JSValue v = JS_GetPropertyStr(ctx, jds, "depthClearValue");
+    if (!JS_IsUndefined(v)) {
+        double dc = 1.0; JS_ToFloat64(ctx, &dc, v);
+        depth->depthClearValue = (float)dc;
+    }
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, jds, "stencilClearValue");
+    if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &depth->stencilClearValue, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, jds, "depthReadOnly");
+    depth->depthReadOnly = JS_ToBool(ctx, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, jds, "stencilReadOnly");
+    depth->stencilReadOnly = JS_ToBool(ctx, v);
+    JS_FreeValue(ctx, v);
+    return TRUE;
+}
+
 static JSValue
 wg_encoder_beginRenderPass(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
@@ -1365,94 +1555,49 @@ wg_encoder_beginRenderPass(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
 
     wg_hold hold = { ctx, NULL };
+    WGPURenderPassColorAttachment colors[NS_WG_MAX_COLOR_ATTACHMENTS];
+    memset(colors, 0, sizeof colors);
+    uint32_t ncolors = 0;
+    gboolean any_view = FALSE;
     JSValue atts = JS_GetPropertyStr(ctx, argv[0], "colorAttachments");
-    WGPURenderPassColorAttachment color;
-    memset(&color, 0, sizeof color);
-    color.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    color.loadOp = WGPULoadOp_Clear;
-    color.storeOp = WGPUStoreOp_Store;
-
     if (JS_IsArray(atts)) {
-        JSValue a0 = JS_GetPropertyUint32(ctx, atts, 0);
-        if (JS_IsObject(a0)) {
-            JSValue jview = JS_GetPropertyStr(ctx, a0, "view");
-            ns_wg_view *vw = wg_hold_opaque(&hold, jview, g_view_class);
-            if (vw) color.view = vw->view;
-            JS_FreeValue(ctx, jview);
-
-            JSValue jload = JS_GetPropertyStr(ctx, a0, "loadOp");
-            const char *ls = JS_IsString(jload) ? JS_ToCString(ctx, jload) : NULL;
-            if (ls && strcmp(ls, "load") == 0) color.loadOp = WGPULoadOp_Load;
-            if (ls) JS_FreeCString(ctx, ls);
-            JS_FreeValue(ctx, jload);
-
-            JSValue jstore = JS_GetPropertyStr(ctx, a0, "storeOp");
-            const char *ss = JS_IsString(jstore) ? JS_ToCString(ctx, jstore) : NULL;
-            if (ss && strcmp(ss, "discard") == 0) color.storeOp = WGPUStoreOp_Discard;
-            if (ss) JS_FreeCString(ctx, ss);
-            JS_FreeValue(ctx, jstore);
-
-            JSValue jclear = JS_GetPropertyStr(ctx, a0, "clearValue");
-            color.clearValue.r = wg_color_component(ctx, jclear, "r", 0);
-            color.clearValue.g = wg_color_component(ctx, jclear, "g", 1);
-            color.clearValue.b = wg_color_component(ctx, jclear, "b", 2);
-            color.clearValue.a = JS_IsUndefined(jclear)
-                ? 1.0 : wg_color_component(ctx, jclear, "a", 3);
-            JS_FreeValue(ctx, jclear);
-
-            JSValue jresolve = JS_GetPropertyStr(ctx, a0, "resolveTarget");
-            ns_wg_view *rv = wg_hold_opaque(&hold, jresolve, g_view_class);
-            if (rv) color.resolveTarget = rv->view;
-            JS_FreeValue(ctx, jresolve);
+        JSValue jl = JS_GetPropertyStr(ctx, atts, "length");
+        JS_ToUint32(ctx, &ncolors, jl);
+        JS_FreeValue(ctx, jl);
+        if (ncolors > NS_WG_MAX_COLOR_ATTACHMENTS)
+            ncolors = NS_WG_MAX_COLOR_ATTACHMENTS;
+        for (uint32_t i = 0; i < ncolors; i++) {
+            JSValue a = JS_GetPropertyUint32(ctx, atts, i);
+            if (wg_read_color_attachment(ctx, a, &colors[i], &hold))
+                any_view = TRUE;
+            JS_FreeValue(ctx, a);
         }
-        JS_FreeValue(ctx, a0);
     }
     JS_FreeValue(ctx, atts);
 
-    if (!color.view) {
+    WGPURenderPassDepthStencilAttachment depth;
+    memset(&depth, 0, sizeof depth);
+    JSValue jds = JS_GetPropertyStr(ctx, argv[0], "depthStencilAttachment");
+    gboolean have_depth = wg_read_depth_attachment(ctx, jds, &depth, &hold);
+    JS_FreeValue(ctx, jds);
+
+    if (!any_view && !have_depth) {
         wg_hold_release(&hold);
         return JS_UNDEFINED;
     }
 
-    WGPURenderPassDepthStencilAttachment depth;
-    memset(&depth, 0, sizeof depth);
-    gboolean have_depth = FALSE;
-    JSValue jds = JS_GetPropertyStr(ctx, argv[0], "depthStencilAttachment");
-    if (JS_IsObject(jds)) {
-        JSValue jview = JS_GetPropertyStr(ctx, jds, "view");
-        ns_wg_view *dv = wg_hold_opaque(&hold, jview, g_view_class);
-        JS_FreeValue(ctx, jview);
-        if (dv) {
-            depth.view = dv->view;
-            have_depth = TRUE;
-            depth.depthLoadOp = WGPULoadOp_Clear;
-            depth.depthStoreOp = WGPUStoreOp_Store;
-            depth.depthClearValue = 1.0f;
-            JSValue jdl = JS_GetPropertyStr(ctx, jds, "depthLoadOp");
-            const char *dls = JS_IsString(jdl) ? JS_ToCString(ctx, jdl) : NULL;
-            if (dls && strcmp(dls, "load") == 0) depth.depthLoadOp = WGPULoadOp_Load;
-            if (dls) JS_FreeCString(ctx, dls);
-            JS_FreeValue(ctx, jdl);
-            JSValue jdsr = JS_GetPropertyStr(ctx, jds, "depthStoreOp");
-            const char *dss = JS_IsString(jdsr) ? JS_ToCString(ctx, jdsr) : NULL;
-            if (dss && strcmp(dss, "discard") == 0) depth.depthStoreOp = WGPUStoreOp_Discard;
-            if (dss) JS_FreeCString(ctx, dss);
-            JS_FreeValue(ctx, jdsr);
-            JSValue jdc = JS_GetPropertyStr(ctx, jds, "depthClearValue");
-            if (!JS_IsUndefined(jdc)) {
-                double dc = 1.0; JS_ToFloat64(ctx, &dc, jdc);
-                depth.depthClearValue = (float)dc;
-            }
-            JS_FreeValue(ctx, jdc);
-        }
-    }
-    JS_FreeValue(ctx, jds);
+    WGPUQuerySet occlusion = NULL;
+    JSValue jocc = JS_GetPropertyStr(ctx, argv[0], "occlusionQuerySet");
+    ns_wg_queryset *oq = wg_hold_opaque(&hold, jocc, g_queryset_class);
+    if (oq) occlusion = oq->qs;
+    JS_FreeValue(ctx, jocc);
 
     WGPURenderPassDescriptor desc;
     memset(&desc, 0, sizeof desc);
-    desc.colorAttachmentCount = 1;
-    desc.colorAttachments = &color;
+    desc.colorAttachmentCount = ncolors;
+    desc.colorAttachments = colors;
     if (have_depth) desc.depthStencilAttachment = &depth;
+    desc.occlusionQuerySet = occlusion;
     WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(e->enc, &desc);
     wg_hold_release(&hold);
     if (!pass) return JS_UNDEFINED;
