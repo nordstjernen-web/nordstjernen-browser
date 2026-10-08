@@ -87,6 +87,7 @@ ns_js *ns_js_new(ns_js_log_cb      log_cb,  gpointer log_user_data,
 
 void   ns_js_set_form_submit_cb(ns_js *js, ns_js_form_submit_cb cb, gpointer user_data);
 void   ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data);
+void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_selection(ns_js *js, const char *text, gboolean has_range,
                            double x, double y, double w, double h);
 void   ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
