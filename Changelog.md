@@ -3,6 +3,16 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU supports the `subgroups` feature. wgpu-native implements
+  subgroup operations on Vulkan, Direct3D 12 and Metal but offers them
+  as a native feature rather than the standard one, so `subgroups` was
+  never listed, and its WGSL front end rejects the `enable subgroups;`
+  directive that WGSL requires before the subgroup built-ins. The
+  feature is now listed and requestable when the adapter has the native
+  one, and `subgroups` is taken out of a shader's `enable` directives
+  (blanked, so error positions stay put) before naga sees it.
+  `subgroupAdd()` and the other built-ins run, and three.js's
+  `webgpu_compute_reduce` runs every kernel without validation errors.
 * A WebAssembly function has one JavaScript function object.
   `table.get(i)` and `instance.exports` built a new wrapper on every
   access, so `table.get(0) === table.get(0)` was false. Emscripten

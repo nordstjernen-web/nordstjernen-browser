@@ -409,6 +409,7 @@ static const struct { const char *name; WGPUFeatureName feature; } wg_feature_na
     { "clip-distances", WGPUFeatureName_ClipDistances },
     { "dual-source-blending", WGPUFeatureName_DualSourceBlending },
     { "subgroups", WGPUFeatureName_Subgroups },
+    { "subgroups", (WGPUFeatureName)WGPUNativeFeature_Subgroup },
     { "texture-formats-tier1", WGPUFeatureName_TextureFormatsTier1 },
     { "texture-formats-tier2", WGPUFeatureName_TextureFormatsTier2 },
     { "primitive-index", WGPUFeatureName_PrimitiveIndex },
@@ -449,15 +450,19 @@ wg_feature_set(JSContext *ctx, const WGPUSupportedFeatures *f, gboolean core)
 }
 
 static gboolean
-wg_feature_from_name(const char *name, WGPUFeatureName *out)
+wg_feature_from_name(WGPUAdapter adapter, const char *name, WGPUFeatureName *out)
 {
+    gboolean known = FALSE;
     for (size_t k = 0; name && k < G_N_ELEMENTS(wg_feature_names); k++) {
-        if (strcmp(wg_feature_names[k].name, name) == 0) {
+        if (strcmp(wg_feature_names[k].name, name) != 0) continue;
+        if (!known) *out = wg_feature_names[k].feature;
+        known = TRUE;
+        if (adapter && wgpuAdapterHasFeature(adapter, wg_feature_names[k].feature)) {
             *out = wg_feature_names[k].feature;
             return TRUE;
         }
     }
-    return FALSE;
+    return known;
 }
 
 static JSValue
@@ -474,8 +479,8 @@ wg_array_from(JSContext *ctx, JSValueConst iterable)
 }
 
 static gboolean
-wg_read_required_features(JSContext *ctx, JSValueConst v, WGPUFeatureName *out,
-                          size_t cap, size_t *count)
+wg_read_required_features(JSContext *ctx, WGPUAdapter adapter, JSValueConst v,
+                          WGPUFeatureName *out, size_t cap, size_t *count)
 {
     *count = 0;
     if (!JS_IsObject(v)) return TRUE;
@@ -493,7 +498,7 @@ wg_read_required_features(JSContext *ctx, JSValueConst v, WGPUFeatureName *out,
         JSValue e = JS_GetPropertyUint32(ctx, list, i);
         const char *name = JS_ToCString(ctx, e);
         WGPUFeatureName f;
-        ok = wg_feature_from_name(name, &f);
+        ok = wg_feature_from_name(adapter, name, &f);
         gboolean dup = FALSE;
         for (size_t k = 0; ok && k < *count; k++) dup |= out[k] == f;
         if (ok && !dup && *count < cap) out[(*count)++] = f;
@@ -1084,7 +1089,7 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
     gboolean have_limits = FALSE;
     if (argc >= 1 && JS_IsObject(argv[0])) {
         JSValue jfeat = JS_GetPropertyStr(ctx, argv[0], "requiredFeatures");
-        gboolean ok = wg_read_required_features(ctx, jfeat, required,
+        gboolean ok = wg_read_required_features(ctx, a->adapter, jfeat, required,
                                                 G_N_ELEMENTS(required),
                                                 &required_count);
         JS_FreeValue(ctx, jfeat);
@@ -2476,6 +2481,64 @@ wg_shader_compilationInfo(JSContext *ctx, JSValueConst this_val,
     return wg_promise_resolved(ctx, info);
 }
 
+static gboolean
+wg_wgsl_ident_char(char c)
+{
+    return g_ascii_isalnum(c) || c == '_';
+}
+
+static const char *
+wg_wgsl_skip_trivia(const char *p)
+{
+    for (;;) {
+        while (*p && g_ascii_isspace(*p)) p++;
+        if (p[0] == '/' && p[1] == '/') {
+            while (*p && *p != '\n') p++;
+        } else if (p[0] == '/' && p[1] == '*') {
+            const char *end = strstr(p + 2, "*/");
+            p = end ? end + 2 : p + strlen(p);
+        } else {
+            return p;
+        }
+    }
+}
+
+static void
+wg_wgsl_drop_subgroups_enable(char *code)
+{
+    char *p = (char *)wg_wgsl_skip_trivia(code);
+    while (strncmp(p, "enable", 6) == 0 && !wg_wgsl_ident_char(p[6])) {
+        char *semi = strchr(p, ';');
+        if (!semi) return;
+        char *list = p + 6;
+        gboolean kept = FALSE;
+        char *q = list;
+        while (q < semi) {
+            while (q < semi && !wg_wgsl_ident_char(*q)) q++;
+            char *start = q;
+            while (q < semi && wg_wgsl_ident_char(*q)) q++;
+            if (q == start) break;
+            if (q - start == 9 && strncmp(start, "subgroups", 9) == 0) {
+                memset(start, ' ', 9);
+                char *comma = q;
+                while (comma < semi && g_ascii_isspace(*comma)) comma++;
+                if (comma < semi && *comma == ',') *comma = ' ';
+                else {
+                    char *prev = start;
+                    while (prev > list && g_ascii_isspace(prev[-1])) prev--;
+                    if (prev > list && prev[-1] == ',') prev[-1] = ' ';
+                }
+            } else {
+                kept = TRUE;
+            }
+        }
+        if (!kept)
+            for (char *c = p; c <= semi; c++)
+                if (*c != '\n') *c = ' ';
+        p = (char *)wg_wgsl_skip_trivia(semi + 1);
+    }
+}
+
 static JSValue
 wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
@@ -2487,16 +2550,19 @@ wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
     const char *code = JS_IsString(jcode) ? JS_ToCString(ctx, jcode) : NULL;
     JS_FreeValue(ctx, jcode);
     if (!code) return JS_ThrowTypeError(ctx, "createShaderModule: code required");
+    char *wgsl = g_strdup(code);
+    JS_FreeCString(ctx, code);
+    wg_wgsl_drop_subgroups_enable(wgsl);
 
     WGPUShaderSourceWGSL src;
     memset(&src, 0, sizeof src);
     src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = wg_sv(code);
+    src.code = wg_sv(wgsl);
     WGPUShaderModuleDescriptor desc;
     memset(&desc, 0, sizeof desc);
     desc.nextInChain = (WGPUChainedStruct *)&src;
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(d->device, &desc);
-    JS_FreeCString(ctx, code);
+    g_free(wgsl);
     if (!mod) return JS_ThrowInternalError(ctx, "createShaderModule failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_shader_class);
