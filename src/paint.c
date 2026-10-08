@@ -751,6 +751,16 @@ corner_radii_inset(corner_radii c, double top, double right, double bottom,
     return in;
 }
 
+static corner_radii
+outline_radii(corner_radii c, double w, double h, double grow)
+{
+    c = corner_radii_fit(c, w, h);
+    double *r[8] = { &c.tl, &c.tr, &c.br, &c.bl, &c.tlv, &c.trv, &c.brv, &c.blv };
+    for (int i = 0; i < 8; i++)
+        if (*r[i] > 0) *r[i] = MAX(0, *r[i] + grow);
+    return c;
+}
+
 static gboolean
 border_style_is_solid(const ns_css_value *v)
 {
@@ -1981,11 +1991,10 @@ paint_block(cairo_t *cr, const ns_box *b)
                 double dashes[] = { ow, ow };
                 cairo_set_dash(cr, dashes, 2, 0);
             }
-            cairo_rectangle(cr,
-                border_x - off - ow / 2.0,
-                border_y - off - ow / 2.0,
-                border_w + (off + ow / 2.0) * 2,
-                border_h + (off + ow / 2.0) * 2);
+            double grow = off + ow / 2.0;
+            rounded_rect_path(cr, border_x - grow, border_y - grow,
+                              border_w + grow * 2, border_h + grow * 2,
+                              outline_radii(radii, border_w, border_h, grow));
             cairo_stroke(cr);
             cairo_restore(cr);
         }
