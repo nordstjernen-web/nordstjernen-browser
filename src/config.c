@@ -157,7 +157,7 @@ static const cfg_field cfg_fields[] = {
     FB(images_enabled,        TRUE),
     FB(javascript_enabled,    TRUE),
     FB(webgl_enabled,         TRUE),
-    FB(webgpu_enabled,        FALSE),
+    { "webgpu", CFG_BOOL, G_STRUCT_OFFSET(ns_config, webgpu_enabled), NULL, TRUE },
     FB(camera_enabled,        FALSE),
     FB(microphone_enabled,    FALSE),
     FB(local_storage_enabled, TRUE),
@@ -549,7 +549,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
     g_string_append_printf(s, "javascript_enabled    = %s\n", c->javascript_enabled ? "true" : "false");
     g_string_append_printf(s, "webgl_enabled         = %s\n", c->webgl_enabled ? "true" : "false");
-    g_string_append_printf(s, "webgpu_enabled        = %s\n", c->webgpu_enabled ? "true" : "false");
+    g_string_append_printf(s, "webgpu                = %s\n", c->webgpu_enabled ? "true" : "false");
     g_string_append_printf(s, "camera_enabled        = %s\n", c->camera_enabled ? "true" : "false");
     g_string_append_printf(s, "microphone_enabled    = %s\n", c->microphone_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");
