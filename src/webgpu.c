@@ -46,7 +46,7 @@ static GHashTable *g_webgpu_ctx_by_node;
 #define NS_WG_MAX_COLOR_ATTACHMENTS 8
 
 typedef struct { WGPUAdapter adapter; } ns_wg_adapter;
-typedef struct {
+typedef struct ns_wg_error_sink {
     JSContext *ctx;
     JSValue    device_obj;
     GPtrArray *pending;
@@ -64,14 +64,18 @@ typedef struct {
 } ns_wg_device;
 
 typedef struct { WGPUErrorType type; char *message; } ns_wg_pending_error;
-typedef struct { WGPUQueue queue; } ns_wg_queue;
+typedef struct { WGPUQueue queue; ns_wg_error_sink *sink; } ns_wg_queue;
 typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean range_escaped; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
 typedef struct { WGPUComputePipeline pipe; } ns_wg_compute_pipe;
 typedef struct { WGPUComputePassEncoder pass; } ns_wg_compute_pass;
 typedef struct { WGPUTexture texture; uint32_t w, h; WGPUTextureFormat format; } ns_wg_texture;
 typedef struct { WGPUTextureView view; } ns_wg_view;
-typedef struct { WGPUCommandEncoder enc; } ns_wg_encoder;
+typedef struct {
+    WGPUCommandEncoder enc;
+    WGPUDevice         device;
+    ns_wg_error_sink  *sink;
+} ns_wg_encoder;
 typedef struct { WGPURenderPassEncoder pass; } ns_wg_pass;
 typedef struct { WGPUCommandBuffer cmd; } ns_wg_cmdbuf;
 typedef struct { WGPUShaderModule mod; } ns_wg_shader;
@@ -157,6 +161,12 @@ static JSValue wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
 static JSValue wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void wg_read_extent(JSContext *ctx, JSValueConst v, WGPUExtent3D *out);
+static void wg_on_uncaptured_error(WGPUDevice const *device, WGPUErrorType type,
+                                   WGPUStringView message, void *u1, void *u2);
+static gboolean wg_pop_internal_scope(WGPUDevice device, WGPUErrorType *type,
+                                      char **message);
+static void wg_report_error(ns_wg_error_sink *sink, WGPUErrorType type,
+                            const char *message);
 
 static gboolean
 ns_webgpu_allowed(void)
@@ -564,13 +574,33 @@ wg_queue_submit(JSContext *ctx, JSValueConst this_val,
     WGPUCommandBuffer *cmds = g_new0(WGPUCommandBuffer, len);
     wg_hold hold = { ctx, NULL };
     uint32_t n = 0;
+    gboolean invalid = FALSE;
+    GPtrArray *consumed = g_ptr_array_new();
     for (uint32_t i = 0; i < len; i++) {
         JSValue e = JS_GetPropertyUint32(ctx, argv[0], i);
         ns_wg_cmdbuf *cb = wg_hold_opaque(&hold, e, g_cmdbuf_class);
-        if (cb && cb->cmd) cmds[n++] = cb->cmd;
+        if (cb && cb->cmd) {
+            cmds[n++] = cb->cmd;
+            g_ptr_array_add(consumed, cb);
+        } else {
+            invalid = TRUE;
+        }
         JS_FreeValue(ctx, e);
     }
-    if (n > 0) wgpuQueueSubmit(q->queue, n, cmds);
+    if (invalid) {
+        if (q->sink)
+            wg_report_error(q->sink, WGPUErrorType_Validation,
+                            "queue.submit: a command buffer is invalid or was "
+                            "already submitted");
+    } else if (n > 0) {
+        wgpuQueueSubmit(q->queue, n, cmds);
+        for (guint i = 0; i < consumed->len; i++) {
+            ns_wg_cmdbuf *cb = g_ptr_array_index(consumed, i);
+            wgpuCommandBufferRelease(cb->cmd);
+            cb->cmd = NULL;
+        }
+    }
+    g_ptr_array_free(consumed, TRUE);
     wg_hold_release(&hold);
     g_free(cmds);
     return JS_UNDEFINED;
@@ -586,13 +616,21 @@ wg_queue_finalizer(JSRuntime *rt, JSValue val)
     g_free(q);
 }
 
+static void
+wg_report_error(ns_wg_error_sink *sink, WGPUErrorType type, const char *message)
+{
+    WGPUStringView sv = { message, strlen(message) };
+    wg_on_uncaptured_error(NULL, type, sv, sink, NULL);
+}
+
 static JSValue
-wg_make_queue(JSContext *ctx, WGPUQueue queue)
+wg_make_queue(JSContext *ctx, WGPUQueue queue, ns_wg_error_sink *sink)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_queue_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_queue *q = g_new0(ns_wg_queue, 1);
     q->queue = queue;
+    q->sink = sink;
     JS_SetOpaque(obj, q);
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
     return obj;
@@ -779,7 +817,7 @@ wg_device_getQueue(JSContext *ctx, JSValueConst this_val,
     ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
     if (!d) return JS_UNDEFINED;
     wgpuQueueAddRef(d->queue);
-    return wg_make_queue(ctx, d->queue);
+    return wg_make_queue(ctx, d->queue, d->sink);
 }
 
 static void
@@ -859,7 +897,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink)
     wg_link_event_target(ctx, obj);
 
     wgpuQueueAddRef(d->queue);
-    JS_SetPropertyStr(ctx, obj, "queue", wg_make_queue(ctx, d->queue));
+    JS_SetPropertyStr(ctx, obj, "queue", wg_make_queue(ctx, d->queue, sink));
     {
         JSValue lost_funcs[2];
         JSValue lost = JS_NewPromiseCapability(ctx, lost_funcs);
@@ -2026,8 +2064,17 @@ wg_encoder_finish(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
     if (!e || !e->enc) return JS_UNDEFINED;
+    wgpuDevicePushErrorScope(e->device, WGPUErrorFilter_Validation);
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(e->enc, NULL);
-    if (!cmd) return JS_UNDEFINED;
+    WGPUErrorType type = WGPUErrorType_NoError;
+    char *message = NULL;
+    if (wg_pop_internal_scope(e->device, &type, &message) &&
+        type != WGPUErrorType_NoError) {
+        if (e->sink) wg_report_error(e->sink, type, message ? message : "");
+        if (cmd) wgpuCommandBufferRelease(cmd);
+        cmd = NULL;
+    }
+    g_free(message);
     return wg_make_cmdbuf(ctx, cmd);
 }
 
@@ -2042,12 +2089,14 @@ wg_encoder_finalizer(JSRuntime *rt, JSValue val)
 }
 
 static JSValue
-wg_make_encoder(JSContext *ctx, WGPUCommandEncoder enc)
+wg_make_encoder(JSContext *ctx, WGPUCommandEncoder enc, const ns_wg_device *d)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_encoder_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_encoder *e = g_new0(ns_wg_encoder, 1);
     e->enc = enc;
+    e->device = d->device;
+    e->sink = d->sink;
     JS_SetOpaque(obj, e);
     return obj;
 }
@@ -2061,7 +2110,7 @@ wg_device_createCommandEncoder(JSContext *ctx, JSValueConst this_val,
     if (!d) return JS_UNDEFINED;
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(d->device, NULL);
     if (!enc) return JS_UNDEFINED;
-    return wg_make_encoder(ctx, enc);
+    return wg_make_encoder(ctx, enc, d);
 }
 
 static void
@@ -3233,6 +3282,24 @@ wg_on_pop_scope(WGPUPopErrorScopeStatus status, WGPUErrorType type,
     w->done = 1;
 }
 
+static gboolean
+wg_pop_internal_scope(WGPUDevice device, WGPUErrorType *type, char **message)
+{
+    wg_scope_wait wait;
+    memset(&wait, 0, sizeof wait);
+    WGPUPopErrorScopeCallbackInfo ci;
+    memset(&ci, 0, sizeof ci);
+    ci.mode = WGPUCallbackMode_AllowProcessEvents;
+    ci.callback = wg_on_pop_scope;
+    ci.userdata1 = &wait;
+    wgpuDevicePopErrorScope(device, ci);
+    for (int i = 0; i < 2000 && !wait.done; i++)
+        wgpuInstanceProcessEvents(ns_webgpu_instance());
+    *type = wait.type;
+    *message = wait.message;
+    return wait.done && wait.status == WGPUPopErrorScopeStatus_Success;
+}
+
 static JSValue
 wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -3536,7 +3603,10 @@ wg_queryset_destroy(JSContext *ctx, JSValueConst this_val,
 {
     (void)ctx; (void)argc; (void)argv;
     ns_wg_queryset *q = JS_GetOpaque(this_val, g_queryset_class);
-    if (q && q->qs) { wgpuQuerySetDestroy(q->qs); }
+    if (q && q->qs) {
+        wgpuQuerySetRelease(q->qs);
+        q->qs = NULL;
+    }
     return JS_UNDEFINED;
 }
 
