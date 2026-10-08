@@ -45,6 +45,22 @@ case "$WEBGPU_MODE" in
         fi ;;
 esac
 
+release_build_or_die() {
+    local cfg
+    cfg=$(meson configure "$1" 2>/dev/null |
+          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{printf " %s=%s", $1, $2}')
+    case "$cfg " in
+        *" buildtype=release "*|*" buildtype=minsize "*) ;;
+        *) echo "$(basename "$0"): $1 is not a release build ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+    case "$cfg " in
+        *" debug=true "*|*" b_sanitize="[!n]*)
+           echo "$(basename "$0"): $1 carries debug info or sanitizers ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+}
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
         -Db_ndebug=true --strip \
@@ -52,6 +68,7 @@ if [ ! -d "$BUILDDIR" ]; then
         ${WEBGPU_SETUP_ARGS[@]+"${WEBGPU_SETUP_ARGS[@]}"}
 fi
 meson compile -C "$BUILDDIR" ${NS_BUILD_JOBS:+-j "$NS_BUILD_JOBS"}
+release_build_or_die "$BUILDDIR"
 strip --strip-all "$BUILDDIR/src/gtk/nordstjernen"
 # The GUI is a thin shell that spawns one sandboxed nordstjernen-renderer
 # process per tab; it must ship alongside the main binary.

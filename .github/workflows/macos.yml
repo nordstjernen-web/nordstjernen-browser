@@ -208,7 +208,7 @@ jobs:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           set -o pipefail
-          bash -x ./scripts/pack-macos.sh 2>&1 | tee pack-macos.log
+          bash ./scripts/pack-macos.sh 2>&1 | tee pack-macos.log
 
       # Hard gate: launch the BUNDLED binary against a real HTTPS URL. The
       # build-tree smoke test above uses the local about:start page, so it

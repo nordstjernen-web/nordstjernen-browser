@@ -99,3 +99,24 @@ __pycache__/
 /scripts/sitebench/node_modules/
 /scripts/sitebench/package-lock.json
 /builddir-dbg/
+
+# Signing material, credentials and local browsing data must never be committed
+*.jks
+*.keystore
+keystore.properties
+local.properties
+*.p8
+*.p12
+*.pfx
+*.key
+*.pem
+!/android/app/src/main/res/raw/cacert.pem
+*.mobileprovision
+.env
+cookies*.txt
+*.har
+*.sqlite
+*.sqlite3
+vgcore.*
+*.dmp
+sitebench-out/

@@ -37,12 +37,29 @@ MINGW_PREFIX=$(resolve_mingw_prefix) || {
     exit 1
 }
 
+release_build_or_die() {
+    local cfg
+    cfg=$(meson configure "$1" 2>/dev/null |
+          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{printf " %s=%s", $1, $2}')
+    case "$cfg " in
+        *" buildtype=release "*|*" buildtype=minsize "*) ;;
+        *) echo "$(basename "$0"): $1 is not a release build ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+    case "$cfg " in
+        *" debug=true "*|*" b_sanitize="[!n]*)
+           echo "$(basename "$0"): $1 carries debug info or sanitizers ($cfg ); refusing to package it" >&2
+           exit 1 ;;
+    esac
+}
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release "${EXTRA_MESON_SETUP_ARGS[@]}"
 elif [ ${#EXTRA_MESON_SETUP_ARGS[@]} -gt 0 ]; then
     meson configure "$BUILDDIR" "${EXTRA_MESON_SETUP_ARGS[@]}"
 fi
 meson compile -C "$BUILDDIR"
+release_build_or_die "$BUILDDIR"
 
 if [ ! -x "$BIN_SRC" ]; then
     echo "pack-windows: build did not produce $BIN_SRC" >&2

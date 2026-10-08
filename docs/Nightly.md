@@ -229,15 +229,15 @@ independently. So the only thing the cron line must do is run from the
 repo with a sane `PATH`.
 
 Install a system cron fragment at `/etc/cron.d/nordstjernen-nightly`
-(replace `andreas` with the build user):
+(replace `builder` with the build user):
 
 ```cron
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-MAILTO=andreas@example.com
+MAILTO=builder@example.com
 
 # 02:30 every day: build the nightly (the script self-updates from main).
-30 2 * * *  andreas  cd /home/andreas/nordstjernen && ./scripts/nightly.sh >> /var/www/html/nightly/cron.log 2>&1
+30 2 * * *  builder  cd /home/builder/nordstjernen && ./scripts/nightly.sh >> /var/www/html/nightly/cron.log 2>&1
 ```
 
 `nightly.sh` exits non-zero if any enabled stage failed, so with
@@ -248,7 +248,7 @@ If you authenticate via a token instead of `gh auth login`, prepend it
 to the command (keep the cron file `chmod 600`):
 
 ```cron
-30 2 * * *  andreas  GH_TOKEN=ghp_xxx bash -lc 'cd /home/andreas/nordstjernen && ./scripts/nightly.sh' >> /var/www/html/nightly/cron.log 2>&1
+30 2 * * *  builder  GH_TOKEN=ghp_xxx bash -lc 'cd /home/builder/nordstjernen && ./scripts/nightly.sh' >> /var/www/html/nightly/cron.log 2>&1
 ```
 
 ## Options and environment
