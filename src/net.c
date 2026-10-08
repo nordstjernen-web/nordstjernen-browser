@@ -5454,12 +5454,20 @@ static const char *const ns_style_accept_headers[] = {
     NULL
 };
 
-static const char *const ns_image_accept_headers[] = {
 #ifdef NS_HAVE_JXL
-    "Accept: image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#define NS_ACCEPT_JXL "image/jxl,"
 #else
-    "Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#define NS_ACCEPT_JXL ""
 #endif
+#ifdef NS_HAVE_AVIF
+#define NS_ACCEPT_AVIF "image/avif,"
+#else
+#define NS_ACCEPT_AVIF ""
+#endif
+
+static const char *const ns_image_accept_headers[] = {
+    "Accept: " NS_ACCEPT_JXL NS_ACCEPT_AVIF
+    "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "X-ND-Fetch-Dest: image",
     NULL
 };
