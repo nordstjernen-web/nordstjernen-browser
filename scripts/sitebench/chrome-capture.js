@@ -4,8 +4,10 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnSync } = require('child_process');
 
 const HERE = __dirname;
+const LOCALE = 'en-US';
 
 function loadPlaywright() {
   try {
@@ -30,6 +32,7 @@ function parseArgs(argv) {
     category: null,
     viewport: '1280x800',
     runs: 1,
+    visualRuns: 1,
     timeoutMs: 30000,
     settleMs: 3000,
     fullMax: 8000,
@@ -37,6 +40,7 @@ function parseArgs(argv) {
     executable: null,
     filmstrip: true,
     skipExisting: false,
+    maxComponents: null,
   };
   for (const a of argv) {
     const [k, v] = a.includes('=') ? [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)] : [a, ''];
@@ -48,6 +52,7 @@ function parseArgs(argv) {
       case '--category': o.category = new Set(v.split(',').filter(Boolean)); break;
       case '--viewport': o.viewport = v; break;
       case '--runs': o.runs = Math.max(1, parseInt(v, 10) || 1); break;
+      case '--visual-runs': o.visualRuns = Math.max(1, parseInt(v, 10) || 1); break;
       case '--timeout-ms': o.timeoutMs = parseInt(v, 10) || o.timeoutMs; break;
       case '--settle-ms': o.settleMs = parseInt(v, 10); break;
       case '--full-max': o.fullMax = parseInt(v, 10) || o.fullMax; break;
@@ -55,10 +60,12 @@ function parseArgs(argv) {
       case '--executable': o.executable = v; break;
       case '--no-filmstrip': o.filmstrip = false; break;
       case '--skip-existing': o.skipExisting = true; break;
+      case '--max-components': o.maxComponents = v; break;
       case '-h': case '--help':
         console.log('usage: node chrome-capture.js [--sites=FILE] [--out=DIR] [--only=id,..] [--category=c,..]\n' +
-                    '  [--viewport=WxH] [--runs=N] [--timeout-ms=N] [--settle-ms=N] [--full-max=PX]\n' +
-                    '  [--channel=chrome] [--executable=PATH] [--no-filmstrip] [--skip-existing]');
+                    '  [--viewport=WxH] [--runs=N] [--visual-runs=N] [--timeout-ms=N] [--settle-ms=N]\n' +
+                    '  [--full-max=PX] [--channel=chrome] [--executable=PATH] [--no-filmstrip] [--skip-existing]\n' +
+                    '  [--max-components=N]');
         process.exit(0);
         break;
       default:
@@ -68,6 +75,10 @@ function parseArgs(argv) {
   }
   const m = /^(\d+)x(\d+)$/.exec(o.viewport);
   if (!m) { console.error('chrome-capture: --viewport wants WxH'); process.exit(2); }
+  if (o.maxComponents !== null && !/^[1-9]\d*$/.test(o.maxComponents)) {
+    console.error('chrome-capture: --max-components wants a positive number');
+    process.exit(2);
+  }
   o.width = +m[1];
   o.height = +m[2];
   return o;
@@ -108,7 +119,30 @@ function median(xs) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
+function psTreeRssKb(rootPid) {
+  const ps = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,rss='], { encoding: 'utf8' });
+  if (ps.status !== 0) return null;
+  const children = new Map();
+  const rss = new Map();
+  for (const line of ps.stdout.split('\n')) {
+    const [pid, ppid, kb] = line.trim().split(/\s+/).map(Number);
+    if (!pid || pid === ps.pid) continue;
+    rss.set(pid, kb || 0);
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+  }
+  let total = 0;
+  const stack = [...(children.get(rootPid) || [])];
+  while (stack.length) {
+    const pid = stack.pop();
+    total += rss.get(pid);
+    for (const c of children.get(pid) || []) stack.push(c);
+  }
+  return total;
+}
+
 function processTreeRssKb(rootPid) {
+  if (process.platform === 'darwin' && rootPid) return psTreeRssKb(rootPid);
   if (process.platform !== 'linux' || !rootPid) return null;
   const children = new Map();
   for (const name of fs.readdirSync('/proc')) {
@@ -142,7 +176,7 @@ async function openPage(browser, o) {
     viewport: { width: o.width, height: o.height },
     deviceScaleFactor: 1,
     userAgent: o.userAgent,
-    locale: 'en-US',
+    locale: LOCALE,
     timezoneId: 'UTC',
   });
   const page = await ctx.newPage();
@@ -221,12 +255,13 @@ async function runProbe(page, probeSrc) {
   }
 }
 
-async function saveScreenshots(page, dir, o, probe) {
+async function saveScreenshots(page, dir, o, probe, fullPage) {
   let error = null;
   await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
   await page.screenshot({ path: path.join(dir, 'viewport.png'), timeout: 15000 }).catch(e => {
     error = `screenshot: ${e.message.split('\n')[0]}`;
   });
+  if (!fullPage) return error;
   const docH = Math.min(Math.max(probe ? probe.docH : o.height, o.height), o.fullMax);
   await page.screenshot({
     path: path.join(dir, 'full.png'), fullPage: true, timeout: 30000,
@@ -305,12 +340,26 @@ function runSummary(run, probe, perf, net, consoleErrors) {
   };
 }
 
-async function captureRun(browser, site, o, dir, visual, browserPid) {
-  const probeSrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+function visualDir(dir, index) {
+  return index === 0 ? dir : path.join(dir, `visual-${index + 1}`);
+}
+
+function clearVisualDirs(dir) {
+  for (const name of fs.readdirSync(dir)) {
+    if (/^visual-\d+$/.test(name)) fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+  }
+}
+
+function probeCall(o) {
+  return fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8').trim() + `(${o.maxComponents || ''})`;
+}
+
+async function captureRun(browser, site, o, dir, index, browserPid) {
+  const probeSrc = probeCall(o);
   const { ctx, page, cdp } = await openPage(browser, o);
   const net = trackNetwork(cdp);
   const consoleErrors = trackConsole(page);
-  const filmstrip = visual && o.filmstrip;
+  const filmstrip = index === 0 && o.filmstrip;
   const frames = filmstrip ? await startFilmstrip(cdp, o) : [];
 
   const cpu0 = cpuTimesMs();
@@ -327,8 +376,10 @@ async function captureRun(browser, site, o, dir, visual, browserPid) {
   const timeOrigin = await page.evaluate('performance.timeOrigin').catch(() => t0);
   run.rssKb = processTreeRssKb(browserPid);
 
-  if (visual) {
-    const shotError = await saveScreenshots(page, dir, o, probed.probe);
+  if (index < o.visualRuns) {
+    const shotDir = visualDir(dir, index);
+    fs.mkdirSync(shotDir, { recursive: true });
+    const shotError = await saveScreenshots(page, shotDir, o, probed.probe, index === 0);
     run.error = run.error || shotError;
     if (frames.length) writeFrames(path.join(dir, 'frames'), frames, timeOrigin);
   }
@@ -357,9 +408,9 @@ async function launchBrowser(chromium, o) {
 
 async function captureRuns(browser, site, o, dir, browserPid) {
   const runs = [];
-  for (let r = 0; r < o.runs; r++) {
+  for (let r = 0; r < Math.max(o.runs, o.visualRuns); r++) {
     try {
-      runs.push(await captureRun(browser, site, o, dir, r === 0, browserPid));
+      runs.push(await captureRun(browser, site, o, dir, r, browserPid));
     } catch (e) {
       runs.push({ error: String(e.message || e).split('\n')[0] });
     }
@@ -378,18 +429,24 @@ async function captureSite(browser, version, site, o, browserPid) {
   const dir = path.join(o.out, o.label, site.id);
   if (o.skipExisting && fs.existsSync(path.join(dir, 'metrics.json'))) return;
   fs.mkdirSync(dir, { recursive: true });
+  clearVisualDirs(dir);
   const runs = await captureRuns(browser, site, o, dir, browserPid);
   const first = runs[0] || {};
   const summary = {};
-  for (const k of SUMMARY_KEYS) summary[k] = median(runs.map(r => r[k]));
+  for (const k of SUMMARY_KEYS) summary[k] = median(runs.slice(0, o.runs).map(r => r[k]));
   const result = {
-    engine: 'chrome', version, site, viewport: { width: o.width, height: o.height },
+    engine: 'chrome', version, locale: LOCALE, site, viewport: { width: o.width, height: o.height },
     capturedAt: new Date().toISOString(), host: os.hostname(), cpus: os.cpus().length,
     status: first.status, error: first.error || null,
+    settings: { runs: o.runs, visualRuns: o.visualRuns },
     summary, runs: runs.map(r => { const c = Object.assign({}, r); delete c.probe; return c; }),
   };
+  runs.slice(0, o.visualRuns).forEach((r, i) => {
+    if (!r.probe) return;
+    fs.mkdirSync(visualDir(dir, i), { recursive: true });
+    fs.writeFileSync(path.join(visualDir(dir, i), 'probe.json'), JSON.stringify(r.probe));
+  });
   fs.writeFileSync(path.join(dir, 'metrics.json'), JSON.stringify(result, null, 1));
-  if (first.probe) fs.writeFileSync(path.join(dir, 'probe.json'), JSON.stringify(first.probe));
   logSite(site, first, summary);
 }
 
@@ -401,7 +458,8 @@ async function main() {
   const browser = await launchBrowser(chromium, o);
   const version = browser.version();
   const browserPid = process.pid;
-  console.log(`chrome-capture: ${version}, ${sites.length} sites, viewport ${o.width}x${o.height}, runs ${o.runs}`);
+  console.log(`chrome-capture: ${version}, ${sites.length} sites, viewport ${o.width}x${o.height}, runs ${o.runs}, ` +
+              `visual runs ${o.visualRuns}`);
   for (const site of sites) await captureSite(browser, version, site, o, browserPid);
   await browser.close();
 }
