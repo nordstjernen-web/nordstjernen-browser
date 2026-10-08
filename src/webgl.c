@@ -1971,18 +1971,14 @@ wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         if (slen <= NS_WEBGL_MAX_SHADER) {
             const GLchar *p = src;
             GLint plen = (GLint)slen;
-#ifdef NS_HAVE_CGL
             char *prefixed = NULL;
-            if (!strstr(src, "#version")) {
+            if (epoxy_is_desktop_gl() && !strstr(src, "#version")) {
                 prefixed = g_strconcat("#version 100\n", src, NULL);
                 p = prefixed;
                 plen = (GLint)strlen(prefixed);
             }
             glShaderSource((GLuint)wgl_name(ctx, argv[0]), 1, &p, &plen);
             g_free(prefixed);
-#else
-            glShaderSource((GLuint)wgl_name(ctx, argv[0]), 1, &p, &plen);
-#endif
         }
         JS_FreeCString(ctx, src);
     }
