@@ -2466,10 +2466,18 @@ ns_css_simple_new(void)
 }
 
 static void
+css_simple_keep_type_case(ns_css_simple *s, const char *as_written)
+{
+    if (strcmp(s->type, as_written) != 0)
+        s->type_cased = g_strdup(as_written);
+}
+
+static void
 ns_css_simple_free(ns_css_simple *s)
 {
     if (!s) return;
     g_free(s->type);
+    g_free(s->type_cased);
     g_free(s->id);
     g_ptr_array_free(s->classes, TRUE);
     g_array_free(s->class_lens, TRUE);
@@ -2993,6 +3001,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                         if (type && *type) {
                             if (!cmp->type) {
                                 cmp->type = ascii_lower(type, strlen(type));
+                                css_simple_keep_type_case(cmp, type);
                                 sel->spec_c += 1;
                             }
                         }
@@ -3067,6 +3076,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                 }
                 else if (!cmp->type) {
                     cmp->type = ascii_lower(type, strlen(type));
+                    css_simple_keep_type_case(cmp, type);
                     sel->spec_c += 1;
                 }
                 else {
@@ -23307,7 +23317,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     if (sel->type && !(sel->type[0] == '*' && sel->type[1] == '\0')) {
         if (!el->name) return FALSE;
         if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
-            if (strcmp(sel->type, el->name) != 0) return FALSE;
+            if (strcmp(sel->type_cased ? sel->type_cased : sel->type,
+                       el->name) != 0)
+                return FALSE;
         }
         else if (!css_name_equals_lower(el->name, sel->type)) {
             return FALSE;
