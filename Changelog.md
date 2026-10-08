@@ -141,6 +141,14 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* `<slot>` is `display: contents`, as in every browser's default style
+  sheet, and lays out the nodes assigned to it in place: slotted
+  elements become flex or grid items of the shadow tree's container, a
+  slot's own padding no longer applies, and fallback content shows when
+  nothing is assigned. Slots used to make a block of their own, so a
+  web component's flex row stacked vertically and absolutely positioned
+  media in Reddit's posts sized itself to the whole page, covering the
+  feed with one video.
 * JavaScript modules load their import graphs in parallel. Each import
   used to be fetched only when the engine reached it, one round trip
   after another; now every module source is scanned for its static

@@ -28545,6 +28545,7 @@ static const char *kUa =
     "{ display: none; }\n"
     "dialog[popover][data-nd-popover-open] { display: block; }\n"
     "template { display: none; }\n"
+    "slot { display: contents; }\n"
     "marquee { display: inline-block; text-align: initial; "
     "overflow: hidden; }\n"
     "nobr { white-space: nowrap; }\n"
