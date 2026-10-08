@@ -474,14 +474,19 @@ stage_java() {
         printf -- '----------------------------------------\n'
     } | tee "$blog"
 
+    local jsrc="$WORK/javasrc"
+    mkdir -p "$jsrc"
+    archive_to "$jsrc"
+    local jtree="$jsrc/nordstjernen-${NVERSION}"
+    if [ -d "$ROOT/subprojects/packagecache" ]; then
+        mkdir -p "$jtree/subprojects/packagecache"
+        cp -a "$ROOT/subprojects/packagecache/." "$jtree/subprojects/packagecache/"
+    fi
+
     log "Java: build native libraries (engine + JNI bridge)"
     mkdir -p "$work/stage/native"
     local nativeok=0
     if command -v "$DOCKER" >/dev/null 2>&1; then
-        local jsrc="$WORK/javanative"
-        mkdir -p "$jsrc"
-        archive_to "$jsrc"
-        local jtree="$jsrc/nordstjernen-${NVERSION}"
         if ! $DOCKER image inspect "$NIGHTLY_DEBIAN_IMAGE" >/dev/null 2>&1; then
             docker_pull "$NIGHTLY_DEBIAN_IMAGE" >> "$blog" 2>&1 || true
         fi
@@ -492,14 +497,13 @@ stage_java() {
             cp -r "$jtree/java/src/main/resources/native/." "$work/stage/native/"
             nativeok=1
         fi
-        rm -rf "$jsrc"
     fi
     if [ "$nativeok" != 1 ]; then
         log "Java: container native build unavailable; falling back to host toolchain"
         if JAVA_HOME="$jhome" BUILDDIR="$WORK/java-engine" CC="${CC:-cc}" \
-                bash "$ROOT/java/scripts/build-native.sh" >> "$blog" 2>&1 \
-           && [ -d "$ROOT/java/src/main/resources/native" ]; then
-            cp -r "$ROOT/java/src/main/resources/native/." "$work/stage/native/"
+                bash "$jtree/java/scripts/build-native.sh" >> "$blog" 2>&1 \
+           && [ -d "$jtree/java/src/main/resources/native" ]; then
+            cp -r "$jtree/java/src/main/resources/native/." "$work/stage/native/"
             nativeok=1
         fi
     fi
@@ -510,15 +514,15 @@ stage_java() {
     fi
     log "Java: javac"
     if ! "$jhome/bin/javac" -d "$work/classes" \
-            $(find "$ROOT/java/src/main/java" -name '*.java') >> "$blog" 2>&1; then
+            $(find "$jtree/java/src/main/java" -name '*.java') >> "$blog" 2>&1; then
         dump_tail "$blog"
         java_fail "javac failed"
         return
     fi
 
     cp -r "$work/classes/." "$work/stage/"
-    if [ -d "$ROOT/java/src/main/resources/org" ]; then
-        cp -r "$ROOT/java/src/main/resources/org" "$work/stage/"
+    if [ -d "$jtree/java/src/main/resources/org" ]; then
+        cp -r "$jtree/java/src/main/resources/org" "$work/stage/"
     fi
     printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.nordstjernen.app.Browser\nImplementation-Title: Nordstjernen\nImplementation-Version: %s\n' \
         "$MESON_VERSION" > "$work/mf.txt"
@@ -528,7 +532,7 @@ stage_java() {
     if ! "$jhome/bin/jar" --create --file "$dst/${base}.jar" \
              --manifest "$work/mf.txt" -C "$work/stage" . >> "$blog" 2>&1 \
        || ! "$jhome/bin/jar" --create --file "$dst/${base}-sources.jar" \
-             -C "$ROOT/java/src/main/java" . >> "$blog" 2>&1; then
+             -C "$jtree/java/src/main/java" . >> "$blog" 2>&1; then
         dump_tail "$blog"
         rm -f "$dst"/*.jar
         java_fail "jar failed"
@@ -537,7 +541,7 @@ stage_java() {
 
     log "Java: javadoc"
     if "$jhome/bin/javadoc" -quiet -Xdoclint:none -d "$work/doc" \
-            -sourcepath "$ROOT/java/src/main/java" org.nordstjernen >> "$blog" 2>&1; then
+            -sourcepath "$jtree/java/src/main/java" org.nordstjernen >> "$blog" 2>&1; then
         "$jhome/bin/jar" --create --file "$dst/${base}-javadoc.jar" -C "$work/doc" . >> "$blog" 2>&1 || true
         rm -rf "$dst/apidocs"
         cp -r "$work/doc" "$dst/apidocs"
