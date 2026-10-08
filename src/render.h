@@ -62,6 +62,7 @@ gboolean ns_render_page_uses_active(void);
 const ns_css_page_rule *ns_render_page_rule(void);
 
 GHashTable *ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout);
+GHashTable *ns_render_restyle(const ns_render_ctx *c);
 GHashTable *ns_render_relayout_profile(const ns_render_ctx *c,
                                        ns_box **out_layout,
                                        ns_render_profile *profile);

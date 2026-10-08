@@ -828,6 +828,8 @@ typedef struct headless_flush_ctx {
     gsize              caret;
     gsize              anchor;
     gboolean           relaying;
+    GHashTable        *retired_styles;
+    guint64            styles_serial;
 } headless_flush_ctx;
 
 static const ns_node *
@@ -849,6 +851,7 @@ headless_relayout(headless_flush_ctx *c)
     if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
     if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
+    g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
     if (c->js && *c->styles) ns_js_set_style_table(c->js, NULL);
     if (*c->styles) { g_hash_table_destroy(*c->styles); *c->styles = NULL; }
 
@@ -857,6 +860,37 @@ headless_relayout(headless_flush_ctx *c)
                                     c->css_cache, headless_focus(c), NULL,
                                     c->caret, c->anchor, c->layout);
     c->relaying = FALSE;
+    c->styles_serial = c->js ? ns_js_mutation_serial(c->js) : 0;
+}
+
+static void headless_flush_layout(gpointer ud);
+
+static void
+headless_flush_style(gpointer ud)
+{
+    headless_flush_ctx *c = ud;
+    if (!c || !c->js || c->relaying) return;
+    if (!*c->layout || !*c->styles) {
+        headless_flush_layout(ud);
+        return;
+    }
+    if (ns_js_consume_mutated(c->js)) g_headless_layout_dirty = TRUE;
+    if (!g_headless_styles_stale &&
+        c->styles_serial == ns_js_mutation_serial(c->js))
+        return;
+    g_headless_styles_stale = FALSE;
+    g_headless_layout_dirty = TRUE;
+    c->relaying = TRUE;
+    GHashTable *fresh = ns_engine_restyle(c->doc, c->base, c->vw, c->vh,
+                                          c->image_cache, c->anim, c->js,
+                                          c->css_cache, headless_focus(c),
+                                          NULL);
+    c->relaying = FALSE;
+    if (!fresh) return;
+    g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
+    c->retired_styles = *c->styles;
+    *c->styles = fresh;
+    c->styles_serial = ns_js_mutation_serial(c->js);
 }
 
 static void
@@ -2146,6 +2180,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_image_cache(js, image_cache);
         ns_js_set_anim(js, anim);
         ns_js_set_layout_flush_cb(js, headless_flush_layout, &flush_ctx);
+        if (!g_getenv("NS_NO_STYLE_FLUSH"))
+            ns_js_set_style_flush_cb(js, headless_flush_style);
         ns_js_set_mse_cb(js, headless_mse_data, video_cache);
         ns_js_set_mse_buffered_cb(js, headless_mse_buffered, video_cache);
         ns_js_set_mse_remove_cb(js, headless_mse_remove, video_cache);
@@ -2187,11 +2223,13 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         g_free(nav_cap.pending_url);
         nav_cap.pending_url = NULL;
         if (js)            ns_js_set_layout_flush_cb(js, NULL, NULL);
+        if (js)            ns_js_set_style_flush_cb(js, NULL);
         if (js)            ns_js_set_layout_root(js, NULL);
         if (js)            ns_js_set_style_table(js, NULL);
         if (anim)          ns_anim_free(anim);
         if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
         if (styles)        g_hash_table_destroy(styles);
+        g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
         if (css_cache)     g_hash_table_destroy(css_cache);
         if (js)            ns_js_free(js);
         if (doc)           ns_node_free(doc);

@@ -1178,6 +1178,50 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
 }
 
 GHashTable *
+ns_engine_restyle(ns_node *doc, const char *base_url,
+                  int viewport_width, double viewport_height,
+                  ns_image_cache *images, ns_anim *anim,
+                  ns_js *js, GHashTable *css_cache,
+                  const ns_node *focused, const ns_node *hover)
+{
+    ns_css_set_frame_viewport_cb(frame_viewport_measured);
+    ns_css_relayout_enter();
+    ns_css_set_doc_base(base_url);
+    ns_css_style_element_cache_begin();
+    GPtrArray *sheets = g_ptr_array_new();
+    GPtrArray *sheet_docs = g_ptr_array_new();
+    ns_engine_collect_stylesheets(doc, base_url, sheets, sheet_docs, css_cache);
+    ns_render_ctx rc = {
+        .doc             = doc,
+        .sheets          = (const ns_css_stylesheet *const *)sheets->pdata,
+        .sheet_docs      = (const ns_node *const *)sheet_docs->pdata,
+        .n_sheets        = sheets->len,
+        .viewport_width  = (double)viewport_width,
+        .viewport_height = viewport_height > 0 ? viewport_height
+                                               : (double)viewport_width * 0.75,
+        .zoom            = 1.0,
+        .images          = images,
+        .base_url        = base_url,
+        .anim            = anim,
+        .js              = js,
+        .focused_input   = focused,
+        .hover_node      = hover,
+    };
+    gint64 t0 = g_get_monotonic_time();
+    GHashTable *styles = ns_render_restyle(&rc);
+    if (g_getenv("NS_PROFILE"))
+        g_printerr("[profile] restyle vw=%d nodes=%u total=%.2fms\n",
+                   viewport_width, styles ? g_hash_table_size(styles) : 0u,
+                   (g_get_monotonic_time() - t0) / 1000.0);
+    for (guint i = 0; i < sheets->len; i++)
+        ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
+    g_ptr_array_free(sheets, TRUE);
+    g_ptr_array_free(sheet_docs, TRUE);
+    ns_css_relayout_leave();
+    return styles;
+}
+
+GHashTable *
 ns_engine_relayout(ns_node *doc, const char *base_url,
                    int viewport_width, double viewport_height,
                    ns_image_cache *images, ns_anim *anim,
