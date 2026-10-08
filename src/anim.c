@@ -1196,11 +1196,11 @@ advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
     int cur = chan_phase_at(ch, elapsed);
     chan_emit_phase(a, s, ch, cur);
     if (cur == NS_ANIM_PHASE_BEFORE) {
-        if (ch->current != ch->from) {
-            ns_css_value_free(ch->current);
-            ch->current = ns_css_value_dup(ch->from);
-        }
-        return TRUE;
+        if (ch->current == ch->from) return FALSE;
+        gboolean moved = !ns_css_value_equal(ch->current, ch->from);
+        ns_css_value_free(ch->current);
+        ch->current = ns_css_value_dup(ch->from);
+        return moved;
     }
     ch->started = TRUE;
     if (cur == NS_ANIM_PHASE_AFTER) {
@@ -1219,9 +1219,10 @@ advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
         ? ns_css_value_dup(eased < 0.5 ? ch->from : ch->to)
         : ns_css_value_interpolate(ch->from, ch->to, eased);
     if (!next) next = ns_css_value_dup(eased < 0.5 ? ch->from : ch->to);
+    gboolean moved = !ch->current || !ns_css_value_equal(ch->current, next);
     ns_css_value_free(ch->current);
     ch->current = next;
-    return TRUE;
+    return moved;
 }
 
 static const ns_css_value *
@@ -1353,6 +1354,59 @@ run_active_ms(const ns_anim_run *r)
 }
 
 static gboolean
+values_tables_equal(GHashTable *a, GHashTable *b)
+{
+    guint na = a ? g_hash_table_size(a) : 0;
+    guint nb = b ? g_hash_table_size(b) : 0;
+    if (na != nb) return FALSE;
+    if (na == 0) return TRUE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, a);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        const ns_css_value *other = g_hash_table_lookup(b, key);
+        if (!other || !ns_css_value_equal(val, other)) return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+partials_tables_equal(GHashTable *a, GHashTable *b)
+{
+    guint na = a ? g_hash_table_size(a) : 0;
+    guint nb = b ? g_hash_table_size(b) : 0;
+    if (na != nb) return FALSE;
+    if (na == 0) return TRUE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, a);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        const ns_anim_partial *p = val;
+        const ns_anim_partial *q = g_hash_table_lookup(b, key);
+        if (!q || p->t != q->t ||
+            !ns_css_value_equal(p->from, q->from) ||
+            !ns_css_value_equal(p->to, q->to))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+run_resample(ns_anim_run *r, double progress)
+{
+    GHashTable *old_values = r->values;
+    GHashTable *old_partials = r->partials;
+    r->values = NULL;
+    r->partials = NULL;
+    run_sample_at(r, progress);
+    gboolean moved = !values_tables_equal(old_values, r->values) ||
+                     !partials_tables_equal(old_partials, r->partials);
+    if (old_values) g_hash_table_destroy(old_values);
+    if (old_partials) g_hash_table_destroy(old_partials);
+    return moved;
+}
+
+static gboolean
 advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
 {
     if (!r->name) return FALSE;
@@ -1365,8 +1419,7 @@ advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
             if (r->partials) g_hash_table_remove_all(r->partials);
             return FALSE;
         }
-        run_sample_at(r, directed_progress(0, 0.0, r->direction));
-        return TRUE;
+        return run_resample(r, directed_progress(0, 0.0, r->direction));
     }
     double active = run_active_ms(r);
     if (r->duration_ms <= 0 || (isfinite(active) && elapsed >= active)) {
@@ -1393,8 +1446,7 @@ advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
     if (iter_d > 1e9) iter_d = 1e9;
     int iter = (int)iter_d;
     double raw = fmod(elapsed, r->duration_ms) / r->duration_ms;
-    run_sample_at(r, directed_progress(iter, raw, r->direction));
-    return TRUE;
+    return run_resample(r, directed_progress(iter, raw, r->direction));
 }
 
 static void

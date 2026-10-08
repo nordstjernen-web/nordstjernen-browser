@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* An animation tick counts as a page change only when an animated value
+  moves. Every running transition or animation reported a change on
+  every tick, so the page was repainted 60 times a second even when the
+  value stood still, as with `steps()` easing or the hold before a
+  delayed start. YouTube's ambient-mode cross-fade runs with
+  `steps(75)` over five seconds and now repaints 15 times a second
+  instead of 60.
 * The video helper decodes on all CPU cores. libavcodec decodes on one
   thread unless asked otherwise, which is not enough for 1440p or 4K
   VP9 and AV1 at 60 frames a second.
