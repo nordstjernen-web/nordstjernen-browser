@@ -14326,6 +14326,26 @@ position_split_specified(const char *canon, char **out_x, char **out_y)
     for (int i = 0; i < n; i++) g_free(tok[i]);
 }
 
+static gboolean
+css_chars_need_separator(char left, char right)
+{
+    gboolean left_open = is_ws(left) || left == '(' || left == ',' ||
+                         left == '/';
+    gboolean right_close = is_ws(right) || right == ')' || right == ',' ||
+                           right == '/';
+    return !left_open && !right_close;
+}
+
+static void
+var_append_separated(GString *out, const char *text, gsize len,
+                     gboolean boundary)
+{
+    if (boundary && len > 0 && out->len > 0 &&
+        css_chars_need_separator(out->str[out->len - 1], text[0]))
+        g_string_append_c(out, ' ');
+    g_string_append_len(out, text, (gssize)len);
+}
+
 static char *
 substitute_var_fallbacks(const char *vtext, int depth)
 {
@@ -14334,13 +14354,14 @@ substitute_var_fallbacks(const char *vtext, int depth)
     GString *out = g_string_new(NULL);
     const char *p = vtext;
     const char *end = vtext + strlen(vtext);
+    gboolean after_var = FALSE;
     while (p < end) {
         const char *fn = css_find_function(p, end, "var");
         if (!fn) {
-            g_string_append_len(out, p, (gssize)(end - p));
+            var_append_separated(out, p, (gsize)(end - p), after_var);
             break;
         }
-        g_string_append_len(out, p, (gssize)(fn - p));
+        var_append_separated(out, p, (gsize)(fn - p), after_var);
         const char *args_start = fn + 4;
         char term = 0;
         const char *args_end = css_scan_until(args_start, end, ")", &term);
@@ -14354,10 +14375,11 @@ substitute_var_fallbacks(const char *vtext, int depth)
         if (comma_term == ',') {
             char *nested = css_trim_dup_range(comma + 1, args_end);
             char *sub = substitute_var_fallbacks(nested, depth + 1);
-            if (sub) g_string_append(out, sub);
+            if (sub) var_append_separated(out, sub, strlen(sub), TRUE);
             g_free(nested);
             g_free(sub);
         }
+        after_var = TRUE;
         p = args_end + 1;
     }
     return g_string_free(out, FALSE);
@@ -14524,15 +14546,17 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
     GString *out = g_string_new(NULL);
     const char *p = vtext;
     const char *end = vtext + strlen(vtext);
+    gboolean after_var = FALSE;
     while (p < end) {
         const char *fn = css_find_function(p, end, "var");
         if (!fn) {
             if (!var_budget_take(b, (gsize)(end - p), valid)) break;
-            g_string_append_len(out, p, (gssize)(end - p));
+            var_append_separated(out, p, (gsize)(end - p), after_var);
             break;
         }
         if (!var_budget_take(b, (gsize)(fn - p), valid)) break;
-        g_string_append_len(out, p, (gssize)(fn - p));
+        var_append_separated(out, p, (gsize)(fn - p), after_var);
+        after_var = TRUE;
         const char *args_start = fn + 4;
         char term = 0;
         const char *args_end = css_scan_until(args_start, end, ")", &term);
@@ -14548,8 +14572,7 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
         const char *replacement = NULL;
         if (map && name[0] == '-' && name[1] == '-')
             replacement = ns_var_map_lookup(map, name);
-        if (replacement && *replacement &&
-            !custom_prop_value_invalid(replacement)) {
+        if (replacement && !custom_prop_value_invalid(replacement)) {
             gboolean sub_valid = TRUE;
             char *sub = substitute_vars_with_valid(replacement, map,
                                                    depth + 1, &sub_valid, b);
@@ -14565,7 +14588,7 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
                 }
             }
             if (sub_valid) {
-                if (sub) g_string_append(out, sub);
+                if (sub) var_append_separated(out, sub, strlen(sub), TRUE);
             } else if (comma_term == ',') {
                 char *nested = css_trim_dup_range(comma + 1, args_end);
                 gboolean nested_valid = TRUE;
@@ -14573,7 +14596,7 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
                                                             depth + 1,
                                                             &nested_valid, b);
                 if (nested_valid && fallback)
-                    g_string_append(out, fallback);
+                    var_append_separated(out, fallback, strlen(fallback), TRUE);
                 else if (valid)
                     *valid = FALSE;
                 g_free(nested);
@@ -14588,7 +14611,7 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
             char *sub = substitute_vars_with_valid(nested, map, depth + 1,
                                                    &nested_valid, b);
             if (nested_valid) {
-                if (sub) g_string_append(out, sub);
+                if (sub) var_append_separated(out, sub, strlen(sub), TRUE);
             } else if (valid) {
                 *valid = FALSE;
             }
