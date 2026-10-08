@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* A WebAssembly function has one JavaScript function object.
+  `table.get(i)` and `instance.exports` built a new wrapper on every
+  access, so `table.get(0) === table.get(0)` was false. Emscripten
+  checks its JavaScript copy of the function table against
+  `table.get()` and aborts with "JavaScript-side Wasm function table
+  mirror is out of date!", which stopped web-ifc and three.js's
+  `webgl_loader_ifc` at start-up. Wrappers are now cached per instance.
 * WebGL 2 `readPixels()` reads into a bound `PIXEL_PACK_BUFFER` and
   honours the destination offset, and `IMPLEMENTATION_COLOR_READ_FORMAT`
   / `_TYPE` describe the bound read framebuffer. The offset form of
