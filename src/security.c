@@ -369,6 +369,22 @@ add_path_rw(int rfd, guint64 allowed, const char *path)
 }
 
 static void
+add_regular_file_read(int rfd, const char *path)
+{
+    int pfd = open(path, O_PATH | O_CLOEXEC);
+    if (pfd < 0) return;
+    struct stat st;
+    if (fstat(pfd, &st) == 0 && S_ISREG(st.st_mode)) {
+        struct landlock_path_beneath_attr pb = {
+            .allowed_access = LANDLOCK_ACCESS_FS_READ_FILE,
+            .parent_fd      = pfd,
+        };
+        (void)landlock_add_rule_(rfd, LANDLOCK_RULE_PATH_BENEATH, &pb, 0);
+    }
+    close(pfd);
+}
+
+static void
 ns_sandbox_require_or_die(const char *what)
 {
     const char *req = g_getenv("NS_REQUIRE_SANDBOX");
@@ -462,7 +478,7 @@ ns_security_sandbox_init(const char *self_exe)
     for (gsize i = 0; ca_bundle_envs[i]; i++) {
         const char *bundle = g_getenv(ca_bundle_envs[i]);
         if (bundle && *bundle && g_path_is_absolute(bundle))
-            add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, bundle);
+            add_regular_file_read(rfd, bundle);
     }
 
     const char *home = g_get_home_dir();
