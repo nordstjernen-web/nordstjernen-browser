@@ -22,6 +22,7 @@
 #endif
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
+#define NS_PROC_VIDEO_PAGE_FRAME_US (1000 * 1000 / 30)
 #define NS_PV_WHEEL_STEP_PX    100.0
 #define NS_PV_WHEEL_TAU_MS     45.0
 #define NS_PV_FLING_TAU_MS     400.0
@@ -322,6 +323,8 @@ struct NsProcView {
     gint64      wheel_last_us;
     gboolean    adopting_scroll;
     guint       hover_after_scroll_id;
+    guint       video_page_render_id;
+    gint64      video_page_render_us;
     double      drag_start_x, drag_start_y;
     double      pointer_x, pointer_y;
     gboolean    drag_anchored;
@@ -2177,6 +2180,30 @@ start_render(NsProcView *v)
 }
 
 static gboolean
+pv_render_beside_video_due(gpointer data)
+{
+    NsProcView *v = data;
+    v->video_page_render_id = 0;
+    v->video_page_render_us = g_get_monotonic_time();
+    request_render(v);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+pv_request_render_beside_video(NsProcView *v)
+{
+    if (v->video_page_render_id) return;
+    gint64 wait = v->video_page_render_us + NS_PROC_VIDEO_PAGE_FRAME_US -
+                  g_get_monotonic_time();
+    if (wait <= 0) {
+        pv_render_beside_video_due(v);
+        return;
+    }
+    v->video_page_render_id = g_timeout_add((guint)((wait + 999) / 1000),
+                                            pv_render_beside_video_due, v);
+}
+
+static gboolean
 hover_after_scroll(gpointer data)
 {
     NsProcView *v = data;
@@ -3205,7 +3232,9 @@ on_result(gpointer data)
                 if (res->pw > 0) v->page_w = res->pw;
                 configure_adjustments(v);
             }
-            if (res->kind && !(v->vring && v->vid_playing))
+            if (res->kind && v->vring && v->vid_playing)
+                pv_request_render_beside_video(v);
+            else if (res->kind)
                 request_render(v);
         }
         v->tick_inflight = FALSE;
@@ -4726,6 +4755,10 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     if (v->hover_after_scroll_id) {
         g_source_remove(v->hover_after_scroll_id);
         v->hover_after_scroll_id = 0;
+    }
+    if (v->video_page_render_id) {
+        g_source_remove(v->video_page_render_id);
+        v->video_page_render_id = 0;
     }
     if (v->console_poll_id) {
         g_source_remove(v->console_poll_id);

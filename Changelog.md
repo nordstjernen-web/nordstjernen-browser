@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* YouTube's player controls work while a video plays. When the video
+  helper was playing, the window ignored the page changes the renderer
+  reported and repainted the page only every 300 frames (2.5 to 5
+  seconds), so hovering the video never showed the control bar, and the
+  progress bar, the time and captions stood still. Page changes now
+  repaint during playback, at most 30 times a second; the video itself
+  still advances at full rate in the compositor.
 * Opacity and colour animations no longer make scripts relayout the
   page. Each animation tick marked the computed styles stale, and the
   next geometry read (`clientWidth`, `getBoundingClientRect()`, ...)
