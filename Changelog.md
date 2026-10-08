@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU knows every texture format of the specification, including the
+  signed-normalised, integer, packed, depth/stencil and BC, ETC2 and
+  ASTC compressed formats; unknown names used to turn silently into
+  `bgra8unorm`. Textures report their real `format`, `dimension`,
+  `mipLevelCount`, `sampleCount`, `usage` and `depthOrArrayLayers`,
+  `viewFormats` are honoured, and a canvas can be configured as
+  `rgba16float` (HDR) as well as `bgra8unorm` or `rgba8unorm`.
 * WebGPU render pipelines honour their full state: stencil tests and
   operations, depth bias (used against shadow acne), front-face winding,
   strip index formats, unclipped depth, multisample masks and alpha-to-
