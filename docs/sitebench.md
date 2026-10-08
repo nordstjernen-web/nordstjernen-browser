@@ -63,6 +63,29 @@ default 3), `VIEWPORT` (default `1280x800`), `OUT` (default
 `--help`, and the capture scripts take `--runs` and `--visual-runs`
 (both default 1).
 
+The comparison can also gate a change. `MIN_PARITY=P` fails the run
+when the newest label's mean visual parity, which covers the stable
+sites (see *Scores*), is below P. `MAX_DROP=D` fails it when the newest
+label's mean visual parity is more than D below the oldest label's,
+the two means taken over the stable sites both labels captured; when a
+stable site's parity is more than D below the oldest label's beyond the
+site's noise (with one visual run the noise is 0); or when the newest
+label failed in more of a site's visual runs than the oldest, on any
+site both captured. When the two labels were captured on different
+sites, `compare.py` names the sites only one of them has. `run.sh` and
+`ab.sh` check both values, and `run.sh` that `MAX_DROP` has two labels
+to compare, before capturing anything, pass them to `compare.py` as
+`--min-parity` and `--max-drop` and exit with its status: 1 when a
+check fails, with one line per failed check; 2 on a usage error, when
+there are no captures, when a label a check needs has no site to
+compare, or when a capture or the comparison itself fails; 0 otherwise.
+Without thresholds, a run that writes its report exits 0 as before.
+
+```sh
+MAX_DROP=1 scripts/sitebench/ab.sh /path/to/old/builddir/src/gtk/nordstjernen \
+                                   builddir/src/gtk/nordstjernen
+```
+
 To use an installed Google Chrome instead of Playwright's Chromium, set
 `CHROME_CHANNEL=chrome` (or `CHROME_EXECUTABLE=PATH` for a given Chrome
 or Chromium binary); `run.sh` and `ab.sh` pass it to `chrome-capture.js`
