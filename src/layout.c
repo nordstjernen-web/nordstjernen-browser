@@ -3315,7 +3315,7 @@ static void collect_walk(const ns_node *n, collector_ctx *ctx, int depth);
 static gboolean
 collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
 {
-    if (!slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
     const ns_node *host = layout_slot_host(slot);
     const ns_node *sr = host ? layout_shadow_root(host) : NULL;
     if (!sr) return FALSE;
@@ -5301,27 +5301,12 @@ build_block(const ns_node *n, GHashTable *styles)
 static int g_contents_depth;
 
 static void
-append_display_contents_children(ns_box *block, const ns_node *n,
-                                 GHashTable *styles,
-                                 gboolean blockify_children,
-                                 ns_box **pending_before)
+append_contents_range(ns_box *block, const ns_node *first, const ns_node *end,
+                      GHashTable *styles, gboolean blockify_children,
+                      ns_box **pending_before)
 {
-    if (g_contents_depth >= NS_LAYOUT_MAX_DEPTH) return;
-    g_contents_depth++;
-    const ns_style *s = g_hash_table_lookup(styles, n);
-    ns_box *contents_before = (s && s->before &&
-                               !style_is_absolute_or_fixed(s->before))
-        ? build_pseudo_inline_for(s->before, n) : NULL;
-    if (pending_before && *pending_before) {
-        contents_before = inline_merge_prefix(*pending_before, contents_before);
-        *pending_before = NULL;
-    }
-    if (contents_before)
-        box_append_child(block, contents_before);
-
-    const ns_node *shadow_root = layout_shadow_root(n);
-    const ns_node *c = shadow_root ? shadow_root->first_child : n->first_child;
-    while (c) {
+    const ns_node *c = first;
+    while (c && c != end) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             tag_is_non_rendering(c->name)) {
             c = c->next_sibling;
@@ -5388,7 +5373,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
             c = c->next_sibling;
-            while (c) {
+            while (c && c != end) {
                 if (c->kind == NS_NODE_ELEMENT && c->name &&
                     tag_is_non_rendering(c->name)) {
                     c = c->next_sibling;
@@ -5412,6 +5397,71 @@ append_display_contents_children(ns_box *block, const ns_node *n,
             if (c) c = c->next_sibling;
         }
     }
+}
+
+static gboolean
+slot_assigns_node(const ns_node *lc, const char *slot_name)
+{
+    if (lc->kind == NS_NODE_TEXT) return !slot_name || !*slot_name;
+    if (lc->kind != NS_NODE_ELEMENT) return FALSE;
+    const char *assigned = ns_element_get_attr(lc, "slot");
+    return g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") == 0;
+}
+
+static gboolean
+append_slot_assigned(ns_box *block, const ns_node *slot, GHashTable *styles,
+                     gboolean blockify_children, ns_box **pending_before)
+{
+    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    gboolean any = FALSE;
+    const ns_node *lc = host->first_child;
+    while (lc) {
+        if (lc == sr || !slot_assigns_node(lc, slot_name)) {
+            lc = lc->next_sibling;
+            continue;
+        }
+        const ns_node *range_end = lc->next_sibling;
+        while (range_end && range_end != sr &&
+               slot_assigns_node(range_end, slot_name))
+            range_end = range_end->next_sibling;
+        append_contents_range(block, lc, range_end, styles, blockify_children,
+                              pending_before);
+        any = TRUE;
+        lc = range_end;
+    }
+    return any;
+}
+
+static void
+append_display_contents_children(ns_box *block, const ns_node *n,
+                                 GHashTable *styles,
+                                 gboolean blockify_children,
+                                 ns_box **pending_before)
+{
+    if (g_contents_depth >= NS_LAYOUT_MAX_DEPTH) return;
+    g_contents_depth++;
+    const ns_style *s = g_hash_table_lookup(styles, n);
+    ns_box *contents_before = (s && s->before &&
+                               !style_is_absolute_or_fixed(s->before))
+        ? build_pseudo_inline_for(s->before, n) : NULL;
+    if (pending_before && *pending_before) {
+        contents_before = inline_merge_prefix(*pending_before, contents_before);
+        *pending_before = NULL;
+    }
+    if (contents_before)
+        box_append_child(block, contents_before);
+
+    const ns_node *shadow_root = layout_shadow_root(n);
+    if (!append_slot_assigned(block, n, styles, blockify_children,
+                              pending_before))
+        append_contents_range(block,
+                              shadow_root ? shadow_root->first_child
+                                          : n->first_child,
+                              NULL, styles, blockify_children, pending_before);
 
     if (s && s->after && !style_is_absolute_or_fixed(s->after)) {
         ns_box *contents_after = build_pseudo_inline_for(s->after, n);
