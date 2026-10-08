@@ -1757,13 +1757,15 @@ svg_is_hidden(svg_ctx *ctx, const ns_node *n)
 }
 
 static gboolean
-svg_never_rendered(const char *tag)
+svg_renderable(const char *tag)
 {
     static const char *const tags[] = {
-        "defs", "symbol", "title", "desc", "metadata", "style", "script",
-        "clipPath", "mask", "marker", "pattern", "filter",
-        "linearGradient", "radialGradient",
+        "a", "circle", "ellipse", "foreignObject", "g", "image", "line",
+        "path", "polygon", "polyline", "rect", "svg", "switch", "text",
+        "textPath", "tspan", "use",
     };
+    const char *colon = strchr(tag, ':');
+    if (colon) tag = colon + 1;
     for (gsize i = 0; i < G_N_ELEMENTS(tags); i++)
         if (strcmp(tag, tags[i]) == 0) return TRUE;
     return FALSE;
@@ -1787,7 +1789,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
                        const svg_state *parent)
 {
     const char *tag = n->name;
-    if (svg_never_rendered(tag)) return;
+    if (!svg_renderable(tag)) return;
 
     if (svg_is_hidden(ctx, n)) return;
 
@@ -2149,7 +2151,7 @@ svg_measure_content(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                strcmp(tag, "foreignObject") == 0) {
         svg_measure_positioned_box(ctx, n, st, own);
     } else if (strcmp(tag, "g") == 0 || strcmp(tag, "a") == 0 ||
-               strcmp(tag, "svg") == 0 || svg_never_rendered(tag)) {
+               strcmp(tag, "svg") == 0 || !svg_renderable(tag)) {
         svg_measure_children(ctx, n, st, frame, own);
     } else {
         svg_measure_shape(ctx, n, st, own);
@@ -2212,13 +2214,8 @@ svg_measure_node_nested(svg_ctx *ctx, const ns_node *n,
                         svg_extent *outer_extent)
 {
     svg_measure *m = ctx->measure;
-    gboolean never = svg_never_rendered(n->name);
-    gboolean hidden = svg_is_hidden(ctx, n);
-    if (never || hidden) {
-        if (m->inside) return;
-        m->out->rendered = FALSE;
-        m->boxless = m->boxless || hidden;
-    }
+    if (m->inside && (!svg_renderable(n->name) || svg_is_hidden(ctx, n)))
+        return;
 
     svg_state st;
     svg_state_copy(&st, parent);
@@ -2375,6 +2372,19 @@ svg_path_to(const ns_node *svg, const ns_node *target)
     return NULL;
 }
 
+static void
+svg_measure_target_rendering(svg_ctx *ctx, const ns_node *svg)
+{
+    svg_measure *m = ctx->measure;
+    for (const ns_node *n = m->target; n && n != svg; n = n->parent) {
+        gboolean hidden = svg_is_hidden(ctx, n);
+        gboolean foreign = !(n->flags & NS_NODE_SVG_NS);
+        if (hidden) m->boxless = TRUE;
+        if (hidden || !(foreign || svg_renderable(n->name)))
+            m->out->rendered = FALSE;
+    }
+}
+
 gboolean
 ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
                      double width, double height, GHashTable *styles,
@@ -2412,6 +2422,7 @@ ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
     svg_state_init_inherited(&st, inherited);
     GHashTable *prev_var_styles = g_svg_var_styles;
     g_svg_var_styles = styles;
+    svg_measure_target_rendering(&ctx, svg);
     svg_state_apply_node(&ctx, &st, svg);
     svg_extent own = { 0 };
     svg_measure_children(&ctx, svg, &st, &frame, &own);
