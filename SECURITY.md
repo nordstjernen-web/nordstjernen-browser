@@ -115,8 +115,16 @@ socket, so it normally needs no `/dev/shm` name at all.
   even if Landlock would have allowed reading it. `ptrace`, `bpf`,
   `keyctl`, `mount`, `unshare`, `userfaultfd`, the `io_uring_*` family,
   `perf_event_open`, `kexec_load`, and the module syscalls are likewise
-  absent from the allow-list. TSYNC propagates the filter to every
-  thread.
+  absent from the allow-list. `clone` is allowed only without the
+  `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
+  falls back to `clone`), and `socket` only creates `AF_INET`,
+  `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio and
+  video helpers also keep `AF_UNIX` for the sound server). Landlock does
+  not govern `connect()` to a UNIX socket, so without that rule a
+  compromised renderer could reach the session D-Bus and have it start
+  programs outside the sandbox. On setups whose EGL lacks the surfaceless
+  platform, the renderer opens its display before the filter loads.
+  TSYNC propagates the filter to every thread.
 - **Media decoding.** Nordstjernen decodes a fixed, in-tree set of media
   rather than shelling out to an external player: MPEG-1 (pl_mpeg) and
   MP3 (minimp3) always, plus WebM/VP9/VP8 video and Opus/Vorbis audio

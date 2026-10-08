@@ -16,6 +16,7 @@ ns_gl_context *ns_gl_context_create(void);
 gboolean       ns_gl_context_make_current(ns_gl_context *c);
 void           ns_gl_context_release(ns_gl_context *c);
 void           ns_gl_context_destroy(ns_gl_context *c);
+void           ns_gl_prepare_for_sandbox(void);
 
 G_END_DECLS
 

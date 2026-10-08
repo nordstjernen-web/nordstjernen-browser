@@ -3,6 +3,37 @@ Changelog:
 
 1.0.31:
 ======
+* The Linux renderer sandbox no longer lets a compromised renderer talk
+  to local services. Landlock does not cover `connect()` on UNIX
+  sockets, and the seccomp filter allowed `socket()` of any family, so
+  code running in a renderer could reach the session D-Bus and ask it to
+  start programs outside the sandbox. The renderer may now only create
+  internet and netlink sockets (DNS falls back from local resolver
+  sockets to `/etc/resolv.conf` as libc does when they are missing), and
+  `clone` can no longer create namespaces.
+* A web page could read local files. The XML parser kept the engine's
+  private `data-nd-*` attributes, so a document from `DOMParser`,
+  `responseXML` or an XHTML/SVG page could forge the path behind an
+  `<input type=file>` and read anything the renderer can open,
+  including the cookie jars. The XML parser now drops those attributes,
+  as the HTML parser already did.
+* Frames fetch with their own origin. A frame's `fetch()` called the
+  embedding page's `window.fetch` with the frame's window as `this`, so
+  an embedder that replaced `fetch` received a cross-origin frame's
+  window and every request it made, and the request was checked against
+  the top page's origin instead of the frame's. Each frame now has its
+  own native `fetch`.
+* Cached pages keep their security headers. A response served from the
+  HTTP cache (fresh, or revalidated with a 304) lost its
+  `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`,
+  `Content-Disposition`, `Content-Language` and `Refresh`, so a page's
+  second load ran without its CSP. They are now stored with the cache
+  entry; the cache is rebuilt once on upgrade.
+* Smaller hardening: cookies from an IP-address host can no longer set a
+  `Domain` that is a suffix of the address; newlines in the home page or
+  search engine setting can no longer add lines to the config file;
+  `NS_HTTP3_INSECURE`, which turned off certificate checks for HTTP/3,
+  is gone; `XMLHttpRequest.send()` re-checks its method and headers.
 * Web pages can no longer change settings or wipe browsing data. A page
   that navigated to `about:settings-save` (a link, `location`, a form
   POST, a `Refresh`) reached it with no referrer, which the about-page

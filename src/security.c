@@ -27,6 +27,8 @@
 #include <sys/syscall.h>
 #ifdef NS_HAVE_SECCOMP
 #include <seccomp.h>
+#include <sched.h>
+#include <sys/socket.h>
 #include <sys/ioctl.h>
 #endif
 #endif
@@ -228,6 +230,14 @@ ns_win_relaunch_deelevated(void)
     return relaunched;
 }
 #endif
+
+static gboolean ns_seccomp_unix_sockets = TRUE;
+
+void
+ns_security_seccomp_deny_unix_sockets(void)
+{
+    ns_seccomp_unix_sockets = FALSE;
+}
 
 gboolean
 ns_security_refuse_root(void)
@@ -615,8 +625,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "clock_gettime64",
     "clock_nanosleep",
     "clock_nanosleep_time64",
-    "clone",
-    "clone3",
     "close",
     "close_range",
     "connect",
@@ -820,7 +828,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "sigaltstack",
     "signalfd",
     "signalfd4",
-    "socket",
     "socketpair",
     "splice",
     "stat",
@@ -867,6 +874,37 @@ static const char *const ns_seccomp_allowed_names[] = {
     "write",
     "writev",
 };
+
+#if defined(__x86_64__) || defined(__aarch64__)
+#define NS_SECCOMP_FILTER_ARGS 1
+#endif
+
+static void
+ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    const scmp_datum_t new_namespaces =
+        CLONE_NEWNS | CLONE_NEWCGROUP | CLONE_NEWUTS | CLONE_NEWIPC |
+        CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET;
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 1,
+                           SCMP_A0(SCMP_CMP_MASKED_EQ, new_namespaces, 0));
+    int clone3_nr = seccomp_syscall_resolve_name("clone3");
+    if (clone3_nr != __NR_SCMP_ERROR)
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), clone3_nr, 0);
+    static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
+    for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
+        if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
+                               SCMP_A0(SCMP_CMP_EQ, (scmp_datum_t)domains[i]));
+    }
+#else
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
+    int clone3_nr = seccomp_syscall_resolve_name("clone3");
+    if (clone3_nr != __NR_SCMP_ERROR)
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, clone3_nr, 0);
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
+#endif
+}
 
 static int
 ns_seccomp_deny_tty_injection(void)
@@ -920,6 +958,7 @@ ns_security_seccomp_init(void)
         if (nr == __NR_SCMP_ERROR) continue;
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
     }
+    ns_seccomp_add_process_rules(ctx);
 
     int rc = seccomp_load(ctx);
     if (rc != 0) {
