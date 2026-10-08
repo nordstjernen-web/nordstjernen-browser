@@ -1,0 +1,7 @@
+[wrap-file]
+directory = wgpu-native-macos-x86_64-v29.0.1.1
+source_url = https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-macos-x86_64-release.zip
+source_filename = wgpu-macos-x86_64-release-v29.0.1.1.zip
+source_hash = 8e2f7378548ddd0e2cf21e7d864dda46e953f0af724855a33778b85ead206d41
+lead_directory_missing = true
+patch_directory = wgpu-native
