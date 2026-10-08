@@ -90,6 +90,10 @@ gboolean ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
 gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     double rel_x, double rel_y,
                                     gsize *out_byte);
+gboolean ns_paint_inline_moved_extents(const ns_box *b, double *x0, double *y0,
+                                       double *x1, double *y1);
+gboolean ns_paint_inline_on_shifted_text(const ns_box *b,
+                                         double rel_x, double rel_y);
 gboolean ns_paint_inline_word_range(const ns_box *b, gsize byte,
                                     gsize *out_start, gsize *out_end);
 double ns_paint_inline_y_offset_for_layout(const ns_box *b,
@@ -121,6 +125,8 @@ NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 
 double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);
+gboolean ns_paint_style_font_metrics(const ns_style *style,
+                                     ns_css_font_metrics *out);
 #define NS_CSS_LINE_HEIGHT_KEY "ns-css-line-height"
 void ns_paint_apply_css_line_spacing(NsPangoLayout *layout,
                                      const ns_style *style);

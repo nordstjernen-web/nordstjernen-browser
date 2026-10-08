@@ -14,6 +14,37 @@ Changelog:
   `<text>`. Now only the element types SVG 2 lists as renderable, with
   rendered ancestors, get a box; the others report `0,0 0x0` and an
   empty list, as in Chrome.
+* Superscripts, subscripts and inline text with `vertical-align` are
+  placed as in Chrome. `<sup>` and `<sub>` were shrunk twice, to 0.75em
+  by the default style and by three quarters again when drawn, and
+  raised by a fixed amount chosen by tag name, so footnote markers came
+  out a third too narrow and their line did not grow; `vertical-align`
+  on other inline elements was ignored. The default style now gives them
+  `font-size: smaller` and `vertical-align: super` or `sub`. An inline
+  element (not an inline block or image) is shifted from its parent
+  box's baseline by `super` (up a third of the parent's font size plus
+  one pixel), `sub` (down a fifth plus one), a length, a percentage of
+  its own `line-height`, `text-top` or `text-bottom`; shifts nest, and
+  the line grows to hold the element unless its `line-height` is 0.
+  Images and inline blocks with `super` or `sub` use the parent box's
+  font size too; `top`, `middle` and `bottom` on inline elements are not
+  handled yet. In 16px Arial at `line-height: 1.5`, `<sup>raised</sup>`
+  is 36px wide instead of 25px, and a line holding it and a `<sub>` is
+  30.5px tall instead of 26.4px, as in Chrome.
+* `position: relative` with `top`, `right`, `bottom` or `left` now moves
+  an inline element such as a `<span>`, `<a>` or `<sup>` with
+  `display: inline`. The offset was ignored, so an icon label nudged
+  with `top: -2px` or a link shifted sideways stayed where the line put
+  it. The element's text, background, border, underline, the images and
+  inline blocks inside it, and an absolute box that sits at its static
+  position inside it are now drawn at the offset, above the rest of the
+  line like other positioned boxes (below the line's text with a
+  negative `z-index`). Clicks on the moved text, selection,
+  `getBoundingClientRect()` and `scrollWidth`/`scrollHeight` follow the
+  moved element, and nested offsets add up, while the line keeps its
+  height and the text after the element stays in place, as in other
+  browsers. For example `<span style="position: relative; top: -10px">`
+  is drawn 10px above the line.
 * quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
   use-after-free in `AsyncDisposableStack`, a reference-count bug in
   `Promise.withResolvers`, an out-of-bounds read when creating typed
