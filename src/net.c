@@ -1654,7 +1654,8 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
         const char *d = domain_attr[0] == '.' ? domain_attr + 1 : domain_attr;
         gsize dl = strlen(d), hl = strlen(host);
         gboolean ok = g_ascii_strcasecmp(host, d) == 0 ||
-                      (hl > dl && host[hl - dl - 1] == '.' &&
+                      (!g_hostname_is_ip_address(host) &&
+                       hl > dl && host[hl - dl - 1] == '.' &&
                        g_ascii_strcasecmp(host + hl - dl, d) == 0);
         if (!ok || !dl) { g_free(domain_attr); g_free(path_attr); return; }
         g_autofree char *d_lower = g_ascii_strdown(d, -1);
@@ -5195,6 +5196,51 @@ is_simple_get(const char *method)
     return !method || !*method || g_ascii_strcasecmp(method, "GET") == 0;
 }
 
+static const struct {
+    const char *name;
+    gsize       offset;
+} k_cached_policy_headers[] = {
+    { "Content-Security-Policy", G_STRUCT_OFFSET(ns_response, csp_header) },
+    { "X-Frame-Options",         G_STRUCT_OFFSET(ns_response, xframe_options) },
+    { "X-Content-Type-Options",
+      G_STRUCT_OFFSET(ns_response, x_content_type_options) },
+    { "Content-Disposition",
+      G_STRUCT_OFFSET(ns_response, content_disposition) },
+    { "Content-Language",        G_STRUCT_OFFSET(ns_response, content_language) },
+    { "Refresh",                 G_STRUCT_OFFSET(ns_response, refresh) },
+};
+
+static char *
+response_policy_headers(const ns_response *resp)
+{
+    GString *out = g_string_new(NULL);
+    for (gsize i = 0; i < G_N_ELEMENTS(k_cached_policy_headers); i++) {
+        const char *v = G_STRUCT_MEMBER(const char *, resp,
+                                        k_cached_policy_headers[i].offset);
+        if (v && *v && !strpbrk(v, "\r\n"))
+            g_string_append_printf(out, "%s: %s\n",
+                                   k_cached_policy_headers[i].name, v);
+    }
+    if (out->len == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static void
+response_restore_policy_headers(ns_response *resp, const char *block)
+{
+    if (!block) return;
+    for (gsize i = 0; i < G_N_ELEMENTS(k_cached_policy_headers); i++) {
+        char **slot = &G_STRUCT_MEMBER(char *, resp,
+                                       k_cached_policy_headers[i].offset);
+        if (!*slot)
+            *slot = ns_net_raw_header_values(block,
+                                             k_cached_policy_headers[i].name);
+    }
+}
+
 static ns_response *
 response_from_cache_entry(ns_cache_entry *e)
 {
@@ -5203,6 +5249,7 @@ response_from_cache_entry(ns_cache_entry *e)
     resp->final_url    = g_strdup(e->final_url);
     resp->content_type = g_strdup(e->content_type);
     resp->cors_allow_origin = g_strdup(e->cors_allow_origin);
+    response_restore_policy_headers(resp, e->policy_headers);
     resp->body         = e->body;
     e->body = NULL;
     return resp;
@@ -6079,12 +6126,15 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             resp->content_type = g_strdup(cached->content_type);
             g_free(resp->cors_allow_origin);
             resp->cors_allow_origin = g_strdup(cached->cors_allow_origin);
+            response_restore_policy_headers(resp, cached->policy_headers);
         } else if (resp->status > 0 && resp->status < 300 &&
                    resp->body && resp->body->len > 0) {
+            g_autofree char *policy_headers = response_policy_headers(resp);
             ns_cache_put(url, cache_partition,
                          resp->final_url, resp->status,
                          resp->content_type,
                          resp->cors_allow_origin,
+                         policy_headers,
                          header_ctx.etag, header_ctx.last_modified,
                          header_ctx.cache_control, header_ctx.expires,
                          header_ctx.vary, cache_request_headers,

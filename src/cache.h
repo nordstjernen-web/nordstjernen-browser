@@ -15,6 +15,7 @@ typedef struct ns_cache_entry {
     long        status;
     char       *content_type;
     char       *cors_allow_origin;
+    char       *policy_headers;
     char       *etag;
     char       *last_modified;
     gint64      expires_at;
@@ -37,6 +38,7 @@ void   ns_cache_put(const char *url,
                     long status,
                     const char *content_type,
                     const char *cors_allow_origin,
+                    const char *policy_headers,
                     const char *etag,
                     const char *last_modified,
                     const char *cache_control,

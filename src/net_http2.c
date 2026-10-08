@@ -2260,20 +2260,16 @@ static const char ns_h3_priority[] =
     "+GROUP-SECP521R1";
 
 static gboolean
-ns_h3_gnutls_init(ns_h3 *h, const char *host, gboolean insecure)
+ns_h3_gnutls_init(ns_h3 *h, const char *host)
 {
     if (gnutls_certificate_allocate_credentials(&h->cred) != 0)
         return FALSE;
-    if (insecure) {
-        gnutls_certificate_set_verify_flags(h->cred, 0);
-    } else {
-        const char *ca = ns_net_ca_bundle_path();
-        if (ca && *ca)
-            gnutls_certificate_set_x509_trust_file(h->cred, ca,
-                                                   GNUTLS_X509_FMT_PEM);
-        else
-            gnutls_certificate_set_x509_system_trust(h->cred);
-    }
+    const char *ca = ns_net_ca_bundle_path();
+    if (ca && *ca)
+        gnutls_certificate_set_x509_trust_file(h->cred, ca,
+                                               GNUTLS_X509_FMT_PEM);
+    else
+        gnutls_certificate_set_x509_system_trust(h->cred);
     if (gnutls_init(&h->tls, GNUTLS_CLIENT) != 0)
         return FALSE;
     if (gnutls_priority_set_direct(h->tls, ns_h3_priority, NULL) != 0)
@@ -2285,8 +2281,7 @@ ns_h3_gnutls_init(ns_h3 *h, const char *host, gboolean insecure)
     h->conn_ref.get_conn = ns_h3_get_conn;
     h->conn_ref.user_data = h;
     gnutls_session_set_ptr(h->tls, &h->conn_ref);
-    if (!insecure)
-        gnutls_session_set_verify_cert(h->tls, host, 0);
+    gnutls_session_set_verify_cert(h->tls, host, 0);
     gnutls_server_name_set(h->tls, GNUTLS_NAME_DNS, host, strlen(host));
     gnutls_datum_t alpn = { (unsigned char *)"h3", 2 };
     gnutls_alpn_set_protocols(h->tls, &alpn, 1, 0);
@@ -2480,8 +2475,7 @@ ns_h3_perform(const ns_hop_req *req, ns_write_ctx *wctx, ns_header_ctx *hctx,
     h.c = &c; h.fd = fd; h.stream_id = -1;
     h.body = req->body; h.body_len = req->body_len;
 
-    gboolean insecure = getenv("NS_HTTP3_INSECURE") != NULL;
-    if (!ns_h3_gnutls_init(&h, host, insecure)) {
+    if (!ns_h3_gnutls_init(&h, host)) {
         if (h.tls) gnutls_deinit(h.tls);
         if (h.cred) gnutls_certificate_free_credentials(h.cred);
         close(fd);

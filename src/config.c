@@ -464,7 +464,9 @@ ns_config_save(GError **error)
         switch (f->kind) {
         case CFG_STRING: {
             const char *v = *(const char *const *)slot;
-            g_string_append_printf(s, "%s = %s\n", f->key, v ? v : "");
+            g_autofree char *line = g_strdup(v ? v : "");
+            g_strdelimit(line, "\r\n", ' ');
+            g_string_append_printf(s, "%s = %s\n", f->key, line);
             break;
         }
         case CFG_BOOL:
