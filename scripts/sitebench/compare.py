@@ -30,6 +30,7 @@ ERROR_PAGE = re.compile(r"^something went wrong|^sorry, something went wrong|^an
 WEIGHTS = {"ssim": 0.30, "hist": 0.15, "layout": 0.20, "components": 0.25, "text": 0.10}
 FILM_MS = [500, 1000, 2000, 3000, 5000]
 UNSTABLE_SPREAD = 2.0
+BAND = 256
 
 
 def load_json(path):
@@ -166,53 +167,126 @@ def component_key(c):
     return (c["tag"], re.sub(r"\d+", "#", c.get("text") or ""), c.get("id") or "")
 
 
-def component_scores(chrome_probe, ns_probe):
-    if not chrome_probe or not ns_probe:
-        return None
-    vh = chrome_probe.get("vh") or 800
-    base = [c for c in chrome_probe.get("components", [])
-            if identifiable(c) and c["y"] < vh and c["w"] * c["h"] >= 16]
-    if not base:
-        return None
-    cand = {}
-    for c in ns_probe.get("components", []):
-        cand.setdefault(component_key(c), []).append(c)
-    found = placed = 0
-    style_checks = style_ok = 0
-    offsets = []
-    style_diffs = []
-    for c in base:
-        options = cand.get(component_key(c))
-        if not options:
-            offsets.append({"tag": c["tag"], "text": c.get("text", "")[:40], "missing": True,
-                            "chrome": [c["x"], c["y"], c["w"], c["h"]], "path": c.get("path")})
+def scored(c):
+    return identifiable(c) and c["w"] * c["h"] >= 16
+
+
+def overlapping_pairs(chrome, ns, ci, nj):
+    bands = {}
+    for j in nj:
+        for b in range(ns[j]["y"] // BAND, (ns[j]["y"] + ns[j]["h"]) // BAND + 1):
+            bands.setdefault(b, set()).add(j)
+    ranked = []
+    for i in ci:
+        c = chrome[i]
+        near = set()
+        for b in range(c["y"] // BAND, (c["y"] + c["h"]) // BAND + 1):
+            near |= bands.get(b, set())
+        for j in near:
+            iou = rect_iou(c, ns[j])
+            if iou > 0:
+                ranked.append((-iou, i, j))
+    return sorted(ranked)
+
+
+def pair_by_key(chrome, ns, ci, nj):
+    pairs = {}
+    taken = set()
+    for _, i, j in overlapping_pairs(chrome, ns, ci, nj):
+        if i not in pairs and j not in taken:
+            pairs[i] = j
+            taken.add(j)
+    rest = [j for j in nj if j not in taken]
+    pairs.update(zip([i for i in ci if i not in pairs], rest))
+    return pairs
+
+
+def match_components(chrome, ns):
+    by_path = {(o["path"], o["tag"]): j for j, o in enumerate(ns) if o.get("path")}
+    same_path = {i: by_path.get((c.get("path"), c["tag"])) for i, c in enumerate(chrome) if c.get("path")}
+    pairs = {i: (j, "path") for i, j in same_path.items()
+             if j is not None and component_key(ns[j]) == component_key(chrome[i])}
+    taken = {j for j, _ in pairs.values()}
+    groups = {}
+    for i, c in enumerate(chrome):
+        if i not in pairs:
+            groups.setdefault(component_key(c), ([], []))[0].append(i)
+    for j, o in enumerate(ns):
+        if j not in taken and component_key(o) in groups:
+            groups[component_key(o)][1].append(j)
+    for ci, nj in groups.values():
+        for i, j in pair_by_key(chrome, ns, ci, nj).items():
+            pairs[i] = (j, "key")
+    taken = {j for j, _ in pairs.values()}
+    for i, j in same_path.items():
+        if j is not None and i not in pairs and j not in taken:
+            pairs[i] = (j, "path only")
+    return pairs
+
+
+def offset_record(c, o, how):
+    rec = {"tag": c["tag"], "text": c.get("text", "")[:40], "chrome": [c["x"], c["y"], c["w"], c["h"]],
+           "path": c.get("path")}
+    if o is None:
+        return dict(rec, missing=True)
+    return dict(rec, iou=round(rect_iou(c, o), 2), dx=o["x"] - c["x"], dy=o["y"] - c["y"],
+                dw=o["w"] - c["w"], dh=o["h"] - c["h"], ns=[o["x"], o["y"], o["w"], o["h"]],
+                nsPath=o.get("path"), by=how)
+
+
+def compare_styles(c, o, diffs):
+    ok = 0
+    for key in ("fs", "fw", "color", "bg", "ff"):
+        if style_equal(key, c.get(key), o.get(key)):
+            ok += 1
+        elif len(diffs) < 60:
+            diffs.append({"tag": c["tag"], "text": c.get("text", "")[:30], "prop": key,
+                          "chrome": c.get(key), "ns": o.get(key)})
+    return ok
+
+
+def placement(chrome, ns, pairs, base):
+    found = placed = style_checks = style_ok = 0
+    by = {"path": 0, "key": 0, "path only": 0}
+    offsets, style_diffs = [], []
+    for i in base:
+        c = chrome[i]
+        j, how = pairs.get(i, (None, None))
+        o = ns[j] if j is not None else None
+        offsets.append(offset_record(c, o, how))
+        if o is None:
             continue
         found += 1
-        best = max(options, key=lambda o: rect_iou(c, o))
-        iou = rect_iou(c, best)
-        if iou >= 0.5:
-            placed += 1
-        offsets.append({"tag": c["tag"], "text": c.get("text", "")[:40], "iou": round(iou, 2),
-                        "dx": best["x"] - c["x"], "dy": best["y"] - c["y"],
-                        "dw": best["w"] - c["w"], "dh": best["h"] - c["h"],
-                        "chrome": [c["x"], c["y"], c["w"], c["h"]],
-                        "ns": [best["x"], best["y"], best["w"], best["h"]],
-                        "path": c.get("path"), "nsPath": best.get("path")})
+        by[how] += 1
+        placed += rect_iou(c, o) >= 0.5
         if c.get("text"):
-            for key in ("fs", "fw", "color", "bg", "ff"):
-                style_checks += 1
-                if style_equal(key, c.get(key), best.get(key)):
-                    style_ok += 1
-                elif len(style_diffs) < 60:
-                    style_diffs.append({"tag": c["tag"], "text": c.get("text", "")[:30], "prop": key,
-                                        "chrome": c.get(key), "ns": best.get(key)})
+            style_checks += 5
+            style_ok += compare_styles(c, o, style_diffs)
     offsets.sort(key=lambda o: (0 if o.get("missing") else 1, -(abs(o.get("dy", 0)) + abs(o.get("dx", 0)))))
     return {
         "count": len(base), "found": found, "placed": placed,
         "foundRate": found / len(base), "placedRate": placed / len(base),
         "styleRate": style_ok / style_checks if style_checks else None,
+        "byPath": by["path"], "byKey": by["key"], "byPathOnly": by["path only"], "unmatched": len(base) - found,
         "worst": offsets[:15], "styleDiffs": style_diffs[:25],
     }
+
+
+def component_scores(chrome_probe, ns_probe):
+    if not chrome_probe or not ns_probe:
+        return None
+    vh = chrome_probe.get("vh") or 800
+    chrome = [c for c in chrome_probe.get("components", []) if scored(c)]
+    base = [i for i, c in enumerate(chrome) if c["y"] < vh]
+    if not base:
+        return None
+    ns = ns_probe.get("components", [])
+    pairs = match_components(chrome, ns)
+    paired = {j for j, _ in pairs.values()}
+    ns_vh = ns_probe.get("vh") or vh
+    ns_first = [j for j, o in enumerate(ns) if scored(o) and o["y"] < ns_vh]
+    return dict(placement(chrome, ns, pairs, base), nsCount=len(ns_first),
+                nsUnmatched=sum(1 for j in ns_first if j not in paired))
 
 
 def rect_iou(a, b):
@@ -1037,18 +1111,25 @@ def path_cell(path, ns_path=None):
     return "<td>" + ("<br>".join(parts) or "–") + "</td>"
 
 
+def pairing_text(comp):
+    return (f"; paired {comp['byPath']} by DOM path, {comp['byKey']} by key and {comp['byPathOnly']} by DOM path "
+            f"alone, left unpaired {comp['unmatched']} in Chrome and {comp['nsUnmatched']} of {comp['nsCount']} "
+            f"in Nordstjernen")
+
+
 def html_component_tables(comp):
     e = html.escape
     style_rate = comp.get("styleRate")
     style_txt = "–" if style_rate is None else f"{style_rate * 100:.0f}%"
     out = [f"<p>{comp['found']}/{comp['count']} Chrome components found, {comp['placed']} placed "
-           f"(IoU ≥ 0.5); style agreement {style_txt}</p>",
+           f"(IoU ≥ 0.5){e(pairing_text(comp))}; style agreement {style_txt}</p>",
            "<div class=wrap><table><thead><tr><th>Component</th><th>DOM path</th><th>Chrome x,y,w,h</th>"
-           "<th>NS x,y,w,h</th><th>IoU</th></tr></thead><tbody>"]
+           "<th>NS x,y,w,h</th><th>IoU</th><th>Paired by</th></tr></thead><tbody>"]
     for w in comp.get("worst", []):
         out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td>{path_cell(w.get('path'), w.get('nsPath'))}"
                    f"<td>{e(str(w['chrome']))}</td>"
-                   f"<td>{e(str(w.get('ns', 'missing')))}</td><td>{fmt(w.get('iou'), 2)}</td></tr>")
+                   f"<td>{e(str(w.get('ns', 'missing')))}</td><td>{fmt(w.get('iou'), 2)}</td>"
+                   f"<td>{e(w.get('by') or '–')}</td></tr>")
     out.append("</tbody></table></div>")
     if comp.get("styleDiffs"):
         out.append("<div class=wrap><table><thead><tr><th>Element</th><th>Property</th><th>Chrome</th>"
