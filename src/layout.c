@@ -5300,6 +5300,105 @@ build_block(const ns_node *n, GHashTable *styles)
 
 static int g_contents_depth;
 
+static gboolean
+node_skips_rendering(const ns_node *c)
+{
+    return c->kind == NS_NODE_ELEMENT && c->name &&
+           tag_is_non_rendering(c->name);
+}
+
+static gboolean
+blockified_child_is_block(const ns_node *c, const ns_style *cs,
+                          GHashTable *styles)
+{
+    static const char *const block_tags[] = {
+        "img", "svg", "audio", "video", "table", NULL,
+    };
+    return (cs && style_is_absolute_or_fixed(cs)) || style_is_block(cs) ||
+           contains_block_media(c, styles) || node_has_media_metadata(c) ||
+           name_in(c->name, block_tags);
+}
+
+static void
+append_blockified_text(ns_box *block, const ns_node *c, GHashTable *styles)
+{
+    if (text_is_ws_only(c->text)) return;
+    ns_box *item = box_new(NS_BOX_BLOCK);
+    item->style = NULL;
+    ns_box *run = build_inline_run(c, c->next_sibling, styles);
+    if (run && run->text && run->text[0]) {
+        box_append_child(item, run);
+        box_append_child(block, item);
+    } else {
+        if (run) ns_box_free(run);
+        ns_box_free(item);
+    }
+}
+
+static void
+append_blockified_child(ns_box *block, const ns_node *c, GHashTable *styles,
+                        ns_box **pending_before)
+{
+    if (c->kind == NS_NODE_TEXT) {
+        append_blockified_text(block, c, styles);
+        return;
+    }
+    if (c->kind != NS_NODE_ELEMENT) return;
+    const ns_style *cs = g_hash_table_lookup(styles, c);
+    if (cs && style_is_none(cs)) return;
+    if (style_is_contents(cs)) {
+        append_display_contents_children(block, c, styles, TRUE, NULL);
+        return;
+    }
+    ns_box *child = blockified_child_is_block(c, cs, styles)
+        ? build_block(c, styles)
+        : build_blockified_inline_item(c, styles, pending_before);
+    if (child) box_append_child(block, child);
+}
+
+static const ns_node *
+inline_run_end(const ns_node *c, const ns_node *end, GHashTable *styles)
+{
+    while (c && c != end) {
+        if (node_skips_rendering(c)) {
+            c = c->next_sibling;
+            continue;
+        }
+        if (c->kind == NS_NODE_ELEMENT &&
+            style_is_contents(g_hash_table_lookup(styles, c)))
+            break;
+        if (!continues_inline_run(c, styles)) break;
+        c = c->next_sibling;
+    }
+    return c;
+}
+
+static const ns_node *
+append_flow_child(ns_box *block, const ns_node *c, const ns_node *end,
+                  GHashTable *styles)
+{
+    if (c->kind == NS_NODE_ELEMENT) {
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs && style_is_none(cs)) return c->next_sibling;
+        if (style_is_contents(cs)) {
+            append_display_contents_children(block, c, styles, FALSE, NULL);
+            return c->next_sibling;
+        }
+    }
+    if (is_inline_dom(c, styles)) {
+        const ns_node *stop = inline_run_end(c->next_sibling, end, styles);
+        ns_box *run = build_inline_run(c, stop, styles);
+        if (run && run->text && run->text[0])
+            box_append_child(block, run);
+        else if (run)
+            ns_box_free(run);
+        return stop;
+    }
+    ns_box *child = build_block(c, styles);
+    if (child) box_append_child(block, child);
+    return c->next_sibling;
+}
+
 static void
 append_contents_range(ns_box *block, const ns_node *first, const ns_node *end,
                       GHashTable *styles, gboolean blockify_children,
@@ -5307,94 +5406,13 @@ append_contents_range(ns_box *block, const ns_node *first, const ns_node *end,
 {
     const ns_node *c = first;
     while (c && c != end) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            tag_is_non_rendering(c->name)) {
+        if (node_skips_rendering(c)) {
             c = c->next_sibling;
-            continue;
-        }
-        if (blockify_children) {
-            if (c->kind == NS_NODE_TEXT) {
-                if (text_is_ws_only(c->text)) { c = c->next_sibling; continue; }
-                ns_box *item = box_new(NS_BOX_BLOCK);
-                item->style = NULL;
-                ns_box *run = build_inline_run(c, c->next_sibling, styles);
-                if (run && run->text && run->text[0]) {
-                    box_append_child(item, run);
-                    box_append_child(block, item);
-                } else {
-                    if (run) ns_box_free(run);
-                    ns_box_free(item);
-                }
-                c = c->next_sibling;
-                continue;
-            }
-            if (c->kind != NS_NODE_ELEMENT) { c = c->next_sibling; continue; }
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs && style_is_none(cs)) { c = c->next_sibling; continue; }
-            if (style_is_contents(cs)) {
-                append_display_contents_children(block, c, styles, TRUE, NULL);
-                c = c->next_sibling;
-                continue;
-            }
-            if (cs && style_is_absolute_or_fixed(cs)) {
-                ns_box *child = build_block(c, styles);
-                if (child) box_append_child(block, child);
-                c = c->next_sibling;
-                continue;
-            }
-            if (style_is_block(cs) ||
-                contains_block_media(c, styles) ||
-                node_has_media_metadata(c) ||
-                (c->name && (strcmp(c->name, "img") == 0 ||
-                             strcmp(c->name, "svg") == 0 ||
-                             strcmp(c->name, "audio") == 0 ||
-                             strcmp(c->name, "video") == 0 ||
-                             strcmp(c->name, "table") == 0))) {
-                ns_box *child = build_block(c, styles);
-                if (child) box_append_child(block, child);
-                c = c->next_sibling;
-                continue;
-            }
-            ns_box *item = build_blockified_inline_item(c, styles, pending_before);
-            if (item) box_append_child(block, item);
+        } else if (blockify_children) {
+            append_blockified_child(block, c, styles, pending_before);
             c = c->next_sibling;
-            continue;
-        }
-
-        if (c->kind == NS_NODE_ELEMENT) {
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs && style_is_none(cs)) { c = c->next_sibling; continue; }
-            if (style_is_contents(cs)) {
-                append_display_contents_children(block, c, styles, FALSE, NULL);
-                c = c->next_sibling;
-                continue;
-            }
-        }
-        if (is_inline_dom(c, styles)) {
-            const ns_node *start = c;
-            c = c->next_sibling;
-            while (c && c != end) {
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    tag_is_non_rendering(c->name)) {
-                    c = c->next_sibling;
-                    continue;
-                }
-                if (c->kind == NS_NODE_ELEMENT) {
-                    const ns_style *cs = g_hash_table_lookup(styles, c);
-                    if (style_is_contents(cs)) break;
-                }
-                if (!continues_inline_run(c, styles)) break;
-                c = c->next_sibling;
-            }
-            ns_box *run = build_inline_run(start, c, styles);
-            if (run && run->text && run->text[0])
-                box_append_child(block, run);
-            else if (run)
-                ns_box_free(run);
         } else {
-            ns_box *child = build_block(c, styles);
-            if (child) box_append_child(block, child);
-            if (c) c = c->next_sibling;
+            c = append_flow_child(block, c, end, styles);
         }
     }
 }
