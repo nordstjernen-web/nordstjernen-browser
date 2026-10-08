@@ -23632,6 +23632,132 @@ inline_declaration_sheet(const char *name, const char *value)
     return sheet;
 }
 
+static const char *
+inline_skip_at_rule(const char *p, const char *end)
+{
+    char term = 0;
+    const char *stop = css_scan_segment(p, end, &term);
+    if (term == '{') return css_skip_to_block_end(stop, end);
+    if (term == ';') return stop + 1;
+    return stop > p ? stop : p + 1;
+}
+
+#define INLINE_LONGHAND_WORDS ((NS_CSS_PROP_COUNT + 63) / 64)
+
+typedef struct {
+    guint64 bits[INLINE_LONGHAND_WORDS];
+} inline_longhand_set;
+
+static __thread GHashTable *g_inline_longhand_sets;
+
+static const inline_longhand_set *
+inline_longhands_of(const char *name)
+{
+    if (!g_inline_longhand_sets)
+        g_inline_longhand_sets = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, g_free);
+    char *key = g_ascii_strdown(name, -1);
+    inline_longhand_set *set = g_hash_table_lookup(g_inline_longhand_sets, key);
+    if (set) {
+        g_free(key);
+        return set;
+    }
+    set = g_new0(inline_longhand_set, 1);
+    if (key[0] != '-' || key[1] != '-') {
+        const ns_css_stylesheet *sheet = inline_declaration_sheet(key, "initial");
+        for (guint ri = 0; sheet && ri < sheet->rules->len; ri++) {
+            ns_css_rule *rule = g_ptr_array_index(sheet->rules, ri);
+            for (guint di = 0; di < rule->decls->len; di++) {
+                guint id = g_array_index(rule->decls, ns_css_decl, di).prop;
+                if (id < NS_CSS_PROP_COUNT)
+                    set->bits[id / 64] |= G_GUINT64_CONSTANT(1) << (id % 64);
+            }
+        }
+    }
+    g_hash_table_insert(g_inline_longhand_sets, key, set);
+    return set;
+}
+
+static gboolean
+inline_longhands_overlap(const inline_longhand_set *a,
+                         const inline_longhand_set *b)
+{
+    for (gsize i = 0; i < INLINE_LONGHAND_WORDS; i++)
+        if (a->bits[i] & b->bits[i]) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+inline_pending_substitution_value(const char *style, const char *prop,
+                                  char **out)
+{
+    if (!strstr(style, "var(") || (prop[0] == '-' && prop[1] == '-'))
+        return FALSE;
+    const inline_longhand_set *want = inline_longhands_of(prop);
+    const char *p = style;
+    const char *end = style + strlen(style);
+    char *last_own = NULL;
+    gboolean pending_after_own = FALSE;
+    gboolean touched = FALSE;
+    while (p < end) {
+        p = css_skip_ws_comments(p, end);
+        while (p < end && *p == ';') {
+            p++;
+            p = css_skip_ws_comments(p, end);
+        }
+        if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
+        const char *kstart = p;
+        char term = 0;
+        const char *kend = css_scan_until(p, end, ":;", &term);
+        char *key = css_trim_dup_range(kstart, kend);
+        if (term != ':') {
+            g_free(key);
+            p = term == ';' ? kend + 1 : kend;
+            continue;
+        }
+        p = css_skip_ws_comments(kend + 1, end);
+        const char *vstart = p;
+        const char *vend = css_scan_declaration_value(p, end, &term);
+        gboolean own = g_ascii_strcasecmp(key, prop) == 0;
+        if (own || (!(key[0] == '-' && key[1] == '-') &&
+                    inline_longhands_overlap(inline_longhands_of(key), want))) {
+            char *value = css_trim_dup_range(vstart, vend);
+            gboolean has_var = strstr(value, "var(") != NULL;
+            touched = TRUE;
+            if (own) {
+                g_free(last_own);
+                last_own = value;
+                pending_after_own = has_var;
+            } else {
+                pending_after_own = pending_after_own || has_var ||
+                                    (last_own && strstr(last_own, "var("));
+                if (last_own && strstr(last_own, "var(")) {
+                    g_free(last_own);
+                    last_own = NULL;
+                }
+                g_free(value);
+            }
+        }
+        g_free(key);
+        p = term == ';' ? vend + 1 : vend;
+    }
+    if (!touched || !pending_after_own) {
+        g_free(last_own);
+        return FALSE;
+    }
+    if (last_own && strstr(last_own, "var(")) {
+        *out = last_own;
+        return TRUE;
+    }
+    g_free(last_own);
+    *out = g_strdup("");
+    return TRUE;
+}
+
 static char *
 inline_expanded_value(const char *name, const char *value, int prop,
                       gboolean *important)
@@ -23679,16 +23805,6 @@ inline_property_is_all_covered(const char *name)
            g_ascii_strcasecmp(name, "direction") != 0 &&
            g_ascii_strcasecmp(name, "unicode-bidi") != 0 &&
            ns_css_named_property_supported(name);
-}
-
-static const char *
-inline_skip_at_rule(const char *p, const char *end)
-{
-    char term = 0;
-    const char *stop = css_scan_segment(p, end, &term);
-    if (term == '{') return css_skip_to_block_end(stop, end);
-    if (term == ';') return stop + 1;
-    return stop > p ? stop : p + 1;
 }
 
 static char *
@@ -24193,6 +24309,9 @@ ns_inline_style_get(const char *style, const char *prop)
     if (!style || !prop) return NULL;
     char *hit = NULL;
     if (inline_get_memo_hit(style, prop, &hit)) return hit;
+    char *pending = NULL;
+    if (inline_pending_substitution_value(style, prop, &pending))
+        return inline_get_memo_keep(style, prop, pending);
     if (g_ascii_strcasecmp(prop, "all") == 0)
         return inline_get_memo_keep(style, prop, inline_all_value(style));
     if (inline_quad_ids(prop))
@@ -24502,7 +24621,16 @@ ns_inline_style_serialize(const char *style)
         const int *ids = inline_quad_ids(quad_names[q]);
         if (!ids) continue;
         gboolean sides[4] = { FALSE, FALSE, FALSE, FALSE };
+        gboolean pending = FALSE;
         for (guint i = 0; i < decls->len; i++) {
+            ns_inline_decl *decl = g_ptr_array_index(decls, i);
+            int id = ns_css_prop_id(decl->name);
+            gboolean member = strcmp(decl->name, quad_names[q]) == 0;
+            for (int side = 0; side < 4; side++)
+                if (id == ids[side]) member = TRUE;
+            if (member && strstr(decl->value, "var(")) pending = TRUE;
+        }
+        for (guint i = 0; i < decls->len && !pending; i++) {
             ns_inline_decl *decl = g_ptr_array_index(decls, i);
             if (strcmp(decl->name, quad_names[q]) == 0) {
                 quad_complete[q] = TRUE;
@@ -24512,7 +24640,7 @@ ns_inline_style_serialize(const char *style)
             for (int side = 0; side < 4; side++)
                 if (id == ids[side]) sides[side] = TRUE;
         }
-        if (!quad_complete[q])
+        if (!quad_complete[q] && !pending)
             quad_complete[q] = sides[0] && sides[1] && sides[2] && sides[3];
         if (quad_complete[q])
             quad_values[q] = inline_quad_value(style, quad_names[q],
