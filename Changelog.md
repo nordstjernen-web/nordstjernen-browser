@@ -25,6 +25,12 @@ Changelog:
   unchanged leaves its subtree alone, and an insertion restyles the
   parent's children rather than its subtree. `:has()` rules without an
   ancestor key no longer switch incremental restyling off for the page.
+* An incremental restyle no longer crashes when an element marked for
+  restyling is freed before the next style pass. The marked set kept
+  the freed pointer and the pass walked its ancestors; a page that
+  replaced marked elements while a blocking script was still loading
+  (Yahoo Japan) crashed about one load in three. Freed nodes now leave
+  every restyle set.
 * A full restyle costs half as much on design-system-heavy pages. Rules
   whose subject is `:root` or an `:is()`/`:where()` of keyed selectors
   are indexed instead of being tried against every element, stylesheets
