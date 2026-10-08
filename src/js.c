@@ -8349,7 +8349,8 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
-    ns_css_mark_childlist_dirty(n, added);
+    ns_css_mark_childlist_replaced(n, added, (ns_node *const *)removed->pdata,
+                                   removed->len);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -28942,7 +28943,8 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
         ns_css_mark_childlist_removed(parent, &removed, 1, next_sibling,
                                       previous_sibling);
     else
-        ns_css_mark_childlist_dirty(parent, added);
+        ns_css_mark_childlist_replaced(parent, added, &removed,
+                                       removed ? 1 : 0);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL, NULL);
 }
@@ -29007,7 +29009,9 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
                                       removed->len, next_sibling,
                                       previous_sibling);
     else
-        ns_css_mark_childlist_dirty(parent, first_added);
+        ns_css_mark_childlist_replaced(parent, first_added,
+            removed ? (ns_node *const *)removed->pdata : NULL,
+            removed ? removed->len : 0);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
