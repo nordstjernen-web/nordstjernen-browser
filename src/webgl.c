@@ -3224,6 +3224,9 @@ wgl_drawBuffers(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     WGL_GET(0);
     GLint bufs[16];
     int n = (argc >= 1) ? wgl_ints(ctx, argv[0], bufs, 16) : 0;
+    if (!g->user_draw_fbo)
+        for (int i = 0; i < n; i++)
+            if (bufs[i] == GL_BACK) bufs[i] = GL_COLOR_ATTACHMENT0;
     if (n > 0) glDrawBuffers(n, (const GLenum *)bufs);
     return JS_UNDEFINED;
 }
@@ -3382,7 +3385,9 @@ static JSValue
 wgl_readBuffer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glReadBuffer((GLenum)argi(ctx, argc, argv, 0));
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
+    if (!g->user_read_fbo && mode == GL_BACK) mode = GL_COLOR_ATTACHMENT0;
+    glReadBuffer(mode);
     return JS_UNDEFINED;
 }
 
