@@ -1,6 +1,15 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.31:
+======
+* Release packages work with immutable GitHub releases. The release
+  workflow ran when a release was published and then attached the .deb
+  and .zip packages, which an immutable release refuses, so the 1.0.30
+  release got no Linux packages. Pushing a version tag now builds the
+  packages and attaches them to a draft release, with the changelog
+  section as its notes; publishing that draft is the last, manual step.
+
 1.0.30:
 ======
 * WebGL points take their size from `gl_PointSize`. On desktop OpenGL
