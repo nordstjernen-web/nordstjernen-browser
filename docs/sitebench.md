@@ -223,6 +223,21 @@ spread either, so the builds' spreads alone decide stability and noise
 for that site until Chrome is captured again (`CHROME=1`, or a new
 `OUT` for `ab.sh`).
 
+To place Chrome's components, `compare.py` pairs each one with at most
+one Nordstjernen component, and each Nordstjernen component serves at
+most one Chrome component. Components with the same DOM path and the
+same key, that is tag, text (digits ignored) and id, are paired first.
+The rest are paired by key: pairs that overlap more go first, and what
+is left of each key is paired in document order. This finds a
+component whose path changed because an element before it exists in
+only one browser, such as a placeholder image or a banner a script
+inserted. Last, components still unpaired that share a DOM path are
+paired by path alone: mostly the same element with another text, such
+as a headline that changed between the two loads or text decoded in
+another charset. A Chrome component without a partner counts as not
+found. Captures made before components had paths are paired by key
+alone.
+
 Sites that answer headless Chrome with a bot challenge or an error page
 instead of their content (detected from the page title and first text,
 or a challenge redirect such as `?js_challenge=` on a near-empty page)
@@ -237,12 +252,15 @@ difference heatmap, Chrome's filmstrip, both full pages, the
 worst-placed components and the computed-style mismatches, which is
 usually enough to point at the engine feature at fault. Each listed
 component shows the end of its DOM path (hover it for the whole path),
-and the path of the Nordstjernen component it was compared with when
-that one sits elsewhere in the tree. With repeated visual runs, the
-screenshots, the heatmap, the components and the style mismatches are
-those of Chrome's reference run and each build's median run, while the
-filmstrip and the full pages come from the first run; *Visual runs*
-adds every run's screenshot and score, and is open for unstable sites.
+the path of the Nordstjernen component it was paired with when that one
+sits elsewhere in the tree, and whether it was paired by path, by key
+or by path alone. Above the list, the report counts the first-screen
+components paired each way and those left unpaired in each browser.
+With repeated visual runs, the screenshots, the heatmap, the components
+and the style mismatches are those of Chrome's reference run and each
+build's median run, while the filmstrip and the full pages come from the
+first run; *Visual runs* adds every run's screenshot and score, and is
+open for unstable sites.
 
 ## Results
 
