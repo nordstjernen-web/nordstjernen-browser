@@ -141,6 +141,13 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* `querySelectorAll` and `querySelector` with a selector list over the
+  document use the class and tag indexes when every selector ends in a
+  class or a type, checking only the elements that carry them instead of
+  matching the whole list against every element. Google's ad library
+  queries the selector text of every CSS rule this way; on ESPN that was
+  10,000 calls and 3.4 s, and the page's main-thread CPU drops from
+  about 20 s to 16 s.
 * Blurred shadows paint up to 16 times faster. Inset shadows now blur
   a strip of the box and stretch its uniform middle, as outer shadows
   already did, instead of blurring the full box - Reddit draws one on a

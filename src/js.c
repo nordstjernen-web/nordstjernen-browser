@@ -36962,14 +36962,130 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
     return JS_UNDEFINED;
 }
 
+#define NS_QUERY_SORT_MAX 32
+
+static gboolean
+ns_query_selector_candidates(const ns_node *doc, const ns_css_selector *sel,
+                             GPtrArray **out)
+{
+    if (sel->pseudo_element != NS_CSS_PE_NONE) return FALSE;
+    if (!sel->compounds || sel->compounds->len == 0) return FALSE;
+    const ns_css_simple *key =
+        g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
+    if (!key || key->never_match) return FALSE;
+    if (key->classes && key->classes->len > 0 && doc->class_index &&
+        ((const char *)g_ptr_array_index(key->classes, 0))[0]) {
+        *out = ns_doc_class_index_lookup(doc, g_ptr_array_index(key->classes, 0));
+        return TRUE;
+    }
+    if (key->type && strcmp(key->type, "*") != 0 && doc->tag_index) {
+        *out = ns_doc_tag_index_lookup(doc, key->type);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gint
+ns_query_order_cmp(gconstpointer a, gconstpointer b)
+{
+    return ns_node_document_order_cmp(*(const ns_node *const *)a,
+                                      *(const ns_node *const *)b);
+}
+
+static void
+ns_walk_collect_marked(const ns_node *n, GHashTable *marked, JSContext *ctx,
+                       JSValue arr, uint32_t *idx, guint *left, int depth)
+{
+    if (!n || !*left || depth >= 512 || ns_dom_hidden_child(n)) return;
+    if (g_hash_table_contains(marked, n)) {
+        JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
+        (*left)--;
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (const ns_node *c = n->first_child; c && *left; c = c->next_sibling)
+        ns_walk_collect_marked(c, marked, ctx, arr, idx, left, depth + 1);
+}
+
+static const ns_node *
+ns_query_first_candidate_match(const ns_css_selector *sel, GPtrArray *cands)
+{
+    for (guint k = 0; cands && k < cands->len; k++) {
+        const ns_node *n = g_ptr_array_index(cands, k);
+        if (ns_css_selector_matches(sel, n)) return n;
+    }
+    return NULL;
+}
+
+static gboolean
+ns_query_key_index_list(JSContext *ctx, const ns_node *doc, GPtrArray *sels,
+                        gboolean want_all, JSValue *out)
+{
+    GPtrArray **cands = g_new0(GPtrArray *, sels->len);
+    for (guint i = 0; i < sels->len; i++) {
+        if (!ns_query_selector_candidates(doc, g_ptr_array_index(sels, i),
+                                          &cands[i])) {
+            g_free(cands);
+            return FALSE;
+        }
+    }
+    if (!want_all) {
+        const ns_node *best = NULL;
+        for (guint i = 0; i < sels->len; i++) {
+            const ns_node *m = ns_query_first_candidate_match(
+                g_ptr_array_index(sels, i), cands[i]);
+            if (m && (!best || ns_node_document_order_cmp(m, best) < 0))
+                best = m;
+        }
+        g_free(cands);
+        *out = ns_make_element(ctx, best);
+        return TRUE;
+    }
+    GPtrArray *hits = g_ptr_array_new();
+    GHashTable *seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+    guint sources = 0;
+    for (guint i = 0; i < sels->len; i++) {
+        const ns_css_selector *sel = g_ptr_array_index(sels, i);
+        guint before = hits->len;
+        for (guint k = 0; cands[i] && k < cands[i]->len; k++) {
+            const ns_node *n = g_ptr_array_index(cands[i], k);
+            if (!g_hash_table_contains(seen, n) &&
+                ns_css_selector_matches(sel, n)) {
+                g_hash_table_add(seen, (gpointer)n);
+                g_ptr_array_add(hits, (gpointer)n);
+            }
+        }
+        if (hits->len > before) sources++;
+    }
+    g_free(cands);
+    JSValue arr = JS_NewArray(ctx);
+    uint32_t idx = 0;
+    if (sources > 1 && hits->len > NS_QUERY_SORT_MAX) {
+        guint left = hits->len;
+        for (const ns_node *c = doc->first_child; c && left; c = c->next_sibling)
+            ns_walk_collect_marked(c, seen, ctx, arr, &idx, &left, 0);
+    } else {
+        if (sources > 1) g_ptr_array_sort(hits, ns_query_order_cmp);
+        for (guint k = 0; k < hits->len; k++)
+            JS_SetPropertyUint32(ctx, arr, idx++,
+                                 ns_make_element(ctx, g_ptr_array_index(hits, k)));
+    }
+    g_hash_table_destroy(seen);
+    g_ptr_array_free(hits, TRUE);
+    *out = ns_nodelist_from_array(ctx, arr);
+    return TRUE;
+}
+
 static gboolean
 ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
                    gboolean want_all, gboolean include_self, JSValue *out)
 {
-    if (sels->len != 1) return FALSE;
+    if (sels->len == 0) return FALSE;
     ns_js *jsx = js_from_ctx(ctx);
     const ns_node *doc = jsx ? jsx->current_doc : NULL;
     if (!doc || !ns_root_uses_doc_index(root, doc)) return FALSE;
+    if (sels->len > 1)
+        return root == doc &&
+               ns_query_key_index_list(ctx, doc, sels, want_all, out);
 
     const ns_css_selector *sel = g_ptr_array_index(sels, 0);
     if (sel->pseudo_element != NS_CSS_PE_NONE) return FALSE;
