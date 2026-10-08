@@ -459,7 +459,7 @@ def write_markdown(rows, agg, labels, base_label, meta, path):
                       fmt(e.get("firstPaintMs")), fmt(e.get("settledMainThreadMs"))]
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
-    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8", errors="replace")
 
 
 CSS = """
@@ -627,7 +627,7 @@ def write_html(rows, agg, labels, base_label, meta, path):
             out.append("</details>")
         out.append("</section>")
     out.append(f"<script>{SORT_JS}</script></main></body></html>")
-    Path(path).write_text("".join(out), encoding="utf-8")
+    Path(path).write_text("".join(out), encoding="utf-8", errors="replace")
 
 
 def main():
@@ -663,7 +663,7 @@ def main():
             "chromeVersion": "Chrome " + ", ".join(sorted(chrome_versions)) if chrome_versions else "",
             "nsVersions": ns_versions, "viewport": a.viewport, "labels": labels}
     (report / "summary.json").write_text(json.dumps({"meta": meta, "aggregate": agg, "sites": rows}, indent=1),
-                                         encoding="utf-8")
+                                         encoding="utf-8", errors="replace")
     write_markdown(rows, agg, labels, a.base, meta, report / "summary.md")
     write_html(rows, agg, labels, a.base, meta, report / "index.html")
     for l in labels:
