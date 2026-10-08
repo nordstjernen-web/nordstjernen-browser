@@ -61,6 +61,7 @@ typedef struct ns_config {
     gboolean images_enabled;
     gboolean javascript_enabled;
     gboolean webgl_enabled;
+    gboolean webgpu_enabled;
     gboolean camera_enabled;
     gboolean microphone_enabled;
     gboolean local_storage_enabled;

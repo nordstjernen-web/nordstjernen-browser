@@ -35,6 +35,8 @@ Even in a build that contains WebGPU, the API is **denied by default**.
 `navigator.gpu.requestAdapter()` resolves to `null` unless WebGPU is
 explicitly enabled, by either:
 
+- turning on **WebGPU** on `about:settings` (the `webgpu_enabled` config
+  key, off by default), which applies to pages loaded afterwards,
 - starting the browser with the **`--enable-webgpu`** command-line flag, or
 - setting the environment variable **`NS_WEBGPU_ALLOW=1`** (what the flag
   does internally).
