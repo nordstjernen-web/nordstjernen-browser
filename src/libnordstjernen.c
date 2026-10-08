@@ -517,10 +517,13 @@ browser_flush_style(gpointer user_data)
                                           b->hover_node);
     b->relaying = FALSE;
     if (!fresh) return;
-    g_clear_pointer(&b->retired_styles, g_hash_table_destroy);
-    b->retired_styles = b->styles;
+    if (b->retired_styles)
+        g_hash_table_destroy(b->styles);
+    else
+        b->retired_styles = b->styles;
     b->styles = fresh;
     b->styles_serial = ns_js_mutation_serial(b->js);
+    b->cascade_dirty = FALSE;
     b->dirty = TRUE;
 }
 
