@@ -64037,6 +64037,20 @@ ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
 
+static gboolean
+ns_js_module_script_fetch_allowed(const ns_js *js, const ns_node *n,
+                                  const char *abs_url, const char *origin)
+{
+    if (!ns_url_is_http_or_https(abs_url)) return FALSE;
+    if (g_str_has_prefix(origin, "https://") &&
+        g_str_has_prefix(abs_url, "http://"))
+        return FALSE;
+    return !js->csp ||
+           ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+                                    ns_element_get_attr(n, "nonce"),
+                                    !(n->flags & NS_NODE_NOT_PARSER_INSERTED));
+}
+
 static void
 ns_js_module_prefetch_scripts(ns_js *js, GArray *tasks, const char *origin)
 {
@@ -64049,7 +64063,7 @@ ns_js_module_prefetch_scripts(ns_js *js, GArray *tasks, const char *origin)
             ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
             continue;
         char *abs_url = ns_url_resolve(origin, src);
-        if (abs_url && ns_url_is_http_or_https(abs_url))
+        if (abs_url && ns_js_module_script_fetch_allowed(js, n, abs_url, origin))
             ns_module_prefetch_url(abs_url, js->current_url);
         g_free(abs_url);
     }
