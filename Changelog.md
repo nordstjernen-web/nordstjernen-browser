@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* `toDataURL()` and `toBlob()` export what a WebGL or WebGPU canvas
+  shows. Both read the canvas's 2D drawing surface, which a 3D canvas
+  never draws to, so screenshots of a WebGL or WebGPU scene (three.js
+  "save image" buttons, thumbnail generators) came out fully
+  transparent. They now take the same surface `drawImage()` uses: the
+  GL framebuffer read back for WebGL, the presented texture for WebGPU.
 * `canvas.toBlob()` hands its callback a real `Blob`, from a task. The
   callback ran synchronously, before `toBlob()` returned, and received a
   plain object carrying `size` and `type` but not `Blob.prototype`, so
