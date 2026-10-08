@@ -83,6 +83,12 @@ static JSValue wg_device_createShaderModule(JSContext *ctx,
 static JSValue wg_device_createRenderPipeline(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
+static JSValue wg_device_createRenderPipelineAsync(JSContext *ctx,
+                                                   JSValueConst this_val,
+                                                   int argc, JSValueConst *argv);
+static JSValue wg_device_createComputePipelineAsync(JSContext *ctx,
+                                                    JSValueConst this_val,
+                                                    int argc, JSValueConst *argv);
 static JSValue wg_device_createBindGroupLayout(JSContext *ctx,
                                                JSValueConst this_val,
                                                int argc, JSValueConst *argv);
@@ -215,6 +221,22 @@ wg_promise_rejected(JSContext *ctx, const char *message)
     JS_FreeValue(ctx, funcs[0]);
     JS_FreeValue(ctx, funcs[1]);
     JS_FreeValue(ctx, err);
+    return p;
+}
+
+static JSValue
+wg_promise_settled(JSContext *ctx, JSValue result)
+{
+    JSValue funcs[2];
+    JSValue p = JS_NewPromiseCapability(ctx, funcs);
+    gboolean failed = JS_IsException(result);
+    JSValue value = failed ? JS_GetException(ctx) : result;
+    JSValue r = JS_Call(ctx, funcs[failed ? 1 : 0], JS_UNDEFINED, 1,
+                        (JSValueConst *)&value);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, funcs[0]);
+    JS_FreeValue(ctx, funcs[1]);
+    JS_FreeValue(ctx, value);
     return p;
 }
 
@@ -756,6 +778,10 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
     wg_bind(ctx, obj, "createShaderModule", wg_device_createShaderModule, 1);
     wg_bind(ctx, obj, "createRenderPipeline", wg_device_createRenderPipeline, 1);
     wg_bind(ctx, obj, "createComputePipeline", wg_device_createComputePipeline, 1);
+    wg_bind(ctx, obj, "createRenderPipelineAsync",
+            wg_device_createRenderPipelineAsync, 1);
+    wg_bind(ctx, obj, "createComputePipelineAsync",
+            wg_device_createComputePipelineAsync, 1);
     wg_bind(ctx, obj, "createBindGroupLayout", wg_device_createBindGroupLayout, 1);
     wg_bind(ctx, obj, "createPipelineLayout", wg_device_createPipelineLayout, 1);
     wg_bind(ctx, obj, "createBindGroup", wg_device_createBindGroup, 1);
@@ -1783,18 +1809,139 @@ wg_sv(const char *s)
 {
     WGPUStringView v;
     v.data = s;
-    v.length = s ? strlen(s) : 0;
+    v.length = s ? strlen(s) : WGPU_STRLEN;
     return v;
+}
+
+static char *
+wg_get_string(JSContext *ctx, JSValueConst obj, const char *key)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, key);
+    char *out = NULL;
+    if (JS_IsString(v)) {
+        const char *s = JS_ToCString(ctx, v);
+        if (s) { out = g_strdup(s); JS_FreeCString(ctx, s); }
+    }
+    JS_FreeValue(ctx, v);
+    return out;
+}
+
+#define NS_WG_MAX_CONSTANTS 64
+
+typedef struct {
+    WGPUConstantEntry entries[NS_WG_MAX_CONSTANTS];
+    char             *keys[NS_WG_MAX_CONSTANTS];
+    size_t            count;
+} wg_constants;
+
+static void
+wg_read_constants(JSContext *ctx, JSValueConst stage, wg_constants *out)
+{
+    memset(out, 0, sizeof *out);
+    JSValue jc = JS_GetPropertyStr(ctx, stage, "constants");
+    JSPropertyEnum *props = NULL;
+    uint32_t n = 0;
+    if (JS_IsObject(jc) &&
+        JS_GetOwnPropertyNames(ctx, &props, &n, jc,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (out->count < NS_WG_MAX_CONSTANTS) {
+                const char *key = JS_AtomToCString(ctx, props[i].atom);
+                JSValue jv = JS_GetProperty(ctx, jc, props[i].atom);
+                double d = 0;
+                JS_ToFloat64(ctx, &d, jv);
+                JS_FreeValue(ctx, jv);
+                if (key) {
+                    size_t k = out->count++;
+                    out->keys[k] = g_strdup(key);
+                    out->entries[k].key = wg_sv(out->keys[k]);
+                    out->entries[k].value = d;
+                    JS_FreeCString(ctx, key);
+                }
+            }
+            JS_FreeAtom(ctx, props[i].atom);
+        }
+        js_free(ctx, props);
+    }
+    JS_FreeValue(ctx, jc);
+}
+
+static void
+wg_constants_clear(wg_constants *c)
+{
+    for (size_t i = 0; i < c->count; i++) g_free(c->keys[i]);
+    c->count = 0;
+}
+
+static WGPUStencilOperation
+wg_stencil_op(const char *s)
+{
+    if (!s) return WGPUStencilOperation_Keep;
+    static const struct { const char *n; WGPUStencilOperation op; } m[] = {
+        { "keep", WGPUStencilOperation_Keep },
+        { "zero", WGPUStencilOperation_Zero },
+        { "replace", WGPUStencilOperation_Replace },
+        { "invert", WGPUStencilOperation_Invert },
+        { "increment-clamp", WGPUStencilOperation_IncrementClamp },
+        { "decrement-clamp", WGPUStencilOperation_DecrementClamp },
+        { "increment-wrap", WGPUStencilOperation_IncrementWrap },
+        { "decrement-wrap", WGPUStencilOperation_DecrementWrap },
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(m); i++)
+        if (strcmp(s, m[i].n) == 0) return m[i].op;
+    return WGPUStencilOperation_Keep;
+}
+
+static void
+wg_read_stencil_face(JSContext *ctx, JSValueConst ds, const char *key,
+                     WGPUStencilFaceState *out)
+{
+    out->compare = WGPUCompareFunction_Always;
+    out->failOp = out->depthFailOp = out->passOp = WGPUStencilOperation_Keep;
+    JSValue f = JS_GetPropertyStr(ctx, ds, key);
+    if (JS_IsObject(f)) {
+        char *s = wg_get_string(ctx, f, "compare");
+        if (s) out->compare = wg_compare_func(s);
+        if (out->compare == WGPUCompareFunction_Undefined)
+            out->compare = WGPUCompareFunction_Always;
+        g_free(s);
+        s = wg_get_string(ctx, f, "failOp"); out->failOp = wg_stencil_op(s); g_free(s);
+        s = wg_get_string(ctx, f, "depthFailOp"); out->depthFailOp = wg_stencil_op(s); g_free(s);
+        s = wg_get_string(ctx, f, "passOp"); out->passOp = wg_stencil_op(s); g_free(s);
+    }
+    JS_FreeValue(ctx, f);
 }
 
 static WGPUVertexFormat
 wg_vertex_format(const char *s)
 {
     if (!s) return WGPUVertexFormat_Float32x3;
-    if (strcmp(s, "float32x2") == 0) return WGPUVertexFormat_Float32x2;
-    if (strcmp(s, "float32x4") == 0) return WGPUVertexFormat_Float32x4;
-    if (strcmp(s, "float32") == 0)   return WGPUVertexFormat_Float32;
-    if (strcmp(s, "uint32") == 0)    return WGPUVertexFormat_Uint32;
+    static const struct { const char *n; WGPUVertexFormat f; } m[] = {
+        { "uint8", WGPUVertexFormat_Uint8 }, { "uint8x2", WGPUVertexFormat_Uint8x2 },
+        { "uint8x4", WGPUVertexFormat_Uint8x4 }, { "sint8", WGPUVertexFormat_Sint8 },
+        { "sint8x2", WGPUVertexFormat_Sint8x2 }, { "sint8x4", WGPUVertexFormat_Sint8x4 },
+        { "unorm8", WGPUVertexFormat_Unorm8 }, { "unorm8x2", WGPUVertexFormat_Unorm8x2 },
+        { "unorm8x4", WGPUVertexFormat_Unorm8x4 }, { "snorm8", WGPUVertexFormat_Snorm8 },
+        { "snorm8x2", WGPUVertexFormat_Snorm8x2 }, { "snorm8x4", WGPUVertexFormat_Snorm8x4 },
+        { "uint16", WGPUVertexFormat_Uint16 }, { "uint16x2", WGPUVertexFormat_Uint16x2 },
+        { "uint16x4", WGPUVertexFormat_Uint16x4 }, { "sint16", WGPUVertexFormat_Sint16 },
+        { "sint16x2", WGPUVertexFormat_Sint16x2 }, { "sint16x4", WGPUVertexFormat_Sint16x4 },
+        { "unorm16", WGPUVertexFormat_Unorm16 }, { "unorm16x2", WGPUVertexFormat_Unorm16x2 },
+        { "unorm16x4", WGPUVertexFormat_Unorm16x4 }, { "snorm16", WGPUVertexFormat_Snorm16 },
+        { "snorm16x2", WGPUVertexFormat_Snorm16x2 }, { "snorm16x4", WGPUVertexFormat_Snorm16x4 },
+        { "float16", WGPUVertexFormat_Float16 }, { "float16x2", WGPUVertexFormat_Float16x2 },
+        { "float16x4", WGPUVertexFormat_Float16x4 }, { "float32", WGPUVertexFormat_Float32 },
+        { "float32x2", WGPUVertexFormat_Float32x2 }, { "float32x3", WGPUVertexFormat_Float32x3 },
+        { "float32x4", WGPUVertexFormat_Float32x4 }, { "uint32", WGPUVertexFormat_Uint32 },
+        { "uint32x2", WGPUVertexFormat_Uint32x2 }, { "uint32x3", WGPUVertexFormat_Uint32x3 },
+        { "uint32x4", WGPUVertexFormat_Uint32x4 }, { "sint32", WGPUVertexFormat_Sint32 },
+        { "sint32x2", WGPUVertexFormat_Sint32x2 }, { "sint32x3", WGPUVertexFormat_Sint32x3 },
+        { "sint32x4", WGPUVertexFormat_Sint32x4 },
+        { "unorm10-10-10-2", WGPUVertexFormat_Unorm10_10_10_2 },
+        { "unorm8x4-bgra", WGPUVertexFormat_Unorm8x4BGRA },
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(m); i++)
+        if (strcmp(s, m[i].n) == 0) return m[i].f;
     return WGPUVertexFormat_Float32x3;
 }
 
@@ -1896,6 +2043,9 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jlayout);
 
     char *vs_entry = NULL, *fs_entry = NULL;
+    wg_constants vs_consts, fs_consts;
+    memset(&vs_consts, 0, sizeof vs_consts);
+    memset(&fs_consts, 0, sizeof fs_consts);
     WGPUVertexBufferLayout vbl[NS_WG_MAX_VBUF];
     WGPUVertexAttribute attrs[NS_WG_MAX_VBUF][NS_WG_MAX_ATTR];
     WGPUColorTargetState targets[NS_WG_MAX_TARGET];
@@ -1917,6 +2067,9 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
         if (JS_IsString(jentry)) vs_entry = (char *)JS_ToCString(ctx, jentry);
         JS_FreeValue(ctx, jentry);
         desc.vertex.entryPoint = wg_sv(vs_entry);
+        wg_read_constants(ctx, jvertex, &vs_consts);
+        desc.vertex.constantCount = vs_consts.count;
+        desc.vertex.constants = vs_consts.entries;
 
         JSValue jbufs = JS_GetPropertyStr(ctx, jvertex, "buffers");
         if (JS_IsArray(jbufs)) {
@@ -1990,6 +2143,19 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
         else if (cs && strcmp(cs, "front") == 0) desc.primitive.cullMode = WGPUCullMode_Front;
         if (cs) JS_FreeCString(ctx, cs);
         JS_FreeValue(ctx, jcull);
+        char *ff = wg_get_string(ctx, jprim, "frontFace");
+        desc.primitive.frontFace = (ff && strcmp(ff, "cw") == 0)
+            ? WGPUFrontFace_CW : WGPUFrontFace_CCW;
+        g_free(ff);
+        char *sif = wg_get_string(ctx, jprim, "stripIndexFormat");
+        if (sif && strcmp(sif, "uint16") == 0)
+            desc.primitive.stripIndexFormat = WGPUIndexFormat_Uint16;
+        else if (sif && strcmp(sif, "uint32") == 0)
+            desc.primitive.stripIndexFormat = WGPUIndexFormat_Uint32;
+        g_free(sif);
+        JSValue juc = JS_GetPropertyStr(ctx, jprim, "unclippedDepth");
+        desc.primitive.unclippedDepth = JS_ToBool(ctx, juc);
+        JS_FreeValue(ctx, juc);
     }
     JS_FreeValue(ctx, jprim);
 
@@ -2013,8 +2179,28 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
             ds.depthCompare = WGPUCompareFunction_Always;
         if (dcs) JS_FreeCString(ctx, dcs);
         JS_FreeValue(ctx, jdc);
-        ds.stencilFront.compare = WGPUCompareFunction_Always;
-        ds.stencilBack.compare = WGPUCompareFunction_Always;
+        wg_read_stencil_face(ctx, jds, "stencilFront", &ds.stencilFront);
+        wg_read_stencil_face(ctx, jds, "stencilBack", &ds.stencilBack);
+        ds.stencilReadMask = ds.stencilWriteMask = 0xFFFFFFFFu;
+        JSValue jm = JS_GetPropertyStr(ctx, jds, "stencilReadMask");
+        if (!JS_IsUndefined(jm)) JS_ToUint32(ctx, &ds.stencilReadMask, jm);
+        JS_FreeValue(ctx, jm);
+        jm = JS_GetPropertyStr(ctx, jds, "stencilWriteMask");
+        if (!JS_IsUndefined(jm)) JS_ToUint32(ctx, &ds.stencilWriteMask, jm);
+        JS_FreeValue(ctx, jm);
+        JSValue jb = JS_GetPropertyStr(ctx, jds, "depthBias");
+        if (!JS_IsUndefined(jb)) JS_ToInt32(ctx, &ds.depthBias, jb);
+        JS_FreeValue(ctx, jb);
+        double bias = 0;
+        jb = JS_GetPropertyStr(ctx, jds, "depthBiasSlopeScale");
+        if (!JS_IsUndefined(jb)) JS_ToFloat64(ctx, &bias, jb);
+        ds.depthBiasSlopeScale = (float)bias;
+        JS_FreeValue(ctx, jb);
+        bias = 0;
+        jb = JS_GetPropertyStr(ctx, jds, "depthBiasClamp");
+        if (!JS_IsUndefined(jb)) JS_ToFloat64(ctx, &bias, jb);
+        ds.depthBiasClamp = (float)bias;
+        JS_FreeValue(ctx, jb);
         desc.depthStencil = &ds;
     }
     JS_FreeValue(ctx, jds);
@@ -2027,6 +2213,12 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
             if (c >= 1) desc.multisample.count = c;
         }
         JS_FreeValue(ctx, jc);
+        JSValue jmask = JS_GetPropertyStr(ctx, jms, "mask");
+        if (!JS_IsUndefined(jmask)) JS_ToUint32(ctx, &desc.multisample.mask, jmask);
+        JS_FreeValue(ctx, jmask);
+        JSValue jatc = JS_GetPropertyStr(ctx, jms, "alphaToCoverageEnabled");
+        desc.multisample.alphaToCoverageEnabled = JS_ToBool(ctx, jatc);
+        JS_FreeValue(ctx, jatc);
     }
     JS_FreeValue(ctx, jms);
 
@@ -2040,6 +2232,9 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
         if (JS_IsString(jentry)) fs_entry = (char *)JS_ToCString(ctx, jentry);
         JS_FreeValue(ctx, jentry);
         frag.entryPoint = wg_sv(fs_entry);
+        wg_read_constants(ctx, jfrag, &fs_consts);
+        frag.constantCount = fs_consts.count;
+        frag.constants = fs_consts.entries;
 
         JSValue jtargets = JS_GetPropertyStr(ctx, jfrag, "targets");
         uint32_t nt = 0;
@@ -2085,6 +2280,8 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
 
     WGPURenderPipeline pipe = wgpuDeviceCreateRenderPipeline(d->device, &desc);
     wg_hold_release(&hold);
+    wg_constants_clear(&vs_consts);
+    wg_constants_clear(&fs_consts);
     if (vs_entry) JS_FreeCString(ctx, vs_entry);
     if (fs_entry) JS_FreeCString(ctx, fs_entry);
     if (!pipe) return JS_ThrowInternalError(ctx, "createRenderPipeline failed");
@@ -2096,6 +2293,22 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     JS_SetOpaque(obj, p);
     wg_bind(ctx, obj, "getBindGroupLayout", wg_pipeline_getBindGroupLayout, 1);
     return obj;
+}
+
+static JSValue
+wg_device_createRenderPipelineAsync(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    return wg_promise_settled(ctx,
+        wg_device_createRenderPipeline(ctx, this_val, argc, argv));
+}
+
+static JSValue
+wg_device_createComputePipelineAsync(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv)
+{
+    return wg_promise_settled(ctx,
+        wg_device_createComputePipeline(ctx, this_val, argc, argv));
 }
 
 static JSValue
@@ -2817,6 +3030,8 @@ wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jlayout);
 
     char *entry = NULL;
+    wg_constants consts;
+    memset(&consts, 0, sizeof consts);
     JSValue jcompute = JS_GetPropertyStr(ctx, argv[0], "compute");
     if (JS_IsObject(jcompute)) {
         JSValue jmod = JS_GetPropertyStr(ctx, jcompute, "module");
@@ -2827,11 +3042,15 @@ wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
         if (JS_IsString(jentry)) entry = (char *)JS_ToCString(ctx, jentry);
         JS_FreeValue(ctx, jentry);
         desc.compute.entryPoint = wg_sv(entry);
+        wg_read_constants(ctx, jcompute, &consts);
+        desc.compute.constantCount = consts.count;
+        desc.compute.constants = consts.entries;
     }
     JS_FreeValue(ctx, jcompute);
 
     WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(d->device, &desc);
     wg_hold_release(&hold);
+    wg_constants_clear(&consts);
     if (entry) JS_FreeCString(ctx, entry);
     if (!pipe) return JS_ThrowInternalError(ctx, "createComputePipeline failed");
 
