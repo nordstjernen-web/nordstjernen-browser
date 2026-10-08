@@ -38,6 +38,8 @@ static JSClassID g_sampler_class;
 static JSClassID g_queryset_class;
 static JSClassID g_compute_pipe_class;
 static JSClassID g_compute_pass_class;
+static JSClassID g_bundle_encoder_class;
+static JSClassID g_bundle_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
@@ -61,6 +63,8 @@ typedef struct { WGPUBindGroupLayout layout; } ns_wg_bgl;
 typedef struct { WGPUPipelineLayout layout; } ns_wg_pllayout;
 typedef struct { WGPUBindGroup group; } ns_wg_bindgroup;
 typedef struct { WGPUSampler sampler; } ns_wg_sampler;
+typedef struct { WGPURenderBundleEncoder enc; } ns_wg_bundle_encoder;
+typedef struct { WGPURenderBundle bundle; } ns_wg_bundle;
 
 typedef struct {
     const ns_node *canvas;
@@ -1221,6 +1225,19 @@ wg_view_dimension(const char *s)
     return WGPUTextureViewDimension_Undefined;
 }
 
+static const char *
+wg_view_dimension_name(WGPUTextureViewDimension d)
+{
+    switch (d) {
+    case WGPUTextureViewDimension_1D: return "1d";
+    case WGPUTextureViewDimension_2DArray: return "2d-array";
+    case WGPUTextureViewDimension_Cube: return "cube";
+    case WGPUTextureViewDimension_CubeArray: return "cube-array";
+    case WGPUTextureViewDimension_3D: return "3d";
+    default: return "2d";
+    }
+}
+
 static void
 wg_view_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -1336,6 +1353,14 @@ wg_make_texture(JSContext *ctx, WGPUTexture texture)
                                       : dim == WGPUTextureDimension_3D ? "3d" : "2d"));
     JS_SetPropertyStr(ctx, obj, "usage",
                       JS_NewUint32(ctx, (uint32_t)wgpuTextureGetUsage(texture)));
+    uint32_t layers = wgpuTextureGetDepthOrArrayLayers(texture);
+    WGPUTextureViewDimension bvd = dim == WGPUTextureDimension_1D
+        ? WGPUTextureViewDimension_1D
+        : dim == WGPUTextureDimension_3D ? WGPUTextureViewDimension_3D
+        : layers > 1 ? WGPUTextureViewDimension_2DArray
+                     : WGPUTextureViewDimension_2D;
+    JS_SetPropertyStr(ctx, obj, "textureBindingViewDimension",
+                      JS_NewString(ctx, wg_view_dimension_name(bvd)));
     JS_SetPropertyStr(ctx, obj, "format",
                       JS_NewString(ctx, wg_format_name(t->format)));
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
@@ -3158,7 +3183,12 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
 
     WGPUTexture tex = wgpuDeviceCreateTexture(d->device, &desc);
     if (!tex) return JS_ThrowInternalError(ctx, "createTexture failed");
-    return wg_make_texture(ctx, tex);
+    JSValue obj = wg_make_texture(ctx, tex);
+    JSValue jbvd = JS_GetPropertyStr(ctx, argv[0], "textureBindingViewDimension");
+    if (JS_IsString(jbvd) && JS_IsObject(obj))
+        JS_SetPropertyStr(ctx, obj, "textureBindingViewDimension", JS_DupValue(ctx, jbvd));
+    JS_FreeValue(ctx, jbvd);
+    return obj;
 }
 
 static JSValue
@@ -3510,6 +3540,260 @@ wg_encoder_beginComputePass(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static void
+wg_bundle_encoder_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_bundle_encoder *b = JS_GetOpaque(val, g_bundle_encoder_class);
+    if (!b) return;
+    if (b->enc) wgpuRenderBundleEncoderRelease(b->enc);
+    g_free(b);
+}
+
+static void
+wg_bundle_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_bundle *b = JS_GetOpaque(val, g_bundle_class);
+    if (!b) return;
+    if (b->bundle) wgpuRenderBundleRelease(b->bundle);
+    g_free(b);
+}
+
+static WGPURenderBundleEncoder
+wg_bundle_enc(JSValueConst this_val)
+{
+    ns_wg_bundle_encoder *b = JS_GetOpaque(this_val, g_bundle_encoder_class);
+    return b ? b->enc : NULL;
+}
+
+static JSValue
+wg_device_createRenderBundleEncoder(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createRenderBundleEncoder: descriptor required");
+    WGPUTextureFormat formats[NS_WG_MAX_COLOR_ATTACHMENTS];
+    WGPURenderBundleEncoderDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    JSValue jcf = JS_GetPropertyStr(ctx, argv[0], "colorFormats");
+    if (JS_IsObject(jcf)) {
+        JSValue list = wg_array_from(ctx, jcf);
+        uint32_t n = 0;
+        JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+        JS_ToUint32(ctx, &n, jl);
+        JS_FreeValue(ctx, jl);
+        for (uint32_t i = 0; i < n && i < NS_WG_MAX_COLOR_ATTACHMENTS; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, list, i);
+            const char *f = JS_IsString(e) ? JS_ToCString(ctx, e) : NULL;
+            formats[desc.colorFormatCount++] = f ? wg_format_from_str(f)
+                                                 : WGPUTextureFormat_Undefined;
+            if (f) JS_FreeCString(ctx, f);
+            JS_FreeValue(ctx, e);
+        }
+        JS_FreeValue(ctx, list);
+    }
+    JS_FreeValue(ctx, jcf);
+    desc.colorFormats = formats;
+    char *dsf = wg_get_string(ctx, argv[0], "depthStencilFormat");
+    desc.depthStencilFormat = dsf ? wg_format_from_str(dsf) : WGPUTextureFormat_Undefined;
+    g_free(dsf);
+    desc.sampleCount = 1;
+    JSValue js = JS_GetPropertyStr(ctx, argv[0], "sampleCount");
+    if (!JS_IsUndefined(js)) JS_ToUint32(ctx, &desc.sampleCount, js);
+    JS_FreeValue(ctx, js);
+    js = JS_GetPropertyStr(ctx, argv[0], "depthReadOnly");
+    desc.depthReadOnly = JS_ToBool(ctx, js);
+    JS_FreeValue(ctx, js);
+    js = JS_GetPropertyStr(ctx, argv[0], "stencilReadOnly");
+    desc.stencilReadOnly = JS_ToBool(ctx, js);
+    JS_FreeValue(ctx, js);
+
+    WGPURenderBundleEncoder enc = wgpuDeviceCreateRenderBundleEncoder(d->device, &desc);
+    if (!enc) return JS_ThrowInternalError(ctx, "createRenderBundleEncoder failed");
+    JSValue obj = JS_NewObjectClass(ctx, g_bundle_encoder_class);
+    if (JS_IsException(obj)) { wgpuRenderBundleEncoderRelease(enc); return obj; }
+    ns_wg_bundle_encoder *b = g_new0(ns_wg_bundle_encoder, 1);
+    b->enc = enc;
+    JS_SetOpaque(obj, b);
+    JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
+    return obj;
+}
+
+static JSValue
+wg_bundle_setPipeline(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)ctx;
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc || argc < 1) return JS_UNDEFINED;
+    ns_wg_pipeline *pl = JS_GetOpaque(argv[0], g_pipeline_class);
+    if (pl && pl->pipe) wgpuRenderBundleEncoderSetPipeline(enc, pl->pipe);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_setBindGroup(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc || argc < 2) return JS_UNDEFINED;
+    uint32_t index = wg_arg_u32(ctx, argc, argv, 0, 0);
+    ns_wg_bindgroup *bg = JS_GetOpaque(argv[1], g_bindgroup_class);
+    uint32_t offsets[NS_WG_MAX_DYNAMIC_OFFSETS];
+    size_t n = wg_read_dynamic_offsets(ctx, argc, argv, offsets);
+    wgpuRenderBundleEncoderSetBindGroup(enc, index, bg ? bg->group : NULL, n, offsets);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_setVertexBuffer(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc || argc < 2) return JS_UNDEFINED;
+    ns_wg_buffer *b = JS_GetOpaque(argv[1], g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    int64_t off = 0, size = -1;
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToInt64(ctx, &off, argv[2]);
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) JS_ToInt64(ctx, &size, argv[3]);
+    wgpuRenderBundleEncoderSetVertexBuffer(enc, wg_arg_u32(ctx, argc, argv, 0, 0),
+        b->buffer, off > 0 ? (uint64_t)off : 0,
+        size < 0 ? WGPU_WHOLE_SIZE : (uint64_t)size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_setIndexBuffer(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc || argc < 2) return JS_UNDEFINED;
+    ns_wg_buffer *b = JS_GetOpaque(argv[0], g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    const char *fs = JS_IsString(argv[1]) ? JS_ToCString(ctx, argv[1]) : NULL;
+    WGPUIndexFormat fmt = (fs && strcmp(fs, "uint16") == 0)
+        ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
+    if (fs) JS_FreeCString(ctx, fs);
+    int64_t off = 0, size = -1;
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToInt64(ctx, &off, argv[2]);
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) JS_ToInt64(ctx, &size, argv[3]);
+    wgpuRenderBundleEncoderSetIndexBuffer(enc, b->buffer, fmt,
+        off > 0 ? (uint64_t)off : 0, size < 0 ? WGPU_WHOLE_SIZE : (uint64_t)size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_draw(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (enc)
+        wgpuRenderBundleEncoderDraw(enc, wg_arg_u32(ctx, argc, argv, 0, 0),
+                                    wg_arg_u32(ctx, argc, argv, 1, 1),
+                                    wg_arg_u32(ctx, argc, argv, 2, 0),
+                                    wg_arg_u32(ctx, argc, argv, 3, 0));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_drawIndexed(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc) return JS_UNDEFINED;
+    int32_t base = 0;
+    if (argc >= 4) JS_ToInt32(ctx, &base, argv[3]);
+    wgpuRenderBundleEncoderDrawIndexed(enc, wg_arg_u32(ctx, argc, argv, 0, 0),
+                                       wg_arg_u32(ctx, argc, argv, 1, 1),
+                                       wg_arg_u32(ctx, argc, argv, 2, 0), base,
+                                       wg_arg_u32(ctx, argc, argv, 4, 0));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_drawIndirect(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    uint64_t off = 0;
+    ns_wg_buffer *b = wg_indirect_args(ctx, argc, argv, &off);
+    if (enc && b) wgpuRenderBundleEncoderDrawIndirect(enc, b->buffer, off);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_drawIndexedIndirect(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    uint64_t off = 0;
+    ns_wg_buffer *b = wg_indirect_args(ctx, argc, argv, &off);
+    if (enc && b) wgpuRenderBundleEncoderDrawIndexedIndirect(enc, b->buffer, off);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_bundle_finish(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    WGPURenderBundleEncoder enc = wg_bundle_enc(this_val);
+    if (!enc) return JS_UNDEFINED;
+    WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(enc, NULL);
+    if (!bundle) return JS_UNDEFINED;
+    JSValue obj = JS_NewObjectClass(ctx, g_bundle_class);
+    if (JS_IsException(obj)) { wgpuRenderBundleRelease(bundle); return obj; }
+    ns_wg_bundle *b = g_new0(ns_wg_bundle, 1);
+    b->bundle = bundle;
+    JS_SetOpaque(obj, b);
+    JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
+    return obj;
+}
+
+static JSValue
+wg_pass_executeBundles(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 1 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
+    JSValue list = wg_array_from(ctx, argv[0]);
+    if (JS_IsException(list)) return list;
+    uint32_t n = 0;
+    JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+    JS_ToUint32(ctx, &n, jl);
+    JS_FreeValue(ctx, jl);
+    WGPURenderBundle *bundles = g_new0(WGPURenderBundle, n ? n : 1);
+    wg_hold hold = { ctx, NULL };
+    size_t count = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue e = JS_GetPropertyUint32(ctx, list, i);
+        ns_wg_bundle *b = wg_hold_opaque(&hold, e, g_bundle_class);
+        if (b && b->bundle) bundles[count++] = b->bundle;
+        JS_FreeValue(ctx, e);
+    }
+    wgpuRenderPassEncoderExecuteBundles(p->pass, count, bundles);
+    wg_hold_release(&hold);
+    g_free(bundles);
+    JS_FreeValue(ctx, list);
+    return JS_UNDEFINED;
+}
+
+static const JSCFunctionListEntry wg_bundle_encoder_proto[] = {
+    JS_CFUNC_DEF("setPipeline", 1, wg_bundle_setPipeline),
+    JS_CFUNC_DEF("setBindGroup", 2, wg_bundle_setBindGroup),
+    JS_CFUNC_DEF("setVertexBuffer", 2, wg_bundle_setVertexBuffer),
+    JS_CFUNC_DEF("setIndexBuffer", 2, wg_bundle_setIndexBuffer),
+    JS_CFUNC_DEF("draw", 4, wg_bundle_draw),
+    JS_CFUNC_DEF("drawIndexed", 5, wg_bundle_drawIndexed),
+    JS_CFUNC_DEF("drawIndirect", 2, wg_bundle_drawIndirect),
+    JS_CFUNC_DEF("drawIndexedIndirect", 2, wg_bundle_drawIndexedIndirect),
+    JS_CFUNC_DEF("finish", 1, wg_bundle_finish),
+    JS_CFUNC_DEF("pushDebugGroup", 1, wg_debug_noop),
+    JS_CFUNC_DEF("popDebugGroup", 0, wg_debug_noop),
+    JS_CFUNC_DEF("insertDebugMarker", 1, wg_debug_noop),
+};
+
 static const JSCFunctionListEntry wg_queue_proto[] = {
     JS_CFUNC_DEF("writeBuffer", 5, wg_queue_writeBuffer),
     JS_CFUNC_DEF("writeTexture", 4, wg_queue_writeTexture),
@@ -3533,6 +3817,7 @@ static const JSCFunctionListEntry wg_device_proto[] = {
     JS_CFUNC_DEF("createComputePipeline", 1, wg_device_createComputePipeline),
     JS_CFUNC_DEF("createRenderPipelineAsync", 1, wg_device_createRenderPipelineAsync),
     JS_CFUNC_DEF("createComputePipelineAsync", 1, wg_device_createComputePipelineAsync),
+    JS_CFUNC_DEF("createRenderBundleEncoder", 1, wg_device_createRenderBundleEncoder),
     JS_CFUNC_DEF("createBindGroupLayout", 1, wg_device_createBindGroupLayout),
     JS_CFUNC_DEF("createPipelineLayout", 1, wg_device_createPipelineLayout),
     JS_CFUNC_DEF("createBindGroup", 1, wg_device_createBindGroup),
@@ -3572,6 +3857,7 @@ static const JSCFunctionListEntry wg_pass_proto[] = {
     JS_CFUNC_DEF("draw", 4, wg_pass_draw),
     JS_CFUNC_DEF("drawIndexed", 5, wg_pass_drawIndexed),
     JS_CFUNC_DEF("drawIndirect", 2, wg_pass_drawIndirect),
+    JS_CFUNC_DEF("executeBundles", 1, wg_pass_executeBundles),
     JS_CFUNC_DEF("drawIndexedIndirect", 2, wg_pass_drawIndexedIndirect),
 };
 
@@ -3652,11 +3938,13 @@ static const wg_interface wg_interfaces[] = {
     { &g_queryset_class, "GPUQuerySet", wg_queryset_proto, G_N_ELEMENTS(wg_queryset_proto) },
     { &g_compute_pipe_class, "GPUComputePipeline", wg_compute_pipe_proto, G_N_ELEMENTS(wg_compute_pipe_proto) },
     { &g_compute_pass_class, "GPUComputePassEncoder", wg_compute_pass_proto, G_N_ELEMENTS(wg_compute_pass_proto) },
+    { &g_bundle_encoder_class, "GPURenderBundleEncoder", wg_bundle_encoder_proto, G_N_ELEMENTS(wg_bundle_encoder_proto) },
+    { &g_bundle_class, "GPURenderBundle", NULL, 0 },
 };
 
 static const char *const wg_plain_interfaces[] = {
     "GPU", "GPUAdapterInfo", "GPUSupportedFeatures", "GPUSupportedLimits",
-    "GPURenderBundle", "GPURenderBundleEncoder", "GPUCompilationInfo",
+    "GPUCompilationInfo",
     "GPUCompilationMessage", "GPUDeviceLostInfo",
 };
 
@@ -3752,6 +4040,10 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
                           wg_compute_pipe_finalizer);
         wg_register_class(ctx, &g_compute_pass_class, "GPUComputePassEncoder",
                           wg_compute_pass_finalizer);
+        wg_register_class(ctx, &g_bundle_encoder_class, "GPURenderBundleEncoder",
+                          wg_bundle_encoder_finalizer);
+        wg_register_class(ctx, &g_bundle_class, "GPURenderBundle",
+                          wg_bundle_finalizer);
     }
 
     JSValue gpu = JS_NewObject(ctx);

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU render bundles work: `device.createRenderBundleEncoder()`, the
+  `GPURenderBundleEncoder` drawing commands and `executeBundles()` on a
+  render pass. three.js records the passes that build texture mipmaps as
+  bundles, so every textured three.js WebGPU scene, including its
+  sprite, material and model examples, stopped at the first texture with
+  "not a function"; they now render. Textures also report
+  `textureBindingViewDimension`.
 * WebGL offers the common extensions: instanced drawing, vertex array
   objects, 32-bit indices, float and half-float textures with linear
   filtering, depth textures, min/max blending, standard derivatives and
