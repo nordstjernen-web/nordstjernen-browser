@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU render passes honour `setViewport()`, `setScissorRect()`,
+  `setBlendConstant()` and `setStencilReference()`, which were ignored,
+  so split views, UI overlays and the stencil effects of three.js draw
+  where the page asks. A render pass can write to several colour targets
+  at once, as deferred shading and three.js multiple-render-target
+  effects need, and its depth/stencil attachment honours the stencil
+  load, store and clear values and the read-only flags. Occlusion
+  queries can be started and ended inside a pass.
 * A WebGPU canvas keeps showing what was drawn into it after the page
   lets go of its context object; it used to go blank at the next garbage
   collection, and calling `getContext('webgpu')` again created a second,
