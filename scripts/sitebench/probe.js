@@ -1,11 +1,18 @@
 /* probe.js — page inventory evaluated identically in Chrome and Nordstjernen. */
 (function () {
-  var SELECTOR = 'header,nav,main,footer,aside,section,article,h1,h2,h3,h4,p,a,button,' +
-    'input,select,textarea,label,img,picture,svg,video,iframe,canvas,form,ul,ol,li,table,' +
-    '[role=banner],[role=navigation],[role=main],[role=search],[role=button],[role=dialog]';
+  var TAGS = wordSet('header nav main footer aside section article h1 h2 h3 h4 p a button input select ' +
+    'textarea label img picture svg video iframe canvas form ul ol li table');
+  var ROLES = wordSet('banner navigation main search button dialog');
   var MAX_SCAN = 4000;
   var MAX_KEEP = 500;
   var SCREENS = 3;
+
+  function wordSet(words) {
+    var set = {};
+    var list = words.split(' ');
+    for (var i = 0; i < list.length; i++) set[list[i]] = true;
+    return set;
+  }
 
   function num(v) { var n = parseFloat(v); return isFinite(n) ? Math.round(n * 10) / 10 : null; }
   function squash(s, n) { return String(s || '').replace(/\s+/g, ' ').trim().slice(0, n); }
@@ -52,8 +59,7 @@
     };
   }
 
-  function component(el, r, cs) {
-    var tag = el.tagName.toLowerCase();
+  function component(el, tag, path, r, cs) {
     var st = styleSummary(cs);
     return {
       tag: tag,
@@ -61,22 +67,49 @@
       text: label(el, tag),
       x: Math.round(r.left), y: Math.round(r.top + sy),
       w: Math.round(r.width), h: Math.round(r.height),
-      fs: st.fs, fw: st.fw, ff: st.ff, color: st.color, bg: st.bg, disp: st.disp
+      fs: st.fs, fw: st.fw, ff: st.ff, color: st.color, bg: st.bg, disp: st.disp,
+      path: path
     };
   }
 
-  function inventory() {
-    var list = safe(function () { return document.querySelectorAll(SELECTOR); }, []);
-    var out = [];
-    var limit = Math.min(list.length, MAX_SCAN);
-    for (var i = 0; i < limit && out.length < MAX_KEEP; i++) {
-      var el = list[i];
-      var r = visibleRect(el);
-      if (!r) continue;
-      var cs = safe(function () { return getComputedStyle(el); }, null);
-      if (hiddenByStyle(cs)) continue;
-      out.push(component(el, r, cs));
+  function selected(el, tag) {
+    return TAGS.hasOwnProperty(tag) || ROLES.hasOwnProperty(el.getAttribute('role') || '');
+  }
+
+  function step(level, el) {
+    var tag = el.tagName.toLowerCase();
+    var n = level.seen[tag] = (level.seen.hasOwnProperty(tag) ? level.seen[tag] : 0) + 1;
+    return { tag: tag, path: level.prefix + (n > 1 ? tag + ':' + n : tag) };
+  }
+
+  function walk(visit) {
+    var top = root.tagName.toLowerCase();
+    if (!visit(root, top, top)) return;
+    var stack = [{ next: root.firstElementChild, prefix: '', seen: {} }];
+    while (stack.length) {
+      var level = stack[stack.length - 1];
+      var el = level.next;
+      if (!el) { stack.pop(); continue; }
+      level.next = el.nextElementSibling;
+      var s = step(level, el);
+      if (!visit(el, s.tag, s.path)) return;
+      stack.push({ next: el.firstElementChild, prefix: s.path + '>', seen: {} });
     }
+  }
+
+  function inventory() {
+    var out = [];
+    var scanned = 0;
+    safe(function () {
+      walk(function (el, tag, path) {
+        if (!selected(el, tag)) return true;
+        if (++scanned > MAX_SCAN) return false;
+        var r = visibleRect(el);
+        var cs = r && safe(function () { return getComputedStyle(el); }, null);
+        if (r && !hiddenByStyle(cs)) out.push(component(el, tag, path, r, cs));
+        return out.length < MAX_KEEP;
+      });
+    }, null);
     return out;
   }
 

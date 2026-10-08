@@ -104,7 +104,12 @@ Both browsers load each site cold (fresh profile, empty cache) in a
 page settles: document size, DOM size, text length, navigation timing,
 and an inventory of up to 500 visible components in the first three
 screens (headings, links, buttons, inputs, images, media, landmarks) with
-their geometry, font size, weight, family and colours.
+their geometry, font size, weight, family and colours. Each component
+also carries its DOM path, the chain of `tag:n` steps below the
+document element down to it, such as `body>div:2>main>p:3>sup>a`, where
+`n` counts the elements of that tag among its siblings and is left out
+for the first. The probe builds the path while it walks the tree, so both
+browsers compute it the same way.
 
 **Chrome** (`chrome-capture.js`, Playwright + DevTools protocol):
 
@@ -230,12 +235,14 @@ run and on each build's median run.
 The report lists, per site, the screenshots side by side with a
 difference heatmap, Chrome's filmstrip, both full pages, the
 worst-placed components and the computed-style mismatches, which is
-usually enough to point at the engine feature at fault. With repeated
-visual runs, the screenshots, the heatmap, the components and the style
-mismatches are those of Chrome's reference run and each build's median
-run, while the filmstrip and the full pages come from the first run;
-*Visual runs* adds every run's screenshot and score, and is open for
-unstable sites.
+usually enough to point at the engine feature at fault. Each listed
+component shows the end of its DOM path (hover it for the whole path),
+and the path of the Nordstjernen component it was compared with when
+that one sits elsewhere in the tree. With repeated visual runs, the
+screenshots, the heatmap, the components and the style mismatches are
+those of Chrome's reference run and each build's median run, while the
+filmstrip and the full pages come from the first run; *Visual runs*
+adds every run's screenshot and score, and is open for unstable sites.
 
 ## Results
 

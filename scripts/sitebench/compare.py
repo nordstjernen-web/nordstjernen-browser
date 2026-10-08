@@ -185,7 +185,7 @@ def component_scores(chrome_probe, ns_probe):
         options = cand.get(component_key(c))
         if not options:
             offsets.append({"tag": c["tag"], "text": c.get("text", "")[:40], "missing": True,
-                            "chrome": [c["x"], c["y"], c["w"], c["h"]]})
+                            "chrome": [c["x"], c["y"], c["w"], c["h"]], "path": c.get("path")})
             continue
         found += 1
         best = max(options, key=lambda o: rect_iou(c, o))
@@ -196,7 +196,8 @@ def component_scores(chrome_probe, ns_probe):
                         "dx": best["x"] - c["x"], "dy": best["y"] - c["y"],
                         "dw": best["w"] - c["w"], "dh": best["h"] - c["h"],
                         "chrome": [c["x"], c["y"], c["w"], c["h"]],
-                        "ns": [best["x"], best["y"], best["w"], best["h"]]})
+                        "ns": [best["x"], best["y"], best["w"], best["h"]],
+                        "path": c.get("path"), "nsPath": best.get("path")})
         if c.get("text"):
             for key in ("fs", "fw", "color", "bg", "ff"):
                 style_checks += 1
@@ -1023,16 +1024,30 @@ def html_visual_runs(r, labels, base_label):
     return out
 
 
+def short_path(path):
+    steps = path.split(">")
+    return path if len(steps) <= 4 else "…>" + ">".join(steps[-4:])
+
+
+def path_cell(path, ns_path=None):
+    e = html.escape
+    parts = [f'<code title="{e(path)}">{e(short_path(path))}</code>'] if path else []
+    if ns_path and ns_path != path:
+        parts.append(f'<code class=muted title="{e(ns_path)}">NS {e(short_path(ns_path))}</code>')
+    return "<td>" + ("<br>".join(parts) or "–") + "</td>"
+
+
 def html_component_tables(comp):
     e = html.escape
     style_rate = comp.get("styleRate")
     style_txt = "–" if style_rate is None else f"{style_rate * 100:.0f}%"
     out = [f"<p>{comp['found']}/{comp['count']} Chrome components found, {comp['placed']} placed "
            f"(IoU ≥ 0.5); style agreement {style_txt}</p>",
-           "<div class=wrap><table><thead><tr><th>Component</th><th>Chrome x,y,w,h</th>"
+           "<div class=wrap><table><thead><tr><th>Component</th><th>DOM path</th><th>Chrome x,y,w,h</th>"
            "<th>NS x,y,w,h</th><th>IoU</th></tr></thead><tbody>"]
     for w in comp.get("worst", []):
-        out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td><td>{e(str(w['chrome']))}</td>"
+        out.append(f"<tr><td>{e(w['tag'])} “{e(w['text'])}”</td>{path_cell(w.get('path'), w.get('nsPath'))}"
+                   f"<td>{e(str(w['chrome']))}</td>"
                    f"<td>{e(str(w.get('ns', 'missing')))}</td><td>{fmt(w.get('iou'), 2)}</td></tr>")
     out.append("</tbody></table></div>")
     if comp.get("styleDiffs"):
