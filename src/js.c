@@ -47278,12 +47278,13 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !js_from_ctx(ctx)) return JS_NewString(ctx, "data:,");
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-    if (!st || !st->surf) return JS_NewString(ctx, "data:,");
+    cairo_surface_t *surf = ns_js_canvas_surface(js_from_ctx(ctx), el);
+    if (!st || !surf) return JS_NewString(ctx, "data:,");
     if (!st->origin_clean)
         return ns_throw_dom_exception(ctx, "SecurityError", 18,
             "Tainted canvases may not be exported.");
     GByteArray *buf = g_byte_array_new();
-    cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
+    cairo_status_t s = cairo_surface_write_to_png_stream(surf,
         ns_canvas_png_write, buf);
     if (s != CAIRO_STATUS_SUCCESS) {
         g_byte_array_free(buf, TRUE);
@@ -47321,9 +47322,10 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
             "Tainted canvases may not be exported.");
     JSValue cb = JS_DupValue(ctx, argv[0]);
     JSValue blob = JS_NULL;
-    if (st && st->surf) {
+    cairo_surface_t *surf = st ? ns_js_canvas_surface(js_from_ctx(ctx), el) : NULL;
+    if (surf) {
         GByteArray *buf = g_byte_array_new();
-        cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
+        cairo_status_t s = cairo_surface_write_to_png_stream(surf,
             ns_canvas_png_write, buf);
         if (s == CAIRO_STATUS_SUCCESS) {
             JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
