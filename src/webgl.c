@@ -47,6 +47,8 @@ typedef struct ns_webgl {
     JSContext     *ctx;
     JSValue        js_obj;
     JSValue        canvas_obj;
+    JSValue        extensions;
+    gboolean       lost;
     const ns_node *canvas;
     int            version;
     ns_gl_context *gl;
@@ -360,6 +362,7 @@ ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
     g->gl = gl;
     g->js_obj = JS_UNDEFINED;
     g->canvas_obj = JS_UNDEFINED;
+    g->extensions = JS_UNDEFINED;
     g->alpha     = ns_webgl_attr(ctx, attrs, "alpha", TRUE);
     g->depth     = ns_webgl_attr(ctx, attrs, "depth", TRUE);
     g->stencil   = ns_webgl_attr(ctx, attrs, "stencil", FALSE);
@@ -439,6 +442,7 @@ ns_webgl_finalizer(JSRuntime *rt, JSValue val)
     if (g_webgl_by_node)
         g_hash_table_remove(g_webgl_by_node, g->canvas);
     JS_FreeValueRT(rt, g->canvas_obj);
+    JS_FreeValueRT(rt, g->extensions);
     ns_webgl_free(g);
 }
 
@@ -446,7 +450,10 @@ static void
 ns_webgl_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
 {
     ns_webgl *g = JS_GetOpaque(val, ns_webgl_class_id);
-    if (g) JS_MarkValue(rt, g->canvas_obj, mark_func);
+    if (g) {
+        JS_MarkValue(rt, g->canvas_obj, mark_func);
+        JS_MarkValue(rt, g->extensions, mark_func);
+    }
 }
 
 static JSClassDef ns_webgl_class = {
@@ -1517,29 +1524,207 @@ static JSValue
 wgl_isContextLost(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
-    return JS_NewBool(ctx, FALSE);
+    ns_webgl *g = wgl_brand(ctx, this_val);
+    if (!g) return JS_EXCEPTION;
+    return JS_NewBool(ctx, g->lost);
 }
 
 static void set_const(JSContext *ctx, JSValueConst obj, const char *name,
                       int value);
 
-static const char *const wgl_supported_extensions[] = {
-    "WEBGL_debug_renderer_info",
-    "EXT_texture_filter_anisotropic",
-    NULL,
+static JSValue wgl_drawArraysInstanced(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_drawElementsInstanced(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_vertexAttribDivisor(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_createVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_deleteVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_isVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_bindVertexArray(JSContext *, JSValueConst, int, JSValueConst *);
+
+static gboolean
+wgl_has_any_ext(const char *a, const char *b)
+{
+    return epoxy_is_desktop_gl() || epoxy_has_gl_extension(a) ||
+           (b && epoxy_has_gl_extension(b));
+}
+
+static gboolean wgl_ext_always(void) { return TRUE; }
+static gboolean wgl_ext_float_rt(void)
+{ return wgl_has_any_ext("GL_EXT_color_buffer_float", NULL); }
+static gboolean wgl_ext_half_float_rt(void)
+{ return wgl_has_any_ext("GL_EXT_color_buffer_half_float", "GL_EXT_color_buffer_float"); }
+static gboolean wgl_ext_float_linear(void)
+{ return wgl_has_any_ext("GL_OES_texture_float_linear", NULL); }
+static gboolean wgl_ext_float_blend(void)
+{ return wgl_has_any_ext("GL_EXT_float_blend", NULL); }
+static gboolean wgl_ext_derivatives(void)
+{ return wgl_has_any_ext("GL_OES_standard_derivatives", NULL); }
+static gboolean wgl_ext_vao(void)
+{
+#ifdef NS_HAVE_CGL
+    return FALSE;
+#else
+    return TRUE;
+#endif
+}
+
+static JSValue
+wgl_ext_trampoline(JSContext *ctx, JSValueConst this_val, int argc,
+                   JSValueConst *argv, int magic, JSValueConst *data)
+{
+    (void)this_val;
+    static JSCFunction *const fns[] = {
+        wgl_drawArraysInstanced, wgl_drawElementsInstanced,
+        wgl_vertexAttribDivisor, wgl_createVertexArray, wgl_deleteVertexArray,
+        wgl_isVertexArray, wgl_bindVertexArray,
+    };
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(fns)) return JS_UNDEFINED;
+    return fns[magic](ctx, data[0], argc, argv);
+}
+
+static void
+wgl_dispatch_context_event(JSContext *ctx, ns_webgl *g, const char *type)
+{
+    if (!JS_IsObject(g->canvas_obj)) return;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Event");
+    JSValue name = JS_NewString(ctx, type);
+    JSValue ev = JS_CallConstructor(ctx, ctor, 1, (JSValueConst *)&name);
+    JS_FreeValue(ctx, name);
+    if (!JS_IsException(ev)) {
+        JSValue dispatch = JS_GetPropertyStr(ctx, g->canvas_obj, "dispatchEvent");
+        JS_FreeValue(ctx, JS_Call(ctx, dispatch, g->canvas_obj, 1,
+                                  (JSValueConst *)&ev));
+        JS_FreeValue(ctx, dispatch);
+    }
+    if (JS_IsException(ev)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, ev);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
+static JSValue
+wgl_lose_context(JSContext *ctx, JSValueConst this_val, int argc,
+                 JSValueConst *argv, int magic, JSValueConst *data)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_webgl *g = JS_GetOpaque(data[0], ns_webgl_class_id);
+    if (!g || g->lost == !magic) return JS_UNDEFINED;
+    g->lost = !magic;
+    wgl_dispatch_context_event(ctx, g, magic ? "webglcontextrestored"
+                                             : "webglcontextlost");
+    return JS_UNDEFINED;
+}
+
+typedef struct { const char *name; int value; } wgl_ext_const;
+typedef struct { const char *name; int argc; int magic; } wgl_ext_method;
+
+typedef struct {
+    const char           *name;
+    int                   versions;
+    gboolean            (*available)(void);
+    const wgl_ext_const  *consts;
+    const wgl_ext_method *methods;
+} wgl_extension;
+
+static const wgl_ext_const wgl_c_debug_info[] = {
+    { "UNMASKED_VENDOR_WEBGL", NS_UNMASKED_VENDOR_WEBGL },
+    { "UNMASKED_RENDERER_WEBGL", NS_UNMASKED_RENDERER_WEBGL }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_aniso[] = {
+    { "MAX_TEXTURE_MAX_ANISOTROPY_EXT", NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT },
+    { "TEXTURE_MAX_ANISOTROPY_EXT", NS_TEXTURE_MAX_ANISOTROPY_EXT }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_instanced[] = {
+    { "VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE", 0x88FE }, { NULL, 0 } };
+static const wgl_ext_method wgl_m_instanced[] = {
+    { "drawArraysInstancedANGLE", 4, 0 }, { "drawElementsInstancedANGLE", 5, 1 },
+    { "vertexAttribDivisorANGLE", 2, 2 }, { NULL, 0, 0 } };
+static const wgl_ext_const wgl_c_vao[] = {
+    { "VERTEX_ARRAY_BINDING_OES", 0x85B5 }, { NULL, 0 } };
+static const wgl_ext_method wgl_m_vao[] = {
+    { "createVertexArrayOES", 0, 3 }, { "deleteVertexArrayOES", 1, 4 },
+    { "isVertexArrayOES", 1, 5 }, { "bindVertexArrayOES", 1, 6 }, { NULL, 0, 0 } };
+static const wgl_ext_const wgl_c_derivatives[] = {
+    { "FRAGMENT_SHADER_DERIVATIVE_HINT_OES", 0x8B8B }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_half_float[] = {
+    { "HALF_FLOAT_OES", 0x8D61 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_depth_texture[] = {
+    { "UNSIGNED_INT_24_8_WEBGL", 0x84FA }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_minmax[] = {
+    { "MIN_EXT", 0x8007 }, { "MAX_EXT", 0x8008 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_color_float[] = {
+    { "RGBA32F_EXT", 0x8814 },
+    { "FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211 },
+    { "UNSIGNED_NORMALIZED_EXT", 0x8C17 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_color_half_float[] = {
+    { "RGBA16F_EXT", 0x881A }, { "RGB16F_EXT", 0x881B },
+    { "FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211 },
+    { "UNSIGNED_NORMALIZED_EXT", 0x8C17 }, { NULL, 0 } };
+static const wgl_ext_const wgl_c_parallel[] = {
+    { "COMPLETION_STATUS_KHR", 0x91B1 }, { NULL, 0 } };
+
+#define WGL_V1 1
+#define WGL_V2 2
+
+static const wgl_extension wgl_extensions[] = {
+    { "ANGLE_instanced_arrays", WGL_V1, wgl_ext_always, wgl_c_instanced, wgl_m_instanced },
+    { "EXT_blend_minmax", WGL_V1, wgl_ext_always, wgl_c_minmax, NULL },
+    { "EXT_color_buffer_float", WGL_V2, wgl_ext_float_rt, NULL, NULL },
+    { "EXT_color_buffer_half_float", WGL_V1 | WGL_V2, wgl_ext_half_float_rt,
+      wgl_c_color_half_float, NULL },
+    { "EXT_float_blend", WGL_V1 | WGL_V2, wgl_ext_float_blend, NULL, NULL },
+    { "EXT_texture_filter_anisotropic", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_aniso, NULL },
+    { "KHR_parallel_shader_compile", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_parallel, NULL },
+    { "OES_element_index_uint", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_standard_derivatives", WGL_V1, wgl_ext_derivatives, wgl_c_derivatives, NULL },
+    { "OES_texture_float", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_texture_float_linear", WGL_V1 | WGL_V2, wgl_ext_float_linear, NULL, NULL },
+    { "OES_texture_half_float", WGL_V1, wgl_ext_always, wgl_c_half_float, NULL },
+    { "OES_texture_half_float_linear", WGL_V1, wgl_ext_always, NULL, NULL },
+    { "OES_vertex_array_object", WGL_V1, wgl_ext_vao, wgl_c_vao, wgl_m_vao },
+    { "WEBGL_color_buffer_float", WGL_V1, wgl_ext_float_rt, wgl_c_color_float, NULL },
+    { "WEBGL_debug_renderer_info", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_debug_info, NULL },
+    { "WEBGL_depth_texture", WGL_V1, wgl_ext_always, wgl_c_depth_texture, NULL },
+    { "WEBGL_lose_context", WGL_V1 | WGL_V2, wgl_ext_always, NULL, NULL },
 };
+
+static gboolean
+wgl_extension_enabled(const ns_webgl *g, const wgl_extension *e)
+{
+    return (e->versions & (g->version >= 2 ? WGL_V2 : WGL_V1)) && e->available();
+}
 
 static JSValue
 wgl_getSupportedExtensions(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
+    ns_webgl *g = wgl_cur(ctx, this_val);
+    if (!g) return JS_NULL;
     JSValue arr = JS_NewArray(ctx);
-    for (int i = 0; wgl_supported_extensions[i]; i++)
-        JS_SetPropertyUint32(ctx, arr, (uint32_t)i,
-                             JS_NewString(ctx, wgl_supported_extensions[i]));
+    uint32_t n = 0;
+    for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions); i++)
+        if (wgl_extension_enabled(g, &wgl_extensions[i]))
+            JS_SetPropertyUint32(ctx, arr, n++,
+                                 JS_NewString(ctx, wgl_extensions[i].name));
     return arr;
+}
+
+static JSValue
+wgl_make_extension(JSContext *ctx, JSValueConst gl, const wgl_extension *e)
+{
+    JSValue ext = JS_NewObject(ctx);
+    for (const wgl_ext_const *c = e->consts; c && c->name; c++)
+        set_const(ctx, ext, c->name, c->value);
+    for (const wgl_ext_method *m = e->methods; m && m->name; m++)
+        JS_SetPropertyStr(ctx, ext, m->name,
+                          JS_NewCFunctionData(ctx, wgl_ext_trampoline, m->argc,
+                                              m->magic, 1, &gl));
+    if (strcmp(e->name, "WEBGL_lose_context") == 0) {
+        JS_SetPropertyStr(ctx, ext, "loseContext",
+                          JS_NewCFunctionData(ctx, wgl_lose_context, 0, 0, 1, &gl));
+        JS_SetPropertyStr(ctx, ext, "restoreContext",
+                          JS_NewCFunctionData(ctx, wgl_lose_context, 0, 1, 1, &gl));
+    }
+    return ext;
 }
 
 static JSValue
@@ -1547,21 +1732,23 @@ wgl_getExtension(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     if (!wgl_brand(ctx, this_val)) return JS_EXCEPTION;
     if (argc < 1) return JS_NULL;
+    ns_webgl *g = wgl_cur(ctx, this_val);
+    if (!g) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
-    JSValue ext = JS_NULL;
-    if (g_ascii_strcasecmp(name, "WEBGL_debug_renderer_info") == 0) {
-        ext = JS_NewObject(ctx);
-        set_const(ctx, ext, "UNMASKED_VENDOR_WEBGL", NS_UNMASKED_VENDOR_WEBGL);
-        set_const(ctx, ext, "UNMASKED_RENDERER_WEBGL", NS_UNMASKED_RENDERER_WEBGL);
-    } else if (g_ascii_strcasecmp(name, "EXT_texture_filter_anisotropic") == 0) {
-        ext = JS_NewObject(ctx);
-        set_const(ctx, ext, "MAX_TEXTURE_MAX_ANISOTROPY_EXT",
-                  NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-        set_const(ctx, ext, "TEXTURE_MAX_ANISOTROPY_EXT",
-                  NS_TEXTURE_MAX_ANISOTROPY_EXT);
-    }
+    const wgl_extension *e = NULL;
+    for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions) && !e; i++)
+        if (g_ascii_strcasecmp(name, wgl_extensions[i].name) == 0 &&
+            wgl_extension_enabled(g, &wgl_extensions[i]))
+            e = &wgl_extensions[i];
     JS_FreeCString(ctx, name);
+    if (!e) return JS_NULL;
+    if (!JS_IsObject(g->extensions)) g->extensions = JS_NewObject(ctx);
+    JSValue ext = JS_GetPropertyStr(ctx, g->extensions, e->name);
+    if (JS_IsObject(ext)) return ext;
+    JS_FreeValue(ctx, ext);
+    ext = wgl_make_extension(ctx, this_val, e);
+    JS_SetPropertyStr(ctx, g->extensions, e->name, JS_DupValue(ctx, ext));
     return ext;
 }
 
@@ -1632,6 +1819,7 @@ wgl_getShaderParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
+    if (pname == 0x91B1) return JS_TRUE;
     glGetShaderiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_COMPILE_STATUS || pname == GL_DELETE_STATUS)
         return JS_NewBool(ctx, v);
@@ -1732,6 +1920,7 @@ wgl_getProgramParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
+    if (pname == 0x91B1) return JS_TRUE;
     glGetProgramiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_LINK_STATUS || pname == GL_VALIDATE_STATUS ||
         pname == GL_DELETE_STATUS)
@@ -2414,6 +2603,32 @@ wgl_unpack_restore(ns_webgl *g, const wgl_unpack_state *saved)
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, saved->skip_pixels);
 }
 
+static GLenum
+wgl_upload_type(const ns_webgl *g, GLenum type)
+{
+    return g->version < 2 && type == GL_HALF_FLOAT_OES ? GL_HALF_FLOAT : type;
+}
+
+static void
+wgl_webgl1_sized_format(const ns_webgl *g, GLint *internalformat, GLenum format,
+                        GLenum *type)
+{
+    if (g->version >= 2) return;
+    if (*type == GL_HALF_FLOAT_OES) {
+        *type = GL_HALF_FLOAT;
+        if (*internalformat == GL_RGBA) *internalformat = GL_RGBA16F;
+        else if (*internalformat == GL_RGB) *internalformat = GL_RGB16F;
+    } else if (*type == GL_FLOAT) {
+        if (*internalformat == GL_RGBA) *internalformat = GL_RGBA32F;
+        else if (*internalformat == GL_RGB) *internalformat = GL_RGB32F;
+    } else if (format == GL_DEPTH_COMPONENT && *internalformat == GL_DEPTH_COMPONENT) {
+        *internalformat = *type == GL_UNSIGNED_INT ? GL_DEPTH_COMPONENT24
+                                                   : GL_DEPTH_COMPONENT16;
+    } else if (format == GL_DEPTH_STENCIL && *internalformat == GL_DEPTH_STENCIL) {
+        *internalformat = GL_DEPTH24_STENCIL8;
+    }
+}
+
 static JSValue
 wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -2438,6 +2653,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
             return JS_UNDEFINED;
         }
+        wgl_webgl1_sized_format(g, &internalformat, format, &type);
         uint8_t *flipped = NULL;
         uint8_t *zero = NULL;
         if (!px) {
@@ -2465,6 +2681,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
+            wgl_webgl1_sized_format(g, &internalformat, format, &type);
             uint8_t *flipped = NULL;
             if (wgl_flip_safe(g, w, h, format, type, need, len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
@@ -2523,7 +2740,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             if (flipped) px = flipped;
         }
         if (px)
-            glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, px);
+            glTexSubImage2D(target, level, xoff, yoff, w, h, format,
+                            wgl_upload_type(g, type), px);
         g_free(flipped);
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return JS_UNDEFINED;
@@ -2545,7 +2763,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
-            glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, px);
+            glTexSubImage2D(target, level, xoff, yoff, w, h, format,
+                            wgl_upload_type(g, type), px);
             g_free(flipped);
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (px) {
