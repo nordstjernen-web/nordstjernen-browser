@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* A `MessagePort` that leads to a worker can carry other ports and
+  `File`s. Such a port encoded every message as if nothing were being
+  transferred, so a port in the message failed with "DataCloneError:
+  value could not be cloned", and ports transferred the other way arrived
+  missing. Comlink sends its callbacks exactly that way, so libarchive.js
+  never opened an archive and Qwasm (qwasm.m-h.org.uk) stopped before
+  downloading its game data; both LibreQuake and the original shareware
+  Quake now unpack and run.
 * Release packages work with immutable GitHub releases. The release
   workflow ran when a release was published and then attached the .deb
   and .zip packages, which an immutable release refuses, so the 1.0.30
