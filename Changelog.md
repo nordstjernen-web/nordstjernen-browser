@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* The JavaScript bytecode cache can no longer load a half-written file.
+  Every process writing the same script used one temporary file name, so
+  two tabs compiling the same library at once could publish a file
+  spliced from both, and the bytecode loader does not validate what it
+  runs. Each write now uses its own temporary file and the entry carries
+  a SHA-256 of its bytecode, checked before loading; old entries are
+  ignored.
 * WebGL, WebGPU and Web Audio no longer touch memory a page has freed.
   `readPixels`, `compressedTexImage*`/`compressedTexSubImage*`,
   `setBindGroup` and realtime `AudioBufferSourceNode` rendering took a

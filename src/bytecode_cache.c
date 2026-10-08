@@ -7,12 +7,20 @@
 
 #include "config.h"
 
+#include <fcntl.h>
 #include <glib/gstdio.h>
+#include <stdio.h>
 #include <string.h>
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 #define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
 #define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026100801u
+#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026100802u
+#define NS_BYTECODE_CACHE_DIGEST_BYTES    32u
+#define NS_BYTECODE_CACHE_HEADER_BYTES    (8u + NS_BYTECODE_CACHE_DIGEST_BYTES)
 
 #ifdef NS_QUICKJS_ORIGINAL
 #define NS_BYTECODE_CACHE_DIR "jsbc" G_DIR_SEPARATOR_S "quickjs-" NS_QUICKJS_ORIGINAL_VERSION
@@ -81,6 +89,17 @@ hash_source(const char *src, gsize len, char out[65])
     g_checksum_free(c);
 }
 
+static void
+digest_bytes(const guint8 *data, gsize len,
+             guint8 out[NS_BYTECODE_CACHE_DIGEST_BYTES])
+{
+    GChecksum *c = g_checksum_new(G_CHECKSUM_SHA256);
+    g_checksum_update(c, data, (gssize)len);
+    gsize out_len = NS_BYTECODE_CACHE_DIGEST_BYTES;
+    g_checksum_get_digest(c, out, &out_len);
+    g_checksum_free(c);
+}
+
 static char *
 disk_path_for(const char *key)
 {
@@ -103,8 +122,10 @@ read_disk(const char *key, gsize *out_len)
     char *path = disk_path_for(key);
     if (!path) return NULL;
     GStatBuf stbuf;
-    if (g_stat(path, &stbuf) != 0 || stbuf.st_size < 8 ||
-        (guint64)stbuf.st_size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES + 8) {
+    if (g_stat(path, &stbuf) != 0 ||
+        stbuf.st_size < (gint64)NS_BYTECODE_CACHE_HEADER_BYTES ||
+        (guint64)stbuf.st_size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES +
+                                 NS_BYTECODE_CACHE_HEADER_BYTES) {
         g_free(path);
         return NULL;
     }
@@ -113,7 +134,10 @@ read_disk(const char *key, gsize *out_len)
     gboolean ok = g_file_get_contents(path, &contents, &length, NULL);
     g_free(path);
     if (!ok) return NULL;
-    if (length < 4 + 4) { g_free(contents); return NULL; }
+    if (length < NS_BYTECODE_CACHE_HEADER_BYTES) {
+        g_free(contents);
+        return NULL;
+    }
     guint32 magic = 0, fmt = 0;
     memcpy(&magic, contents,     4);
     memcpy(&fmt,   contents + 4, 4);
@@ -122,13 +146,20 @@ read_disk(const char *key, gsize *out_len)
         g_free(contents);
         return NULL;
     }
-    gsize bc_len = length - 8;
+    gsize bc_len = length - NS_BYTECODE_CACHE_HEADER_BYTES;
     if (bc_len == 0 || bc_len > NS_BYTECODE_CACHE_VALUE_CAP_BYTES) {
         g_free(contents);
         return NULL;
     }
+    const guint8 *bc = (const guint8 *)contents + NS_BYTECODE_CACHE_HEADER_BYTES;
+    guint8 digest[NS_BYTECODE_CACHE_DIGEST_BYTES];
+    digest_bytes(bc, bc_len, digest);
+    if (memcmp(digest, contents + 8, sizeof digest) != 0) {
+        g_free(contents);
+        return NULL;
+    }
     guint8 *out = g_malloc(bc_len);
-    memcpy(out, contents + 8, bc_len);
+    memcpy(out, bc, bc_len);
     g_free(contents);
     if (out_len) *out_len = bc_len;
     return out;
@@ -141,11 +172,23 @@ write_disk(const char *key, const guint8 *bc, gsize bc_len)
     if (!path) return;
     guint32 magic = GUINT32_TO_LE(0x4E4A4243u);
     guint32 fmt   = GUINT32_TO_LE(NS_BYTECODE_CACHE_FORMAT_VERSION);
-    char *tmp = g_strdup_printf("%s.tmp", path);
-    FILE *f = g_fopen(tmp, "wb");
-    if (!f) { g_free(tmp); g_free(path); return; }
+    guint8 digest[NS_BYTECODE_CACHE_DIGEST_BYTES];
+    digest_bytes(bc, bc_len, digest);
+    char *tmp = g_strdup_printf("%s.XXXXXX", path);
+    int fd = g_mkstemp_full(tmp, O_WRONLY | O_BINARY, 0600);
+    FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
+    if (!f) {
+        if (fd >= 0) {
+            g_close(fd, NULL);
+            g_unlink(tmp);
+        }
+        g_free(tmp);
+        g_free(path);
+        return;
+    }
     gboolean wrote = fwrite(&magic, 1, 4, f) == 4 &&
                      fwrite(&fmt,   1, 4, f) == 4 &&
+                     fwrite(digest, 1, sizeof digest, f) == sizeof digest &&
                      fwrite(bc,     1, bc_len, f) == bc_len &&
                      ferror(f) == 0;
     if (fclose(f) != 0 || !wrote) {
