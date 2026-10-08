@@ -168,6 +168,9 @@ Changelog:
   after another; now every module source is scanned for its static
   imports as soon as it arrives and those are requested at once, and a
   page's module scripts start fetching their graphs when parsing ends.
+  The scan skips comments, strings, template literals and regular
+  expressions, and a prefetch follows the page's Content-Security-Policy
+  and never fetches http: modules for an https: page.
   Deferred scripts that are ready run back to back instead of one per
   event-loop turn with a relayout between each. On microsoft.com, which
   has 224 module scripts, 27 of them run within the benchmark's settle

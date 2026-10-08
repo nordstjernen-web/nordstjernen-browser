@@ -252,6 +252,7 @@ static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_flush_layout(ns_js *js);
 static void ns_js_flush_style(ns_js *js);
+static void ns_js_module_prefetch_release(const ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
@@ -61935,6 +61936,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_js_module_prefetch_release(js);
     if (js->doc_ready_states) {
         g_hash_table_destroy(js->doc_ready_states);
         js->doc_ready_states = NULL;
@@ -63188,35 +63190,138 @@ ns_module_quoted_after_from(const char *q, const char *end)
     return NULL;
 }
 
+static const char *
+ns_module_skip_quoted(const char *p, const char *end)
+{
+    char quote = *p++;
+    while (p < end && *p != quote && *p != '\n')
+        p += *p == '\\' && p + 1 < end ? 2 : 1;
+    return p < end ? p + 1 : end;
+}
+
+static const char *
+ns_module_skip_regex(const char *p, const char *end)
+{
+    gboolean in_class = FALSE;
+    for (p++; p < end && *p != '\n'; p++) {
+        if (*p == '\\' && p + 1 < end) p++;
+        else if (*p == '[') in_class = TRUE;
+        else if (*p == ']') in_class = FALSE;
+        else if (*p == '/' && !in_class) return p + 1;
+    }
+    return p;
+}
+
+static gboolean
+ns_module_regex_may_follow(char prev)
+{
+    return prev == 0 || strchr("(,=:[!&|?{};+-*%<>~^", prev) != NULL;
+}
+
+static const char *ns_module_skip_template(const char *p, const char *end,
+                                           int depth);
+
+static const char *
+ns_module_skip_literal(const char *p, const char *end, char *prev, int depth)
+{
+    if (*p == '"' || *p == '\'' || *p == '`') {
+        *prev = '"';
+        return *p == '`' ? ns_module_skip_template(p, end, depth)
+                         : ns_module_skip_quoted(p, end);
+    }
+    if (*p != '/' || p + 1 >= end) return NULL;
+    if (p[1] == '/') {
+        const char *nl = memchr(p, '\n', (gsize)(end - p));
+        return nl ? nl : end;
+    }
+    if (p[1] == '*') {
+        const char *close = g_strstr_len(p + 2, end - p - 2, "*/");
+        return close ? close + 2 : end;
+    }
+    if (!ns_module_regex_may_follow(*prev)) return NULL;
+    *prev = '"';
+    return ns_module_skip_regex(p, end);
+}
+
+static const char *
+ns_module_skip_template_expr(const char *p, const char *end, int depth)
+{
+    char prev = '{';
+    int open = 0;
+    while (p < end) {
+        const char *after = ns_module_skip_literal(p, end, &prev, depth);
+        if (after) {
+            p = after;
+            continue;
+        }
+        if (*p == '}' && open-- == 0) return p + 1;
+        if (*p == '{') open++;
+        if (!g_ascii_isspace(*p)) prev = *p;
+        p++;
+    }
+    return end;
+}
+
+static const char *
+ns_module_skip_template(const char *p, const char *end, int depth)
+{
+    for (p++; p < end && *p != '`'; ) {
+        if (*p == '\\' && p + 1 < end)
+            p += 2;
+        else if (*p == '$' && p + 1 < end && p[1] == '{' && depth < 16)
+            p = ns_module_skip_template_expr(p + 2, end, depth + 1);
+        else
+            p++;
+    }
+    return p < end ? p + 1 : end;
+}
+
+static const char *
+ns_module_import_at(const char *src, const char *p, const char *end,
+                    GPtrArray *out)
+{
+    if (end - p <= 6) return NULL;
+    gboolean is_import = memcmp(p, "import", 6) == 0;
+    if (!is_import && memcmp(p, "export", 6) != 0) return NULL;
+    if ((p > src && (ns_module_ident_char(p[-1]) || p[-1] == '.')) ||
+        ns_module_ident_char(p[6]))
+        return NULL;
+    const char *q = p + 6;
+    while (q < end && g_ascii_isspace(*q)) q++;
+    if (q >= end || (is_import && (*q == '(' || *q == '.'))) return NULL;
+    const char *spec = is_import && (*q == '"' || *q == '\'')
+        ? q : ns_module_quoted_after_from(q, end);
+    if (!spec) return NULL;
+    const char *body = spec + 1;
+    gsize room = (gsize)(end - body) < 512 ? (gsize)(end - body) : 512;
+    const char *close = memchr(body, *spec, room);
+    if (!close) return NULL;
+    if (ns_module_specifier_fetchable(body, (gsize)(close - body)))
+        g_ptr_array_add(out, g_strndup(body, (gsize)(close - body)));
+    return close + 1;
+}
+
 static void
 ns_module_scan_imports(const char *src, gsize len, GPtrArray *out)
 {
     const char *end = src + len;
-    for (const char *p = src; p + 6 < end; p++) {
-        gboolean is_import = memcmp(p, "import", 6) == 0;
-        if (!is_import && memcmp(p, "export", 6) != 0) continue;
-        if ((p > src && (ns_module_ident_char(p[-1]) || p[-1] == '.')) ||
-            ns_module_ident_char(p[6]))
+    char prev = 0;
+    for (const char *p = src; p < end; ) {
+        const char *after = ns_module_skip_literal(p, end, &prev, 0);
+        if (!after && (after = ns_module_import_at(src, p, end, out)))
+            prev = '"';
+        if (after) {
+            p = after;
             continue;
-        const char *q = p + 6;
-        while (q < end && g_ascii_isspace(*q)) q++;
-        if (q >= end) break;
-        if (is_import && (*q == '(' || *q == '.')) continue;
-        const char *spec = is_import && (*q == '"' || *q == '\'')
-            ? q : ns_module_quoted_after_from(q, end);
-        if (!spec) continue;
-        const char *body = spec + 1;
-        gsize room = (gsize)(end - body) < 512 ? (gsize)(end - body) : 512;
-        const char *close = memchr(body, *spec, room);
-        if (!close) continue;
-        if (ns_module_specifier_fetchable(body, (gsize)(close - body)))
-            g_ptr_array_add(out, g_strndup(body, (gsize)(close - body)));
-        p = close;
+        }
+        if (!g_ascii_isspace(*p)) prev = *p;
+        p++;
     }
 }
 
-static void ns_module_prefetch_imports(const char *module_url, const char *src,
-                                       gsize len, const char *top_url);
+static void ns_module_prefetch_imports(const ns_js *js, const char *module_url,
+                                       const char *src, gsize len,
+                                       const char *top_url);
 
 static gboolean
 ns_module_prefetch_claim(const char *url)
@@ -63238,13 +63343,14 @@ on_module_prefetched(GObject *src, GAsyncResult *res, gpointer user_data)
     char **target = user_data;
     ns_response *resp = ns_net_fetch_finish(res, NULL);
     if (resp && !resp->error && resp->status == 200 && resp->body &&
-        g_module_prefetch_seen &&
+        g_module_prefetch_owner && g_module_prefetch_seen &&
         g_hash_table_contains(g_module_prefetch_seen, target[0])) {
         char *key = ns_net_request_key(target[0], target[1], "GET",
             ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT));
         ns_net_preload_keep(key, resp);
         g_free(key);
-        ns_module_prefetch_imports(target[0], (const char *)resp->body->data,
+        ns_module_prefetch_imports(g_module_prefetch_owner, target[0],
+                                   (const char *)resp->body->data,
                                    resp->body->len, target[1]);
     }
     if (resp) ns_response_free(resp);
@@ -63267,9 +63373,21 @@ ns_module_prefetch_url(const char *url, const char *top_url)
                          on_module_prefetched, target);
 }
 
+static gboolean
+ns_module_import_prefetch_allowed(const ns_js *js, const char *abs_url,
+                                  const char *top_url)
+{
+    if (!abs_url || !ns_url_is_http_or_https(abs_url)) return FALSE;
+    if (g_str_has_prefix(top_url, "https://") &&
+        g_str_has_prefix(abs_url, "http://"))
+        return FALSE;
+    return !js->csp ||
+           ns_csp_allows(js->csp, NS_CSP_SCRIPT, abs_url, top_url);
+}
+
 static void
-ns_module_prefetch_imports(const char *module_url, const char *src, gsize len,
-                           const char *top_url)
+ns_module_prefetch_imports(const ns_js *js, const char *module_url,
+                           const char *src, gsize len, const char *top_url)
 {
     if (!module_url || !src || !top_url ||
         !ns_url_is_http_or_https(module_url))
@@ -63278,7 +63396,7 @@ ns_module_prefetch_imports(const char *module_url, const char *src, gsize len,
     ns_module_scan_imports(src, len, specs);
     for (guint i = 0; i < specs->len; i++) {
         char *abs_url = ns_url_resolve(module_url, g_ptr_array_index(specs, i));
-        if (abs_url && ns_url_is_http_or_https(abs_url))
+        if (ns_module_import_prefetch_allowed(js, abs_url, top_url))
             ns_module_prefetch_url(abs_url, top_url);
         g_free(abs_url);
     }
@@ -63294,6 +63412,14 @@ ns_js_module_prefetch_owner(ns_js *js)
 }
 
 static void
+ns_js_module_prefetch_release(const ns_js *js)
+{
+    if (g_module_prefetch_owner != js) return;
+    g_module_prefetch_owner = NULL;
+    if (g_module_prefetch_seen) g_hash_table_remove_all(g_module_prefetch_seen);
+}
+
+static void
 ns_js_module_prefetch_begin(ns_js *js, const char *module_url,
                             const char *src, gsize len)
 {
@@ -63302,7 +63428,7 @@ ns_js_module_prefetch_begin(ns_js *js, const char *module_url,
     if (module_url && ns_url_is_http_or_https(module_url) &&
         g_module_prefetch_seen)
         g_hash_table_add(g_module_prefetch_seen, g_strdup(module_url));
-    ns_module_prefetch_imports(module_url, src, len, js->current_url);
+    ns_module_prefetch_imports(js, module_url, src, len, js->current_url);
 }
 
 static JSValue
