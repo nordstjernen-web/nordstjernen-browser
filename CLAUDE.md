@@ -34,10 +34,11 @@ Update Changelog.md
   fetches the pinned release through `subprojects/wgpu-native-<platform>.wrap`
   and links it statically. On the BSDs, musl, Android and iOS — where
   wgpu-native publishes no release — it stays optional, and `-Dwebgpu=disabled`
-  drops it anywhere. WebGPU is **off at runtime** until the browser is started
-  with `--enable-webgpu` (which sets `NS_WEBGPU_ALLOW=1`, inherited by the
-  sandboxed renderer); without that flag `navigator.gpu.requestAdapter()`
-  resolves to `null`. The library is fetched, never committed. See
+  drops it anywhere. WebGPU is **off at runtime** until it is turned on in
+  Settings (`webgpu_enabled`) or the browser is started with
+  `--enable-webgpu` (which sets `NS_WEBGPU_ALLOW=1`, inherited by the
+  sandboxed renderer); otherwise `navigator.gpu.requestAdapter()` resolves to
+  `null`. The library is fetched, never committed. See
   `docs/webgpu.md`.
 - The **one vendored, in-tree** video codec is MPEG-1, decoded by the
   vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
@@ -426,8 +427,8 @@ don't add `meson test` targets.
 - WebGPU is layered over external wgpu-native (`src/webgpu.c`,
   `docs/webgpu.md`): required on glibc Linux, macOS and Windows (fetched by
   the pinned wraps when not installed), optional on the platforms wgpu-native
-  does not ship for. Keep it behind the `--enable-webgpu` /
-  `NS_WEBGPU_ALLOW` runtime gate, and never commit its library into the tree
+  does not ship for. Keep it behind the Settings switch /
+  `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate, and never commit its library into the tree
   (headers only).
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the

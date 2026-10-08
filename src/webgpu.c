@@ -17,6 +17,7 @@
 #include "webgpu/wgpu.h"
 #include "js.h"
 #include "webgl.h"
+#include "config.h"
 
 static WGPUInstance g_wg_instance;
 static JSClassID g_adapter_class;
@@ -178,7 +179,9 @@ static gboolean
 ns_webgpu_allowed(void)
 {
     const char *env = g_getenv("NS_WEBGPU_ALLOW");
-    return env && env[0] == '1';
+    if (env && env[0] == '1') return TRUE;
+    const ns_config *cfg = ns_config_get();
+    return cfg && cfg->webgpu_enabled;
 }
 
 static WGPUInstance

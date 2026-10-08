@@ -3,6 +3,9 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU can be switched on in Settings, next to WebGL, instead of only
+  by starting the browser with `--enable-webgpu`. It stays off unless
+  turned on, and `about:nordstjernen` says how it was enabled.
 * WebGL can upload compressed textures: the S3TC/DXT (also sRGB), RGTC,
   BPTC, ETC2/EAC and ASTC extensions are offered wherever the graphics
   driver decodes those formats, and `compressedTexImage2D()`,
