@@ -31788,7 +31788,15 @@ incr_queue_class_change(GPtrArray *queue, const char *old_value,
 }
 
 static gboolean
-attr_restyles_subtree(const char *name)
+attr_disables_descendants(const ns_node *target, const char *name)
+{
+    return g_ascii_strcasecmp(name, "disabled") == 0 &&
+           (ns_node_is_element_named(target, "fieldset") ||
+            ns_node_is_element_named(target, "optgroup"));
+}
+
+static gboolean
+attr_restyles_subtree(const ns_node *target, const char *name)
 {
     static const char *const subtree_attrs[] = {
         "lang", "xml:lang", "dir", "slot", "inert", "open", "popover",
@@ -31796,7 +31804,7 @@ attr_restyles_subtree(const char *name)
     };
     for (gsize i = 0; i < G_N_ELEMENTS(subtree_attrs); i++)
         if (g_ascii_strcasecmp(name, subtree_attrs[i]) == 0) return TRUE;
-    return FALSE;
+    return attr_disables_descendants(target, name);
 }
 
 static gboolean
@@ -31834,7 +31842,7 @@ static gboolean
 incr_queue_attr_change(GPtrArray *queue, const ns_node *target,
                        const char *name, const char *old_value)
 {
-    if (!incr_attr_queue_ready(name) || attr_restyles_subtree(name))
+    if (!incr_attr_queue_ready(name) || attr_restyles_subtree(target, name))
         return FALSE;
     if (g_ascii_strcasecmp(name, "style") == 0) return TRUE;
     if (is_presentational_attr_name(name)) return FALSE;
