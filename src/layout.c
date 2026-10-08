@@ -6856,8 +6856,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     gboolean ws_nowrap = keyword_is(
         parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "nowrap") ||
         keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "pre");
-    gboolean ellip = keyword_is(
-        parent_style ? parent_style->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis");
+    gboolean ellip = ns_paint_text_ellipsizes(parent_style);
     if (ws_nowrap && !ellip)
         ns_pango_layout_set_width(layout, -1);
     else
@@ -6889,7 +6888,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_inline_layout_set_attrs(layout, i18n, box);
     ns_pango_attr_list_unref(i18n);
 
-    ns_pango_layout_set_text(layout, box->text, -1);
+    ns_paint_layout_set_inline_text(layout, box->text);
     ns_paint_start_align_overflow(layout);
     ns_text_measure measured;
     text_measure(layout, &measured);
@@ -7078,10 +7077,9 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
         double ti = ns_inline_text_indent_px(box, parent_style, box->content_width);
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(parent_style ? parent_style->values[NS_CSS_TEXT_OVERFLOW] : NULL,
-                   "ellipsis"))
+    if (ns_paint_text_ellipsizes(parent_style))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
-    ns_pango_layout_set_text(layout, box->text, -1);
+    ns_paint_layout_set_inline_text(layout, box->text);
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
@@ -7213,7 +7211,7 @@ inline_box_can_fragment_multicol(const ns_box *box, const ns_style *style,
     if (keyword_is(style ? style->values[NS_CSS_WHITE_SPACE] : NULL, "nowrap") ||
         keyword_is(style ? style->values[NS_CSS_WHITE_SPACE] : NULL, "pre"))
         return FALSE;
-    if (keyword_is(style ? style->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(style))
         return FALSE;
     if (style && style->values[NS_CSS_LINE_CLAMP])
         return FALSE;

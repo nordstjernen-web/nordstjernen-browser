@@ -118,6 +118,8 @@ NsPangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
 NsPangoAttribute *ns_paint_font_variations_attr_from_values(const char *settings);
 
 NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
+gboolean ns_paint_text_ellipsizes(const ns_style *style);
+void ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text);
 
 double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);
