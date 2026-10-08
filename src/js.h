@@ -120,6 +120,7 @@ void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
 void   ns_js_window_action_applied(ns_js *js);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
+void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb);
 void   ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
                                     gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
@@ -137,6 +138,7 @@ gboolean ns_js_in_pump(const ns_js *js);
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url);
 
 gboolean ns_js_consume_mutated(ns_js *js);
+guint64 ns_js_mutation_serial(const ns_js *js);
 
 char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 

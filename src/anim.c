@@ -1025,9 +1025,11 @@ ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
     GArray *items = g_array_new(FALSE, FALSE, sizeof(ns_anim_observe_item));
     GHashTableIter it;
     gpointer key, val;
+    gboolean have_states = g_hash_table_size(a->states) > 0;
     g_hash_table_iter_init(&it, styles);
     while (g_hash_table_iter_next(&it, &key, &val)) {
-        const ns_anim_state *s = g_hash_table_lookup(a->states, key);
+        const ns_anim_state *s = have_states
+            ? g_hash_table_lookup(a->states, key) : NULL;
         if (s ? s->prev_style == val && !state_is_active(s)
               : !ns_css_style_may_animate(val))
             continue;

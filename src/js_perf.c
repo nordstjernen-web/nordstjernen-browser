@@ -1011,6 +1011,10 @@ JSValue
 ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'PerformanceObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     ns_js *js = js_from_ctx(ctx);
     ns_new_class_id(&ns_perf_observer_class_id);
     JS_NewClass(JS_GetRuntime(ctx), ns_perf_observer_class_id, &ns_perf_observer_class);

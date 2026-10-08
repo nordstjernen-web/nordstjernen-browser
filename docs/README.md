@@ -54,3 +54,4 @@ top-level [README.md](../README.md); the development plan is
 - [wpt-scores.md](wpt-scores.md) — tracked WPT scores over time.
 - [wpt-fast-scores.md](wpt-fast-scores.md) — scores from the wpt-fast tree (`scripts/wpt-fast.sh`).
 - [Benchmarking.md](Benchmarking.md) — Speedometer benchmarking.
+- [sitebench.md](sitebench.md) — the site benchmark: the most visited sites in Chrome and Nordstjernen, visual parity and load performance side by side.

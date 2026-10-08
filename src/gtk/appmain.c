@@ -693,6 +693,8 @@ main(int argc, char **argv)
                 hopts.time_ms = (int)n;
         } else if (g_strcmp0(argv[i], "--wpt") == 0) {
             hopts.wpt = TRUE;
+        } else if (g_strcmp0(argv[i], "--timing") == 0) {
+            hopts.timing = TRUE;
         } else if (g_str_has_prefix(argv[i], "--wpt-timeout-ms=")) {
             char *end = NULL;
             gint64 n = g_ascii_strtoll(argv[i] + 17, &end, 10);

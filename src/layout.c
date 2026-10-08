@@ -383,6 +383,31 @@ style_is_grid_container(const ns_style *s)
     return ns_display_is_grid_container(ns_css_display_of(s));
 }
 
+static gboolean
+box_is_form_widget(const ns_box *box)
+{
+    if (!box || box->kind != NS_BOX_BLOCK || !box->dom ||
+        box->dom->kind != NS_NODE_ELEMENT || !box->dom->name)
+        return FALSE;
+    return strcmp(box->dom->name, "input") == 0 ||
+           strcmp(box->dom->name, "textarea") == 0 ||
+           strcmp(box->dom->name, "select") == 0;
+}
+
+static gboolean
+box_is_flex_container(const ns_box *box)
+{
+    return box && !box_is_form_widget(box) &&
+           style_is_flex_container(box->style);
+}
+
+static gboolean
+box_is_grid_container(const ns_box *box)
+{
+    return box && !box_is_form_widget(box) &&
+           style_is_grid_container(box->style);
+}
+
 static const char *
 keyword_or(const ns_style *s, ns_css_prop p, const char *fallback)
 {
@@ -1003,30 +1028,65 @@ node_is_frame_fallback(const ns_node *n)
 
 static GHashTable *g_contains_block_media_cache;
 
+static const ns_node *layout_slot_host(const ns_node *slot);
+static const ns_node *layout_shadow_root(const ns_node *host);
+static gboolean contains_block_media_depth(const ns_node *n, GHashTable *styles,
+                                           int depth);
+
+static gboolean
+child_makes_block_media(const ns_node *c, GHashTable *styles, int depth)
+{
+    if (c->kind != NS_NODE_ELEMENT || !c->name) return FALSE;
+    if (node_is_non_rendering(c)) return FALSE;
+    if (node_has_media_metadata(c) ||
+        (is_replaced_block_tag(c->name) &&
+         !is_inline_level_replaced(c, styles)) ||
+        strcmp(c->name, "iframe") == 0)
+        return TRUE;
+    if (styles) {
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs) {
+            if (style_is_none(cs) || style_is_absolute_or_fixed(cs))
+                return FALSE;
+            if (style_is_block_level(cs)) return TRUE;
+            if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
+                return FALSE;
+        }
+    }
+    return contains_block_media_depth(c, styles, depth + 1);
+}
+
+static gboolean
+slot_assigns_block_media(const ns_node *slot, GHashTable *styles, int depth)
+{
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    for (const ns_node *lc = host->first_child; lc; lc = lc->next_sibling) {
+        if (lc == sr || lc->kind != NS_NODE_ELEMENT) continue;
+        const char *assigned = ns_element_get_attr(lc, "slot");
+        if (g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") != 0)
+            continue;
+        if (child_makes_block_media(lc, styles, depth)) return TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean
 contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH || n->kind != NS_NODE_ELEMENT)
         return FALSE;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (node_is_non_rendering(c)) continue;
-        if (node_has_media_metadata(c) ||
-            (is_replaced_block_tag(c->name) &&
-             !is_inline_level_replaced(c, styles)) ||
-            strcmp(c->name, "iframe") == 0)
-            return TRUE;
-        if (styles) {
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs) {
-                if (style_is_none(cs) || style_is_absolute_or_fixed(cs))
-                    continue;
-                if (style_is_block_level(cs)) return TRUE;
-                if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
-                    continue;
-            }
+    const ns_node *shadow_root = layout_shadow_root(n);
+    const ns_node *first = shadow_root ? shadow_root->first_child : n->first_child;
+    for (const ns_node *c = first; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            strcmp(c->name, "slot") == 0) {
+            if (slot_assigns_block_media(c, styles, depth + 1)) return TRUE;
+            continue;
         }
-        if (contains_block_media_depth(c, styles, depth + 1)) return TRUE;
+        if (child_makes_block_media(c, styles, depth)) return TRUE;
     }
     return FALSE;
 }
@@ -1081,10 +1141,15 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (n->kind != NS_NODE_ELEMENT) return FALSE;
     if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
     if (node_has_media_metadata(n)) return FALSE;
-    for (const ns_node *sc = n->first_child; sc; sc = sc->next_sibling)
-        if (sc->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(sc, NS_SHADOW_ATTR))
+    if (layout_shadow_root(n)) {
+        const ns_style *hs = g_hash_table_lookup(styles, n);
+        if (!hs || style_is_none(hs) || style_is_block_level(hs) ||
+            style_is_absolute_or_fixed(hs))
             return FALSE;
+        if (!display_is_atomic_inline_container(ns_css_display_of(hs)) &&
+            contains_block_media(n, styles))
+            return FALSE;
+    }
     if (is_replaced_block_tag(n->name)) {
         if (strcmp(n->name, "table") == 0) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);
@@ -2287,7 +2352,7 @@ emit_attr_styled(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize end,
 static gboolean
 inline_run_at_line_start(const GString *out)
 {
-    if (!out || out->len == 0) return TRUE;
+    if (out->len == 0) return TRUE;
     gsize i = out->len;
     while (i > 0) {
         if ((guchar)out->str[i - 1] == ' ') { i--; continue; }
@@ -3335,6 +3400,30 @@ emit_datalist_suggestions(collector_ctx *ctx, const ns_node *input)
     g_free(needle);
 }
 
+static void collect_walk(const ns_node *n, collector_ctx *ctx, int depth);
+
+static gboolean
+collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
+{
+    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    gboolean any = FALSE;
+    for (const ns_node *lc = host->first_child; lc; lc = lc->next_sibling) {
+        if (lc == sr) continue;
+        const char *assigned = lc->kind == NS_NODE_ELEMENT
+            ? ns_element_get_attr(lc, "slot") : NULL;
+        if (g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") != 0)
+            continue;
+        if (lc->kind != NS_NODE_ELEMENT && lc->kind != NS_NODE_TEXT) continue;
+        collect_walk(lc, ctx, depth + 1);
+        any = TRUE;
+    }
+    return any;
+}
+
 static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
@@ -3495,13 +3584,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                            g_ascii_strcasecmp(type, "tel") == 0 ||
                            g_ascii_strcasecmp(type, "number") == 0;
         if (is_text) {
-            if (!inline_run_at_line_start(ctx->out))
+            gboolean boxed = n == g_form_control_inline;
+            if (!boxed && !inline_run_at_line_start(ctx->out))
                 g_string_append(ctx->out, "\xc2\xa0\xc2\xa0\xc2\xa0");
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, "\xc2\xa0");
-            int leading = text_input_leading_spaces(s);
-            for (int i = 0; i < leading; i++)
+            if (!boxed) {
                 g_string_append(ctx->out, "\xc2\xa0");
+                int leading = text_input_leading_spaces(s);
+                for (int i = 0; i < leading; i++)
+                    g_string_append(ctx->out, "\xc2\xa0");
+            }
             const char *real_value = ns_input_used_value(n);
             const char *v = real_value;
             gboolean is_placeholder = FALSE;
@@ -3651,19 +3743,17 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         } else if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {
             gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, checked ? "\xe2\x98\x91" : "\xe2\x98\x90");
+            g_string_append(ctx->out, "\xef\xbf\xbc");
             emit_form_attr_sized(ctx->attrs,
                 checked ? NS_INLINE_CHECKBOX_CHECKED : NS_INLINE_CHECKBOX,
                 start, ctx->out->len, n, ctx->styles);
-            g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "radio") == 0) {
             gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, checked ? "\xe2\x97\x89" : "\xe2\x97\x8b");
+            g_string_append(ctx->out, "\xef\xbf\xbc");
             emit_form_attr_sized(ctx->attrs,
                 checked ? NS_INLINE_RADIO_CHECKED : NS_INLINE_RADIO,
                 start, ctx->out->len, n, ctx->styles);
-            g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "file") == 0) {
             gsize start = ctx->out->len;
             g_string_append(ctx->out, "\xc2\xa0" "Choose File" "\xc2\xa0");
@@ -4119,8 +4209,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         !(pseudo_blocks && g_pseudo_block_before))
         append_pseudo_inline(ctx, s->before, n);
 
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_walk(c, ctx, depth + 1);
+    const ns_node *shadow_root = layout_shadow_root(n);
+    if (shadow_root) {
+        for (const ns_node *c = shadow_root->first_child; c; c = c->next_sibling)
+            collect_walk(c, ctx, depth + 1);
+    } else if (!collect_walk_assigned(n, ctx, depth)) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+            collect_walk(c, ctx, depth + 1);
+    }
 
     if (s && s->after && s->after->values[NS_CSS_CONTENT] &&
         !(pseudo_blocks && g_pseudo_block_after))
@@ -5303,6 +5399,160 @@ build_block(const ns_node *n, GHashTable *styles)
 
 static int g_contents_depth;
 
+static gboolean
+node_skips_rendering(const ns_node *c)
+{
+    return c->kind == NS_NODE_ELEMENT && c->name &&
+           tag_is_non_rendering(c->name);
+}
+
+static gboolean
+blockified_child_is_block(const ns_node *c, const ns_style *cs,
+                          GHashTable *styles)
+{
+    static const char *const block_tags[] = {
+        "img", "svg", "audio", "video", "table", NULL,
+    };
+    return (cs && style_is_absolute_or_fixed(cs)) || style_is_block(cs) ||
+           contains_block_media(c, styles) || node_has_media_metadata(c) ||
+           name_in(c->name, block_tags);
+}
+
+static void
+append_blockified_text(ns_box *block, const ns_node *c, GHashTable *styles)
+{
+    if (text_is_ws_only(c->text)) return;
+    ns_box *item = box_new(NS_BOX_BLOCK);
+    item->style = NULL;
+    ns_box *run = build_inline_run(c, c->next_sibling, styles);
+    if (run && run->text && run->text[0]) {
+        box_append_child(item, run);
+        box_append_child(block, item);
+    } else {
+        if (run) ns_box_free(run);
+        ns_box_free(item);
+    }
+}
+
+static void
+append_blockified_child(ns_box *block, const ns_node *c, GHashTable *styles,
+                        ns_box **pending_before)
+{
+    if (c->kind == NS_NODE_TEXT) {
+        append_blockified_text(block, c, styles);
+        return;
+    }
+    if (c->kind != NS_NODE_ELEMENT) return;
+    const ns_style *cs = g_hash_table_lookup(styles, c);
+    if (cs && style_is_none(cs)) return;
+    if (style_is_contents(cs)) {
+        append_display_contents_children(block, c, styles, TRUE, NULL);
+        return;
+    }
+    ns_box *child = blockified_child_is_block(c, cs, styles)
+        ? build_block(c, styles)
+        : build_blockified_inline_item(c, styles, pending_before);
+    if (child) box_append_child(block, child);
+}
+
+static const ns_node *
+inline_run_end(const ns_node *c, const ns_node *end, GHashTable *styles)
+{
+    while (c && c != end) {
+        if (node_skips_rendering(c)) {
+            c = c->next_sibling;
+            continue;
+        }
+        if (c->kind == NS_NODE_ELEMENT &&
+            style_is_contents(g_hash_table_lookup(styles, c)))
+            break;
+        if (!continues_inline_run(c, styles)) break;
+        c = c->next_sibling;
+    }
+    return c;
+}
+
+static const ns_node *
+append_flow_child(ns_box *block, const ns_node *c, const ns_node *end,
+                  GHashTable *styles)
+{
+    if (c->kind == NS_NODE_ELEMENT) {
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs && style_is_none(cs)) return c->next_sibling;
+        if (style_is_contents(cs)) {
+            append_display_contents_children(block, c, styles, FALSE, NULL);
+            return c->next_sibling;
+        }
+    }
+    if (is_inline_dom(c, styles)) {
+        const ns_node *stop = inline_run_end(c->next_sibling, end, styles);
+        ns_box *run = build_inline_run(c, stop, styles);
+        if (run && run->text && run->text[0])
+            box_append_child(block, run);
+        else if (run)
+            ns_box_free(run);
+        return stop;
+    }
+    ns_box *child = build_block(c, styles);
+    if (child) box_append_child(block, child);
+    return c->next_sibling;
+}
+
+static void
+append_contents_range(ns_box *block, const ns_node *first, const ns_node *end,
+                      GHashTable *styles, gboolean blockify_children,
+                      ns_box **pending_before)
+{
+    const ns_node *c = first;
+    while (c && c != end) {
+        if (node_skips_rendering(c)) {
+            c = c->next_sibling;
+        } else if (blockify_children) {
+            append_blockified_child(block, c, styles, pending_before);
+            c = c->next_sibling;
+        } else {
+            c = append_flow_child(block, c, end, styles);
+        }
+    }
+}
+
+static gboolean
+slot_assigns_node(const ns_node *lc, const char *slot_name)
+{
+    if (lc->kind == NS_NODE_TEXT) return !slot_name || !*slot_name;
+    if (lc->kind != NS_NODE_ELEMENT) return FALSE;
+    const char *assigned = ns_element_get_attr(lc, "slot");
+    return g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") == 0;
+}
+
+static gboolean
+append_slot_assigned(ns_box *block, const ns_node *slot, GHashTable *styles,
+                     gboolean blockify_children, ns_box **pending_before)
+{
+    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    gboolean any = FALSE;
+    const ns_node *lc = host->first_child;
+    while (lc) {
+        if (lc == sr || !slot_assigns_node(lc, slot_name)) {
+            lc = lc->next_sibling;
+            continue;
+        }
+        const ns_node *range_end = lc->next_sibling;
+        while (range_end && range_end != sr &&
+               slot_assigns_node(range_end, slot_name))
+            range_end = range_end->next_sibling;
+        append_contents_range(block, lc, range_end, styles, blockify_children,
+                              pending_before);
+        any = TRUE;
+        lc = range_end;
+    }
+    return any;
+}
+
 static void
 append_display_contents_children(ns_box *block, const ns_node *n,
                                  GHashTable *styles,
@@ -5323,98 +5573,12 @@ append_display_contents_children(ns_box *block, const ns_node *n,
         box_append_child(block, contents_before);
 
     const ns_node *shadow_root = layout_shadow_root(n);
-    const ns_node *c = shadow_root ? shadow_root->first_child : n->first_child;
-    while (c) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            tag_is_non_rendering(c->name)) {
-            c = c->next_sibling;
-            continue;
-        }
-        if (blockify_children) {
-            if (c->kind == NS_NODE_TEXT) {
-                if (text_is_ws_only(c->text)) { c = c->next_sibling; continue; }
-                ns_box *item = box_new(NS_BOX_BLOCK);
-                item->style = NULL;
-                ns_box *run = build_inline_run(c, c->next_sibling, styles);
-                if (run && run->text && run->text[0]) {
-                    box_append_child(item, run);
-                    box_append_child(block, item);
-                } else {
-                    if (run) ns_box_free(run);
-                    ns_box_free(item);
-                }
-                c = c->next_sibling;
-                continue;
-            }
-            if (c->kind != NS_NODE_ELEMENT) { c = c->next_sibling; continue; }
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs && style_is_none(cs)) { c = c->next_sibling; continue; }
-            if (style_is_contents(cs)) {
-                append_display_contents_children(block, c, styles, TRUE, NULL);
-                c = c->next_sibling;
-                continue;
-            }
-            if (cs && style_is_absolute_or_fixed(cs)) {
-                ns_box *child = build_block(c, styles);
-                if (child) box_append_child(block, child);
-                c = c->next_sibling;
-                continue;
-            }
-            if (style_is_block(cs) ||
-                contains_block_media(c, styles) ||
-                node_has_media_metadata(c) ||
-                (c->name && (strcmp(c->name, "img") == 0 ||
-                             strcmp(c->name, "svg") == 0 ||
-                             strcmp(c->name, "audio") == 0 ||
-                             strcmp(c->name, "video") == 0 ||
-                             strcmp(c->name, "table") == 0))) {
-                ns_box *child = build_block(c, styles);
-                if (child) box_append_child(block, child);
-                c = c->next_sibling;
-                continue;
-            }
-            ns_box *item = build_blockified_inline_item(c, styles, pending_before);
-            if (item) box_append_child(block, item);
-            c = c->next_sibling;
-            continue;
-        }
-
-        if (c->kind == NS_NODE_ELEMENT) {
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs && style_is_none(cs)) { c = c->next_sibling; continue; }
-            if (style_is_contents(cs)) {
-                append_display_contents_children(block, c, styles, FALSE, NULL);
-                c = c->next_sibling;
-                continue;
-            }
-        }
-        if (is_inline_dom(c, styles)) {
-            const ns_node *start = c;
-            c = c->next_sibling;
-            while (c) {
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    tag_is_non_rendering(c->name)) {
-                    c = c->next_sibling;
-                    continue;
-                }
-                if (c->kind == NS_NODE_ELEMENT) {
-                    const ns_style *cs = g_hash_table_lookup(styles, c);
-                    if (style_is_contents(cs)) break;
-                }
-                if (!continues_inline_run(c, styles)) break;
-                c = c->next_sibling;
-            }
-            ns_box *run = build_inline_run(start, c, styles);
-            if (run && run->text && run->text[0])
-                box_append_child(block, run);
-            else if (run)
-                ns_box_free(run);
-        } else {
-            ns_box *child = build_block(c, styles);
-            if (child) box_append_child(block, child);
-            if (c) c = c->next_sibling;
-        }
-    }
+    if (!append_slot_assigned(block, n, styles, blockify_children,
+                              pending_before))
+        append_contents_range(block,
+                              shadow_root ? shadow_root->first_child
+                                          : n->first_child,
+                              NULL, styles, blockify_children, pending_before);
 
     if (s && s->after && !style_is_absolute_or_fixed(s->after)) {
         ns_box *contents_after = build_pseudo_inline_for(s->after, n, s);
@@ -6312,10 +6476,55 @@ field_attr_is_text_input(const ns_inline_attr *r)
         g_ascii_strcasecmp(type, "password") == 0;
 }
 
+gboolean
+ns_inline_toggle_geometry(const ns_inline_attr *r, double *side,
+                          double margins[4])
+{
+    if (r->kind != NS_INLINE_CHECKBOX && r->kind != NS_INLINE_CHECKBOX_CHECKED &&
+        r->kind != NS_INLINE_RADIO && r->kind != NS_INLINE_RADIO_CHECKED)
+        return FALSE;
+    double edge = 13;
+    if (r->box_w > 0 || r->box_h > 0) {
+        double bw = r->box_w > 0 ? r->box_w : r->box_h;
+        double bh = r->box_h > 0 ? r->box_h : r->box_w;
+        edge = MIN(bw, bh);
+    }
+    *side = edge;
+    static const ns_css_prop sides[4] = {
+        NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_RIGHT,
+        NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_LEFT,
+    };
+    for (int i = 0; i < 4; i++)
+        margins[i] = r->style ? length_or(r->style->values[sides[i]], 0) : 0;
+    return TRUE;
+}
+
+static void
+inline_apply_toggle_shapes(NsPangoAttrList *list, const ns_box *box)
+{
+    if (!box->attrs) return;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        double side, m[4];
+        if (!ns_inline_toggle_geometry(r, &side, m) || r->len == 0) continue;
+        double w = MAX(0, m[3] + side + m[1]);
+        double h = MAX(0, m[0] + side + m[2]);
+        NsPangoRectangle rect = {
+            0, (int)(-(m[0] + side) * NS_PANGO_SCALE),
+            (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE)
+        };
+        NsPangoAttribute *attr = ns_pango_attr_shape_new(&rect, &rect);
+        attr->start_index = (guint)r->start;
+        attr->end_index = (guint)(r->start + r->len);
+        ns_pango_attr_list_insert(list, attr);
+    }
+}
+
 void
 ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
 {
     if (!box) return;
+    inline_apply_toggle_shapes(list, box);
     if (box->inline_atomics) {
         double max_asc = 0;
         for (guint i = 0; i < box->inline_atomics->len; i++) {
@@ -6419,7 +6628,11 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (r->kind == NS_INLINE_SPACER && r->len > 0)
+        gboolean toggle = r->kind == NS_INLINE_CHECKBOX ||
+                          r->kind == NS_INLINE_CHECKBOX_CHECKED ||
+                          r->kind == NS_INLINE_RADIO ||
+                          r->kind == NS_INLINE_RADIO_CHECKED;
+        if ((r->kind == NS_INLINE_SPACER || toggle) && r->len > 0)
             inline_insert_line_height_units(list, 0, (guint)r->start,
                                             (guint)(r->start + r->len));
     }
@@ -6952,8 +7165,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     gboolean ws_nowrap = keyword_is(
         parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "nowrap") ||
         keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "pre");
-    gboolean ellip = keyword_is(
-        parent_style ? parent_style->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis");
+    gboolean ellip = ns_paint_text_ellipsizes(parent_style);
     if (ws_nowrap && !ellip)
         ns_pango_layout_set_width(layout, -1);
     else
@@ -6985,7 +7197,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_inline_layout_set_attrs(layout, i18n, box);
     ns_pango_attr_list_unref(i18n);
 
-    ns_pango_layout_set_text(layout, box->text, -1);
+    ns_paint_layout_set_inline_text(layout, box->text);
     ns_paint_start_align_overflow(layout);
     ns_text_measure measured;
     text_measure(layout, &measured);
@@ -7175,10 +7387,9 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
         double ti = ns_inline_text_indent_px(box, parent_style, box->content_width);
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(parent_style ? parent_style->values[NS_CSS_TEXT_OVERFLOW] : NULL,
-                   "ellipsis"))
+    if (ns_paint_text_ellipsizes(parent_style))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
-    ns_pango_layout_set_text(layout, box->text, -1);
+    ns_paint_layout_set_inline_text(layout, box->text);
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
@@ -7311,7 +7522,7 @@ inline_box_can_fragment_multicol(const ns_box *box, const ns_style *style,
     if (keyword_is(style ? style->values[NS_CSS_WHITE_SPACE] : NULL, "nowrap") ||
         keyword_is(style ? style->values[NS_CSS_WHITE_SPACE] : NULL, "pre"))
         return FALSE;
-    if (keyword_is(style ? style->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(style))
         return FALSE;
     if (style && style->values[NS_CSS_LINE_CLAMP])
         return FALSE;
@@ -7823,11 +8034,11 @@ box_establishes_bfc(const ns_box *box)
     if (float_side_of(box->style) >= 0 ||
         style_is_absolute_or_fixed(box->style) ||
         style_is_multicol(box->style) ||
-        style_is_flex_container(box->style) ||
-        style_is_grid_container(box->style))
+        box_is_flex_container(box) ||
+        box_is_grid_container(box))
         return TRUE;
-    if (style_is_flex_container(box->parent->style) ||
-        style_is_grid_container(box->parent->style))
+    if (box_is_flex_container(box->parent) ||
+        box_is_grid_container(box->parent))
         return TRUE;
     if (box->is_rendered_legend ||
         ns_node_is_element_named(box->dom, "fieldset"))
@@ -8078,7 +8289,7 @@ layout_image(ns_box *box, double parent_content_width)
     const char *parent_flex_dir = box->parent
         ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     double pct_width_base = parent_content_width;
@@ -8486,8 +8697,8 @@ box_inline_size_is_definite(const ns_box *box)
         if (style_is_absolute_or_fixed(s) || float_side_of(s) >= 0 ||
             ns_display_is_atomic_inline(ns_css_display_of(s)))
             return FALSE;
-        if (b->parent && (style_is_flex_container(b->parent->style) ||
-                          style_is_grid_container(b->parent->style)))
+        if (b->parent && (box_is_flex_container(b->parent) ||
+                          box_is_grid_container(b->parent)))
             return FALSE;
     }
     return TRUE;
@@ -8527,7 +8738,7 @@ replaced_containing_box(const ns_box *box)
 static gboolean
 replaced_containing_block_is_definite(const ns_box *box)
 {
-    if (box->parent && style_is_grid_container(box->parent->style))
+    if (box->parent && box_is_grid_container(box->parent))
         return FALSE;
     const ns_box *cb = replaced_containing_box(box);
     return cb && box_inline_size_is_definite(cb);
@@ -8862,11 +9073,11 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
     const ns_style *child_style = box->style ? box->style : parent_style;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(box, child_style, FALSE);
-    if (box->style && style_is_grid_container(box->style)) {
+    if (box->style && box_is_grid_container(box)) {
         double gw = grid_natural_width(box, child_style);
         if (gw > 0) return gw;
     }
-    gboolean flex_row = style_is_flex_container(box->style) &&
+    gboolean flex_row = box_is_flex_container(box) &&
         strncmp(flex_direction_of(box->style), "row", 3) == 0;
     double max_child = 0;
     double float_row = 0;
@@ -9082,12 +9293,12 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
-    if (box->style && style_is_grid_container(box->style) &&
+    if (box->style && box_is_grid_container(box) &&
         grid_flows_by_column(box->style)) {
         double gw = grid_column_flow_width(box, box->style, TRUE);
         if (gw >= 0) return gw;
     }
-    if (box->style && style_is_grid_container(box->style)) {
+    if (box->style && box_is_grid_container(box)) {
         const ns_css_value *cv =
             box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
         if (cv && cv->kind == NS_CSS_V_TRACKS && cv->u.tracks.n > 0 &&
@@ -9122,7 +9333,7 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         }
     }
     const ns_style *child_style = box->style ? box->style : parent_style;
-    gboolean single_line_row = style_is_flex_container(box->style) &&
+    gboolean single_line_row = box_is_flex_container(box) &&
         strncmp(flex_direction_of(box->style), "row", 3) == 0 &&
         !flex_wraps(box->style);
     double max_child = 0;
@@ -10034,7 +10245,7 @@ estimate_natural_width(const ns_box *b, double cap)
     } else {
         int flow_children = 0;
         gboolean column_flex = b->style &&
-            style_is_flex_container(b->style) &&
+            box_is_flex_container(b) &&
             (strcmp(flex_direction_of(b->style),
                     "column") == 0 ||
              strcmp(flex_direction_of(b->style),
@@ -10057,7 +10268,7 @@ estimate_natural_width(const ns_box *b, double cap)
             }
             flow_children++;
         }
-        if (flow_children > 1 && style_is_flex_container(b->style) &&
+        if (flow_children > 1 && box_is_flex_container(b) &&
             strcmp(flex_direction_of(b->style),
                    "column") != 0 &&
             strcmp(flex_direction_of(b->style),
@@ -10993,7 +11204,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             if (eh >= 0) eh = flex_wrap_clamp_height(box, eh, cw);
         }
         gboolean flexed_item = box->parent &&
-            style_is_flex_container(box->parent->style) &&
+            box_is_flex_container(box->parent) &&
             box_read_definite_height(box) > 0;
         if ((eh < 0 || flexed_item) && box->definite_height > 0 &&
             lines->len > 0)
@@ -11412,8 +11623,11 @@ layout_flex_column(ns_box *box, double cw,
             for (guint k = 0; k < ln->count; k++) {
                 ns_box *c = items->pdata[ln->start + k];
                 if (!c->style) continue;
-                if (keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto"))
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto")) {
                     c->margin.top += share;
+                    shift_box_tree(c, 0, share);
+                    c->y -= share;
+                }
                 if (keyword_is(c->style->values[NS_CSS_MARGIN_BOTTOM], "auto"))
                     c->margin.bottom += share;
             }
@@ -13099,7 +13313,7 @@ layout_grid(ns_box *box, double cw,
             if (item_w < 0) item_w = 0;
         }
         ns_subgrid_cols subctx = {0};
-        if (sp >= 1 && style_is_grid_container(c->style) &&
+        if (sp >= 1 && box_is_grid_container(c) &&
             style_columns_are_subgrid(c->style)) {
             subctx.n = sp;
             subctx.gap = col_gap;
@@ -13112,7 +13326,7 @@ layout_grid(ns_box *box, double cw,
         ns_subgrid_rows subrowctx = {0};
         int sub_rs = MIN(rs, NS_CSS_TRACKS_MAX);
         if (sub_rs >= 1 && placed_row + sub_rs <= n_rows &&
-            style_is_grid_container(c->style) &&
+            box_is_grid_container(c) &&
             style_rows_are_subgrid(c->style)) {
             gboolean usable = TRUE;
             for (int k = 0; k < sub_rs; k++) {
@@ -13843,8 +14057,8 @@ static double
 block_align_content_shift(const ns_box *box, double free_space)
 {
     if (!box->style || free_space == 0) return 0;
-    if (style_is_flex_container(box->style) ||
-        style_is_grid_container(box->style))
+    if (box_is_flex_container(box) ||
+        box_is_grid_container(box))
         return 0;
     const char *acont = keyword_or(box->style, NS_CSS_ALIGN_CONTENT, "normal");
     gboolean unsafe = g_str_has_prefix(acont, "unsafe ");
@@ -13885,11 +14099,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     const char *parent_flex_dir = box->parent
         ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     gboolean flex_col_item_stretch = box->parent &&
-        style_is_flex_container(box->parent->style) &&
+        box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "column") == 0 ||
          strcmp(parent_flex_dir, "column-reverse") == 0);
     if (flex_col_item_stretch) {
@@ -14050,10 +14264,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         box->parent && !box_establishes_bfc(box) &&
         block_height_is_auto(box, parent_content_width);
 
-    if (style_is_flex_container(box->style) || style_is_grid_container(box->style))
+    if (box_is_flex_container(box) || box_is_grid_container(box))
         reorder_children_by_order(box);
 
-    if (style_is_flex_container(box->style)) {
+    if (box_is_flex_container(box)) {
         const char *dir = flex_direction_of(box->style);
         gboolean is_row = strcmp(dir, "row") == 0 || strcmp(dir, "row-reverse") == 0;
         gboolean is_col = strcmp(dir, "column") == 0 || strcmp(dir, "column-reverse") == 0;
@@ -14075,7 +14289,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         }
     }
 
-    if (style_is_grid_container(box->style) &&
+    if (box_is_grid_container(box) &&
         g_grid_nesting < NS_GRID_NESTING_MAX) {
         g_grid_nesting++;
         layout_grid(box, cw, inner_x, inner_y, child_inherited, &cursor_y);
@@ -14749,6 +14963,7 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_svg_defs_computed_for_layout = FALSE;
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
+    ns_paint_i18n_memo_begin();
     ns_box *root = ns_layout_build_(doc, styles, viewport_width);
     if (!g_input_columns_for_layout) {
         GHashTable *cols = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -14774,6 +14989,7 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
         g_counters_for_layout = NULL;
     }
     record_frame_viewports(root);
+    ns_paint_i18n_memo_end();
     return root;
 }
 
@@ -15455,7 +15671,7 @@ static gboolean
 flex_static_position(ns_box *abox, const ns_box *fc, double *out_x,
                      double *out_y)
 {
-    if (!fc || !fc->style || !style_is_flex_container(fc->style)) return FALSE;
+    if (!fc || !fc->style || !box_is_flex_container(fc)) return FALSE;
 
     double origin_x = fc->x + fc->margin.left + fc->border.left +
                       fc->padding.left;
@@ -17730,7 +17946,8 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
                 &g_array_index(root->attrs, ns_inline_attr, i);
             if (r->dom != target || r->len == 0) continue;
             double ex, ey, ew, eh;
-            if (!ns_paint_inline_range_extents(root, r->start, r->len,
+            if (!ns_paint_inline_toggle_rect(root, r, &ex, &ey, &ew, &eh) &&
+                !ns_paint_inline_range_extents(root, r->start, r->len,
                                                inline_attr_element(r),
                                                &ex, &ey, &ew, &eh))
                 continue;

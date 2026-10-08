@@ -287,22 +287,22 @@ ns_lav_seek_to(ns_lav *L, double seconds)
 static ns_texture *
 ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame, int w, int h)
 {
-    gsize stride = (gsize)w * 4;
+    gsize stride = ((gsize)w * 4 + 63) & ~(gsize)63;
     gsize buf_len = stride * (gsize)h;
-    guint8 *bgra = g_try_malloc(buf_len);
+    guint8 *bgra = av_malloc(buf_len + 64);
     if (!bgra) return NULL;
 
     L->sws = sws_getCachedContext(L->sws, frame->width, frame->height,
                                   frame->format, w, h, AV_PIX_FMT_BGRA,
                                   SWS_BILINEAR, NULL, NULL, NULL);
-    if (!L->sws) { g_free(bgra); return NULL; }
+    if (!L->sws) { av_free(bgra); return NULL; }
 
     uint8_t *dst[4] = { bgra, NULL, NULL, NULL };
     int dst_stride[4] = { (int)stride, 0, 0, 0 };
     sws_scale(L->sws, (const uint8_t *const *)frame->data, frame->linesize,
               0, frame->height, dst, dst_stride);
 
-    GBytes *gb = g_bytes_new_take(bgra, buf_len);
+    GBytes *gb = g_bytes_new_with_free_func(bgra, buf_len, av_free, bgra);
     ns_texture *tex = ns_texture_new(w, h, NS_TEXTURE_BGRA_PREMULTIPLIED,
                                      gb, stride);
     g_bytes_unref(gb);

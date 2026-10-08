@@ -51,6 +51,36 @@ ns_engine_layout_perf(guint64 *relayouts, double *total_ms)
     if (total_ms)  *total_ms  = g_engine_relayout_us / 1000.0;
 }
 
+static guint64 g_engine_blocking_count;
+static gint64  g_engine_blocking_us;
+
+static void
+engine_blocking_wait(GMainLoop *loop)
+{
+    gboolean outermost = g_engine_blocking_depth == 0;
+    gint64 t0 = g_get_monotonic_time();
+    g_engine_blocking_depth++;
+    g_main_loop_run(loop);
+    g_engine_blocking_depth--;
+    g_engine_blocking_count++;
+    if (outermost) g_engine_blocking_us += g_get_monotonic_time() - t0;
+}
+
+void
+ns_engine_blocking_perf(guint64 *waits, double *total_ms)
+{
+    if (waits)    *waits    = g_engine_blocking_count;
+    if (total_ms) *total_ms = g_engine_blocking_us / 1000.0;
+}
+
+static gint64 g_engine_encode_us;
+
+double
+ns_engine_encode_ms(void)
+{
+    return g_engine_encode_us / 1000.0;
+}
+
 static void
 on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -80,9 +110,7 @@ engine_request_blocking(const char *url, const char *top_url,
     ns_net_request_async(url, top_url, method, body, body_len, content_type,
                          headers,
                          NULL, on_fetch_done, &st);
-    g_engine_blocking_depth++;
-    g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
+    engine_blocking_wait(st.loop);
     g_main_loop_unref(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
@@ -147,6 +175,13 @@ engine_remember_linked_css(const char *url, GBytes *bytes)
         !g_hash_table_contains(g_linked_css, url))
         g_hash_table_remove_all(g_linked_css);
     g_hash_table_insert(g_linked_css, g_strdup(url), g_bytes_ref(bytes));
+}
+
+gboolean
+ns_engine_linked_css_known(const char *url)
+{
+    return url && *url && g_linked_css &&
+           g_hash_table_contains(g_linked_css, url);
 }
 
 char *
@@ -386,6 +421,19 @@ on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 }
 
 void
+ns_engine_preload_script(const char *url, const char *top_url)
+{
+    if (!url || !top_url || !ns_url_is_http_or_https(url)) return;
+    const char *const *headers = ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
+    char *key = ns_net_request_key(url, top_url, "GET", headers);
+    if (!key) return;
+    ns_net_preload_expect(key);
+    g_free(key);
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
+                         on_preload_fetched, NULL);
+}
+
+void
 ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                               gboolean include_images)
 {
@@ -500,23 +548,32 @@ sheet_run_drop_repeats(sheet_collect_ctx *cc)
     if (n < 2) return;
     GHashTable *later = g_hash_table_new(g_str_hash, g_str_equal);
     gboolean *drop = g_new0(gboolean, n);
-    gboolean any = FALSE;
     for (guint i = n; i-- > 0; ) {
         const char *chunk = g_ptr_array_index(cc->run_chunks, i);
         if (strchr(chunk, '@')) continue;
-        if (g_hash_table_contains(later, chunk)) drop[i] = any = TRUE;
+        if (g_hash_table_contains(later, chunk)) drop[i] = TRUE;
         else g_hash_table_add(later, (gpointer)chunk);
     }
-    if (any) {
-        g_string_set_size(cc->run, 0);
-        for (guint i = 0; i < n; i++) {
-            if (drop[i]) continue;
-            g_string_append(cc->run, g_ptr_array_index(cc->run_chunks, i));
-            g_string_append_c(cc->run, '\n');
-        }
-    }
-    g_free(drop);
     g_hash_table_destroy(later);
+    for (guint i = n; i-- > 0; )
+        if (drop[i]) g_ptr_array_remove_index(cc->run_chunks, i);
+    g_free(drop);
+}
+
+#define SHEET_RUN_CHUNK_ALONE 16384
+
+static void
+sheet_run_emit(sheet_collect_ctx *cc, const char *css, gsize len)
+{
+    if (len == 0) return;
+    ns_css_stylesheet *sh = ns_css_merged_styles_cached(css, (gssize)len,
+                                                        cc->run_base);
+    if (!sh) return;
+    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+    append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url, seen,
+                               cc->cache, 0, FALSE, cc->frame_depth > 0);
+    g_hash_table_destroy(seen);
 }
 
 static void
@@ -524,17 +581,21 @@ sheet_run_flush(sheet_collect_ctx *cc)
 {
     if (!cc->run || cc->run->len == 0) return;
     sheet_run_drop_repeats(cc);
-    g_ptr_array_set_size(cc->run_chunks, 0);
-    ns_css_stylesheet *sh =
-        ns_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len,
-                                    cc->run_base);
-    if (sh) {
-        GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                 g_free, NULL);
-        append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url, seen,
-                                   cc->cache, 0, FALSE, cc->frame_depth > 0);
-        g_hash_table_destroy(seen);
+    g_string_set_size(cc->run, 0);
+    for (guint i = 0; i < cc->run_chunks->len; i++) {
+        const char *chunk = g_ptr_array_index(cc->run_chunks, i);
+        gsize len = strlen(chunk);
+        if (len < SHEET_RUN_CHUNK_ALONE) {
+            g_string_append_len(cc->run, chunk, (gssize)len);
+            g_string_append_c(cc->run, '\n');
+            continue;
+        }
+        sheet_run_emit(cc, cc->run->str, cc->run->len);
+        g_string_set_size(cc->run, 0);
+        sheet_run_emit(cc, chunk, len);
     }
+    sheet_run_emit(cc, cc->run->str, cc->run->len);
+    g_ptr_array_set_size(cc->run_chunks, 0);
     g_string_set_size(cc->run, 0);
     cc->run_base = NULL;
 }
@@ -741,29 +802,301 @@ collect_frame_children(ns_node *frame, const char *base_url,
     }
 }
 
+typedef struct {
+    guint64             hash;
+    gsize               len;
+    char               *host_id;
+    double              vw;
+    double              vh;
+    guint               generation;
+    guint64             pass;
+    gboolean            viewport_media;
+    ns_css_stylesheet  *sheet;
+} adopted_sheet_entry;
+
+static GHashTable *g_adopted_sheets;
+static guint64     g_adopted_pass;
+
+static void
+adopted_sheet_entry_free(gpointer data)
+{
+    adopted_sheet_entry *e = data;
+    if (!e) return;
+    if (e->sheet) {
+        e->sheet->cached = FALSE;
+        ns_css_stylesheet_free(e->sheet);
+    }
+    g_free(e->host_id);
+    g_free(e);
+}
+
+typedef struct {
+    gsize       len;
+    const char *host_id;
+    const char *base_url;
+    double      vw;
+    double      vh;
+    guint       generation;
+} adopted_sheet_key;
+
+static adopted_sheet_key
+adopted_sheet_key_now(gsize len, const char *host_id, const char *base_url)
+{
+    adopted_sheet_key key = {
+        .len = len,
+        .host_id = host_id,
+        .base_url = base_url,
+        .vw = ns_css_media_viewport_current_w(),
+        .vh = ns_css_media_viewport_current_h(),
+        .generation = ns_css_stylesheet_cache_generation(),
+    };
+    return key;
+}
+
+static gboolean
+adopted_sheet_entry_matches(const adopted_sheet_entry *e,
+                            const adopted_sheet_key *key)
+{
+    const char *resolved_base = e->sheet->resolved_base;
+    return e->len == key->len && e->vw == key->vw && e->vh == key->vh &&
+           e->generation == key->generation &&
+           g_strcmp0(e->host_id, key->host_id) == 0 &&
+           (!resolved_base || g_strcmp0(resolved_base, key->base_url) == 0);
+}
+
+static adopted_sheet_entry *
+adopted_sheet_entry_new(guint64 hash, const adopted_sheet_key *key,
+                        gboolean viewport_media, ns_css_stylesheet *sheet)
+{
+    sheet->cached = TRUE;
+    adopted_sheet_entry *e = g_new0(adopted_sheet_entry, 1);
+    e->hash = hash;
+    e->len = key->len;
+    e->host_id = g_strdup(key->host_id);
+    e->vw = key->vw;
+    e->vh = key->vh;
+    e->generation = key->generation;
+    e->pass = g_adopted_pass;
+    e->viewport_media = viewport_media;
+    e->sheet = sheet;
+    return e;
+}
+
+static guint64
+adopted_text_hash(const char *s, gsize n)
+{
+    guint64 h = 1469598103934665603ULL;
+    gsize i = 0;
+    for (; i + 8 <= n; i += 8) {
+        guint64 w;
+        memcpy(&w, s + i, 8);
+        h = (h ^ w) * 1099511628211ULL;
+        h ^= h >> 29;
+    }
+    for (; i < n; i++)
+        h = (h ^ (guchar)s[i]) * 1099511628211ULL;
+    return h ^ n;
+}
+
+static GHashTable *g_large_style_sheets;
+
+static void
+cached_sheets_trim(GHashTable *table)
+{
+    if (!table || g_hash_table_size(table) < 512) return;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, table);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        adopted_sheet_entry *e = value;
+        if (e->pass + 1 < g_adopted_pass) g_hash_table_iter_remove(&it);
+    }
+}
+
+static void
+adopted_sheets_trim(void)
+{
+    cached_sheets_trim(g_adopted_sheets);
+    cached_sheets_trim(g_large_style_sheets);
+}
+
+static void
+style_text_fingerprint(const ns_node *n, guint64 *hash, gsize *len, int depth)
+{
+    if (depth >= 512) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_TEXT && c->text) {
+            *hash = (*hash * 1099511628211ULL) ^
+                    adopted_text_hash(c->text, c->text_len);
+            *len += c->text_len;
+        } else if (c->kind == NS_NODE_ELEMENT) {
+            style_text_fingerprint(c, hash, len, depth + 1);
+        }
+    }
+}
+
+static const char *
+style_shadow_host_id(const ns_node *style)
+{
+    for (const ns_node *a = style; a; a = a->parent)
+        if (a->kind == NS_NODE_ELEMENT && a->parent &&
+            ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL)
+            return ns_element_get_attr(a->parent, NS_HOST_SCOPE_ATTR);
+    return NULL;
+}
+
+static adopted_sheet_entry *
+large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
+{
+    if (!g_large_style_sheets)
+        g_large_style_sheets = g_hash_table_new_full(g_direct_hash,
+                                                     g_direct_equal, NULL,
+                                                     adopted_sheet_entry_free);
+    adopted_sheet_key key = adopted_sheet_key_now(len,
+                                                  style_shadow_host_id(style),
+                                                  base_url);
+    adopted_sheet_entry *e = g_hash_table_lookup(g_large_style_sheets, style);
+    if (e && e->hash == hash && adopted_sheet_entry_matches(e, &key))
+        return e;
+    char *css = ns_css_style_element_text(style);
+    if (!css) return NULL;
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(css, -1);
+    gboolean media_dep = css_has_viewport_media(css);
+    g_free(css);
+    if (!sheet) return NULL;
+    e = adopted_sheet_entry_new(hash, &key, media_dep, sheet);
+    g_hash_table_replace(g_large_style_sheets, style, e);
+    return e;
+}
+
+static gboolean
+collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
+{
+    if (cc->frame_depth > 0) return FALSE;
+    guint64 hash = 1469598103934665603ULL;
+    gsize len = 0;
+    style_text_fingerprint(style, &hash, &len, 0);
+    if (len < SHEET_RUN_CHUNK_ALONE) return FALSE;
+    const char *media = ns_element_get_attr(style, "media");
+    if (media && *media && !ns_css_media_query_matches(media)) return TRUE;
+    adopted_sheet_entry *e = large_style_entry(style, hash, len, base_url);
+    if (!e) return TRUE;
+    e->pass = g_adopted_pass;
+    if (e->viewport_media) cc->media_seen = TRUE;
+    sheet_run_flush(cc);
+    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+    append_stylesheet_expanded(cc->out, e->sheet, base_url, cc->top_url, seen,
+                               cc->cache, 0, engine_node_in_head(style), FALSE);
+    g_hash_table_destroy(seen);
+    return TRUE;
+}
+
+static guint64
+adopted_sheet_hash(const char *css, gsize len, const char *host_id)
+{
+    guint64 hash = adopted_text_hash(css, len);
+    if (host_id)
+        hash ^= adopted_text_hash(host_id, strlen(host_id)) * 31;
+    return hash;
+}
+
+static ns_css_stylesheet *
+adopted_sheet_parse(ns_node *root, const char *css, adopted_sheet_key *key,
+                    gboolean *viewport_media)
+{
+    char *scoped = ns_css_shadow_adopted_css(root);
+    if (!scoped) return NULL;
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(scoped, -1);
+    gboolean media = css_has_viewport_media(scoped);
+    g_free(scoped);
+    if (!sheet) return NULL;
+    *viewport_media = media;
+    key->host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
+    if (!key->host_id) return sheet;
+    adopted_sheet_entry *e = adopted_sheet_entry_new(
+        adopted_sheet_hash(css, key->len, key->host_id), key, media, sheet);
+    g_hash_table_replace(g_adopted_sheets, &e->hash, e);
+    return sheet;
+}
+
+static ns_css_stylesheet *
+adopted_sheet_for(ns_node *root, const char *base_url, gboolean *viewport_media)
+{
+    const char *css = ns_element_get_attr(root, NS_ADOPTED_CSS_ATTR);
+    if (!css || !*css || !root->parent) return NULL;
+    if (!g_adopted_sheets)
+        g_adopted_sheets = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                                 NULL, adopted_sheet_entry_free);
+    gsize len = strlen(css);
+    const char *host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
+    adopted_sheet_key key = adopted_sheet_key_now(len, host_id, base_url);
+    guint64 hash = adopted_sheet_hash(css, len, host_id);
+    adopted_sheet_entry *e = g_hash_table_lookup(g_adopted_sheets, &hash);
+    if (e && host_id && adopted_sheet_entry_matches(e, &key)) {
+        e->pass = g_adopted_pass;
+        *viewport_media = e->viewport_media;
+        return e->sheet;
+    }
+    return adopted_sheet_parse(root, css, &key, viewport_media);
+}
+
 static void
 collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
 {
     if (root->kind != NS_NODE_ELEMENT) return;
-    char *css = ns_css_shadow_adopted_css(root);
-    if (!css) return;
-    if (css_has_viewport_media(css)) cc->media_seen = TRUE;
-    gboolean alone = !ns_css_syntax_is_self_contained(css, strlen(css));
-    if (alone || (cc->run_base && cc->run_base != base_url))
-        sheet_run_flush(cc);
-    sheet_run_append(cc, css, base_url);
-    if (alone) sheet_run_flush(cc);
-    g_free(css);
+    gboolean viewport_media = FALSE;
+    ns_css_stylesheet *sh = adopted_sheet_for(root, base_url, &viewport_media);
+    if (!sh) return;
+    if (viewport_media) cc->media_seen = TRUE;
+    sheet_run_flush(cc);
+    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+    append_stylesheet_expanded(cc->out, sh, base_url, cc->top_url, seen,
+                               cc->cache, 0, FALSE, cc->frame_depth > 0);
+    g_hash_table_destroy(seen);
+}
+
+static gboolean
+collect_name_may_matter(const ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    switch (n->name[0]) {
+    case 'f': case 'i': case 'l': case 'n': case 'o': case 's':
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void
+collect_internal_attrs(const ns_node *n, gboolean *shadow_root,
+                       gboolean *adopted)
+{
+    *shadow_root = FALSE;
+    *adopted = FALSE;
+    if (n->kind != NS_NODE_ELEMENT) return;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name || a->name[0] != 'd' ||
+            strncmp(a->name, "data-nd-", 8) != 0)
+            continue;
+        if (strcmp(a->name, NS_SHADOW_ATTR) == 0) *shadow_root = TRUE;
+        else if (strcmp(a->name, NS_ADOPTED_CSS_ATTR) == 0 && a->value &&
+                 *a->value)
+            *adopted = TRUE;
+    }
 }
 
 static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
-    if (!n || depth >= 512 || ns_node_is_element_named(n, "noscript")) return;
-    if (ns_node_is_element_named(n, "iframe") ||
-        ns_node_is_element_named(n, "frame") ||
-        ns_node_is_element_named(n, "object")) {
+    if (!n || depth >= 512) return;
+    gboolean named = collect_name_may_matter(n);
+    if (named && ns_node_is_element_named(n, "noscript")) return;
+    if (named && (ns_node_is_element_named(n, "iframe") ||
+                  ns_node_is_element_named(n, "frame") ||
+                  ns_node_is_element_named(n, "object"))) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
@@ -789,8 +1122,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (ns_node_is_element_named(n, "style") && style_sheet_enabled(n)) {
-        char *css = ns_css_style_element_text(n);
+    if (named && ns_node_is_element_named(n, "style") &&
+        style_sheet_enabled(n)) {
+        char *css = collect_large_style(n, base_url, cc)
+            ? NULL : ns_css_style_element_text(n);
         if (css) {
             if (css_has_viewport_media(css)) cc->media_seen = TRUE;
             if (cc->run_base && cc->run_base != base_url)
@@ -815,7 +1150,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             }
             g_free(css);
         }
-    } else if (ns_node_is_element_named(n, "link") && base_url) {
+    } else if (named && ns_node_is_element_named(n, "link") && base_url) {
         sheet_run_flush(cc);
         const char *rel = ns_element_get_attr(n, "rel");
         const char *href = ns_element_get_attr(n, "href");
@@ -850,9 +1185,22 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             g_free(abs);
         }
     }
+    gboolean shadow_attr, adopted_attr;
+    collect_internal_attrs(n, &shadow_attr, &adopted_attr);
+    gboolean shadow_scope = cc->docs && shadow_attr &&
+                            n->parent && n->parent->kind == NS_NODE_ELEMENT;
+    ns_node *outer_doc = cc->doc;
+    if (shadow_scope) {
+        sheet_docs_sync(cc);
+        cc->doc = n->parent;
+    }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_stylesheets_walk(c, base_url, cc, depth + 1);
-    collect_adopted_css(n, base_url, cc);
+    if (adopted_attr) collect_adopted_css(n, base_url, cc);
+    if (shadow_scope) {
+        sheet_docs_sync(cc);
+        cc->doc = outer_doc;
+    }
 }
 
 void
@@ -865,6 +1213,8 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                                                    NULL, g_free);
     else
         g_hash_table_remove_all(g_collect_frame_vp);
+    g_adopted_pass++;
+    adopted_sheets_trim();
     sheet_collect_ctx cc = {
         .out = out, .cache = css_cache,
         .run = g_string_new(NULL),
@@ -902,6 +1252,50 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
     for (guint i = 0; i < page_sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
     g_ptr_array_free(page_sheets, TRUE);
+    g_ptr_array_free(sheet_docs, TRUE);
+    ns_css_relayout_leave();
+    return styles;
+}
+
+GHashTable *
+ns_engine_restyle(ns_node *doc, const char *base_url,
+                  int viewport_width, double viewport_height,
+                  ns_image_cache *images, ns_anim *anim,
+                  ns_js *js, GHashTable *css_cache,
+                  const ns_node *focused, const ns_node *hover)
+{
+    ns_css_set_frame_viewport_cb(frame_viewport_measured);
+    ns_css_relayout_enter();
+    ns_css_set_doc_base(base_url);
+    ns_css_style_element_cache_begin();
+    GPtrArray *sheets = g_ptr_array_new();
+    GPtrArray *sheet_docs = g_ptr_array_new();
+    ns_engine_collect_stylesheets(doc, base_url, sheets, sheet_docs, css_cache);
+    ns_render_ctx rc = {
+        .doc             = doc,
+        .sheets          = (const ns_css_stylesheet *const *)sheets->pdata,
+        .sheet_docs      = (const ns_node *const *)sheet_docs->pdata,
+        .n_sheets        = sheets->len,
+        .viewport_width  = (double)viewport_width,
+        .viewport_height = viewport_height > 0 ? viewport_height
+                                               : (double)viewport_width * 0.75,
+        .zoom            = 1.0,
+        .images          = images,
+        .base_url        = base_url,
+        .anim            = anim,
+        .js              = js,
+        .focused_input   = focused,
+        .hover_node      = hover,
+    };
+    gint64 t0 = g_get_monotonic_time();
+    GHashTable *styles = ns_render_restyle(&rc);
+    if (g_getenv("NS_PROFILE"))
+        g_printerr("[profile] restyle vw=%d nodes=%u total=%.2fms\n",
+                   viewport_width, styles ? g_hash_table_size(styles) : 0u,
+                   (g_get_monotonic_time() - t0) / 1000.0);
+    for (guint i = 0; i < sheets->len; i++)
+        ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
+    g_ptr_array_free(sheets, TRUE);
     g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
     return styles;
@@ -1285,9 +1679,7 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
             ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
             on_image_fetch_done, item);
     }
-    g_engine_blocking_depth++;
-    g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
+    engine_blocking_wait(st.loop);
     g_main_loop_unref(st.loop);
     g_hash_table_destroy(wanted);
 }
@@ -1322,7 +1714,9 @@ ns_engine_write_png(const ns_box *root, const char *path)
     cairo_t *cr = cairo_create(surf);
     ns_paint(cr, root, NULL);
     cairo_destroy(cr);
+    gint64 encode_t0 = g_get_monotonic_time();
     cairo_status_t st = cairo_surface_write_to_png(surf, path);
+    g_engine_encode_us += g_get_monotonic_time() - encode_t0;
     cairo_surface_destroy(surf);
     if (st != CAIRO_STATUS_SUCCESS) {
         fprintf(stderr, "engine: PNG write failed: %s\n",

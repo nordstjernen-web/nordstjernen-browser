@@ -87,6 +87,9 @@ gboolean ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
                                        const ns_inline_attr *element,
                                        double *out_x, double *out_y,
                                        double *out_w, double *out_h);
+gboolean ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
+                                     double *out_x, double *out_y,
+                                     double *out_w, double *out_h);
 gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     double rel_x, double rel_y,
                                     gsize *out_byte);
@@ -122,6 +125,10 @@ NsPangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
 NsPangoAttribute *ns_paint_font_variations_attr_from_values(const char *settings);
 
 NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
+void ns_paint_i18n_memo_begin(void);
+void ns_paint_i18n_memo_end(void);
+gboolean ns_paint_text_ellipsizes(const ns_style *style);
+void ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text);
 
 double ns_paint_css_line_height_px(const ns_style *style);
 double ns_paint_normal_line_height_px(const ns_style *style);

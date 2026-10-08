@@ -107,12 +107,14 @@ struct ns_js {
     ns_js_repaint_cb repaint_cb;
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
+    ns_js_layout_flush_cb style_flush_cb;
     gpointer      layout_flush_user_data;
     ns_js_viewport_scroll_cb viewport_scroll_cb;
     gpointer      viewport_scroll_user_data;
     gboolean    (*load_delay_cb)(gpointer user_data);
     gpointer      load_delay_user_data;
     gboolean      in_layout_flush;
+    gboolean      cssom_commit_pending;
     guint64       task_epoch;
     ns_js_clipboard_write_cb clipboard_write_cb;
     ns_js_selection_cmd_cb selection_cmd_cb;
@@ -140,6 +142,7 @@ struct ns_js {
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
+    guint64       mutation_serial;
     GHashTable   *timers;
     GMainContext *main_context;
     GPtrArray    *workers;
@@ -153,6 +156,7 @@ struct ns_js {
     gint64        raf_last_us;
     ns_node      *raf_frame_ctx;
     JSValue       pristine_promise;
+    JSValue       fonts_set;
     GHashTable   *style_table;
     const struct ns_box *layout_root;
     GHashTable   *box_lookup_cache;
