@@ -141,6 +141,12 @@ Changelog:
   no longer drawn over a ballot-box glyph whose fallback font set the
   width of the space next to it; `getBoundingClientRect()` reports
   their 13x13 box.
+* Headless page loads fetch images while the page settles, as the
+  browser window does: each new layout requests the images it now needs,
+  and their `load` events fire as they arrive. Images used to be fetched
+  only once, just before the first screenshot, so a page that swaps a
+  placeholder for the real picture in an `onload` handler (BBC's lazy
+  photos) often had not done so when the final shot was taken.
 * Unquoted font family names may contain a generic family keyword after
   their first word, as in `font-family: BBC Reith Serif, serif`. Any
   such word made the whole declaration invalid, so BBC's headlines and

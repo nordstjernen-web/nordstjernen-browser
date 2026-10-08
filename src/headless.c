@@ -286,6 +286,7 @@ headless_js_log(const char *line, gpointer user_data)
 
 static gboolean g_headless_layout_dirty;
 static gboolean g_headless_styles_stale;
+static gboolean g_headless_images_arrived;
 
 static void
 headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
@@ -830,6 +831,10 @@ typedef struct headless_flush_ctx {
     gboolean           relaying;
     GHashTable        *retired_styles;
     guint64            styles_serial;
+    guint64            layout_serial;
+    guint64            images_scanned_serial;
+    GHashTable        *images_requested;
+    GPtrArray         *image_sessions;
 } headless_flush_ctx;
 
 static const ns_node *
@@ -860,7 +865,43 @@ headless_relayout(headless_flush_ctx *c)
                                     c->css_cache, headless_focus(c), NULL,
                                     c->caret, c->anchor, c->layout);
     c->relaying = FALSE;
+    c->layout_serial++;
     c->styles_serial = c->js ? ns_js_mutation_serial(c->js) : 0;
+}
+
+static void
+headless_image_arrived(gpointer user_data)
+{
+    (void)user_data;
+    g_headless_layout_dirty = TRUE;
+    g_headless_images_arrived = TRUE;
+}
+
+static void
+headless_stream_images(headless_flush_ctx *c)
+{
+    if (!c->image_cache || !*c->layout ||
+        c->images_scanned_serial == c->layout_serial)
+        return;
+    c->images_scanned_serial = c->layout_serial;
+    if (!c->images_requested)
+        c->images_requested = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                    g_free, NULL);
+    if (!c->image_sessions)
+        c->image_sessions = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)ns_engine_img_session_close);
+    ns_engine_img_session *session =
+        ns_engine_fetch_images_start(*c->layout, c->base, c->image_cache,
+                                     c->images_requested, 0.0, c->vh, NULL,
+                                     headless_image_arrived, c);
+    if (session) g_ptr_array_add(c->image_sessions, session);
+}
+
+static void
+headless_stop_images(headless_flush_ctx *c)
+{
+    g_clear_pointer(&c->image_sessions, g_ptr_array_unref);
+    g_clear_pointer(&c->images_requested, g_hash_table_destroy);
 }
 
 static void headless_flush_layout(gpointer ud);
@@ -943,6 +984,12 @@ settle_raf_tick(gpointer user_data)
         s->pending_mutation = FALSE;
         s->last_flush_us = g_get_monotonic_time();
     }
+    if (g_headless_images_arrived && !s->pending_mutation &&
+        !g_headless_layout_dirty && *fc->layout) {
+        g_headless_images_arrived = FALSE;
+        if (fc->js) ns_js_fire_media_load_events(fc->js, *fc->layout);
+    }
+    headless_stream_images(fc);
     return G_SOURCE_CONTINUE;
 }
 
@@ -2233,6 +2280,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         if (css_cache)     g_hash_table_destroy(css_cache);
         if (js)            ns_js_free(js);
         if (doc)           ns_node_free(doc);
+        headless_stop_images(&flush_ctx);
         if (image_cache)   ns_image_cache_free(image_cache);
         if (video_cache)   ns_video_cache_free(video_cache);
         g_free(decoded);
@@ -2386,6 +2434,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (css_cache)     g_hash_table_destroy(css_cache);
     if (js)            ns_js_free(js);
     if (doc)           ns_node_free(doc);
+    headless_stop_images(&flush_ctx);
     if (image_cache)   ns_image_cache_free(image_cache);
     if (video_cache)   ns_video_cache_free(video_cache);
     ns_response_free(resp);
