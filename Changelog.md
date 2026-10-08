@@ -90,6 +90,18 @@ Changelog:
   following the shrunken radii, and blur softening the edge. They were a
   fixed 4px stroke along the border edge that ignored spread, so the
   common `inset 0 0 0 1px` focus or field ring came out 2px wide.
+* Form controls look and measure like Chrome's. A text input that is a
+  box of its own (`display: block`, `flex` or `inline-block`) no longer
+  applies its padding twice, so text starts at the content edge, and a
+  `display: flex` or `grid` input, select or textarea lays its text out
+  as a field rather than as a flex item stuck to the top (Twitch's
+  search placeholder). An unstyled text field draws Chrome's 1px
+  rounded frame instead of a 2px inset border. Checkboxes and radio
+  buttons are 13px widgets with Chrome's default margins and look - an
+  accent-filled box or ring and dot - independent of the font size, and
+  no longer drawn over a ballot-box glyph whose fallback font set the
+  width of the space next to it; `getBoundingClientRect()` reports
+  their 13x13 box.
 * `text-decoration: inherit` works, so Tailwind's preflight removes the
   underline from links (Yahoo's navigation and headlines were all
   underlined), and outlines follow `border-radius` like Chrome's (pill

@@ -701,6 +701,37 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
 }
 
 static gboolean
+box_paints_native_text_field(const ns_box *b)
+{
+    const ns_style *s = b ? b->style : NULL;
+    if (!s || b->kind != NS_BOX_BLOCK || !b->dom ||
+        b->dom->kind != NS_NODE_ELEMENT || !b->dom->name ||
+        strcmp(b->dom->name, "input") != 0)
+        return FALSE;
+    if (keyword_is(s->values[NS_CSS_APPEARANCE], "none")) return FALSE;
+    static const ns_css_prop side_styles[4] = {
+        NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+        NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
+    };
+    for (int i = 0; i < 4; i++)
+        if (!keyword_is(s->values[side_styles[i]], "inset")) return FALSE;
+    const double widths[4] = {
+        b->border.top, b->border.right, b->border.bottom, b->border.left,
+    };
+    for (int i = 0; i < 4; i++)
+        if (widths[i] != 2) return FALSE;
+    const char *type = ns_element_get_attr(b->dom, "type");
+    return !type || !*type ||
+        g_ascii_strcasecmp(type, "text") == 0 ||
+        g_ascii_strcasecmp(type, "search") == 0 ||
+        g_ascii_strcasecmp(type, "email") == 0 ||
+        g_ascii_strcasecmp(type, "url") == 0 ||
+        g_ascii_strcasecmp(type, "tel") == 0 ||
+        g_ascii_strcasecmp(type, "number") == 0 ||
+        g_ascii_strcasecmp(type, "password") == 0;
+}
+
+static gboolean
 style_side_visible(const ns_style *s, ns_css_prop wp, ns_css_prop sp)
 {
     if (!s) return FALSE;
@@ -1928,6 +1959,17 @@ paint_block(cairo_t *cr, const ns_box *b)
         rgba uniform_color = {0};
         gboolean drew_uniform = paint_border_image(cr, b, s, border_x, border_y,
                                                    border_w, border_h);
+        if (!drew_uniform && box_paints_native_text_field(b)) {
+            const ns_css_value *col = s->values[NS_CSS_BORDER_TOP_COLOR];
+            set_source_rgba(cr, rgba_of(col ? col : s->values[NS_CSS_COLOR],
+                                        0, 0, 0, 1));
+            cairo_set_line_width(cr, 1.0);
+            rounded_rect_path(cr, border_x + 0.5, border_y + 0.5,
+                              border_w - 1, border_h - 1,
+                              corner_radii_uniform(2));
+            cairo_stroke(cr);
+            drew_uniform = TRUE;
+        }
         if (!drew_uniform && !corner_radii_zero(radii) &&
             style_uniform_solid_border(s, &uniform_bw, &uniform_color)) {
             set_source_rgba(cr, uniform_color);
@@ -2993,6 +3035,20 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
 }
 
 static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
+
+static double
+layout_baseline_at_index(NsPangoLayout *layout, int index)
+{
+    double baseline = 0;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(iter);
+        baseline = (double)ns_pango_layout_iter_get_baseline(iter) / NS_PANGO_SCALE;
+        if (line && index < line->start_index + line->length) break;
+    } while (ns_pango_layout_iter_next_line(iter));
+    ns_pango_layout_iter_free(iter);
+    return baseline;
+}
 
 static gboolean
 inline_has_form_controls(const ns_box *b)
@@ -4379,11 +4435,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     }
 
     if (b->attrs) {
-        double font_size = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
         const ns_css_value *ac = s ? s->values[NS_CSS_ACCENT_COLOR] : NULL;
         rgba accent = rgba_of(
             (ac && ac->kind == NS_CSS_V_COLOR) ? ac : NULL,
-            0.13, 0.36, 0.80, 1);
+            0.0, 0.459, 1.0, 1);
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
             if (r->kind != NS_INLINE_CHECKBOX &&
@@ -4391,50 +4446,45 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 r->kind != NS_INLINE_RADIO &&
                 r->kind != NS_INLINE_RADIO_CHECKED)
                 continue;
-            NsPangoRectangle r0, r1;
+            NsPangoRectangle r0;
             ns_pango_layout_index_to_pos(layout, (int)r->start, &r0);
-            ns_pango_layout_index_to_pos(layout,
-                (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
-            double gx0 = text_x + (double)r0.x / NS_PANGO_SCALE;
-            double gy0 = y_origin + (double)r0.y / NS_PANGO_SCALE;
-            double gx1 = text_x + (double)(r1.x + r1.width) / NS_PANGO_SCALE;
-            double gy1 = y_origin + (double)(r0.y + r0.height) / NS_PANGO_SCALE;
-            if (gx1 < gx0) { double t = gx0; gx0 = gx1; gx1 = t; }
-            double side = font_size * 0.82;
-            if (r->box_w > 0 || r->box_h > 0) {
-                double bw = r->box_w > 0 ? r->box_w : r->box_h;
-                double bh = r->box_h > 0 ? r->box_h : r->box_w;
-                side = bw < bh ? bw : bh;
-            }
-            double bx = gx0 + ((gx1 - gx0) - side) / 2.0;
-            double by = gy0 + ((gy1 - gy0) - side) / 2.0;
+            double side, margins[4];
+            ns_inline_toggle_geometry(r, &side, margins);
+            double bx = text_x + (double)r0.x / NS_PANGO_SCALE + margins[3];
+            double by = y_origin +
+                layout_baseline_at_index(layout, (int)r->start) - side;
             gboolean radio = (r->kind == NS_INLINE_RADIO ||
                               r->kind == NS_INLINE_RADIO_CHECKED);
             gboolean checked = (r->kind == NS_INLINE_CHECKBOX_CHECKED ||
                                 r->kind == NS_INLINE_RADIO_CHECKED);
             cairo_save(cr);
             cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            corner_radii toggle_radii = corner_radii_uniform(side * 0.16);
             if (radio) {
                 cairo_new_sub_path(cr);
                 cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
-                          side / 2.0, 0, 2 * G_PI);
+                          side / 2.0 - 0.5, 0, 2 * G_PI);
             } else {
-                cairo_rectangle(cr, bx, by, side, side);
+                rounded_rect_path(cr, bx + 0.5, by + 0.5, side - 1, side - 1,
+                                  toggle_radii);
             }
             cairo_fill_preserve(cr);
-            cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
+            if (checked && radio)
+                cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
+            else
+                cairo_set_source_rgb(cr, 0.463, 0.463, 0.463);
             cairo_set_line_width(cr, 1.0);
             cairo_stroke(cr);
             if (checked) {
                 cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
                 if (radio) {
-                    double rdot = side * 0.30;
+                    double rdot = side * 0.31;
                     cairo_new_sub_path(cr);
                     cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
                               rdot, 0, 2 * G_PI);
                     cairo_fill(cr);
                 } else {
-                    cairo_rectangle(cr, bx, by, side, side);
+                    rounded_rect_path(cr, bx, by, side, side, toggle_radii);
                     cairo_fill(cr);
                     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
                     cairo_set_line_width(cr, side * 0.18);
@@ -4453,7 +4503,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         const ns_css_value *ac = s ? s->values[NS_CSS_ACCENT_COLOR] : NULL;
         rgba accent = rgba_of(
             (ac && ac->kind == NS_CSS_V_COLOR) ? ac : NULL,
-            0.13, 0.36, 0.80, 1);
+            0.0, 0.459, 1.0, 1);
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
             if (r->kind != NS_INLINE_PROGRESS &&
@@ -4781,6 +4831,29 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
     if (out_y) *out_y = u.y0 - b->y;
     if (out_w) *out_w = u.x1 - u.x0;
     if (out_h) *out_h = u.y1 - u.y0;
+    return TRUE;
+}
+
+gboolean
+ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
+                            double *out_x, double *out_y,
+                            double *out_w, double *out_h)
+{
+    double side, margins[4];
+    if (!ns_inline_toggle_geometry(r, &side, margins)) return FALSE;
+    double ex, ey, ew, eh;
+    if (!ns_paint_inline_range_extents(b, r->start, r->len, NULL,
+                                       &ex, &ey, &ew, &eh))
+        return FALSE;
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
+    double baseline = layout_baseline_at_index(layout, (int)r->start);
+    g_object_unref(layout);
+    *out_x = ex + margins[3];
+    *out_y = y_offset + baseline - side;
+    *out_w = side;
+    *out_h = side;
     return TRUE;
 }
 

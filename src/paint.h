@@ -87,6 +87,9 @@ gboolean ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
                                        const ns_inline_attr *element,
                                        double *out_x, double *out_y,
                                        double *out_w, double *out_h);
+gboolean ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
+                                     double *out_x, double *out_y,
+                                     double *out_w, double *out_h);
 gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     double rel_x, double rel_y,
                                     gsize *out_byte);
