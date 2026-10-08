@@ -3,6 +3,12 @@ Changelog:
 
 1.0.30:
 ======
+* A WebGPU canvas is copied back from the GPU only when the page has
+  drawn into it since the last paint, through a buffer kept for the
+  canvas, instead of a full new copy into a freshly allocated buffer on
+  every repaint of the page. `getCurrentTexture()` returns the same
+  texture until the canvas is next presented, as the specification
+  requires.
 * Mistakes in a page's WebGPU commands no longer abort the renderer. A
   command buffer that failed validation, for example because a shader
   did not compile, or one submitted a second time used to stop the
