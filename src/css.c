@@ -21626,6 +21626,7 @@ typedef struct ns_css_rule_index {
     GHashTable *by_attr;
     GArray     *universal;
     GArray     *root_only;
+    guint64     bloom[4];
 } ns_css_rule_index;
 
 static void ns_css_rule_index_free(ns_css_rule_index *idx);
@@ -21978,6 +21979,45 @@ index_add_by_is_arguments(ns_css_rule_index *idx, const ns_css_simple *subj,
     return TRUE;
 }
 
+static guint32
+index_key_hash(char kind, const char *key, gsize len, gboolean lower)
+{
+    guint32 h = 2166136261u ^ (guchar)kind;
+    h *= 16777619u;
+    for (gsize i = 0; i < len; i++) {
+        guchar c = (guchar)key[i];
+        if (lower && c >= 'A' && c <= 'Z') c = (guchar)(c + 32);
+        h ^= c;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void
+index_bloom_set(guint64 *bloom, guint32 h)
+{
+    bloom[(h & 255) >> 6] |= G_GUINT64_CONSTANT(1) << (h & 63);
+    bloom[((h >> 8) & 255) >> 6] |= G_GUINT64_CONSTANT(1) << ((h >> 8) & 63);
+}
+
+static gboolean
+index_bloom_may_contain(const guint64 *bloom, guint32 h)
+{
+    return (bloom[(h & 255) >> 6] & (G_GUINT64_CONSTANT(1) << (h & 63))) &&
+           (bloom[((h >> 8) & 255) >> 6] &
+            (G_GUINT64_CONSTANT(1) << ((h >> 8) & 63)));
+}
+
+static void
+index_bloom_fill(guint64 *bloom, GHashTable *table, char kind)
+{
+    GHashTableIter it;
+    gpointer k;
+    g_hash_table_iter_init(&it, table);
+    while (g_hash_table_iter_next(&it, &k, NULL))
+        index_bloom_set(bloom, index_key_hash(kind, k, strlen(k), FALSE));
+}
+
 static ns_css_rule_index *
 ns_css_rule_index_build(const ns_css_stylesheet *sheet)
 {
@@ -22056,6 +22096,10 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
         if (!had_matchable_selector) continue;
     }
     index_counts_free(&counts);
+    index_bloom_fill(idx->bloom, idx->by_id, '#');
+    index_bloom_fill(idx->bloom, idx->by_class, '.');
+    index_bloom_fill(idx->bloom, idx->by_tag, '%');
+    index_bloom_fill(idx->bloom, idx->by_attr, '[');
     return idx;
 }
 
@@ -26578,6 +26622,69 @@ typedef struct {
     GArray *pending_out;
 } gather_dest;
 
+#define CSS_ELEMENT_KEYS_MAX 48
+
+typedef struct {
+    char        kind;
+    const char *text;
+    gsize       len;
+    guint32     hash;
+} css_element_key;
+
+typedef struct {
+    const ns_node  *el;
+    guint64         pass;
+    guint           n;
+    gboolean        overflow;
+    css_element_key k[CSS_ELEMENT_KEYS_MAX];
+} css_element_keys;
+
+static __thread css_element_keys g_element_keys;
+static __thread guint64 g_element_keys_pass = 1;
+
+static void
+css_element_keys_add(css_element_keys *keys, char kind, const char *text,
+                     gsize len, gboolean lower)
+{
+    if (keys->n >= CSS_ELEMENT_KEYS_MAX) {
+        keys->overflow = TRUE;
+        return;
+    }
+    css_element_key *k = &keys->k[keys->n++];
+    k->kind = kind;
+    k->text = text;
+    k->len = len;
+    k->hash = index_key_hash(kind, text, len, lower);
+}
+
+static const css_element_keys *
+css_element_keys_for(const ns_node *el)
+{
+    css_element_keys *keys = &g_element_keys;
+    if (keys->el == el && keys->pass == g_element_keys_pass) return keys;
+    keys->el = el;
+    keys->pass = g_element_keys_pass;
+    keys->n = 0;
+    keys->overflow = FALSE;
+    const char *id = ns_element_get_attr(el, "id");
+    if (id && *id) css_element_keys_add(keys, '#', id, strlen(id), FALSE);
+    const char *cls = ns_element_get_attr(el, "class");
+    for (const char *p = cls; p && *p; ) {
+        while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' ||
+                      *p == '\f')) p++;
+        const char *tok = p;
+        while (*p && !(*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' ||
+                       *p == '\f')) p++;
+        if (p > tok) css_element_keys_add(keys, '.', tok, (gsize)(p - tok), FALSE);
+    }
+    if (el->name && *el->name)
+        css_element_keys_add(keys, '%', el->name, strlen(el->name), TRUE);
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        if (a->name && *a->name)
+            css_element_keys_add(keys, '[', a->name, strlen(a->name), TRUE);
+    return keys;
+}
+
 static void
 gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                      int sheet_index, const ns_node *el,
@@ -26613,42 +26720,25 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     } while (0)
 
     if (el && el->kind == NS_NODE_ELEMENT) {
-        const char *id = ns_element_get_attr(el, "id");
-        if (id && *id) {
-            GArray *bucket = g_hash_table_lookup(idx->by_id, id);
+        const css_element_keys *keys = css_element_keys_for(el);
+        for (guint ki = 0; ki < keys->n; ki++) {
+            const css_element_key *k = &keys->k[ki];
+            if (!keys->overflow && !index_bloom_may_contain(idx->bloom, k->hash))
+                continue;
+            GArray *bucket = NULL;
+            char small[64];
+            char *key = k->len < sizeof(small) ? small
+                                               : g_malloc(k->len + 1);
+            memcpy(key, k->text, k->len);
+            key[k->len] = '\0';
+            switch (k->kind) {
+            case '#': bucket = g_hash_table_lookup(idx->by_id, key); break;
+            case '.': bucket = g_hash_table_lookup(idx->by_class, key); break;
+            case '%': bucket = css_index_lookup_ci(idx->by_tag, key, k->len); break;
+            default:  bucket = css_index_lookup_ci(idx->by_attr, key, k->len); break;
+            }
+            if (key != small) g_free(key);
             CAND_PUSH_ARR(bucket);
-        }
-        const char *cls = ns_element_get_attr(el, "class");
-        if (cls && *cls) {
-            const char *s = cls;
-            while (*s) {
-                while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' || *s == '\f')) s++;
-                const char *tok = s;
-                while (*s && !(*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' || *s == '\f')) s++;
-                if (s == tok) break;
-                gsize tlen = (gsize)(s - tok);
-                char small[64];
-                char *key;
-                if (tlen < sizeof(small)) {
-                    memcpy(small, tok, tlen); small[tlen] = '\0'; key = small;
-                } else {
-                    key = g_strndup(tok, tlen);
-                }
-                GArray *bucket = g_hash_table_lookup(idx->by_class, key);
-                if (key != small) g_free(key);
-                CAND_PUSH_ARR(bucket);
-            }
-        }
-        if (el->name && *el->name) {
-            CAND_PUSH_ARR(css_index_lookup_ci(idx->by_tag, el->name,
-                                              strlen(el->name)));
-        }
-        if (idx->by_attr && g_hash_table_size(idx->by_attr) > 0) {
-            for (const ns_attr *a = el->attrs; a; a = a->next) {
-                if (!a->name) continue;
-                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_attr, a->name,
-                                                  strlen(a->name)));
-            }
         }
     }
     CAND_PUSH_ARR(idx->universal);
@@ -27120,7 +27210,9 @@ var_map_apply_registered(GHashTable *vars, const ns_var_map *parent,
     const char *value_text = resolved->text;
     ns_custom_prop_wide kind = custom_prop_wide_kind(value_text);
     char *expanded = NULL;
-    if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(")) {
+    gboolean typed = pr && pr->syntax && !ns_css_syntax_def_universal(pr->syntax);
+    if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(") &&
+        (typed || var_text_mentions_wide_keyword(resolved->text))) {
         ns_var_map scope = { .ref = 1, .own = vars,
                              .parent = (ns_var_map *)parent };
         expanded = substitute_vars_with(value_text, &scope, 0);
@@ -32873,6 +32965,7 @@ ns_css_compute(ns_node *doc,
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
     pending_parse_cache_trim();
+    g_element_keys_pass++;
     ns_css_selector_batch_begin();
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
