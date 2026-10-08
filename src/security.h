@@ -20,6 +20,8 @@ void ns_security_add_exec_dir(const char *dir);
 
 void ns_security_seccomp_init(void);
 
+void ns_security_seccomp_deny_unix_sockets(void);
+
 void ns_security_win32_mitigations_init(gboolean allow_child_processes);
 
 gboolean ns_security_csprng_fill(void *buf, gsize len);

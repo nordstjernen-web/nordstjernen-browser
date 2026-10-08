@@ -40,6 +40,7 @@
 #include "video.h"
 #include "camera.h"
 #include "webgl.h"
+#include "glctx.h"
 
 #define NS_IMAGE_RELAYOUT_BATCH 8
 
@@ -1097,6 +1098,9 @@ ns_browser_sandbox(const char *self_exe)
 {
     ns_security_win32_mitigations_init(FALSE);
     ns_security_sandbox_init(self_exe);
+    if (ns_config_get()->webgl_enabled)
+        ns_gl_prepare_for_sandbox();
+    ns_security_seccomp_deny_unix_sockets();
     ns_security_seccomp_init();
 }
 

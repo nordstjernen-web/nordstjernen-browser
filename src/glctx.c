@@ -340,6 +340,14 @@ ns_gl_context_destroy(ns_gl_context *c)
     g_free(c);
 }
 
+void
+ns_gl_prepare_for_sandbox(void)
+{
+    const char *exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+    if (!exts || !strstr(exts, "EGL_MESA_platform_surfaceless"))
+        (void)ns_gl_shared_display();
+}
+
 #elif defined(NS_ENABLE_WEBGL)
 
 ns_gl_context *ns_gl_context_create(void) { return NULL; }
@@ -348,3 +356,10 @@ void ns_gl_context_release(ns_gl_context *c) { (void)c; }
 void ns_gl_context_destroy(ns_gl_context *c) { (void)c; }
 
 #endif /* NS_ENABLE_WEBGL */
+
+#if !defined(NS_ENABLE_WEBGL) || !defined(NS_HAVE_EGL)
+void
+ns_gl_prepare_for_sandbox(void)
+{
+}
+#endif
