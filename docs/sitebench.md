@@ -29,6 +29,18 @@ reused (`CHROME=1` re-captures it); each run captures Nordstjernen under
 Comparing two Nordstjernen builds, say before and after a change:
 
 ```sh
+scripts/sitebench/ab.sh /path/to/old/builddir/src/gtk/nordstjernen \
+                        builddir/src/gtk/nordstjernen
+```
+
+`ab.sh` loads each site in Chrome and then in both builds before moving
+on, so all three see the live page within a few minutes of each other;
+capturing one build after the other an hour apart lets the sites' own
+changes (a new top story, a different ad) show up as differences between
+the builds. It writes to `sitebench-out/ab/` and resumes where it
+stopped when run again. With `run.sh` the same comparison is
+
+```sh
 NS_BIN=/path/to/old/builddir/src/gtk/nordstjernen LABEL=before scripts/sitebench/run.sh
 LABEL=after LABELS=before,after scripts/sitebench/run.sh
 ```
@@ -76,7 +88,9 @@ their geometry, font size, weight, family and colours.
   wait, process CPU time and peak RSS;
 - one settled load (`--settle-ms=2000 --time-ms=1000`) for the
   screenshots, the probe, main-thread CPU over the whole load, and the JS
-  errors reported on stderr.
+  errors reported on stderr. As in the browser window, images are fetched
+  while the page settles, as each new layout asks for them, and their
+  `load` events fire as they arrive.
 
 **Scores** (`compare.py`):
 
