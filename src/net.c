@@ -2370,8 +2370,12 @@ ns_net_apply_curl_tls(void *curl_handle)
         }
     }
 #endif
-    if (g_ca_bundle)
+    if (g_ca_bundle) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, g_ca_bundle);
+#ifndef G_OS_WIN32
+        curl_easy_setopt(curl, CURLOPT_CAPATH, NULL);
+#endif
+    }
 #ifdef G_OS_WIN32
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
@@ -5457,12 +5461,20 @@ static const char *const ns_style_accept_headers[] = {
     NULL
 };
 
-static const char *const ns_image_accept_headers[] = {
 #ifdef NS_HAVE_JXL
-    "Accept: image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#define NS_ACCEPT_JXL "image/jxl,"
 #else
-    "Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+#define NS_ACCEPT_JXL ""
 #endif
+#ifdef NS_HAVE_AVIF
+#define NS_ACCEPT_AVIF "image/avif,"
+#else
+#define NS_ACCEPT_AVIF ""
+#endif
+
+static const char *const ns_image_accept_headers[] = {
+    "Accept: " NS_ACCEPT_JXL NS_ACCEPT_AVIF
+    "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "X-ND-Fetch-Dest: image",
     NULL
 };
@@ -6307,7 +6319,7 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx);
 }
 
-#define NS_PRELOAD_MAX_ENTRIES 64
+#define NS_PRELOAD_MAX_ENTRIES 512
 #define NS_PRELOAD_MAX_BYTES   (16u * 1024u * 1024u)
 #define NS_FETCH_JOIN_MAX_WAIT_S (NS_MAX_TIMEOUT_S + 5)
 
@@ -6402,6 +6414,21 @@ ns_preload_store_locked(const char *key, const ns_response *resp)
     if (g_hash_table_contains(g_preload_store, key)) return;
     g_preload_bytes += resp->body->len;
     g_hash_table_insert(g_preload_store, g_strdup(key), ns_response_copy(resp));
+}
+
+void
+ns_net_preload_keep(const char *key, const ns_response *resp)
+{
+    if (!key || !resp) return;
+    g_mutex_lock(&g_fetch_mutex);
+    if (!g_preload_store || !g_hash_table_contains(g_preload_store, key)) {
+        if (!g_preload_expected)
+            g_preload_expected = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, NULL);
+        g_hash_table_add(g_preload_expected, g_strdup(key));
+        ns_preload_store_locked(key, resp);
+    }
+    g_mutex_unlock(&g_fetch_mutex);
 }
 
 typedef enum {

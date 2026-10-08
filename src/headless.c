@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -39,6 +40,98 @@
 #include "wpt_hook.h"
 
 static char *g_headless_doc_charset;
+
+typedef struct headless_timing {
+    gint64 start_us;
+    gint64 start_cpu_us;
+    gint64 fetch_us;
+    gint64 parse_us;
+    gint64 style_us;
+    gint64 script_us;
+    gint64 settle_us;
+    gint64 images_us;
+    gint64 paint_us;
+    gint64 encode_us;
+    gint64 first_render_us;
+    gint64 first_render_cpu_us;
+    gint64 first_paint_us;
+    gint64 first_paint_cpu_us;
+    int    hops;
+    int    status;
+    guint  nodes;
+} headless_timing;
+
+static headless_timing g_timing;
+
+static gint64
+headless_thread_cpu_us(void)
+{
+#ifdef CLOCK_THREAD_CPUTIME_ID
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
+        return (gint64)ts.tv_sec * G_USEC_PER_SEC + ts.tv_nsec / 1000;
+#endif
+    return 0;
+}
+
+static guint
+headless_count_elements(const ns_node *n)
+{
+    guint count = 0;
+    for (const ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling)
+        count += (c->kind == NS_NODE_ELEMENT) + headless_count_elements(c);
+    return count;
+}
+
+static void
+headless_time_first_paint(const ns_box *layout, int width, int height)
+{
+    if (!layout || width <= 0 || height <= 0) return;
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t *cr = cairo_create(surf);
+    ns_paint(cr, layout, NULL);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surf);
+    g_timing.first_paint_us =
+        g_get_monotonic_time() - g_timing.start_us - g_timing.settle_us;
+    g_timing.first_paint_cpu_us =
+        headless_thread_cpu_us() - g_timing.start_cpu_us;
+}
+
+static void
+headless_print_timing(void)
+{
+    gint64 total = g_get_monotonic_time() - g_timing.start_us;
+    gint64 cpu = headless_thread_cpu_us() - g_timing.start_cpu_us;
+    guint64 relayouts = 0, net_waits = 0;
+    double relayout_ms = 0, net_wait_ms = 0;
+    ns_engine_layout_perf(&relayouts, &relayout_ms);
+    ns_engine_blocking_perf(&net_waits, &net_wait_ms);
+    fprintf(stdout,
+            "timing: {\"total_ms\":%.1f,\"busy_ms\":%.1f,\"cpu_ms\":%.1f,"
+            "\"first_paint_ms\":%.1f,\"first_paint_cpu_ms\":%.1f,"
+            "\"first_render_ms\":%.1f,\"first_render_cpu_ms\":%.1f,"
+            "\"fetch_ms\":%.1f,\"parse_ms\":%.1f,\"style_ms\":%.1f,"
+            "\"script_ms\":%.1f,\"images_ms\":%.1f,\"paint_ms\":%.1f,"
+            "\"encode_ms\":%.1f,"
+            "\"settle_ms\":%.1f,\"relayouts\":%" G_GUINT64_FORMAT ","
+            "\"relayout_ms\":%.1f,\"net_waits\":%" G_GUINT64_FORMAT ","
+            "\"net_wait_ms\":%.1f,\"hops\":%d,\"status\":%d,"
+            "\"nodes\":%u}\n",
+            total / 1000.0, (total - g_timing.settle_us) / 1000.0, cpu / 1000.0,
+            g_timing.first_paint_us / 1000.0,
+            g_timing.first_paint_cpu_us / 1000.0,
+            g_timing.first_render_us / 1000.0,
+            g_timing.first_render_cpu_us / 1000.0,
+            g_timing.fetch_us / 1000.0, g_timing.parse_us / 1000.0,
+            g_timing.style_us / 1000.0, g_timing.script_us / 1000.0,
+            g_timing.images_us / 1000.0, g_timing.paint_us / 1000.0,
+            g_timing.encode_us / 1000.0,
+            g_timing.settle_us / 1000.0, relayouts, relayout_ms, net_waits,
+            net_wait_ms, g_timing.hops, g_timing.status, g_timing.nodes);
+    fflush(stdout);
+}
 
 static gboolean
 settle_quit_cb(gpointer user_data)
@@ -193,6 +286,7 @@ headless_js_log(const char *line, gpointer user_data)
 
 static gboolean g_headless_layout_dirty;
 static gboolean g_headless_styles_stale;
+static gboolean g_headless_images_arrived;
 
 static void
 headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
@@ -633,7 +727,7 @@ static gboolean
 ns_headless_renderer_capable(const ns_headless_opts *opts)
 {
     if (g_getenv("NS_HEADLESS_LEGACY")) return FALSE;
-    if (opts->wpt) return FALSE;
+    if (opts->wpt || opts->timing) return FALSE;
     if (opts->inspect && *opts->inspect) return FALSE;
     if (opts->inspect_at && *opts->inspect_at) return FALSE;
     if (opts->dump == NS_DUMP_PNG || opts->dump == NS_DUMP_PDF ||
@@ -658,10 +752,15 @@ ns_headless_run(const ns_headless_opts *opts)
     if (opts->debug_levels)
         dlog_sub = ns_debug_log_subscribe(headless_dlog_listener,
                                           GUINT_TO_POINTER(opts->debug_levels));
-    int rc = ns_headless_renderer_capable(opts)
+    memset(&g_timing, 0, sizeof g_timing);
+    g_timing.start_us = g_get_monotonic_time();
+    g_timing.start_cpu_us = headless_thread_cpu_us();
+    gboolean via_renderer = ns_headless_renderer_capable(opts);
+    int rc = via_renderer
              ? ns_headless_run_via_renderer(opts)
              : ns_headless_run_one(opts, opts->url, 0, NULL,
                                    NULL, 0, NULL);
+    if (opts->timing) headless_print_timing();
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
@@ -730,6 +829,12 @@ typedef struct headless_flush_ctx {
     gsize              caret;
     gsize              anchor;
     gboolean           relaying;
+    GHashTable        *retired_styles;
+    guint64            styles_serial;
+    guint64            layout_serial;
+    guint64            images_scanned_serial;
+    GHashTable        *images_requested;
+    GPtrArray         *image_sessions;
 } headless_flush_ctx;
 
 static const ns_node *
@@ -751,6 +856,7 @@ headless_relayout(headless_flush_ctx *c)
     if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
     if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
+    g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
     if (c->js && *c->styles) ns_js_set_style_table(c->js, NULL);
     if (*c->styles) { g_hash_table_destroy(*c->styles); *c->styles = NULL; }
 
@@ -759,6 +865,75 @@ headless_relayout(headless_flush_ctx *c)
                                     c->css_cache, headless_focus(c), NULL,
                                     c->caret, c->anchor, c->layout);
     c->relaying = FALSE;
+    c->layout_serial++;
+    c->styles_serial = c->js ? ns_js_mutation_serial(c->js) : 0;
+}
+
+static void
+headless_image_arrived(gpointer user_data)
+{
+    (void)user_data;
+    g_headless_layout_dirty = TRUE;
+    g_headless_images_arrived = TRUE;
+}
+
+static void
+headless_stream_images(headless_flush_ctx *c)
+{
+    if (!c->image_cache || !*c->layout ||
+        c->images_scanned_serial == c->layout_serial)
+        return;
+    c->images_scanned_serial = c->layout_serial;
+    if (!c->images_requested)
+        c->images_requested = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                    g_free, NULL);
+    if (!c->image_sessions)
+        c->image_sessions = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)ns_engine_img_session_close);
+    ns_engine_img_session *session =
+        ns_engine_fetch_images_start(*c->layout, c->base, c->image_cache,
+                                     c->images_requested, 0.0, c->vh, NULL,
+                                     headless_image_arrived, c);
+    if (session) g_ptr_array_add(c->image_sessions, session);
+}
+
+static void
+headless_stop_images(headless_flush_ctx *c)
+{
+    g_clear_pointer(&c->image_sessions, g_ptr_array_unref);
+    g_clear_pointer(&c->images_requested, g_hash_table_destroy);
+}
+
+static void headless_flush_layout(gpointer ud);
+
+static void
+headless_flush_style(gpointer ud)
+{
+    headless_flush_ctx *c = ud;
+    if (!c || !c->js || c->relaying) return;
+    if (!*c->layout || !*c->styles) {
+        headless_flush_layout(ud);
+        return;
+    }
+    if (ns_js_consume_mutated(c->js)) g_headless_layout_dirty = TRUE;
+    if (!g_headless_styles_stale &&
+        c->styles_serial == ns_js_mutation_serial(c->js))
+        return;
+    g_headless_styles_stale = FALSE;
+    g_headless_layout_dirty = TRUE;
+    c->relaying = TRUE;
+    GHashTable *fresh = ns_engine_restyle(c->doc, c->base, c->vw, c->vh,
+                                          c->image_cache, c->anim, c->js,
+                                          c->css_cache, headless_focus(c),
+                                          NULL);
+    c->relaying = FALSE;
+    if (!fresh) return;
+    if (c->retired_styles)
+        g_hash_table_destroy(*c->styles);
+    else
+        c->retired_styles = *c->styles;
+    *c->styles = fresh;
+    c->styles_serial = ns_js_mutation_serial(c->js);
 }
 
 static void
@@ -781,36 +956,64 @@ typedef struct {
     gboolean            pending_mutation;
 } settle_state;
 
-static gboolean
-settle_raf_tick(gpointer user_data)
+static void
+settle_tick_media(headless_flush_ctx *fc, gint64 now)
 {
-    settle_state *s = user_data;
-    headless_flush_ctx *fc = s->fc;
-    gint64 now = g_get_monotonic_time();
     if (fc->image_cache) ns_image_cache_tick(fc->image_cache, now);
     if (fc->video_cache) {
         if (*fc->layout)
             ns_video_cache_discover(fc->video_cache, *fc->layout, fc->doc, now);
         ns_video_cache_tick(fc->video_cache, now);
     }
+}
+
+static gboolean
+settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
+{
     if (fc->anim && ns_anim_tick(fc->anim, now)) {
         g_headless_styles_stale = TRUE;
         if (ns_anim_needs_layout(fc->anim)) g_headless_layout_dirty = TRUE;
     }
     if (fc->anim && fc->js) ns_js_dispatch_anim_events(fc->js, fc->anim);
     if (fc->js) ns_js_run_animation_frame(fc->js);
-    if (fc->js && ns_js_consume_mutated(fc->js)) {
-        s->pending_mutation = TRUE;
-        g_headless_styles_stale = TRUE;
-    }
+    if (!fc->js || !ns_js_consume_mutated(fc->js)) return FALSE;
+    g_headless_styles_stale = TRUE;
+    return TRUE;
+}
+
+static void
+settle_tick_flush(settle_state *s, gint64 now)
+{
     if (g_headless_layout_dirty) s->pending_mutation = TRUE;
-    if (s->pending_mutation && now - s->last_flush_us >= 200000) {
-        g_headless_layout_dirty = FALSE;
-        g_headless_styles_stale = FALSE;
-        headless_relayout(fc);
-        s->pending_mutation = FALSE;
-        s->last_flush_us = g_get_monotonic_time();
-    }
+    if (!s->pending_mutation || now - s->last_flush_us < 200000) return;
+    g_headless_layout_dirty = FALSE;
+    g_headless_styles_stale = FALSE;
+    headless_relayout(s->fc);
+    s->pending_mutation = FALSE;
+    s->last_flush_us = g_get_monotonic_time();
+}
+
+static void
+settle_tick_media_loads(settle_state *s)
+{
+    headless_flush_ctx *fc = s->fc;
+    if (!g_headless_images_arrived || s->pending_mutation ||
+        g_headless_layout_dirty || !*fc->layout)
+        return;
+    g_headless_images_arrived = FALSE;
+    if (fc->js) ns_js_fire_media_load_events(fc->js, *fc->layout);
+}
+
+static gboolean
+settle_raf_tick(gpointer user_data)
+{
+    settle_state *s = user_data;
+    gint64 now = g_get_monotonic_time();
+    settle_tick_media(s->fc, now);
+    if (settle_tick_scripts(s->fc, now)) s->pending_mutation = TRUE;
+    settle_tick_flush(s, now);
+    settle_tick_media_loads(s);
+    headless_stream_images(s->fc);
     return G_SOURCE_CONTINUE;
 }
 
@@ -818,6 +1021,7 @@ static void
 settle_main_loop(int ms, headless_flush_ctx *fc)
 {
     if (ms <= 0 || !fc) return;
+    gint64 started = g_get_monotonic_time();
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     g_timeout_add(ms, settle_quit_cb, loop);
     settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
@@ -825,6 +1029,7 @@ settle_main_loop(int ms, headless_flush_ctx *fc)
     g_main_loop_run(loop);
     g_source_remove(raf_id);
     g_main_loop_unref(loop);
+    g_timing.settle_us += g_get_monotonic_time() - started;
 }
 
 static const char *const ns_wpt_poll_js =
@@ -1860,10 +2065,14 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                     gsize post_len, const char *post_ct)
 {
     GError *err = NULL;
+    gint64 phase_t0 = g_get_monotonic_time();
     ns_response *resp = post_body
         ? ns_engine_navigate_post_blocking(fetch_url, top_url, post_body,
                                            post_len, post_ct, hop == 0, &err)
         : ns_engine_navigate_blocking(fetch_url, top_url, hop == 0, &err);
+    g_timing.fetch_us += g_get_monotonic_time() - phase_t0;
+    g_timing.hops++;
+    g_timing.status = resp ? (int)resp->status : 0;
     if (!resp) {
         const char *emsg = err ? err->message : "unknown error";
         fprintf(stderr, "headless: fetch failed: %s\n", emsg);
@@ -1960,6 +2169,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         }
     }
 
+    phase_t0 = g_get_monotonic_time();
     const char *raw = resp->body ? (const char *)resp->body->data : "";
     gsize raw_len = resp->body ? resp->body->len : 0;
     g_free(g_headless_doc_charset);
@@ -1976,6 +2186,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                                        decoded ? (gssize)strlen(decoded) : 0,
                                        FALSE);
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
+    g_timing.parse_us += g_get_monotonic_time() - phase_t0;
 
     ns_print_setup_default(&g_headless_print_setup);
     ns_css_set_print_media(opts->dump == NS_DUMP_PRINT);
@@ -1989,6 +2200,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         vh = ps->height - ps->margin_top - ps->margin_bottom;
     }
     ns_css_set_viewport((double)vw, vh);
+    if (parse_cfg && parse_cfg->speculative_preload)
+        ns_engine_speculative_preload(doc, page_url, FALSE);
     const char *frag = opts->url ? strchr(opts->url, '#') : NULL;
     const char *target_frag = frag && *(frag + 1) ? frag + 1 : NULL;
     ns_css_set_target_fragment(target_frag);
@@ -1997,11 +2210,13 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     GHashTable *css_cache =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                               (GDestroyNotify)g_bytes_unref);
+    phase_t0 = g_get_monotonic_time();
     GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache, NULL);
 
     ns_anim *anim = ns_anim_new();
     ns_engine_load_keyframes(anim, doc, page_url, css_cache);
     ns_engine_anim_observe(anim, styles, g_get_monotonic_time());
+    g_timing.style_us += g_get_monotonic_time() - phase_t0;
 
     headless_nav_capture nav_cap = {0};
     ns_js_navigation_timing navigation_timing = {
@@ -2036,6 +2251,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_image_cache(js, image_cache);
         ns_js_set_anim(js, anim);
         ns_js_set_layout_flush_cb(js, headless_flush_layout, &flush_ctx);
+        if (!g_getenv("NS_NO_STYLE_FLUSH"))
+            ns_js_set_style_flush_cb(js, headless_flush_style);
         ns_js_set_mse_cb(js, headless_mse_data, video_cache);
         ns_js_set_mse_buffered_cb(js, headless_mse_buffered, video_cache);
         ns_js_set_mse_remove_cb(js, headless_mse_remove, video_cache);
@@ -2043,8 +2260,11 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
-        if (scripting_on)
+        if (scripting_on) {
+            phase_t0 = g_get_monotonic_time();
             ns_js_run_scripts_in_doc(js, doc, resp->final_url);
+            g_timing.script_us += g_get_monotonic_time() - phase_t0;
+        }
     }
 
     if (opts->settle_ms > 0) settle_main_loop(opts->settle_ms, &flush_ctx);
@@ -2074,14 +2294,17 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         g_free(nav_cap.pending_url);
         nav_cap.pending_url = NULL;
         if (js)            ns_js_set_layout_flush_cb(js, NULL, NULL);
+        if (js)            ns_js_set_style_flush_cb(js, NULL);
         if (js)            ns_js_set_layout_root(js, NULL);
         if (js)            ns_js_set_style_table(js, NULL);
         if (anim)          ns_anim_free(anim);
         if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
         if (styles)        g_hash_table_destroy(styles);
+        g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
         if (css_cache)     g_hash_table_destroy(css_cache);
         if (js)            ns_js_free(js);
         if (doc)           ns_node_free(doc);
+        headless_stop_images(&flush_ctx);
         if (image_cache)   ns_image_cache_free(image_cache);
         if (video_cache)   ns_video_cache_free(video_cache);
         g_free(decoded);
@@ -2100,6 +2323,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     }
 
     headless_relayout(&flush_ctx);
+    if (opts->timing) headless_time_first_paint(layout, vw, (int)vh);
     if (js && opts->settle_ms > 0) {
         settle_main_loop(opts->settle_ms, &flush_ctx);
         headless_relayout(&flush_ctx);
@@ -2144,8 +2368,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     case NS_DUMP_PRINT: {
         const char *base = resp->final_url ? resp->final_url : opts->url;
         if (!image_cache) image_cache = ns_image_cache_new();
+        phase_t0 = g_get_monotonic_time();
         ns_engine_fetch_images(layout, base, image_cache);
         headless_relayout(&flush_ctx);
+        g_timing.images_us += g_get_monotonic_time() - phase_t0;
         if (opts->dump == NS_DUMP_PRINT) {
             ns_print_setup_apply_page_rule(&g_headless_print_setup,
                                            ns_render_page_rule());
@@ -2167,7 +2393,19 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_anim_tick(anim, 0);
         ns_paint_set_anim(anim);
         char *initial_path = ns_engine_suffix_before_ext(opts->out_path, "-initial");
+        phase_t0 = g_get_monotonic_time();
+        gint64 encode_before_us = (gint64)(ns_engine_encode_ms() * 1000.0);
         rc = write_capture(layout, initial_path, opts->dump);
+        gint64 encode_us =
+            (gint64)(ns_engine_encode_ms() * 1000.0) - encode_before_us;
+        gint64 painted = g_get_monotonic_time() - encode_us;
+        g_timing.paint_us += painted - phase_t0;
+        g_timing.encode_us += encode_us;
+        g_timing.first_render_us = painted - g_timing.start_us -
+                                   g_timing.settle_us;
+        g_timing.first_render_cpu_us = headless_thread_cpu_us() -
+                                       g_timing.start_cpu_us - encode_us;
+        g_timing.nodes = headless_count_elements(doc);
         fprintf(stderr, "[headless] initial render -> %s\n", initial_path);
         g_free(initial_path);
 
@@ -2217,9 +2455,11 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (js)            ns_js_set_style_table(js, NULL);
     if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
     if (styles)        g_hash_table_destroy(styles);
+    g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
     if (css_cache)     g_hash_table_destroy(css_cache);
     if (js)            ns_js_free(js);
     if (doc)           ns_node_free(doc);
+    headless_stop_images(&flush_ctx);
     if (image_cache)   ns_image_cache_free(image_cache);
     if (video_cache)   ns_video_cache_free(video_cache);
     ns_response_free(resp);

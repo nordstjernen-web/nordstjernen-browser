@@ -64,6 +64,7 @@
 #define NS_PANGO_DIRECTION_NEUTRAL                        PANGO_DIRECTION_NEUTRAL
 #define NS_PANGO_DIRECTION_RTL                            PANGO_DIRECTION_RTL
 #define NS_PANGO_ELLIPSIZE_END                            PANGO_ELLIPSIZE_END
+#define NS_PANGO_ELLIPSIZE_NONE                           PANGO_ELLIPSIZE_NONE
 #define ns_pango_extents_to_pixels                        pango_extents_to_pixels
 #define ns_pango_family                                   pango_family
 #define NS_PANGO_FC_FONT_MAP                              PANGO_FC_FONT_MAP

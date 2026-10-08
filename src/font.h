@@ -19,6 +19,7 @@ gboolean ns_font_available(void);
 
 
 gboolean ns_font_family_loaded(const char *family);
+char    *ns_font_metric_alias(const char *family);
 gboolean ns_font_family_is_emoji(const char *family);
 char    *ns_font_family_for_text(const char *family);
 guint    ns_font_generation(void);

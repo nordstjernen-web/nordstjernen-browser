@@ -39,6 +39,7 @@ void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                                    GHashTable *css_cache);
 
 char *ns_engine_linked_css_text(const char *url);
+gboolean ns_engine_linked_css_known(const char *url);
 
 /* Resource timing of the stylesheets the engine fetched for a page, held
  * until that page's JavaScript takes them for its performance timeline. */
@@ -56,10 +57,16 @@ GPtrArray *ns_engine_take_resource_timings(const char *top_url);
 
 void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
+void ns_engine_preload_script(const char *url, const char *top_url);
 
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                                       GHashTable *css_cache, ns_anim *anim);
 
+GHashTable *ns_engine_restyle(ns_node *doc, const char *base_url,
+                              int viewport_width, double viewport_height,
+                              ns_image_cache *images, ns_anim *anim,
+                              ns_js *js, GHashTable *css_cache,
+                              const ns_node *focused, const ns_node *hover);
 GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                int viewport_width, double viewport_height,
                                ns_image_cache *images, ns_anim *anim,
@@ -69,6 +76,8 @@ GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                gsize sel_anchor_byte, ns_box **out_layout);
 
 void ns_engine_layout_perf(guint64 *relayouts, double *total_ms);
+void ns_engine_blocking_perf(guint64 *waits, double *total_ms);
+double ns_engine_encode_ms(void);
 
 void ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
                               GHashTable *css_cache);

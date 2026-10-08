@@ -194,14 +194,18 @@ intl_opt_bool(JSContext *ctx, JSValueConst o, const char *key, int dflt)
 static JSValue
 intl_instance_proto(JSContext *ctx, JSValueConst this_val, const char *service)
 {
-    JSValue p = JS_GetPropertyStr(ctx, this_val, "prototype");
-    if (JS_IsObject(p)) return p;
-    JS_FreeValue(ctx, p);
-    JSValue ctor = JS_GetPropertyStr(ctx, this_val, service);
-    p = JS_GetPropertyStr(ctx, ctor, "prototype");
-    JS_FreeValue(ctx, ctor);
-    if (JS_IsObject(p)) return p;
-    JS_FreeValue(ctx, p);
+    JSValue p, ctor;
+    if (JS_IsObject(this_val)) {
+        p = JS_GetPropertyStr(ctx, this_val, "prototype");
+        if (JS_IsObject(p)) return p;
+        JS_FreeValue(ctx, p);
+        ctor = JS_GetPropertyStr(ctx, this_val, service);
+        p = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
+                              : JS_UNDEFINED;
+        JS_FreeValue(ctx, ctor);
+        if (JS_IsObject(p)) return p;
+        JS_FreeValue(ctx, p);
+    }
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue intl = JS_GetPropertyStr(ctx, global, "Intl");
     JS_FreeValue(ctx, global);

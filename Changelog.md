@@ -45,6 +45,248 @@ Changelog:
   height and the text after the element stays in place, as in other
   browsers. For example `<span style="position: relative; top: -10px">`
   is drawn 10px above the line.
+* A site benchmark compares Nordstjernen with Chrome on sixty of the most
+  visited sites (`scripts/sitebench/`, see `docs/sitebench.md`). It
+  captures each site in headless Chrome and in Nordstjernen, scores
+  visual parity from screenshots, component placement and text, and
+  compares first paint with Chrome's First Contentful Paint, main-thread
+  CPU and peak memory, writing an HTML and Markdown report with
+  side-by-side shots and filmstrips. Sites that show headless Chrome a
+  bot challenge are reported but kept out of the averages.
+  `nordstjernen --headless --timing` now prints per-phase timings
+  (fetch, parse, style, script, layout, images, paint) and the time of
+  the first painted frame.
+* Restyling after a DOM change touches only what the change can affect.
+  A class, id or attribute change used to restyle the changed element's
+  whole subtree whenever any selector named it in an ancestor position,
+  so toggling a theme class on `<body>` recomputed every style on the
+  page; inserting a child under a parent that `:first-child`-style
+  selectors watch did the same. Changes now follow Chrome's
+  invalidation sets: only descendants matching the affected selectors'
+  subjects are restyled, an element whose computed style comes out
+  unchanged leaves its subtree alone, and an insertion restyles the
+  parent's children rather than its subtree. `:has()` rules without an
+  ancestor key no longer switch incremental restyling off for the page.
+* An incremental restyle no longer crashes when an element marked for
+  restyling is freed before the next style pass. The marked set kept
+  the freed pointer and the pass walked its ancestors; a page that
+  replaced marked elements while a blocking script was still loading
+  (Yahoo Japan) crashed about one load in three. Freed nodes now leave
+  every restyle set.
+* A full restyle costs half as much on design-system-heavy pages. Rules
+  whose subject is `:root` or an `:is()`/`:where()` of keyed selectors
+  are indexed instead of being tried against every element, stylesheets
+  whose keys cannot match an element are skipped, `var()`-substituted
+  declarations are parsed once per pass, identical custom-property maps
+  are shared instead of chained as deep as the DOM, and custom-property
+  values are no longer expanded just to check for CSS-wide keywords. A
+  full restyle of GitHub's front page drops from 230 to about 110 ms and
+  Stack Overflow's from 108 to 56 ms.
+* A `:has()` rule no longer makes every DOM change restyle the whole
+  page. Stack Overflow's `html:has(.disable-document-scroll)` made each
+  inserted node - including every node the parser hands back after a
+  script - mark the entire document dirty, and CNN's 600 `:has()` rules
+  did the same to whole page sections. Like Chrome, a mutation now
+  invalidates a `:has()` anchor only when it touches an element carrying
+  a class, id, tag or attribute named in that anchor's own `:has()`
+  argument (arguments with sibling combinators, structural
+  pseudo-classes or unkeyed compounds stay conservative), and only what
+  the rule can reach is restyled: the anchor itself when it is the
+  rule's subject, the descendants matching the subject's key when only
+  descendant combinators follow it, and its following siblings only
+  when sibling combinators do. Anchors are looked up by key instead of
+  being tested one by one against every ancestor of every change.
+  Removing an element between `.a` and `.b` now re-matches
+  `.a:has(+ .b)`. A script that inserts nodes and reads a computed style
+  200 times under such a rule went from 4.2 s to about 0.7 s; on CNN's
+  front page script time drops from 14 to 9 s and first paint from
+  15.6 to 10.6 s.
+* Changing an element's style no longer restyles everything inside it.
+  When an element's computed style changed, every descendant was
+  recomputed even if only a non-inherited property such as `padding`
+  changed. Now, like Chrome, children are recomputed only when an
+  inherited property, `display`, a custom property, or a property a
+  child explicitly `inherit`s changed, and the check repeats one level
+  down, stopping wherever a child's style comes out the same. An inline
+  `style` change marks only its element unless a selector tests
+  `[style]` outside its subject. A script that sets `body.style` and
+  reads `offsetHeight` spends 6-7 ms on styles instead of 110 ms on
+  CNN's and GitHub's front pages.
+* A style flush after a small DOM change costs a fraction of what it did.
+  Subtrees with nothing dirty in them are no longer walked element by
+  element - their previous styles are carried over in one pass - the
+  table of previous styles is updated in place instead of being copied,
+  the stylesheet scan skips elements that cannot be a `<style>`,
+  `<link>` or frame, pages without `@font-face` skip the font-usage walk,
+  and the animation check is cached per style. Together with the `:has()`
+  change, 200 insert-and-`getComputedStyle()` cycles on a 3,000-element
+  page drop from 4.2 s to about 0.23 s.
+* `getComputedStyle()` lays the page out only when it has to. Reading a
+  property whose value does not depend on layout (colour, display,
+  fonts and most others) now recomputes styles alone, so a script that
+  toggles a class and reads a computed colour in a loop runs about five
+  times faster; width, height, margins, paddings, insets, transforms and
+  grid tracks still trigger layout as in other browsers.
+* Scripts inserted by other scripts are fetched in parallel and run when
+  they arrive, instead of being fetched one after another and run
+  inline; component stylesheets are no longer re-parsed on every
+  relayout, CSSOM rule insertion is batched, CSS property names are
+  looked up in a hash table, libcurl keeps the CA store between
+  connections, and font-family and `lang`/`dir` lookups are memoised per
+  pass. BBC's front page loads in 3.3 s instead of 25 s.
+* Fonts resolve the way Chrome resolves them on Linux and Windows:
+  generic `serif` and `sans-serif` map to Times New Roman and Arial (or
+  their metric-compatible Liberation equivalents), so text wraps at the
+  same widths as in Chrome.
+* Yahoo's front page no longer goes blank. `onerror` was missing from
+  the event-handler accessors on `HTMLElement.prototype`, so an
+  ad-recovery script that wraps that accessor threw on every script's
+  `onerror` assignment and wiped the page.
+* Reddit renders. A `<slot>` inside an inline element of a shadow tree
+  (`<devvit-wrapper><slot></slot></devvit-wrapper>` around the whole
+  app) dropped every block-level element slotted into it, and inline
+  slotted text was lost too; slots now pass their assigned content
+  through, and an inline shadow host joins the line it sits in.
+* `var()` substitution keeps token boundaries, so a minified value such
+  as `var(--weight)var(--size)/var(--line-height)var(--font)` no longer
+  fuses into one invalid token: Roblox's headings were 16px instead of
+  56px. A custom property declared empty (`--x:;`) substitutes to
+  nothing instead of invalidating the declaration, and a `font`
+  shorthand containing `var()` keeps its weight and line height.
+* Netflix's "Get Started" button and email field are styled. Rules
+  inserted through `insertRule()` (CSS-in-JS libraries) lost a
+  shorthand set with `var()` after earlier values of the same property,
+  and `cssText` folded `border-color: var(--b)` into a resolved colour.
+* Twitch's search box has its rounded corners. The CSSOM rebuilt an
+  `insertRule()` sheet from each rule's declarations one property at a
+  time, and a `var()` shorthand that a later longhand partly overrides
+  (`border-radius: var(--r); border-top-right-radius: 0`) has no value
+  of its own, so it came back as `border-radius: ;`. Rules now keep
+  their serialized text. `style.length` and `style[i]` are answered
+  from a cache instead of re-serializing the whole style per call, and
+  a value containing `;` (`url(data:...;base64,...)`) no longer adds a
+  bogus property name.
+* Pages that keep their theme in one long `style` attribute and read it
+  back property by property are fast again: Twitch holds about a
+  thousand custom properties in a 47 KB style and read each one by
+  rescanning the text. Custom-property reads on long styles go through
+  a per-string index, and other reads are memoized; Twitch's headless
+  CPU time drops from 22-26 s to about 17 s.
+* Inset box shadows are drawn as specified: inside the padding box, with
+  the offset and spread shaping the unshadowed hole, its corners
+  following the shrunken radii, and blur softening the edge. They were a
+  fixed 4px stroke along the border edge that ignored spread, so the
+  common `inset 0 0 0 1px` focus or field ring came out 2px wide.
+* Form controls look and measure like Chrome's. A text input that is a
+  box of its own (`display: block`, `flex` or `inline-block`) no longer
+  applies its padding twice, so text starts at the content edge, and a
+  `display: flex` or `grid` input, select or textarea lays its text out
+  as a field rather than as a flex item stuck to the top (Twitch's
+  search placeholder). An unstyled text field draws Chrome's 1px
+  rounded frame instead of a 2px inset border. Checkboxes and radio
+  buttons are 13px widgets with Chrome's default margins and look - an
+  accent-filled box or ring and dot - independent of the font size, and
+  no longer drawn over a ballot-box glyph whose fallback font set the
+  width of the space next to it; `getBoundingClientRect()` reports
+  their 13x13 box.
+* `getComputedStyle()` resolves colours that default to `currentcolor`
+  - the border, outline, column-rule and text-decoration colours, and
+  `caret-color: auto` - to the element's colour, where it returned an
+  empty string or `auto`, and serializes the `border`, `border-top`
+  (and the other sides) and `outline` shorthands as Chrome does
+  (`2px solid rgb(10, 20, 30)`, `rgb(10, 20, 30) solid 1px`, an empty
+  string for `border` when the sides differ). Shorthands such as
+  `border` and `outline` read as strings instead of `undefined`.
+* `<slot>` is `display: contents`, as in every browser's default style
+  sheet, and lays out the nodes assigned to it in place: slotted
+  elements become flex or grid items of the shadow tree's container, a
+  slot's own padding no longer applies, and fallback content shows when
+  nothing is assigned. Slots used to make a block of their own, so a
+  web component's flex row stacked vertically and absolutely positioned
+  media in Reddit's posts sized itself to the whole page, covering the
+  feed with one video.
+* JavaScript modules load their import graphs in parallel. Each import
+  used to be fetched only when the engine reached it, one round trip
+  after another; now every module source is scanned for its static
+  imports as soon as it arrives and those are requested at once, and a
+  page's module scripts start fetching their graphs when parsing ends.
+  The scan skips comments, strings, template literals and regular
+  expressions, and a prefetch follows the page's Content-Security-Policy
+  and never fetches http: modules for an https: page.
+  Deferred scripts that are ready run back to back instead of one per
+  event-loop turn with a relayout between each. On microsoft.com, which
+  has 224 module scripts, 27 of them run within the benchmark's settle
+  window instead of 17, and its main-thread CPU drops from 9.9 s to
+  7.4 s.
+* Calling `Intl.DateTimeFormat()` and the other Intl constructors
+  without `new` no longer leaves a stray TypeError behind. The
+  constructor read `prototype` off its undefined receiver, failed
+  silently and returned a working object, and the pending error then
+  surfaced in whatever script ran next: on microsoft.com, Microsoft
+  Clarity's call aborted a web-component module mid-evaluation.
+  `MutationObserver`, `IntersectionObserver`, `ResizeObserver` and
+  `PerformanceObserver` called without `new` now throw a TypeError as in
+  Chrome, and module load failures are logged with their stack.
+* Headless page loads fetch images while the page settles, as the
+  browser window does: each new layout requests the images it now needs,
+  and their `load` events fire as they arrive. Images used to be fetched
+  only once, just before the first screenshot, so a page that swaps a
+  placeholder for the real picture in an `onload` handler (BBC's lazy
+  photos) often had not done so when the final shot was taken.
+* Unquoted font family names may contain a generic family keyword after
+  their first word, as in `font-family: BBC Reith Serif, serif`. Any
+  such word made the whole declaration invalid, so BBC's headlines and
+  body text fell back to the default font instead of BBC Reith Serif. A
+  name is now rejected only when its first word is `serif`,
+  `sans-serif`, `cursive`, `fantasy`, `monospace`, `system-ui`, `math`
+  or `-webkit-body`, which is where Chrome draws the line.
+* `querySelectorAll` and `querySelector` with a selector list over the
+  document use the class and tag indexes when every selector ends in a
+  class or a type, checking only the elements that carry them instead of
+  matching the whole list against every element. Google's ad library
+  queries the selector text of every CSS rule this way; on ESPN that was
+  10,000 calls and 3.4 s, and the page's main-thread CPU drops from
+  about 20 s to 16 s.
+* Blurred shadows paint up to 16 times faster. Inset shadows now blur
+  a strip of the box and stretch its uniform middle, as outer shadows
+  already did, instead of blurring the full box - Reddit draws one on a
+  1280x2300 element - and the blur's vertical pass runs along rows
+  instead of down columns. A page of assorted inset and outer shadows
+  paints in 49 ms instead of 801 ms, pixel for pixel the same, and
+  Reddit's paint time drops from 1.3 s to 0.1 s.
+* A web component whose host is `display: inline-block`, `inline-flex`
+  or `inline-grid` sits in the line like any inline block. Elements with
+  a shadow root were treated as blocks whenever their display generated
+  a box of their own, so a row of such components stacked one per line,
+  and MSN's shortcut icons rendered as empty circles.
+* Identical CSS declaration blocks are parsed once. Web components that
+  carry the same stylesheet in every shadow root - Reddit puts one
+  239 KB sheet in 93 of them - had that sheet rewritten for each host
+  and every declaration reparsed, a quarter of the page's CPU time.
+  Parsed blocks are now kept by their text and shared between rules;
+  Reddit's main-thread CPU drops from 18 s to 13.5 s, and a page with 40
+  such components loads in 1.2 s of CPU instead of 4.7 s.
+* Image requests advertise only the formats the build can decode. The
+  `Accept` header always listed `image/avif`, so in a build without
+  libavif, CDNs that negotiate formats (AliExpress served 50 of its
+  images this way) sent AVIF that then failed to decode.
+* `text-decoration: inherit` works, so Tailwind's preflight removes the
+  underline from links (Yahoo's navigation and headlines were all
+  underlined), and outlines follow `border-radius` like Chrome's (pill
+  search boxes drawn with `outline` were square).
+* `text-overflow: ellipsis` only clips text that cannot wrap. Wrapping
+  text (`normal`, `pre-line`, `pre-wrap`) wraps as in other browsers
+  instead of being cut to one line with a visible line-break glyph, and
+  a `<br>` in non-wrapping ellipsized text starts a new line.
+* A column flex item with `margin-top: auto` moves its content down with
+  it (Google's logo sat at the top of its box), stylesheet `<link>`s
+  inserted by the HTML parser fire `load`, and `document.fonts` is a
+  single per-document `FontFaceSet` that dispatches loading events, which
+  claude.ai waits for before showing its app.
+* Pages with WebM background video (claude.com) no longer crash the
+  renderer: the in-process video frame buffer is padded for swscale's
+  vector writes. The sandbox lets the renderer read a CA bundle named by
+  `CURL_CA_BUNDLE` or `SSL_CERT_FILE`.
 * quickjs-ng is at 0.17.0 plus upstream master (`60984dc`). It fixes a
   use-after-free in `AsyncDisposableStack`, a reference-count bug in
   `Promise.withResolvers`, an out-of-bounds read when creating typed

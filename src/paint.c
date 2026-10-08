@@ -450,6 +450,8 @@ typedef struct shadow_blur_key {
     corner_radii radii;
     double       r, g, b, a;
     int          radius;
+    int          inset;
+    double       hole_x, hole_y, hole_w, hole_h;
 } shadow_blur_key;
 
 #define NS_SHADOW_BLUR_CACHE_BYTES (32u << 20)
@@ -485,7 +487,15 @@ blurred_shadow_surface_new(const shadow_blur_key *k, int pad,
         return NULL;
     }
     cairo_t *scr = cairo_create(surf);
-    rounded_rect_path(scr, pad, pad, k->sw, k->sh, k->radii);
+    if (k->inset) {
+        cairo_rectangle(scr, 0, 0, surf_w, surf_h);
+        if (k->hole_w > 0 && k->hole_h > 0)
+            rounded_rect_path(scr, pad + k->hole_x, pad + k->hole_y,
+                              k->hole_w, k->hole_h, k->radii);
+        cairo_set_fill_rule(scr, CAIRO_FILL_RULE_EVEN_ODD);
+    } else {
+        rounded_rect_path(scr, pad, pad, k->sw, k->sh, k->radii);
+    }
     cairo_set_source_rgba(scr, k->r, k->g, k->b, k->a);
     cairo_fill(scr);
     cairo_destroy(scr);
@@ -528,21 +538,28 @@ blurred_shadow_cached(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
 }
 
 static int
-shadow_band_excess(double len, int pad, int radius, double start_r, double end_r)
+shadow_band_first(double start, int pad, int radius, double start_r)
 {
-    int first = (int)ceil(pad + start_r) + radius * 3 + 1;
-    int last = (int)floor(pad + len - end_r) - radius * 3 - 1;
+    return MAX((int)ceil(pad + start + start_r) + radius * 3 + 1, pad);
+}
+
+static int
+shadow_band_excess(double start, double len, int surf_len, int pad, int radius,
+                   double start_r, double end_r)
+{
+    int first = shadow_band_first(start, pad, radius, start_r);
+    int last = MIN((int)floor(pad + start + len - end_r) - radius * 3 - 1,
+                   surf_len - pad - 1);
     int uniform = last - first;
     return uniform > 1 ? uniform - 1 : 0;
 }
 
 static gboolean
-shadow_radii_fit(const shadow_blur_key *k)
+shadow_radii_fit(const corner_radii *c, double w, double h)
 {
-    const corner_radii *c = &k->radii;
     const double sums[4] = { c->tl + c->tr, c->trv + c->brv,
                              c->br + c->bl, c->tlv + c->blv };
-    const double lens[4] = { k->sw, k->sh, k->sw, k->sh };
+    const double lens[4] = { w, h, w, h };
     for (int i = 0; i < 4; i++)
         if (sums[i] > 0 && lens[i] / sums[i] < 1.0) return FALSE;
     return TRUE;
@@ -561,11 +578,14 @@ shadow_corner_h(double w, double h)
 }
 
 static gboolean
-shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
-             int *mid_x, int *mid_y)
+shadow_bands(const shadow_blur_key *k, int pad, int surf_w, int surf_h,
+             int *dx, int *dy, int *mid_x, int *mid_y)
 {
     *dx = *dy = 0;
-    if (!(k->sw > 0) || !(k->sh > 0) || !shadow_radii_fit(k)) return FALSE;
+    double x0 = k->inset ? k->hole_x : 0, y0 = k->inset ? k->hole_y : 0;
+    double w = k->inset ? k->hole_w : k->sw, h = k->inset ? k->hole_h : k->sh;
+    if (!(w > 0) || !(h > 0) || !shadow_radii_fit(&k->radii, w, h))
+        return FALSE;
     const corner_radii *c = &k->radii;
     double left_r = MAX(shadow_corner_w(c->tl, c->tlv),
                         shadow_corner_w(c->bl, c->blv));
@@ -575,10 +595,10 @@ shadow_bands(const shadow_blur_key *k, int pad, int *dx, int *dy,
                        shadow_corner_h(c->tr, c->trv));
     double bottom_r = MAX(shadow_corner_h(c->bl, c->blv),
                           shadow_corner_h(c->br, c->brv));
-    *dx = shadow_band_excess(k->sw, pad, k->radius, left_r, right_r);
-    *dy = shadow_band_excess(k->sh, pad, k->radius, top_r, bottom_r);
-    *mid_x = (int)ceil(pad + left_r) + k->radius * 3 + 1;
-    *mid_y = (int)ceil(pad + top_r) + k->radius * 3 + 1;
+    *dx = shadow_band_excess(x0, w, surf_w, pad, k->radius, left_r, right_r);
+    *dy = shadow_band_excess(y0, h, surf_h, pad, k->radius, top_r, bottom_r);
+    *mid_x = *dx > 0 ? shadow_band_first(x0, pad, k->radius, left_r) : 0;
+    *mid_y = *dy > 0 ? shadow_band_first(y0, pad, k->radius, top_r) : 0;
     return *dx > 0 || *dy > 0;
 }
 
@@ -620,7 +640,7 @@ static cairo_surface_t *
 blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h)
 {
     int dx, dy, mid_x, mid_y;
-    if (!shadow_bands(k, pad, &dx, &dy, &mid_x, &mid_y))
+    if (!shadow_bands(k, pad, surf_w, surf_h, &dx, &dy, &mid_x, &mid_y))
         return blurred_shadow_cached(k, pad, surf_w, surf_h, FALSE);
     if (g_shadow_blur_cache) {
         cairo_surface_t *hit = g_hash_table_lookup(g_shadow_blur_cache, k);
@@ -629,6 +649,10 @@ blurred_shadow_surface(const shadow_blur_key *k, int pad, int surf_w, int surf_h
     shadow_blur_key small_key = *k;
     small_key.sw -= dx;
     small_key.sh -= dy;
+    if (k->inset) {
+        small_key.hole_w -= dx;
+        small_key.hole_h -= dy;
+    }
     cairo_surface_t *small = blurred_shadow_cached(&small_key, pad, surf_w - dx,
                                                    surf_h - dy, TRUE);
     if (!small) return NULL;
@@ -691,6 +715,53 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
 }
 
 static gboolean
+box_is_input_block(const ns_box *b)
+{
+    return b && b->style && b->kind == NS_BOX_BLOCK && b->dom &&
+           b->dom->kind == NS_NODE_ELEMENT && b->dom->name &&
+           strcmp(b->dom->name, "input") == 0;
+}
+
+static gboolean
+box_has_native_field_border(const ns_box *b)
+{
+    static const ns_css_prop side_styles[4] = {
+        NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+        NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
+    };
+    for (int i = 0; i < 4; i++)
+        if (!keyword_is(b->style->values[side_styles[i]], "inset"))
+            return FALSE;
+    const double widths[4] = {
+        b->border.top, b->border.right, b->border.bottom, b->border.left,
+    };
+    for (int i = 0; i < 4; i++)
+        if (widths[i] != 2) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+input_type_is_text_field(const char *type)
+{
+    static const char *const text_types[] = {
+        "text", "search", "email", "url", "tel", "number", "password",
+    };
+    if (!type || !*type) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(text_types); i++)
+        if (g_ascii_strcasecmp(type, text_types[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+box_paints_native_text_field(const ns_box *b)
+{
+    if (!box_is_input_block(b)) return FALSE;
+    if (keyword_is(b->style->values[NS_CSS_APPEARANCE], "none")) return FALSE;
+    if (!box_has_native_field_border(b)) return FALSE;
+    return input_type_is_text_field(ns_element_get_attr(b->dom, "type"));
+}
+
+static gboolean
 style_side_visible(const ns_style *s, ns_css_prop wp, ns_css_prop sp)
 {
     if (!s) return FALSE;
@@ -749,6 +820,71 @@ corner_radii_inset(corner_radii c, double top, double right, double bottom,
         MAX(0, c.brv - bottom), MAX(0, c.blv - bottom),
     };
     return in;
+}
+
+static corner_radii
+outline_radii(corner_radii c, double w, double h, double grow)
+{
+    c = corner_radii_fit(c, w, h);
+    double *r[8] = { &c.tl, &c.tr, &c.br, &c.bl, &c.tlv, &c.trv, &c.brv, &c.blv };
+    for (int i = 0; i < 8; i++)
+        if (*r[i] > 0) *r[i] = MAX(0, *r[i] + grow);
+    return c;
+}
+
+static void
+paint_inset_box_shadow(cairo_t *cr, const ns_css_shadow *sh,
+                       double px, double py, double pw, double ph,
+                       corner_radii pad_radii)
+{
+    if (!(pw > 0) || !(ph > 0)) return;
+    double hole_x = sh->x + sh->spread;
+    double hole_y = sh->y + sh->spread;
+    double hole_w = pw - 2 * sh->spread;
+    double hole_h = ph - 2 * sh->spread;
+    corner_radii hole_radii = outline_radii(pad_radii, pw, ph, -sh->spread);
+    cairo_save(cr);
+    rounded_rect_path(cr, px, py, pw, ph, pad_radii);
+    cairo_clip(cr);
+    cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
+                          sh->a / 255.0);
+    int radius = (int)(sh->blur * 0.5 + 0.5);
+    int pad = radius * 3 + 2;
+    int surf_w = (int)ceil(pw) + pad * 2, surf_h = (int)ceil(ph) + pad * 2;
+    if (sh->blur > 0 && radius <= 256 && surf_w <= 4096 && surf_h <= 4096) {
+        shadow_blur_key key;
+        memset(&key, 0, sizeof key);
+        key.sw = pw;
+        key.sh = ph;
+        key.radii = hole_radii;
+        key.r = sh->r / 255.0;
+        key.g = sh->g / 255.0;
+        key.b = sh->b / 255.0;
+        key.a = sh->a / 255.0;
+        key.radius = radius;
+        key.inset = 1;
+        key.hole_x = hole_x;
+        key.hole_y = hole_y;
+        key.hole_w = hole_w;
+        key.hole_h = hole_h;
+        cairo_surface_t *surf =
+            blurred_shadow_surface(&key, pad, surf_w, surf_h);
+        if (surf) {
+            cairo_set_source_surface(cr, surf, px - pad, py - pad);
+            cairo_paint(cr);
+            cairo_surface_destroy(surf);
+        }
+    } else if (hole_w > 0 && hole_h > 0) {
+        cairo_new_path(cr);
+        cairo_rectangle(cr, px - 1, py - 1, pw + 2, ph + 2);
+        rounded_rect_path(cr, px + hole_x, py + hole_y, hole_w, hole_h,
+                          hole_radii);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        cairo_fill(cr);
+    } else {
+        cairo_paint(cr);
+    }
+    cairo_restore(cr);
 }
 
 static gboolean
@@ -1829,16 +1965,12 @@ paint_block(cairo_t *cr, const ns_box *b)
         for (int si = sl->n - 1; si >= 0; si--) {
             const ns_css_shadow *sh = &sl->s[si];
             if (!sh->inset) continue;
-            cairo_save(cr);
-            rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_clip(cr);
-            cairo_set_source_rgba(cr,
-                sh->r / 255.0, sh->g / 255.0, sh->b / 255.0, sh->a / 255.0);
-            cairo_set_line_width(cr, sh->blur > 0 ? sh->blur : 4);
-            cairo_translate(cr, sh->x, sh->y);
-            rounded_rect_path(cr, border_x, border_y, border_w, border_h, radii);
-            cairo_stroke(cr);
-            cairo_restore(cr);
+            paint_inset_box_shadow(cr, sh,
+                border_x + b->border.left, border_y + b->border.top,
+                border_w - b->border.left - b->border.right,
+                border_h - b->border.top - b->border.bottom,
+                corner_radii_inset(radii, b->border.top, b->border.right,
+                                   b->border.bottom, b->border.left));
         }
     }
 
@@ -1857,6 +1989,17 @@ paint_block(cairo_t *cr, const ns_box *b)
         rgba uniform_color = {0};
         gboolean drew_uniform = paint_border_image(cr, b, s, border_x, border_y,
                                                    border_w, border_h);
+        if (!drew_uniform && box_paints_native_text_field(b)) {
+            const ns_css_value *col = s->values[NS_CSS_BORDER_TOP_COLOR];
+            set_source_rgba(cr, rgba_of(col ? col : s->values[NS_CSS_COLOR],
+                                        0, 0, 0, 1));
+            cairo_set_line_width(cr, 1.0);
+            rounded_rect_path(cr, border_x + 0.5, border_y + 0.5,
+                              border_w - 1, border_h - 1,
+                              corner_radii_uniform(2));
+            cairo_stroke(cr);
+            drew_uniform = TRUE;
+        }
         if (!drew_uniform && !corner_radii_zero(radii) &&
             style_uniform_solid_border(s, &uniform_bw, &uniform_color)) {
             set_source_rgba(cr, uniform_color);
@@ -1981,11 +2124,10 @@ paint_block(cairo_t *cr, const ns_box *b)
                 double dashes[] = { ow, ow };
                 cairo_set_dash(cr, dashes, 2, 0);
             }
-            cairo_rectangle(cr,
-                border_x - off - ow / 2.0,
-                border_y - off - ow / 2.0,
-                border_w + (off + ow / 2.0) * 2,
-                border_h + (off + ow / 2.0) * 2);
+            double grow = off + ow / 2.0;
+            rounded_rect_path(cr, border_x - grow, border_y - grow,
+                              border_w + grow * 2, border_h + grow * 2,
+                              outline_radii(radii, border_w, border_h, grow));
             cairo_stroke(cr);
             cairo_restore(cr);
         }
@@ -2551,6 +2693,58 @@ find_ci_substring(const char *hay, gsize hay_len,
     return (gsize)-1;
 }
 
+typedef struct {
+    const char *lang;
+    const char *xml_lang;
+    const char *dir;
+} paint_i18n_attrs;
+
+static __thread GHashTable *g_i18n_memo;
+
+void
+ns_paint_i18n_memo_begin(void)
+{
+    if (g_i18n_memo) g_hash_table_remove_all(g_i18n_memo);
+    else g_i18n_memo = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                             NULL, g_free);
+}
+
+void
+ns_paint_i18n_memo_end(void)
+{
+    g_clear_pointer(&g_i18n_memo, g_hash_table_destroy);
+}
+
+static const char *
+own_attr_nonempty(const ns_node *n, const char *attr)
+{
+    const char *v = ns_element_get_attr(n, attr);
+    return v && *v ? v : NULL;
+}
+
+static const paint_i18n_attrs *
+paint_i18n_attrs_for(const ns_node *n)
+{
+    paint_i18n_attrs *hit = g_hash_table_lookup(g_i18n_memo, n);
+    if (hit) return hit;
+    const paint_i18n_attrs *up = NULL;
+    for (const ns_node *p = n->parent; p && !up; p = p->parent)
+        if (p->kind == NS_NODE_ELEMENT) up = paint_i18n_attrs_for(p);
+    paint_i18n_attrs *a = g_new0(paint_i18n_attrs, 1);
+    if (n->kind == NS_NODE_ELEMENT) {
+        a->lang = own_attr_nonempty(n, "lang");
+        a->xml_lang = own_attr_nonempty(n, "xml:lang");
+        a->dir = own_attr_nonempty(n, "dir");
+    }
+    if (up) {
+        if (!a->lang) a->lang = up->lang;
+        if (!a->xml_lang) a->xml_lang = up->xml_lang;
+        if (!a->dir) a->dir = up->dir;
+    }
+    g_hash_table_insert(g_i18n_memo, (gpointer)n, a);
+    return a;
+}
+
 static const char *
 nearest_node_attr(const ns_node *n, const char *attr)
 {
@@ -2593,6 +2787,29 @@ ns_style_is_nowrap(const ns_style *style)
     return ws && ws->kind == NS_CSS_V_KEYWORD && ws->u.keyword &&
            (strcmp(ws->u.keyword, "nowrap") == 0 ||
             strcmp(ws->u.keyword, "pre") == 0);
+}
+
+gboolean
+ns_paint_text_ellipsizes(const ns_style *style)
+{
+    return style && ns_style_is_nowrap(style) &&
+           keyword_is(style->values[NS_CSS_TEXT_OVERFLOW], "ellipsis");
+}
+
+void
+ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text)
+{
+    static const char line_sep[] = "\xe2\x80\xa8";
+    if (!text || ns_pango_layout_get_ellipsize(layout) == NS_PANGO_ELLIPSIZE_NONE ||
+        ns_pango_layout_get_height(layout) != -1 || !strstr(text, line_sep)) {
+        ns_pango_layout_set_text(layout, text, -1);
+        return;
+    }
+    char *paragraphs = g_strdup(text);
+    for (char *p = strstr(paragraphs, line_sep); p; p = strstr(p + 3, line_sep))
+        p[2] = '\xa9';
+    ns_pango_layout_set_text(layout, paragraphs, -1);
+    g_free(paragraphs);
 }
 
 static double
@@ -2727,8 +2944,12 @@ ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
         ih->end_index   = G_MAXUINT;
         ns_pango_attr_list_insert(attrs, ih);
     }
-    const char *lang = dn ? nearest_node_attr(dn, "lang") : NULL;
-    if (!lang && dn) lang = nearest_node_attr(dn, "xml:lang");
+    const paint_i18n_attrs *memo = dn && g_i18n_memo
+        ? paint_i18n_attrs_for(dn) : NULL;
+    const char *lang = memo ? memo->lang
+                     : dn ? nearest_node_attr(dn, "lang") : NULL;
+    if (!lang && dn)
+        lang = memo ? memo->xml_lang : nearest_node_attr(dn, "xml:lang");
     if (lang && attrs) {
         NsPangoAttribute *a = ns_pango_attr_language_new(
             ns_pango_language_from_string(lang));
@@ -2736,7 +2957,8 @@ ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
         a->end_index   = G_MAXUINT;
         ns_pango_attr_list_insert(attrs, a);
     }
-    const char *dir = dn ? nearest_node_attr(dn, "dir") : NULL;
+    const char *dir = memo ? memo->dir
+                    : dn ? nearest_node_attr(dn, "dir") : NULL;
     NsPangoDirection bd = NS_PANGO_DIRECTION_NEUTRAL;
     if (dir) {
         if (g_ascii_strcasecmp(dir, "rtl") == 0) bd = NS_PANGO_DIRECTION_RTL;
@@ -3021,6 +3243,38 @@ ns_paint_font_available(const char *family)
     return has;
 }
 
+#define NS_FONT_ALIAS_CACHE_MAX 1024
+
+static char *
+ns_paint_font_alias(const char *family)
+{
+    static GMutex lock;
+    static GHashTable *aliases;
+    if (!family || !*family) return NULL;
+    char *key = g_ascii_strdown(family, -1);
+    g_mutex_lock(&lock);
+    if (!aliases)
+        aliases = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    gpointer cached = NULL;
+    gboolean known = g_hash_table_lookup_extended(aliases, key, NULL, &cached);
+    g_mutex_unlock(&lock);
+    if (known) {
+        g_free(key);
+        return cached ? g_strdup(cached) : NULL;
+    }
+    char *alias = ns_font_metric_alias(family);
+    if (alias && !ns_paint_font_available(alias)) {
+        g_free(alias);
+        alias = NULL;
+    }
+    g_mutex_lock(&lock);
+    if (g_hash_table_size(aliases) >= NS_FONT_ALIAS_CACHE_MAX)
+        g_hash_table_remove_all(aliases);
+    g_hash_table_replace(aliases, key, g_strdup(alias));
+    g_mutex_unlock(&lock);
+    return alias;
+}
+
 static gboolean
 ns_paint_text_family_available(const char *family)
 {
@@ -3201,6 +3455,7 @@ void
 ns_paint_register_font_oracle(void)
 {
     ns_css_set_font_available_cb(ns_paint_text_family_available);
+    ns_css_set_font_alias_cb(ns_paint_font_alias);
     ns_css_set_font_family_name_cb(ns_font_family_for_text);
     ns_css_set_font_generation_cb(ns_paint_font_generation);
     ns_css_set_font_metrics_cb(ns_paint_font_metrics);
@@ -3320,6 +3575,20 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
 }
 
 static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
+
+static double
+layout_baseline_at_index(NsPangoLayout *layout, int index)
+{
+    double baseline = 0;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(iter);
+        baseline = (double)ns_pango_layout_iter_get_baseline(iter) / NS_PANGO_SCALE;
+        if (line && index < line->start_index + line->length) break;
+    } while (ns_pango_layout_iter_next_line(iter));
+    ns_pango_layout_iter_free(iter);
+    return baseline;
+}
 
 static gboolean
 inline_has_form_controls(const ns_box *b)
@@ -3802,8 +4071,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     NsPangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
 
-    if (ns_style_is_nowrap(s) &&
-        !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_style_is_nowrap(s) && !ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
@@ -3815,7 +4083,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         if (ti > 0)
             ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
         const ns_css_value *lc = s ? s->values[NS_CSS_LINE_CLAMP] : NULL;
@@ -3824,7 +4092,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
-    ns_pango_layout_set_text(layout, b->text, -1);
+    ns_paint_layout_set_inline_text(layout, b->text);
 
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
@@ -4957,11 +5225,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     }
 
     if (b->attrs) {
-        double font_size = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
         const ns_css_value *ac = s ? s->values[NS_CSS_ACCENT_COLOR] : NULL;
         rgba accent = rgba_of(
             (ac && ac->kind == NS_CSS_V_COLOR) ? ac : NULL,
-            0.13, 0.36, 0.80, 1);
+            0.0, 0.459, 1.0, 1);
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
             if (r->kind != NS_INLINE_CHECKBOX &&
@@ -4969,51 +5236,49 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 r->kind != NS_INLINE_RADIO &&
                 r->kind != NS_INLINE_RADIO_CHECKED)
                 continue;
-            NsPangoRectangle r0, r1;
+            NsPangoRectangle r0;
             ns_pango_layout_index_to_pos(layout, (int)r->start, &r0);
-            ns_pango_layout_index_to_pos(layout,
-                (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
-            double gx0 = text_x + (double)r0.x / NS_PANGO_SCALE;
-            double gy0 = y_origin + (double)r0.y / NS_PANGO_SCALE;
-            double gx1 = text_x + (double)(r1.x + r1.width) / NS_PANGO_SCALE;
-            double gy1 = y_origin + (double)(r0.y + r0.height) / NS_PANGO_SCALE;
-            inline_shift_rect(b, r->start, &gx0, &gy0, &gx1, &gy1);
-            if (gx1 < gx0) { double t = gx0; gx0 = gx1; gx1 = t; }
-            double side = font_size * 0.82;
-            if (r->box_w > 0 || r->box_h > 0) {
-                double bw = r->box_w > 0 ? r->box_w : r->box_h;
-                double bh = r->box_h > 0 ? r->box_h : r->box_w;
-                side = bw < bh ? bw : bh;
-            }
-            double bx = gx0 + ((gx1 - gx0) - side) / 2.0;
-            double by = gy0 + ((gy1 - gy0) - side) / 2.0;
+            double side, margins[4];
+            ns_inline_toggle_geometry(r, &side, margins);
+            double bx = text_x + (double)r0.x / NS_PANGO_SCALE + margins[3];
+            double by = y_origin +
+                layout_baseline_at_index(layout, (int)r->start) - side;
+            double dx, dy;
+            ns_inline_offset_at(b, r->start, &dx, &dy);
+            bx += dx;
+            by += dy;
             gboolean radio = (r->kind == NS_INLINE_RADIO ||
                               r->kind == NS_INLINE_RADIO_CHECKED);
             gboolean checked = (r->kind == NS_INLINE_CHECKBOX_CHECKED ||
                                 r->kind == NS_INLINE_RADIO_CHECKED);
             cairo_save(cr);
             cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            corner_radii toggle_radii = corner_radii_uniform(side * 0.16);
             if (radio) {
                 cairo_new_sub_path(cr);
                 cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
-                          side / 2.0, 0, 2 * G_PI);
+                          side / 2.0 - 0.5, 0, 2 * G_PI);
             } else {
-                cairo_rectangle(cr, bx, by, side, side);
+                rounded_rect_path(cr, bx + 0.5, by + 0.5, side - 1, side - 1,
+                                  toggle_radii);
             }
             cairo_fill_preserve(cr);
-            cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
+            if (checked && radio)
+                cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
+            else
+                cairo_set_source_rgb(cr, 0.463, 0.463, 0.463);
             cairo_set_line_width(cr, 1.0);
             cairo_stroke(cr);
             if (checked) {
                 cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
                 if (radio) {
-                    double rdot = side * 0.30;
+                    double rdot = side * 0.31;
                     cairo_new_sub_path(cr);
                     cairo_arc(cr, bx + side / 2.0, by + side / 2.0,
                               rdot, 0, 2 * G_PI);
                     cairo_fill(cr);
                 } else {
-                    cairo_rectangle(cr, bx, by, side, side);
+                    rounded_rect_path(cr, bx, by, side, side, toggle_radii);
                     cairo_fill(cr);
                     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
                     cairo_set_line_width(cr, side * 0.18);
@@ -5032,7 +5297,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         const ns_css_value *ac = s ? s->values[NS_CSS_ACCENT_COLOR] : NULL;
         rgba accent = rgba_of(
             (ac && ac->kind == NS_CSS_V_COLOR) ? ac : NULL,
-            0.13, 0.36, 0.80, 1);
+            0.0, 0.459, 1.0, 1);
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
             if (r->kind != NS_INLINE_PROGRESS &&
@@ -5097,8 +5362,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 
     NsPangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
-    if (ns_style_is_nowrap(s) &&
-        !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_style_is_nowrap(s) && !ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
@@ -5109,7 +5373,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
         double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
-    if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
+    if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
         const ns_css_value *lc = s ? s->values[NS_CSS_LINE_CLAMP] : NULL;
@@ -5118,7 +5382,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
-    ns_pango_layout_set_text(layout, b->text, -1);
+    ns_paint_layout_set_inline_text(layout, b->text);
 
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
@@ -5471,6 +5735,31 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
     return TRUE;
 }
 
+gboolean
+ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
+                            double *out_x, double *out_y,
+                            double *out_w, double *out_h)
+{
+    double side, margins[4];
+    if (!ns_inline_toggle_geometry(r, &side, margins)) return FALSE;
+    double ex, ey, ew, eh;
+    if (!ns_paint_inline_range_extents(b, r->start, r->len, NULL,
+                                       &ex, &ey, &ew, &eh))
+        return FALSE;
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
+    double baseline = layout_baseline_at_index(layout, (int)r->start);
+    g_object_unref(layout);
+    double dx, dy;
+    ns_inline_offset_at(b, r->start, &dx, &dy);
+    *out_x = ex + margins[3] + dx;
+    *out_y = y_offset + baseline - side + dy;
+    *out_w = side;
+    *out_h = side;
+    return TRUE;
+}
+
 static double
 parse_filter_amount(const char *p, const char **out_end)
 {
@@ -5512,18 +5801,22 @@ box_blur_argb(guchar *data, int stride, int w, int h, int radius)
             }
         }
     }
-    for (int x = 0; x < w; x++) {
-        for (int c = 0; c < 4; c++) {
-            int sum = 0;
-            for (int i = -radius; i <= radius; i++)
-                sum += tmp[clamp_i(i, 0, h - 1) * stride + x * 4 + c];
-            for (int y = 0; y < h; y++) {
-                data[y * stride + x * 4 + c] = (guchar)(sum / win);
-                sum += tmp[clamp_i(y + radius + 1, 0, h - 1) * stride + x * 4 + c]
-                     - tmp[clamp_i(y - radius, 0, h - 1) * stride + x * 4 + c];
-            }
+    int row_bytes = w * 4;
+    int *sums = g_new0(int, row_bytes);
+    for (int i = -radius; i <= radius; i++) {
+        const guchar *row = tmp + (gsize)clamp_i(i, 0, h - 1) * stride;
+        for (int x = 0; x < row_bytes; x++) sums[x] += row[x];
+    }
+    for (int y = 0; y < h; y++) {
+        guchar *d = data + (gsize)y * stride;
+        const guchar *add = tmp + (gsize)clamp_i(y + radius + 1, 0, h - 1) * stride;
+        const guchar *sub = tmp + (gsize)clamp_i(y - radius, 0, h - 1) * stride;
+        for (int x = 0; x < row_bytes; x++) {
+            d[x] = (guchar)(sums[x] / win);
+            sums[x] += add[x] - sub[x];
         }
     }
+    g_free(sums);
     g_free(tmp);
 }
 

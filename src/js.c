@@ -252,6 +252,7 @@ static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_flush_layout(ns_js *js);
 static void ns_js_flush_style(ns_js *js);
+static void ns_js_module_prefetch_release(const ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
@@ -1564,12 +1565,19 @@ ns_js_run_due_timers(ns_js *js)
 }
 
 static void
+ns_report_mutations(ns_js *js)
+{
+    if (!js->mutated) return;
+    js->mutation_serial++;
+    if (js->mut_cb) js->mut_cb(js->mut_user_data);
+    js->mutated = FALSE;
+}
+
+static void
 ns_drain_mutations(ns_js *js)
 {
     ns_drain_microtasks(js);
-    if (js->mutated && js->mut_cb)
-        js->mut_cb(js->mut_user_data);
-    js->mutated = FALSE;
+    ns_report_mutations(js);
     ns_storage_schedule_flush(js);
     ns_js_run_due_timers(js);
 }
@@ -2779,39 +2787,18 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         char *end = NULL;
         long idx = strtol(name, &end, 10);
         if (end && *end == '\0' && idx >= 0) {
-            char *style = ns_inline_style_serialize(
-                ns_element_get_attr(n, "style"));
-            char *prop_name = NULL;
-            gsize cur = 0;
-            const char *p = style;
-            while (p && *p) {
-                while (*p == ' ' || *p == ';') p++;
-                const char *colon = strchr(p, ':');
-                if (!colon) break;
-                if ((long)cur == idx) {
-                    prop_name = g_strndup(p, (gsize)(colon - p));
-                    while (*prop_name && (prop_name[strlen(prop_name)-1] == ' '))
-                        prop_name[strlen(prop_name)-1] = '\0';
-                    break;
-                }
-                const char *end_p = strchr(colon, ';');
-                if (!end_p) end_p = colon + strlen(colon);
-                p = end_p;
-                cur++;
-            }
             JS_FreeCString(ctx, name);
-            g_free(style);
-            if (prop_name) {
-                if (desc) {
-                    desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
-                    desc->value = JS_NewString(ctx, prop_name);
-                    desc->getter = JS_UNDEFINED;
-                    desc->setter = JS_UNDEFINED;
-                }
-                g_free(prop_name);
-                return 1;
+            const GPtrArray *names =
+                ns_inline_style_names(ns_element_get_attr(n, "style"));
+            if ((gulong)idx >= names->len) return 0;
+            if (desc) {
+                desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+                desc->value = JS_NewString(ctx,
+                                           g_ptr_array_index(names, idx));
+                desc->getter = JS_UNDEFINED;
+                desc->setter = JS_UNDEFINED;
             }
-            return 0;
+            return 1;
         }
     }
     char *css = camel_to_kebab(name);
@@ -2845,21 +2832,9 @@ ns_style_get_length(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewInt32(ctx, 0);
-    char *style = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
-    int32_t count = 0;
-    const char *p = style;
-    while (*p) {
-        while (*p == ' ' || *p == ';') p++;
-        if (!*p) break;
-        const char *colon = strchr(p, ':');
-        if (!colon) break;
-        count++;
-        const char *end_p = strchr(colon, ';');
-        if (!end_p) break;
-        p = end_p;
-    }
-    g_free(style);
-    return JS_NewInt32(ctx, count);
+    const GPtrArray *names =
+        ns_inline_style_names(ns_element_get_attr(n, "style"));
+    return JS_NewInt32(ctx, (int32_t)names->len);
 }
 
 static int
@@ -8375,7 +8350,8 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
-    ns_css_mark_childlist_dirty(n, added);
+    ns_css_mark_childlist_replaced(n, added, (ns_node *const *)removed->pdata,
+                                   removed->len);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -17109,6 +17085,25 @@ ns_computed_initial_value(const char *name)
     return ns_css_initial_value_text(name);
 }
 
+static gboolean
+ns_computed_needs_layout(const char *name)
+{
+    static const char *const exact[] = {
+        "width", "height", "block-size", "inline-size", "top", "right",
+        "bottom", "left", "inset", "transform", "transform-origin",
+        "perspective-origin", "grid", "grid-template", "grid-template-columns",
+        "grid-template-rows", "border-width",
+    };
+    static const char *const prefixes[] = {
+        "margin", "padding", "inset-",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(exact); i++)
+        if (strcmp(name, exact[i]) == 0) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(prefixes); i++)
+        if (g_str_has_prefix(name, prefixes[i])) return TRUE;
+    return g_str_has_prefix(name, "border-") && g_str_has_suffix(name, "-width");
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name);
 
@@ -17771,6 +17766,30 @@ ns_computed_radius_shorthand(JSContext *ctx, const ns_node *n)
     return out;
 }
 
+static gboolean
+ns_computed_defaults_to_currentcolor(int pid)
+{
+    return pid == NS_CSS_BORDER_TOP_COLOR || pid == NS_CSS_BORDER_RIGHT_COLOR ||
+           pid == NS_CSS_BORDER_BOTTOM_COLOR || pid == NS_CSS_BORDER_LEFT_COLOR ||
+           pid == NS_CSS_OUTLINE_COLOR || pid == NS_CSS_COLUMN_RULE_COLOR ||
+           pid == NS_CSS_TEXT_DECORATION_COLOR || pid == NS_CSS_CARET_COLOR;
+}
+
+static char *
+ns_computed_join3(JSContext *ctx, const ns_node *n, const char *a,
+                  const char *b, const char *c)
+{
+    char *x = ns_computed_lookup(ctx, n, a);
+    char *y = ns_computed_lookup(ctx, n, b);
+    char *z = ns_computed_lookup(ctx, n, c);
+    char *out = g_strdup_printf("%s %s %s", x ? x : "", y ? y : "",
+                                z ? z : "");
+    g_free(x);
+    g_free(y);
+    g_free(z);
+    return out;
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
@@ -17839,6 +17858,39 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "inset") == 0)
         return ns_computed_box_shorthand(ctx, n, "top", "right",
                                          "bottom", "left");
+    static const char *const border_sides[4] = {
+        "top", "right", "bottom", "left",
+    };
+    for (int i = 0; i < 4; i++) {
+        if (strncmp(name, "border-", 7) != 0 ||
+            strcmp(name + 7, border_sides[i]) != 0)
+            continue;
+        char *width = g_strdup_printf("border-%s-width", border_sides[i]);
+        char *bstyle = g_strdup_printf("border-%s-style", border_sides[i]);
+        char *color = g_strdup_printf("border-%s-color", border_sides[i]);
+        char *out = ns_computed_join3(ctx, n, width, bstyle, color);
+        g_free(width);
+        g_free(bstyle);
+        g_free(color);
+        return out;
+    }
+    if (strcmp(name, "border") == 0) {
+        char *sides[4];
+        for (int i = 0; i < 4; i++) {
+            char *side = g_strdup_printf("border-%s", border_sides[i]);
+            sides[i] = ns_computed_lookup(ctx, n, side);
+            g_free(side);
+        }
+        gboolean same = sides[0] != NULL;
+        for (int i = 1; i < 4 && same; i++)
+            same = sides[i] && strcmp(sides[i], sides[0]) == 0;
+        char *out = g_strdup(same ? sides[0] : "");
+        for (int i = 0; i < 4; i++) g_free(sides[i]);
+        return out;
+    }
+    if (strcmp(name, "outline") == 0)
+        return ns_computed_join3(ctx, n, "outline-color", "outline-style",
+                                 "outline-width");
     if (strcmp(name, "border-image") == 0) {
         char *source = ns_computed_lookup(ctx, n, "border-image-source");
         char *slice = ns_computed_lookup(ctx, n, "border-image-slice");
@@ -17910,7 +17962,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             "grid-auto-columns",
         };
         ns_js *grid_js = js_from_ctx(ctx);
-        if (grid_js) ns_js_flush_style(grid_js);
+        if (grid_js) ns_js_flush_layout(grid_js);
         if (!grid_js || !grid_js->style_table ||
             !g_hash_table_lookup(grid_js->style_table, n))
             return g_strdup("");
@@ -17934,9 +17986,13 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     }
 
     ns_js *js = js_from_ctx(ctx);
-    if (js) ns_js_flush_layout(js);
+    gboolean needs_layout = ns_computed_needs_layout(name);
+    if (js) {
+        if (needs_layout) ns_js_flush_layout(js);
+        else ns_js_flush_style(js);
+    }
     const char *style = ns_element_get_attr(n, "style");
-    const struct ns_box *lbox = (js && js->layout_root)
+    const struct ns_box *lbox = (needs_layout && js && js->layout_root)
         ? ns_box_find_by_dom(js->layout_root, n) : NULL;
     const ns_style *computed = (js && js->style_table)
         ? g_hash_table_lookup(js->style_table, n) : NULL;
@@ -18133,6 +18189,17 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             if (r) return r;
         }
         return g_strdup("none");
+    }
+    if (ns_computed_defaults_to_currentcolor(pid)) {
+        const ns_style *s = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, n) : NULL;
+        char *text = s && s->values[pid]
+            ? ns_css_value_serialize(s->values[pid]) : NULL;
+        if (text && *text && g_ascii_strcasecmp(text, "currentcolor") != 0 &&
+            !(pid == NS_CSS_CARET_COLOR && g_ascii_strcasecmp(text, "auto") == 0))
+            return text;
+        g_free(text);
+        return ns_computed_lookup(ctx, n, "color");
     }
     const char *canonical = pid >= 0 ? ns_css_prop_name(pid) : name;
     if (pid >= 0 && js && js->style_table) {
@@ -18496,7 +18563,19 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_FALSE;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_FALSE;
+    static const char *const shorthands[] = {
+        "animation", "background", "border", "border-block", "border-bottom",
+        "border-color", "border-image", "border-inline", "border-left",
+        "border-radius", "border-right", "border-style", "border-top",
+        "border-width", "column-rule", "columns", "flex", "flex-flow", "font",
+        "gap", "grid", "grid-area", "grid-column", "grid-row",
+        "grid-template", "inset", "list-style", "margin", "outline",
+        "overflow", "padding", "place-content", "place-items", "place-self",
+        "text-decoration", "transition",
+    };
     gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
+    for (gsize i = 0; !ok && i < G_N_ELEMENTS(shorthands); i++)
+        ok = strcmp(name, shorthands[i]) == 0;
     JS_FreeCString(ctx, name);
     return JS_NewBool(ctx, ok);
 }
@@ -18805,6 +18884,29 @@ ns_anim_animate_native(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_cssom_mark_pending(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) js->cssom_commit_pending = TRUE;
+    return JS_UNDEFINED;
+}
+
+static void
+ns_js_commit_cssom(ns_js *js)
+{
+    static const char src[] =
+        "typeof __ndFlushCSSOM==='function'&&__ndFlushCSSOM()";
+    if (!js || !js->cssom_commit_pending || !js->ctx) return;
+    js->cssom_commit_pending = FALSE;
+    JSValue r = JS_Eval(js->ctx, src, sizeof(src) - 1, "<cssom-commit>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+}
+
+static JSValue
 ns_linked_css_text(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
@@ -18878,7 +18980,7 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
         const ns_node *node = ns_unwrap_element(argv[0]);
         ns_js *style_js = js_from_ctx(ctx);
         if (node && style_js) {
-            ns_js_flush_layout(style_js);
+            ns_js_flush_style(style_js);
             const ns_style *style = style_js->style_table
                 ? g_hash_table_lookup(style_js->style_table, node) : NULL;
             if (style && style->vars)
@@ -28838,7 +28940,12 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
                           ns_node *previous_sibling, ns_node *next_sibling)
 {
     ns_js_index_child_change(js, parent, added, removed);
-    ns_css_mark_childlist_dirty(parent, added);
+    if (!added && removed)
+        ns_css_mark_childlist_removed(parent, &removed, 1, next_sibling,
+                                      previous_sibling);
+    else
+        ns_css_mark_childlist_replaced(parent, added, &removed,
+                                       removed ? 1 : 0);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL, NULL);
 }
@@ -28898,7 +29005,14 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
     }
     ns_node *first_added = added && added->len > 0
         ? g_ptr_array_index(added, 0) : NULL;
-    ns_css_mark_childlist_dirty(parent, first_added);
+    if (!first_added && removed && removed->len > 0)
+        ns_css_mark_childlist_removed(parent, (ns_node *const *)removed->pdata,
+                                      removed->len, next_sibling,
+                                      previous_sibling);
+    else
+        ns_css_mark_childlist_replaced(parent, first_added,
+            removed ? (ns_node *const *)removed->pdata : NULL,
+            removed ? removed->len : 0);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
@@ -29193,6 +29307,10 @@ static JSValue
 ns_window_observer_ctor(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'MutationObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "MutationObserver callback must be callable");
@@ -29942,6 +30060,10 @@ static JSValue
 ns_intersection_observer_ctor(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'IntersectionObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "IntersectionObserver callback must be callable");
@@ -30354,6 +30476,10 @@ static JSValue
 ns_resize_observer_ctor(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Failed to construct 'ResizeObserver': "
+            "Please use the 'new' operator, this DOM object constructor "
+            "cannot be called as a function.");
     if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
         return JS_ThrowTypeError(ctx,
             "ResizeObserver callback must be callable");
@@ -32393,9 +32519,7 @@ ns_dispatch_finish_mutations(ns_js *js)
     if (js->eval_depth == 0 && js->callback_depth == 0 && !js->in_pump) {
         ns_drain_mutations(js);
     } else {
-        if (js->mutated && js->mut_cb)
-            js->mut_cb(js->mut_user_data);
-        js->mutated = FALSE;
+        ns_report_mutations(js);
         ns_storage_schedule_flush(js);
     }
 }
@@ -36940,14 +37064,130 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
     return JS_UNDEFINED;
 }
 
+#define NS_QUERY_SORT_MAX 32
+
+static gboolean
+ns_query_selector_candidates(const ns_node *doc, const ns_css_selector *sel,
+                             GPtrArray **out)
+{
+    if (sel->pseudo_element != NS_CSS_PE_NONE) return FALSE;
+    if (!sel->compounds || sel->compounds->len == 0) return FALSE;
+    const ns_css_simple *key =
+        g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
+    if (!key || key->never_match) return FALSE;
+    if (key->classes && key->classes->len > 0 && doc->class_index &&
+        ((const char *)g_ptr_array_index(key->classes, 0))[0]) {
+        *out = ns_doc_class_index_lookup(doc, g_ptr_array_index(key->classes, 0));
+        return TRUE;
+    }
+    if (key->type && strcmp(key->type, "*") != 0 && doc->tag_index) {
+        *out = ns_doc_tag_index_lookup(doc, key->type);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gint
+ns_query_order_cmp(gconstpointer a, gconstpointer b)
+{
+    return ns_node_document_order_cmp(*(const ns_node *const *)a,
+                                      *(const ns_node *const *)b);
+}
+
+static void
+ns_walk_collect_marked(const ns_node *n, GHashTable *marked, JSContext *ctx,
+                       JSValue arr, uint32_t *idx, guint *left, int depth)
+{
+    if (!n || !*left || depth >= 512 || ns_dom_hidden_child(n)) return;
+    if (g_hash_table_contains(marked, n)) {
+        JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
+        (*left)--;
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (const ns_node *c = n->first_child; c && *left; c = c->next_sibling)
+        ns_walk_collect_marked(c, marked, ctx, arr, idx, left, depth + 1);
+}
+
+static const ns_node *
+ns_query_first_candidate_match(const ns_css_selector *sel, GPtrArray *cands)
+{
+    for (guint k = 0; cands && k < cands->len; k++) {
+        const ns_node *n = g_ptr_array_index(cands, k);
+        if (ns_css_selector_matches(sel, n)) return n;
+    }
+    return NULL;
+}
+
+static gboolean
+ns_query_key_index_list(JSContext *ctx, const ns_node *doc, GPtrArray *sels,
+                        gboolean want_all, JSValue *out)
+{
+    GPtrArray **cands = g_new0(GPtrArray *, sels->len);
+    for (guint i = 0; i < sels->len; i++) {
+        if (!ns_query_selector_candidates(doc, g_ptr_array_index(sels, i),
+                                          &cands[i])) {
+            g_free(cands);
+            return FALSE;
+        }
+    }
+    if (!want_all) {
+        const ns_node *best = NULL;
+        for (guint i = 0; i < sels->len; i++) {
+            const ns_node *m = ns_query_first_candidate_match(
+                g_ptr_array_index(sels, i), cands[i]);
+            if (m && (!best || ns_node_document_order_cmp(m, best) < 0))
+                best = m;
+        }
+        g_free(cands);
+        *out = ns_make_element(ctx, best);
+        return TRUE;
+    }
+    GPtrArray *hits = g_ptr_array_new();
+    GHashTable *seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+    guint sources = 0;
+    for (guint i = 0; i < sels->len; i++) {
+        const ns_css_selector *sel = g_ptr_array_index(sels, i);
+        guint before = hits->len;
+        for (guint k = 0; cands[i] && k < cands[i]->len; k++) {
+            const ns_node *n = g_ptr_array_index(cands[i], k);
+            if (!g_hash_table_contains(seen, n) &&
+                ns_css_selector_matches(sel, n)) {
+                g_hash_table_add(seen, (gpointer)n);
+                g_ptr_array_add(hits, (gpointer)n);
+            }
+        }
+        if (hits->len > before) sources++;
+    }
+    g_free(cands);
+    JSValue arr = JS_NewArray(ctx);
+    uint32_t idx = 0;
+    if (sources > 1 && hits->len > NS_QUERY_SORT_MAX) {
+        guint left = hits->len;
+        for (const ns_node *c = doc->first_child; c && left; c = c->next_sibling)
+            ns_walk_collect_marked(c, seen, ctx, arr, &idx, &left, 0);
+    } else {
+        if (sources > 1) g_ptr_array_sort(hits, ns_query_order_cmp);
+        for (guint k = 0; k < hits->len; k++)
+            JS_SetPropertyUint32(ctx, arr, idx++,
+                                 ns_make_element(ctx, g_ptr_array_index(hits, k)));
+    }
+    g_hash_table_destroy(seen);
+    g_ptr_array_free(hits, TRUE);
+    *out = ns_nodelist_from_array(ctx, arr);
+    return TRUE;
+}
+
 static gboolean
 ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
                    gboolean want_all, gboolean include_self, JSValue *out)
 {
-    if (sels->len != 1) return FALSE;
+    if (sels->len == 0) return FALSE;
     ns_js *jsx = js_from_ctx(ctx);
     const ns_node *doc = jsx ? jsx->current_doc : NULL;
     if (!doc || !ns_root_uses_doc_index(root, doc)) return FALSE;
+    if (sels->len > 1)
+        return root == doc &&
+               ns_query_key_index_list(ctx, doc, sels, want_all, out);
 
     const ns_css_selector *sel = g_ptr_array_index(sels, 0);
     if (sel->pseudo_element != NS_CSS_PE_NONE) return FALSE;
@@ -51769,6 +52009,30 @@ ns_document_get_applets(JSContext *ctx, JSValueConst this_val)
 }
 
 static void
+ns_js_fonts_dispatch_loadingdone(ns_js *js)
+{
+    static const char src[] =
+        "(function(set){"
+        "var E=typeof FontFaceSetLoadEvent==='function'?FontFaceSetLoadEvent:Event;"
+        "var ev=new E('loadingdone',{fontfaces:[]});"
+        "if(typeof set.dispatchEvent==='function')set.dispatchEvent(ev);"
+        "if(typeof set.onloadingdone==='function')set.onloadingdone.call(set,ev);"
+        "})";
+    if (!js || !JS_IsObject(js->fonts_set)) return;
+    JSValue fn = JS_Eval(js->ctx, src, sizeof(src) - 1, "<fonts-loadingdone>",
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(fn)) {
+        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+        return;
+    }
+    JSValue r = JS_Call(js->ctx, fn, JS_UNDEFINED, 1,
+                        (JSValueConst[]){ js->fonts_set });
+    if (JS_IsException(r)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+    JS_FreeValue(js->ctx, fn);
+}
+
+static void
 ns_js_fonts_idle(gpointer user_data)
 {
     ns_js *js = user_data;
@@ -51786,6 +52050,7 @@ ns_js_fonts_idle(gpointer user_data)
         JS_FreeValue(js->ctx, value);
     }
     g_array_free(resolvers, TRUE);
+    ns_js_fonts_dispatch_loadingdone(js);
     ns_drain_microtasks(js);
 }
 
@@ -51825,10 +52090,24 @@ ns_fontfaceset_load(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
-    JSValue fs = JS_NewObject(ctx);
+    gboolean main_doc = js && js->ctx == ctx && js->current_doc &&
+                        ns_document_root_for(ctx, this_val) == js->current_doc;
+    JSValue fs;
+    if (main_doc && JS_IsObject(js->fonts_set)) {
+        fs = JS_DupValue(ctx, js->fonts_set);
+    } else {
+        fs = JS_NewObject(ctx);
+        ns_bind_fn(ctx, fs, "check",   ns_event_true,       1);
+        ns_bind_fn(ctx, fs, "load",    ns_fontfaceset_load, 2);
+        ns_bind_fn(ctx, fs, "add",     ns_event_noop,       1);
+        ns_bind_fn(ctx, fs, "delete",  ns_event_noop,       1);
+        ns_bind_fn(ctx, fs, "clear",   ns_event_noop,       0);
+        ns_bind_fn(ctx, fs, "forEach", ns_event_noop,       1);
+        JS_SetPropertyStr(ctx, fs, "size", JS_NewInt32(ctx, 0));
+        if (main_doc) js->fonts_set = JS_DupValue(ctx, fs);
+    }
     JSValue resolvers[2];
     JSValue ready = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(ready)) { JS_FreeValue(ctx, fs); return ready; }
@@ -51838,13 +52117,6 @@ ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
     JS_SetPropertyStr(ctx, fs, "ready",  ready);
     JS_SetPropertyStr(ctx, fs, "status",
                       JS_NewString(ctx, loading ? "loading" : "loaded"));
-    ns_bind_fn(ctx, fs, "check", ns_event_true,                    1);
-    ns_bind_fn(ctx, fs, "load",  ns_fontfaceset_load,              2);
-    ns_bind_fn(ctx, fs, "add",   ns_event_noop,                    1);
-    ns_bind_fn(ctx, fs, "delete",  ns_event_noop, 1);
-    ns_bind_fn(ctx, fs, "clear",   ns_event_noop, 0);
-    ns_bind_fn(ctx, fs, "forEach", ns_event_noop, 1);
-    JS_SetPropertyStr(ctx, fs, "size", JS_NewInt32(ctx, 0));
     return fs;
 }
 
@@ -54628,8 +54900,8 @@ static const char *const ns_event_handler_names[] = {
     "oncontextrestored", "oncopy", "oncuechange", "oncut", "ondblclick",
     "ondrag", "ondragend", "ondragenter",
     "ondragleave", "ondragover", "ondragstart", "ondrop",
-    "ondurationchange", "onemptied", "onended", "onfocus", "onformdata",
-    "ongamepadconnected", "ongamepaddisconnected", "ongotpointercapture",
+    "ondurationchange", "onemptied", "onended", "onerror", "onfocus",
+    "onformdata", "ongamepadconnected", "ongamepaddisconnected", "ongotpointercapture",
     "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup", "onload",
     "onloadeddata", "onloadedmetadata", "onloadstart",
     "onlostpointercapture", "onmousedown", "onmouseenter", "onmouseleave",
@@ -55840,6 +56112,9 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
         " normalize('UserActivation',globalThis.navigator&&navigator.userActivation,'UserActivation',false);"
         " normalize('StorageManager',globalThis.navigator&&navigator.storage,'StorageManager',false);"
         " normalize('WakeLock',globalThis.navigator&&navigator.wakeLock,'WakeLock',false);"
+        " var FS=globalThis.FontFaceSet&&FontFaceSet.prototype;"
+        " if(FS&&typeof EventTarget==='function'&&EventTarget.prototype)"
+        "  try{Object.setPrototypeOf(FS,EventTarget.prototype);}catch(e){}"
         " var PS=globalThis.PermissionStatus&&PermissionStatus.prototype;"
         " if(PS&&typeof EventTarget==='function'&&EventTarget.prototype)"
         "  try{Object.setPrototypeOf(PS,EventTarget.prototype);"
@@ -57078,6 +57353,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_linked_css",
         JS_NewCFunction(ctx, ns_linked_css_text, "__ns_linked_css", 1),
+        0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_cssom_pending",
+        JS_NewCFunction(ctx, ns_cssom_mark_pending, "__ns_cssom_pending", 0),
         0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_list",
         JS_NewCFunction(ctx, ns_anim_list_native, "__ns_anim_list", 1), 0);
@@ -61670,6 +61948,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_js_module_prefetch_release(js);
     if (js->doc_ready_states) {
         g_hash_table_destroy(js->doc_ready_states);
         js->doc_ready_states = NULL;
@@ -61953,6 +62232,7 @@ ns_js_free(ns_js *js)
     ns_storage_free_deferred_events(js);
     JS_FreeValue(js->ctx, js->pending_fullscreen_resolve);
     JS_FreeValue(js->ctx, js->pristine_promise);
+    JS_FreeValue(js->ctx, js->fonts_set);
     if (js->dom_protos_set) {
         JS_FreeValue(js->ctx, js->proto_node);
         JS_FreeValue(js->ctx, js->proto_element);
@@ -62875,10 +63155,299 @@ ns_js_module_set_import_meta(JSContext *ctx, JSValueConst module,
     return 0;
 }
 
+#define NS_MODULE_PREFETCH_MAX 512
+#define NS_DEFERRED_SCRIPT_SLICE_US 50000
+
+static GHashTable *g_module_prefetch_seen;
+static const ns_js *g_module_prefetch_owner;
+
+static gboolean
+ns_module_ident_char(char c)
+{
+    return g_ascii_isalnum(c) || c == '_' || c == '$';
+}
+
+static gboolean
+ns_module_specifier_fetchable(const char *s, gsize n)
+{
+    return (n >= 2 && s[0] == '.' && s[1] == '/') ||
+           (n >= 3 && s[0] == '.' && s[1] == '.' && s[2] == '/') ||
+           (n >= 1 && s[0] == '/') ||
+           (n >= 7 && g_ascii_strncasecmp(s, "http://", 7) == 0) ||
+           (n >= 8 && g_ascii_strncasecmp(s, "https://", 8) == 0);
+}
+
+static const char *
+ns_module_quoted_after_from(const char *q, const char *end)
+{
+    static const char *const declarations[] = {
+        "function", "const", "let", "var", "class", "default", "async",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(declarations); i++) {
+        gsize n = strlen(declarations[i]);
+        if ((gsize)(end - q) > n && memcmp(q, declarations[i], n) == 0 &&
+            !ns_module_ident_char(q[n]))
+            return NULL;
+    }
+    const char *limit = end - q > 4096 ? q + 4096 : end;
+    for (const char *r = q; r + 4 < limit; r++) {
+        if (*r == ';') return NULL;
+        if (memcmp(r, "from", 4) != 0 || ns_module_ident_char(r[4]) ||
+            (r > q && ns_module_ident_char(r[-1])))
+            continue;
+        const char *s = r + 4;
+        while (s < limit && g_ascii_isspace(*s)) s++;
+        if (s < limit && (*s == '"' || *s == '\'')) return s;
+    }
+    return NULL;
+}
+
+static const char *
+ns_module_skip_quoted(const char *p, const char *end)
+{
+    char quote = *p++;
+    while (p < end && *p != quote && *p != '\n')
+        p += *p == '\\' && p + 1 < end ? 2 : 1;
+    return p < end ? p + 1 : end;
+}
+
+static const char *
+ns_module_skip_regex(const char *p, const char *end)
+{
+    gboolean in_class = FALSE;
+    for (p++; p < end && *p != '\n'; p++) {
+        if (*p == '\\' && p + 1 < end) p++;
+        else if (*p == '[') in_class = TRUE;
+        else if (*p == ']') in_class = FALSE;
+        else if (*p == '/' && !in_class) return p + 1;
+    }
+    return p;
+}
+
+static gboolean
+ns_module_regex_may_follow(char prev)
+{
+    return prev == 0 || strchr("(,=:[!&|?{};+-*%<>~^", prev) != NULL;
+}
+
+static const char *ns_module_skip_template(const char *p, const char *end,
+                                           int depth);
+
+static const char *
+ns_module_skip_literal(const char *p, const char *end, char *prev, int depth)
+{
+    if (*p == '"' || *p == '\'' || *p == '`') {
+        *prev = '"';
+        return *p == '`' ? ns_module_skip_template(p, end, depth)
+                         : ns_module_skip_quoted(p, end);
+    }
+    if (*p != '/' || p + 1 >= end) return NULL;
+    if (p[1] == '/') {
+        const char *nl = memchr(p, '\n', (gsize)(end - p));
+        return nl ? nl : end;
+    }
+    if (p[1] == '*') {
+        const char *close = g_strstr_len(p + 2, end - p - 2, "*/");
+        return close ? close + 2 : end;
+    }
+    if (!ns_module_regex_may_follow(*prev)) return NULL;
+    *prev = '"';
+    return ns_module_skip_regex(p, end);
+}
+
+static const char *
+ns_module_skip_template_expr(const char *p, const char *end, int depth)
+{
+    char prev = '{';
+    int open = 0;
+    while (p < end) {
+        const char *after = ns_module_skip_literal(p, end, &prev, depth);
+        if (after) {
+            p = after;
+            continue;
+        }
+        if (*p == '}' && open-- == 0) return p + 1;
+        if (*p == '{') open++;
+        if (!g_ascii_isspace(*p)) prev = *p;
+        p++;
+    }
+    return end;
+}
+
+static const char *
+ns_module_skip_template(const char *p, const char *end, int depth)
+{
+    for (p++; p < end && *p != '`'; ) {
+        if (*p == '\\' && p + 1 < end)
+            p += 2;
+        else if (*p == '$' && p + 1 < end && p[1] == '{' && depth < 16)
+            p = ns_module_skip_template_expr(p + 2, end, depth + 1);
+        else
+            p++;
+    }
+    return p < end ? p + 1 : end;
+}
+
+static const char *
+ns_module_import_at(const char *src, const char *p, const char *end,
+                    GPtrArray *out)
+{
+    if (end - p <= 6) return NULL;
+    gboolean is_import = memcmp(p, "import", 6) == 0;
+    if (!is_import && memcmp(p, "export", 6) != 0) return NULL;
+    if ((p > src && (ns_module_ident_char(p[-1]) || p[-1] == '.')) ||
+        ns_module_ident_char(p[6]))
+        return NULL;
+    const char *q = p + 6;
+    while (q < end && g_ascii_isspace(*q)) q++;
+    if (q >= end || (is_import && (*q == '(' || *q == '.'))) return NULL;
+    const char *spec = is_import && (*q == '"' || *q == '\'')
+        ? q : ns_module_quoted_after_from(q, end);
+    if (!spec) return NULL;
+    const char *body = spec + 1;
+    gsize room = (gsize)(end - body) < 512 ? (gsize)(end - body) : 512;
+    const char *close = memchr(body, *spec, room);
+    if (!close) return NULL;
+    if (ns_module_specifier_fetchable(body, (gsize)(close - body)))
+        g_ptr_array_add(out, g_strndup(body, (gsize)(close - body)));
+    return close + 1;
+}
+
+static void
+ns_module_scan_imports(const char *src, gsize len, GPtrArray *out)
+{
+    const char *end = src + len;
+    char prev = 0;
+    for (const char *p = src; p < end; ) {
+        const char *after = ns_module_skip_literal(p, end, &prev, 0);
+        if (!after && (after = ns_module_import_at(src, p, end, out)))
+            prev = '"';
+        if (after) {
+            p = after;
+            continue;
+        }
+        if (!g_ascii_isspace(*p)) prev = *p;
+        p++;
+    }
+}
+
+static void ns_module_prefetch_imports(const ns_js *js, const char *module_url,
+                                       const char *src, gsize len,
+                                       const char *top_url);
+
+static gboolean
+ns_module_prefetch_claim(const char *url)
+{
+    if (!g_module_prefetch_seen)
+        g_module_prefetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, NULL);
+    if (g_hash_table_size(g_module_prefetch_seen) >= NS_MODULE_PREFETCH_MAX ||
+        g_hash_table_contains(g_module_prefetch_seen, url))
+        return FALSE;
+    g_hash_table_add(g_module_prefetch_seen, g_strdup(url));
+    return TRUE;
+}
+
+static void
+on_module_prefetched(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)src;
+    char **target = user_data;
+    ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp && !resp->error && resp->status == 200 && resp->body &&
+        g_module_prefetch_owner && g_module_prefetch_seen &&
+        g_hash_table_contains(g_module_prefetch_seen, target[0])) {
+        char *key = ns_net_request_key(target[0], target[1], "GET",
+            ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT));
+        ns_net_preload_keep(key, resp);
+        g_free(key);
+        ns_module_prefetch_imports(g_module_prefetch_owner, target[0],
+                                   (const char *)resp->body->data,
+                                   resp->body->len, target[1]);
+    }
+    if (resp) ns_response_free(resp);
+    g_strfreev(target);
+}
+
+static void
+ns_module_prefetch_url(const char *url, const char *top_url)
+{
+    if (!ns_module_prefetch_claim(url)) return;
+    const char *const *headers = ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
+    char *key = ns_net_request_key(url, top_url, "GET", headers);
+    if (!key) return;
+    ns_net_preload_expect(key);
+    g_free(key);
+    char **target = g_new0(char *, 3);
+    target[0] = g_strdup(url);
+    target[1] = g_strdup(top_url);
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
+                         on_module_prefetched, target);
+}
+
+static gboolean
+ns_module_import_prefetch_allowed(const ns_js *js, const char *abs_url,
+                                  const char *top_url)
+{
+    if (!abs_url || !ns_url_is_http_or_https(abs_url)) return FALSE;
+    if (g_str_has_prefix(top_url, "https://") &&
+        g_str_has_prefix(abs_url, "http://"))
+        return FALSE;
+    return !js->csp ||
+           ns_csp_allows(js->csp, NS_CSP_SCRIPT, abs_url, top_url);
+}
+
+static void
+ns_module_prefetch_imports(const ns_js *js, const char *module_url,
+                           const char *src, gsize len, const char *top_url)
+{
+    if (!module_url || !src || !top_url ||
+        !ns_url_is_http_or_https(module_url))
+        return;
+    GPtrArray *specs = g_ptr_array_new_with_free_func(g_free);
+    ns_module_scan_imports(src, len, specs);
+    for (guint i = 0; i < specs->len; i++) {
+        char *abs_url = ns_url_resolve(module_url, g_ptr_array_index(specs, i));
+        if (ns_module_import_prefetch_allowed(js, abs_url, top_url))
+            ns_module_prefetch_url(abs_url, top_url);
+        g_free(abs_url);
+    }
+    g_ptr_array_free(specs, TRUE);
+}
+
+static void
+ns_js_module_prefetch_owner(ns_js *js)
+{
+    if (g_module_prefetch_owner == js) return;
+    g_module_prefetch_owner = js;
+    if (g_module_prefetch_seen) g_hash_table_remove_all(g_module_prefetch_seen);
+}
+
+static void
+ns_js_module_prefetch_release(const ns_js *js)
+{
+    if (g_module_prefetch_owner != js) return;
+    g_module_prefetch_owner = NULL;
+    if (g_module_prefetch_seen) g_hash_table_remove_all(g_module_prefetch_seen);
+}
+
+static void
+ns_js_module_prefetch_begin(ns_js *js, const char *module_url,
+                            const char *src, gsize len)
+{
+    if (!js || js->worker_host || !js->current_url) return;
+    ns_js_module_prefetch_owner(js);
+    if (module_url && ns_url_is_http_or_https(module_url) &&
+        g_module_prefetch_seen)
+        g_hash_table_add(g_module_prefetch_seen, g_strdup(module_url));
+    ns_module_prefetch_imports(js, module_url, src, len, js->current_url);
+}
+
 static JSValue
 ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
                             const char *module_name)
 {
+    ns_js_module_prefetch_begin(js_from_ctx(ctx), module_name, src, len);
     gsize  name_len = module_name ? strlen(module_name) : 0;
     gsize  key_len  = name_len + 1 + len;
     char  *key      = g_malloc(key_len);
@@ -63058,6 +63627,27 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
 }
 
 static void
+ns_js_log_module_failure(ns_js *js, JSContext *ctx, const char *what,
+                         const char *origin, JSValueConst ex)
+{
+    if (!js->log_cb) return;
+    const char *msg = JS_ToCString(ctx, ex);
+    if (!msg) return;
+    JSValue stack = JS_IsObject(ex) ? JS_GetPropertyStr(ctx, ex, "stack")
+                                    : JS_UNDEFINED;
+    const char *stack_s = JS_IsString(stack) ? JS_ToCString(ctx, stack) : NULL;
+    char *line = g_strdup_printf("JS module %s in %s: %s%s%s", what,
+                                 origin ? origin : "module", msg,
+                                 stack_s && *stack_s ? "\n" : "",
+                                 stack_s ? stack_s : "");
+    js->log_cb(line, js->log_user_data);
+    g_free(line);
+    if (stack_s) JS_FreeCString(ctx, stack_s);
+    JS_FreeValue(ctx, stack);
+    JS_FreeCString(ctx, msg);
+}
+
+static void
 ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
 {
     ns_budget_guard bg = {0};
@@ -63089,28 +63679,13 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
                    origin ? origin : "module");
     if (JS_IsException(v)) {
         JSValue ex = JS_GetException(ctx);
-        const char *msg = JS_ToCString(ctx, ex);
-        if (msg && js->log_cb) {
-            char *line = g_strdup_printf("JS module error in %s: %s",
-                                         origin ? origin : "module", msg);
-            js->log_cb(line, js->log_user_data);
-            g_free(line);
-        }
-        if (msg) JS_FreeCString(ctx, msg);
+        ns_js_log_module_failure(js, ctx, "error", origin, ex);
         JS_FreeValue(ctx, ex);
     } else {
         JSPromiseStateEnum st = JS_PromiseState(ctx, v);
         if (st == JS_PROMISE_REJECTED) {
             JSValue reason = JS_PromiseResult(ctx, v);
-            const char *msg = JS_ToCString(ctx, reason);
-            if (msg && js->log_cb) {
-                char *line = g_strdup_printf(
-                    "JS module rejected in %s: %s",
-                    origin ? origin : "module", msg);
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-            }
-            if (msg) JS_FreeCString(ctx, msg);
+            ns_js_log_module_failure(js, ctx, "rejected", origin, reason);
             JS_FreeValue(ctx, reason);
         }
     }
@@ -63609,6 +64184,38 @@ ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
 
+static gboolean
+ns_js_module_script_fetch_allowed(const ns_js *js, const ns_node *n,
+                                  const char *abs_url, const char *origin)
+{
+    if (!ns_url_is_http_or_https(abs_url)) return FALSE;
+    if (g_str_has_prefix(origin, "https://") &&
+        g_str_has_prefix(abs_url, "http://"))
+        return FALSE;
+    return !js->csp ||
+           ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+                                    ns_element_get_attr(n, "nonce"),
+                                    !(n->flags & NS_NODE_NOT_PARSER_INSERTED));
+}
+
+static void
+ns_js_module_prefetch_scripts(ns_js *js, GArray *tasks, const char *origin)
+{
+    if (!js || js->worker_host || !js->current_url || !tasks) return;
+    ns_js_module_prefetch_owner(js);
+    for (guint i = 0; i < tasks->len; i++) {
+        const ns_node *n = g_array_index(tasks, ns_script_task, i).node;
+        const char *src = n ? ns_element_get_attr(n, "src") : NULL;
+        if (!src || !*src || !ns_script_type_is_module(n) ||
+            ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
+            continue;
+        char *abs_url = ns_url_resolve(origin, src);
+        if (abs_url && ns_js_module_script_fetch_allowed(js, n, abs_url, origin))
+            ns_module_prefetch_url(abs_url, js->current_url);
+        g_free(abs_url);
+    }
+}
+
 static void
 ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
                           const char *origin)
@@ -63746,6 +64353,27 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
     ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
 }
 
+static void
+ns_js_fire_parsed_stylesheet_loads(ns_js *js, ns_node *doc)
+{
+    GPtrArray *sheets = g_ptr_array_new();
+    ns_js_collect_pending_stylesheets(doc, sheets);
+    g_autofree char *origin = sheets->len ? ns_js_node_document_base_url(js, doc)
+                                          : NULL;
+    for (guint i = 0; i < sheets->len && !js->halted; i++) {
+        ns_node *link = g_ptr_array_index(sheets, i);
+        g_autofree char *abs =
+            ns_url_resolve(origin, ns_element_get_attr(link, "href"));
+        if (ns_engine_linked_css_known(abs)) {
+            link->flags |= NS_NODE_LINK_LOAD_FIRED;
+            ns_js_dispatch_resource_event(js, link, "load");
+        } else {
+            ns_js_load_stylesheet_element(js, link, origin ? origin : "inline");
+        }
+    }
+    g_ptr_array_free(sheets, TRUE);
+}
+
 static gboolean
 ns_js_root_connected(ns_js *js, const ns_node *root)
 {
@@ -63854,6 +64482,26 @@ ns_js_script_needs_prepare(ns_js *js, ns_node *script)
 }
 
 static void
+ns_js_preload_inserted_script(ns_js *js, const ns_node *script,
+                              const char *origin)
+{
+    const char *src = ns_element_get_attr(script, "src");
+    if (!src || !*src || ns_script_type_is_module(script) ||
+        g_str_has_prefix(src, "data:") || g_str_has_prefix(src, "blob:"))
+        return;
+    g_autofree char *abs_url = ns_url_resolve(origin, src);
+    if (!abs_url || (g_str_has_prefix(origin, "https://") &&
+                     !g_str_has_prefix(abs_url, "https://")))
+        return;
+    if (js->csp &&
+        !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+                                  ns_element_get_attr(script, "nonce"),
+                                  FALSE))
+        return;
+    ns_engine_preload_script(abs_url, origin);
+}
+
+static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
     if (!js || !root || !js->current_doc || js->halted) return;
@@ -63884,13 +64532,16 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         /* While the initial parse is held at a script, a blocking script it
          * writes runs before the parser goes on, even an external one. */
         gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
-                                 js->callback_depth == 0;
+                                 js->callback_depth == 0 &&
+                                 !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
         if (t->schedule == NS_SCRIPT_BLOCKING &&
             (!ns_element_get_attr(t->node, "src") || parser_paused) &&
-            !ns_script_type_is_module(t->node))
+            !ns_script_type_is_module(t->node)) {
             ns_js_run_script_element(js, t->node, origin);
-        else
+        } else {
             have_external = TRUE;
+            ns_js_preload_inserted_script(js, t->node, origin);
+        }
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
     if (js->eval_depth > 0 || js->callback_depth > 0 ||
@@ -65668,6 +66319,7 @@ ns_js_lifecycle_tick(gpointer data)
     const char *origin = js->lifecycle_origin && *js->lifecycle_origin
         ? js->lifecycle_origin : "inline";
     if (js->lifecycle_phase == 0) {
+        ns_js_module_prefetch_scripts(js, js->lifecycle_tasks, origin);
         ns_js_set_navigation_milestone(js,
             &js->navigation_timing.dom_interactive_ms, "domInteractive");
         js->ready_state = 1;
@@ -65677,8 +66329,17 @@ ns_js_lifecycle_tick(gpointer data)
         return G_SOURCE_REMOVE;
     }
     if (js->lifecycle_phase == 1) {
-        if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
-                                           NS_SCRIPT_DEFERRED, origin)) {
+        gint64 slice_end = g_get_monotonic_time() + NS_DEFERRED_SCRIPT_SLICE_US;
+        g_autofree char *slice_origin = g_strdup(origin);
+        gboolean ran = FALSE;
+        while (!js->halted && js->lifecycle_doc == doc && js->lifecycle_tasks &&
+               ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
+                                              NS_SCRIPT_DEFERRED,
+                                              slice_origin)) {
+            ran = TRUE;
+            if (g_get_monotonic_time() >= slice_end) break;
+        }
+        if (ran) {
             ns_js_lifecycle_schedule(js);
             return G_SOURCE_REMOVE;
         }
@@ -65690,6 +66351,7 @@ ns_js_lifecycle_tick(gpointer data)
             &js->navigation_timing.dom_content_loaded_event_end_ms,
             "domContentLoadedEventEnd");
         ns_ce_upgrade_subtree_all(js, doc);
+        ns_js_fire_parsed_stylesheet_loads(js, doc);
         js->lifecycle_phase = 2;
         ns_js_lifecycle_schedule(js);
         return G_SOURCE_REMOVE;
@@ -66289,16 +66951,32 @@ ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data)
 static void
 ns_js_flush_layout(ns_js *js)
 {
-    if (!js || !js->layout_flush_cb || js->in_layout_flush) return;
+    if (!js || js->in_layout_flush) return;
+    ns_js_commit_cssom(js);
+    if (!js->layout_flush_cb) return;
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
 }
 
+void
+ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb)
+{
+    if (js) js->style_flush_cb = cb;
+}
+
 static void
 ns_js_flush_style(ns_js *js)
 {
-    ns_js_flush_layout(js);
+    if (!js || js->in_layout_flush) return;
+    if (!js->style_flush_cb) {
+        ns_js_flush_layout(js);
+        return;
+    }
+    ns_js_commit_cssom(js);
+    js->in_layout_flush = TRUE;
+    js->style_flush_cb(js->layout_flush_user_data);
+    js->in_layout_flush = FALSE;
 }
 
 
@@ -66356,7 +67034,14 @@ ns_js_consume_mutated(ns_js *js)
     if (!js) return FALSE;
     gboolean m = js->mutated;
     js->mutated = FALSE;
+    if (m) js->mutation_serial++;
     return m;
+}
+
+guint64
+ns_js_mutation_serial(const ns_js *js)
+{
+    return js ? js->mutation_serial : 0;
 }
 
 char *

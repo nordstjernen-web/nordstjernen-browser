@@ -1,0 +1,8 @@
+{
+  "name": "nordstjernen-sitebench",
+  "private": true,
+  "description": "Chrome side of the Nordstjernen site benchmark",
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

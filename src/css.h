@@ -637,6 +637,7 @@ gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 char    *ns_css_font_family_for_pango(const char *css_family);
 char    *ns_css_font_family_first_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
+void     ns_css_set_font_alias_cb(char *(*cb)(const char *family));
 void     ns_css_set_font_family_name_cb(char *(*cb)(const char *family));
 void     ns_css_set_font_generation_cb(guint64 (*cb)(void));
 int      ns_css_font_weight_number(const ns_css_value *v, int fallback);
@@ -810,6 +811,7 @@ void       ns_css_clear_defined_elements(void);
 char *ns_inline_style_get(const char *style_text, const char *prop_name);
 char *ns_inline_style_set(const char *style_text, const char *prop_name, const char *value);
 char *ns_inline_style_serialize(const char *style_text);
+const GPtrArray *ns_inline_style_names(const char *style_text);
 gboolean ns_inline_value_strip_important(char *value);
 
 typedef struct ns_css_decl {
@@ -944,6 +946,7 @@ gboolean           ns_css_supports_condition(const char *condition,
 ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
 char              *ns_css_shadow_adopted_css(ns_node *root);
+guint              ns_css_stylesheet_cache_generation(void);
 ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
                                                const char *base_url);
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
@@ -1024,6 +1027,8 @@ typedef struct ns_style {
     guint64 share_id;
     int   ref;
     guint32 currentcolor_bits;
+    guint8 animation_hint;
+    guint8 explicit_inherit;
     struct ns_var_map *vars;
 } ns_style;
 
@@ -1171,8 +1176,9 @@ void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
 void ns_css_append_unescaped(GString *out, const char **pp);
 
-/* sheet_docs, when not NULL, holds the document of each author sheet; a
-   sheet then styles the elements of its own document only. */
+/* sheet_docs, when not NULL, holds the document of each author sheet, or
+   the shadow host of a sheet from a shadow tree; a sheet then styles the
+   elements of its own document, or of its host's subtree, only. */
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            const ns_node *const    *sheet_docs,
@@ -1182,6 +1188,11 @@ void ns_css_selector_cache_end(void);
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
 void ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added);
+void ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
+                                    ns_node *const *removed, guint n_removed);
+void ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
+                                  guint n_removed, ns_node *next_sibling,
+                                  ns_node *previous_sibling);
 void ns_css_mark_attr_dirty(ns_node *target, const char *name,
                             const char *old_value);
 gboolean ns_css_attr_may_affect_style(const ns_node *target, const char *name);
