@@ -53,6 +53,17 @@ Changelog:
   200 times under such a rule went from 4.2 s to about 0.7 s; on CNN's
   front page script time drops from 14 to 9 s and first paint from
   15.6 to 10.6 s.
+* Changing an element's style no longer restyles everything inside it.
+  When an element's computed style changed, every descendant was
+  recomputed even if only a non-inherited property such as `padding`
+  changed. Now, like Chrome, children are recomputed only when an
+  inherited property, `display`, a custom property, or a property a
+  child explicitly `inherit`s changed, and the check repeats one level
+  down, stopping wherever a child's style comes out the same. An inline
+  `style` change marks only its element unless a selector tests
+  `[style]` outside its subject. A script that sets `body.style` and
+  reads `offsetHeight` spends 6-7 ms on styles instead of 110 ms on
+  CNN's and GitHub's front pages.
 * A style flush after a small DOM change costs a fraction of what it did.
   Subtrees with nothing dirty in them are no longer walked element by
   element - their previous styles are carried over in one pass - the
