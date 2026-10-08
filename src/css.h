@@ -1025,6 +1025,7 @@ typedef struct ns_style {
     guint64 share_id;
     int   ref;
     guint32 currentcolor_bits;
+    guint8 animation_hint;
     struct ns_var_map *vars;
 } ns_style;
 

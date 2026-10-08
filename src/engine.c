@@ -1011,14 +1011,46 @@ collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
     g_hash_table_destroy(seen);
 }
 
+static gboolean
+collect_name_may_matter(const ns_node *n)
+{
+    if (n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    switch (n->name[0]) {
+    case 'f': case 'i': case 'l': case 'n': case 'o': case 's':
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void
+collect_internal_attrs(const ns_node *n, gboolean *shadow_root,
+                       gboolean *adopted)
+{
+    *shadow_root = FALSE;
+    *adopted = FALSE;
+    if (n->kind != NS_NODE_ELEMENT) return;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name || a->name[0] != 'd' ||
+            strncmp(a->name, "data-nd-", 8) != 0)
+            continue;
+        if (strcmp(a->name, NS_SHADOW_ATTR) == 0) *shadow_root = TRUE;
+        else if (strcmp(a->name, NS_ADOPTED_CSS_ATTR) == 0 && a->value &&
+                 *a->value)
+            *adopted = TRUE;
+    }
+}
+
 static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
-    if (!n || depth >= 512 || ns_node_is_element_named(n, "noscript")) return;
-    if (ns_node_is_element_named(n, "iframe") ||
-        ns_node_is_element_named(n, "frame") ||
-        ns_node_is_element_named(n, "object")) {
+    if (!n || depth >= 512) return;
+    gboolean named = collect_name_may_matter(n);
+    if (named && ns_node_is_element_named(n, "noscript")) return;
+    if (named && (ns_node_is_element_named(n, "iframe") ||
+                  ns_node_is_element_named(n, "frame") ||
+                  ns_node_is_element_named(n, "object"))) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
@@ -1044,7 +1076,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (ns_node_is_element_named(n, "style") && style_sheet_enabled(n)) {
+    if (named && ns_node_is_element_named(n, "style") &&
+        style_sheet_enabled(n)) {
         char *css = collect_large_style(n, base_url, cc)
             ? NULL : ns_css_style_element_text(n);
         if (css) {
@@ -1071,7 +1104,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             }
             g_free(css);
         }
-    } else if (ns_node_is_element_named(n, "link") && base_url) {
+    } else if (named && ns_node_is_element_named(n, "link") && base_url) {
         sheet_run_flush(cc);
         const char *rel = ns_element_get_attr(n, "rel");
         const char *href = ns_element_get_attr(n, "href");
@@ -1106,9 +1139,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             g_free(abs);
         }
     }
-    gboolean shadow_scope = cc->docs && n->kind == NS_NODE_ELEMENT &&
-                            n->parent && n->parent->kind == NS_NODE_ELEMENT &&
-                            ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+    gboolean shadow_attr, adopted_attr;
+    collect_internal_attrs(n, &shadow_attr, &adopted_attr);
+    gboolean shadow_scope = cc->docs && shadow_attr &&
+                            n->parent && n->parent->kind == NS_NODE_ELEMENT;
     ns_node *outer_doc = cc->doc;
     if (shadow_scope) {
         sheet_docs_sync(cc);
@@ -1116,7 +1150,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_stylesheets_walk(c, base_url, cc, depth + 1);
-    collect_adopted_css(n, base_url, cc);
+    if (adopted_attr) collect_adopted_css(n, base_url, cc);
     if (shadow_scope) {
         sheet_docs_sync(cc);
         cc->doc = outer_doc;

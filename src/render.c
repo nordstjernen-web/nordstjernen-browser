@@ -293,6 +293,10 @@ render_request_fonts(const ns_render_ctx *c, GHashTable *styles)
             g_hash_table_insert(families, g_strdup(ff->family), usage);
         }
     }
+    if (g_hash_table_size(families) == 0) {
+        g_hash_table_destroy(families);
+        return;
+    }
     g_font_list_matches = g_hash_table_new_full(
         g_direct_hash, g_direct_equal, NULL,
         (GDestroyNotify)g_ptr_array_unref);

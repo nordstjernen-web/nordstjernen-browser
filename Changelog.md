@@ -44,6 +44,15 @@ Changelog:
   unkeyed compounds keep the conservative behaviour. A script that
   inserts nodes and reads a computed style 200 times under such a rule
   went from 4.2 s to about 0.7 s.
+* A style flush after a small DOM change costs a fraction of what it did.
+  Subtrees with nothing dirty in them are no longer walked element by
+  element - their previous styles are carried over in one pass - the
+  table of previous styles is updated in place instead of being copied,
+  the stylesheet scan skips elements that cannot be a `<style>`,
+  `<link>` or frame, pages without `@font-face` skip the font-usage walk,
+  and the animation check is cached per style. Together with the `:has()`
+  change, 200 insert-and-`getComputedStyle()` cycles on a 3,000-element
+  page drop from 4.2 s to about 0.23 s.
 * `getComputedStyle()` lays the page out only when it has to. Reading a
   property whose value does not depend on layout (colour, display,
   fonts and most others) now recomputes styles alone, so a script that
