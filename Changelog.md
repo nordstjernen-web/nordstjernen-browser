@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* WebGL offers the common extensions: instanced drawing, vertex array
+  objects, 32-bit indices, float and half-float textures with linear
+  filtering, depth textures, min/max blending, standard derivatives and
+  float render targets in WebGL 1, and float and half-float render
+  targets, float blending, parallel shader compilation and context-loss
+  simulation in both versions. Only the debug-renderer and anisotropic-
+  filtering extensions existed, so WebGL 1 pages that need instancing or
+  float textures fell back or failed, and three.js could not render to
+  the HDR targets its post-processing uses.
 * Pages that upload WebGPU textures without giving `rowsPerImage`, which
   three.js does for every texture, no longer abort the renderer: the
   missing value reached wgpu-native as an invalid zero and it stopped
