@@ -3,6 +3,13 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU is now part of every Linux, macOS and Windows build, as WebGL
+  already was. When wgpu-native is not installed, the build downloads
+  the pinned release for the platform and links it into the browser, so
+  no extra library has to ship beside it. FreeBSD, NetBSD, musl-based
+  Linux, Android and iOS, which wgpu-native publishes no release for,
+  still build without it. WebGPU stays off until the browser is started
+  with `--enable-webgpu`.
 * Text falls back through the page's own `font-family` list. Only one
   family of the list was handed to the text engine, so a character that
   family lacks came from the system's fallback font and never from the
