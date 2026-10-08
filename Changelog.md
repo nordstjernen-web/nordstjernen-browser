@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* Videos decoded by the video helper are scaled on the GPU. The window
+  drew every frame through cairo, which scaled it on the CPU and then
+  uploaded the result, about 20 ms per 1080p frame, so a 60 fps YouTube
+  video showed 40 to 55 frames a second and the window process used
+  64% CPU. Each frame is now a texture that GTK scales while it
+  composites: all 60 frames reach the screen and the window process
+  uses 25%.
 * A `MessagePort` that leads to a worker can carry other ports and
   `File`s. Such a port encoded every message as if nothing were being
   transferred, so a port in the message failed with "DataCloneError:
