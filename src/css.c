@@ -258,16 +258,6 @@ ns_css_set_fullscreen_node(const ns_node *node)
     return prev;
 }
 
-void
-ns_css_forget_node(const ns_node *node)
-{
-    if (g_css_focus_node == node) g_css_focus_node = NULL;
-    if (g_css_focus_visible_node == node) g_css_focus_visible_node = NULL;
-    if (g_css_hover_node == node) g_css_hover_node = NULL;
-    if (g_css_active_node == node) g_css_active_node = NULL;
-    if (g_css_fullscreen_node == node) g_css_fullscreen_node = NULL;
-}
-
 static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_DISPLAY]              = "display",
     [NS_CSS_COLOR]                = "color",
@@ -30433,6 +30423,24 @@ incr_mark_has_region(ns_node *anchor)
 }
 
 static GHashTable    *g_has_subject_docs;
+static __thread gboolean g_css_compute_thread;
+
+void
+ns_css_forget_node(const ns_node *node)
+{
+    if (g_css_focus_node == node) g_css_focus_node = NULL;
+    if (g_css_focus_visible_node == node) g_css_focus_visible_node = NULL;
+    if (g_css_hover_node == node) g_css_hover_node = NULL;
+    if (g_css_active_node == node) g_css_active_node = NULL;
+    if (g_css_fullscreen_node == node) g_css_fullscreen_node = NULL;
+    if (!g_css_compute_thread) return;
+    GHashTable *node_sets[] = {
+        g_incr_dirty, g_incr_self_dirty, g_incr_exclude, g_incr_inv_pending,
+        g_has_subject_docs,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(node_sets); i++)
+        if (node_sets[i]) g_hash_table_remove(node_sets[i], node);
+}
 
 static void
 incr_defer_loose_has_subjects(ns_node *changed)
@@ -33873,6 +33881,7 @@ ns_css_compute(ns_node *doc,
     GHashTable *out = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, (GDestroyNotify)ns_style_free);
 
+    g_css_compute_thread = TRUE;
     g_pragma_valid = FALSE;
 
     const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
