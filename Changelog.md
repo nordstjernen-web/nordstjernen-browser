@@ -70,6 +70,21 @@ Changelog:
   inserted through `insertRule()` (CSS-in-JS libraries) lost a
   shorthand set with `var()` after earlier values of the same property,
   and `cssText` folded `border-color: var(--b)` into a resolved colour.
+* Twitch's search box has its rounded corners. The CSSOM rebuilt an
+  `insertRule()` sheet from each rule's declarations one property at a
+  time, and a `var()` shorthand that a later longhand partly overrides
+  (`border-radius: var(--r); border-top-right-radius: 0`) has no value
+  of its own, so it came back as `border-radius: ;`. Rules now keep
+  their serialized text. `style.length` and `style[i]` are answered
+  from a cache instead of re-serializing the whole style per call, and
+  a value containing `;` (`url(data:...;base64,...)`) no longer adds a
+  bogus property name.
+* Pages that keep their theme in one long `style` attribute and read it
+  back property by property are fast again: Twitch holds about a
+  thousand custom properties in a 47 KB style and read each one by
+  rescanning the text. Custom-property reads on long styles go through
+  a per-string index, and other reads are memoized; Twitch's headless
+  CPU time drops from 22-26 s to about 17 s.
 * `text-decoration: inherit` works, so Tailwind's preflight removes the
   underline from links (Yahoo's navigation and headlines were all
   underlined), and outlines follow `border-radius` like Chrome's (pill

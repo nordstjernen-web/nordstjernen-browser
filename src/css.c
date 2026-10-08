@@ -25063,6 +25063,59 @@ ns_inline_style_serialize(const char *style)
                                       g_string_free(out, FALSE));
 }
 
+typedef struct {
+    const char *ptr;
+    char       *copy;
+    gsize       len;
+    GPtrArray  *names;
+} inline_names_cache;
+
+static __thread inline_names_cache g_inline_names[INLINE_INDEX_SLOTS];
+static __thread guint g_inline_names_next;
+
+static GPtrArray *
+inline_names_build(const char *style)
+{
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    char *text = ns_inline_style_serialize(style);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    while (p < end) {
+        while (p < end && (*p == ' ' || *p == ';')) p++;
+        if (p >= end) break;
+        char term = 0;
+        const char *kend = css_scan_until(p, end, ":;", &term);
+        if (term != ':') break;
+        g_ptr_array_add(names, css_trim_dup_range(p, kend));
+        const char *vend = css_scan_declaration_value(kend + 1, end, &term);
+        p = term == ';' ? vend + 1 : vend;
+    }
+    g_free(text);
+    return names;
+}
+
+const GPtrArray *
+ns_inline_style_names(const char *style)
+{
+    if (!style) style = "";
+    gsize len = strlen(style);
+    for (guint i = 0; i < INLINE_INDEX_SLOTS; i++) {
+        inline_names_cache *slot = &g_inline_names[i];
+        if (slot->ptr == style && slot->len == len &&
+            memcmp(slot->copy, style, len) == 0)
+            return slot->names;
+    }
+    inline_names_cache *slot =
+        &g_inline_names[g_inline_names_next++ % INLINE_INDEX_SLOTS];
+    g_free(slot->copy);
+    if (slot->names) g_ptr_array_unref(slot->names);
+    slot->names = inline_names_build(style);
+    slot->ptr = style;
+    slot->len = len;
+    slot->copy = g_memdup2(style, len + 1);
+    return slot->names;
+}
+
 gboolean
 ns_inline_value_strip_important(char *value)
 {

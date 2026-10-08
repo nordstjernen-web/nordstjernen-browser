@@ -2779,39 +2779,18 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         char *end = NULL;
         long idx = strtol(name, &end, 10);
         if (end && *end == '\0' && idx >= 0) {
-            char *style = ns_inline_style_serialize(
-                ns_element_get_attr(n, "style"));
-            char *prop_name = NULL;
-            gsize cur = 0;
-            const char *p = style;
-            while (p && *p) {
-                while (*p == ' ' || *p == ';') p++;
-                const char *colon = strchr(p, ':');
-                if (!colon) break;
-                if ((long)cur == idx) {
-                    prop_name = g_strndup(p, (gsize)(colon - p));
-                    while (*prop_name && (prop_name[strlen(prop_name)-1] == ' '))
-                        prop_name[strlen(prop_name)-1] = '\0';
-                    break;
-                }
-                const char *end_p = strchr(colon, ';');
-                if (!end_p) end_p = colon + strlen(colon);
-                p = end_p;
-                cur++;
-            }
             JS_FreeCString(ctx, name);
-            g_free(style);
-            if (prop_name) {
-                if (desc) {
-                    desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
-                    desc->value = JS_NewString(ctx, prop_name);
-                    desc->getter = JS_UNDEFINED;
-                    desc->setter = JS_UNDEFINED;
-                }
-                g_free(prop_name);
-                return 1;
+            const GPtrArray *names =
+                ns_inline_style_names(ns_element_get_attr(n, "style"));
+            if ((gulong)idx >= names->len) return 0;
+            if (desc) {
+                desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+                desc->value = JS_NewString(ctx,
+                                           g_ptr_array_index(names, idx));
+                desc->getter = JS_UNDEFINED;
+                desc->setter = JS_UNDEFINED;
             }
-            return 0;
+            return 1;
         }
     }
     char *css = camel_to_kebab(name);
@@ -2845,21 +2824,9 @@ ns_style_get_length(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewInt32(ctx, 0);
-    char *style = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
-    int32_t count = 0;
-    const char *p = style;
-    while (*p) {
-        while (*p == ' ' || *p == ';') p++;
-        if (!*p) break;
-        const char *colon = strchr(p, ':');
-        if (!colon) break;
-        count++;
-        const char *end_p = strchr(colon, ';');
-        if (!end_p) break;
-        p = end_p;
-    }
-    g_free(style);
-    return JS_NewInt32(ctx, count);
+    const GPtrArray *names =
+        ns_inline_style_names(ns_element_get_attr(n, "style"));
+    return JS_NewInt32(ctx, (int32_t)names->len);
 }
 
 static int
