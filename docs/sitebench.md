@@ -117,7 +117,9 @@ each font family: under `tr_TR.UTF-8` it lists the system font as
 Nordstjernen takes `Accept-Language` from the Windows user locale
 instead. `NS_LOCALE` (or `--locale`) picks another locale; the report
 header shows each build's locale next to Chrome's, and "not recorded"
-for captures made before the locale was.
+for captures made before the locale was. Both browsers also run in UTC,
+Chrome through its context's time zone and Nordstjernen with `TZ=UTC`,
+so dates and times a page prints read the same in both.
 
 **Scores** (`compare.py`):
 
