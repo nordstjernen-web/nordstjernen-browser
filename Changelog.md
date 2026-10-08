@@ -3,6 +3,14 @@ Changelog:
 
 1.0.30:
 ======
+* The WebGPU interface objects (`GPUDevice`, `GPUTexture`,
+  `GPURenderPassEncoder`, `GPURenderBundleEncoder` and the rest) exist
+  as globals, as in other browsers. three.js tests command encoders
+  against them, so its WebGPU renderer stopped on a `ReferenceError` at
+  its first frame; the instancing and custom-lighting examples now
+  render. WebGPU methods live on the interfaces' prototypes, so creating
+  a render pass or a buffer no longer builds a fresh set of functions
+  each time.
 * WebGPU knows every texture format of the specification, including the
   signed-normalised, integer, packed, depth/stencil and BC, ETC2 and
   ASTC compressed formats; unknown names used to turn silently into
