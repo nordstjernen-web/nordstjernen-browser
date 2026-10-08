@@ -999,30 +999,65 @@ node_is_frame_fallback(const ns_node *n)
 
 static GHashTable *g_contains_block_media_cache;
 
+static const ns_node *layout_slot_host(const ns_node *slot);
+static const ns_node *layout_shadow_root(const ns_node *host);
+static gboolean contains_block_media_depth(const ns_node *n, GHashTable *styles,
+                                           int depth);
+
+static gboolean
+child_makes_block_media(const ns_node *c, GHashTable *styles, int depth)
+{
+    if (c->kind != NS_NODE_ELEMENT || !c->name) return FALSE;
+    if (node_is_non_rendering(c)) return FALSE;
+    if (node_has_media_metadata(c) ||
+        (is_replaced_block_tag(c->name) &&
+         !is_inline_level_replaced(c, styles)) ||
+        strcmp(c->name, "iframe") == 0)
+        return TRUE;
+    if (styles) {
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs) {
+            if (style_is_none(cs) || style_is_absolute_or_fixed(cs))
+                return FALSE;
+            if (style_is_block_level(cs)) return TRUE;
+            if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
+                return FALSE;
+        }
+    }
+    return contains_block_media_depth(c, styles, depth + 1);
+}
+
+static gboolean
+slot_assigns_block_media(const ns_node *slot, GHashTable *styles, int depth)
+{
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    for (const ns_node *lc = host->first_child; lc; lc = lc->next_sibling) {
+        if (lc == sr || lc->kind != NS_NODE_ELEMENT) continue;
+        const char *assigned = ns_element_get_attr(lc, "slot");
+        if (g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") != 0)
+            continue;
+        if (child_makes_block_media(lc, styles, depth)) return TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean
 contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH || n->kind != NS_NODE_ELEMENT)
         return FALSE;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (node_is_non_rendering(c)) continue;
-        if (node_has_media_metadata(c) ||
-            (is_replaced_block_tag(c->name) &&
-             !is_inline_level_replaced(c, styles)) ||
-            strcmp(c->name, "iframe") == 0)
-            return TRUE;
-        if (styles) {
-            const ns_style *cs = g_hash_table_lookup(styles, c);
-            if (cs) {
-                if (style_is_none(cs) || style_is_absolute_or_fixed(cs))
-                    continue;
-                if (style_is_block_level(cs)) return TRUE;
-                if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
-                    continue;
-            }
+    const ns_node *shadow_root = layout_shadow_root(n);
+    const ns_node *first = shadow_root ? shadow_root->first_child : n->first_child;
+    for (const ns_node *c = first; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            strcmp(c->name, "slot") == 0) {
+            if (slot_assigns_block_media(c, styles, depth + 1)) return TRUE;
+            continue;
         }
-        if (contains_block_media_depth(c, styles, depth + 1)) return TRUE;
+        if (child_makes_block_media(c, styles, depth)) return TRUE;
     }
     return FALSE;
 }
@@ -1077,10 +1112,12 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (n->kind != NS_NODE_ELEMENT) return FALSE;
     if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
     if (node_has_media_metadata(n)) return FALSE;
-    for (const ns_node *sc = n->first_child; sc; sc = sc->next_sibling)
-        if (sc->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(sc, NS_SHADOW_ATTR))
+    if (layout_shadow_root(n)) {
+        const ns_style *hs = g_hash_table_lookup(styles, n);
+        if (!hs || style_is_none(hs) || style_is_block(hs) ||
+            style_is_absolute_or_fixed(hs) || contains_block_media(n, styles))
             return FALSE;
+    }
     if (is_replaced_block_tag(n->name)) {
         if (strcmp(n->name, "table") == 0) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);
@@ -3245,6 +3282,30 @@ emit_datalist_suggestions(collector_ctx *ctx, const ns_node *input)
     g_free(needle);
 }
 
+static void collect_walk(const ns_node *n, collector_ctx *ctx, int depth);
+
+static gboolean
+collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
+{
+    if (!slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    const ns_node *host = layout_slot_host(slot);
+    const ns_node *sr = host ? layout_shadow_root(host) : NULL;
+    if (!sr) return FALSE;
+    const char *slot_name = ns_element_get_attr(slot, "name");
+    gboolean any = FALSE;
+    for (const ns_node *lc = host->first_child; lc; lc = lc->next_sibling) {
+        if (lc == sr) continue;
+        const char *assigned = lc->kind == NS_NODE_ELEMENT
+            ? ns_element_get_attr(lc, "slot") : NULL;
+        if (g_strcmp0(assigned ? assigned : "", slot_name ? slot_name : "") != 0)
+            continue;
+        if (lc->kind != NS_NODE_ELEMENT && lc->kind != NS_NODE_TEXT) continue;
+        collect_walk(lc, ctx, depth + 1);
+        any = TRUE;
+    }
+    return any;
+}
+
 static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
@@ -4025,8 +4086,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         !(pseudo_blocks && g_pseudo_block_before))
         append_pseudo_inline(ctx, s->before, n);
 
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_walk(c, ctx, depth + 1);
+    const ns_node *shadow_root = layout_shadow_root(n);
+    if (shadow_root) {
+        for (const ns_node *c = shadow_root->first_child; c; c = c->next_sibling)
+            collect_walk(c, ctx, depth + 1);
+    } else if (!collect_walk_assigned(n, ctx, depth)) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+            collect_walk(c, ctx, depth + 1);
+    }
 
     if (s && s->after && s->after->values[NS_CSS_CONTENT] &&
         !(pseudo_blocks && g_pseudo_block_after))
