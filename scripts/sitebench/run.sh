@@ -26,6 +26,7 @@ environment:
   CHROME=auto|1|0  capture Chrome: only when missing (auto), always (1), never (0)
   NS=1|0         capture Nordstjernen (default: 1)
   NS_BIN=PATH    Nordstjernen binary (default: builddir/src/gtk/nordstjernen)
+  NS_LOCALE=NAME  locale Nordstjernen runs under (default: en_US.UTF-8)
 EOF
 }
 

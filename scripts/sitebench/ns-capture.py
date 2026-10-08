@@ -172,12 +172,18 @@ def main_thread_ms(timing):
     return round(max(cpu - (timing.get("encode_ms") or 0), 0), 1)
 
 
-def isolated_env(home):
+LOCALE_OVERRIDES = ("LANGUAGE", "FC_LANG", "NS_PANGO_LANGUAGE")
+
+
+def isolated_env(home, locale):
     env = dict(os.environ)
     env["HOME"] = home
     env["XDG_CACHE_HOME"] = os.path.join(home, ".cache")
     env["XDG_CONFIG_HOME"] = os.path.join(home, ".config")
     env["XDG_DATA_HOME"] = os.path.join(home, ".local", "share")
+    env["LANG"] = env["LC_ALL"] = locale
+    for key in LOCALE_OVERRIDES:
+        env.pop(key, None)
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         env.setdefault("NS_ALLOW_ROOT", "1")
     for key in ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
@@ -198,7 +204,7 @@ def capture_site(site, a, probe_src):
             png = os.path.join(home, "perf.png")
             cmd = [a.bin, "--headless", "--timing", viewport, "--settle-ms=0", "--time-ms=0",
                    f"--dump=png:{png}", site["url"]]
-            r = run_with_rusage(cmd, isolated_env(home), a.timeout)
+            r = run_with_rusage(cmd, isolated_env(home, a.locale), a.timeout)
         finally:
             shutil.rmtree(home, ignore_errors=True)
         timing = parse_prefixed_json(r["stdout"], "timing: ") or {}
@@ -214,7 +220,7 @@ def capture_site(site, a, probe_src):
             (out_dir / stale).unlink(missing_ok=True)
         cmd = [a.bin, "--headless", "--timing", viewport, f"--settle-ms={a.settle_ms}",
                f"--time-ms={a.time_ms}", f"--dump=png:{full}", f"--eval={probe_src}", site["url"]]
-        visual = run_with_rusage(cmd, isolated_env(home), a.timeout)
+        visual = run_with_rusage(cmd, isolated_env(home, a.locale), a.timeout)
     finally:
         shutil.rmtree(home, ignore_errors=True)
     (out_dir / "stderr.log").write_text(visual["stderr"][-200000:], encoding="utf-8", errors="replace")
@@ -259,7 +265,7 @@ def capture_site(site, a, probe_src):
     elif visual["rc"] not in (0, None) and not full.exists():
         error = error or f"exit code {visual['rc']}"
     result = {
-        "engine": "nordstjernen", "version": a.version, "site": site,
+        "engine": "nordstjernen", "version": a.version, "locale": a.locale, "site": site,
         "viewport": {"width": a.width, "height": a.height},
         "capturedAt": datetime.now(timezone.utc).isoformat(), "host": platform.node(),
         "cpus": os.cpu_count(), "status": status, "error": error,
@@ -281,6 +287,8 @@ def main():
     p.add_argument("--only", default="")
     p.add_argument("--category", default="")
     p.add_argument("--viewport", default="1280x800")
+    p.add_argument("--locale", default=os.environ.get("NS_LOCALE") or "en_US.UTF-8",
+                   help="LANG and LC_ALL for Nordstjernen (default en_US.UTF-8, as Chrome runs en-US)")
     p.add_argument("--runs", type=int, default=1, help="cold first-render runs per site (median reported)")
     p.add_argument("--settle-ms", type=int, default=2000)
     p.add_argument("--time-ms", type=int, default=1000)
@@ -301,7 +309,7 @@ def main():
         sys.exit("ns-capture: no sites selected")
     a.version = engine_version(a.bin)
     probe_src = (HERE / "probe.js").read_text(encoding="utf-8", errors="replace")
-    print(f"ns-capture: {a.version}, {len(sites)} sites, viewport {a.width}x{a.height}, "
+    print(f"ns-capture: {a.version}, locale {a.locale}, {len(sites)} sites, viewport {a.width}x{a.height}, "
           f"runs {a.runs}, jobs {a.jobs}", flush=True)
 
     def report(site, res):

@@ -47,8 +47,9 @@ LABEL=after LABELS=before,after scripts/sitebench/run.sh
 
 Settings come from the environment: `RUNS` (cold loads per site and
 browser, medians are reported; default 3), `VIEWPORT` (default
-`1280x800`), `OUT` (default `sitebench-out`). The three steps can also be
-run on their own; each has `--help`.
+`1280x800`), `OUT` (default `sitebench-out`), `NS_LOCALE` (the locale
+Nordstjernen runs under, see below; default `en_US.UTF-8`). The three
+steps can also be run on their own; each has `--help`.
 
 To use an installed Google Chrome instead of Playwright's Chromium, run
 `node scripts/sitebench/chrome-capture.js --channel=chrome` (or
@@ -91,6 +92,19 @@ their geometry, font size, weight, family and colours.
   errors reported on stderr. As in the browser window, images are fetched
   while the page settles, as each new layout asks for them, and their
   `load` events fire as they arrive.
+
+On Linux and macOS both browsers run in US English, whatever the host's
+locale: Chrome with the `en-US` locale and Nordstjernen under
+`en_US.UTF-8`. `ns-capture.py` sets `LANG` and `LC_ALL` to it and
+removes `LANGUAGE`, `FC_LANG` and `NS_PANGO_LANGUAGE`, which would take
+precedence. The locale decides Nordstjernen's `Accept-Language` header,
+`navigator.languages` and `Intl` default, and which name fontconfig gives
+each font family: under `tr_TR.UTF-8` it lists the system font as
+"Sistem Fontu", so `system-ui` text falls back to Helvetica. On Windows,
+Nordstjernen takes `Accept-Language` from the Windows user locale
+instead. `NS_LOCALE` (or `--locale`) picks another locale; the report
+header shows each build's locale next to Chrome's, and "not recorded"
+for captures made before the locale was.
 
 **Scores** (`compare.py`):
 
