@@ -29964,8 +29964,85 @@ static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
 static guint64        g_struct_sig;
 static gboolean       g_struct_ready;
+static GHashTable    *g_has_arg_keys;
+static GHashTable    *g_has_arg_attrs;
+static gboolean       g_has_arg_loose;
+static int            g_has_gate_skip;
 
 static gboolean incr_node_matches_has_cq(const ns_node *n);
+static gboolean incr_node_matches_keys(const ns_node *n, GHashTable *keyset);
+static gboolean incr_class_list_matches_keys(const char *cls,
+                                             GHashTable *keyset);
+static gboolean incr_keyset_contains(GHashTable *keyset, char prefix,
+                                     const char *name, gsize len,
+                                     gboolean fold);
+
+static gboolean
+incr_has_arg_feature_on(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    if (incr_node_matches_keys(n, g_has_arg_keys)) return TRUE;
+    if (!g_has_arg_attrs || g_hash_table_size(g_has_arg_attrs) == 0)
+        return FALSE;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name) continue;
+        char *low = g_ascii_strdown(a->name, -1);
+        gboolean hit = g_hash_table_contains(g_has_arg_attrs, low);
+        g_free(low);
+        if (hit) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_has_arg_feature_within(const ns_node *n, guint *budget)
+{
+    if (!n) return FALSE;
+    if (*budget == 0) return TRUE;
+    (*budget)--;
+    if (incr_has_arg_feature_on(n)) return TRUE;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        if (incr_has_arg_feature_within(c, budget)) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_has_gate_open(void)
+{
+    return g_has_arg_loose || !g_has_anchors || g_has_anchors->len == 0;
+}
+
+static gboolean
+incr_has_nodes_touch_args(ns_node *const *nodes, guint n, gboolean following)
+{
+    if (incr_has_gate_open()) return TRUE;
+    guint budget = 4096;
+    for (guint i = 0; i < n; i++)
+        for (const ns_node *c = nodes[i]; c; c = following ? c->next_sibling : NULL)
+            if (incr_has_arg_feature_within(c, &budget)) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_has_attr_change_touches_args(const ns_node *target, const char *name,
+                                  const char *old_value)
+{
+    if (incr_has_gate_open()) return TRUE;
+    if (incr_has_arg_feature_on(target)) return TRUE;
+    if (!name) return TRUE;
+    char *low = g_ascii_strdown(name, -1);
+    gboolean hit = g_has_arg_attrs && g_hash_table_contains(g_has_arg_attrs, low);
+    if (!hit && g_has_arg_keys && old_value && *old_value &&
+        strcmp(low, "class") == 0)
+        hit = incr_class_list_matches_keys(old_value, g_has_arg_keys);
+    if (!hit && g_has_arg_keys && old_value && *old_value &&
+        strcmp(low, "id") == 0)
+        hit = incr_keyset_contains(g_has_arg_keys, '#', old_value,
+                                   strlen(old_value), FALSE);
+    g_free(low);
+    return hit;
+}
+
 
 static void
 incr_mark_has_region(ns_node *anchor)
@@ -29996,6 +30073,7 @@ static void
 incr_mark_has_subjects(ns_node *changed)
 {
     if (!changed || !g_incr_eligible || g_has_cq_loose) return;
+    if (g_has_gate_skip > 0) return;
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
     incr_defer_loose_has_subjects(changed);
@@ -30936,10 +31014,9 @@ incr_mark_children_positions(ns_node *parent, ns_node *added)
     return TRUE;
 }
 
-void
-ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
+static void
+incr_mark_childlist(ns_node *parent, ns_node *added)
 {
-    if (!parent) return;
     if (!g_struct_ready)
         ns_css_mark_restyle_dirty(parent);
     else if (incr_childlist_needs_flood(parent)) {
@@ -30949,6 +31026,28 @@ ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
         ns_css_mark_restyle_dirty(added);
     else
         incr_mark_has_subjects(parent);
+}
+
+void
+ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
+{
+    if (!parent) return;
+    gboolean skip = added && !incr_has_nodes_touch_args(&added, 1, TRUE);
+    g_has_gate_skip += skip;
+    incr_mark_childlist(parent, added);
+    g_has_gate_skip -= skip;
+}
+
+void
+ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
+                              guint n_removed)
+{
+    if (!parent) return;
+    gboolean skip = n_removed > 0 &&
+                    !incr_has_nodes_touch_args(removed, n_removed, FALSE);
+    g_has_gate_skip += skip;
+    incr_mark_childlist(parent, NULL);
+    g_has_gate_skip -= skip;
 }
 
 static gboolean
@@ -31114,6 +31213,9 @@ incr_node_hits_inv(const ns_node *n)
     return FALSE;
 }
 
+static void incr_mark_attr_change(ns_node *target, const char *name,
+                                  const char *old_value);
+
 void
 ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
 {
@@ -31123,6 +31225,15 @@ ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
         return;
     if (!ns_css_attr_may_affect_style(target, name)) return;
     if (incr_name_change_unused(target, name, old_value)) return;
+    gboolean skip = !incr_has_attr_change_touches_args(target, name, old_value);
+    g_has_gate_skip += skip;
+    incr_mark_attr_change(target, name, old_value);
+    g_has_gate_skip -= skip;
+}
+
+static void
+incr_mark_attr_change(ns_node *target, const char *name, const char *old_value)
+{
     if (!g_struct_ready) {
         ns_css_mark_restyle_dirty(target->parent ? target->parent : target);
         return;
@@ -31415,6 +31526,44 @@ incr_add_has_subject_anchor(const incr_has_ctx *at)
     return TRUE;
 }
 
+static void
+incr_has_arg_note_compound(const ns_css_simple *c)
+{
+    if (!g_has_arg_keys)
+        g_has_arg_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, NULL);
+    if (!g_has_arg_attrs)
+        g_has_arg_attrs = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, NULL);
+    gboolean keyed = incr_add_compound_keys(g_has_arg_keys, c);
+    for (guint i = 0; c->attrs && i < c->attrs->len; i++) {
+        const ns_css_attr_pred *a =
+            &g_array_index(c->attrs, ns_css_attr_pred, i);
+        if (!a->name) continue;
+        g_hash_table_add(g_has_arg_attrs, g_ascii_strdown(a->name, -1));
+        keyed = TRUE;
+    }
+    if (!keyed || incr_simple_has_structural(c, 0) ||
+        (c->has_groups && c->has_groups->len > 0))
+        g_has_arg_loose = TRUE;
+}
+
+static void
+incr_has_arg_note_selector(const ns_css_selector *sel)
+{
+    if (!sel || !sel->compounds || sel->compounds->len == 0) {
+        g_has_arg_loose = TRUE;
+        return;
+    }
+    for (guint i = 0; sel->combinators && i < sel->combinators->len; i++) {
+        ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, i);
+        if (comb == NS_CSS_COMB_ADJACENT || comb == NS_CSS_COMB_SIBLING)
+            g_has_arg_loose = TRUE;
+    }
+    for (guint i = 0; i < sel->compounds->len; i++)
+        incr_has_arg_note_compound(g_ptr_array_index(sel->compounds, i));
+}
+
 static gboolean
 incr_collect_has_anchors_simple(const incr_has_ctx *at, int depth)
 {
@@ -31423,6 +31572,11 @@ incr_collect_has_anchors_simple(const incr_has_ctx *at, int depth)
     gboolean found = FALSE;
     if (c->has_groups && c->has_groups->len > 0) {
         found = TRUE;
+        for (guint gi = 0; gi < c->has_groups->len; gi++) {
+            const GPtrArray *group = g_ptr_array_index(c->has_groups, gi);
+            for (guint si = 0; group && si < group->len; si++)
+                incr_has_arg_note_selector(g_ptr_array_index(group, si));
+        }
         if (!incr_add_has_anchor_deps(at, depth) &&
             !incr_add_has_subject_anchor(at))
             g_has_cq_loose = TRUE;
@@ -33151,6 +33305,9 @@ ns_css_compute(ns_node *doc,
                                                        g_int64_equal,
                                                        g_free, NULL);
             g_has_cq_loose = FALSE;
+            if (g_has_arg_keys) g_hash_table_remove_all(g_has_arg_keys);
+            if (g_has_arg_attrs) g_hash_table_remove_all(g_has_arg_attrs);
+            g_has_arg_loose = FALSE;
         }
         if (incr_sheet_newly_seen(g_has_serials, cached_ua))
             incr_collect_has_cq_keys(cached_ua);
