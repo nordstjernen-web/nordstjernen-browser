@@ -118,6 +118,8 @@ NsPangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
 NsPangoAttribute *ns_paint_font_variations_attr_from_values(const char *settings);
 
 NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
+void ns_paint_i18n_memo_begin(void);
+void ns_paint_i18n_memo_end(void);
 gboolean ns_paint_text_ellipsizes(const ns_style *style);
 void ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text);
 
