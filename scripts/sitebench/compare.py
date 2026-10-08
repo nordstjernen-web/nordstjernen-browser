@@ -305,7 +305,10 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
         if "site" not in row:
             row["site"] = ns["site"]
         ns_probe = load_json(ns_dir / "probe.json")
-        s = ns["summary"]
+        s = dict(ns["summary"])
+        vt = ns.get("visualTiming") or {}
+        if isinstance(vt.get("cpu_ms"), (int, float)):
+            s["settledMainThreadMs"] = round(max(vt["cpu_ms"] - (vt.get("encode_ms") or 0), 0), 1)
         entry = dict(s, status=ns.get("status"), error=ns.get("error"),
                      docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
                      jsErrorSample=ns.get("jsErrorSample", []),

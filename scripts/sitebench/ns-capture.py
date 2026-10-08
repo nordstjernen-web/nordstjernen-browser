@@ -165,6 +165,13 @@ def median(values):
     return v[mid] if len(v) % 2 else (v[mid - 1] + v[mid]) / 2
 
 
+def main_thread_ms(timing):
+    cpu = timing.get("cpu_ms")
+    if not isinstance(cpu, (int, float)):
+        return None
+    return round(max(cpu - (timing.get("encode_ms") or 0), 0), 1)
+
+
 def isolated_env(home):
     env = dict(os.environ)
     env["HOME"] = home
@@ -235,7 +242,8 @@ def capture_site(site, a, probe_src):
         "processWallMs": median(p["wall_ms"] for p in perf_runs),
         "processCpuMs": median((p["usage"] or {}).get("cpu_ms") for p in perf_runs),
         "maxRssMb": median((p["usage"] or {}).get("max_rss_mb") for p in perf_runs),
-        "settledMainThreadMs": vtiming.get("cpu_ms"),
+        "settledMainThreadMs": main_thread_ms(vtiming),
+        "settledEncodeMs": vtiming.get("encode_ms"),
         "settledProcessCpuMs": (visual["usage"] or {}).get("cpu_ms"),
         "settledMaxRssMb": (visual["usage"] or {}).get("max_rss_mb"),
         "settledWallMs": visual["wall_ms"],
