@@ -833,17 +833,19 @@ adopted_sheet_entry_free(gpointer data)
 typedef struct {
     gsize       len;
     const char *host_id;
+    const char *base_url;
     double      vw;
     double      vh;
     guint       generation;
 } adopted_sheet_key;
 
 static adopted_sheet_key
-adopted_sheet_key_now(gsize len, const char *host_id)
+adopted_sheet_key_now(gsize len, const char *host_id, const char *base_url)
 {
     adopted_sheet_key key = {
         .len = len,
         .host_id = host_id,
+        .base_url = base_url,
         .vw = ns_css_media_viewport_current_w(),
         .vh = ns_css_media_viewport_current_h(),
         .generation = ns_css_stylesheet_cache_generation(),
@@ -855,9 +857,11 @@ static gboolean
 adopted_sheet_entry_matches(const adopted_sheet_entry *e,
                             const adopted_sheet_key *key)
 {
+    const char *resolved_base = e->sheet->resolved_base;
     return e->len == key->len && e->vw == key->vw && e->vh == key->vh &&
            e->generation == key->generation &&
-           g_strcmp0(e->host_id, key->host_id) == 0;
+           g_strcmp0(e->host_id, key->host_id) == 0 &&
+           (!resolved_base || g_strcmp0(resolved_base, key->base_url) == 0);
 }
 
 static adopted_sheet_entry *
@@ -942,14 +946,15 @@ style_shadow_host_id(const ns_node *style)
 }
 
 static adopted_sheet_entry *
-large_style_entry(ns_node *style, guint64 hash, gsize len)
+large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
 {
     if (!g_large_style_sheets)
         g_large_style_sheets = g_hash_table_new_full(g_direct_hash,
                                                      g_direct_equal, NULL,
                                                      adopted_sheet_entry_free);
     adopted_sheet_key key = adopted_sheet_key_now(len,
-                                                  style_shadow_host_id(style));
+                                                  style_shadow_host_id(style),
+                                                  base_url);
     adopted_sheet_entry *e = g_hash_table_lookup(g_large_style_sheets, style);
     if (e && e->hash == hash && adopted_sheet_entry_matches(e, &key))
         return e;
@@ -974,7 +979,7 @@ collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
     if (len < SHEET_RUN_CHUNK_ALONE) return FALSE;
     const char *media = ns_element_get_attr(style, "media");
     if (media && *media && !ns_css_media_query_matches(media)) return TRUE;
-    adopted_sheet_entry *e = large_style_entry(style, hash, len);
+    adopted_sheet_entry *e = large_style_entry(style, hash, len, base_url);
     if (!e) return TRUE;
     e->pass = g_adopted_pass;
     if (e->viewport_media) cc->media_seen = TRUE;
@@ -1016,7 +1021,7 @@ adopted_sheet_parse(ns_node *root, const char *css, adopted_sheet_key *key,
 }
 
 static ns_css_stylesheet *
-adopted_sheet_for(ns_node *root, gboolean *viewport_media)
+adopted_sheet_for(ns_node *root, const char *base_url, gboolean *viewport_media)
 {
     const char *css = ns_element_get_attr(root, NS_ADOPTED_CSS_ATTR);
     if (!css || !*css || !root->parent) return NULL;
@@ -1025,7 +1030,7 @@ adopted_sheet_for(ns_node *root, gboolean *viewport_media)
                                                  NULL, adopted_sheet_entry_free);
     gsize len = strlen(css);
     const char *host_id = ns_element_get_attr(root->parent, NS_HOST_SCOPE_ATTR);
-    adopted_sheet_key key = adopted_sheet_key_now(len, host_id);
+    adopted_sheet_key key = adopted_sheet_key_now(len, host_id, base_url);
     guint64 hash = adopted_sheet_hash(css, len, host_id);
     adopted_sheet_entry *e = g_hash_table_lookup(g_adopted_sheets, &hash);
     if (e && host_id && adopted_sheet_entry_matches(e, &key)) {
@@ -1041,7 +1046,7 @@ collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
 {
     if (root->kind != NS_NODE_ELEMENT) return;
     gboolean viewport_media = FALSE;
-    ns_css_stylesheet *sh = adopted_sheet_for(root, &viewport_media);
+    ns_css_stylesheet *sh = adopted_sheet_for(root, base_url, &viewport_media);
     if (!sh) return;
     if (viewport_media) cc->media_seen = TRUE;
     sheet_run_flush(cc);
