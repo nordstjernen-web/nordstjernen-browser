@@ -45,6 +45,19 @@ def load_rgb(path, size=None):
         return None
 
 
+def load_viewport(capture_dir, vw, vh, size):
+    shot = load_rgb(capture_dir / "viewport.png", size)
+    if shot is not None:
+        return shot
+    try:
+        with Image.open(capture_dir / "full.png") as im:
+            canvas = Image.new("RGB", (vw, vh), (255, 255, 255))
+            canvas.paste(im.convert("RGB").crop((0, 0, min(vw, im.width), min(vh, im.height))), (0, 0))
+            return np.asarray(canvas.resize(size, Image.BILINEAR), dtype=np.float64)
+    except OSError:
+        return None
+
+
 def box_mean(x, k):
     pad = np.pad(x, ((1, 0), (1, 0)))
     c = pad.cumsum(0).cumsum(1)
@@ -281,7 +294,7 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
                              textLen=(chrome_probe or {}).get("textLen"),
                              blocked=blocked_reason(chrome_probe, chrome.get("status")))
     size = (vw // 2, vh // 2)
-    chrome_img = load_rgb(chrome_dir / "viewport.png", size)
+    chrome_img = load_viewport(chrome_dir, vw, vh, size)
     if chrome_img is not None:
         save_jpeg(chrome_img, img_dir / f"{site_id}-{base_label}.jpg")
         full_thumb(chrome_dir / "full.png", img_dir / f"{site_id}-{base_label}-full.jpg")
@@ -313,7 +326,7 @@ def analyse_site(site_id, out, base_label, labels, img_dir, vw, vh):
                      docH=(ns_probe or {}).get("docH"), textLen=(ns_probe or {}).get("textLen"),
                      jsErrorSample=ns.get("jsErrorSample", []),
                      blocked=blocked_reason(ns_probe, ns.get("status")))
-        ns_img = load_rgb(ns_dir / "viewport.png", size)
+        ns_img = load_viewport(ns_dir, vw, vh, size)
         visual = {}
         if ns_img is not None:
             save_jpeg(ns_img, img_dir / f"{site_id}-{label}.jpg")
