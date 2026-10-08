@@ -3,6 +3,9 @@ Changelog:
 
 1.0.31:
 ======
+* The video helper decodes on all CPU cores. libavcodec decodes on one
+  thread unless asked otherwise, which is not enough for 1440p or 4K
+  VP9 and AV1 at 60 frames a second.
 * YouTube videos no longer jump back and stutter about 20 seconds in.
   The video helper decodes the MSE stream from a file that grows as the
   page appends segments, but the MP4 and WebM demuxers stop at the size
