@@ -127,15 +127,49 @@ are resolved by polling wgpu-native's event loop synchronously, so
 `await navigator.gpu.requestAdapter()` works without integrating with the
 page event loop.
 
+### Since the first cut
+
+- Every interface (`GPUDevice`, `GPUBuffer`, `GPURenderPassEncoder`,
+  `GPURenderBundleEncoder`, ...) is a global interface object whose
+  prototype carries the methods; `instanceof` checks work.
+- `adapter.limits`/`device.limits` and `features` are the real ones;
+  `requestDevice()` honours `requiredFeatures` and `requiredLimits`.
+- Render passes: up to eight colour attachments, full depth/stencil
+  attachment state, `setViewport`, `setScissorRect`, `setBlendConstant`,
+  `setStencilReference`, occlusion queries, `drawIndirect`,
+  `drawIndexedIndirect` and `executeBundles`. Render bundles are complete.
+- Pipelines: all vertex formats, primitive state, stencil faces, depth bias,
+  multisample mask / alpha-to-coverage, override constants, omitted entry
+  points, and `create{Render,Compute}PipelineAsync`.
+- All 99 texture formats; textures report their real attributes;
+  `viewFormats`; `rgba16float` canvases.
+- Bind group layouts: every view dimension, multisampled and integer
+  textures, storage textures, dynamic offsets.
+- Encoders: `copyBufferToTexture`, `copyTextureToBuffer`, `clearBuffer`,
+  `dispatchWorkgroupsIndirect`; `queue.onSubmittedWorkDone()`.
+- Errors: real error scopes, `GPUValidationError` / `GPUOutOfMemoryError` /
+  `GPUInternalError`, `uncapturederror` events on the device (an
+  `EventTarget`), `device.destroy()` resolving `device.lost`.
+
+### Guarding wgpu-native
+
+wgpu-native aborts the process instead of reporting an error in several
+places, so `src/webgpu.c` keeps such input from reaching it: unknown usage
+bits become a validation error, zero copy strides become
+`WGPU_COPY_STRIDE_UNDEFINED`, popping an empty error scope rejects in
+JavaScript, `GPUQuerySet.destroy()` releases instead of destroying,
+`wgpuTextureGetTextureBindingViewDimension` (unimplemented upstream) is
+never called, and a command buffer that failed validation at `finish()`
+or was already submitted is never passed to `wgpuQueueSubmit`.
+
 ### Not yet implemented
 
-What remains: real timestamp queries, render bundles, explicit blend state,
-storage textures, and 3D/cube/array texture-view descriptors (views default
-to 2D). Geometry, vertex colours, uniforms/transforms, texture-mapped
-geometry, and GPU compute all work; heavier three.js material examples (PBR
-clearcoat, environment maps) still drive the software backend into feature
-paths that `wgpu-native` itself panics on, which need the missing pieces
-above. This document and feature-detection reflect exactly what runs.
+Real timestamp queries (accepted, but they record nothing), compilation
+messages from `getCompilationInfo()`, external textures
+(`importExternalTexture`), and `mapAsync` that resolves asynchronously
+rather than by polling. Some three.js shaders use WGSL that naga rejects;
+the pipeline then reports a validation error and the affected pass is
+skipped.
 
 ## Architecture & security notes
 
