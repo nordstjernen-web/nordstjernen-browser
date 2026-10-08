@@ -3,6 +3,15 @@ Changelog:
 
 1.0.30:
 ======
+* New WebGL renderbuffers start cleared, as the WebGL specification
+  requires: depth to 1.0, color and stencil to 0. The storage came from
+  the driver uninitialised, usually zero, so a render target whose depth
+  buffer was never cleared rejected every fragment. three.js's
+  `PMREMGenerator.fromScene()` renders the six cube faces that way, so a
+  `RoomEnvironment` environment map came out black and models lit only
+  by it — `webgl_animation_keyframes`, most GLTF viewers — drew as black
+  silhouettes. A renderbuffer is cleared the first time it is attached
+  to a complete framebuffer after its storage is (re)allocated.
 * WebGL `drawBuffers([gl.BACK])` and `readBuffer(gl.BACK)` work on the
   default framebuffer. A WebGL canvas draws into an offscreen
   framebuffer object, where `GL_BACK` is not a valid draw or read

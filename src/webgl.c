@@ -76,6 +76,7 @@ typedef struct ns_webgl {
     GHashTable    *bound_buffers;
     GHashTable    *buffer_sizes;
     GHashTable    *elem_data;
+    GHashTable    *uncleared_rbs;
     ns_gl_vattr    attribs[NS_WEBGL_MAX_VATTRIBS];
     int            next_sync;
 } ns_webgl;
@@ -429,6 +430,7 @@ ns_webgl_free(ns_webgl *g)
     if (g->bound_buffers) g_hash_table_destroy(g->bound_buffers);
     if (g->buffer_sizes) g_hash_table_destroy(g->buffer_sizes);
     if (g->elem_data) g_hash_table_destroy(g->elem_data);
+    if (g->uncleared_rbs) g_hash_table_destroy(g->uncleared_rbs);
     if (g->surf) cairo_surface_destroy(g->surf);
     g_free(g->readback);
     g_free(g);
@@ -2959,14 +2961,93 @@ wgl_framebufferTexture2D(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return JS_UNDEFINED;
 }
 
+static void
+wgl_clear_attachment(GLenum target, GLenum attachment)
+{
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLboolean discard = glIsEnabled(GL_RASTERIZER_DISCARD);
+    GLboolean cmask[4], dmask;
+    GLint smask_front = 0, smask_back = 0;
+    glGetBooleanv(GL_COLOR_WRITEMASK, cmask);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &dmask);
+    glGetIntegerv(GL_STENCIL_WRITEMASK, &smask_front);
+    glGetIntegerv(GL_STENCIL_BACK_WRITEMASK, &smask_back);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_RASTERIZER_DISCARD);
+
+    GLint prev_fbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_fbo);
+    GLint fbo = prev_fbo;
+    if (target == GL_READ_FRAMEBUFFER) {
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)fbo);
+    }
+
+    if (attachment == GL_DEPTH_ATTACHMENT || attachment == GL_STENCIL_ATTACHMENT ||
+        attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+        glDepthMask(GL_TRUE);
+        glStencilMask(0xFFFFFFFFu);
+        glClearBufferfi(GL_DEPTH_STENCIL, 0, 1.0f, 0);
+        glDepthMask(dmask);
+        glStencilMaskSeparate(GL_FRONT, (GLuint)smask_front);
+        glStencilMaskSeparate(GL_BACK, (GLuint)smask_back);
+    } else {
+        GLint draw_bufs[8], max_bufs = 1;
+        glGetIntegerv(GL_MAX_DRAW_BUFFERS, &max_bufs);
+        max_bufs = CLAMP(max_bufs, 1, 8);
+        for (int i = 0; i < max_bufs; i++) {
+            draw_bufs[i] = GL_NONE;
+            glGetIntegerv(GL_DRAW_BUFFER0 + i, &draw_bufs[i]);
+        }
+        GLenum only = attachment;
+        glDrawBuffers(1, &only);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        static const GLfloat zero[4] = { 0, 0, 0, 0 };
+        glClearBufferfv(GL_COLOR, 0, zero);
+        glColorMask(cmask[0], cmask[1], cmask[2], cmask[3]);
+        GLenum restore[8];
+        for (int i = 0; i < max_bufs; i++) restore[i] = (GLenum)draw_bufs[i];
+        glDrawBuffers(max_bufs, restore);
+    }
+
+    if (target == GL_READ_FRAMEBUFFER)
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_fbo);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    if (discard) glEnable(GL_RASTERIZER_DISCARD);
+}
+
+static void
+wgl_clear_new_renderbuffer(ns_webgl *g, GLenum target, GLenum attachment, GLuint rb)
+{
+    if (!rb || !g->uncleared_rbs ||
+        !g_hash_table_contains(g->uncleared_rbs, GUINT_TO_POINTER(rb)))
+        return;
+    if (glCheckFramebufferStatus(target) != GL_FRAMEBUFFER_COMPLETE) return;
+    g_hash_table_remove(g->uncleared_rbs, GUINT_TO_POINTER(rb));
+    wgl_clear_attachment(target, attachment);
+}
+
+static void
+wgl_mark_renderbuffer_uncleared(ns_webgl *g)
+{
+    GLint rb = 0;
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &rb);
+    if (!rb) return;
+    if (!g->uncleared_rbs)
+        g->uncleared_rbs = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(g->uncleared_rbs, GUINT_TO_POINTER((GLuint)rb));
+}
+
 static JSValue
 wgl_framebufferRenderbuffer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glFramebufferRenderbuffer((GLenum)argi(ctx, argc, argv, 0),
-                              (GLenum)argi(ctx, argc, argv, 1),
-                              (GLenum)argi(ctx, argc, argv, 2),
-                              (GLuint)wgl_name(ctx, argv[3]));
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    GLenum attachment = (GLenum)argi(ctx, argc, argv, 1);
+    GLuint rb = (GLuint)wgl_name(ctx, argv[3]);
+    glFramebufferRenderbuffer(target, attachment,
+                              (GLenum)argi(ctx, argc, argv, 2), rb);
+    wgl_clear_new_renderbuffer(g, target, attachment, rb);
     return JS_UNDEFINED;
 }
 
@@ -2996,6 +3077,7 @@ wgl_renderbufferStorage(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     WGL_GET(0);
     glRenderbufferStorage((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1),
                           argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3));
+    wgl_mark_renderbuffer_uncleared(g);
     return JS_UNDEFINED;
 }
 
@@ -3344,6 +3426,7 @@ wgl_renderbufferStorageMultisample(JSContext *ctx, JSValueConst this_val, int ar
     glRenderbufferStorageMultisample((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1),
                                      (GLenum)argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3),
                                      argi(ctx, argc, argv, 4));
+    wgl_mark_renderbuffer_uncleared(g);
     return JS_UNDEFINED;
 }
 
