@@ -210,6 +210,7 @@ def isolated_env(home, locale):
     env["XDG_CONFIG_HOME"] = os.path.join(home, ".config")
     env["XDG_DATA_HOME"] = os.path.join(home, ".local", "share")
     env["LANG"] = env["LC_ALL"] = locale
+    env["TZ"] = "UTC"
     for key in LOCALE_OVERRIDES:
         env.pop(key, None)
     if hasattr(os, "geteuid") and os.geteuid() == 0:
