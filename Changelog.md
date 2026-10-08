@@ -3,6 +3,16 @@ Changelog:
 
 1.0.30:
 ======
+* WebGPU reports errors the way pages expect. `pushErrorScope()` and
+  `popErrorScope()` capture real validation, out-of-memory and internal
+  errors as `GPUValidationError`, `GPUOutOfMemoryError` and
+  `GPUInternalError` objects (they always reported "no error"), errors
+  outside a scope fire an `uncapturederror` event on the device (the
+  device is now an `EventTarget`, with `onuncapturederror`), and only
+  unhandled ones are written to the log, at most twenty per device.
+  `device.destroy()` destroys the device and resolves `device.lost`, and
+  popping an empty error-scope stack rejects instead of aborting the
+  renderer.
 * WebGPU render bundles work: `device.createRenderBundleEncoder()`, the
   `GPURenderBundleEncoder` drawing commands and `executeBundles()` on a
   render pass. three.js records the passes that build texture mipmaps as
