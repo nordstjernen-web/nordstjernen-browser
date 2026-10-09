@@ -9150,6 +9150,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                          strcmp(b->dom->name, "body") == 0));
     gboolean clip_overflow = !is_root &&
                              (overflow_kw_clips(ovx) || overflow_kw_clips(ovy));
+    gboolean scroll_anchored = FALSE;
     if (clip_overflow &&
         (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE_CAPTION ||
          b->kind == NS_BOX_TABLE_CELL)) {
@@ -9203,8 +9204,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                            px, py, pw, ph, ex0, ey0, ex1, ey1);
             }
             if ((b->scroll_x != 0 || b->scroll_y != 0) &&
-                !isnan(b->scroll_x) && !isnan(b->scroll_y))
+                !isnan(b->scroll_x) && !isnan(b->scroll_y)) {
                 cairo_translate(cr, -b->scroll_x, -b->scroll_y);
+                g_paint_anchor_dx -= b->scroll_x;
+                g_paint_anchor_dy -= b->scroll_y;
+                scroll_anchored = TRUE;
+            }
             if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
         } else {
             clip_overflow = FALSE;
@@ -9253,6 +9258,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             g_ptr_array_free(deferred_mine, TRUE);
             deferred_mine = NULL;
         }
+    }
+    if (scroll_anchored) {
+        g_paint_anchor_dx += b->scroll_x;
+        g_paint_anchor_dy += b->scroll_y;
     }
     const char *sbw_kw = b->style && b->style->values[NS_CSS_SCROLLBAR_WIDTH] &&
         b->style->values[NS_CSS_SCROLLBAR_WIDTH]->kind == NS_CSS_V_KEYWORD
