@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* The Windows, Linux (clang) and Java builds compile again, and the
+  macOS, Windows, Linux and AppImage packages and the Java native jar
+  are produced again. The Windows link lost the no-op
+  `ns_gl_prepare_for_sandbox` because MSYS2 ships `epoxy/egl.h`, clang
+  rejected a seccomp socket rule with an incomplete argument comparison,
+  and the release-build check in the pack scripts read meson's empty
+  sanitizer list `[]` as a sanitizer and refused every release tree.
 * Builds with the nghttp2 HTTP backend (`-Dhttp_backend=nghttp2`) follow
   the cookie settings and learn HSTS. That backend sent and stored
   cookies on every request, so cross-site requests carried the user's
