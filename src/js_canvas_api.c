@@ -1214,15 +1214,15 @@ static JSValue
 ns_imagedata_array_size(JSContext *ctx, size_t blen, int argc, JSValueConst *argv,
                         uint32_t *sw, uint64_t *rows)
 {
-    if (blen % 4)
+    if (blen == 0 || blen % 4)
         return ns_canvas_throw_dom(ctx, "InvalidStateError",
-                                   "The input data length is not a multiple of 4.");
+                                   "The input data length is not a nonzero multiple of 4.");
     if (JS_ToUint32(ctx, sw, argv[1]) < 0) return JS_EXCEPTION;
     if (*sw == 0)
         return ns_canvas_throw_dom(ctx, "IndexSizeError", "The source width is zero.");
     uint64_t pixels = blen / 4;
     if (pixels % *sw)
-        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+        return ns_canvas_throw_dom(ctx, "IndexSizeError",
             "The input data byte length is not a multiple of (4 * width).");
     *rows = pixels / *sw;
     if (argc < 3 || JS_IsUndefined(argv[2])) return JS_UNDEFINED;

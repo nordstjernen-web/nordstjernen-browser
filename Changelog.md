@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* WebAssembly: a JavaScript exception thrown into a wasm call that
+  JavaScript made from inside another wasm call now reaches that
+  JavaScript caller. It used to surface only at the outermost call, so
+  the `try`/`catch` around the inner call never ran. Emscripten's
+  `setjmp`/`longjmp` and C++ exceptions rely on catching it there.
+* `new ImageData(data, width)` throws `IndexSizeError`, as the HTML
+  standard requires, when the pixel count is not a multiple of the
+  width (it threw `InvalidStateError`), and rejects empty data.
 * The parsed-stylesheet caches evict only sheets no cascade has used
   for a long while, so a page with hundreds of stylesheets keeps them
   all parsed while sheets from pages navigated away from are freed.

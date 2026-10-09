@@ -467,8 +467,6 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
     }
 
     if (!ok) {
-        if (wi->call_depth > 0)
-            return JS_EXCEPTION;
         if (wi->has_pending) {
             JSValue exc = wi->pending_exc;
             wi->pending_exc = JS_UNDEFINED;
