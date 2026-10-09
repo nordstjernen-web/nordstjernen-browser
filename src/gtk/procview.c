@@ -3855,8 +3855,10 @@ static void
 ns_proc_view_area_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 {
     NsProcView *v = NS_PROC_VIEW_AREA(widget)->view;
-    if (!v)
+    if (!v) {
+        GTK_WIDGET_CLASS(ns_proc_view_area_parent_class)->snapshot(widget, snapshot);
         return;
+    }
     if (v->tiles_mode) {
         ns_page_layers_snapshot(v->layers, snapshot,
                                 gtk_widget_get_width(widget),

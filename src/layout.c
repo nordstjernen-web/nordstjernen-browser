@@ -1499,7 +1499,6 @@ ns_vertical_stack_text(const char *text)
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
 static GHashTable    *g_counters_for_layout;
-static gboolean       g_svg_defs_computed_for_layout;
 static ns_box *ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width);
 
 typedef struct ns_subgrid_cols {
@@ -15088,7 +15087,6 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = focused_sel_anchor_byte;
     g_image_cache_for_layout = image_cache;
     g_base_url_for_layout = base_url;
-    g_svg_defs_computed_for_layout = FALSE;
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
     ns_paint_i18n_memo_begin();
@@ -15111,7 +15109,6 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = 0;
     g_image_cache_for_layout = NULL;
     g_base_url_for_layout = NULL;
-    g_svg_defs_computed_for_layout = FALSE;
     if (g_counters_for_layout) {
         g_hash_table_destroy(g_counters_for_layout);
         g_counters_for_layout = NULL;

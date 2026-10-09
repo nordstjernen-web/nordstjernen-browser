@@ -60,7 +60,6 @@ static GHashTable *g_hsts_cache;
 static gint64      g_hsts_cache_mtime_us;
 static GMutex      g_hsts_lock;
 static char *g_ca_bundle;
-static gboolean g_has_http3;
 static const char *g_ec_curves = "X25519:P-256:P-384";
 static char *g_accept_encoding;
 static char *g_proxy_override;
@@ -2107,7 +2106,6 @@ ns_net_init(void)
     ns_net_resolve_ca_bundle();
     curl_global_init(CURL_GLOBAL_DEFAULT);
     curl_version_info_data *vi = curl_version_info(CURLVERSION_NOW);
-    g_has_http3 = vi && (vi->features & CURL_VERSION_HTTP3) != 0;
 
     unsigned ossl_major = 0, ossl_minor = 0;
     if (vi && vi->ssl_version &&
