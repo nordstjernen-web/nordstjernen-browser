@@ -71,6 +71,12 @@ bytes_are_isobmff(const guint8 *bytes, gsize len)
 {
     return bytes && len >= 12 && memcmp(bytes + 4, "ftyp", 4) == 0;
 }
+
+static gboolean
+bytes_are_ogg(const guint8 *bytes, gsize len)
+{
+    return bytes && len >= 4 && memcmp(bytes, "OggS", 4) == 0;
+}
 #endif
 
 #ifdef NS_HAVE_LIBAV
@@ -381,7 +387,8 @@ ns_video_player_new(const guint8 *bytes, gsize len)
     }
 
 #ifdef NS_HAVE_LIBAV
-    if (bytes_are_matroska(bytes, len) || bytes_are_isobmff(bytes, len)) {
+    if (bytes_are_matroska(bytes, len) || bytes_are_isobmff(bytes, len) ||
+        bytes_are_ogg(bytes, len)) {
         int w = 0, h = 0, has_audio = 0;
         double dur = 0.0;
         double demuxed_end = 0.0;
@@ -509,6 +516,8 @@ ns_video_codec_available(const char *codec)
         id = AV_CODEC_ID_OPUS;
     else if (strstr(codec, "vorbis"))
         id = AV_CODEC_ID_VORBIS;
+    else if (strcmp(codec, "theora") == 0)
+        id = AV_CODEC_ID_THEORA;
     if (id == AV_CODEC_ID_NONE) return FALSE;
     return avcodec_find_decoder(id) != NULL;
 #else

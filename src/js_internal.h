@@ -87,6 +87,8 @@ struct ns_js {
     gpointer      media_play_user_data;
     ns_js_media_muted_cb media_muted_cb;
     gpointer      media_muted_user_data;
+    ns_js_media_frame_cb media_frame_cb;
+    gpointer      media_frame_user_data;
     ns_js_mse_cb  mse_cb;
     gpointer      mse_user_data;
     ns_js_mse_buffered_cb mse_buffered_cb;
