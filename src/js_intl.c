@@ -1165,7 +1165,7 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
 {
     JSValue arr = JS_NewArray(ctx);
     uint32_t n = 0;
-    if (isnan(ms)) {
+    if (isnan(ms) || isinf(ms)) {
         JS_SetPropertyUint32(ctx, arr, n++,
                              intl_part(ctx, "literal", "Invalid Date"));
         return arr;
