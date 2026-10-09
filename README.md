@@ -31,7 +31,7 @@ Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary. No JIT.
 headers, excluding vendored libraries and generated assets — small enough for
 one person to read and audit end-to-end.
 
-See [northstar-browser-gpl](https://github.com/nordstjernen-web/northstar-browser-gpl)
+See [Northstar](https://github.com/nordstjernen-web/northstar-browser)
 for the GPL-licensed sibling project.
 
 <img src="docs/nordstjernen-now.gif" alt="Nordstjernen Now!" width="140">
