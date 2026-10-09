@@ -8,11 +8,10 @@ JavaScript live. The shell process is covered briefly at the end.
 
 A renderer process is **single-main-thread**: the DOM, CSS, layout,
 Cairo/Pango paint, and page JavaScript all live on its main thread (it
-runs a GLib main loop and links GTK only for GDK's GL context — used by
-WebGL — and the GDK-pixbuf image loaders; it creates no on-screen GTK
-windows or widgets). Background threads
-exist only for work that is either inherently blocking (network I/O) or
-CPU-heavy and self-contained (HTML/CSS parsing, image decoding). Every
+runs a GLib main loop and links no GTK at all; WebGL draws through the
+toolkit-independent offscreen GL context in `src/glctx.c`). Background
+threads exist only for work that is either inherently blocking (network
+I/O) or CPU-heavy and self-contained (image decoding). Every
 result computed off the main thread is handed back to the main thread
 through a GLib main-context invocation before it touches any shared
 state.
@@ -21,8 +20,7 @@ The guiding rule: **nothing outside the main thread ever touches a
 `ns_node` DOM tree, a layout box, or a live `JSContext` that belongs to
 the page.** Background threads operate on self-contained inputs
 (response bytes, a URL, a script source) and produce self-contained
-outputs (decoded pixels, a parsed stylesheet, a detached DOM document)
-that are transferred by ownership.
+outputs (a response, decoded pixels) that are transferred by ownership.
 
 ## Threads in a renderer process
 
@@ -31,8 +29,12 @@ that are transferred by ownership.
 | **Main** | `renderer_http.c` | whole process | yes — owns the DOM, layout, paint, page JS |
 | **Fetch pool** (≤32) | `net.c`, GLib `GTask` thread pool | per request | no |
 | **Network I/O** (1) | `net.c`, owns the shared `CURLM` | first fetch → shutdown | no |
+| **HTTP/2 connection I/O** (1 per connection, `-Dhttp_backend=nghttp2` only) | `net_http2.c` | connection lifetime | no |
+| **Image decode** (`async_image_decode`, on by default) | `image.c`, GLib `GTask` thread pool | per image | no |
 | **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
+| **Service Worker** (1 per registered worker) | `js.c` | until terminated | no (own `JSContext`) |
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |
+| **EventSource** (1 per source) | `eventsource.c` | connection lifetime | no |
 | **RNG warm-up** (transient) | `net.c` | one-shot at startup | no |
 
 The shell process (`src/gtk/procview.c`) has its
@@ -43,33 +45,36 @@ GTK widgets.
 
 ## How the renderer main thread keeps making progress
 
-Two mechanisms keep the renderer's main loop pumping (so timers,
-fetch/XHR completions, and animation frames keep flowing, and the shell
-keeps getting fresh frames):
+Two rules keep the renderer's main loop turning (so timers, fetch/XHR
+completions, and animation frames keep flowing, and the shell keeps
+getting fresh frames):
 
-1. **Blocking and heavy work is off-thread.** Network transfers, HTML
-   parsing, CSS parsing, and image decoding never run on the main thread.
-   Each request is owned by a fetch-pool thread that drives its transfer
-   on a single shared `CURLM` (the network I/O thread), then posts its
-   result back.
+1. **Blocking work is off-thread.** Network transfers never run on the
+   main thread, and neither does image decoding while
+   `async_image_decode` is on (the default). Each request is owned by a
+   fetch-pool thread that drives its transfer on a single shared `CURLM`
+   (the network I/O thread), then posts its result back. HTML and CSS
+   parsing do run on the renderer's main thread; since each tab has its
+   own renderer, a slow parse stalls only that tab.
 
-2. **Long synchronous page JS cooperatively pumps the main loop.** Page
-   JavaScript necessarily runs on the main thread (it manipulates the
-   DOM). To stop a tight script from wedging the renderer,
-   `ns_js_interrupt_cb` (`src/js.c`) is installed as the QuickJS
-   interrupt handler. While *main-thread* JS runs, every ~100 ms it
-   does up to 8 non-blocking iterations of the default `GMainContext`,
-   so timers, fetch completions, and animation frames are serviced
-   mid-script. This pump is gated to main-thread JS only
-   (`!js->worker_host`): a Web Worker has its own thread and
-   `GMainContext` and must never iterate the global default context from
-   off the main thread.
+2. **Long synchronous page JS is bounded, not pumped.** Page JavaScript
+   necessarily runs on the main thread (it manipulates the DOM), and
+   while it runs the main loop does not turn. `ns_js_interrupt_cb`
+   (`src/js.c`) is installed as the QuickJS interrupt handler; it halts
+   a script that overruns its eval budget or the 60 s wall-clock monitor
+   (and a worker whose host is closing), but it does **not** iterate the
+   main context. An earlier version pumped the default `GMainContext`
+   from the interrupt handler every ~100 ms; that re-entrancy could free
+   an iframe realm whose `JSContext` was still on the stack, so it was
+   removed. The only intentional pumps are the synchronous loads
+   described at the end of this document.
 
 ### Reentrancy contract of the JS pump
 
-Iterating the main context from inside a running script (mechanism 2)
-re-enters the GLib event loop while a `JS_Eval`/`JS_Call` frame is still
-on the C stack. Two layers keep that safe:
+Iterating the main context from inside a running script (the
+synchronous loads below) re-enters the GLib event loop while a
+`JS_Eval`/`JS_Call` frame is still on the C stack. Two layers keep that
+safe:
 
 - **`js->in_pump`** is set for the duration of the pump. Every JS entry
   point that the loop could trigger — timers, `requestAnimationFrame`,
@@ -99,10 +104,10 @@ Every blocking or unbounded operation has a bound:
 |-----------|-------|-------|
 | HTTP connect | 15 s navigation / 6 s subresource | `CURLOPT_CONNECTTIMEOUT`, `net.c` |
 | HTTP transfer | 30 s default, 60 s max (`X-ND-Timeout-Seconds`) | `CURLOPT_TIMEOUT`, `net.c` |
-| HTTP redirects | 10 | `CURLOPT_MAXREDIRS`, `net.c` |
+| HTTP redirects | `max_redirects` (default and cap 10) | `CURLOPT_MAXREDIRS`, `net.c` |
 | WebSocket connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `ws.c` |
 | WebSocket transfer | none (long-lived); 10 ms poll cadence | `ws.c` |
-| Page JS eval slice | `js_eval_budget_ms` (config default 60 s, max 60 s; 5 s no-config fallback) | `ns_js_budget_push`, `js.c` |
+| Page JS eval slice | `js_eval_budget_ms` (default 60 s, max 60 s) | `ns_js_budget_push`, `js.c` |
 | Page JS hard monitor | 60 s of wall-clock per top-level entry | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
 | JS heap (page runtime) | `js_memory_cap_mb` (config default 2048; 2048 no-config fallback, no clamp) | `JS_SetMemoryLimit`, `js.c` |
 | JS heap (worker runtime) | `js_memory_cap_mb` clamped to ≤512; 256 no-config fallback | `JS_SetMemoryLimit`, `js.c` |
@@ -121,10 +126,11 @@ blocks a pool thread indefinitely.
 duplicate every input into a heap `ns_fetch_ctx`, and enqueue it. A
 mutex-guarded throttle (`g_fetch_throttle_mutex`, `g_fetch_queue`,
 `g_fetch_active`) caps concurrency at `NS_MAX_CONCURRENT_FETCHES` and
-dispatches via `g_task_run_in_thread`. `ns_fetch_thread` builds a curl
-easy handle (redirects, TLS, cache, and FTP handling all stay inline,
-hop by hop) and drives the actual transfer through
-**`ns_net_multi_perform`**, then `g_task_return_pointer` delivers the
+dispatches via `g_task_run_in_thread`. `ns_fetch_thread` walks the
+request hop by hop (redirects, HSTS, cache, and FTP handling stay
+inline) and hands each hop to `ns_hop_transport()`; on the default curl
+backend that builds an easy handle and drives the transfer through
+**`ns_net_multi_perform`**. Then `g_task_return_pointer` delivers the
 `ns_response` to the `GTask` callback **on the main thread** (the task
 was created there). On completion the active count is decremented under
 the mutex and the queue is re-pumped.
@@ -161,7 +167,8 @@ connection as parallel streams rather than opening one apiece.
 A headless run with `--debug=net` also prints a one-line `[net perf]`
 summary at the end of the load comparing the network-active wall span to
 main-thread layout time, e.g.
-`fetches=167 net_span=794ms net_sum=1431ms | relayouts=1 layout=97ms`.
+`fetches=167 bytes=… net_span=794.0ms net_sum=1431.0ms | relayouts=1 layout=97.0ms | …`
+(the trailing fields report the text-shaping caches).
 `net_span` is the wall-clock window from the first fetch start to the
 last completion (so it accounts for fetch concurrency), `net_sum` is the
 overlapping per-fetch total, and `layout` is the accumulated time inside
@@ -182,7 +189,7 @@ Shared state and its protection:
 - **Disk + memory response cache** (`cache.c`, `g_cache_mutex`;
   `bytecode_cache.c`, `g_lock`) — fully locked; safe to call from pool threads.
 - **Config-derived globals** (`g_accept_encoding`, `g_ca_bundle`,
-  `g_proxy_override`, `g_has_http3`, `g_allow_file_urls`) — written
+  `g_proxy_override`, `g_allow_file_urls`) — written
   once at init / argument-parsing time, before any fetch is issued, and
   treated as read-only thereafter.
 
@@ -197,7 +204,9 @@ flags (`closing`, `owner_alive`, `joined`); `host->lock` guards the
 `worker_js`/`loop`/`thread` pointers.
 
 Message passing is structured-clone over `JS_WriteObject` /
-`JS_ReadObject` (no shared JS heap, transfer lists rejected):
+`JS_ReadObject` (no shared JS heap; values named in a transfer list, such
+as `ArrayBuffer`s, are detached on the sending side, and `MessagePort`s
+travel with the message):
 
 - owner → worker: `g_main_context_invoke_full(host->context, …)` runs
   `ns_worker_deliver_worker` **on the worker thread**.
@@ -237,10 +246,11 @@ Two parts (GTK; see `docs/watchdog.md`). A **supervisor process**
 with `g_child_watch_add`, and restarts it on crash/hang with capped burst
 control plus session recovery. Inside the shell, a **hang-monitor thread**
 (`ns_watchdog_hang_thread`) compares an atomic heartbeat (`g_beat`, bumped
-by a 2 s shell-main-loop timeout) against a deadline of the JS eval budget
-plus a 60 s floor; if the loop
-stops beating it `_Exit`s with code 70 so the supervisor restarts. The
-shell runs no page JS, so the loop is never legitimately blocked long.
+by a 2 s shell-main-loop timeout) against a 60 s deadline (plus the JS eval
+budget under `--single-process`, where the shell does run page JS); if the
+loop stops beating it `_Exit`s with code 70 so the supervisor restarts. In
+the default multiprocess mode the shell runs no page JS, so its loop is
+never legitimately blocked long.
 This supervises the *shell*; per-tab engine crashes are already contained
 to their renderer process.
 
@@ -254,7 +264,7 @@ emitting thread**. Listeners therefore must be thread-safe: they must
 not touch the DOM directly and must not dereference an object that
 another thread can free. Page `console.*` output is captured by the JS
 log callback into a bounded per-page buffer, which the shell drains over
-the IPC `CONSOLE` message for the DevTools console panel (see
+the IPC `/console` message for the DevTools console panel (see
 `docs/tab-isolation.md`); it is never handed to a UI object from a worker
 thread.
 
@@ -306,8 +316,8 @@ so a page cannot fill the disk.
 
 ## Invariants for contributors
 
-- New blocking or >~10 ms CPU work belongs on the fetch pool or the
-  per-tab worker, never inline on the main thread.
+- New blocking or >~10 ms CPU work belongs on the fetch pool or another
+  `GTask` thread, never inline on the main thread.
 - A subscriber/callback that can be invoked from a background thread
   must capture identifiers by value (e.g. a window id), never a raw
   pointer to an object the main thread may free.
@@ -327,8 +337,10 @@ A handful of sub-resource loads are *synchronous from the script's point
 of view* — the script that triggers them must see the result inline:
 classic external `<script src>`, classic module imports (the QuickJS
 module loader resolves synchronously), and `<iframe>` `src` plus its
-inline scripts. (`XMLHttpRequest` is **not** here — it always uses the
-async fetch pool, `ns_net_request_async`.)
+inline scripts. (Asynchronous `XMLHttpRequest` is **not** here — it uses
+the async fetch pool, `ns_net_request_async`. A synchronous XHR issues the
+same async request and then iterates the main context until the request
+reaches `readyState` 4, bounded at 60 s, `ns_xhr_pump_until_done`.)
 
 Rather than block the main thread inside `curl_easy_perform`, these route
 through `ns_js_fetch_resource`, which dispatches the request to the
@@ -336,18 +348,19 @@ async fetch pool and spins a **nested `GMainLoop`** on the main thread
 until completion, with `js->in_pump` set for the duration. The window
 keeps painting; reentrant JS (timers/rAF/events) is suppressed by the
 existing `in_pump` guards, which preserves the synchronous-to-the-script
-semantics; and every GTK teardown path defers (see the pump reentrancy
-contract above), so the context cannot be freed mid-fetch. Completion is
+semantics; and the page is only closed between IPC messages (see the pump
+reentrancy contract above), so the context cannot be freed mid-fetch.
+Time spent in the nested loop is credited back to the script's budgets
+(`ns_js_credit_pumped_time`). Completion is
 a plain C callback, so it fires and quits the nested loop even while
 `in_pump` defers everything else. The wait is bounded by the curl
-transfer timeout, and concurrency still flows through the 5-slot
-throttle. On a worker thread (`js->worker_host`) there is no GUI to keep
+transfer timeout, and concurrency still flows through the global fetch
+throttle (32 in flight, 6 per origin). On a worker thread (`js->worker_host`) there is no GUI to keep
 alive, so `ns_js_fetch_resource` falls back to a direct blocking fetch.
 
 **Deferring without busy-spin.** Because the nested loop holds `in_pump`
-for the whole sub-resource fetch (not just the ~8 iterations of the
-interrupt-handler pump), any *other* JS-invoking completion that lands
-during it must defer — and must do so without re-arming an
+for the whole sub-resource fetch, any *other* JS-invoking completion
+that lands during it must defer — and must do so without re-arming an
 always-ready idle, which would spin the loop at 100 % CPU. The rule is
 now uniform across **every** asynchronous source whose callback runs
 page JS: each, when `in_pump` holds, re-arms with a 4 ms `g_timeout`
@@ -368,8 +381,8 @@ page JS: each, when `in_pump` holds, re-arms with a 4 ms `g_timeout`
 
 This also closed a latent reentrancy gap: XHR, WebSocket, AbortSignal,
 and FileReader callbacks previously ran immediately with no `in_pump`
-check, so a completion arriving during *any* pump (including the brief
-interrupt-handler pump) could run reentrant JS. With the set above,
+check, so a completion arriving during *any* pump could run reentrant
+JS. With the set above,
 no asynchronous source can run page JS while another JS frame is on the
 stack.
 

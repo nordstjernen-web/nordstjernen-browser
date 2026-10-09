@@ -12,9 +12,11 @@ because it is readable on the wire, has no slot-lifetime bookkeeping to get
 wrong, and costs nothing in throughput: the pixels never travel over it.
 
 Every control message is a plain HTTP `POST` with a small JSON body — `/open`,
-`/render`, `/link`, `/click`, `/key`, `/hover`, `/find`, `/viewport`, `/select`,
-`/eval`, `/console`, `/media`, `/export`, `/quit` — so the protocol is readable
-in a trace and trivial to extend. Only the rendered pixels travel through shared
+`/render`, `/tick`, `/link`, `/click`, `/key`, `/hover`, `/scroll`, `/find`,
+`/viewport`, `/select`, `/eval`, `/console`, `/media`, `/print`, `/export`,
+`/quit`, and others, all dispatched by `ns_renderer_session_handle` in
+`src/renderer_serve.c` — so the protocol is readable in a trace and trivial to
+extend. Only the rendered pixels travel through shared
 memory. The framebuffer is not a global named object: the shell backs it with an
 anonymous `memfd_create` (Linux), an immediately-unlinked `shm_open` segment
 (other Unix), or an unnamed inheritable file mapping (Windows), and hands the
@@ -25,16 +27,17 @@ renderer the descriptor/handle over the control channel rather than a name.
 For each frame the shell `POST`s `/render` with the target size, scroll offset,
 and a `scale` that maps CSS pixels to device pixels. The renderer:
 
-1. pumps pending JS/animation work for a small time budget
-   (`ns_browser_tick`);
+1. pumps pending JS/animation work for a 16 ms budget (`ns_browser_tick`),
+   deferring it while a scroll is in progress;
 2. paints the requested viewport region of the layout tree straight into the
    shared-memory framebuffer in Cairo-native ARGB32
    (`ns_browser_render_argb32` over `src/paint.c`), with no intermediate
    surface;
-3. replies with `X-W`/`X-H`/`X-Stride`/`X-Anim` headers and an empty body — the
-   pixels are already in the shell's address space via the shared mapping.
+3. replies with `X-W`/`X-H`/`X-Stride`/`X-Anim` (plus page-size and scroll)
+   headers and an empty body — the pixels are already in the shell's address
+   space via the shared mapping.
 
-Renders are coalesced so at most one is in flight, so the shell's per-view worker
+Renders are coalesced so at most one is in flight; the shell's per-view worker
 thread copies the frame out of the shared mapping into its display surface
 (a texture on GTK) before issuing the next render. The copy runs off the UI
 thread; the data plane never crosses the socket. While `ns_browser_animating()`
@@ -47,10 +50,11 @@ hover restyle, find, click result).
 
 The GTK shell asks for the page as tiles instead of one viewport frame
 (`"tiles":1` in the `/render` body). The renderer (`src/renderer_tiles.c`)
-splits the page into layers by paint order and paints them separately:
+splits the page into layers by paint order and paints them separately; the
+shell picks the tile height (`NS_PV_TILE_H`, 256 device rows):
 
 - **document layers** are the content that scrolls with the page. They are
-  cut into horizontal tiles of 256 device rows at full viewport width;
+  cut into horizontal tiles of that height at full viewport width;
 - **fixed layers** hold one `position: fixed` subtree each, in viewport
   coordinates;
 - **sticky layers** hold one `position: sticky` subtree each (scrollport is
@@ -83,15 +87,17 @@ the tiles; the page paints a transparent hole where it shows.
 `NS_TILES=0` turns tiles off and brings back full frames.
 
 Resizing re-lays-out the page for the new CSS-pixel viewport width in the
-renderer (`VIEWPORT` → `ns_browser_set_viewport_width`), re-evaluating
+renderer (`/viewport` → `ns_browser_set_viewport`), re-evaluating
 `@media` queries, viewport units, and fluid widths.
 
 ## Isolation
 
 Because the engine runs in a separate, sandboxed process, a crash or hang in
 untrusted page content cannot take down the UI; the shell detects a dead
-renderer and restarts the tab. The renderer is confined with Linux Landlock +
-seccomp (`ns_browser_sandbox`); see `docs/tab-isolation.md`.
+renderer and restarts the tab. The renderer confines itself with
+`ns_browser_sandbox` — Landlock + seccomp on Linux, a Seatbelt profile on
+macOS, process mitigation policies on Windows; see
+[tab-isolation.md](tab-isolation.md).
 
 ## Long documents
 
@@ -111,6 +117,7 @@ reference. Two hot spots to keep in mind when touching these paths:
   for targets whose document position cannot be located by node rank;
   they prune subtrees that follow the target.
 
-With `NS_PROFILE=1` (set in the renderer's environment), the
-`js phases install=` figure covers the index builds, and `css.cascade=`
-is expected to dominate large static pages once layout is linear.
+With `NS_PROFILE=1` (set in the renderer's environment), the engine prints
+`[profile]` lines to stderr (`restyle`, `relayout`, `paint`, `tiles`, and
+`css.idx=`/`css.cascade=`, among others); `css.cascade=` is expected to
+dominate large static pages once layout is linear.

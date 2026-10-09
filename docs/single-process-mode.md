@@ -38,10 +38,11 @@ renderer process to inspect.
 Single-process mode reuses the renderer IPC protocol unchanged; only
 the transport and process boundary differ.
 
-- `src/rproc_http.c` — when the mode is enabled
-  (`ns_rproc_http_set_inproc`), "spawning a renderer" creates a
-  `socketpair` (two `_pipe`s on Windows) and a plain `malloc`'d
-  framebuffer instead of forking `nordstjernen-renderer`. The shell's
+- `src/rproc_http.c` — once `ns_rproc_single_process_enable` has
+  registered the in-process host (`ns_rproc_http_set_inproc`),
+  "spawning a renderer" creates a `socketpair` (two `_pipe`s on Windows)
+  and a reference-counted heap framebuffer instead of forking
+  `nordstjernen-renderer`. The shell's
   client code (`procview`/`procwindow`) is unchanged
   and does not know which mode it is running in.
 - `src/rproc_inproc.c` — the in-process host. A small reader thread
@@ -57,9 +58,9 @@ All engine work therefore runs on the thread that owns the default
 GLib main context — the GTK main thread. This
 matches the engine's threading model: its timers, async fetch
 completions, and settle loops all live on the default main context.
-The engine still uses its internal worker threads (tab workers, image
-decode, networking, Dedicated Workers), so "single process" does not
-mean single-threaded.
+The engine still uses its internal worker threads (image decode,
+networking, Web Workers), so "single process" does not mean
+single-threaded.
 
 Framebuffers are not shared memory in this mode — client and renderer
 are the same process, so the renderer paints straight into a buffer
@@ -79,7 +80,10 @@ properties that process-per-tab exists for:
   exec-dir Landlock widening that proc mode needs.)
 - **No crash containment.** An engine crash takes the whole browser
   down (the GTK watchdog still restarts it and recovers the session)
-  instead of one tab showing a restart message.
+  instead of one tab showing a restart message. Since page JavaScript
+  runs on the shell's main loop in this mode, the watchdog's hang
+  timeout is extended by the JS eval budget (see
+  [watchdog.md](watchdog.md)).
 - **Tabs share one engine lane.** Requests are serialized on the main
   context, so a slow page load can delay another tab's rendering; in
   multiprocess mode tabs make progress independently.

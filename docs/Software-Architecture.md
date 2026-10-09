@@ -4,7 +4,7 @@ How Nordstjernen is built, from the process model down to each engine
 subsystem, and how those choices compare with Firefox (Gecko), Chrome
 (Blink), and Ladybird (LibWeb).
 
-Snapshot: **1.0.23**, 2026-08-08. This is a living map of the codebase;
+Snapshot: **1.0.31-dev**, 2026-10-09. This is a living map of the codebase;
 the source is the source of truth. File references are given as
 `path:line` and were accurate at the snapshot revision.
 
@@ -31,8 +31,8 @@ third-party libraries vendored and integrated in-tree; the DOM, the CSS
 cascade and selector engine, layout, paint, the media pipeline, and all
 of the Web-platform bindings are original code.
 
-The whole engine is roughly **155,000 lines of C** (`src/`, excluding the
-vendored lexbor and QuickJS trees), small enough for a single person to
+The whole engine is roughly **230,000 lines of C** (`src/`, excluding the
+vendored lexbor, QuickJS, and WAMR trees), small enough for a single person to
 read and audit end to end. That constraint drives most of the
 architecture below.
 
@@ -44,7 +44,7 @@ architecture below.
 - **Secure by construction.** Each tab's engine runs in its own
   sandboxed OS process (seccomp + Landlock on Linux). There is **no
   JIT** anywhere — neither for JavaScript (QuickJS is a bytecode
-  interpreter) nor for WebAssembly (WAMR runs the classic interpreter),
+  interpreter) nor for WebAssembly (WAMR runs its fast interpreter),
   so the renderer never generates or maps executable code at runtime and
   presents no W^X surface.
 - **Standards-first, not browser-mimicking.** Behaviour is measured
@@ -70,19 +70,19 @@ not one monolith. From the top:
 nordstjernen (watchdog supervisor)
 └── nordstjernen (GTK shell — thin, engine-free UI)
     ├── nordstjernen-renderer   (tab 1 — sandboxed engine)
-    │   ├── nordstjernen-audio   (lazy, per tab)
-    │   └── nordstjernen-video   (lazy, per tab)
+    ├── nordstjernen-audio      (tab 1 — lazy, spawned by the shell)
+    ├── nordstjernen-video      (tab 1 — lazy, spawned by the shell)
     ├── nordstjernen-renderer   (tab 2 — sandboxed engine)
     └── …
 ```
 
 **Watchdog supervisor.** A normal launch turns the process you start
 into a tiny supervisor (`ns_watchdog_run_supervisor`,
-`src/watchdog.c:537`, entered from `src/gtk/appmain.c:503`) that spawns
+`src/watchdog.c:548`, entered from `src/gtk/appmain.c:554`) that spawns
 the real GUI shell as a child and restarts it if it crashes or hangs,
 bounded by a crash-loop limit of 5 restarts per 60 s
-(`src/watchdog.c:394`). A dedicated heartbeat thread inside the shell
-(`src/watchdog.c:56`) turns a wedged main loop into a non-zero exit the
+(`src/watchdog.c:398`). A dedicated heartbeat thread inside the shell
+(`src/watchdog.c:57`) turns a wedged main loop into a non-zero exit the
 supervisor can recover. See [watchdog.md](watchdog.md).
 
 **GTK shell.** The shell (`src/gtk/appmain.c`, `src/gtk/procview.c`) is
@@ -94,9 +94,10 @@ and forwards input to its renderer.
 **Per-tab renderer.** The engine — HTML parse, CSS cascade, layout,
 Cairo/Pango paint, the QuickJS runtime, networking — runs inside one
 sandboxed `nordstjernen-renderer` process **per tab**
-(`src/renderer_http.c`, spawned at `src/gtk/procview.c:1174`). A renderer
-crash is contained to its tab and transparently restarted
-(`src/gtk/procview.c:1189`). This is a **process-per-tab** boundary; a
+(`src/renderer_http.c`, spawned by the per-view worker at
+`src/gtk/procview.c:1552`). A renderer crash is contained to its tab and
+transparently restarted, up to `NS_PROC_MAX_RESTARTS` times
+(`src/gtk/procview.c:3339`). This is a **process-per-tab** boundary; a
 finer process-per-site boundary is noted as future work in
 [tab-isolation.md](tab-isolation.md).
 
@@ -110,7 +111,7 @@ serves every tab from one in-process engine over the same IPC protocol
 containment for footprint and debuggability. **Headless** modes
 (`--headless`/`--dump`/`--eval`/`--inspect`/`--wpt`/`--act`) are a
 separate path again: they run the engine in-process with no shell and no
-IPC at all (`ns_run_headless`, `src/gtk/appmain.c:399`). See
+IPC at all (`ns_run_headless`, `src/gtk/appmain.c:418`). See
 [single-process-mode.md](single-process-mode.md).
 
 ---
@@ -122,28 +123,32 @@ choices. Rather than a bespoke binary protocol, every control message is
 a **plain HTTP/1.1 POST with a small JSON body**, and only the rendered
 pixels travel through shared memory (see [Rendering.md](Rendering.md)).
 
-- **Transport.** An `AF_UNIX` `socketpair` on POSIX (the renderer reads
-  and writes fd 3, `src/rproc_http.c:137`), inherited stdio pipes on
-  Windows, or a `stdio` mode for JVM/Android embedders. Framing is
+- **Transport.** An `AF_UNIX` `socketpair` on POSIX (the child end is
+  `dup2`'d to fd 3, `src/rproc_http.c:184`, which the renderer reads and
+  writes, `src/renderer_http.c:222`), inherited stdio pipes on Windows, or a `stdio` mode for JVM/Android embedders. Framing is
   minimal HTTP/1.1 in `src/ipc_http.c` (`http_write_request`,
   `http_read_head`).
 - **Messages are POST paths**, all dispatched in `ns_renderer_session_handle`
-  (`src/renderer_serve.c:261`): `/open`, `/render`, `/click`, `/key`,
-  `/hover`, `/scroll`, `/select`, `/find`, `/viewport`, `/eval`,
-  `/console`, `/media`, `/export`, `/quit`, and others. The client-side
+  (`src/renderer_serve.c:587`): `/open`, `/render`, `/tick`, `/link`,
+  `/click`, `/key`, `/hover`, `/scroll`, `/select`, `/find`, `/viewport`,
+  `/eval`, `/console`, `/media`, `/print`, `/export`, `/quit`, and others. The client-side
   wrappers live in `src/rproc_http.c`.
 - **Frames are shared memory.** The shell backs the framebuffer with an
   anonymous `memfd_create` (Linux) or an immediately-unlinked `shm_open`
   segment (other Unix), passes the descriptor to the renderer over
-  `SCM_RIGHTS` (`src/rproc_http.c:169`), and the renderer wraps it
-  directly as a Cairo ARGB32 surface. `/render` replies carry only
-  geometry in `X-*` headers (`X-W`, `X-H`, `X-Stride`, `X-Anim`,
-  `X-PageW`, `X-PageH`); the body is empty.
+  `SCM_RIGHTS` (`http_send_fd`, `src/ipc_http.c:75`), and the renderer
+  wraps it directly as a Cairo ARGB32 surface. Windows creates an
+  unnamed inheritable file mapping and passes the handle. A full-frame
+  `/render` reply carries only geometry in `X-*` headers (`X-W`, `X-H`,
+  `X-Stride`, `X-Anim`, `X-PageW`, `X-PageH`, `X-ScrollY`) and an empty
+  body; a tiled reply lists its layers and tiles in the body (see
+  [Rendering.md](Rendering.md)).
 - **Renderer→shell side-channels** ride the `/render` reply as extra
   headers drained from the engine's pending queues: `X-Nav` (a
   script-initiated navigation), `X-Audio` (media-helper commands),
-  `X-WebGL` (WebGL activity), `X-Camera` (a permission prompt), and
-  `X-Download` (a download offer).
+  `X-WebGL` (WebGL activity), `X-Camera` (a permission prompt),
+  `X-Download` (a download offer), and `X-Window-Action` (a
+  script-requested window action).
 
 The protocol is readable in a trace and trivial to extend, which is the
 whole point: a browser's process boundary is normally the least
@@ -169,28 +174,31 @@ network bytes
   → shared-memory framebuffer → shell blit
 ```
 
-The same tree feeds paper. `ns_browser_print_pages` (`src/print.c`) lays
+The same tree feeds paper. `ns_browser_print_pages`
+(`src/libnordstjernen.c:1822`, paginating through `src/print.c`) lays
 the document out at the sheet size `@page` asks for, cuts it into sheets
 at the breaks `break-before`/`break-after`/`break-inside` allow, renders
 one cairo recording surface per sheet and restores the on-screen layout.
-The surfaces cross no process boundary, so the print action needs the
-in-process renderer; `src/gtk/procview.c` hands them to
-`GtkPrintOperation` and the platform's own print dialog. See
+In single-process mode the shell takes those surfaces directly; across
+the process boundary the renderer's `/print` handler rasterises each
+sheet to a PNG in the runtime directory and the shell loads them back
+(`ns_rproc_http_print`). Either way `src/gtk/procview.c` hands the sheets
+to `GtkPrintOperation` and the platform's own print dialog. See
 [printing.md](printing.md).
 
-**Charset decode.** `ns_html_decode_body_full` (`src/html.c:685`) applies
+**Charset decode.** `ns_html_decode_body_full` (`src/html.c:733`) applies
 BOM sniffing, then the declared charset, then UTF-8 validation, then
 **uchardet** detection, then a Windows-1252 fallback. Dangerous
 encodings (UTF-7, HZ, ISO-2022) are rejected.
 
-**HTML parse.** `ns_html_parse` (`src/html_lexbor.c:767`) drives the
+**HTML parse.** `ns_html_parse` (`src/html_lexbor.c:761`) drives the
 in-tree **lexbor** tokeniser and tree constructor (scripting flag on),
 then converts the lexbor tree into the native DOM
-(`lxb_to_nd_root`, `:204`), preserving quirks mode, declarative shadow
+(`lxb_to_nd_root`, `:197`), preserving quirks mode, declarative shadow
 DOM, and standards media-metadata extraction. The lexbor document is
 kept alive as backing store on the DOM root.
 
-**Style + layout core.** `ns_render_relayout_profile` (`src/render.c:167`)
+**Style + layout core.** `ns_render_relayout_profile` (`src/render.c:681`)
 sets the viewport, runs `ns_css_compute` to produce the `ns_node* →
 ns_style*` table, builds the `ns_box` layout tree with `ns_layout_build`,
 and — only if the page uses container queries — measures containers and
@@ -218,24 +226,24 @@ throttling belongs. The cost of the guarantee is that, with no
 incremental layout invalidation, a write/read thrash loop pays a full
 cascade and box-tree rebuild per iteration.
 
-**Paint.** `ns_paint` (`src/paint.c:6100`) walks the box tree into a
+**Paint.** `ns_paint` (`src/paint.c:9587`) walks the box tree into a
 Cairo surface. See [§7](#7-paint-text-and-fonts).
 
 ---
 
 ## 5. The DOM
 
-The DOM is a hand-rolled tree of `ns_node` (`src/dom.h:63`), not a
+The DOM is a hand-rolled tree of `ns_node` (`src/dom.h:70`), not a
 wrapper over lexbor's tree. Each node carries its `kind`
 (document/doctype/element/text/comment), tag name, text, a
 singly-linked attribute list, and parent/child/sibling pointers. Per
 document, `ns_node` maintains **id, class, and tag indexes** (hash
-tables built in bulk in document order, `src/dom.c:1280`) plus an
+tables built in bulk in document order, `src/dom.c:1604`) plus an
 attribute Bloom filter for fast selector rejection, so `getElementById`
 and selector matching don't rescan the tree.
 
 The bridge from lexbor to `ns_node` is `lxb_node_convert`
-(`src/html_lexbor.c:60`), which copies attributes (including namespaced
+(`src/html_lexbor.c:61`), which copies attributes (including namespaced
 ones), tags SVG/MathML nodes with their namespace, and follows
 `<template>` content. Node→JS wrapper identity is cached on the node
 itself (see [§8](#8-the-javascript-engine)).
@@ -244,8 +252,8 @@ itself (see [§8](#8-the-javascript-engine)).
 
 ## 6. The CSS engine
 
-`src/css.c` (~17,000 lines) is a full cascade and selector engine with
-its own data model in `src/css.h`: 190+ longhand properties, a tagged
+`src/css.c` (~34,000 lines) is a full cascade and selector engine with
+its own data model in `src/css.h`: 240+ longhand properties, a tagged
 value union (keyword/length/color/calc/shadow/gradient/grid-tracks/
 transform/…), specificity-carrying selectors, and a computed `ns_style`
 record that holds a `values[]` array plus sub-styles for each supported
@@ -261,20 +269,20 @@ pseudo-element and a custom-property (`--var`) map.
   matches are gathered from the UA sheet, presentational hints, and
   author sheets, then sorted by origin → layer → specificity → source
   order, with `!important`, `revert`, `inherit`/`initial`, and inherited
-  fill-down resolved in `cascade_for` (`src/css.c:15442`). Font-relative
+  fill-down resolved in `cascade_for` (`src/css.c:29322`). Font-relative
   and viewport/container units are resolved during the cascade.
-- **Selectors.** `ns_css_selector_matches` (`src/css.c:14051`) matches
+- **Selectors.** `ns_css_selector_matches` (`src/css.c:25737`) matches
   the rightmost compound then walks combinators right-to-left (child,
   `+`, `~`, descendant). The pseudo-class/element coverage is broad,
   including `:has()`, `:is()`/`:where()`, structural, state, and the
   HTML-connected pseudo-classes.
-- **UA stylesheet.** The `kUa` literal (`src/css.c:15108`) supplies the
+- **UA stylesheet.** The `kUa` literal (`src/css.c:28569`) supplies the
   default rendering (display types, heading scale, list markers, form
   controls, `[hidden]`, `dialog`, popover). It is the browser's
   implementation of the HTML Rendering section — the sections/grouping
   elements have no element-specific code path, only UA CSS.
 - **Media & container queries.** `ns_css_media_query_matches`
-  (`src/css.c:10347`) evaluates width/height/aspect-ratio/resolution/
+  (`src/css_media.c:1179`) evaluates width/height/aspect-ratio/resolution/
   orientation/`prefers-color-scheme`/`prefers-reduced-motion`/pointer/
   hover and range syntax.
 
@@ -282,44 +290,47 @@ pseudo-element and a custom-property (`--var`) map.
 
 ## 7. Layout, paint, text, and fonts
 
-**Layout** (`src/layout.c`, ~11,000 lines) builds the `ns_box` tree from
-the style table. `layout_box` (`src/layout.c:7377`) dispatches by box
+**Layout** (`src/layout.c`, ~18,000 lines) builds the `ns_box` tree from
+the style table. `layout_box` (`src/layout.c:10191`) dispatches by box
 kind into the implemented formatting contexts:
 
 | Context | Entry | Notes |
 |---------|-------|-------|
 | Block | `layout_block` | margin collapsing, multicol |
 | Inline | `inline_layout` | Pango-shaped runs, atomic inlines |
-| Flex | `layout_flex_row`/`_wrap`/`_column` | `order`, wrapping |
+| Flex | `layout_flex_row`/`layout_flex_column` | `order`, wrapping |
 | Grid | `layout_grid` | track sizing, spans, named areas |
 | Table | `layout_table` | colspan/rowspan, border models |
 | MathML | `ns_math_measure` | presentation MathML |
 
 **Paint.** Page painting is **entirely Cairo software rendering** —
 there is no GPU compositor for page content. `ns_browser_render_argb32`
-(`src/libnordstjernen.c:1451`) wraps the shared-memory buffer directly as
-a Cairo ARGB32 surface and calls `ns_paint` (`src/paint.c:6100`), whose
-recursive `paint_walk` (`:5468`) culls hidden/offscreen boxes, applies
+(`src/libnordstjernen.c:2273`) wraps the shared-memory buffer directly as
+a Cairo ARGB32 surface and calls `ns_paint` (`src/paint.c:9587`), whose
+recursive `paint_walk` (`:8896`) culls hidden/offscreen boxes, applies
 opacity/blend/mask groups, sticky offsets, 2D and 3D transforms, and
 clip-paths, and paints positioned/z-indexed children in stacking order.
 
-**Text** is shaped with **Pango** (`pango/pangocairo.h`). `@font-face`
+**Text** is shaped with **Pango** — on desktop through the **ns-pango**
+fork pinned as a meson subproject (`subprojects/ns-pango.wrap`, included
+as `"ns_pango.h"`), which caches shaped glyph strings across layouts;
+Android and iOS link the system Pango. `@font-face`
 fonts are fetched, converted from WOFF to SFNT (`src/font.c`) and from
 WOFF2 to SFNT over libbrotlidec when it is available (`src/woff2.c`), and
 registered with Fontconfig so the Pango-FC fontmap can use them.
 
 **Animation.** `src/anim.c` tracks CSS transitions and `@keyframes`.
-The per-frame pump `ns_browser_tick` (`src/libnordstjernen.c:1231`)
+The per-frame pump `ns_browser_tick` (`src/libnordstjernen.c:1866`)
 advances the animator, dispatches transition/animation events, runs
 `requestAnimationFrame` callbacks, pumps the GLib main context, and
 relayouts on mutation. `ns_browser_animating` gates whether the shell
 runs a continuous frame loop or renders on demand.
 
-**Images** are decoded by `ns_image_decode_bytes` (`src/image.c:492`),
+**Images** are decoded by `ns_image_decode_bytes` (`src/image.c:253`),
 which tries decoders in a fixed content-sniffed order and returns a
 texture: **ICO/CUR → Wuffs** (memory-safe: PNG/APNG, GIF, BMP, JPEG,
 WebP) **→ libwebp** (animated/extended WebP) **→ libavif** (if built)
-SVG renders in-engine (`src/svg.c`). Nothing follows: a format none of
+**→ libjxl** (if built) **→ SVG**, rendered in-engine (`src/svg.c`). Nothing follows: a format none of
 these cover fails to decode rather than falling through to a
 plugin-loaded decoder.
 
@@ -332,7 +343,8 @@ The engine is an in-tree fork of **quickjs-ng** (`src/quickjs/`, version
 builds the same binding on Fabrice Bellard's original QuickJS instead,
 through the `src/ns_quickjs.h` adapter ([quickjs.md](quickjs.md)). Each browsing
 context gets one `JSRuntime` + `JSContext`, created in `ns_js_new`
-(`src/js.c:39454`) with a 2 GB memory cap and a 5 MB stack.
+(`src/js.c:57052`) with a 2 GB memory cap (`js_memory_cap_mb`) and a
+5 MB stack.
 
 **DOM bindings.** All DOM node types share **one** `JSClassID`
 (`ns_element_class_id`); the C `ns_node *` is the JS object's opaque
@@ -343,7 +355,7 @@ node always yields the same JS object. Types are distinguished by
 element interfaces. Genuinely dynamic surfaces (Window named properties,
 `CSSStyleDeclaration`, `DOMTokenList`, live collections, `dataset`) use
 QuickJS **exotic objects**. `src/js.c` is the single largest file in the
-tree (~47,000 lines) because it hosts essentially the whole Web-platform
+tree (~67,000 lines) because it hosts essentially the whole Web-platform
 binding surface.
 
 **Event loop.** The engine has no internal loop; JS work is **pumped
@@ -352,7 +364,7 @@ drain via `JS_ExecutePendingJob`; timers are GLib sources; `requestAnimationFram
 callbacks are drained each frame with a clamped high-resolution
 timestamp. A per-invocation soft budget and a hard **60-second wall-clock
 monitor** are enforced through `JS_SetInterruptHandler`
-(`ns_js_interrupt_cb`, `src/js.c:413`); time spent blocked in a nested
+(`ns_js_interrupt_cb`, `src/js.c:580`); time spent blocked in a nested
 main loop (a synchronous fetch) is credited back so I/O doesn't burn the
 budget.
 
@@ -367,11 +379,11 @@ runtime, cross-thread messaging by structured clone), `localStorage`/
 **Intl** (`src/js_intl.c`) and **Temporal** (`src/js_date.c`), and the
 observer APIs.
 
-**WebAssembly** runs on **WAMR** (`src/wamr/`, the classic interpreter
+**WebAssembly** runs on **WAMR** (`src/wamr/`, the fast interpreter
 with reference-types and bulk-memory, no JIT/AOT); `src/wasm.c` binds the
 `WebAssembly` JS API over it.
 
-**Polyfills.** A ~331 KB `data/js/polyfills.js` bundle is embedded at
+**Polyfills.** A ~500 KB `data/js/polyfills.js` bundle is embedded at
 build time and evaluated after the native bindings install. It builds
 higher-level spec object models over thin native backends (the whole
 IndexedDB interface over `__nd_idb`), and adds faithfulness shims (making
@@ -396,10 +408,17 @@ scripts skip recompilation across loads.
 
 ## 9. Networking
 
-Networking is built on **libcurl** (`src/net.c`, ~6,000 lines):
+Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
 
-- **HTTP/2 by default** (`CURL_HTTP_VERSION_2TLS`), with **HTTP/3**
-  opt-in.
+- **HTTP/2 by default** (`CURL_HTTP_VERSION_2TLS`); curl's **HTTP/3** is
+  opt-in (`NS_FORCE_HTTP3`, when libcurl is built with it).
+- **Swappable transport.** A single hop goes through `ns_hop_transport()`
+  (`src/net_backend.h`). `-Dhttp_backend=nghttp2` replaces the curl hop
+  with an in-tree libnghttp2 + OpenSSL client (`src/net_http2.c`) that
+  multiplexes streams per connection and upgrades to HTTP/3 over QUIC
+  after `Alt-Svc` when ngtcp2/nghttp3/gnutls are present. Redirects,
+  HSTS, cache, and cookies stay above the hop and are shared. See
+  [http-backends.md](http-backends.md).
 - **WHATWG URL** parsing, resolution, origin/host/site extraction all
   route through lexbor's URL module (`ns_url_*`), so there is no separate
   URL library.
@@ -410,7 +429,8 @@ Networking is built on **libcurl** (`src/net.c`, ~6,000 lines):
   `Sec-Fetch-*` set, `Sec-CH-UA*` under a Chrome identity,
   `Upgrade-Insecure-Requests`, and a compat-mode-selectable User-Agent
   (Chrome/Firefox/Ladybird presets).
-- **HSTS** and an optional **HTTPS-first** upgrade path.
+- **HSTS** and an **HTTPS-first** upgrade path (on by default, the
+  `https_first` config key).
 - **HTTP cache**: a **SQLite-indexed** cache with on-disk bodies
   (`src/cache.c`), honouring ETag/Last-Modified.
 - **Cookies** partitioned per site; JS-set cookies persisted in a
@@ -428,15 +448,15 @@ Confinement is layered, and the **out-of-process renderer is the real
 boundary** (`src/security.c`).
 
 - **Linux — Landlock + seccomp.** The renderer seals a **Landlock**
-  filesystem ruleset (`ns_security_sandbox_init`, `src/security.c:362`):
+  filesystem ruleset (`ns_security_sandbox_init`, `src/security.c:417`):
   read+exec on system library dirs, read-only on config/certs/proc/sys,
   and read-write only on its own runtime, cache, and downloads
   directories. It then loads a **seccomp-bpf** filter
-  (`ns_security_seccomp_init`, `:814`) whose default action is
-  fail-with-`EPERM`, allowing ~230 named syscalls and **denying `execve`,
+  (`ns_security_seccomp_init`, `:933`) whose default action is
+  fail-with-`EPERM`, allowing ~260 named syscalls and **denying `execve`,
   `ptrace`, `mount`, `setuid`, `bpf`, and other escape primitives by
   omission**. Both are sealed before the renderer opens any page
-  (`src/renderer_http.c:258`). The shell gets Landlock only (it must
+  (`src/renderer_http.c:261`). The shell gets Landlock only (it must
   `fork`/`execv` renderers, which the no-`execve` filter would block).
 - **macOS** applies a Seatbelt filesystem-write-confinement profile;
   **Windows** applies `SetProcessMitigationPolicy` (DEP, ASLR,
@@ -444,8 +464,8 @@ boundary** (`src/security.c`).
   platforms are unsandboxed no-ops.
 - **Same-Origin Policy / CORS.** Enforced through `ns_url_same_origin`;
   `fetch`/XHR responses are gated by a CORS check
-  (`cors_allows`, `src/js.c:7084`).
-- **CSP** (`src/csp.c`) parses and enforces 11 directives including
+  (`cors_allows`, `src/js.c:9366`).
+- **CSP** (`src/csp.c`) parses and enforces 14 directives including
   `frame-ancestors`, with source-list matching, nonces, and
   sha-256/384/512 inline hashes.
 - **No JIT** means no runtime code generation for JS or wasm, removing
@@ -463,7 +483,7 @@ See [tab-isolation.md](tab-isolation.md), [watchdog.md](watchdog.md).
 A renderer is **single-main-thread**: DOM, CSS, layout, Cairo/Pango
 paint, and page JavaScript all live on one thread running a GLib main
 loop. Background threads exist only for inherently blocking or
-self-contained work — network I/O, HTML/CSS parsing, image decoding,
+self-contained work — network I/O, image decoding,
 WebSocket/EventSource pumps, and Web Workers (each its own runtime) —
 and every off-thread result is handed back through a GLib main-context
 invocation before it touches shared state. The invariant: **nothing
@@ -475,8 +495,8 @@ live page `JSContext`.** See [threading.md](threading.md).
 ## 12. Media: audio and video
 
 Media decodes **outside** the sandboxed renderer, in helper processes
-the shell spawns per tab and drives over the `X-Audio` side-channel
-(see [media.md](media.md)):
+the shell spawns per tab and drives with the commands the renderer
+emits on the `X-Audio` side-channel (see [media.md](media.md)):
 
 - **`nordstjernen-audio`** (`src/audio/main.c`) decodes to PCM in-tree —
   pl_mpeg (MPEG-1/MP2), minimp3 (MP3), and libav (Opus/Vorbis) — and
@@ -499,15 +519,19 @@ media stack**.
 
 - **WebGL 1/2** (`src/webgl.c`) maps the API more or less directly onto
   OpenGL ES through a toolkit-independent offscreen GL context
-  (`src/glctx.c`) and libepoxy — a surfaceless EGL context on Linux, WGL
-  on Windows. There is no ANGLE layer and no command-stream validator.
+  (`src/glctx.c`) and libepoxy — a surfaceless EGL context on Linux, CGL
+  on macOS, WGL on Windows. There is no ANGLE layer and no command-stream validator.
   It is enabled by default, globally switchable in Settings, and announced
   in the status bar when a page uses it. The result renders into an FBO, is
   read back, and composited into the Cairo scene like any other image.
 - **WebGPU** (`src/webgpu.c`) is **experimental**, layered over the
-  external wgpu-native library. The build feature is `auto` (compiled
-  only when wgpu-native is present) and it stays off at runtime unless
-  started with `--enable-webgpu`. A stock build carries no WebGPU symbol.
+  external wgpu-native library (headers vendored, library never
+  committed). It is a required part of the build on glibc Linux, macOS,
+  and Windows — fetched through a pinned meson wrap when not installed —
+  and optional elsewhere; `-Dwebgpu=disabled` drops it. It is on at
+  runtime by default, can be switched off in Settings (the `webgpu`
+  config key), and `--enable-webgpu` turns it on even when Settings has
+  it off.
 - **Canvas 2D** (`src/js_canvas.c`) is Cairo+Pango backed.
 
 See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
@@ -532,9 +556,10 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 ## 15. Build, embedding, and platforms
 
 - **Build system:** meson + ninja. Optional features (`gtk`, `wasm`,
-  `ai`, `audio`, `webgpu`) are meson feature flags; ccache is picked up
-  automatically. The vendored lexbor and QuickJS trees are loaded via
-  `subdir()` and expose declared dependencies directly, not as
+  `audio`, `webgpu`, `avif`, `jxl`, `ns-pango`) are meson feature flags,
+  and `http_backend` and `quickjs` are combo options; ccache is picked up
+  automatically. The vendored lexbor, QuickJS, and WAMR trees are loaded
+  via `subdir()` and expose declared dependencies directly, not as
   subprojects.
 - **Embedding:** the engine is exposed as a shared library
   `libnordstjernen` with a plain-C API (`src/libnordstjernen.h`,
@@ -566,13 +591,13 @@ codebase. The table summarises; the notes explain.
 | JIT | **None** (interpreter) | Multi-tier JIT | Multi-tier JIT | Interpreter (bytecode) |
 | WebAssembly | WAMR interpreter | SpiderMonkey (JIT) | V8 (JIT) | LibWasm |
 | HTML parser | lexbor (vendored) | Own | Own | Own (LibWeb) |
-| Page compositing | Cairo software; GPU only for WebGL/GPU/canvas | WebRender (GPU) | Viz/cc (GPU) | CPU paint (LibGfx/Skia) |
+| Page compositing | Cairo software; GPU only for WebGL/WebGPU | WebRender (GPU) | Viz/cc (GPU) | CPU paint (LibGfx/Skia) |
 | Networking | libcurl | Necko (own) | Chromium net service (own) | RequestServer (libcurl) |
 | Process model | Process-per-tab | Process-per-site (Fission) | Process-per-site (site isolation) | Process-per-tab + service processes |
 | IPC | HTTP/JSON + shm framebuffer | IPDL | Mojo | Own IPC compiler over sockets |
 | Sandbox | Landlock + seccomp (Linux) | seccomp + namespaces; Fission | seccomp + namespaces; site isolation | Process isolation (evolving) |
 | Dependency stance | Reuse proven libs, write the browser | Mostly in-house | Mostly in-house | In-house core, some third-party |
-| Approx. size | ~155 K lines C | tens of millions | tens of millions | ~1M+ lines |
+| Approx. size | ~230 K lines C | tens of millions | tens of millions | ~1M+ lines |
 | Telemetry | None | Optional | Yes | None |
 
 ### Firefox (Gecko)
@@ -588,7 +613,7 @@ the cost of an enormous, multi-language codebase.
 
 Nordstjernen shares the *independent-engine* stance but inverts almost
 every implementation choice: one language (C), no JIT, no Rust
-concurrency machinery, software page compositing, and a codebase five
+concurrency machinery, software page compositing, and a codebase two
 orders of magnitude smaller. Nordstjernen's per-tab renderer with a
 seccomp+Landlock sandbox is conceptually similar to a Firefox content
 process, but Nordstjernen isolates per **tab**, whereas Fission isolates
@@ -607,8 +632,8 @@ capable and the largest of the four.
 
 Every one of those choices is a scale/performance trade Nordstjernen
 declines on purpose. There is no JIT (security and size), no GPU
-compositor (a page paints in Cairo; the GPU is used only by WebGL/WebGPU/
-canvas producers that hand back CPU-side textures), no code-generated
+compositor (a page paints in Cairo; the GPU is used only by the
+WebGL/WebGPU producers, which hand back CPU-side pixels), no code-generated
 binding layer (bindings are hand-written C in `js.c`), and no Mojo-style
 typed-interface IPC (the boundary is human-readable HTTP/JSON). Where
 Chrome sends `Sec-CH-UA`/`Sec-Fetch-*`/`Upgrade-Insecure-Requests` to
@@ -635,7 +660,7 @@ takes a more pragmatic middle line: it writes its own DOM, CSS, layout,
 and paint, but **vendors** a proven JS interpreter (QuickJS-ng), HTML
 parser (lexbor), image decoders (Wuffs/libwebp), and wasm runtime (WAMR)
 rather than reimplementing them. The result is a much smaller codebase
-(~155 K lines of C versus Ladybird's 1M+), a deliberate non-goal of a
+(~230 K lines of C versus Ladybird's 1M+), a deliberate non-goal of a
 from-scratch JS engine, and the distinctive HTTP/JSON+shared-memory IPC
 boundary. Both projects share the same north star — a readable,
 independent, standards-first browser that is not a rebrand of an existing
@@ -651,7 +676,7 @@ engines in
   W^X surface) accepted at the cost of peak JS/wasm throughput. Ladybird
   shares the no-JIT-JS property; Chrome and Firefox do not.
 - **Software page compositing.** The whole page paints in Cairo; the GPU
-  is confined to WebGL/WebGPU/canvas. No retained-mode GPU compositor.
+  is confined to WebGL/WebGPU. No retained-mode GPU compositor.
 - **Reuse over reimplementation.** Vendored lexbor/QuickJS/Wuffs/WAMR
   instead of in-house parsers and a from-scratch JS engine — the opposite
   of Ladybird's write-everything approach, and unlike Chrome/Firefox's
@@ -659,7 +684,7 @@ engines in
 - **Inspectable IPC.** A readable HTTP/JSON control channel plus a
   shared-memory framebuffer, versus the typed binary IPC (Mojo/IPDL/
   Ladybird's IPC compiler) the others use.
-- **Auditability as a hard constraint.** ~155 K lines of C is the design
+- **Auditability as a hard constraint.** ~230 K lines of C is the design
   budget, not an accident. It is what makes one-person review of the
   whole engine feasible, and it is the reason the browser reuses proven
   libraries and declines a GPU compositor and a JIT.
