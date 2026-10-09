@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* WebGL supports `WEBGL_multi_draw`: `multiDrawArraysWEBGL`,
+  `multiDrawElementsWEBGL` and their instanced variants issue one draw
+  per list entry with `gl_DrawID` set, after checking every range
+  against the bound buffers. three.js's `BatchedMesh` (the mesh-batch
+  and batch-LOD examples) needs it and drew nothing without it. The set
+  of attributes a program reads is now cached per program instead of
+  queried from the driver on every draw.
 * WebGL 2's sized texture uploads accept every image source:
   `texImage2D`/`texSubImage2D` with explicit width and height, and
   `texImage3D`/`texSubImage3D`, now take an `<img>`, canvas, video,
