@@ -2809,6 +2809,61 @@ wgl_webgl1_sized_format(const ns_webgl *g, GLint *internalformat, GLenum format,
     }
 }
 
+static uint8_t *
+wgl_tex_source_pixels(JSContext *ctx, ns_webgl *g, JSValueConst src,
+                      GLenum format, GLenum type, int want_w, int want_h,
+                      gboolean *threw)
+{
+    *threw = FALSE;
+    if (type != GL_UNSIGNED_BYTE || want_w <= 0 || want_h <= 0) return NULL;
+    int comps = wgl_components(format);
+    int sw = 0, sh = 0;
+    uint8_t *px = NULL;
+    size_t len = 0;
+    JSValue hold;
+    const uint8_t *idata = wgl_imagedata_bytes(ctx, src, &sw, &sh, &len, &hold);
+    if (idata) {
+        size_t need = (size_t)sw * (size_t)sh * 4u;
+        if (format == GL_RGBA && len >= need)
+            px = g->unpack_flip_y ? wgl_flip_rows(idata, sw, sh, 4)
+                                  : g_memdup2(idata, need);
+        if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
+    } else {
+        px = wgl_source_rgba(ctx, src, format, g->unpack_flip_y, g->premultiply,
+                             &sw, &sh, threw);
+    }
+    if (!px) return NULL;
+    if (sw == want_w && sh == want_h) return px;
+    guint64 total = (guint64)want_w * (guint64)want_h * (guint64)comps;
+    uint8_t *out = total <= NS_WEBGL_MAX_ALLOC ? g_try_malloc0((size_t)total)
+                                               : NULL;
+    if (out) {
+        int cw = MIN(sw, want_w), ch = MIN(sh, want_h);
+        for (int y = 0; y < ch; y++)
+            memcpy(out + (size_t)y * (size_t)want_w * (size_t)comps,
+                   px + (size_t)y * (size_t)sw * (size_t)comps,
+                   (size_t)cw * (size_t)comps);
+    }
+    g_free(px);
+    return out;
+}
+
+static int
+wgl_unpack_pbo_offset(JSContext *ctx, ns_webgl *g, JSValueConst v,
+                      const void **out)
+{
+    if (g->version < 2 || !JS_IsNumber(v)) return 0;
+    GLint unpack_buffer = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
+    int64_t off = 0;
+    if (!unpack_buffer || JS_ToInt64(ctx, &off, v) < 0 || off < 0) {
+        g->injected_error = GL_INVALID_OPERATION;
+        return -1;
+    }
+    *out = (const void *)(intptr_t)off;
+    return 1;
+}
+
 static JSValue
 wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -2826,8 +2881,31 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         JSValue hold = JS_UNDEFINED;
         size_t len = 0;
         const uint8_t *px = NULL;
+        const void *pbo = NULL;
+        int pbo_state = wgl_unpack_pbo_offset(ctx, g, argv[8], &pbo);
+        if (pbo_state) {
+            if (pbo_state > 0)
+                glTexImage2D(target, level, internalformat, w, h, border, format,
+                             type, pbo);
+            return JS_UNDEFINED;
+        }
         if (!JS_IsNull(argv[8]) && !JS_IsUndefined(argv[8]))
             px = view_bytes(ctx, argv[8], &len, &hold);
+        if (!px && JS_IsObject(argv[8])) {
+            gboolean threw = FALSE;
+            uint8_t *rgba = wgl_tex_source_pixels(ctx, g, argv[8], format, type,
+                                                  w, h, &threw);
+            if (threw) return JS_EXCEPTION;
+            if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
+                glTexImage2D(target, level, internalformat, w, h, border, format,
+                             type, rgba);
+                wgl_unpack_restore(g, &saved);
+                g_free(rgba);
+            }
+            return JS_UNDEFINED;
+        }
         size_t need = wgl_transfer_bytes(g, w, h, 1, format, type, FALSE);
         if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
             if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
@@ -2907,8 +2985,31 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         JSValue hold = JS_UNDEFINED;
         size_t len = 0;
         const uint8_t *px = NULL;
+        const void *pbo = NULL;
+        int pbo_state = wgl_unpack_pbo_offset(ctx, g, argv[8], &pbo);
+        if (pbo_state) {
+            if (pbo_state > 0)
+                glTexSubImage2D(target, level, xoff, yoff, w, h, format,
+                                wgl_upload_type(g, type), pbo);
+            return JS_UNDEFINED;
+        }
         if (!JS_IsNull(argv[8]) && !JS_IsUndefined(argv[8]))
             px = view_bytes(ctx, argv[8], &len, &hold);
+        if (!px && JS_IsObject(argv[8])) {
+            gboolean threw = FALSE;
+            uint8_t *rgba = wgl_tex_source_pixels(ctx, g, argv[8], format, type,
+                                                  w, h, &threw);
+            if (threw) return JS_EXCEPTION;
+            if (rgba) {
+                wgl_unpack_state saved;
+                wgl_unpack_tight(g, &saved);
+                glTexSubImage2D(target, level, xoff, yoff, w, h, format, type,
+                                rgba);
+                wgl_unpack_restore(g, &saved);
+                g_free(rgba);
+            }
+            return JS_UNDEFINED;
+        }
         size_t need = wgl_transfer_bytes(g, w, h, 1, format, type, FALSE);
         if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
@@ -3852,8 +3953,31 @@ wgl_texImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JSValue hold = JS_UNDEFINED;
     size_t len = 0;
     const uint8_t *px = NULL;
+    const void *pbo = NULL;
+    int pbo_state = argc >= 10 ? wgl_unpack_pbo_offset(ctx, g, argv[9], &pbo) : 0;
+    if (pbo_state) {
+        if (pbo_state > 0)
+            glTexImage3D(target, level, internalformat, w, h, d, border, format,
+                         type, pbo);
+        return JS_UNDEFINED;
+    }
     if (argc >= 10 && JS_IsObject(argv[9]))
         px = view_bytes(ctx, argv[9], &len, &hold);
+    if (!px && argc >= 10 && JS_IsObject(argv[9]) && d > 0) {
+        gboolean threw = FALSE;
+        uint8_t *rgba = wgl_tex_source_pixels(ctx, g, argv[9], format, type,
+                                              w, h * d, &threw);
+        if (threw) return JS_EXCEPTION;
+        if (rgba) {
+            wgl_unpack_state saved;
+            wgl_unpack_tight(g, &saved);
+            glTexImage3D(target, level, internalformat, w, h, d, border, format,
+                         type, rgba);
+            wgl_unpack_restore(g, &saved);
+            g_free(rgba);
+        }
+        return JS_UNDEFINED;
+    }
     size_t need = wgl_transfer_bytes(g, w, h, d, format, type, FALSE);
     if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
         if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
@@ -3884,8 +4008,31 @@ wgl_texSubImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     JSValue hold = JS_UNDEFINED;
     size_t len = 0;
     const uint8_t *px = NULL;
+    const void *pbo = NULL;
+    int pbo_state = argc >= 11 ? wgl_unpack_pbo_offset(ctx, g, argv[10], &pbo) : 0;
+    if (pbo_state) {
+        if (pbo_state > 0)
+            glTexSubImage3D(target, level, xoff, yoff, zoff, w, h, d, format,
+                            type, pbo);
+        return JS_UNDEFINED;
+    }
     if (argc >= 11 && JS_IsObject(argv[10]))
         px = view_bytes(ctx, argv[10], &len, &hold);
+    if (!px && argc >= 11 && JS_IsObject(argv[10]) && d > 0) {
+        gboolean threw = FALSE;
+        uint8_t *rgba = wgl_tex_source_pixels(ctx, g, argv[10], format, type,
+                                              w, h * d, &threw);
+        if (threw) return JS_EXCEPTION;
+        if (rgba) {
+            wgl_unpack_state saved;
+            wgl_unpack_tight(g, &saved);
+            glTexSubImage3D(target, level, xoff, yoff, zoff, w, h, d, format,
+                            type, rgba);
+            wgl_unpack_restore(g, &saved);
+            g_free(rgba);
+        }
+        return JS_UNDEFINED;
+    }
     size_t need = wgl_transfer_bytes(g, w, h, d, format, type, FALSE);
     if (px && need > 0 && need <= NS_WEBGL_MAX_ALLOC && len >= need)
         glTexSubImage3D(target, level, xoff, yoff, zoff, w, h, d, format, type, px);
