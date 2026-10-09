@@ -6548,6 +6548,28 @@ paint_failed_image(cairo_t *cr, const ns_box *b)
     cairo_stroke(cr);
 }
 
+static const ns_box *g_svg_foreign_owner;
+
+static void
+paint_svg_foreign(cairo_t *cr, const ns_node *fo, double width, double height,
+                  void *user_data)
+{
+    (void)width;
+    (void)height;
+    (void)user_data;
+    const ns_box *svg_box = g_svg_foreign_owner;
+    GPtrArray *roots = svg_box && svg_box->media
+        ? svg_box->media->svg_foreign : NULL;
+    if (!roots) return;
+    for (guint i = 0; i < roots->len; i++) {
+        const ns_box *root = g_ptr_array_index(roots, i);
+        if (root->dom == fo) {
+            paint_walk(cr, root, NULL);
+            return;
+        }
+    }
+}
+
 static void
 paint_svg(cairo_t *cr, const ns_box *b)
 {
@@ -6559,7 +6581,12 @@ paint_svg(cairo_t *cr, const ns_box *b)
     double y = b->y + b->margin.top  + b->border.top  + b->padding.top;
     cairo_save(cr);
     cairo_translate(cr, x, y);
+    const ns_box *outer = g_svg_foreign_owner;
+    g_svg_foreign_owner = b;
+    ns_svg_set_foreign_painter(paint_svg_foreign, NULL);
     ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
+    g_svg_foreign_owner = outer;
+    if (!outer) ns_svg_set_foreign_painter(NULL, NULL);
     cairo_restore(cr);
 }
 

@@ -990,7 +990,12 @@ svg_by_id(svg_ctx *ctx, const char *id)
                                              (gpointer)ctx->root);
         svg_index_ids(ctx, ctx->root);
     }
-    return g_hash_table_lookup(ctx->ids, id);
+    const ns_node *hit = g_hash_table_lookup(ctx->ids, id);
+    if (hit) return hit;
+    const ns_node *doc = ctx->root;
+    while (doc && doc->parent) doc = doc->parent;
+    if (!doc || doc == ctx->root || doc->kind != NS_NODE_DOCUMENT) return NULL;
+    return ns_node_find_by_id(doc, id);
 }
 
 static const char *
@@ -1306,6 +1311,16 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     }
     cairo_t *mcr = cairo_create(rgb);
     cairo_set_matrix(mcr, &ctm);
+    const char *content_units = ns_element_get_attr(mask, "maskContentUnits");
+    if (content_units &&
+        g_ascii_strcasecmp(content_units, "objectBoundingBox") == 0) {
+        double bx = svg_attr_length(n, "x", ctx->vw, st->font_size, 0);
+        double by = svg_attr_length(n, "y", ctx->vh, st->font_size, 0);
+        double bw = svg_attr_length(n, "width", ctx->vw, st->font_size, ctx->vw);
+        double bh = svg_attr_length(n, "height", ctx->vh, st->font_size, ctx->vh);
+        cairo_translate(mcr, bx, by);
+        cairo_scale(mcr, bw > 0 ? bw : 1, bh > 0 ? bh : 1);
+    }
 
     cairo_t *saved = ctx->cr;
     ctx->cr = mcr;
@@ -1756,6 +1771,16 @@ svg_is_hidden(svg_ctx *ctx, const ns_node *n)
     return d && g_ascii_strcasecmp(d, "none") == 0;
 }
 
+static ns_svg_foreign_painter g_foreign_painter;
+static void *g_foreign_painter_data;
+
+void
+ns_svg_set_foreign_painter(ns_svg_foreign_painter painter, void *user_data)
+{
+    g_foreign_painter = painter;
+    g_foreign_painter_data = user_data;
+}
+
 static gboolean
 svg_renderable(const char *tag)
 {
@@ -1878,6 +1903,18 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
                 svg_render_node(ctx, t, &st);
             }
             ctx->depth--;
+        }
+    } else if (strcmp(tag, "foreignObject") == 0) {
+        double x = svg_attr_length(n, "x", ctx->vw, st.font_size, 0);
+        double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
+        double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
+        double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
+        if (g_foreign_painter && w > 0 && h > 0) {
+            cairo_translate(cr, x, y);
+            cairo_rectangle(cr, 0, 0, w, h);
+            cairo_clip(cr);
+            cairo_new_path(cr);
+            g_foreign_painter(cr, n, w, h, g_foreign_painter_data);
         }
     } else if (strcmp(tag, "text") == 0) {
         svg_render_text(ctx, n, &st);
