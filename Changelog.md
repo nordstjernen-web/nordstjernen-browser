@@ -3,6 +3,27 @@ Changelog:
 
 1.0.31:
 ======
+* Security: fixes from Northstar's audit and a use-after-free that
+  AddressSanitizer found there on github.com, ported here.
+  - Page script no longer runs in the middle of layout. Layout waits for
+    stylesheets by running the main context, and the lifecycle tick
+    (deferred and module scripts), the async-script timer,
+    `AbortSignal.timeout()`, `FileReader` and the IntersectionObserver
+    tick could fire there. A `history.replaceState()` from such a script
+    freed the page URL the stylesheet walk was still passing to its
+    requests. Those tasks now wait for the fetch to finish, and layout
+    works on its own copy of the URL.
+  - WebAssembly: an export returning an `externref` that no table or
+    global held had its host box freed by the periodic reclaim before the
+    result was converted, so every 64th such call read freed memory. The
+    results are converted first.
+  - Appending a node to a descendant more than 512 levels below it
+    slipped past the cycle check and hung the next tree walk; the check
+    now walks every ancestor.
+  - A `conic-gradient()` with an enormous `from` angle looped forever
+    while painting; the angle is normalised with `floor()`.
+  - `Intl.DateTimeFormat` formats an infinite time as `Invalid Date`
+    instead of converting it to `time_t`.
 * WebAssembly: a JavaScript exception thrown into a wasm call that
   JavaScript made from inside another wasm call now reaches that
   JavaScript caller. It used to surface only at the outermost call, so
