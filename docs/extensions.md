@@ -14,10 +14,10 @@ Extensions are loaded **unpacked** (a directory containing
 locations are scanned at renderer start:
 
 - Every immediate sub-directory of
-  `$XDG_DATA_HOME/nordstjernen/extensions/` (on Linux, by default
-  `~/.local/share/nordstjernen/extensions/<ext>/`).
+  `$XDG_DATA_HOME/nordstjernen/extensions/` (GLib's user data directory:
+  on Linux, by default `~/.local/share/nordstjernen/extensions/<ext>/`).
 - Any path in the `NS_EXTENSIONS_DIR` environment variable
-  (`:`-separated). Each entry is treated as a directory of extensions,
+  (`:`-separated, `;` on Windows). Each entry is treated as a directory of extensions,
   or — if it directly contains a `manifest.json` — as a single
   extension.
 

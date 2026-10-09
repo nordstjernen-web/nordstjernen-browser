@@ -34,8 +34,7 @@ Nordstjernen connects only to the sites you visit: the address you
 type, the links you click, and the resources those pages reference.
 Text typed into the search box is sent to your configured search
 engine (DuckDuckGo by default, changeable in settings).
-Clicking a media overlay hands the media URL to your system's
-external player. There are no background connections, prefetch
+There are no background connections, prefetch
 services, safe-browsing lookups, or other third-party services
 built in.
 

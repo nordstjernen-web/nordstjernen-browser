@@ -22,6 +22,7 @@ These work from anywhere in the window.
 | `Alt+→` | Forward |
 | `Alt+Home` | Go to the home page |
 | `Ctrl+R` · `F5` | Reload |
+| `Ctrl+Shift+R` · `Ctrl+F5` | Hard reload |
 | `Escape` | Return focus to the page |
 
 Back and Forward restore the previous page from an in-memory back/forward
@@ -40,6 +41,7 @@ true, instead of re-fetching and re-rendering. Reload always re-fetches.
 | `Ctrl+Tab` · `Ctrl+Page Down` | Next tab |
 | `Ctrl+Shift+Tab` · `Ctrl+Page Up` | Previous tab |
 | `Ctrl+Q` | Quit |
+| `F11` | Toggle full screen (`Escape` also leaves it) |
 
 ### Zoom
 
@@ -61,12 +63,20 @@ Zoom is clamped to the 0.25×–5.0× range.
 | `Enter` / `Shift+Enter` | Next / previous match (while the find field is focused) |
 | `Escape` | Close the find bar |
 | `Ctrl+P` | Print the page through the system print dialog (see [printing.md](printing.md)) |
+| `Ctrl+D` | Bookmark the current page |
+| `Ctrl+H` | History |
+| `Ctrl+J` | Downloads |
+| `Ctrl+U` | View the page source |
 | `F12` · `Ctrl+Shift+J` | Toggle the developer console |
+| `Shift+Escape` | Task manager |
 | `Ctrl+,` | Open Settings |
 
 Bookmarks are managed from the bookmarks toolbar button (bookmark the
 current page, open or remove saved bookmarks). The **☰** toolbar menu
-offers New Tab, New Private Tab, Reload, Settings, and About.
+offers New Tab, New Private Tab, Zoom In/Out/Reset, Full Screen, Find in
+Page, Bookmark This Page, History, Downloads, Print…, Save Page as PDF… /
+Image…, Page Source, JavaScript Console, Task Manager, Settings, and
+About Nordstjernen.
 
 A **private tab** (☰ menu → New Private Tab, or `Ctrl+Alt+P`) runs its own
 renderer in an ephemeral mode: cookies, the HTTP cache, history,
@@ -90,12 +100,13 @@ focused, typing and editing keys go to that field instead.
 | Key | Action |
 | --- | --- |
 | `Tab` · `Shift+Tab` | Move focus between links and form fields |
-| `Space` · `Shift+Space` | Scroll down / up by ~one viewport |
+| `Space` | Scroll down by ~one viewport |
 | `Page Down` · `Page Up` | Scroll down / up by ~one viewport |
 | `Home` · `End` | Jump to the top / bottom of the page |
 | `↑` · `↓` · `←` · `→` | Scroll by a few lines |
 | `Ctrl+A` | Select all text on the page |
-| `Ctrl+C` | Copy the selected text |
+| `Ctrl+C` · `Ctrl+Insert` | Copy the selected text |
+| `Ctrl+X` · `Ctrl+V` · `Shift+Insert` | Cut / paste in an editable field |
 
 ## Mouse
 
@@ -112,12 +123,14 @@ focused, typing and editing keys go to that field instead.
 Moving the pointer updates the cursor (a hand over links) and shows a
 link's target URL in the status bar while hovered, and `:hover` styling
 and `mouseover`/`mousemove` JS events fire. Clicking an `<audio>` or
-`<video>` poster hands the media URL to an external player.
+`<video>` in a format the engine cannot play does not launch an external
+player (see [media.md](media.md#other-media)).
 
 The right-click context menu adapts to what was clicked: over a link it
 offers Open Link / Open Link in New Tab / Copy Link Address; over a
 selection it offers Copy; and every menu has Back, Forward, Reload,
-Select All, Copy Page Address, and Save Page as PDF / Image.
+Select All, Copy Page Address, and Save Page as PDF… / Image…. Over an
+editable field it offers Cut, Copy, Paste, and Select All instead.
 
 ## Touch
 

@@ -43,8 +43,8 @@ kill switch for WebGL context creation.
 `src/webgl.c` is the whole implementation; it is compiled into the engine
 only when `NS_ENABLE_WEBGL` is defined (every desktop build — Linux, macOS,
 Windows), and runs in the engine wherever it is hosted, including the
-out-of-process renderer. The Android engine build gets a stub that returns
-`null`. The status-bar activity indicator belongs to the GTK shell; the GL
+out-of-process renderer. Mobile engine builds (Android, iOS) do not define
+it, so `getContext("webgl")` returns `null` there. The status-bar activity indicator belongs to the GTK shell; the GL
 implementation itself contains no toolkit UI code.
 
 1. **Context** — `ns_gl_context_create()` (`src/glctx.c`) creates the
@@ -222,10 +222,9 @@ mitigations focus on the parts a hostile page can actually reach.
   (`<img>` / `<canvas>` / `ImageBitmap`) decode through the same
   Wuffs-first image path as the rest of the engine
   (`ns_image_decode_bytes`): Google's memory-safe Wuffs decoder handles
-  PNG/GIF/BMP/JPEG, libwebp handles WebP and libavif AVIF, with
-  GDK-Pixbuf only as a fallback. The
-  untrusted image bytes never touch a hand-rolled decoder before becoming
-  texels. Raw typed-array uploads stay bounds-checked as above.
+  PNG/GIF/BMP/JPEG, libwebp handles WebP and libavif AVIF; there is no
+  GDK-Pixbuf fallback. The untrusted image bytes never touch a hand-rolled
+  decoder before becoming texels. Raw typed-array uploads stay bounds-checked as above.
 - **Shader source size cap.** `shaderSource` is bounded (4 MiB) and the
   source is handed to the driver with an explicit length, so an embedded
   NUL can't truncate the shader and a pathologically large string can't be
@@ -244,8 +243,9 @@ mitigations focus on the parts a hostile page can actually reach.
   maxima, the WebGL 2 block and component limits, and the aliased
   line/point-size ranges — are clamped to fixed common values
   (`wgl_param_cap` in `src/webgl.c`), so high-end and exotic GPUs report the
-  same numbers as the mainstream. `COMPRESSED_TEXTURE_FORMATS` is reported as
-  empty. Clamping only ever lowers a reported limit, so it never makes the
+  same numbers as the mainstream. `COMPRESSED_TEXTURE_FORMATS` lists only the
+  formats of the compressed-texture extensions the page has enabled. Clamping
+  only ever lowers a reported limit, so it never makes the
   driver promise capacity it does not have.
 - **No JS-controlled stack write in `getParameter`.** An unrecognised
   `pname` falls through to `glGetIntegerv` into a fixed stack buffer; that
@@ -269,23 +269,27 @@ GL stack can disable WebGL globally in Settings.
 
 ## Limitations
 
-- The extension set is limited to `WEBGL_debug_renderer_info` and
-  `EXT_texture_filter_anisotropic`.
 - `texImage2D` from a DOM source decodes through the same surface path the
   2D canvas `drawImage` uses, so cross-origin restrictions and decode
   support match the rest of the engine.
-- No `webglcontextlost` / restore events — `isContextLost()` is always
-  `false`.
+- Context loss is only ever simulated: `webglcontextlost` /
+  `webglcontextrestored` fire through `WEBGL_lose_context`, never because the
+  driver lost the context.
 - Antialiasing depends on the driver advertising `GL_MAX_SAMPLES > 1`.
+- WebGL 2 is not available on macOS (see [How it works](#how-it-works)).
 
 These are deliberate: the goal is a small, readable bridge that runs the
 common WebGL content, not a full conformance suite.
 
 ## Trying it
 
+The interactive browser does not open `file://` URLs, so serve the page
+over HTTP (or render it with `--headless`, which accepts file paths):
+
 ```sh
 meson compile -C builddir
-./builddir/src/gtk/nordstjernen path/to/your-webgl-page.html
+python3 -m http.server 8000 &
+./builddir/src/gtk/nordstjernen http://localhost:8000/your-webgl-page.html
 ```
 
 A minimal smoke test page is a hello-triangle: create a vertex + fragment

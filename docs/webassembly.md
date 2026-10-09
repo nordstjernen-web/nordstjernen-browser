@@ -2,7 +2,7 @@
 
 Nordstjernen ships a **complete WebAssembly JS API** backed by a vendored
 subset of [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
-(wasm-micro-runtime, Apache-2.0) — the classic interpreter, with
+(wasm-micro-runtime, Apache-2.0) — its fast interpreter, with
 **reference types** and **bulk memory** enabled. There is no JIT and no
 AOT: wasm executes in a portable interpreter, the same on Linux, macOS,
 Windows and Android.
