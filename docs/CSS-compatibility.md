@@ -14,7 +14,9 @@ the feature (see [How to re-check](#how-to-re-check-this-document)).
 
 Snapshot: **1.0.23**, 2026-08-08. The paged-media and scroll-snap rows
 were revised against the engine for this release; the remaining rows
-carry forward from the 1.0.21 pass.
+carry forward from the 1.0.21 pass. The `@property`, `color-mix()`,
+transition/animation and design-constraint rows were re-checked against
+the 1.0.31-dev source.
 
 **Legend:** ✅ implemented · 🟡 partial / approximated · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -24,7 +26,9 @@ carry forward from the 1.0.21 pass.
 
 | Concern | Source |
 |---------|--------|
-| Tokenizer, parser, cascade, selector matching | `src/css.c`, `src/css.h` |
+| Tokenizer, parser, cascade, selector matching | `src/css.c`, `src/css.h`, `src/css_syntax.c` |
+| Media queries | `src/css_media.c` |
+| Registered custom-property `syntax` | `src/css_prop_syntax.c` |
 | Value/unit resolution, `calc()` | `src/css.c` (`length_resolve` in `src/layout.c`) |
 | Box layout (block/inline/flex/grid/table/multicol/float/position) | `src/layout.c`, `src/layout.h` |
 | Paint (Cairo): backgrounds, borders, shadows, gradients, filters | `src/paint.c`, `src/render.c` |
@@ -44,8 +48,9 @@ carry forward from the 1.0.21 pass.
 | Origins & specificity ordering | ✅ | UA → presentational hints → author; `!important` honoured; specificity (id/class/type) computed and ordered |
 | Inheritance | ✅ | per-property inheritance table (`prop_inherits` in `src/css.c`) |
 | `inherit` / `initial` / `unset` / `revert` | ✅ | CSS-wide keywords honoured in the cascade; `revert` rolls author declarations back to lower-origin UA results, while `revert-layer` remains folded into the simplified layer model |
+| CSS Nesting (`&`, nested rules) | ✅ | verified |
 | Shorthand expansion | ✅ | `margin`/`padding`/`border`/`background`/`font`/`flex`/`grid`/`gap`/`place-*`/`columns`/`outline`/`column-rule`/`inset`/`text-decoration` and the logical-property shorthands |
-| Custom properties (`--x`) + `var()` | ✅ | registered and substituted; `@property` registers `initial-value`/`inherits`/`syntax` (syntax parsed, not type-validated) |
+| Custom properties (`--x`) + `var()` | ✅ | registered and substituted; `@property` and `CSS.registerProperty()` register `initial-value`/`inherits`/`syntax`; the initial value and declared values are validated against the `syntax` grammar (`src/css_prop_syntax.c`), and an invalid declaration falls back to the inherited or initial value |
 
 ## Values & units (Values 4)
 
@@ -114,7 +119,6 @@ carry forward from the 1.0.21 pass.
 | `align-items` / `align-self` (block axis) | ✅ | stretch/center/end within the row; rows stretch to a taller container height first |
 | `align-content` (row group) | ✅ | stretch (distribute), center, end, and space-between / -around / -evenly all honoured |
 | `justify-content` (column group) | ✅ | center / end / space-between / -around / -evenly position the column group when tracks don't fill the container; `1fr` tracks fill, so that case is a no-op |
-| CSS Nesting (`&`, nested rules) | ✅ | verified |
 | `place-items` / `place-self` / `place-content` shorthands | ✅ | expand to both axes; `display:grid; place-items:center` centres a box, verified |
 | `subgrid` | 🟡 | column-axis subgrid adopts the parent grid's spanned columns; row-axis subgrid adopts concrete parent row tracks (`grid-template-rows` / fixed `grid-auto-rows`) and gap, while fully auto-sized parent rows still fall back to the regular auto-row path |
 
@@ -200,7 +204,7 @@ carry forward from the 1.0.21 pass.
 |-------|:--:|------|
 | Named, `#hex`, `rgb()`/`rgba()`, `hsl()`/`hsla()` | ✅ | modern space/slash syntax |
 | `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()` | ✅ | converted to sRGB |
-| `color-mix(in srgb, …)` | ✅ | |
+| `color-mix()` | 🟡 | `in srgb` and `in oklab`/`in oklch` interpolate in that space; `srgb-linear`, `hsl`, `hwb`, `lab`, `lch` and `xyz` are accepted but mixed in sRGB |
 | `currentColor`, `transparent` | ✅ | |
 | `accent-color` / `caret-color` | ✅ | |
 
@@ -209,8 +213,8 @@ carry forward from the 1.0.21 pass.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | 2D/3D `transform` (translate/scale/rotate/skew/matrix), `transform-origin` | ✅ | `getComputedStyle().transform` returns the CSSOM **resolved value** — the function list is composed into a single `matrix(...)` (2D) or `matrix3d(...)` (3D, column-order) via `ns_css_transform_to_mat4`, with translate percentages resolved against the border box (`ns_computed_transform_matrix` in `src/js.c`); `none` when no transform |
-| `transition` (`opacity`/`transform`/`color`/`background-color`) | ✅ | `src/anim.c`; respects `prefers-reduced-motion` |
-| `@keyframes` + `animation` | 🟡 | opacity/transform/color/bg-color targets; `animation-direction` (normal/reverse/alternate/alternate-reverse) and `animation-fill-mode` (none/forwards/backwards/both) honoured |
+| `transition` | ✅ | `src/anim.c`; any animatable property whose start and end values interpolate (`ns_css_value_interpolate`), with `visibility` animating discretely; respects `prefers-reduced-motion` |
+| `@keyframes` + `animation` | 🟡 | any property the keyframes set, interpolated the same way (values that cannot interpolate flip at the midpoint), with per-keyframe timing functions; `animation-direction` (normal/reverse/alternate/alternate-reverse) and `animation-fill-mode` (none/forwards/backwards/both) honoured. `animation-composition` and `animation-timeline` (scroll-driven animations) are not applied |
 | Easing (`linear`/`ease`/`ease-in`/`-out`/`-in-out`, `steps()`, `step-start`/`step-end`, `cubic-bezier()`) | ✅ | steps() jump terms and a Newton-Raphson cubic-bezier solver in `src/anim.c` |
 
 ## Visual effects (Filter Effects 1, Compositing 1, Masking 1)
@@ -246,7 +250,7 @@ carry forward from the 1.0.21 pass.
 | `@supports` (incl. `selector()`) | ✅ | evaluated |
 | `@font-face` | ✅ | |
 | `@keyframes` | 🟡 | see animation |
-| `@property` | ✅ | `initial-value` + `inherits` honoured; `syntax` parsed |
+| `@property` | ✅ | `initial-value` + `inherits` honoured; `syntax` parsed and enforced (see Syntax & cascade) |
 | `@scope` | ✅ | roots/limits, `:scope`, proximity |
 | `@container` + `container-type`/`container-name` | ✅ | container query units resolve |
 | `@layer` | ✅ | layers are ordered as a tree (`css_layer_ranks_finalize` in `src/css.c`): sublayers sort within their parent in first-declaration order, a layer's own un-sublayered declarations act as its implicit final sublayer, and nested anonymous layers stay nested |
@@ -286,16 +290,17 @@ same task.
 
 Project non-goals (see `CLAUDE.md` / `README.md`), not defects:
 
-- No CSS that requires **WebGL/WebGPU** or AI-style surfaces.
-- No reliance on **Web/Service Workers** for style (e.g. paint worklets,
-  `@property` registered via JS Houdini are not a goal).
+- No AI-style surfaces.
+- No reliance on **worklets** for style (e.g. Houdini paint worklets are
+  not a goal; `CSS.registerProperty()` is supported).
 - Orthogonal-flow writing-mode layout and full bidi override remain incomplete.
 
 ## Highest-leverage CSS gaps for real-world sites
 
 Ordered by how often they block ordinary browsing:
 
-1. `writing-mode` / full bidi — absent; affects CJK and some RTL layouts.
+1. `writing-mode` / full bidi — partial (no orthogonal-flow layout or
+   full bidi override); affects CJK and some RTL layouts.
 2. `scrollWidth` / `scrollHeight` on inline-level boxes (`inline-block`,
    `inline-flex`, `inline-grid`) do not match `clientWidth`/`clientHeight`
    when there is no overflow.
@@ -303,7 +308,7 @@ Ordered by how often they block ordinary browsing:
    `getComputedStyle().content` is serialized, so the resolved value
    still reads `attr(...)`.
 
-(`border-image`, `border-collapse` shared-edge de-duplication and exact
+(`border-image`, `border-collapse` shared-edge de-duplication, exact
 absolute units and single-text-run multi-column fragmentation have since
 been implemented.)
 
@@ -320,8 +325,7 @@ nordstjernen --headless --url=FILE --viewport=900 --dump=png:out.png
 The fixtures under `data/render-tests/` (`grid-align.html`,
 `multicol-columnwidth.html`, `flex.html`, `grid-markers.html`,
 `table.html`, `selectors-color4.html`, `units.html`, `border-image.html`,
-…) exercise much of
-the surface above. `--inspect=SELECTOR` / `--inspect-at=X,Y` print the
+…) exercise much of the surface above. `--inspect=SELECTOR` / `--inspect-at=X,Y` print the
 box model and key computed styles for any element, like a browser's
 inspector. Treat this file as a living map and update it whenever
 behaviour changes.

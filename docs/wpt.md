@@ -13,8 +13,12 @@ server-generated `.any.html` / `.window.html` wrappers for `.any.js`
 and `.window.js` files.
 
 Not supported: reftests, crashtests, `.worker.js` / service-worker
-tests, wdspec tests, manual tests, and print tests. The runner skips
-them during enumeration.
+tests, wdspec tests, manual tests, and print tests. During enumeration
+the runner only picks up `.html`/`.htm`, `.any.js`, and `.window.js`
+files that reference `testharness.js`, and skips `resources/`,
+`support/`, `tools/`, and `crashtests/` directories plus `*-ref.html`
+and `*-manual.html` files. A test that declares
+`<meta name="variant">` entries is run once per variant.
 
 ## One-time setup
 
@@ -47,14 +51,36 @@ scripts/wpt-run.sh --wpt-root=~/wpt --list dom/events
 The runner starts `./wpt serve` itself (and stops it on exit) unless a
 server is already reachable; pass `--no-serve` to require an external
 server. Other options: `--base=URL` (default
-`http://web-platform.test:8000`), `--timeout-ms=N` per test (default
-15000), and `--results=FILE` to append one JSON line per test:
+`http://web-platform.test:8000`; with a `localhost`/`127.0.0.1` base the
+auto-started server is configured for `localhost`, which suits
+origin-insensitive tests without hosts entries), `--timeout-ms=N` per
+test (default 15000), and `--results=FILE` to append one JSON line per
+test:
 
 ```json
 {"test":"/url/url-tojson.any.html","exit":0,"result":{"harness":"OK","message":null,"subtests":[...]}}
 ```
 
 The runner exits 0 only when every test file ran without failures.
+`NS_BIN` overrides the browser binary (default
+`builddir/src/gtk/nordstjernen`) and `NS_WPT_ROOT` supplies a default
+for `--wpt-root`.
+
+## Related scripts
+
+- `scripts/wpt-score.sh --wpt-root=DIR [PATH...]` — runs the tracked
+  slice (or part of it) through `wpt-run.sh` and updates
+  [wpt-scores.md](wpt-scores.md), `wpt-subtests.tsv`, and a snapshot in
+  `wpt-runs/`.
+- `scripts/wpt-fast.sh [--fast-root=DIR] [--jobs=N] [PATH...]` — runs
+  the [wpt-fast](https://github.com/nordstjernen-web/wpt-fast) checkout
+  in parallel; scores land in [wpt-fast-scores.md](wpt-fast-scores.md).
+- `scripts/wpt-local.sh PATH...` — quick iteration against a plain
+  static HTTP server instead of `./wpt serve` (no multi-origin or
+  server-side tests).
+- `scripts/wpt-estimate.sh --wpt-root=DIR [--sample=N]` — extrapolates
+  a whole-suite pass count from a random sample; needs a running WPT
+  server.
 
 ## Running a single test by hand
 
@@ -77,10 +103,10 @@ WPT SUMMARY total=2 pass=1 fail=1 timeout=0 notrun=0 precondition_failed=0
 WPT JSON {"harness":"OK","message":null,"subtests":[...]}
 ```
 
-Exit codes: `0` — harness OK and every subtest passed; `1` — at least
-one subtest failed (or the harness errored); `2` — the page never
-produced results before the timeout (testharness.js missing, or tests
-hung).
+Exit codes: `0` — harness OK (or `PRECONDITION_FAILED`) and every
+subtest passed; `1` — at least one subtest failed, timed out, or did
+not run (or the harness errored); `2` — the page never produced results
+before the timeout (testharness.js missing, or tests hung).
 
 ## How it works
 
@@ -88,10 +114,12 @@ hung).
 (`data/js/wpt-hook.js`, embedded into the binary at build time) into
 the fresh JS context before any document script runs. The hook places
 an accessor trap on `globalThis.add_completion_callback`; when
-testharness.js defines that function the trap registers a completion
-callback with the harness — via a microtask, since testharness.js
-creates its internal `Tests` object after exposing the API — and then
-restores the plain function. On completion the callback serializes the
+testharness.js defines that function the trap restores the plain
+function and registers a completion callback with the harness —
+immediately if possible, otherwise from a microtask, since
+testharness.js creates its internal `Tests` object after exposing the
+API. The driver's poll also registers the callback as a last resort if
+neither attempt succeeded. On completion the callback serializes the
 harness status and every subtest result into globals that the driver
 polls from C (`src/headless.c`), prints, and turns into the exit code.
 Because registration happens before the test script executes, even

@@ -18,7 +18,7 @@ LibJS is a spec-tracking engine that passes >90% of test262.
 
 | Engine  | Identity | Source |
 | ------- | -------- | ------ |
-| QuickJS | quickjs-ng **0.16.1** (`QJS_VERSION_*` in `src/quickjs/quickjs.h`) | in-tree fork at `src/quickjs/` |
+| QuickJS | quickjs-ng **0.17.0** (`QJS_VERSION_*` in `src/quickjs/quickjs.h`) | in-tree fork at `src/quickjs/` |
 | LibJS   | Ladybird `master` (June 2026) | upstream, not vendored |
 
 ## What the bundled QuickJS already covers
@@ -47,7 +47,7 @@ below:
   call-site machinery.
 - Set methods: `union`, `intersection`, `difference`,
   `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`.
-- `Promise.try`; `Error.isError`; `Array.fromAsync`.
+- `Promise.try`; `Error.isError`.
 - `Uint8Array` base64/hex: `fromBase64`/`toBase64`/`setFromBase64` and
   `fromHex`/`toHex`/`setFromHex`.
 - `String.prototype.isWellFormed` / `toWellFormed`.
@@ -181,8 +181,8 @@ used on the open web.)
 ## Beyond LibJS: extras Nordstjernen adds that LibJS lacks
 
 These were *shared gaps* (absent from the bundled QuickJS **and** from
-LibJS). Nordstjernen now implements the first two natively, so on these it
-is ahead of both bare QuickJS and LibJS:
+LibJS). Nordstjernen implements ShadowRealm natively, so there it is ahead
+of both bare QuickJS and LibJS:
 
 - **ShadowRealm** — native, in `src/js_realm.c`. `new ShadowRealm()`
   spins up a fresh standard-library global in a child `JSContext` of the
@@ -192,14 +192,11 @@ is ahead of both bare QuickJS and LibJS:
   any other object result throws `TypeError`). Limitation:
   `importValue()` is not supported (returns a rejected promise), since the
   child realm has no module loader wired.
-- **AsyncContext** — native, in `src/js_realm.c`. `AsyncContext.Variable`
-  (`run`/`get`) and `AsyncContext.Snapshot` (`run`, static `wrap`) are
-  implemented with correct **synchronous** semantics: `run` sets the value
-  for the dynamic extent of the callback and restores it afterwards (even
-  on throw), and a `Snapshot` captures/restores all live variables.
-  Limitation: values do **not** auto-propagate across real async
-  boundaries (`await`, `setTimeout`, promise reactions), which would
-  require engine-level continuation hooks QuickJS does not expose.
+- **AsyncContext** — *no longer exposed.* A synchronous-only
+  `AsyncContext.Variable`/`Snapshot` once lived in `src/js_realm.c`, but
+  it was removed (commit 187bd807): no shipping browser carries the
+  proposal, and libraries that feature-detect it took an untested code
+  path that broke real sites. It is now a shared gap again.
 
 ### Checked, and *not* a gap
 
@@ -227,7 +224,7 @@ LibJS-vs-QuickJS scope of this note.
 The QuickJS column is the bare engine; the Nordstjernen column reflects
 what the browser exposes after its native C additions load.
 
-| Feature area              | QuickJS-ng 0.16.1 | Nordstjernen | LibJS |
+| Feature area              | QuickJS-ng 0.17.0 | Nordstjernen | LibJS |
 | ------------------------- | :---------------: | :----------: | :---: |
 | Core ES2023+ language     | ✅ | ✅ | ✅ |
 | WeakRef / FinalizationRegistry | ✅ | ✅ | ✅ |
@@ -241,13 +238,13 @@ what the browser exposes after its native C additions load.
 | **Temporal**              | ❌ | ✅ native (ISO/UTC) | ✅ full |
 | **JSON modules**          | ❌ (attr parsed) | ✅ loader | ✅ |
 | ShadowRealm               | ❌ | ✅ native (no `importValue`) | ❌ |
-| AsyncContext              | ❌ | ✅ native (sync-only) | ❌ |
+| AsyncContext              | ❌ | ❌ (removed) | ❌ |
 
 Nordstjernen now matches LibJS on every LibJS-provided API surface here
 (its only remaining shortfall is the i18n/calendar/time-zone *data depth*
-an ICU-backed engine provides), and is *ahead* of LibJS on ShadowRealm
-and AsyncContext, which LibJS does not implement. **Decorators** are the
-sole feature absent from all three. Everything else in the recent-proposal
+an ICU-backed engine provides), and is *ahead* of LibJS on ShadowRealm,
+which LibJS does not implement. **Decorators** and **AsyncContext** are
+absent from all three. Everything else in the recent-proposal
 set is already present in the bundled QuickJS.
 
 ## Implications for Nordstjernen
@@ -265,13 +262,10 @@ set is already present in the bundled QuickJS.
   (`JS_SetModuleLoaderFunc2` + `JS_ParseJSON` + a synthetic
   `JS_NewCModule` default export), verified for static and dynamic
   imports over `data:`/`http(s)`.
-- **ShadowRealm** and **AsyncContext** are now provided natively in
-  `src/js_realm.c` (the former over a child `JSContext`, the latter as
-  synchronous `Variable`/`Snapshot`), putting Nordstjernen ahead of LibJS
-  here. Their documented limits — no `ShadowRealm.importValue`, no
-  AsyncContext propagation across `await`/timers — would each require
-  deeper engine plumbing (a child-realm module loader; promise/task
-  continuation hooks).
+- **ShadowRealm** is provided natively in `src/js_realm.c` over a child
+  `JSContext`, putting Nordstjernen ahead of LibJS here. Its documented
+  limit — no `ShadowRealm.importValue` — would need a child-realm module
+  loader. AsyncContext was removed again (see above).
 - **Decorators** are not implemented and were intentionally not attempted
   in this pass: they are a core-compiler change (lexer/parser/codegen plus
   the decorator-application runtime), where a defect would break class
