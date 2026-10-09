@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* `<input type=range>` is drawn as a slider (a track filled up to the
+  value and a round thumb, in `accent-color`) instead of a boxed row of
+  dashes with the number printed after it, and clicking or dragging it
+  sets the value and fires `input` and then `change`. The settings
+  panels of the three.js examples were showing "50" beside every
+  slider and could not be adjusted. `<input type=color>` shows a colour
+  swatch for its current value; it used to print the hex text of the
+  `value` attribute, so a colour set from script read `#000000`.
 * The Windows, Linux (clang) and Java builds compile again, and the
   macOS, Windows, Linux and AppImage packages and the Java native jar
   are produced again. The Windows link lost the no-op
