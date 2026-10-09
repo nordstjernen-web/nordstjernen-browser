@@ -1232,9 +1232,10 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
 }
 
 GHashTable *
-ns_engine_compute_cascade(ns_node *doc, const char *base_url,
+ns_engine_compute_cascade(ns_node *doc, const char *page_url,
                           GHashTable *css_cache, ns_anim *anim)
 {
+    g_autofree char *base_url = g_strdup(page_url);
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);
@@ -1302,7 +1303,7 @@ ns_engine_restyle(ns_node *doc, const char *base_url,
 }
 
 GHashTable *
-ns_engine_relayout(ns_node *doc, const char *base_url,
+ns_engine_relayout(ns_node *doc, const char *page_url,
                    int viewport_width, double viewport_height,
                    ns_image_cache *images, ns_anim *anim,
                    ns_js *js, GHashTable *css_cache,
@@ -1310,6 +1311,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
                    gsize caret_byte,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
+    g_autofree char *base_url = g_strdup(page_url);
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);
