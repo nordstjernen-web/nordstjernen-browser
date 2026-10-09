@@ -419,6 +419,43 @@ ns_wasm_val_to_js(JSContext *ctx, const wasm_val_t *val)
 }
 
 static JSValue
+ns_wasm_call_result(JSContext *ctx, ns_wasm_instance *wi, gboolean ok,
+                    guint n_results, const wasm_val_t *results)
+{
+    if (!ok) {
+        if (wi->has_pending) {
+            JSValue exc = wi->pending_exc;
+            wi->pending_exc = JS_UNDEFINED;
+            wi->has_pending = FALSE;
+            wasm_runtime_clear_exception(wi->inst);
+            return JS_Throw(ctx, exc);
+        }
+        const char *msg = wasm_runtime_get_exception(wi->inst);
+        JSValue ret = ns_wasm_throw_named(ctx, "RuntimeError",
+                                          msg ? msg : "wasm trap");
+        wasm_runtime_clear_exception(wi->inst);
+        return ret;
+    }
+
+    if (n_results == 0)
+        return JS_UNDEFINED;
+    if (n_results == 1)
+        return ns_wasm_val_to_js(ctx, &results[0]);
+    JSValue arr = JS_NewArray(ctx);
+    if (JS_IsException(arr))
+        return arr;
+    for (guint i = 0; i < n_results; i++) {
+        JSValue v = ns_wasm_val_to_js(ctx, &results[i]);
+        if (JS_IsException(v) ||
+            JS_DefinePropertyValueUint32(ctx, arr, i, v, JS_PROP_C_W_E) < 0) {
+            JS_FreeValue(ctx, arr);
+            return JS_EXCEPTION;
+        }
+    }
+    return arr;
+}
+
+static JSValue
 ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
                       wasm_function_inst_t func, int argc, JSValueConst *argv)
 {
@@ -460,42 +497,14 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
                                            results, n_params, args);
     wi->call_depth--;
 
+    JSValue ret = ns_wasm_call_result(ctx, wi, ok, n_results, results);
+
     if (wi->call_depth == 0 &&
         ++wi->calls_since_reclaim >= NS_WASM_RECLAIM_INTERVAL) {
         wi->calls_since_reclaim = 0;
         ns_wamr_externref_reclaim(wi->inst);
     }
-
-    if (!ok) {
-        if (wi->has_pending) {
-            JSValue exc = wi->pending_exc;
-            wi->pending_exc = JS_UNDEFINED;
-            wi->has_pending = FALSE;
-            wasm_runtime_clear_exception(wi->inst);
-            return JS_Throw(ctx, exc);
-        }
-        const char *msg = wasm_runtime_get_exception(wi->inst);
-        JSValue ret = ns_wasm_throw_named(ctx, "RuntimeError",
-                                          msg ? msg : "wasm trap");
-        wasm_runtime_clear_exception(wi->inst);
-        return ret;
-    }
-
-    if (n_results == 0)
-        return JS_UNDEFINED;
-    if (n_results == 1)
-        return ns_wasm_val_to_js(ctx, &results[0]);
-    JSValue arr = JS_NewArray(ctx);
-    if (JS_IsException(arr))
-        return arr;
-    for (guint i = 0; i < n_results; i++) {
-        JSValue v = ns_wasm_val_to_js(ctx, &results[i]);
-        if (JS_IsException(v) || JS_SetPropertyUint32(ctx, arr, i, v) < 0) {
-            JS_FreeValue(ctx, arr);
-            return JS_EXCEPTION;
-        }
-    }
-    return arr;
+    return ret;
 }
 
 static void
@@ -952,14 +961,15 @@ ns_wasm_table_grow(JSContext *ctx, JSValueConst this_val, int argc,
     }
     uint32_t old_size = 0;
     if (!ns_wamr_table_grow(wi->inst, t->name, delta, &old_size)) {
-        if (fill_externref)
+        if (fill_externref && wi->call_depth == 0)
             ns_wamr_externref_reclaim(wi->inst);
         return JS_ThrowRangeError(ctx, "wasm table.grow failed");
     }
     if (fill_externref) {
         for (uint32_t i = 0; i < delta; i++) {
             if (!ns_wamr_table_set_ref(wi->inst, t->name, old_size + i, ref)) {
-                ns_wamr_externref_reclaim(wi->inst);
+                if (wi->call_depth == 0)
+                    ns_wamr_externref_reclaim(wi->inst);
                 return JS_ThrowRangeError(ctx, "table index out of bounds");
             }
         }
