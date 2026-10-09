@@ -33803,6 +33803,8 @@ typedef struct {
 static GHashTable *g_style_el_cache;
 static GHashTable *g_merged_style_cache;
 static GHashTable *g_link_sheet_cache;
+static GHashTable *g_sheet_cache_used;
+static guint g_sheet_cache_clock;
 static GHashTable *g_import_sheet_cache;
 static guint64 g_merged_style_cache_clock;
 
@@ -33923,6 +33925,35 @@ ns_css_stylesheet_cache_drop(void)
     if (g_import_sheet_cache) g_hash_table_remove_all(g_import_sheet_cache);
 }
 
+static void
+sheet_cache_note_used(const char *key)
+{
+    if (!g_sheet_cache_used)
+        g_sheet_cache_used = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, NULL);
+    g_hash_table_replace(g_sheet_cache_used, g_strdup(key),
+                         GUINT_TO_POINTER(g_sheet_cache_clock + 1));
+}
+
+static void
+sheet_cache_evict_unused(GHashTable *cache)
+{
+    if (!cache || g_hash_table_size(cache) <= 256) return;
+    guint oldest = g_sheet_cache_clock > 512 ? g_sheet_cache_clock - 512 : 0;
+    GHashTableIter iter;
+    gpointer key;
+    g_hash_table_iter_init(&iter, cache);
+    while (g_hash_table_iter_next(&iter, &key, NULL)) {
+        guint used = g_sheet_cache_used
+            ? GPOINTER_TO_UINT(g_hash_table_lookup(g_sheet_cache_used, key))
+            : 0;
+        if (used <= oldest) {
+            if (g_sheet_cache_used) g_hash_table_remove(g_sheet_cache_used, key);
+            g_hash_table_iter_remove(&iter);
+        }
+    }
+}
+
 void
 ns_css_style_element_cache_begin(void)
 {
@@ -33931,10 +33962,9 @@ ns_css_style_element_cache_begin(void)
         g_hash_table_remove_all(g_style_el_cache);
     ns_merged_style_cache_trim(g_merged_style_pass_start);
     g_merged_style_pass_start = g_merged_style_cache_clock;
-    if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 4096)
-        g_hash_table_remove_all(g_link_sheet_cache);
-    if (g_import_sheet_cache && g_hash_table_size(g_import_sheet_cache) > 4096)
-        g_hash_table_remove_all(g_import_sheet_cache);
+    g_sheet_cache_clock++;
+    sheet_cache_evict_unused(g_link_sheet_cache);
+    sheet_cache_evict_unused(g_import_sheet_cache);
 }
 
 static void
@@ -34023,6 +34053,7 @@ ns_css_stylesheet_parse_url_cached(const char *url, const char *css, gssize len)
     char *key = g_strdup_printf("%.0fx%.0f|%s",
                                 ns_css_media_viewport_current_w(),
                                 ns_css_media_viewport_current_h(), url);
+    sheet_cache_note_used(key);
     ns_css_stylesheet *hit = g_hash_table_lookup(g_link_sheet_cache, key);
     if (hit) {
         g_free(key);
@@ -34065,6 +34096,7 @@ ns_css_stylesheet_parse_import_cached(const char *url, const char *layer_name,
                                 layer_name ? 'L' : '-',
                                 layer_name ? strlen(layer_name) : (gsize)0,
                                 layer_name ? layer_name : "", url);
+    sheet_cache_note_used(key);
     ns_import_sheet_cached *hit = g_hash_table_lookup(g_import_sheet_cache, key);
     if (hit && (hit->bytes == bytes || g_bytes_equal(hit->bytes, bytes))) {
         g_free(key);
