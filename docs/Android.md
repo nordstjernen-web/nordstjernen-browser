@@ -65,7 +65,7 @@ each subsequent release:
    keystore offline, and set the four `ANDROID_*` GitHub secrets documented
    below so `.github/workflows/android-release.yml` emits a signed `.aab`.
 6. **Build the release bundle.** Trigger the `android-release` workflow or run
-   `gradle bundleRelease` locally, then upload the resulting `.aab` to an
+   `./gradlew bundleRelease` locally (see [Building](#building)), then upload the resulting `.aab` to an
    internal testing track first. Play requires Android App Bundles for new apps.
 7. **Run Play-delivered smoke tests.** Install from the internal track on at
    least a real Pixel and an emulator. Re-check startup, default-browser role,
@@ -247,14 +247,17 @@ Versioning: `versionCode` is a monotonic int and Play rejects a repeat;
 `versionName` tracks the desktop version ("1.0.x"). Both live in
 `android/app/build.gradle` and are **not** derived from `meson.build`, so they
 are bumped by hand. The ladder so far: 1.0.22 = 7, 1.0.23 = 8, 1.0.24 = 9,
-1.0.25 = 10, 1.0.26 = 11, 1.0.27 = 12, 1.0.28 = 13, 1.0.29 = 14. For a critical security fix, halt rollout, then re-submit on a
-fast rollout.
+1.0.25 = 10, 1.0.26 = 11, 1.0.27 = 12, 1.0.28 = 13, 1.0.29 = 14,
+1.0.30 = 15.
+
+For a critical security fix, halt rollout, then re-submit on a fast rollout.
 
 ## CI
 
 `.github/workflows/android.yml` fetches the public prebuilt dependency sysroot,
 cross-compiles the native engine for `arm64-v8a` and `x86_64`, and builds the
-debug APK on every push/PR.
+debug APK on every push and pull request to `main` (changes that touch only
+Markdown or `docs/` are skipped), plus manual `workflow_dispatch`.
 
 `.github/workflows/android-release.yml` is the Play build: trigger it manually
 (`workflow_dispatch`), and it runs `gradle bundleRelease` and uploads the
@@ -275,4 +278,4 @@ Console internal track by hand.
 
 - **F-Droid** — separate track; reproducible builds are the only twist.
 - **Samsung / Huawei / Amazon stores** — year-two store-listing ports.
-- **iOS** — different document, much worse cost/benefit.
+- **iOS** — see [`iOS.md`](iOS.md); much worse cost/benefit.

@@ -6,8 +6,9 @@ layout and a status snapshot see [`ios/README.md`](../ios/README.md).
 
 ## The port in brief
 
-- **UIKit/Swift UI shell** over the C embedding API (`src/libnordstjernen.h`)
-  through a thin C bridge (`ios/App/Bridge/ns_ios.*`) — URL bar, back/forward
+- **UIKit shell in Swift** (`ios/App/Sources/`) over the C embedding API
+  (`src/libnordstjernen.h`, see [`Embedding.md`](Embedding.md)) through a
+  thin C bridge (`ios/App/Bridge/ns_ios.*`) — URL bar, back/forward
   history, reload, a scrolling `PageView`, and tap-to-follow-link.
 - The **same engine**, cross-compiled to a static
   `libnordstjernen.a`. Like Android, iOS drops GTK 4,
@@ -25,7 +26,8 @@ therefore reuses the Android split: the GTK-free engine as a library, plus a
 native shell that renders its ARGB output and forwards input.
 
 In `meson.build` this is the `is_mobile = is_android or is_ios` predicate. An
-iOS configure (`-Dios=true`, set by the meson cross file) builds only the
+iOS configure (`-Dios=true`, passed by `ios/scripts/build-engine.sh` alongside
+its generated cross file) builds only the
 embeddable engine library — no desktop shell, out-of-process renderer, or
 audio/video helper executables — exactly as Android does.
 
@@ -36,7 +38,7 @@ Cairo-native ARGB32 (premultiplied, host byte order). On little-endian arm64
 that is exactly a Core Graphics `byteOrder32Little` + `premultipliedFirst`
 image, so `PageView` wraps the buffer as a `CGImage` with no channel swizzle.
 The engine lays the page out at a phone-width CSS viewport and renders scaled by
-the display density (`UIScreen.scale`), so text is crisp at native resolution —
+the display density (the screen's `scale`), so text is crisp at native resolution —
 re-rendered by the engine on scroll rather than bitmap-stretched.
 
 ## Building
@@ -50,7 +52,8 @@ prebuilt dependency sysroot and writes the static libraries plus a generated
 export NORDSTJERNEN_IOS_SYSROOT="$HOME/.cache/nordstjernen-ios-sysroot"
 ios/scripts/fetch-prebuilt-deps.sh --sysroot "$NORDSTJERNEN_IOS_SYSROOT"
 
-# 2. Cross-compile the engine (writes ios/App/vendor/ + nordstjernen.xcconfig):
+# 2. Cross-compile the engine (stages ios/App/vendor/<platform>/ and writes
+#    ios/App/vendor/nordstjernen.xcconfig):
 ios/scripts/build-engine.sh device
 ios/scripts/build-engine.sh simulator
 

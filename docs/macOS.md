@@ -99,7 +99,8 @@ Install [Homebrew](https://brew.sh) if you do not already have it, then:
 ```sh
 brew install meson ninja pkg-config cmake gtk4 libepoxy curl \
     uchardet libpsl sqlite webp sdl2
-brew install ccache    # optional, speeds up rebuilds
+brew install ccache          # optional, speeds up rebuilds
+brew install dylibbundler    # needed only to package the .app / .dmg
 ```
 
 Homebrew installs to `/opt/homebrew` on Apple Silicon and `/usr/local` on
@@ -115,6 +116,8 @@ Optional extras, all auto-detected — the build works without them:
   instead builds a minimal LGPL FFmpeg with
   `scripts/build-ffmpeg-lgpl.sh`; a local developer build can use the
   Homebrew one directly.
+- `brew install libavif jpeg-xl` adds AVIF and JPEG XL image decoding
+  (`-Davif=disabled` / `-Djxl=disabled` drop them).
 
 ### Build
 
@@ -126,7 +129,17 @@ meson compile -C builddir
 ```
 
 QuickJS, lexbor, WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree,
-so `meson setup` requires no submodules or setup-time downloads.
+so there are no submodules. The first `meson setup` does download two
+pinned subprojects through their wraps: the ns-pango text-layout fork
+(`subprojects/ns-pango.wrap`) and the wgpu-native release behind WebGPU
+(`subprojects/wgpu-native-macos-<arch>.wrap`, skipped when wgpu-native is
+found through pkg-config or `-Dwgpu_native_root`; see
+[`webgpu.md`](webgpu.md)).
+
+This plain `meson setup` links the macOS SDK's system libcurl rather than
+Homebrew's keg-only curl; see
+[macOS links a different curl / TLS stack](#macos-links-a-different-curl--tls-stack-than-you-expect)
+for the one-line fix.
 
 To match CI exactly:
 
@@ -165,7 +178,10 @@ MACOS_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
     MACOS_NOTARY_PROFILE="nordstjernen-notary" ./scripts/pack-macos.sh
 ```
 
-The script stages `dist/Nordstjernen.app`, vendors the Homebrew dylibs
+The script needs `dylibbundler` on `PATH`. It configures its own release +
+LTO build in `build-macos/` (set `BUILDDIR` to reuse another build
+directory; it refuses one that is not a release build or carries
+sanitizers), stages `dist/Nordstjernen.app`, vendors the Homebrew dylibs
 with `dylibbundler`, code-signs the bundle, and produces
 `dist/nordstjernen-<version>-macos-<arch>.dmg`. When `MACOS_NOTARY_PROFILE`
 names a stored notarytool credential profile (see below) and a real
@@ -253,9 +269,9 @@ them large:
 1. **App Sandbox.** The store requires the
    `com.apple.security.app-sandbox` entitlement, and a sandboxed app may
    **not** `fork()`/`execv()` a sibling executable. Nordstjernen spawns a
-   `nordstjernen-renderer` per tab (and a `nordstjernen-audio` helper)
-   exactly that way (`src/rproc_http.c`) for OS-level tab isolation. Those
-   helpers would have to be re-built as **XPC services**
+   `nordstjernen-renderer` per tab (and the `nordstjernen-audio` and
+   `nordstjernen-video` helpers) exactly that way (`src/rproc_http.c`) for
+   OS-level tab isolation. Those helpers would have to be re-built as **XPC services**
    (`Contents/XPCServices/*.xpc`), or the app would ship
    `--single-process` and forfeit the per-tab security boundary. This is
    real engineering, not configuration.
@@ -422,13 +438,15 @@ rpaths, **build the `.dmg` and launch the bundled binary against a real URL**:
 
 ```sh
 PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$PKG_CONFIG_PATH" \
-    BUILDDIR="$PWD/builddir" NS_PACK_AI=disabled ./scripts/pack-macos.sh
+    BUILDDIR="$PWD/builddir" ./scripts/pack-macos.sh
 dist/Nordstjernen.app/Contents/MacOS/Nordstjernen \
     --headless --dump=text https://example.com    # must print page text
 ```
 
-(Reusing an existing `BUILDDIR` skips the from-scratch compile; `dylibbundler`
-still takes a few minutes.) Worth adding to CI as a real gate.
+(Reusing an existing release `BUILDDIR` skips the from-scratch compile;
+`dylibbundler` still takes a few minutes.) CI runs exactly this check on the
+bundled binary after packaging (the *Smoke test the bundled .app* step in
+`.github/workflows/macos.yml`).
 
 ### `dylibbundler` + meson build-rpaths → duplicate `LC_RPATH` (fatal)
 
@@ -482,51 +500,17 @@ Same as everywhere else (`CLAUDE.md`):
 3. The change is committed and pushed to `origin/main`.
 
 The macOS CI workflow runs on every push and pull request to `main`
-plus manual `workflow_dispatch`, and exists to catch regressions that
+(changes that touch only Markdown or `docs/` are skipped) plus manual
+`workflow_dispatch`, and exists to catch regressions that
 the local Linux build misses (Apple Silicon ABI, BSD libc, GTK 4
 Quartz backend).
 
-## iPhone / iPad — not yet, and what would it take
+## iPhone / iPad
 
-There is no iOS build today. The blockers are real, not speed-of-light:
-
-1. **No GTK 4 on iOS.** GTK 4 has no UIKit backend; the Quartz
-   backend on macOS uses the same desktop AppKit APIs (`NSWindow`,
-   `NSEvent`) that iOS does not expose. The window/toolbar/keyboard
-   layer in `src/gtk/procwindow.c` / `src/gtk/procview.c` and the entry
-   point in `src/gtk/appmain.c` would have to be replaced wholesale by a
-   UIKit / SwiftUI shell.
-2. **App Review until very recently required WebKit.** Apple's
-   App Store Review Guidelines §2.5.6 historically forced every
-   browser-like app to render web content through WebKit's
-   `WKWebView`. The EU's Digital Markets Act has cracked this open
-   for users in the EU as of 2024, but the global rule still
-   stands and the entitlements / notarisation paperwork for an
-   alt-engine browser is non-trivial.
-3. **No `fork`/`exec` for per-tab renderers.** iOS apps run a single
-   process. The per-tab renderer spawn (`ns_rproc_http_spawn`) that
-   re-execs the binary for OS-level isolation simply cannot exist;
-   isolation would need to be inside one process, or shelved.
-4. **Cairo and Pango are not first-class on iOS.** They build,
-   but no one ships them in App Store apps; the native path is
-   CoreGraphics + CoreText, which means re-targeting the paint
-   layer.
-
-A realistic incremental path, if it ever gets prioritised:
-
-- Keep the parser / CSS / layout / paint engine portable C
-  (already true today). Compile it as a static library for the
-  `arm64-apple-ios` triple.
-- Wrap the rendering output in a thin UIKit (or SwiftUI) shell —
-  `UIScrollView` containing a single `CALayer`-backed view that
-  the engine paints into via Cairo's image surface, copied to a
-  `CGImage`.
-- Networking via `libcurl` continues to work on iOS as long as it
-  is linked statically; `_NSGetExecutablePath` and CA bundle
-  discovery already do the right thing.
-- Skip Landlock, skip the refuse-root check (iOS apps are not
-  root), skip the JS console UI for v1.
-
-None of the above is on the roadmap; this section exists so the
-next person who asks "could Nordstjernen run on iPhone?" has the
-short answer in one place.
+The macOS `.app` does not carry over to iOS: GTK 4 has no UIKit backend, and
+iOS apps cannot `fork`/`exec` the per-tab renderer and media helpers. iOS is
+instead an Android-style port in [`ios/`](../ios) — the GTK-free engine
+cross-compiled to a static `libnordstjernen.a` (`-Dios=true`) under a native
+UIKit shell written in Swift. It builds for the iOS Simulator on a Mac but is
+not in CI, not signed for devices, and not on the App Store. See
+[`iOS.md`](iOS.md) for the build steps and status.

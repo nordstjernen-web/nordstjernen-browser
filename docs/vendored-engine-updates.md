@@ -5,13 +5,14 @@ modify freely for browser integration:
 
 - **QuickJS** (`src/quickjs/`) — forked from
   [quickjs-ng](https://github.com/quickjs-ng/quickjs).
-- **Lexbor** (`src/lexbor/`) — forked from
-  [lexbor](https://github.com/lexbor/lexbor), trimmed to the modules we
-  use (`core dom encoding html ns ports punycode tag unicode url utils`;
-  upstream's `css engine selectors style test utils/*` tooling is not
-  carried).
+- **Lexbor** (`src/lexbor/`, sources under `src/lexbor/source/lexbor/`) —
+  forked from [lexbor](https://github.com/lexbor/lexbor), trimmed to the
+  modules we use (`core dom encoding html ns ports punycode tag unicode url
+  utils`); upstream's `css`, `engine`, `selectors` and `style` modules and
+  its test and `utils/` tooling are not carried.
 
-We track the upstream **main** branch. This document records each refresh:
+We track each upstream's development branch (`master`; some older entries
+below call it `main`). This document records each refresh:
 the upstream point we rebased onto, the upstream changes that landed, and
 the local modifications that were preserved on top.
 
@@ -26,8 +27,11 @@ is classified:
 - **merge** — both touched it → 3-way merge (`git merge-file ours BASE
   theirs`), reviewing every hunk.
 
-Sources are listed explicitly in each `meson.build`, so new upstream files
-in unused areas are simply not compiled; the build is the final gate.
+Sources are listed explicitly in each `meson.build` (`src/quickjs/meson.build`,
+`src/lexbor/meson.build`), so new upstream files in unused areas are simply
+not compiled; the build is the final gate. After a QuickJS refresh, also build
+`-Dquickjs=quickjs` and fix the adapter if the binding changed (see
+[`quickjs.md`](quickjs.md)).
 
 ## 2026-10-08 — QuickJS 0.16.2 → 60984dc
 
