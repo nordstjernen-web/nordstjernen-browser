@@ -37068,8 +37068,7 @@ ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root)
 {
     if (!desc || !root) return NULL;
     if (desc == root) return desc;
-    int depth = 0;
-    for (const ns_node *p = desc->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent)
+    for (const ns_node *p = desc->parent; p; p = p->parent)
         if (p == root) return desc;
     return NULL;
 }
