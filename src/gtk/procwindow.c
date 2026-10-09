@@ -685,9 +685,8 @@ update_chrome(ProcWindow *pw)
     }
     set_loading_ui(pw, ns_proc_view_is_loading(v));
     toggle_css_class(pw->toolbar, "ns-private", ns_proc_view_is_private(v));
-    const char *url = ns_proc_view_url(v);
     const char *title = ns_proc_view_title(v);
-    set_address_text(pw, url);
+    set_address_text(pw, ns_proc_view_display_url(v));
     const char *brand = ns_brand_versioned();
     char *wt = title && *title ? g_strdup_printf("%s — %s", title, brand)
                                : g_strdup(brand);
@@ -1746,7 +1745,7 @@ act_focus_page(GSimpleAction *a, GVariant *p, gpointer ud)
     gboolean editing_address = focus && pw->address &&
         (focus == pw->address || gtk_widget_is_ancestor(focus, pw->address));
     if (editing_address)
-        set_address_text(pw, v ? ns_proc_view_url(v) : "");
+        set_address_text(pw, v ? ns_proc_view_display_url(v) : "");
     else if (ns_proc_view_find_close(v))
         return;
     else if (v && ns_proc_view_is_loading(v))

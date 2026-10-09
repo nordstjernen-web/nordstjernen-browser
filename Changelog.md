@@ -3,6 +3,10 @@ Changelog:
 
 1.0.31:
 ======
+* The address bar shows the URL being loaded as soon as the load
+  starts. It stayed empty (or kept the previous page's address) until
+  the renderer finished the first layout, which on script-heavy pages
+  such as the three.js WebGPU examples took many seconds.
 * JPEGs with 16-bit quantization tables decode. The vendored Wuffs
   decoder refused them as "unsupported precision", although the samples
   are 8-bit and only the table entries are wide; Photoshop writes such
