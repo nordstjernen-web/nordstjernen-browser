@@ -11038,6 +11038,13 @@ layout_flex_row(ns_box *box, double cw,
         if (stretches) {
             double pre_h = c->content_height;
             c->content_height = flex_item_stretched_height(c, cross_size, cw);
+            if (c->content_height < pre_h - 0.01 && c->style &&
+                overflow_kw_scrolls(overflow_axis_keyword(c->style,
+                                                          NS_CSS_OVERFLOW_Y))) {
+                c->scrolls = TRUE;
+                if (pre_h - c->content_height > c->scroll_max_y)
+                    c->scroll_max_y = pre_h - c->content_height;
+            }
             if (c->definite_height <= 0)
                 c->definite_height = c->content_height;
             if (!cross_preset)
@@ -16621,7 +16628,15 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (stretched_h >= 0) {
             abox->definite_height = stretched_h;
             layout_box(abox, layout_w, cs);
+            double natural_h = abox->content_height;
             abox->content_height = stretched_h;
+            if (natural_h > stretched_h + 0.01 && abox->style &&
+                overflow_kw_scrolls(overflow_axis_keyword(abox->style,
+                                                          NS_CSS_OVERFLOW_Y))) {
+                abox->scrolls = TRUE;
+                if (natural_h - stretched_h > abox->scroll_max_y)
+                    abox->scroll_max_y = natural_h - stretched_h;
+            }
         }
         gboolean static_x = (!alv || length_is_auto(alv)) &&
                             (!arv || length_is_auto(arv));
