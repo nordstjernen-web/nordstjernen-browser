@@ -48,6 +48,26 @@ VP9/WebM, so the external-player fallback is not acceptable here.
     sudo zypper install ffmpeg-devel                            # openSUSE (Packman)
     sudo apk add ffmpeg-dev                                     # Alpine
 
+Optional, auto-detected: `libpoppler-glib-dev` (PDF rendering),
+`libenchant-2-dev` plus a dictionary such as `hunspell-en-us`
+(spell-checking), `libavif-dev` (AVIF; `-Davif=disabled` drops it) and
+`libjxl-dev` (JPEG XL; `-Djxl=disabled` drops it).
+
+`meson setup` checks version floors up front: libcurl 8.5+, GTK 4.14+,
+and — for the default ns-pango text stack — GLib 2.80+, cairo 1.18+,
+HarfBuzz 8.3+, FriBiDi 1.0.6+ and fontconfig 2.15+. Ubuntu 24.04, Debian 13 and Fedora
+40 are the oldest releases that ship all of them;
+`-Dns-pango=disabled` drops the text-stack floors by shaping through the
+system Pango.
+
+The first `meson setup` also fetches two subprojects, so it needs network
+access and `git`: ns-pango (cloned from git, `subprojects/ns-pango.wrap`)
+and, on glibc `x86_64`/`aarch64`, the pinned wgpu-native release for
+WebGPU (`subprojects/wgpu-native-linux-*.wrap`) unless a system
+`wgpu_native` pkg-config file or `-Dwgpu_native_root` supplies it. For an
+offline build pass `-Dns-pango=disabled -Dwebgpu=disabled`, as the distro
+packages do.
+
 `ccache` is the biggest build-time win — `meson` picks it up
 automatically. With ccache warm, a clean `meson setup builddir &&
 meson compile -C builddir` drops from ~35 s to ~1 s. Install once
@@ -65,27 +85,36 @@ with the distro package manager.
 ## Package — portable zip
 
 `./scripts/pack-linux.sh` produces a redistributable, stripped,
-LTO-optimised x86_64 build:
+LTO-optimised build for the host architecture (it configures a separate
+release tree in `release-build/`, or `$BUILDDIR`):
 
-    dist/nordstjernen-<version>-linux-x86_64.zip       # ~1.5 MB
-    dist/nordstjernen-<version>-linux-x86_64/          # unpacked bundle
+    dist/nordstjernen-<version>-linux-<arch>.zip       # e.g. linux-x86_64
+    dist/nordstjernen-<version>-linux-<arch>/          # unpacked bundle
 
-The zip contains the `nordstjernen` binary, the application icon,
-the desktop entry, `README.md`, `THIRD-PARTY-LICENSES.md`, and a
-generated `INSTALL.md` listing the runtime requirements.
+The zip contains the `nordstjernen` shell, the sandboxed
+`nordstjernen-renderer`, the `nordstjernen-audio` helper (when SDL2 was
+found), the application icons, the desktop entry, `README.md`,
+`THIRD-PARTY-LICENSES.md`, `License.md`, `COPYING`, and a generated
+`INSTALL.md` listing the runtime requirements. When WebGPU is built,
+`libwgpu_native.so` ships beside the binaries, found through an `$ORIGIN`
+rpath (`NS_WEBGPU=0` packages without it).
 
-The in-tree browser engine — lexbor, quickjs, and the
-uchardet wrapper — is statically linked. The GTK desktop stack stays
-dynamic because it expects to find pixbuf loaders, IM modules, and
-font/theme data on the host at runtime; fully-static GTK isn't
-practical. Runtime requirements:
+The in-tree browser engine — lexbor, quickjs, wuffs and wamr — is
+statically linked. The GTK desktop stack stays dynamic because it
+expects to find pixbuf loaders, IM modules, and font/theme data on the
+host at runtime; fully-static GTK isn't practical. Runtime requirements:
 
-- glibc 2.31+ (Ubuntu 20.04 / Fedora 34 / Debian 11 era and later)
-- GTK 4.6+ with gio, gobject, pango, cairo
+- glibc at least as new as the build host's (`INSTALL.md` records the
+  floor read from the built binary)
+- GTK 4.14+ with gio, gobject, pango, cairo
 - libepoxy (usually pulled in by GTK 4; WebGL dispatch)
-- libcurl with a TLS backend
-- libuchardet
+- libcurl 8.5+ with a TLS backend; OpenSSL 3 (libcrypto)
+- libuchardet, libwebp, libpsl, libseccomp, libsqlite3, SDL2
+- FFmpeg 6.0+ runtime libraries (libavformat, libavcodec, libavutil,
+  libswscale, libswresample)
+- libpoppler-glib and libavif, when the build found them
 - fontconfig + a font set, harfbuzz, freetype, libstdc++
+- ca-certificates (TLS trust store)
 - An X11 or Wayland session
 
 Smoke test the bundled binary headlessly without installing:
@@ -107,7 +136,7 @@ then drives `rpmbuild` against a generated spec under
 
 Output:
 
-    dist/nordstjernen-<version>-1.x86_64.rpm           # ~1.3 MB
+    dist/nordstjernen-<version>-1.x86_64.rpm
 
 The spec uses `AutoReqProv: yes` so `rpmbuild` extracts the actual
 SONAME dependencies (`libgtk-4.so.1`, `libcurl.so.4`,
@@ -117,12 +146,20 @@ installs on Fedora, RHEL, and openSUSE without per-distro tweaks —
 each distro's resolver maps the SONAMEs to its own provider
 packages. (Cross-installing into Debian / Ubuntu uses `alien`.)
 
-Install layout:
+Install layout (`%{_docdir}` is `/usr/share/doc/packages` on openSUSE,
+`/usr/share/doc` on Fedora / RHEL):
 
     /usr/bin/nordstjernen
-    /usr/share/icons/hicolor/scalable/apps/nordstjernen.svg
-    /usr/share/applications/nordstjernen.desktop
-    /usr/share/doc/packages/nordstjernen/{README.md,THIRD-PARTY-LICENSES.md}
+    /usr/bin/nordstjernen-renderer
+    /usr/bin/nordstjernen-audio                      # when built
+    /usr/lib64/nordstjernen/libwgpu_native.so        # when WebGPU is built
+    /usr/share/icons/hicolor/scalable/apps/nordstjernen*
+    /usr/share/applications/org.nordstjernen.WebBrowser.desktop
+    /usr/share/nordstjernen/{License.md,COPYING}
+    %{_docdir}/nordstjernen/{README.md,THIRD-PARTY-LICENSES.md}
+
+The desktop file is installed under the application id so Wayland
+compositors can match the window (`StartupWMClass`) to it.
 
 Inspect, install, remove:
 
@@ -140,6 +177,14 @@ application picker picks up the new entry without a re-login.
 The lower-bound glibc version pinned to `libc.so.6(GLIBC_2.x)` in
 auto-generated requires reflects whatever the build host ships. If
 you want broader portability than the build host's libc allows,
-build inside an older base container (e.g. Rocky 8) and re-run
-`pack-linux.sh` + `pack-rpm.sh` from there. AppImage packaging is
-future work.
+build inside the oldest base container that still meets the meson
+version floors (see *Build dependencies*) and re-run `pack-linux.sh` +
+`pack-rpm.sh` from there.
+
+Two more packaging scripts follow the same pattern:
+`./scripts/pack-deb.sh` repackages the `pack-linux.sh` bundle as a
+`.deb` (`dist/nordstjernen_<version>_[<distro-tag>_]<arch>.deb`; see
+`Debian.md` for the source package in `debian/`), and
+`./scripts/pack-appimage.sh` builds
+`dist/nordstjernen-<version>-<arch>.AppImage` with linuxdeploy and its
+GTK plugin, bundling the GTK 4 stack for distros without a modern GTK.

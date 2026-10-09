@@ -24,8 +24,8 @@ files are stale. The root contains:
 | Debian package (`.deb`) + binary zip | `debian:trixie` container | `linux/debian/` |
 | Ubuntu package (`.deb`) + binary zip | `ubuntu:26.04` container | `linux/ubuntu/` |
 | openSUSE package (`.rpm`) + binary zip | `opensuse/tumbleweed` container | `linux/opensuse/` |
-| Alpine (musl) binary zip | `alpine:edge` container | `linux/alpine/` |
-| Windows bundle (`.zip`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
+| Alpine (musl) package (`.apk`) + binary zip | `alpine:edge` container | `linux/alpine/` |
+| Windows bundle (`.zip`) + MSIX (`.msix`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
 | macOS `.dmg` + binary | GitHub Actions `macos.yml` | `macos/` |
 | FreeBSD portable zip | GitHub Actions `freebsd.yml` (vmactions VM) | `freebsd/` |
 | NetBSD portable zip | GitHub Actions `netbsd.yml` (vmactions VM) | `netbsd/` |
@@ -35,12 +35,13 @@ Each glibc Linux artifact (Debian/Ubuntu/openSUSE zip, `.deb`, `.rpm`) also
 ships **experimental WebGPU**: `scripts/pack-linux.sh` fetches the pinned
 wgpu-native release with `scripts/fetch-wgpu-native.sh`, builds the `webgpu`
 feature in, and bundles `libwgpu_native.so` beside the binaries (zip) or under
-`/usr/lib/nordstjernen` (deb/rpm) with an `$ORIGIN` rpath. WebGPU stays dormant
-until the browser is started with `--enable-webgpu`. The Alpine (musl) build
-skips it — wgpu-native ships no musl library — and the Windows/macOS/BSD builds
-are WebGPU-free for now (the `webgpu` feature is `auto`, so it is simply not
-built where wgpu-native is absent). Set `NS_WEBGPU=0` to force a WebGPU-free
-Linux nightly, or `NS_WEBGPU=1` to make a missing wgpu-native fail the build
+`/usr/lib/nordstjernen` (deb) or `%{_libdir}/nordstjernen` (rpm) with an
+`$ORIGIN` rpath. WebGPU is on at runtime by default and can be switched off in
+Settings. The Alpine (musl) build skips it — wgpu-native ships no musl
+library. The Windows and macOS builds link wgpu-native statically through the
+pinned `subprojects/wgpu-native-*.wrap` releases; the BSD builds are
+WebGPU-free, since wgpu-native publishes no BSD release. Set `NS_WEBGPU=0`
+to force a WebGPU-free Linux nightly, or `NS_WEBGPU=1` to make a missing wgpu-native fail the build
 instead of degrading.
 
 Plus `SHA256SUMS`, `MANIFEST.txt` (version, commit, per-stage status,
@@ -57,6 +58,7 @@ back to the Debian and then the openSUSE build:
 
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.exe`
+- `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.msix`
 - `https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg` (Apple Silicon)
 - `https://www.nordstjernen.org/nightly/nordstjernen-macos-arm64` (Apple Silicon, unbundled binary)
 - `https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb`
@@ -64,6 +66,7 @@ back to the Debian and then the openSUSE build:
 - `https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm`
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip` (musl)
+- `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk` (musl)
 - `https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java.jar`
@@ -91,7 +94,8 @@ dispatch would cause. The Linux
 packages are built locally in distro containers so each binary links
 against that distro's own glibc / GTK, and the source tarball is a
 plain `git archive` (the engine — lexbor, quickjs, wuffs — is vendored
-in-tree, so the tarball is buildable fully offline).
+in-tree; ns-pango and wgpu-native are not, so a fully offline build of the
+tarball needs `-Dns-pango=disabled -Dwebgpu=disabled`).
 
 The FreeBSD and NetBSD builds run the same way as Windows/macOS —
 driven through GitHub Actions — but GitHub has no native BSD runners, so
@@ -126,11 +130,13 @@ sudo apt install -y git docker.io gh xz-utils gzip zip ca-certificates
 sudo apt install -y nginx      # or apache2 — to serve /var/www/html
 ```
 
-#### Java API stage (JDK 21 + engine build deps on the host)
+#### Java API stage (JDK 21 on the host)
 
-Unlike the distro packages (built in containers) and the Windows/macOS builds
-(built on GitHub runners), the **Java API stage builds on the host**, so the
-host needs a JDK 21 and the engine's own build dependencies:
+The Java API stage runs `javac`/`jar`/`javadoc` on the host, so the host
+needs a JDK 21. Its native libraries are built in the `debian:trixie`
+container; the engine build dependencies below are only needed on the host
+when no container engine is available and the natives fall back to a host
+build:
 
 ```sh
 # Update apt and install OpenJDK 21
@@ -140,7 +146,8 @@ sudo apt install -y openjdk-21-jdk
 # Engine build toolchain + libraries (so build-native.sh can cross the JNI bridge)
 sudo apt install -y build-essential clang pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 
 # Point JAVA_HOME at the JDK 21 install (and persist it for the cron user)
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
@@ -263,6 +270,7 @@ to the command (keep the cron file `chmod 600`):
 | `--no-gha` | — | Skip the Windows/macOS GitHub Actions builds. |
 | `--no-java` | — | Skip the Java API jar/javadoc stage. |
 | `--no-tarball` | — | Skip the source tarball. |
+| `--no-parallel` / `NIGHTLY_PARALLEL` | `1` | Build the four Linux containers concurrently; `0`/`--no-parallel` builds them one at a time. |
 | `--no-pull` / `NIGHTLY_PULL` | `1` | Fast-forward the checkout to `origin/main` and re-exec before building; `0`/`--no-pull` to disable. |
 | `NIGHTLY_PULL_BRANCH` | `main` | Branch the working tree is fast-forwarded to. |
 | `JAVA_HOME` | autodetected from `javac` | JDK 21 used by the Java stage. |
@@ -312,16 +320,18 @@ prefer a dedicated vhost, point its `root` at `/var/www/html/nightly`
   (`NS_BUILD_JOBS`) and disables LTO for the nightly packages
   (`NS_BUILD_LTO=false`) — nightly binaries are functionally identical,
   just slightly larger. Override either env if your box has plenty of
-  RAM (`NS_BUILD_LTO=true NS_BUILD_JOBS=16`). Builds also run
-  sequentially, one distro at a time, so don't launch a second heavy
-  build alongside a nightly.
-- **Debian build fails with `implicit declaration of
-  gtk_file_dialog_*` / `gtk_css_provider_load_from_string`** — the
-  Debian image's GTK 4 is too old (Nordstjernen needs the GtkFileDialog
-  / `load_from_string` APIs from GTK 4.10–4.12). The default image is
-  `debian:trixie` (Debian 13), which ships a new enough GTK 4;
-  `debian:12` (bookworm, GTK 4.8) cannot build the browser. If you
-  override `NIGHTLY_DEBIAN_IMAGE`, pick trixie or newer. The container
+  RAM (`NS_BUILD_LTO=true NS_BUILD_JOBS=16`). By default the four
+  distro containers build concurrently, with that job budget split
+  between them; pass `--no-parallel` to build one distro at a time on a
+  tight box, and don't launch a second heavy build alongside a nightly.
+- **`meson setup` stops with "Nordstjernen needs newer system
+  libraries than this machine has"** — the image is older than the
+  version floors (GTK 4.14, libcurl 8.5, and the GLib/cairo/HarfBuzz/
+  fontconfig floors of the ns-pango text stack). The default image is
+  `debian:trixie` (Debian 13), the oldest Debian release that meets them;
+  `debian:12` (bookworm) cannot build the browser. If you override
+  `NIGHTLY_DEBIAN_IMAGE` or `NIGHTLY_UBUNTU_IMAGE`, pick Debian 13 /
+  Ubuntu 24.04 or newer. The container
   helper also installs a modern meson via pip, since older Debian meson
   predates the `c_std` fallback-list syntax the project uses.
 - **Stale orchestrator** — `nightly.sh` fast-forwards its own checkout

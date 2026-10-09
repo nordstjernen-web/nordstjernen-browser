@@ -29,6 +29,7 @@ and runtime dependencies:
 ```sh
 pacman -Sy --noconfirm --needed \
     base-devel \
+    git \
     mingw-w64-x86_64-clang \
     mingw-w64-x86_64-pkgconf \
     mingw-w64-x86_64-meson \
@@ -53,6 +54,12 @@ GPL-configured, which is fine for a local developer build; the
 redistributable packages instead link the minimal LGPL FFmpeg that
 `scripts/build-ffmpeg-lgpl.sh` builds, as CI does.
 
+`git` is needed because the first `meson setup` clones the ns-pango
+subproject (`subprojects/ns-pango.wrap`). MSYS2's stock `gtk4` must be
+4.22.1 or newer — meson enforces that floor on Windows.
+`mingw-w64-x86_64-libavif` and `mingw-w64-x86_64-libjxl` are optional and
+add AVIF and JPEG XL decoding (CI installs both).
+
 This pulls in roughly 600 MB of runtime + headers. `pacman -Syu`
 is intentionally avoided: pin to the packages above rather than the
 rolling latest.
@@ -61,19 +68,20 @@ A few of these pull in transitively but are listed explicitly so a
 fresh box gets them in one command:
 
 - `mingw-w64-x86_64-ca-certificates` is a hard dependency of
-  `mingw-w64-x86_64-curl`, so it always arrives with curl. It's
-  what makes HTTPS work — `src/net.c::ns_net_resolve_ca_bundle`
-  hardcodes `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` in
-  the Windows fallback list. With the package installed, dev
-  builds reach `https://` without any env-var fiddling.
+  `mingw-w64-x86_64-curl`, so it always arrives with curl. It
+  supplies the CA bundle for dev builds —
+  `src/net.c::ns_net_resolve_ca_bundle` lists
+  `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` among its Windows
+  fallback paths, so dev builds reach `https://` without any
+  env-var fiddling.
 - `mingw-w64-x86_64-uchardet` is the charset detector used by
   `ns_html_decode_body`. Per `CLAUDE.md` it's a hard dependency;
   without it `meson setup` fails the `uchardet` pkg-config check.
 - `mingw-w64-x86_64-libwebp` is a hard build dependency for
   WebP. Both lossy VP8 — used by the BBC, Wikipedia thumbnails,
   and most modern CDNs — and lossless VP8L decode in-tree via
-  `src/image_webp.c`; no gdk-pixbuf loader or `loaders.cache`
-  registration is involved.
+  `src/image_webp.c` (animated WebP too); no gdk-pixbuf loader or
+  `loaders.cache` registration is involved.
 
 ## Build
 
@@ -89,18 +97,27 @@ meson compile -C builddir
 The QuickJS JS engine (forked from
 [quickjs-ng](https://github.com/quickjs-ng/quickjs)) and the lexbor
 HTML / WHATWG-URL parser are both vendored in-tree at
-`src/quickjs/` and `src/lexbor/` respectively, so the first
-`meson setup` no longer touches the network for either of them. The
-only remaining source subproject is Wuffs (image decoders), shipped
-as a single-file release under `subprojects/wuffs/`.
+`src/quickjs/` and `src/lexbor/` respectively, and Wuffs and pl_mpeg
+ship as single-file sources under `subprojects/`. The first
+`meson setup` still needs the network for two subprojects: it clones
+ns-pango (the text-shaping Pango fork) with git, and downloads the
+pinned wgpu-native MinGW release for WebGPU
+(`subprojects/wgpu-native-windows-x86_64-gnu.wrap`), which is linked
+statically.
 
 Build artifacts:
 
 - `builddir/src/gtk/nordstjernen.exe` — the main binary (the thin GTK
-  shell; ~15 MB).
+  shell).
 - `builddir/src/nordstjernen-renderer.exe` — the out-of-process,
   sandboxed renderer the shell spawns per tab. Ship it next to
   `nordstjernen.exe` (the packaging scripts do).
+- `builddir/src/nordstjernen-audio.exe` — the SDL2 audio helper.
+- `builddir/src/nordstjernen-video.exe` — the MSE video helper (built
+  with libav).
+- `builddir/src/nordstjernen-launcher.exe` — the small Win32 launcher
+  that `scripts/pack-windows.sh` installs as the bundle's
+  `nordstjernen.exe`.
 - `builddir/src/quickjs/libqjs.a`
 - `builddir/src/lexbor/liblexbor_static.a`
 
@@ -128,7 +145,8 @@ folder that runs on a Windows machine with no MSYS2 install. It:
 
 1. Copies a tiny Win32 launcher as `nordstjernen.exe`, copies the
    real GTK shell as `app/nordstjernen-ui.exe`, copies
-   `app/nordstjernen-renderer.exe`, and transitively resolves every
+   `app/nordstjernen-renderer.exe` (and `app/nordstjernen-audio.exe`
+   when built), and transitively resolves every
    imported DLL via `objdump -p`, pulling each one from `/mingw64/bin/`
    into `app/` (system DLLs like `KERNEL32.dll` are skipped because
    they aren't found there).
@@ -156,15 +174,9 @@ Run it from the MINGW64 shell:
 ```
 
 The script builds (or reuses) a separate `builddir-release/`
-tree configured with `--buildtype=release`, so `NDEBUG` is
-defined when QuickJS and friends compile. That matters because
-quickjs-ng v0.14.0 has an unconditional `assert(list_empty(&rt->gc_obj_list))`
-in `JS_FreeRuntime` (`quickjs.c:2323`) that fires on any leaked
-JS object at context-teardown time — which is easy to hit when
-real-world JS-heavy pages (e.g., DuckDuckGo) navigate while
-event handlers / in-flight `fetch()` promises still hold
-JSValues. Production builds need that assertion compiled out;
-debugging the actual leak is a separate task.
+tree configured with `--buildtype=release` (set `BUILDDIR` to package
+another tree), and refuses to package a tree that is not a release
+build or that carries debug info or sanitizers.
 
 Typical output: 77 DLLs, ~86 MB. The bundle is portable — extract
 the whole `nordstjernen-win64` folder to another Windows box and
@@ -175,7 +187,8 @@ an "Extract All" message instead of failing with Windows'
 `0xC0000135` missing-DLL status.
 
 The bundle is intentionally *not* code-signed. Authenticode signing
-is a separate, manual step (see Phase 11 / Distribution).
+is a separate, manual step; the MSIX path avoids it, because the
+Microsoft Store signs the package (see `windows-store.md`).
 `scripts/pack-windows-installer.sh` (below) wraps this bundle in a proper
 `.exe` installer with shortcuts and an uninstaller.
 
@@ -238,7 +251,7 @@ testing and for unattended deployment:
 
 ```sh
 # Silent install to a custom path
-./dist/nordstjernen-1.0.30-win64-setup.exe /S /D=C:\Tools\Nordstjernen
+./dist/nordstjernen-<version>-win64-setup.exe /S /D=C:\Tools\Nordstjernen
 
 # Silent uninstall
 "%LOCALAPPDATA%\Programs\Nordstjernen\uninstall.exe" /S
@@ -288,7 +301,7 @@ using `data/msix/AppxManifest.xml.in` and tile assets rendered from
 the SVG logo. The Store policy situation (an independent engine
 conflicts with policy 10.2.1), the manifest decisions, identity
 overrides, local sideload testing, and the full submission
-procedure are documented in `docs/windows-store.md`.
+procedure are documented in `windows-store.md`.
 
 ## CA bundle (what `app/etc/ssl/certs/ca-bundle.crt` is)
 
@@ -308,10 +321,10 @@ the Mozilla NSS / `certdata.txt` curated root list — the same
 source Firefox uses. We bundle it because:
 
 - **Windows itself stores roots in the registry (the Windows
-  Certificate Store), not as a PEM file**, and the mingw build
-  of libcurl + OpenSSL we link against does not consult that
-  store. Without the bundled file, libcurl has nowhere to find
-  trusted anchors and refuses every HTTPS fetch.
+  Certificate Store), not as a PEM file.** On Windows the browser
+  also sets `CURLSSLOPT_NATIVE_CA`, asking libcurl to consult that
+  store, but the bundled file keeps a known root set available
+  regardless of what the store holds.
 - The mingw libcurl is compiled with a default CA path of
   `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt`. That path
   only exists on a machine with MSYS2 installed; on a fresh
@@ -322,10 +335,13 @@ source Firefox uses. We bundle it because:
 
 1. `$CURL_CA_BUNDLE` env var, if set and the path exists.
 2. `$SSL_CERT_FILE` env var, same condition.
-3. On Windows: `<exe_dir>/etc/ssl/certs/ca-bundle.crt`, then
-   `<exe_dir>/ssl/certs/ca-bundle.crt`, then
-   `<exe_dir>/ca-bundle.crt`, then `<exe_dir>/cert.pem`. In the
-   redistributable bundle, `<exe_dir>` is `app/`.
+3. Beside the executable: `<exe_dir>/etc/ssl/certs/ca-bundle.crt`,
+   then `<exe_dir>/ssl/certs/ca-bundle.crt`, then
+   `<exe_dir>/ca-bundle.crt`, then `<exe_dir>/cert.pem` (plus a few
+   Homebrew-style `../etc/...` paths). In the redistributable bundle,
+   `<exe_dir>` is `app/`.
+4. On Windows: the MSYS2 install paths
+   (`C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` and friends).
 
 If found, the resolved path is applied to every `curl_easy`
 handle via `CURLOPT_CAINFO` before `curl_easy_perform`. The
@@ -335,17 +351,22 @@ process. The UI exe also exports `CURL_CA_BUNDLE` /
 but those are redundant now that the binary self-resolves; they
 only matter for third-party tooling that spawns from the same env.
 
-On Linux / macOS the env-var path applies; otherwise libcurl's
-own system-default resolution wins (`/etc/ssl/certs/...` and
-friends). Those distros maintain CA stores out of the box,
-so we don't ship a bundled copy there.
+On Linux, the BSDs and macOS the same function falls back to the
+well-known system bundle paths (`/etc/ssl/certs/ca-certificates.crt`,
+`/etc/pki/tls/certs/ca-bundle.crt`, the Homebrew `cert.pem`, …).
+Those systems maintain CA stores out of the box, so we don't ship a
+bundled copy there.
 
 ## Known Windows-specific differences
 
-- **No Landlock sandbox.** `src/security.c` guards the Landlock
-  syscalls behind `#ifdef __linux__`; on Windows the sandbox init
-  is a no-op. The intentional analogue (AppContainer / Job Object)
-  is not yet implemented.
+- **No Landlock / seccomp sandbox.** `src/security.c` compiles the
+  Landlock and seccomp code only on Linux. On Windows it applies
+  process mitigation policies instead
+  (`ns_security_win32_mitigations_init`: forced ASLR relocation,
+  strict handle checks, extension-point DLLs disabled, no remote or
+  low-integrity image loads, and no child-process creation in the
+  renderer); `NS_NO_WIN32_MITIGATIONS=1` skips them. An AppContainer /
+  Job Object sandbox is not implemented.
 - **Drops Administrator rights.** Elevation is detected via
   `CheckTokenMembership` against the builtin Administrators SID
   (`src/security.c::ns_security_refuse_root`). Instead of the Linux
@@ -366,9 +387,9 @@ so we don't ship a bundled copy there.
   dbus binary not found` warning at startup when no
   `dbus-daemon.exe` is on `PATH`. We intentionally don't ship
   D-Bus — none of the browser's surface uses it on Windows; the
-  warning is benign noise. `main.c` installs a
-  `g_log_set_writer_func` that filters this specific message
-  through `g_log_writer_default`; every other warning still
+  warning is benign noise. `src/gtk/appmain.c` installs a
+  `g_log_set_writer_func` writer that drops this message (and a few
+  other known-benign GTK messages); every other warning still
   prints.
 
 ## Troubleshooting
