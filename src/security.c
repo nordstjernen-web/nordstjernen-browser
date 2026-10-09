@@ -231,12 +231,20 @@ ns_win_relaunch_deelevated(void)
 }
 #endif
 
+#if defined(NS_HAVE_SECCOMP) && (defined(__x86_64__) || defined(__aarch64__))
+#define NS_SECCOMP_FILTER_ARGS 1
+#endif
+
+#ifdef NS_SECCOMP_FILTER_ARGS
 static gboolean ns_seccomp_unix_sockets = TRUE;
+#endif
 
 void
 ns_security_seccomp_deny_unix_sockets(void)
 {
+#ifdef NS_SECCOMP_FILTER_ARGS
     ns_seccomp_unix_sockets = FALSE;
+#endif
 }
 
 gboolean
@@ -874,10 +882,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "write",
     "writev",
 };
-
-#if defined(__x86_64__) || defined(__aarch64__)
-#define NS_SECCOMP_FILTER_ARGS 1
-#endif
 
 static void
 ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
