@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* An absolutely positioned element sized by `top` and `bottom` (or
+  `inset: 0`) with an auto height now gives its children a definite
+  height when it is a flex container, so `flex: 1` columns and
+  `height: 100%` children inside it fill it instead of growing to their
+  content.
 * Inline SVG `<foreignObject>` renders its HTML content: the subtree is
   laid out at the element's width and painted inside the SVG's
   transforms, clip and mask. Masks also resolve ids defined in another

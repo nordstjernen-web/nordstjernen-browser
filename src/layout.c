@@ -16617,6 +16617,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             stretched_h = h;
         }
         if (stretched_h >= 0) {
+            abox->definite_height = stretched_h;
             layout_box(abox, layout_w, cs);
             abox->content_height = stretched_h;
         }
