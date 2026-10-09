@@ -58,6 +58,7 @@ void ns_proc_view_exit_fullscreen(NsProcView *view);
 gboolean    ns_proc_view_can_back(NsProcView *view);
 gboolean    ns_proc_view_can_forward(NsProcView *view);
 const char *ns_proc_view_url(NsProcView *view);
+const char *ns_proc_view_display_url(NsProcView *view);
 const char *ns_proc_view_title(NsProcView *view);
 gboolean    ns_proc_view_is_loading(NsProcView *view);
 
