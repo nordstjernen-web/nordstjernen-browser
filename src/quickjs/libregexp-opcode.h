@@ -43,9 +43,9 @@ DEF(split_next_first, 5)
 DEF(match, 1)
 DEF(lookahead_match, 1)
 DEF(negative_lookahead_match, 1) /* must come after */
-DEF(save_start, 2) /* save start position */
-DEF(save_end, 2) /* save end position, must come after saved_start */
-DEF(save_reset, 3) /* reset save positions */
+DEF(save_start, 3) /* save start position */
+DEF(save_end, 3) /* save end position, must come after saved_start */
+DEF(save_reset, 5) /* reset save positions */
 DEF(loop, 6) /* decrement the top the stack and goto if != 0 */
 DEF(loop_split_goto_first, 10) /* loop and then split */
 DEF(loop_split_next_first, 10)
