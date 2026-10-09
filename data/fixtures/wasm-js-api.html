@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WebAssembly JS API and ImageData</title></head>
+<body>
+<h1>WebAssembly JS API and ImageData</h1>
+<ul id="out"></ul>
+<script>
+function check(name, fn) {
+  var li = document.createElement('li');
+  var result;
+  try { result = fn(); } catch (e) { result = 'threw ' + (e && e.name) + ': ' + (e && e.message); }
+  li.textContent = name + ': ' + result;
+  document.getElementById('out').appendChild(li);
+}
+
+var bytes = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+  0x01, 0x0a, 0x02, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x00, 0x00,
+  0x02, 0x1a, 0x02,
+  0x03, 0x65, 0x6e, 0x76, 0x07, 0x74, 0x68, 0x72, 0x6f, 0x77, 0x65, 0x72, 0x00, 0x01,
+  0x03, 0x65, 0x6e, 0x76, 0x04, 0x62, 0x6f, 0x6f, 0x6d, 0x00, 0x01,
+  0x03, 0x04, 0x03, 0x00, 0x01, 0x01,
+  0x05, 0x03, 0x01, 0x00, 0x01,
+  0x07, 0x24, 0x04,
+  0x03, 0x61, 0x64, 0x64, 0x00, 0x02,
+  0x09, 0x63, 0x61, 0x6c, 0x6c, 0x74, 0x68, 0x72, 0x6f, 0x77, 0x00, 0x03,
+  0x08, 0x63, 0x61, 0x6c, 0x6c, 0x62, 0x6f, 0x6f, 0x6d, 0x00, 0x04,
+  0x03, 0x6d, 0x65, 0x6d, 0x02, 0x00,
+  0x0a, 0x13, 0x03,
+  0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b,
+  0x04, 0x00, 0x10, 0x00, 0x0b,
+  0x04, 0x00, 0x10, 0x01, 0x0b
+]);
+
+var boomError = new Error('boom');
+var caughtInside = 'nothing';
+var exports = null;
+var imports = {
+  env: {
+    thrower: function () {
+      try { exports.callboom(); } catch (e) { caughtInside = e === boomError ? 'same error' : 'other ' + e; }
+    },
+    boom: function () { throw boomError; }
+  }
+};
+
+check('module validates', function () { return WebAssembly.validate(bytes); });
+var instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), imports);
+exports = instance.exports;
+check('add(2, 40)', function () { return exports.add(2, 40); });
+check('nested call exception reaches the inner JS caller', function () {
+  exports.callthrow();
+  return caughtInside;
+});
+check('exception from an import reaches the outer caller', function () {
+  try { exports.callboom(); return 'not thrown'; } catch (e) { return e === boomError ? 'same error' : 'other'; }
+});
+check('memory buffer is shared with the instance', function () {
+  var view = new Uint8Array(exports.mem.buffer);
+  view[10] = 7;
+  return exports.mem.buffer.byteLength + ' bytes, byte 10 = ' + new Uint8Array(exports.mem.buffer)[10];
+});
+
+check('new ImageData(width, height)', function () {
+  var d = new ImageData(3, 2);
+  return d.width + 'x' + d.height + ' len ' + d.data.length + ' ' + (d instanceof ImageData);
+});
+check('new ImageData(data, width) keeps the array', function () {
+  var px = new Uint8ClampedArray(16);
+  var d = new ImageData(px, 2);
+  return d.width + 'x' + d.height + ' same=' + (d.data === px) + ' ' + d.colorSpace;
+});
+check('new ImageData(data, width, wrong height)', function () {
+  new ImageData(new Uint8ClampedArray(16), 2, 3);
+  return 'no error';
+});
+check('new ImageData(data, width not dividing length)', function () {
+  new ImageData(new Uint8ClampedArray(12), 2);
+  return 'no error';
+});
+check('putImageData draws the array', function () {
+  var canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = 1;
+  var ctx = canvas.getContext('2d');
+  var px = new Uint8ClampedArray([200, 10, 20, 255, 5, 6, 7, 255]);
+  ctx.putImageData(new ImageData(px, 2, 1), 0, 0);
+  var back = ctx.getImageData(0, 0, 2, 1);
+  return Array.prototype.join.call(back.data, ',') + ' ' + (back instanceof ImageData);
+});
+</script>
+</body>
+</html>

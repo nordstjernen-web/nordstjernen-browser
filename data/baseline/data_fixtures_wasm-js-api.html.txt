@@ -1,0 +1,11 @@
+WebAssembly JS API and ImageData
+module validates: true
+add(2, 40): 42
+nested call exception reaches the inner JS caller: same error
+exception from an import reaches the outer caller: same error
+memory buffer is shared with the instance: 65536 bytes, byte 10 = 7
+new ImageData(width, height): 3x2 len 24 true
+new ImageData(data, width) keeps the array: 2x2 same=true srgb
+new ImageData(data, width, wrong height): threw IndexSizeError: The input data byte length is not equal to (4 * width * height).
+new ImageData(data, width not dividing length): threw IndexSizeError: The input data byte length is not a multiple of (4 * width).
+putImageData draws the array: 200,10,20,255,5,6,7,255 true
