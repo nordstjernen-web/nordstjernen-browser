@@ -381,6 +381,26 @@ Optionally use the `lld` linker for faster final links
 `meson compile -C builddir` in one shot — use it instead of typing
 the two commands separately.
 
+### Security fixes across editions
+
+[Northstar](https://github.com/nordstjernen-web/northstar-browser) and
+[Southstar](https://github.com/nordstjernen-web/southstar-browser) share
+most of this engine, so a memory-safety or denial-of-service fix here
+usually applies there as well. Give every such commit a trailer naming
+the bug, and name the source commit when porting one:
+
+```
+Security-Fix: css-grid-auto-repeat-overread
+Ported-From: nordstjernen-web/northstar-browser@<full sha>
+```
+
+Put both lines in the final trailer block, next to `Co-Authored-By`,
+and keep the slug when porting so the same bug carries the same name in
+every tree. `git log --format=%B | sed -n 's/^Security-Fix: //p' | sort -u`
+lists a tree's fixes; a slug that one edition has and another lacks is
+a fix still to check there. Port only commits whose author the
+destination's provenance rules allow (Northstar's `AGENTS.md`).
+
 ### WPT scoreboard
 
 `docs/wpt-scores.md` tracks web-platform-tests scores over time and
