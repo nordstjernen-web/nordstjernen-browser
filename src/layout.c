@@ -3772,17 +3772,17 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 g_string_append(ctx->out, " (no file chosen)");
             }
         } else if (type && g_ascii_strcasecmp(type, "color") == 0) {
-            const char *v = ns_element_get_attr(n, "value");
+            const char *v = ns_input_used_value(n);
+            if (!v || !*v) v = ns_element_get_attr(n, "value");
             const char *hex = v && *v ? v : "#000000";
             gsize start = ctx->out->len;
             g_string_append(ctx->out, "\xc2\xa0");
             gsize swatch_start = ctx->out->len;
-            g_string_append(ctx->out, "\xe2\x96\xa0");
+            for (int i = 0; i < 7; i++)
+                g_string_append(ctx->out, "\xc2\xa0");
             gsize swatch_end = ctx->out->len;
             g_string_append(ctx->out, "\xc2\xa0");
-            g_string_append(ctx->out, hex);
-            g_string_append(ctx->out, "\xc2\xa0");
-            emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD, start, ctx->out->len, n, ctx->styles);
+            emit_form_attr_sized(ctx->attrs, NS_INLINE_BUTTON, start, ctx->out->len, n, ctx->styles);
             guint8 r8 = 0, g8 = 0, b8 = 0;
             if (hex[0] == '#' && strlen(hex) >= 7) {
                 unsigned int rv, gv, bv;
@@ -3790,29 +3790,30 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                     r8 = (guint8)rv; g8 = (guint8)gv; b8 = (guint8)bv;
                 }
             }
-            emit_color_attr(ctx->attrs, swatch_start, swatch_end, r8, g8, b8, 255);
+            ns_inline_attr swatch = {
+                .kind = NS_INLINE_BG_COLOR,
+                .start = swatch_start, .len = swatch_end - swatch_start,
+                .r = r8, .g = g8, .b = b8, .a = 255,
+            };
+            g_array_append_val(ctx->attrs, swatch);
         } else if (type && (g_ascii_strcasecmp(type, "range") == 0)) {
-            const char *v = ns_element_get_attr(n, "value");
+            const char *v = ns_input_used_value(n);
+            if (!v || !*v) v = ns_element_get_attr(n, "value");
             const char *mn = ns_element_get_attr(n, "min");
             const char *mx = ns_element_get_attr(n, "max");
-            double vv = v && *v ? g_ascii_strtod(v, NULL) : 50;
             double mnv = mn && *mn ? g_ascii_strtod(mn, NULL) : 0;
             double mxv = mx && *mx ? g_ascii_strtod(mx, NULL) : 100;
             if (mxv <= mnv) mxv = mnv + 1;
+            double vv = v && *v ? g_ascii_strtod(v, NULL)
+                                : mnv + (mxv - mnv) / 2;
             double frac = (vv - mnv) / (mxv - mnv);
             if (frac < 0) frac = 0;
             if (frac > 1) frac = 1;
-            int knob_at = (int)(frac * 10 + 0.5);
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, "\xc2\xa0");
-            for (int i = 0; i <= 10; i++) {
-                if (i == knob_at)
-                    g_string_append(ctx->out, "\xe2\x97\x8f");
-                else
-                    g_string_append(ctx->out, "\xe2\x94\x80");
-            }
-            g_string_append_printf(ctx->out, " %g\xc2\xa0", vv);
-            emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD, start, ctx->out->len, n, ctx->styles);
+            g_string_append(ctx->out, "\xef\xbf\xbc");
+            emit_form_attr_sized(ctx->attrs, NS_INLINE_RANGE, start, ctx->out->len, n, ctx->styles);
+            g_array_index(ctx->attrs, ns_inline_attr,
+                          ctx->attrs->len - 1).font_size_px = frac;
         } else if (type && (g_ascii_strcasecmp(type, "date") == 0 ||
                             g_ascii_strcasecmp(type, "datetime-local") == 0 ||
                             g_ascii_strcasecmp(type, "time") == 0 ||
@@ -6499,18 +6500,40 @@ ns_inline_toggle_geometry(const ns_inline_attr *r, double *side,
     return TRUE;
 }
 
+gboolean
+ns_inline_range_geometry(const ns_inline_attr *r, const ns_box *box,
+                         double *w, double *h, double margins[4])
+{
+    if (r->kind != NS_INLINE_RANGE) return FALSE;
+    double css_w = inline_attr_control_width(r, box);
+    *w = css_w > 0 ? css_w : 129;
+    *h = r->box_h > 0 ? r->box_h : 16;
+    static const ns_css_prop sides[4] = {
+        NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_RIGHT,
+        NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_LEFT,
+    };
+    for (int i = 0; i < 4; i++)
+        margins[i] = r->style ? length_or(r->style->values[sides[i]], 2) : 2;
+    return TRUE;
+}
+
 static void
 inline_apply_toggle_shapes(NsPangoAttrList *list, const ns_box *box)
 {
     if (!box->attrs) return;
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
-        double side, m[4];
-        if (!ns_inline_toggle_geometry(r, &side, m) || r->len == 0) continue;
-        double w = MAX(0, m[3] + side + m[1]);
-        double h = MAX(0, m[0] + side + m[2]);
+        double side, m[4], ww, hh;
+        if (r->len == 0) continue;
+        if (ns_inline_toggle_geometry(r, &side, m)) {
+            ww = hh = side;
+        } else if (!ns_inline_range_geometry(r, box, &ww, &hh, m)) {
+            continue;
+        }
+        double w = MAX(0, m[3] + ww + m[1]);
+        double h = MAX(0, m[0] + hh + m[2]);
         NsPangoRectangle rect = {
-            0, (int)(-(m[0] + side) * NS_PANGO_SCALE),
+            0, (int)(-(m[0] + hh) * NS_PANGO_SCALE),
             (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE)
         };
         NsPangoAttribute *attr = ns_pango_attr_shape_new(&rect, &rect);
@@ -6630,6 +6653,7 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
             &g_array_index(box->attrs, ns_inline_attr, i);
         gboolean toggle = r->kind == NS_INLINE_CHECKBOX ||
                           r->kind == NS_INLINE_CHECKBOX_CHECKED ||
+                          r->kind == NS_INLINE_RANGE ||
                           r->kind == NS_INLINE_RADIO ||
                           r->kind == NS_INLINE_RADIO_CHECKED;
         if ((r->kind == NS_INLINE_SPACER || toggle) && r->len > 0)
@@ -6859,6 +6883,7 @@ inline_attr_cacheable_kind(ns_inline_attr_kind k)
     case NS_INLINE_RADIO_CHECKED:
     case NS_INLINE_PROGRESS:
     case NS_INLINE_METER:
+    case NS_INLINE_RANGE:
     case NS_INLINE_CARET:
     case NS_INLINE_SELECTION:
         return FALSE;
@@ -7352,6 +7377,7 @@ inline_attr_is_form_hit(ns_inline_attr_kind k)
 {
     return k == NS_INLINE_INPUT_FIELD ||
            k == NS_INLINE_INPUT_FIELD_FOCUSED ||
+           k == NS_INLINE_RANGE ||
            k == NS_INLINE_BUTTON ||
            k == NS_INLINE_CHECKBOX ||
            k == NS_INLINE_CHECKBOX_CHECKED ||
@@ -7503,6 +7529,7 @@ inline_attr_can_fragment(ns_inline_attr_kind k)
     case NS_INLINE_RADIO_CHECKED:
     case NS_INLINE_PROGRESS:
     case NS_INLINE_METER:
+    case NS_INLINE_RANGE:
     case NS_INLINE_CARET:
     case NS_INLINE_SELECTION:
         return FALSE;
