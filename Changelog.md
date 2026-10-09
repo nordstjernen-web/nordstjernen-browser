@@ -3,6 +3,10 @@ Changelog:
 
 1.0.31:
 ======
+* Content of a scrolled element is no longer culled from painting as if
+  it were still at its unscrolled position. Anything more than a screen
+  below the top of a scroll container's content disappeared once
+  scrolled into view, while it could still be clicked.
 * A scroll container that gets its height by being stretched (an
   absolutely positioned box with `top`/`bottom` set, or a row flex item
   stretched to its line) can scroll through all of its content. Its
