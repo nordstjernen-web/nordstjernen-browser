@@ -8156,11 +8156,40 @@ box_border_rect(const ns_box *b, double *bx, double *by, double *bw, double *bh)
 }
 
 static gboolean
+style_keyword_set(const ns_style *s, ns_css_prop prop, const char *neutral)
+{
+    const ns_css_value *v = s->values[prop];
+    if (!v) return FALSE;
+    if (v->kind != NS_CSS_V_KEYWORD) return TRUE;
+    return v->u.keyword && g_ascii_strcasecmp(v->u.keyword, neutral) != 0;
+}
+
+static gboolean
+box_flattens_3d(const ns_box *b)
+{
+    const ns_style *s = b->style;
+    if (box_opacity(b) < 1.0) return TRUE;
+    const char *ovs = ns_style_keyword(s, NS_CSS_OVERFLOW);
+    const char *ovx = ns_style_keyword(s, NS_CSS_OVERFLOW_X);
+    const char *ovy = ns_style_keyword(s, NS_CSS_OVERFLOW_Y);
+    if (!ovx) ovx = ovs;
+    if (!ovy) ovy = ovs;
+    if ((overflow_kw_clips(ovx) && g_ascii_strcasecmp(ovx, "clip") != 0) ||
+        (overflow_kw_clips(ovy) && g_ascii_strcasecmp(ovy, "clip") != 0))
+        return TRUE;
+    return style_keyword_set(s, NS_CSS_FILTER, "none") ||
+           style_keyword_set(s, NS_CSS_CLIP_PATH, "none") ||
+           style_keyword_set(s, NS_CSS_MASK_IMAGE, "none") ||
+           style_keyword_set(s, NS_CSS_MIX_BLEND_MODE, "normal");
+}
+
+static gboolean
 box_preserve3d(const ns_box *b)
 {
     if (!b->style || !b->style->values[NS_CSS_TRANSFORM_STYLE]) return FALSE;
     const char *kw = ns_style_keyword(b->style, NS_CSS_TRANSFORM_STYLE);
-    return kw && strcmp(kw, "preserve-3d") == 0;
+    if (!kw || strcmp(kw, "preserve-3d") != 0) return FALSE;
+    return !box_flattens_3d(b);
 }
 
 static double

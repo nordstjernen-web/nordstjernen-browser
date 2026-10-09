@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* `transform-style: preserve-3d` is treated as `flat` on elements whose
+  opacity, overflow, filter, clip-path, mask or blend mode force
+  flattening, as CSS Transforms specifies. Such elements used to go
+  through the 3D path, which ignored their opacity and transform;
+  Discord's user panel drew the hidden username on top of "Online".
 * Content of a scrolled element is no longer culled from painting as if
   it were still at its unscrolled position. Anything more than a screen
   below the top of a scroll container's content disappeared once
