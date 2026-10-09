@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* JPEGs with 16-bit quantization tables decode. The vendored Wuffs
+  decoder refused them as "unsupported precision", although the samples
+  are 8-bit and only the table entries are wide; Photoshop writes such
+  files, and the three.js MilkyWay skybox is one, so pages using it
+  rejected their textures and drew nothing behind the scene.
 * `<input type=range>` is drawn as a slider (a track filled up to the
   value and a round thumb, in `accent-color`) instead of a boxed row of
   dashes with the number printed after it, and clicking or dragging it
