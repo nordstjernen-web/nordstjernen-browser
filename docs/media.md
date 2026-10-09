@@ -1,11 +1,12 @@
 # Media: video and audio
 
 How Nordstjernen plays `<video>` and `<audio>`. The engine ships a tiny,
-in-tree decoder set plus one optional WebM extension; anything else renders
-a poster and a play overlay.
+in-tree decoder set plus one FFmpeg-backed WebM extension; anything else
+renders a poster and a play overlay.
 
-The video process handles video, the audio process handles audio 
-and the html process renders html.
+Three processes share the work: the sandboxed renderer parses and paints the
+page, the `nordstjernen-audio` helper plays sound, and (for MSE streams) the
+`nordstjernen-video` helper decodes video frames.
 
 ## Inline video
 
@@ -51,7 +52,7 @@ How libav is obtained differs by platform, to keep it redistributable:
   no licensing obligation falls on the package.
 - **macOS / Windows** vendor a **minimal, LGPL-only FFmpeg** built from source
   (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
-  the native VP8/VP9/Opus/Vorbis decoders — no GPL parts, no external codec
+  the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
   libraries.
 - **Android / iOS** do not cross-build FFmpeg, so the inline libav WebM path is
   unavailable there.
@@ -66,9 +67,10 @@ the MPEG-1/MP2 track, [minimp3](https://github.com/lieff/minimp3) (CC0, vendored
 for standalone `.mp3` files, and libav for Opus/Vorbis (WebM/Ogg) — and plays it
 through [SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
 CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling the streams
-itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/`stop`
-ride the renderer→shell render channel, and looping re-syncs the audio at each
-wrap.
+itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/
+`stop`/`loop`/`volume` commands ride the render response's `X-Audio`
+side-channel to the shell, which spawns and pumps the helper
+(`src/gtk/procview.c`), and looping re-syncs the audio at each wrap.
 
 ## Captions and subtitles (`<track>`)
 
@@ -106,7 +108,7 @@ over the same renderer→shell media channel with
 `video open`/`reload`/`play`/`pause`/`seek`/`stop` lines, plus a
 `video rect` line carrying the on-page rectangle of the `<video>` box captured
 at paint time. The helper decodes with libav on its own presentation clock and
-writes BGRA frames into a shared-memory ring (`/nsvid-<pid>-<n>`, three slots);
+writes BGRA frames into a shared-memory ring (`/nsvid-<pid>-<n>`, eight slots);
 the UI shell maps the ring and **composites the newest frame over the page
 surface** on every widget frame tick.
 
@@ -114,7 +116,7 @@ This decouples video from page rendering: a page repaint is only needed when
 the page itself changes, while video advances at full rate in the compositor —
 so large players no longer force full-page repaints per frame, decode jank
 never blocks the renderer main loop, and attacker-controlled codec bytes are
-parsed in a small self-sandboxed process (Landlock on Linux) that can reach
+parsed in a small self-sandboxed process (Landlock + seccomp on Linux) that can reach
 only its shm ring and temp files. The helper is optional: it is built when
 libav is available — including on Windows, where the shared-memory ring is a
 named file mapping (`CreateFileMapping`/`MapViewOfFile`) rather than POSIX
@@ -141,8 +143,8 @@ the source URL inside the sandboxed renderer process (`ns_browser_media_at`),
 and the renderer's HTTP protocol reports it to whoever drives the renderer —
 the C embedding API and the Java binding can hand it to an external player of
 their own. The GTK shell itself does not launch an external player; the
-`.deb` and `.rpm` packages still `Recommend` one (`mpv`) for opening such
-URLs by hand.
+`.deb` and `.rpm` packages still recommend one (`mpv`, or `ffmpeg` as the
+`.deb` alternative) for opening such URLs by hand.
 
 Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
 with no plain file URL; those play inline through the video helper described

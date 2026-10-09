@@ -141,8 +141,8 @@ for proxied requests.
 
 ## Limitations
 
-- WebSocket connections (`ws://`, `wss://`) use the same libcurl
-  config and are tunneled through the same proxy.
+- WebSocket (`ws://`, `wss://`) and Server-Sent Events connections
+  apply the same proxy settings and are tunneled through the same proxy.
 - PAC (proxy auto-config) scripts are not interpreted. Resolve to a
   concrete proxy URL manually.
 - The `no_proxy` list is matched by libcurl exactly the way curl's

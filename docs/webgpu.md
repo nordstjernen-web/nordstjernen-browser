@@ -14,7 +14,7 @@ order:
 2. `-Dwgpu_native_root=/path/to/extracted/release` (expects
    `lib/libwgpu_native.{so,a,dylib}`), which the Linux packaging scripts use to
    bundle the shared library (`scripts/fetch-wgpu-native.sh`);
-3. on glibc Linux, macOS (x86_64/aarch64) and Windows x86_64 (MinGW), the
+3. on glibc Linux and macOS (x86_64/aarch64) and Windows x86_64 (MinGW), the
    pinned release downloaded by `subprojects/wgpu-native-<platform>.wrap` and
    linked **statically**, so no extra shared library ships beside the binary.
 
@@ -33,8 +33,8 @@ files and `scripts/fetch-wgpu-native.sh`, and rebuild.
 
 In a build that contains WebGPU, the API is **available by default**.
 `navigator.gpu.requestAdapter()` resolves to `null` only when WebGPU is
-switched off on `about:settings` (the `webgpu` config key, on by default;
-the change applies to pages loaded afterwards). Even then it can be turned
+switched off on `about:settings` (saved as the `webgpu` config key, on by
+default; the change applies to pages loaded afterwards). Even then it can be turned
 on for one run by:
 
 - starting the browser with the **`--enable-webgpu`** command-line flag, or
@@ -71,8 +71,8 @@ a working **render-to-canvas** path:
 - `GPUCommandEncoder` — `beginRenderPass()` (color attachment `view`,
   `loadOp`/`storeOp`, `clearValue`), `finish()`.
 - `GPURenderPassEncoder` — `end()`, `setPipeline()`, `setVertexBuffer()`,
-  `setIndexBuffer()`, `draw()`, `drawIndexed()`. (`setBindGroup`,
-  `setViewport`, `setScissorRect` are accepted as no-ops for now.)
+  `setIndexBuffer()`, `draw()`, `drawIndexed()` (see below for
+  `setBindGroup`, `setViewport` and `setScissorRect`).
 - `GPUCommandBuffer`.
 - `GPUShaderModule` — `device.createShaderModule({ code })` compiles WGSL
   via wgpu-native's `naga`; `getCompilationInfo()`.
@@ -81,7 +81,6 @@ a working **render-to-canvas** path:
   `arrayStride`/`stepMode`/`attributes[{format, offset, shaderLocation}]`),
   a `fragment` stage (`module`, `entryPoint`, `targets[{format}]`), and
   `primitive.topology`.
-
 - `GPUBindGroupLayout` / `GPUPipelineLayout` / `GPUBindGroup` — buffer
   (uniform/storage), sampler, and texture-view bindings; `setBindGroup`;
   `pipeline.getBindGroupLayout()`.
@@ -203,8 +202,9 @@ skipped.
   when no GPU is present.
 - wgpu-native is, by a wide margin, the largest dependency the project can
   pull in (tens of MB, plus a Rust toolchain to build from source) and is
-  not auditable by a single maintainer. This is the core reason it stays
-  opt-in and out of the default build.
+  not auditable by a single maintainer. This is why it is never vendored
+  (only its headers are), is fetched as a pinned release, and can be switched
+  off at runtime in Settings or dropped at build time with `-Dwebgpu=disabled`.
 - Real (hardware) GPU backends need device access and a large driver attack
   surface that the sandboxed renderer otherwise denies; running WebGPU
   against a hardware backend inside the sandbox is an open design question

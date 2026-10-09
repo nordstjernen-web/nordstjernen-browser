@@ -9,11 +9,12 @@ meson setup builddir -Dhttp_backend=curl      # explicit curl
 meson setup builddir -Dhttp_backend=nghttp2   # in-tree nghttp2 client
 ```
 
-Selecting `nghttp2` additionally needs the libnghttp2 and brotli-decoder
-development packages (Debian/Ubuntu `libnghttp2-dev libbrotli-dev`,
-Fedora/RHEL `libnghttp2-devel brotli-devel`); OpenSSL and zlib are already
-required by the default build. brotli is optional — without it the nghttp2
-backend simply advertises `gzip, deflate`.
+Selecting `nghttp2` additionally needs the libnghttp2 development package,
+plus optionally the brotli-decoder and zstd ones (Debian/Ubuntu
+`libnghttp2-dev libbrotli-dev libzstd-dev`, Fedora/RHEL
+`libnghttp2-devel brotli-devel libzstd-devel`); OpenSSL and zlib are already
+required by the default build. brotli and zstd are each optional — without
+them the nghttp2 backend simply advertises `gzip, deflate`.
 
 libnghttp2 1.60.0 introduced `nghttp2_ssize` and a set of `…2` entry points
 that replace the deprecated `ssize_t`-based ones. `src/net_http2.c` defines
@@ -72,7 +73,7 @@ the curl path just lets curl orchestrate them.
 
 ## The nghttp2 backend (`-Dhttp_backend=nghttp2`)
 
-`src/net_http2.c` (~2300 lines) implements the same `ns_hop_transport()`
+`src/net_http2.c` (~2700 lines) implements the same `ns_hop_transport()`
 seam from scratch for one hop:
 
 1. `getaddrinfo` for DNS, then a non-blocking `connect()` with a deadline and
@@ -85,7 +86,7 @@ seam from scratch for one hop:
 3. **libnghttp2** for HTTP/2 when ALPN selects `h2`; otherwise a compact
    HTTP/1.1 client (Content-Length, chunked, and read-to-close), which also
    serves plaintext `http://`.
-4. gzip / deflate (zlib), brotli and zstd response decompression, streamed
+4. gzip / deflate (zlib), brotli and zstd (each when built in) response decompression, streamed
    into the same budget-enforced body sink the curl path uses.
 5. Cookies through the shared jar (`ns_net_cookies_for_request()` for the
    request, `ns_net_store_set_cookie()` for `Set-Cookie`), and per-hop
