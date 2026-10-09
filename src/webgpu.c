@@ -535,7 +535,11 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     if (!JS_IsException(abuf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
-        if (base) { bytes = base + view_off; byte_len = view_len; }
+        if (base && view_off <= total) {
+            size_t avail = total - view_off;
+            bytes = base + view_off;
+            byte_len = view_len < avail ? view_len : avail;
+        }
         JS_FreeValue(ctx, abuf);
     } else {
         JS_FreeValue(ctx, abuf);
@@ -600,27 +604,29 @@ wg_queue_submit(JSContext *ctx, JSValueConst this_val,
     if (len == 0) return JS_UNDEFINED;
     if (len > 4096) len = 4096;
 
+    JSValue *vals = g_new0(JSValue, len);
+    for (uint32_t i = 0; i < len; i++)
+        vals[i] = JS_GetPropertyUint32(ctx, argv[0], i);
+
     WGPUCommandBuffer *cmds = g_new0(WGPUCommandBuffer, len);
-    wg_hold hold = { ctx, NULL };
+    GPtrArray *consumed = g_ptr_array_new();
     uint32_t n = 0;
     gboolean invalid = FALSE;
-    GPtrArray *consumed = g_ptr_array_new();
     for (uint32_t i = 0; i < len; i++) {
-        JSValue e = JS_GetPropertyUint32(ctx, argv[0], i);
-        ns_wg_cmdbuf *cb = wg_hold_opaque(&hold, e, g_cmdbuf_class);
-        if (cb && cb->cmd) {
-            cmds[n++] = cb->cmd;
-            g_ptr_array_add(consumed, cb);
-        } else {
-            invalid = TRUE;
-        }
-        JS_FreeValue(ctx, e);
+        ns_wg_cmdbuf *cb = JS_GetOpaque(vals[i], g_cmdbuf_class);
+        if (!cb || !cb->cmd) { invalid = TRUE; continue; }
+        gboolean dup = FALSE;
+        for (guint k = 0; k < consumed->len && !dup; k++)
+            dup = g_ptr_array_index(consumed, k) == cb;
+        if (dup) { invalid = TRUE; continue; }
+        cmds[n++] = cb->cmd;
+        g_ptr_array_add(consumed, cb);
     }
     if (invalid) {
         if (q->sink)
             wg_report_error(q->sink, WGPUErrorType_Validation,
-                            "queue.submit: a command buffer is invalid or was "
-                            "already submitted");
+                            "queue.submit: a command buffer is invalid, was "
+                            "already submitted, or appears more than once");
     } else if (n > 0) {
         wgpuQueueSubmit(q->queue, n, cmds);
         wg_mark_canvases_pending();
@@ -631,7 +637,8 @@ wg_queue_submit(JSContext *ctx, JSValueConst this_val,
         }
     }
     g_ptr_array_free(consumed, TRUE);
-    wg_hold_release(&hold);
+    for (uint32_t i = 0; i < len; i++) JS_FreeValue(ctx, vals[i]);
+    g_free(vals);
     g_free(cmds);
     return JS_UNDEFINED;
 }
@@ -3626,7 +3633,11 @@ wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
     if (!JS_IsException(abuf)) {
         size_t total = 0;
         uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
-        if (base) { bytes = base + view_off; byte_len = view_len; }
+        if (base && view_off <= total) {
+            size_t avail = total - view_off;
+            bytes = base + view_off;
+            byte_len = view_len < avail ? view_len : avail;
+        }
         JS_FreeValue(ctx, abuf);
     } else {
         JS_FreeValue(ctx, abuf);
