@@ -931,6 +931,12 @@ ns_box_free(ns_box *box)
             g_free(cur->media->video_src);
             g_free(cur->media->video_poster);
             g_free(cur->media->video_audio_src);
+            if (cur->media->svg_foreign) {
+                for (guint i = 0; i < cur->media->svg_foreign->len; i++)
+                    g_ptr_array_add(stack,
+                        g_ptr_array_index(cur->media->svg_foreign, i));
+                g_ptr_array_free(cur->media->svg_foreign, TRUE);
+            }
             g_free(cur->media);
         }
         if (g_box_pool_n < (int)G_N_ELEMENTS(g_box_pool))
@@ -5381,6 +5387,97 @@ layout_flat_parent(const ns_node *n)
 }
 
 static ns_box *build_block_impl(const ns_node *n, GHashTable *styles);
+static void apply_position_offsets(ns_box *box, double parent_w,
+                                   double parent_h);
+static void process_absolute_boxes(ns_box *root, GHashTable *styles,
+                                   double viewport_width);
+static void compute_paint_bounds(ns_box *b);
+
+static double
+svg_foreign_width(const ns_node *fo, double fallback)
+{
+    const char *a = ns_element_get_attr(fo, "width");
+    if (!a || !*a || strchr(a, '%')) return fallback;
+    char *end = NULL;
+    double v = g_ascii_strtod(a, &end);
+    return end != a && v > 0 ? v : fallback;
+}
+
+static ns_box *
+layout_svg_foreign_object(const ns_node *fo, GHashTable *styles, double width)
+{
+    GArray *saved_pending = g_abs_pending;
+    GHashTable *saved_seen = g_abs_seen;
+    GHashTable *saved_ph_set = g_abs_ph_set;
+    GHashTable *saved_static = g_abs_static;
+    gboolean saved_force = g_abs_force_build;
+    g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
+    g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_abs_static = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                         NULL, g_free);
+    g_abs_force_build = FALSE;
+
+    ns_box *root = box_new(NS_BOX_BLOCK);
+    root->dom = fo;
+    for (const ns_node *c = fo->first_child; c; c = c->next_sibling) {
+        const ns_style *cs = c->kind == NS_NODE_ELEMENT
+            ? g_hash_table_lookup(styles, c) : NULL;
+        if (style_is_contents(cs)) {
+            append_display_contents_children(root, c, styles, FALSE, NULL);
+            continue;
+        }
+        ns_box *child = build_block(c, styles);
+        if (child) box_append_child(root, child);
+    }
+    root->x = 0;
+    root->y = 0;
+    layout_block(root, width, NULL);
+    apply_position_offsets(root, width, root->content_height);
+    process_absolute_boxes(root, styles, width);
+    ns_paint_sync_inline_atomic_offsets(root);
+    compute_paint_bounds(root);
+
+    g_array_free(g_abs_pending, TRUE);
+    g_hash_table_destroy(g_abs_seen);
+    g_hash_table_destroy(g_abs_ph_set);
+    g_hash_table_destroy(g_abs_static);
+    g_abs_pending = saved_pending;
+    g_abs_seen = saved_seen;
+    g_abs_ph_set = saved_ph_set;
+    g_abs_static = saved_static;
+    g_abs_force_build = saved_force;
+    return root;
+}
+
+static void
+collect_svg_foreign_objects(ns_box *svg_box, const ns_node *n,
+                            GHashTable *styles, double fallback_width)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs && style_is_none(cs)) continue;
+        if (strcmp(c->name, "foreignObject") == 0) {
+            if (!g_abs_pending) continue;
+            ns_box_media *m = ns_box_media_ensure(svg_box);
+            if (!m->svg_foreign) m->svg_foreign = g_ptr_array_new();
+            g_ptr_array_add(m->svg_foreign,
+                layout_svg_foreign_object(c, styles,
+                    svg_foreign_width(c, fallback_width)));
+            continue;
+        }
+        collect_svg_foreign_objects(svg_box, c, styles, fallback_width);
+    }
+}
+
+static void
+build_svg_foreign_objects(ns_box *svg_box, const ns_node *svg,
+                          GHashTable *styles, double width)
+{
+    if (!styles) return;
+    collect_svg_foreign_objects(svg_box, svg, styles, width > 0 ? width : 300);
+}
 
 static ns_box *
 build_block(const ns_node *n, GHashTable *styles)
@@ -5870,6 +5967,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         box->content_width  = w;
         box->content_height = h;
         m->declared_image_size = w > 0 && h > 0;
+        build_svg_foreign_objects(box, n, styles, w);
         return box;
     }
 
@@ -15310,8 +15408,6 @@ apply_inline_relative_offsets(ns_box *box, double cb_w, double cb_h)
     g_hash_table_destroy(set.index);
 }
 
-static void apply_position_offsets(ns_box *box, double parent_w,
-                                   double parent_h);
 
 /* Inline-level atomic boxes (images, inline blocks) hang off the text box
    of their line; their containing block is that box's parent, whose
@@ -16689,6 +16785,9 @@ collect_images_walk(const ns_box *b, GPtrArray *out)
         for (guint i = 0; i < b->inline_atomics->len; i++)
             collect_images_walk(
                 g_array_index(b->inline_atomics, ns_inline_atomic, i).box, out);
+    if (b->media && b->media->svg_foreign)
+        for (guint i = 0; i < b->media->svg_foreign->len; i++)
+            collect_images_walk(g_ptr_array_index(b->media->svg_foreign, i), out);
 }
 
 static void

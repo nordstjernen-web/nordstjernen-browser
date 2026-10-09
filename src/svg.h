@@ -40,6 +40,12 @@ const ns_node *ns_svg_document_root(const ns_node *doc);
 
 void ns_svg_intrinsic_size(const ns_node *svg, ns_svg_size *out);
 
+typedef void (*ns_svg_foreign_painter)(cairo_t *cr, const ns_node *fo,
+                                       double width, double height,
+                                       void *user_data);
+void ns_svg_set_foreign_painter(ns_svg_foreign_painter painter,
+                                void *user_data);
+
 void ns_svg_render_node(cairo_t          *cr,
                         const ns_node    *svg,
                         double            width,
