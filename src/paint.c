@@ -1316,8 +1316,8 @@ conic_color_at(const ns_css_gradient *gr, double frac,
                double *r, double *g, double *b, double *a)
 {
     double pos = frac + gr->from_deg / 360.0;
-    while (pos < 0) pos += 1.0;
-    while (pos >= 1.0) pos -= 1.0;
+    pos -= floor(pos);
+    if (!(pos >= 0.0 && pos < 1.0)) pos = 0.0;
     if (gr->repeating) {
         double cper = gr->stops[gr->n_stops - 1].pos;
         if (cper > 0) pos = fmod(pos, cper);
