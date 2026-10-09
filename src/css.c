@@ -33931,9 +33931,9 @@ ns_css_style_element_cache_begin(void)
         g_hash_table_remove_all(g_style_el_cache);
     ns_merged_style_cache_trim(g_merged_style_pass_start);
     g_merged_style_pass_start = g_merged_style_cache_clock;
-    if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 256)
+    if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 4096)
         g_hash_table_remove_all(g_link_sheet_cache);
-    if (g_import_sheet_cache && g_hash_table_size(g_import_sheet_cache) > 256)
+    if (g_import_sheet_cache && g_hash_table_size(g_import_sheet_cache) > 4096)
         g_hash_table_remove_all(g_import_sheet_cache);
 }
 
