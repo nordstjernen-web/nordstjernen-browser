@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* Inline SVG `<foreignObject>` renders its HTML content: the subtree is
+  laid out at the element's width and painted inside the SVG's
+  transforms, clip and mask. Masks also resolve ids defined in another
+  `<svg>` of the document and honour `maskContentUnits="objectBoundingBox"`.
+  Discord's avatars and server icons, which are images inside masked
+  `foreignObject`s, now show up with their round shape and status cut-out.
 * Typed arrays and other ECMAScript built-ins no longer get an own
   `Symbol.toStringTag` data property. The interface-tagging pass meant for
   DOM interfaces also tagged `Uint8Array.prototype` and its siblings,
