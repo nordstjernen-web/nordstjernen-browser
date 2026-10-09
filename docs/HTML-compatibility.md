@@ -16,7 +16,10 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-07-08 (rev 35).
+Snapshot: **1.0.16**, 2026-07-08 (rev 35). Function names and the
+WebGPU, audio, JavaScript-engine, CSS-animation, `color-mix()`,
+`@property` and `--act` notes were re-checked against the 1.0.31-dev
+source.
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
 implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
@@ -48,7 +51,7 @@ implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
 Nordstjernen has a single renderer architecture. The GTK app
 is a thin shell (`src/gtk/procview.c`) that spawns
 one sandboxed `nordstjernen-renderer` process per tab
-(`src/renderer_http.c`, `src/renderer_serve.c`) and drive it over a control channel +
+(`src/renderer_http.c`, `src/renderer_serve.c`) and drives it over a control channel +
 shared-memory framebuffer (`src/rproc_http.c`). The engine
 (`src/css.c`, `src/layout.c`, `src/js.c`, `src/dom.c`, `src/paint.c`,
 `src/net.c`, images) runs entirely inside the sandboxed child (Linux
@@ -94,7 +97,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | WHATWG URL parsing & serialisation | ✅ | lexbor URL module via `ns_url_resolve`, `ns_url_parts_new`, `ns_url_host_from`, `ns_url_origin_from` in `src/net.c` |
 | IDN / Punycode | ✅ | handled inside the lexbor URL module |
 | Origin & same-origin/same-site | ✅ | `ns_url_same_origin`, `ns_url_is_same_site` (`src/net.c`) |
-| Character encodings → UTF-8 | ✅ | uchardet detection in `ns_html_decode_body` (`src/html.c`), `g_convert` to UTF-8, Latin-1 last-resort |
+| Character encodings → UTF-8 | ✅ | uchardet detection in `ns_html_decode_body_full` (`src/html.c`), `g_convert` to UTF-8, Latin-1 last-resort |
 | Content-type sniffing | 🟡 | charset sniffing delegated to uchardet; no full MIME sniffing standard |
 | Reflected content attributes / IDL | ✅ | typed reflection in `src/js.c`: string, URL (resolved to absolute), boolean (presence), `long`/`unsigned long` with defaults and spec clamping (e.g. `colSpan` → [1,1000], `rowSpan` → [0,65534]), numeric `progress`/`meter` range getters (`value`/`max`/`position`, `min`/`low`/`high`/`optimum`), and **enumerated** attributes canonicalised to known keywords with missing-/invalid-value defaults (`type`, `loading`, `decoding`, `method`, `crossOrigin`, `referrerPolicy`, `draggable` true/false/auto) |
 | Microsyntaxes (numbers, dates/times, colours, tokens) | 🟡 | integer/non-negative-integer parsing drives reflection; date/month/week/time/local-date-time parsing & serialisation back the form `valueAsNumber`/`valueAsDate` APIs (`src/js.c`); the legacy-colour-value algorithm drives presentational hints (`bgcolor`/`text`/`<font color>`, `parse_legacy_color` in `src/css.c`); space/comma-separated tokens handled |
@@ -177,7 +180,7 @@ elements (`head title meta link style script noscript template`) to
 | Element | Status | Notes |
 |---------|:--:|------|
 | `img` | ✅ | layout + decode pipeline |
-| `img srcset` / `sizes` | ✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density. `HTMLImageElement.currentSrc` reflects the actually-selected source (resolved to an absolute URL via the shared `ns_img_chosen_url` so it always matches the image the engine renders, including `<picture>` selection) |
+| `img srcset` / `sizes` | ✅ | descriptor parsing and selection (`srcset_parse` / `srcset_select` in `src/layout.c`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density. `HTMLImageElement.currentSrc` reflects the actually-selected source (resolved to an absolute URL via the shared `ns_img_chosen_url` so it always matches the image the engine renders, including `<picture>` selection) |
 | `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
 | `img loading="lazy"` | ✅ | fetch/decode deferred until the image scrolls near the viewport (`src/engine.c`) |
 | Decode pipeline | ✅/🟡 | ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG) → WebP via libwebp (lossy VP8 + lossless VP8L + animated via `WebPAnimDecoder`, `src/image_webp.c`) → AVIF via libavif (`src/image_avif.c`, if built). SVG renders in-engine (`src/svg.c`). Nothing follows: an unsupported format fails to decode |
@@ -185,7 +188,7 @@ elements (`head title meta link style script noscript template`) to
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
 | `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and VP9/VP8 WebM (`.webm`, with FFmpeg libav), honouring `autoplay`/`loop`/`muted`/`poster`, play/pause, seeking, volume, `played` and timed events. `MediaSource`/`SourceBuffer` streams use the same standards path: YouTube- and Vimeo-style WebM segments are accumulated in the renderer, video is decoded in `nordstjernen-video`, audio in `nordstjernen-audio`, and old prefix segments are evicted when the page calls `SourceBuffer.remove()`. `SourceBuffer.buffered` exposes the retained demux timestamp range after eviction. Unsupported codecs retain the poster + play overlay. See [media.md](media.md) |
-| `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) play via the unsandboxed `nordstjernen-audio` helper; other codecs hand the source URL to the system media player. See [media.md](media.md) |
+| `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) play via the unsandboxed `nordstjernen-audio` helper; for other codecs a click resolves the media URL and reports it over the renderer protocol for an embedder — the GTK shell launches no external player. See [media.md](media.md) |
 | `track` (captions) | 🟡 | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path. **Rendered**: a `<track default>` whose `kind` is `subtitles`/`captions` (the missing-value default) is fetched, its WebVTT parsed into timed cues (`ns_vtt_parse` in `src/video.c` — `[HH:]MM:SS.mmm` timings, cue-setting/identifier/`NOTE` skipping, `<…>` tag and entity stripping), and the cue active at the video's current time is painted as centred captions over the bottom of the inline video (`paint_video_caption` in `src/paint.c`). Only the `default` track auto-shows (per the spec's initial mode); JS `TextTrack.mode` switching and cue positioning settings (`line`/`position`/`align`) are not wired |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
 | `img ismap` (server-side image maps) | ✅ | clicking an `<img ismap>` nested in an `<a href>` appends the click position relative to the image's top-left corner as a `?x,y` suffix to the link URL before navigating (GUI path in `src/libnordstjernen.c`, headless click path in `src/headless.c`); coordinates are clamped to non-negative |
@@ -244,7 +247,7 @@ validation.
 
 | Element | Status | Notes |
 |---------|:--:|------|
-| `details` / `summary` | ✅ | UA-styled disclosure widget with a marker; the `<summary>`'s **activation behavior** toggles its parent `<details>` across every click path — scripted `summary.click()` (the activation behavior in `ns_element_click_default_action`), the renderer/GUI pointer-click path (`ns_js_activate_summary` in `ns_browser_release_click`, honouring `preventDefault()`), and the `open` IDL/attribute setters. Each toggle dispatches the spec's `ToggleEvent` pair — a `beforetoggle` then a `toggle`, carrying `oldState`/`newState` ∈ `"open"`/`"closed"` (`ns_js_details_toggle_open`); opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule; fragment/hash navigation into skipped details content sets `open` before scrolling. CSS open/close *animation* (`::details-content`/`interpolate-size`) is not supported — a rendering nicety, not part of the element's behaviour |
+| `details` / `summary` | ✅ | UA-styled disclosure widget with a marker; the `<summary>`'s **activation behavior** toggles its parent `<details>` across every click path — scripted `summary.click()` (the activation behavior in `ns_element_activation_behavior`), the renderer/GUI pointer-click path (`ns_js_activate_summary` in `ns_browser_release_click`, honouring `preventDefault()`), and the `open` IDL/attribute setters. Each toggle dispatches the spec's `ToggleEvent` pair — a `beforetoggle` then a `toggle`, carrying `oldState`/`newState` ∈ `"open"`/`"closed"` (`ns_js_details_toggle_open`); opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule; fragment/hash navigation into skipped details content sets `open` before scrolling. CSS open/close *animation* (`::details-content`/`interpolate-size`) is not supported — a rendering nicety, not part of the element's behaviour |
 | `dialog` | ✅ | `open`/`show()`/`showModal()`/`close(result)` and `returnValue` implemented (`src/js.c`); `method="dialog"` forms close the dialog with the submitter's value; `requestClose(returnValue?)` (and an Escape press on the topmost open modal) fires a cancelable `cancel` event and, if not prevented, closes the dialog and fires `close` — matching the spec's close-watcher semantics. `showModal()` now puts the dialog in the top layer (painted on top of an author `::backdrop` fill, `src/paint.c`), moves focus to its `autofocus`/first focusable descendant, traps focus by making the rest of the document inert, and restores focus to the opener on close |
 | `popover` attribute | 🟡 | open/closed state, `showPopover`/`hidePopover`/`togglePopover`, `popovertarget` activation, and target/action reflection; open/close transitions dispatch the spec `ToggleEvent` pair — a `beforetoggle` (cancelable on open, so `preventDefault()` keeps the popover closed) then a `toggle`, each with `oldState`/`newState`; limited top-layer behaviour |
 
@@ -255,13 +258,13 @@ validation.
 | `script` inline / external | ✅ | `ns_js_run_scripts_in_doc` (`src/js.c`); `script.text` returns/sets the child text content per spec |
 | `async` / `defer` | ✅ | `defer` delays to end of parse |
 | `type="module"` / `nomodule` | 🟡 | modules detected and run; full module graph/`import` resolution limited |
-| Engine | ✅ | QuickJS-ng (in-tree, **interpreter only, no JIT** — W^X holds); ≈ES2020+; per-call eval budget plus a 60 s absolute execution monitor that halts a runaway page (armed on the outermost JS entry, enforced in the interrupt callback — `src/js.c`) |
+| Engine | ✅ | QuickJS-ng (in-tree, **interpreter only, no JIT** — W^X holds); ES2023+ (see [quickjs-libjs-compare.md](quickjs-libjs-compare.md)); per-call eval budget plus a 60 s absolute execution monitor that halts a runaway page (armed on the outermost JS entry, enforced in the interrupt callback — `src/js.c`) |
 | `noscript` | ✅ | `display:none` when JS enabled |
 | `template` (`.content`) | ✅ | `template.content` is a `DocumentFragment` (snapshot clone of the parsed children); descendants of a `<template>` are hidden from the document's tree-walk: `document.querySelectorAll`, `getElementsByTagName`/`ClassName`/`Name`, `getElementById`, the CSS selector engine, and the id/class/tag indexes all stop at a `<template>` and don't descend into its children. The child accessors on the template element — `firstChild`, `lastChild`, `firstElementChild`, `lastElementChild`, `children`, `childNodes`, `childElementCount`, `hasChildNodes()` — all report empty/null, matching the spec model where template content lives in the content fragment rather than as children of the template element. Only `template.content`-rooted queries see the parsed nodes |
 | `slot` / shadow projection | 🟡 | `attachShadow` + slot assignment (bounded) |
 | `canvas` 2D context | ✅ | full Cairo-backed `CanvasRenderingContext2D` (paths, text, `drawImage`, gradients/patterns, `get/putImageData`, compositing, shadows) |
 | `canvas` WebGL / WebGL2 context | 🟡 | `getContext("webgl"/"webgl2")` maps a pragmatic WebGL 1 / 2 core directly onto OpenGL ES via the toolkit-independent GL context + libepoxy (`src/webgl.c`). Enabled by default, globally switchable in Settings, and announced in the status bar when used. The supported extension set is deliberately small; data-transfer entry points are bounds-checked and zero-initialised. See [`docs/webgl.md`](webgl.md) |
-| `canvas` WebGPU context | 🟡 | experimental, off at runtime by default. Built whenever wgpu-native is present (the `webgpu` feature is `auto`) and enabled at runtime with `--enable-webgpu` (or `NS_WEBGPU_ALLOW=1`); `navigator.gpu` + `getContext("webgpu")` cover most of the **render and compute** path: WGSL shaders (naga), bind groups / uniforms / samplers / textures (incl. `copyExternalImageToTexture`), render & depth pipelines, MSAA, **compute pipelines** + storage buffers, and texture-to-canvas output — enough that **three.js's `WebGPURenderer` renders on it**, including GPU-compute examples (`webgpu_compute_birds`). Real timestamp queries, storage textures, and some PBR feature paths remain. See [`docs/webgpu.md`](webgpu.md) |
+| `canvas` WebGPU context | 🟡 | experimental, on at runtime by default (switchable in Settings; `--enable-webgpu` / `NS_WEBGPU_ALLOW=1` force it on). Built over wgpu-native — required on glibc Linux, macOS and Windows, optional elsewhere; `navigator.gpu` + `getContext("webgpu")` cover most of the **render and compute** path: WGSL shaders (naga), bind groups / uniforms / samplers / textures (incl. `copyExternalImageToTexture`), render & depth pipelines, MSAA, **compute pipelines** + storage buffers, and texture-to-canvas output — enough that **three.js's `WebGPURenderer` renders on it**, including GPU-compute examples (`webgpu_compute_birds`). Real timestamp queries, storage textures, and some PBR feature paths remain. See [`docs/webgpu.md`](webgpu.md) |
 | `OffscreenCanvas` | 🟡 | constructs; no worker thread |
 
 ## §4.13 Custom elements
@@ -349,7 +352,7 @@ surface).
 | `crypto.subtle` (Web Cryptography) | ✅ | full SubtleCrypto over OpenSSL libcrypto (`src/webcrypto.c`): `digest`, `generateKey`, `importKey`, `exportKey`, `sign`, `verify`, `encrypt`, `decrypt`, `deriveBits`, `deriveKey`. Algorithms: HMAC; AES-GCM/CBC/CTR; RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP; ECDSA and ECDH on P-256/384/521; PBKDF2; HKDF. Key formats `raw`/`jwk`/`spki`/`pkcs8`; ECDSA uses the raw r‖s signature encoding. Verified against NIST AES-GCM, RFC 6070 PBKDF2 and RFC 5869 HKDF vectors |
 | `structuredClone` (§2.7) | ✅ | true serialize/deserialize in `src/js.c`: cycles & shared references, `Map`/`Set`/`Date`/`RegExp`, `ArrayBuffer`/typed arrays/`DataView`, `Blob`/`File`, `Error` subtypes (name/message/stack), `undefined`; `DataCloneError` for functions/symbols. `structuredClone` itself does not honour a transfer list, but `Worker.postMessage(value, [buffers])` **does** transfer `ArrayBuffer`s — the bytes are serialized to the receiver and the source buffers are detached (a non-transferable entry throws `DataCloneError`). |
 | `document.implementation.createHTMLDocument(title?)` | ✅ | builds a real inert HTML document (`<html><head><title></head><body>`) via the HTML parser and exposes the document factory methods (`createElement`/`createElementNS`/`createTextNode`/`createComment`/`createDocumentFragment`/`importNode`/`adoptNode`) plus `documentElement`/`head`/`body`/`title` (`ns_impl_create_html_document` in `src/js.c`). Nodes it creates are real and adoptable into the main document, which is what jQuery's `$.parseHTML` / `buildFragment` use to parse markup off-document |
-| `DOMParser` / `XMLSerializer` | ✅ | The returned `Document` carries the live spec accessors — `documentElement`, `body`, `head`, `title`, `nodeType` (`= 9`) — populated by `ns_attach_document_view` (`src/js.c`); `text/html` parses through the full HTML document parser (auto-wraps `<html><head><body>`); MIME types with `xml` or `svg` parse through the fragment parser so the supplied root (e.g. `<svg>`) becomes `documentElement` rather than being wrapped; malformed XML input yields a document whose root is a `<parsererror>` element (the contract `jQuery.parseXML` relies on to throw) |
+| `DOMParser` / `XMLSerializer` | ✅ | The returned `Document` carries the live spec accessors — `documentElement`, `body`, `head`, `title`, `nodeType` (`= 9`) — populated in `src/js.c` (`ns_dom_parser_parseFromString`); `text/html` parses through the full HTML document parser (auto-wraps `<html><head><body>`); MIME types with `xml` or `svg` parse through the fragment parser so the supplied root (e.g. `<svg>`) becomes `documentElement` rather than being wrapped; malformed XML input yields a document whose root is a `<parsererror>` element (the contract `jQuery.parseXML` relies on to throw) |
 | `fetch` / `Response` body | ✅ | binary-safe: response bytes are attached as an `ArrayBuffer` on `_bodyBuffer` and the body consumers (`text` / `json` / `blob` / `arrayBuffer` / `bytes` / `formData`) read from it through `TextDecoder` / `Uint8Array`, so non-UTF-8 bytes survive round-tripping (PNG, MP4, etc.) instead of being mangled by JS-string conversion |
 | `Response.body` / `Request.body` (`ReadableStream`) | ✅ | `body` is a readable stream: `getReader()` yields the bytes as a single `Uint8Array` chunk then closes, and `body.pipeThrough(new DecompressionStream(...))` works. A `Request`/`Response` can also be **constructed from** a `ReadableStream` body — the consumers (`text`/`arrayBuffer`/…) drain it. Bodyless requests report `body === null`. The stream is single-chunk (not incremental network delivery) and not a real `tee`, so `clone()` of a stream-backed body shares the underlying stream |
 | `Request`/`Response` body extraction + `Content-Type` | ✅ | the `Request`/`Response` constructors serialize every body type and infer the default `Content-Type` (unless one is given): string → `text/plain;charset=UTF-8`; `URLSearchParams` → `application/x-www-form-urlencoded;charset=UTF-8`; `Blob` → its `type`; `FormData` → `multipart/form-data` with a CSPRNG boundary (with per-part `Content-Disposition`/filenames); `ArrayBuffer`/typed array → raw bytes, no type. The serialized bytes are what `text()`/`arrayBuffer()` read and what `fetch()` sends, so both `fetch(url, {body})` **and** `fetch(new Request(url, {body}))` upload attachments and form posts correctly |
@@ -533,11 +536,11 @@ CSS support (abridged):
   and `Q`.
 - ✅ Typography, CSS Color 4 `rgb()`/`hsl()`/`hwb()` space/slash syntax
   plus `lab()`/`lch()`/`oklab()`/`oklch()` conversion to sRGB, and
-  CSS Color 5 `color-mix(in srgb, ...)`,
+  CSS Color 5 `color-mix()` (`srgb` and `oklab`/`oklch` interpolation),
   backgrounds (incl. linear/radial/conic gradients and external
   stylesheet-relative `url(...)` resources),
-  transforms (2D/3D), transitions/animations (`opacity`/`transform`/
-  `color`/`background-color`), inline font/style/stretch ranges measured
+  transforms (2D/3D), transitions/animations (any property whose values
+  interpolate), inline font/style/stretch ranges measured
   for wrapping and line height, `object-fit`, `mask-image`,
   `accent-color`, `caret-color`, `tab-size`, `pointer-events`, custom properties + `calc()` and
   the Values 4 length math subset (`round()`/`mod()`/`rem()`/`abs()`).
@@ -606,7 +609,8 @@ CSS support (abridged):
   (registers custom-property `initial-value` and the `inherits`
   descriptor — registered properties resolve to their initial value
   when unset, and `inherits: false` properties do not inherit from the
-  parent; `syntax` is parsed but not yet type-validated).
+  parent; `syntax` is enforced — see
+  [CSS-compatibility.md](CSS-compatibility.md)).
 - ✅ Logical sizing/spacing aliases and shorthands including
   `margin-inline/block`, `padding-inline/block`, `inset-inline/block`,
   `border-inline/block`, logical border width/style/color pairs, and
@@ -661,9 +665,8 @@ CSS support (abridged):
   formatting controls around the element's content (override LRO/RLO…PDF
   for `bidi-override`; isolates LRI/RLI/FSI…PDI for `isolate`/`plaintext`,
   combined for `isolate-override`; UA rules give `bdo` override and `bdi`
-  isolate) so fribidi performs real UAX#9 isolation/override. The residual
-  gap is exposing the computed *used* direction of `dir=auto` elements to
-  `:dir()`.
+  isolate) so fribidi performs real UAX#9 isolation/override. `dir=auto`
+  directionality also feeds `:dir()` (`ns_css_node_dir` in `src/css.c`).
 - 🟡 Writing modes: `writing-mode` and `text-orientation` are parsed and inherited
   (`ns_css_writing_mode` / `ns_css_text_orientation` in `src/css.c`); a
   block/inline-block container in `vertical-rl` / `vertical-lr` (and the
@@ -702,9 +705,9 @@ These are project non-goals (see `CLAUDE.md` / `README.md`), not
 defects, and will not be added:
 
 - AI-style web APIs. (WebGL is supported and enabled by default; see §4.12 and
-  [`docs/webgl.md`](webgl.md). **WebGPU** is experimental: built over
-  wgpu-native whenever that library is present and enabled at runtime with
-  `--enable-webgpu`; `navigator.gpu` plus a working `getContext("webgpu")`
+  [`docs/webgl.md`](webgl.md). **WebGPU** is experimental, over
+  wgpu-native, and also on at runtime by default (Settings switch,
+  `--enable-webgpu`); `navigator.gpu` plus a working `getContext("webgpu")`
   render/compute path — see [`docs/webgpu.md`](webgpu.md).)
 - Shared Workers and Worklets. (Service Worker `FetchEvent` interception
   of page `fetch()` **is** supported — see §10/§11; what remains is routing
@@ -728,7 +731,7 @@ Ordered by how often they block ordinary browsing:
 1. Remaining row-axis `subgrid` sizing edge cases — concrete parent
    rows are adopted; fully auto-sized parent rows still use the regular
    auto-row path.
-2. Remaining `table-layout` edge cases (advanced auto-layout sizing and shared-edge border collapsing; inter-cell `border-spacing`/`border-collapse` spacing is now honoured).
+2. Remaining `table-layout` edge cases (advanced auto-layout sizing; inter-cell `border-spacing` and collapsed shared-edge borders are now honoured).
 
 (`subgrid`, `multipart/form-data` for `fetch`/`XHR`
 bodies, the Microdata DOM API, table captions with `caption-side`,
@@ -754,11 +757,14 @@ the feature and observing the result. Treat this file as a living map
 and update it whenever behaviour changes.
 
 Interaction can be scripted in headless mode with `--act`, a
-`;`-separated list of `click X,Y`, `drag X,Y X,Y`, `type TEXT`,
-`key NAME`, and `wait N`
-(`Enter`/`Backspace`/`Delete`/`Left`/`Right`/`Up`/`Down`/`Home`/`End`)
-steps run after the page settles, before the dump. `wait` settles the main
-loop for `N` milliseconds. The clicks drive the
+`;`-separated list of steps run after the page settles, before the dump:
+`click X,Y`, `rightclick X,Y`, `hold X,Y MS` (`:active` for `MS`
+milliseconds), `drag X,Y X,Y` (HTML drag-and-drop), `mousedrag X,Y X,Y`,
+`type TEXT`, `key NAME` (`Enter`/`Return`/`Backspace`/`Delete`/`Tab`/
+`Escape`/`Left`/`Right`/`Up`/`Down`/`Home`/`End`), `scroll X,Y`,
+`eval JS`, `evalfile PATH` (results printed as `act-eval:` lines), and
+`wait N`, which settles the main loop for `N` milliseconds. The clicks
+drive the
 real hit-test, focus, checkbox/radio toggling, `<label>`→control
 activation, `<summary>` disclosure of `<details>`, link navigation,
 native HTML drag-and-drop dispatch, and JS `click`/`input`/`change`

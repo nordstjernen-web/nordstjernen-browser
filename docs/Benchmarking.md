@@ -62,6 +62,12 @@ reported. Per phase the driver records `sync` time (the interaction loop) plus
 runner's `measurementMethod = "raf"` measurement. `domNodes` is the live
 element count at the end of the run.
 
+Other environment overrides: `NS_SETTLE` (headless settle budget in ms,
+default 8000), `NS_BIN` (browser binary), `NS_PORT` (local HTTP port,
+default 8123), and `NS_SPEEDOMETER_DIR` (scratch checkout of the
+Speedometer sources). `scripts/speedometer4-bench.sh` is the equivalent
+driver for the Speedometer `main` (4.0-alpha) workloads.
+
 ## What runs
 
 Suites that drive end to end and produce a score in the **official iframe
@@ -184,7 +190,7 @@ suites carry ~7000 static nodes that are re-styled 100 times over.
 A 150-sample gdb profile of the add phase originally attributed ~41% to glibc
 allocator churn (`_int_malloc` / `free` / `malloc_consolidate`) and ~30% to
 GLib hashing behind selector matching, under `cascade_walk` →
-`gather_matches_impl` (`src/css.c`). Two changes cut the allocator churn:
+`gather_matches_impl` (`src/css.c`). These changes cut the allocator churn:
 
 - **Skip empty pseudo-element passes.** `cascade_walk` ran eight pseudo-element
   gather passes (`::before`/`::after`/`::first-letter`/…) per element, each
@@ -301,6 +307,11 @@ remains noisy and should be rechecked with multi-iteration medians before
 treating one run as a regression.
 
 ## Cache inline-SVG textures before the document defs walk (2026-06-26)
+
+(Historical: the `build_box` / `ns_collect_svg_defs` path described here
+was later replaced when SVG moved to the in-engine renderer,
+`src/svg.c`; the measurements still record what the fix bought at the
+time.)
 
 A fresh sampling profile of the `*-Complex-DOM` add phase (the
 `scripts/sample-profile.sh` poor-man's sampler against a long-settle stress
