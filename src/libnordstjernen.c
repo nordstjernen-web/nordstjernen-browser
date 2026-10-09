@@ -111,6 +111,8 @@ struct ns_browser {
     const ns_node  *open_select;
     gboolean        datalist_suppressed;
     const ns_node  *press_node;
+    ns_node        *range_drag;
+    char           *range_drag_start;
     int             press_x;
     int             press_y;
     int             press_mods;
@@ -168,6 +170,10 @@ browser_prune_cached_nodes(ns_browser *browser)
         browser->hover_node = NULL;
     if (browser->open_select && !browser_node_alive(browser, browser->open_select))
         browser->open_select = NULL;
+    if (browser->range_drag && !browser_node_alive(browser, browser->range_drag)) {
+        browser->range_drag = NULL;
+        g_clear_pointer(&browser->range_drag_start, g_free);
+    }
 }
 
 static guint64
@@ -2781,10 +2787,84 @@ browser_copy_text(ns_browser *b)
     return ns_selection_collect_text(b->layout, &b->selection);
 }
 
+static gboolean
+browser_node_is_range(const ns_node *n)
+{
+    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    return type && g_ascii_strcasecmp(type, "range") == 0 &&
+           !ns_element_get_attr(n, "disabled");
+}
+
+static double
+browser_range_attr(const ns_node *n, const char *name, double fallback)
+{
+    const char *v = ns_element_get_attr(n, name);
+    if (!v || !*v) return fallback;
+    char *end = NULL;
+    double d = g_ascii_strtod(v, &end);
+    return end && end != v && isfinite(d) ? d : fallback;
+}
+
+static void
+browser_range_set_from_x(ns_browser *b, ns_node *n, int x)
+{
+    double rx, ry, rw, rh;
+    if (!ns_box_inline_rect_for_dom(b->layout, n, &rx, &ry, &rw, &rh))
+        return;
+    double lo = browser_range_attr(n, "min", 0);
+    double hi = browser_range_attr(n, "max", 100);
+    if (hi < lo) hi = lo;
+    double knob = 16.0;
+    double track = rw - 4.0 - knob;
+    double frac = track > 0 ? ((double)x - (rx + 2.0 + knob / 2.0)) / track
+                            : 0.5;
+    frac = CLAMP(frac, 0.0, 1.0);
+    double v = lo + frac * (hi - lo);
+    const char *step_attr = ns_element_get_attr(n, "step");
+    gboolean any = step_attr && g_ascii_strcasecmp(step_attr, "any") == 0;
+    double step = any ? 0 : browser_range_attr(n, "step", 1);
+    if (step > 0) {
+        v = lo + round((v - lo) / step) * step;
+        while (v > hi + 1e-9) v -= step;
+        if (v < lo) v = lo;
+    }
+    char buf[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd(buf, sizeof buf, "%.10g", v);
+    if (g_strcmp0(ns_node_editable_value(n), buf) == 0) return;
+    ns_node_set_editable_value(n, buf);
+    if (b->js) {
+        ns_js_dispatch_event(b->js, n, "input", NULL);
+        (void)ns_js_consume_mutated(b->js);
+    }
+    b->dirty = TRUE;
+}
+
+static void
+browser_range_drag_end(ns_browser *b)
+{
+    ns_node *n = b->range_drag;
+    b->range_drag = NULL;
+    if (n && b->js &&
+        g_strcmp0(ns_node_editable_value(n), b->range_drag_start) != 0) {
+        ns_js_dispatch_event(b->js, n, "change", NULL);
+        if (ns_js_consume_mutated(b->js)) b->dirty = TRUE;
+    }
+    g_clear_pointer(&b->range_drag_start, g_free);
+}
+
 char *
 ns_browser_select(ns_browser *browser, int kind, int x, int y)
 {
     if (!browser || !browser->layout) return NULL;
+    if (browser->range_drag && kind == 1) {
+        browser_range_set_from_x(browser, browser->range_drag, x);
+        if (browser->dirty) {
+            browser_relayout(browser);
+            browser->dirty = FALSE;
+        }
+        return NULL;
+    }
     ns_node *field = browser_focused_field(browser);
     switch (kind) {
     case 0: ns_selection_anchor_at(&browser->selection, browser->layout,
@@ -2839,6 +2919,14 @@ ns_browser_hover(ns_browser *browser, int x, int y)
     const ns_node *node = browser_hit_node(browser, x, y);
 
     browser_prune_cached_nodes(browser);
+    if (browser->range_drag) {
+        browser_range_set_from_x(browser, browser->range_drag, x);
+        if (browser->dirty) {
+            browser_relayout(browser);
+            browser->dirty = FALSE;
+            return 1;
+        }
+    }
     const ns_node *prev = browser->hover_node;
     gboolean changed = node != prev;
     browser->hover_node = node;
@@ -3509,6 +3597,16 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
+    browser_range_drag_end(browser);
+    const ns_node *range = ns_box_hit_form_dom(browser->layout, (double)x,
+                                               (double)y);
+    if (browser_node_is_range(range)) {
+        browser->range_drag = (ns_node *)range;
+        browser->range_drag_start =
+            g_strdup(ns_node_editable_value(browser->range_drag));
+        browser_range_set_from_x(browser, browser->range_drag, x);
+    }
+
     if (browser->js) {
         if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
@@ -3626,6 +3724,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     gboolean drag_selected = browser->selection_dragged &&
                              ns_selection_has_range(&browser->selection);
     browser->selection_dragged = FALSE;
+    browser_range_drag_end(browser);
 
     gboolean prevented = FALSE;
     if (browser->js && node) {
@@ -4577,6 +4676,7 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);
     g_free(browser->search_query);
+    g_free(browser->range_drag_start);
     g_free(browser->remote_ip);
     if (browser->console_buf) g_string_free(browser->console_buf, TRUE);
     g_free(browser);

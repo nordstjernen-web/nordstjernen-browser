@@ -57,6 +57,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_RADIO_CHECKED,
     NS_INLINE_PROGRESS,
     NS_INLINE_METER,
+    NS_INLINE_RANGE,
     NS_INLINE_FONT_SIZE,
     NS_INLINE_FONT_WEIGHT,
     NS_INLINE_FONT_STRETCH,
@@ -208,6 +209,8 @@ struct _PangoLayout;
 void ns_inline_apply_atomic_shapes(struct _PangoAttrList *list, const ns_box *box);
 gboolean ns_inline_toggle_geometry(const ns_inline_attr *r, double *side,
                                    double margins[4]);
+gboolean ns_inline_range_geometry(const ns_inline_attr *r, const ns_box *box,
+                                  double *w, double *h, double margins[4]);
 void ns_inline_layout_set_attrs(struct _PangoLayout *layout,
                                 struct _PangoAttrList *list, const ns_box *box);
 void ns_inline_offset_at(const ns_box *box, gsize byte, double *dx, double *dy);
