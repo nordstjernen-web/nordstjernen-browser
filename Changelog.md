@@ -58,6 +58,14 @@ Changelog:
   before any command-buffer handle is used, and an invalid,
   already-submitted or repeated command buffer raises a WebGPU validation
   error instead of reaching that path.
+* `GPUBuffer.getMappedRange()` can no longer abort the WebGPU renderer.
+  Calling it on a buffer that is not mapped, with an offset or size that
+  is not correctly aligned (offset a multiple of 8, size a multiple of
+  4), or with a range outside the region the buffer was mapped with
+  handed those arguments straight to a wgpu-native call that aborts the
+  process on the resulting validation error. The arguments are now
+  checked against the buffer's live mapped range and bad input throws an
+  `OperationError` in JavaScript instead.
 * The Linux renderer sandbox no longer lets a compromised renderer talk
   to local services. Landlock does not cover `connect()` on UNIX
   sockets, and the seccomp filter allowed `socket()` of any family, so
