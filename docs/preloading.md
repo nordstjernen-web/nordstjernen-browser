@@ -28,16 +28,20 @@ identity of a fetch:
 GET \x1f <url> \x1f top=<site> \x1f ua=<user-agent> \x1f al=<accept-language> \x1f <header>...
 ```
 
-The `top=…ua=…al=…` segment is produced by `ns_net_partition_key`, the
+The trailing headers are sorted, so the order a caller lists them in does
+not matter. The `top=…ua=…al=…` segment is produced by
+`ns_net_partition_key`, the
 same helper `ns_fetch_sync_hop` uses for the HTTP cache partition, so the
 two can never disagree about what counts as the same request. `<site>` is
-the registrable domain of the top-level document — not the subresource's
-own origin — which is what keeps one site from reading a resource another
-site fetched under its own cookies.
+the registrable domain of the top-level document (its origin when it has
+no registrable domain) — not the subresource's own origin — which is what
+keeps one site from reading a resource another site fetched under its own
+cookies.
 
 The function returns `NULL` — meaning "do not share this fetch with
-anyone" — for anything that is not a bodyless HTTP(S) GET. Requests with
-a body, non-GET methods, and cancellable requests always run alone.
+anyone" — for anything that is not an HTTP(S) GET, and the request
+functions do not compute a key at all for a request with a body or a
+`GCancellable`. Such requests always run alone.
 
 Two requests share bytes only if their keys are byte-identical. A script
 and a stylesheet at the same URL send different `Accept` headers, so they
@@ -67,7 +71,7 @@ can answer does.
 | Preload map | a preload for this exact key already finished | `src/net.c` |
 | In-flight coalescer | a fetch with this exact key is running right now | `src/net.c` |
 | HTTP cache | a fresh entry exists on disk for this partition and this `Vary` variant | `src/cache.c` |
-| Network | otherwise | libcurl |
+| Network | otherwise | the HTTP backend (libcurl, or nghttp2) |
 
 The first two share one mutex (`g_fetch_mutex`) and one decision
 function, `ns_fetch_claim_locked`. That matters: it means a resource is
@@ -90,9 +94,11 @@ preloaded bytes when they exist.
 asynchronous entry point coalesces. A blocking caller that finds a fetch
 already running does not start a second one: `ns_fetch_join_sync`
 registers a stack-allocated waiter on the group and blocks on a
-`GCond` until the leader delivers. All blocking callers run on dedicated
-threads (worker threads, the download thread), never on the GTask pool,
-so a blocked joiner cannot starve the pool that its leader needs.
+`GCond` until the leader delivers. Blocking callers run outside the
+GTask pool (Web Worker threads, the shell's download thread, the
+renderer's main thread), so a blocked joiner cannot starve the pool that
+its leader needs. The one exception is a `view-source:` hop, which fetches
+the inner URL with `ns_net_request_blocking` from inside the pool thread.
 
 Whichever caller creates the group is the *leader* and is responsible for
 delivering to it. `ns_net_request_blocking` delivers even when the fetch
@@ -161,18 +167,20 @@ working.
 `rel=preconnect` and `rel=dns-prefetch` open a connection through
 `ns_net_preconnect_async` and fetch nothing.
 
-Image preloading is a parameter of the scan, not a setting: the only
-caller, `browser_build_from_doc` in `libnordstjernen.c`, passes `include_images = FALSE`, so
-`<img>` is not preloaded today. The branch is kept because the scan is
+Image preloading is a parameter of the scan, not a setting: both callers,
+`browser_build_from_doc` in `libnordstjernen.c` and the headless driver in
+`headless.c`, pass `include_images = FALSE`, so `<img>` is not preloaded
+today. The branch is kept because the scan is
 the right place for it if that changes.
 
 ## Vary and cache variants
 
 `cache.c` stores the response's `Vary` header alongside the entry and
-keys each variant separately. A row's key is
-`SHA256(url + partition + selector)`, where the selector is built from
-the values of the request headers that response's `Vary` names. Every row
-also carries an indexed `base_key` of `SHA256(url + partition)`, so a
+keys each variant separately. Every row carries an indexed `base_key` of
+`SHA256(url + partition)`; a row's own key is that `base_key` when the
+response varies on nothing, and `SHA256(base_key + selector)` otherwise,
+where the selector is built from the values of the request headers that
+response's `Vary` names. A
 lookup enumerates the variants stored for a URL, recomputes each one's
 selector against the current request, and takes the row that matches.
 
@@ -211,7 +219,7 @@ that were expected are stored on completion, so the map never becomes a
 general-purpose second cache. A response is stored only if it is a
 `200`, has a body, carries no `no-store`, and fits the budget:
 
-- at most `NS_PRELOAD_MAX_ENTRIES` (64) entries
+- at most `NS_PRELOAD_MAX_ENTRIES` (512) entries
 - at most `NS_PRELOAD_MAX_BYTES` (16 MiB) of bodies in total
 
 There is no expiry timer. The map is cleared once per top-level
@@ -300,10 +308,12 @@ primitives; HTML's own `rel=preload` section calls the structure a
 
 ## Measuring it
 
-Set `NS_NET_LOG=1` to print every request the network layer issues:
+A headless run with `--debug=net` logs every request the network layer
+completes (status, URL, and size), plus per-origin connection reuse and a
+`[net perf]` summary (see [threading.md](threading.md)):
 
 ```sh
-NS_NET_LOG=1 ./builddir/src/gtk/nordstjernen --headless https://example.com/
+./builddir/src/gtk/nordstjernen --headless --debug=net https://example.com/
 ```
 
 Counting at the origin is the more trustworthy check, since it also

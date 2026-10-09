@@ -1,21 +1,23 @@
 # Tab isolation and renderer boundaries
 
-This note records the current isolation shape in Nordstjernen and the
-next useful implementation steps. The current direction is:
+This note records the current isolation shape in Nordstjernen, how the
+codebase got there, and the next useful steps. Process-per-tab is
+implemented (see *Current state*); what remains is:
 
-- keep using per-tab workers to remove GTK-free work from the UI thread;
-- build snapshot boundaries so the main thread stops walking mutable tab
-  state while painting;
-- treat real security isolation as a later process-per-site renderer
-  boundary, not as something threads can provide.
+- browser-process services for networking, cookies, cache, and storage,
+  so a renderer can be made credential-less;
+- a finer process-per-site boundary;
+- a seccomp profile, or a pre-sandbox zygote, for the shell.
 
 ## Current state
 
 Nordstjernen now runs each tab's engine in **its own sandboxed renderer
 process** (`nordstjernen-renderer`); the GTK shell is a thin
 display/input client. The process-per-tab boundary described later in
-this document is the implemented default — the sections below trace how
-the codebase got there from the original single-process model. An
+this document is the implemented default. The sections from *Per-tab
+worker status* through *Recommended order* were written for the original
+single-process GTK engine and are kept as history; *First implementation
+step* onward describes the process boundary as built. An
 opt-in `--single-process` flag serves every tab from an in-process
 engine over the same IPC protocol, trading the renderer sandbox and
 crash containment for footprint and debuggability; see
@@ -23,7 +25,7 @@ crash containment for footprint and debuggability; see
 
 Engine state is per renderer process:
 
-- parsed DOM (`parsed_doc`), layout tree, computed-style table, scroll,
+- parsed DOM (`ns_browser`'s `doc`), layout tree, computed-style table, scroll,
   focus, history cursor, CSP, image/video cache, and animation state;
 - one QuickJS runtime and context, created by `ns_js_new()` in
   `src/js.c`;
@@ -46,7 +48,6 @@ where it is currently shared:
 
 | Subsystem | Global state | Lock / owner |
 | --- | --- | --- |
-| Disk byte cache | `bytecode_cache.c` `g_mem` | `g_lock` |
 | HTTP cache | `cache.c` SQLite handle | `g_cache_mutex` |
 | History | `history.c` SQLite handle | `g_history_mutex` |
 | Cookies / HSTS / curl share | `net.c` globals | `g_hsts_lock`, curl share locks |
@@ -55,16 +56,24 @@ where it is currently shared:
 | Config | `config.c` `g_cfg` | browser process |
 
 Cookies are partitioned by registrable site, and same-origin, CORS, CSP,
-mixed-content, and SRI checks exist. In the current single address
-space, these are policy boundaries, not memory-safety boundaries.
+mixed-content, and SRI checks exist. Within one renderer process (and
+across all tabs under `--single-process`) these are policy boundaries,
+not memory-safety boundaries.
 
-## Per-tab worker status
+## Per-tab worker status (historical)
 
-The per-tab worker is deliberately serial. That keeps publication order
+This section describes the single-process GTK engine, which ran one
+serial worker thread per tab. The renderer process has no such thread:
+page body decode, HTML parse, and stylesheet parse run on the renderer's
+main thread, and still-image decode runs on the GLib `GTask` pool while
+`async_image_decode` is on (the default); see
+[threading.md](threading.md).
+
+The per-tab worker was deliberately serial. That keeps publication order
 simple, avoids intra-tab worker races, and still lets different tabs
 prepare pages and resources in parallel.
 
-Current worker-owned jobs:
+Worker-owned jobs at the time:
 
 | Work item | State | Main-thread publication |
 | --- | --- | --- |
@@ -85,10 +94,10 @@ Fetch generation checks are now used across page and stylesheet
 publication, including Stop/cancel paths. Old network or worker results
 should not overwrite a newer navigation once `fetch_gen` has advanced.
 
-## What is isolated today
+## What threads isolated (before process-per-tab)
 
-The current architecture gives useful fault containment inside the
-program structure:
+Before the renderer split, the threaded architecture gave useful fault
+containment inside the program structure:
 
 - tab DOMs, style state, JS heaps, scroll/focus state, and resource
   caches are separate objects;
@@ -100,10 +109,11 @@ program structure:
 - existing `fork()` / `socketpair()` patterns in the watchdog and media
   broker show that process machinery is available in the tree.
 
-This is not a renderer sandbox. Any memory-safety bug in the browser
-process can still read or corrupt another tab's DOM, JS heap, cookies,
+That was not a renderer sandbox. Any memory-safety bug in the browser
+process could still read or corrupt another tab's DOM, JS heap, cookies,
 or cache state. Threads improve responsiveness and reduce accidental
-cross-tab coupling, but they do not provide a security boundary.
+cross-tab coupling, but they do not provide a security boundary — which
+is why the engine moved into per-tab renderer processes.
 
 ## Main blockers
 
@@ -142,9 +152,10 @@ general disk state directly. Those capabilities need browser-process
 services and a small IPC protocol before renderer subprocesses can be a
 meaningful sandbox.
 
-The existing WebGL path is an isolation complication because it
-binds GL state to GTK-local process state. Do not expand it while the
-renderer boundary is unsettled; keep it out of any first renderer split.
+WebGL used to complicate the split because it bound GL state to GTK's
+process-local GL context. It now draws through the toolkit-independent
+offscreen context in `src/glctx.c` inside the renderer, which prepares GL
+before sealing its sandbox (`ns_gl_prepare_for_sandbox`).
 
 ## Suggested next steps
 
@@ -186,7 +197,8 @@ renderer boundary is unsettled; keep it out of any first renderer split.
    after input latency, selection, scrolling, and incremental relayout
    still feel correct.
 
-6. Define renderer IPC before adding renderer processes.
+6. Define renderer IPC before adding renderer processes (done — see
+   *First implementation step* below).
 
    Specify the message surface first: navigation commit data,
    subresource requests, response bodies, input, resize, timers, console
@@ -194,7 +206,8 @@ renderer boundary is unsettled; keep it out of any first renderer split.
    Keep cookies, HSTS, HTTP cache, history, downloads, and persistent
    storage in the browser process.
 
-7. Add process-per-site renderers after the IPC boundary is real.
+7. Add process-per-site renderers after the IPC boundary is real
+   (process-per-tab has landed; per-site has not).
 
    Use a forked renderer or zygote model that fits the current no-`execve`
    seccomp shape, then narrow Landlock/seccomp inside each renderer.
@@ -211,8 +224,8 @@ The practical sequence is:
 3. main-thread display-list generation and painting;
 4. Pango measurement service;
 5. inactive-tab worker layout;
-6. renderer IPC protocol;
-7. process-per-site sandboxed renderers.
+6. renderer IPC protocol (done);
+7. process-per-site sandboxed renderers (process-per-tab done).
 
 This keeps each step small enough to verify locally while moving the
 code toward the only true security boundary: a credential-less renderer
@@ -225,10 +238,12 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
 
 - `src/rproc_http.{h,c}` + `src/ipc_http.{h,c}` — the parent/client side: an
   **HTTP/1.1 + JSON control channel plus a shared-memory framebuffer**. Each
-  operation is a `POST` (`/open`, `/render`, `/link`, `/click`, `/key`,
-  `/hover`, `/find`, `/viewport`, `/select`, `/eval`, `/console`, `/media`,
-  `/export`, `/quit`) with a small JSON body and JSON reply; only `/render`
-  touches the shared framebuffer (geometry in `X-*` headers, empty body). The
+  operation is a `POST` (`/open`, `/render`, `/tick`, `/link`, `/click`,
+  `/key`, `/hover`, `/scroll`, `/find`, `/viewport`, `/select`, `/eval`,
+  `/console`, `/media`, `/print`, `/export`, `/quit`, and others) with a
+  small JSON body and JSON reply; only `/render` touches the shared
+  framebuffer (geometry in `X-*` headers; a tiled render lists its tiles
+  in the body, see [Rendering.md](Rendering.md)). The
   framebuffer is passed by descriptor, not by name: Linux backs it with an
   anonymous `memfd_create`, other Unix with an immediately-`shm_unlink`ed
   `shm_open` segment passed over the control socket with `SCM_RIGHTS`; Windows
@@ -246,15 +261,17 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
   `ns_browser_link_at` / …). It links no GUI toolkit.
 - `src/gtk/procview.{h,c}` + `src/gtk/procwindow.{h,c}` — the **GTK** frontend's
   process-per-tab UI, the **only** GTK renderer (the former in-process engine
-  renderer has been removed). `NsProcView` is a `GtkDrawingArea` that blits the
-  renderer framebuffer (cairo), runs `rproc_http` IPC on a per-view worker thread
+  renderer has been removed). `NsProcView` is a `GtkDrawingArea` that shows the
+  renderer's tiles as textures (`src/gtk/pagelayers.c`, or full frames with
+  `NS_TILES=0`), runs `rproc_http` IPC on a per-view worker thread
   (`GAsyncQueue` + `g_idle_add` replies, results guarded by a refcount and a
   closed flag), and handles wheel/keyboard scroll, link clicks, hover, text
   selection, find-in-page, a context menu, the DevTools console, save/export,
   and open-in-new-process-tab; `NsProcWindow` is a `GtkNotebook` of them with a
   toolbar, address entry, app menu, settings, and bookmarks. The proc-mode GTK
-  shell skips its own seccomp/Landlock so it can spawn renderers and create
-  POSIX shm — the sandbox lives in the renderer processes.
+  shell applies Landlock only, no seccomp, so it can spawn renderers and
+  create POSIX shm — the full sandbox lives in the renderer processes (see
+  *Proc-mode security posture* below).
 
 This started as a proof of concept: Linux/macOS use `fork`+`execv`, Windows
 uses `CreateProcess` and inherited pipes. The framebuffer is no longer a
@@ -265,9 +282,9 @@ namespace. The eventual POSIX sandboxed renderer should move to the
 fork/zygote + inherited-mapping shape that fits the no-`execve` seccomp
 policy (step 7); Windows should grow the matching restricted token / Job
 Object / AppContainer shape separately. The control channel
-now has a startup handshake, bounded child teardown, client-side renderer
-restart in the proc view, and a dirty-rect render command that
-repaints only a requested rectangle inside the shared framebuffer. IPC
+now has bounded child teardown, client-side renderer restart in the proc
+view, and tiled rendering, which repaints only the tiles whose pixels
+changed (see [Rendering.md](Rendering.md)). IPC
 reply reads are bounded on Linux/macOS and Windows so a wedged renderer
 becomes a failed request that the client can close or restart, not an
 unbounded browser-side wait. The proc view still uses a synchronous
@@ -275,16 +292,15 @@ request/reply rproc protocol, but it dispatches those calls off the UI
 thread so page load, scroll, resize, and hover paths no longer block on an
 IPC round trip.
 
-The renderer now sandboxes itself. After it maps the framebuffer, initialises
-the engine, and sends `HELLO`, but before it opens any page,
+The renderer now sandboxes itself. After it maps the framebuffer and
+initialises the engine, but before it reads its first request,
 `nordstjernen-renderer` calls `ns_browser_sandbox` (a glib-free entry point on
-`libnordstjernen`) to apply the same Linux Landlock + seccomp confinement the
-GTK browser process uses (Windows process mitigations off Linux; a no-op on
-macOS). Untrusted HTML/CSS/JS is therefore parsed, scripted, laid out, and
+`libnordstjernen`) to apply Linux Landlock + seccomp confinement (a Seatbelt
+profile on macOS, process mitigation policies on Windows). Untrusted HTML/CSS/JS is therefore parsed, scripted, laid out, and
 painted under a loaded syscall filter, with the renderer's filesystem reach
 narrowed to what the engine needs. The `NS_NO_SANDBOX` / `NS_NO_SECCOMP`
 overrides are honoured, and where Landlock is unavailable the call degrades
-gracefully, exactly as in the main process. Next: browser-process broker
+gracefully. Next: browser-process broker
 services for networking, cookies, cache, and storage so the renderer can be
 made credential-less rather than fetching and persisting on its own.
 
@@ -313,7 +329,8 @@ renderers have different threat models, so they are confined differently.
   tailored profile, or a pre-sandbox zygote that forks renderers so the shell
   can keep the no-`execve` filter, is the eventual fix.
 - **Watchdog ("guarddog")** supervision is active in proc mode (the default):
-  when `watchdog_enabled` is set, `ns_watchdog_run_supervisor` (`src/gtk/appmain.c`)
+  when `watchdog_enabled` is set, `ns_watchdog_run_supervisor` (`src/watchdog.c`,
+  called from `src/gtk/appmain.c`)
   spawns the thin engine-free shell and restarts it on crash or hang. Engine
   crashes are additionally contained structurally: the engine runs in renderer
   processes, a renderer crash is confined to its tab, and `NsProcView`
@@ -341,18 +358,19 @@ later frame.
 `ns_browser_tick(browser, budget_ms)` on `libnordstjernen` fixes that. Before
 each full `RENDER`, `nordstjernen-renderer` calls it to fire due timers,
 deliver pending fetch/XHR and promise jobs, run `rAF` and CSS animations, and
-relayout if the DOM changed, all bounded by a budget (`NS_TICK_MS`, default
-16 ms; partial rect repaints skip it). A latent bug surfaced while wiring this
+relayout if the DOM changed, all bounded by a fixed 16 ms budget (deferred
+while a scroll is in progress; `/tick` runs it without rendering). A latent
+bug surfaced while wiring this
 up: `ns_drain_mutations` notifies the embedder's mutate callback and then
 clears the dirty flag, but `libnordstjernen`'s callback was a no-op, so
 timer/event-driven mutations were swallowed before `ns_js_consume_mutated`
 could see them. The callback now marks the browser dirty so the tick relayouts.
 
-This makes JS-driven content correct on the next render (e.g. a `setTimeout`
-that rewrites the page shows up once the user scrolls or otherwise triggers a
-frame). Smooth continuous animation still needs the client to drive a frame
-loop and a renderer→client "frame dirty" signal; today rendering is
-client-pull.
+This makes JS-driven content correct on the next render. For continuous
+animation the renderer reports `X-Anim` on each render reply while
+`ns_browser_animating()` is true (active CSS transitions/animations or pending
+`requestAnimationFrame`), and the shell drives a frame loop for as long as it
+is set; otherwise it renders on demand (see [Rendering.md](Rendering.md)).
 
 ## Shared memory for images (evaluated)
 

@@ -6,7 +6,7 @@ spawns the real **GUI shell** as a child, watches it, and restarts it if
 it crashes or hangs. The shell is thin and engine-free, so this guards
 the *UI* process; each tab's untrusted engine already runs in its own
 sandboxed renderer process, and the shell restarts a dead renderer
-per tab (see `docs/tab-isolation.md`). The two layers compose: a renderer
+per tab (see [tab-isolation.md](tab-isolation.md)). The two layers compose: a renderer
 crash is contained to its tab, and a crash/hang of the shell itself is
 caught by the supervisor.
 
@@ -49,9 +49,11 @@ two roles they use:
    respawning a content process. Our supervisor spawns the browser, waits
    on it with `g_child_watch`, and is notified the instant it exits. A
    clean exit (status 0 — you closed the last window) means "the user is
-   done": the supervisor exits 0 and does *not* restart. Any abnormal
-   exit — non-zero status, or a fatal signal such as `SIGSEGV` or
-   `SIGABRT` — is a crash, and triggers a restart.
+   done": the supervisor exits 0 and does *not* restart. So does a child
+   killed by a termination signal (`SIGTERM`, `SIGINT`, `SIGHUP`,
+   `SIGQUIT`, `SIGKILL`), which is taken as a deliberate stop. Any other
+   abnormal exit — non-zero status, or a fatal signal such as `SIGSEGV`
+   or `SIGABRT` — is a crash, and triggers a restart.
 
 2. **An in-process thread catches hangs** — like Firefox's
    `BackgroundHangMonitor` and SpiderMonkey's watchdog thread, or
@@ -64,12 +66,13 @@ two roles they use:
    as a crash and restarts — so there is exactly one restart path, not
    two.
 
-The hang timeout is **at least 60 s** of no heartbeat (the configured JS
-eval budget plus a 60 s floor, `NS_WATCHDOG_HANG_MIN_SECS`). Because page
-JavaScript now runs in the renderer processes — not in the shell's main
-loop — the shell loop is never legitimately blocked by a long synchronous
-script; the watchdog is the backstop for *native*
-deadlocks in the shell (a wedged blit or a stuck IPC call). (Runaway
+The hang timeout is **60 s** of no heartbeat (`NS_WATCHDOG_HANG_MIN_SECS`).
+Because page JavaScript runs in the renderer processes — not in the
+shell's main loop — the shell loop is never legitimately blocked by a long
+synchronous script; the watchdog is the backstop for *native* deadlocks in
+the shell (a wedged blit or a stuck IPC call). Under `--single-process`
+the shell does run page JS, so there the configured JS eval budget
+(`js_eval_budget_ms`) is added on top of the 60 s. (Runaway
 scripts are interrupted separately, in-engine, at the JS budget; see
 `src/js.c`.)
 
@@ -90,9 +93,9 @@ A silent relaunch to a blank page would throw away your work, so the
 supervisor restores it — the way Chrome and Firefox reopen your tabs after
 an "Aw, Snap!" / `about:tabcrashed`.
 
-While the shell runs it records the URLs of its open `http(s)`/`file`
-tabs to a small session file every few seconds (`write_session_cb` in
-`src/gtk/procwindow.c`). When a crash or hang triggers a restart, the
+While the shell runs it records the URLs of its open `http(s)`/`ftp`/`file`
+tabs (private tabs excluded) to a small session file every four seconds
+(`write_session_cb` in `src/gtk/procwindow.c`). When a crash or hang triggers a restart, the
 supervisor sets `NS_WATCHDOG_RECOVER=1` on the respawned child; that
 child reopens the saved pages and shows a status-bar note that it
 recovered after an unexpected exit. A clean shutdown deletes the session
@@ -100,13 +103,18 @@ file, so a normal launch never offers to recover. `about:` pages are not
 recorded, so a recovered window that had only `about:start` simply opens
 the home page.
 
-The session file lives in the per-user runtime/cache directory
-(e.g. `~/.cache/`), not in the world-readable system temp directory.
+The session file (`nordstjernen-watchdog-<uuid>.session`) lives in the
+per-user runtime directory (`g_get_user_runtime_dir()`: `$XDG_RUNTIME_DIR`
+on Linux, falling back to the user cache directory), not in the
+world-readable system temp directory.
 
 ## Shutting it down
 
-On Unix, sending the supervisor `SIGINT` (Ctrl-C) or `SIGTERM` asks the
-child to quit gracefully and then exits cleanly without restarting it.
+On Unix, sending the supervisor `SIGINT` (Ctrl-C) or `SIGTERM` sends the
+child `SIGTERM`, escalates to `SIGKILL` if it has not exited after three
+seconds, and then exits cleanly without restarting it. On Linux the child
+also asks for `SIGTERM` when the supervisor itself dies
+(`PR_SET_PDEATHSIG`), so killing the supervisor does not orphan the shell.
 
 ## Notes
 
