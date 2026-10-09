@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* Typed arrays and other ECMAScript built-ins no longer get an own
+  `Symbol.toStringTag` data property. The interface-tagging pass meant for
+  DOM interfaces also tagged `Uint8Array.prototype` and its siblings,
+  hiding the `%TypedArray%.prototype` getter that libraries such as
+  `which-typed-array` read; Discord's login page threw "a function is
+  required" and never rendered.
 * Regular expressions may have up to 65535 capture groups instead of 255.
   Discord's login bundle contains a pattern with more than 255 groups and
   failed to load with `SyntaxError: too many captures`.
