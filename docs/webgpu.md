@@ -178,6 +178,14 @@ array over a resizable buffer reports its live length (not the length it
 had before a `resize()`), so neither call reads past the end of a buffer
 that shrank after the view was created.
 
+`GPUBuffer.getMappedRange()` validates its `offset`/`size` against the
+range the buffer is currently mapped with before calling
+`wgpuBufferGetMappedRange` (the wrapper is fatal on any error): the buffer
+must be mapped, the offset must be a multiple of 8, the size a multiple of
+4, and the range must fall inside the mapped region. Anything else throws
+an `OperationError` in JavaScript. The wrapper tracks the mapped range
+from `mappedAtCreation`, `mapAsync()` and `unmap()`/`destroy()`.
+
 ### Not yet implemented
 
 Real timestamp queries (accepted, but they record nothing), compilation
