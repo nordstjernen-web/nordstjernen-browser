@@ -9,12 +9,12 @@ focused on support for modern HTML, CSS and JavaScript standards.
 Supported platforms:
 * [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)
 * MacOS
-* Linux,
-* FreeBSD and NetBSD. 
+* Linux
+* FreeBSD and NetBSD
 * [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
-* Java.
+* Java
 
-**Current release:** **1.0.29** (October 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.30** (October 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope
@@ -27,7 +27,7 @@ that are non-goals by design: `embed`/`object` plugins, `frame`/`frameset`,
 **Security.** Each tab's engine runs in its own sandboxed process (seccomp +
 Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary. No JIT.
 
-**Minimalism.** The core engine is about 210,000 lines of project C and
+**Minimalism.** The core engine is about 230,000 lines of project C and
 headers, excluding vendored libraries and generated assets — small enough for
 one person to read and audit end-to-end.
 
@@ -76,12 +76,12 @@ DirectComposition). Every other platform builds from source — see
   nghttp3 + gnutls when present. Both backends fetch byte-identically, so the
   independent transports cross-check each other. See
   [docs/http-backends.md](docs/http-backends.md).
-- **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and lossy
-  WebP; libwebp handles lossless and animated WebP; ICO and SVG are rendered
-  in-engine, with optional AVIF and inline PDF support.
+- **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and lossless
+  WebP; libwebp handles lossy and animated WebP; ICO and SVG are rendered
+  in-engine, with optional AVIF, JPEG XL and inline PDF support.
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
-  [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and, when FFmpeg's libav is
-  present at build time, **WebM** (VP9/VP8 + Opus/Vorbis). MSE/`blob:`
+  [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and **WebM** (VP9/VP8 +
+  Opus/Vorbis) through FFmpeg's libav, which Linux and Windows builds require. MSE/`blob:`
   streaming and HLS/DASH manifests play through the `nordstjernen-video`
   helper, and a `<track default>` WebVTT file is drawn over the video. Other
   codecs render a poster and play overlay. See [docs/media.md](docs/media.md).
@@ -149,9 +149,11 @@ WHATWG URL module), [QuickJS](https://github.com/quickjs-ng/quickjs)
 (WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
 (MPEG-1 video + MP2 audio) and [minimp3](https://github.com/lieff/minimp3)
-(MP3). The only setup-time download is
+(MP3). The first `meson setup` downloads two pinned subprojects:
 [ns-pango](https://github.com/nordstjernen-web/ns-pango), the text-shaping
-fork; `-Dns-pango=disabled` links the system Pango and needs no network.
+fork, and the [wgpu-native](https://github.com/gfx-rs/wgpu-native) release
+for WebGPU, linked statically. `-Dns-pango=disabled -Dwebgpu=disabled` link
+the system Pango, drop WebGPU and need no network.
 
 **Required system libraries:**
 
@@ -165,19 +167,19 @@ fork; `-Dns-pango=disabled` links the system Pango and needs no network.
 | uchardet | — | charset detection |
 | libpsl | — | public-suffix list for cookie scoping |
 | SQLite | — | IndexedDB persistent storage |
-| libwebp | — | animated, lossless and fallback WebP decoding |
+| libwebp | — | lossy and animated WebP decoding |
 | SDL2 | — | audio output for the `nordstjernen-audio` helper |
+| FFmpeg libav\* | ≥ 6.0 (Linux, Windows; optional on macOS) | inline WebM (VP9/VP8 video, Opus/Vorbis audio) |
 | libseccomp | — (Linux only) | syscall sandbox; no-op on macOS/Windows |
 
 **Optional**, auto-detected or build-time-selected:
-[FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* (inline WebM playback —
-required on Linux and Windows, auto-detected on macOS), poppler-glib (inline
-PDF), libavif (AVIF images), Enchant (spell checking), fontconfig / pangoft2
+[FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS (inline WebM),
+poppler-glib (inline PDF), libavif (AVIF images), libjxl (JPEG XL images), Enchant (spell checking), fontconfig / pangoft2
 (extra font backends), [libnghttp2](https://github.com/nghttp2/nghttp2) (the
 in-tree HTTP/2 backend), [ngtcp2](https://github.com/ngtcp2/ngtcp2) +
 [nghttp3](https://github.com/ngtcp2/nghttp3) + GnuTLS (HTTP/3 over QUIC inside
-it), [wgpu-native](https://github.com/gfx-rs/wgpu-native) (experimental
-WebGPU) and Fabrice Bellard's original
+it), wgpu-native on platforms it publishes no release for (the BSDs, musl,
+Android, iOS) and Fabrice Bellard's original
 [QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
 through a meson wrap).
 
