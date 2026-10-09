@@ -67,6 +67,7 @@ typedef struct ns_webgl {
     gboolean       dirty;
     gboolean       repaint_queued;
     GLenum         injected_error;
+    GHashTable    *attrib_masks;
     gboolean       drawing_p3, unpack_p3;
     gboolean       unpack_flip_y;
     gboolean       premultiply;
@@ -452,6 +453,7 @@ ns_webgl_free(ns_webgl *g)
     if (g->syncs) g_hash_table_destroy(g->syncs);
     if (g->bound_buffers) g_hash_table_destroy(g->bound_buffers);
     if (g->buffer_sizes) g_hash_table_destroy(g->buffer_sizes);
+    if (g->attrib_masks) g_hash_table_destroy(g->attrib_masks);
     if (g->elem_data) g_hash_table_destroy(g->elem_data);
     if (g->uncleared_rbs) g_hash_table_destroy(g->uncleared_rbs);
     if (g->surf) cairo_surface_destroy(g->surf);
@@ -790,11 +792,8 @@ wgl_attr_type_cols(GLenum t)
 }
 
 static uint64_t
-wgl_program_attrib_mask(void)
+wgl_program_attrib_mask_query(GLint prog)
 {
-    GLint prog = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
-    if (prog <= 0) return 0;
     GLint nattr = 0;
     glGetProgramiv((GLuint)prog, GL_ACTIVE_ATTRIBUTES, &nattr);
     if (nattr <= 0) return 0;
@@ -818,6 +817,31 @@ wgl_program_attrib_mask(void)
     }
     g_free(name);
     return mask;
+}
+
+static uint64_t
+wgl_program_attrib_mask(ns_webgl *g)
+{
+    GLint prog = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+    if (prog <= 0) return 0;
+    if (!g->attrib_masks)
+        g->attrib_masks = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                NULL, g_free);
+    guint64 *cached = g_hash_table_lookup(g->attrib_masks,
+                                          GINT_TO_POINTER(prog));
+    if (cached) return *cached;
+    guint64 *mask = g_new(guint64, 1);
+    *mask = wgl_program_attrib_mask_query(prog);
+    g_hash_table_insert(g->attrib_masks, GINT_TO_POINTER(prog), mask);
+    return *mask;
+}
+
+static void
+wgl_forget_program(ns_webgl *g, GLuint prog)
+{
+    if (g->attrib_masks)
+        g_hash_table_remove(g->attrib_masks, GUINT_TO_POINTER(prog));
 }
 
 static gboolean
@@ -858,7 +882,7 @@ static gboolean
 wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
 {
     if (!g || vertex_last < 0) return TRUE;
-    uint64_t used = wgl_program_attrib_mask();
+    uint64_t used = wgl_program_attrib_mask(g);
     for (int i = 0; i < 64; i++) {
         if (!(used & ((uint64_t)1 << i))) continue;
         GLuint index = (GLuint)i;
@@ -1596,6 +1620,8 @@ wgl_isContextLost(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 static void set_const(JSContext *ctx, JSValueConst obj, const char *name,
                       int value);
 
+static JSValue wgl_drawArrays(JSContext *, JSValueConst, int, JSValueConst *);
+static JSValue wgl_drawElements(JSContext *, JSValueConst, int, JSValueConst *);
 static JSValue wgl_drawArraysInstanced(JSContext *, JSValueConst, int, JSValueConst *);
 static JSValue wgl_drawElementsInstanced(JSContext *, JSValueConst, int, JSValueConst *);
 static JSValue wgl_vertexAttribDivisor(JSContext *, JSValueConst, int, JSValueConst *);
@@ -1664,6 +1690,155 @@ static gboolean wgl_ext_vao(void)
 #endif
 }
 
+static int32_t *
+wgl_int_list(JSContext *ctx, JSValueConst list, int64_t offset, int64_t count)
+{
+    if (offset < 0 || count < 0 || count > (1 << 24)) return NULL;
+    int32_t *out = g_try_new0(int32_t, count ? (gsize)count : 1);
+    if (!out) return NULL;
+    size_t len = 0;
+    JSValue hold;
+    const uint8_t *bytes = view_bytes(ctx, list, &len, &hold);
+    if (bytes) {
+        gboolean ok = (uint64_t)(offset + count) * 4u <= len;
+        if (ok) memcpy(out, bytes + offset * 4, (size_t)count * 4u);
+        if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
+        if (!ok) { g_free(out); return NULL; }
+        return out;
+    }
+    if (!JS_IsArray(list)) { g_free(out); return NULL; }
+    for (int64_t i = 0; i < count; i++) {
+        JSValue v = JS_GetPropertyInt64(ctx, list, offset + i);
+        if (JS_IsUndefined(v) || JS_ToInt32(ctx, &out[i], v) < 0) {
+            JS_FreeValue(ctx, v);
+            g_free(out);
+            return NULL;
+        }
+        JS_FreeValue(ctx, v);
+    }
+    return out;
+}
+
+static GLint
+wgl_draw_id_location(void)
+{
+    GLint prog = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+    return prog ? glGetUniformLocation((GLuint)prog, "ns_webgl_DrawID") : -1;
+}
+
+static gboolean wgl_elements_in_range(ns_webgl *g, GLsizei count, GLenum type,
+                                      GLintptr offset);
+static int wgl_index_bytes(GLenum type);
+static GByteArray *wgl_elem_shadow_load(ns_webgl *g, GLuint name);
+static gboolean wgl_transform_feedback_active(ns_webgl *g);
+
+static JSValue
+wgl_multi_draw(JSContext *ctx, JSValueConst gl_obj, int argc, JSValueConst *argv,
+               gboolean elements, gboolean instanced)
+{
+    ns_webgl *g = wgl_cur(ctx, gl_obj);
+    if (!g) return wgl_no_context(ctx, gl_obj);
+    int list_a = 1, list_b = elements ? 4 : 3, list_c = elements ? 6 : 5;
+    int count_at = instanced ? (elements ? 8 : 7) : (elements ? 6 : 5);
+    if (argc <= count_at) return JS_UNDEFINED;
+    int32_t drawcount = 0;
+    if (JS_ToInt32(ctx, &drawcount, argv[count_at]) < 0 || drawcount <= 0)
+        return JS_UNDEFINED;
+    GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
+    GLenum type = elements ? (GLenum)argi(ctx, argc, argv, 3) : 0;
+    int64_t off_a = 0, off_b = 0, off_c = 0;
+    JS_ToInt64(ctx, &off_a, argv[list_a + 1]);
+    JS_ToInt64(ctx, &off_b, argv[list_b + 1]);
+    if (instanced) JS_ToInt64(ctx, &off_c, argv[list_c + 1]);
+    int32_t *a = wgl_int_list(ctx, argv[list_a], off_a, drawcount);
+    int32_t *b = wgl_int_list(ctx, argv[list_b], off_b, drawcount);
+    int32_t *c = instanced ? wgl_int_list(ctx, argv[list_c], off_c, drawcount) : NULL;
+    if (!a || !b || (instanced && !c)) {
+        g_free(a); g_free(b); g_free(c);
+        g->injected_error = GL_INVALID_OPERATION;
+        return JS_UNDEFINED;
+    }
+    int64_t last = -1, inst_max = 1;
+    gboolean ok = TRUE;
+    GByteArray *shadow = NULL;
+    if (elements) {
+        GLuint ebuf = wgl_bound_buffer(g, GL_ELEMENT_ARRAY_BUFFER);
+        shadow = wgl_elem_shadow_get(g, ebuf);
+        if (!shadow || wgl_transform_feedback_active(g))
+            shadow = wgl_elem_shadow_load(g, ebuf);
+    }
+    for (int32_t i = 0; i < drawcount && ok; i++) {
+        int64_t inst = instanced ? c[i] : 1;
+        if (inst < 0) { ok = FALSE; break; }
+        if (inst > inst_max) inst_max = inst;
+        if (elements) {
+            if (!wgl_elements_in_range(g, a[i], type, b[i])) { ok = FALSE; break; }
+            if (a[i] == 0 || inst == 0) continue;
+            uint64_t mx = 0;
+            if (!shadow || !wgl_elem_max_index(shadow->data, shadow->len, b[i],
+                                               a[i], wgl_index_bytes(type),
+                                               g->version, &mx)) {
+                ok = FALSE;
+                break;
+            }
+            if ((int64_t)mx > last) last = (int64_t)mx;
+        } else {
+            if (a[i] < 0 || b[i] < 0) { ok = FALSE; break; }
+            if (b[i] > 0 && inst > 0 && (int64_t)a[i] + b[i] - 1 > last)
+                last = (int64_t)a[i] + b[i] - 1;
+        }
+    }
+    if (ok && last >= 0 && !wgl_attribs_cover(g, last, inst_max)) ok = FALSE;
+    if (ok) {
+        GLint draw_id = wgl_draw_id_location();
+        for (int32_t i = 0; i < drawcount; i++) {
+            if (draw_id >= 0) glUniform1i(draw_id, i);
+            if (elements && instanced)
+                glDrawElementsInstanced(mode, a[i], type,
+                                        (const void *)(intptr_t)b[i], c[i]);
+            else if (elements)
+                glDrawElements(mode, a[i], type, (const void *)(intptr_t)b[i]);
+            else if (instanced)
+                glDrawArraysInstanced(mode, a[i], b[i], c[i]);
+            else
+                glDrawArrays(mode, a[i], b[i]);
+        }
+        if (draw_id >= 0) glUniform1i(draw_id, 0);
+        wgl_mark_dirty(g);
+    } else {
+        g->injected_error = GL_INVALID_OPERATION;
+    }
+    g_free(a);
+    g_free(b);
+    g_free(c);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wgl_multiDrawArrays(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_multi_draw(ctx, this_val, argc, argv, FALSE, FALSE);
+}
+
+static JSValue
+wgl_multiDrawElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_multi_draw(ctx, this_val, argc, argv, TRUE, FALSE);
+}
+
+static JSValue
+wgl_multiDrawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_multi_draw(ctx, this_val, argc, argv, FALSE, TRUE);
+}
+
+static JSValue
+wgl_multiDrawElementsInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return wgl_multi_draw(ctx, this_val, argc, argv, TRUE, TRUE);
+}
+
 static JSValue
 wgl_ext_trampoline(JSContext *ctx, JSValueConst this_val, int argc,
                    JSValueConst *argv, int magic, JSValueConst *data)
@@ -1673,6 +1848,8 @@ wgl_ext_trampoline(JSContext *ctx, JSValueConst this_val, int argc,
         wgl_drawArraysInstanced, wgl_drawElementsInstanced,
         wgl_vertexAttribDivisor, wgl_createVertexArray, wgl_deleteVertexArray,
         wgl_isVertexArray, wgl_bindVertexArray,
+        wgl_multiDrawArrays, wgl_multiDrawElements,
+        wgl_multiDrawArraysInstanced, wgl_multiDrawElementsInstanced,
     };
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(fns)) return JS_UNDEFINED;
     return fns[magic](ctx, data[0], argc, argv);
@@ -1805,6 +1982,10 @@ static const wgl_ext_const wgl_c_astc[] = {
     { "COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR", 0x93DB },
     { "COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR", 0x93DC },
     { "COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR", 0x93DD }, { NULL, 0 } };
+static const wgl_ext_method wgl_m_multi_draw[] = {
+    { "multiDrawArraysWEBGL", 6, 7 }, { "multiDrawElementsWEBGL", 7, 8 },
+    { "multiDrawArraysInstancedWEBGL", 8, 9 },
+    { "multiDrawElementsInstancedWEBGL", 9, 10 }, { NULL, 0, 0 } };
 static const wgl_ext_const wgl_c_parallel[] = {
     { "COMPLETION_STATUS_KHR", 0x91B1 }, { NULL, 0 } };
 
@@ -1831,6 +2012,7 @@ static const wgl_extension wgl_extensions[] = {
     { "WEBGL_debug_renderer_info", WGL_V1 | WGL_V2, wgl_ext_always, wgl_c_debug_info, NULL },
     { "WEBGL_depth_texture", WGL_V1, wgl_ext_always, wgl_c_depth_texture, NULL },
     { "WEBGL_lose_context", WGL_V1 | WGL_V2, wgl_ext_always, NULL, NULL },
+    { "WEBGL_multi_draw", WGL_V1 | WGL_V2, wgl_ext_always, NULL, wgl_m_multi_draw },
     { "WEBGL_compressed_texture_s3tc", WGL_V1 | WGL_V2, wgl_ext_s3tc, wgl_c_s3tc, NULL },
     { "WEBGL_compressed_texture_s3tc_srgb", WGL_V1 | WGL_V2, wgl_ext_s3tc_srgb,
       wgl_c_s3tc_srgb, NULL },
@@ -1960,6 +2142,55 @@ wgl_deleteShader(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     return JS_UNDEFINED;
 }
 
+static char *
+wgl_rewrite_draw_id(const char *src)
+{
+    if (!strstr(src, "GL_ANGLE_multi_draw") && !strstr(src, "gl_DrawID"))
+        return NULL;
+    GRegex *ext = g_regex_new("^[ \\t]*#[ \\t]*extension[ \\t]+GL_ANGLE_multi_draw[^\\n]*$",
+                              G_REGEX_MULTILINE, 0, NULL);
+    GRegex *ifdef = g_regex_new("#[ \\t]*ifdef[ \\t]+GL_ANGLE_multi_draw\\b", 0, 0, NULL);
+    GRegex *ifndef = g_regex_new("#[ \\t]*ifndef[ \\t]+GL_ANGLE_multi_draw\\b", 0, 0, NULL);
+    GRegex *defined = g_regex_new("defined[ \\t]*\\([ \\t]*GL_ANGLE_multi_draw[ \\t]*\\)|"
+                                  "defined[ \\t]+GL_ANGLE_multi_draw\\b", 0, 0, NULL);
+    GRegex *draw_id = g_regex_new("\\bgl_DrawID\\b", 0, 0, NULL);
+    char *a = g_regex_replace_literal(ext, src, -1, 0, "", 0, NULL);
+    char *b = g_regex_replace_literal(ifdef, a, -1, 0, "#if 1", 0, NULL);
+    char *c = g_regex_replace_literal(ifndef, b, -1, 0, "#if 0", 0, NULL);
+    char *d = g_regex_replace_literal(defined, c, -1, 0, "1", 0, NULL);
+    gboolean uses = g_regex_match(draw_id, d, 0, NULL);
+    char *e = g_regex_replace_literal(draw_id, d, -1, 0, "ns_webgl_DrawID", 0, NULL);
+    g_regex_unref(ext);
+    g_regex_unref(ifdef);
+    g_regex_unref(ifndef);
+    g_regex_unref(defined);
+    g_regex_unref(draw_id);
+    g_free(a);
+    g_free(b);
+    g_free(c);
+    g_free(d);
+    if (!uses) return e;
+    const char *at = e;
+    for (const char *line = e; *line; ) {
+        const char *q = line;
+        while (*q == ' ' || *q == '\t' || *q == '\r') q++;
+        const char *nl = strchr(line, '\n');
+        if (*q != '#' && *q != '\n' && *q != '\0' &&
+            !(q[0] == '/' && q[1] == '/')) {
+            at = line;
+            break;
+        }
+        if (!nl) { at = line + strlen(line); break; }
+        line = nl + 1;
+        at = line;
+    }
+    GString *out = g_string_new_len(e, at - e);
+    g_string_append(out, "uniform highp int ns_webgl_DrawID;\n");
+    g_string_append(out, at);
+    g_free(e);
+    return g_string_free(out, FALSE);
+}
+
 static JSValue
 wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -1969,16 +2200,18 @@ wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     const char *src = JS_ToCStringLen(ctx, &slen, argv[1]);
     if (src) {
         if (slen <= NS_WEBGL_MAX_SHADER) {
-            const GLchar *p = src;
-            GLint plen = (GLint)slen;
+            char *rewritten = wgl_rewrite_draw_id(src);
+            const GLchar *p = rewritten ? rewritten : src;
+            GLint plen = rewritten ? (GLint)strlen(rewritten) : (GLint)slen;
             char *prefixed = NULL;
-            if (epoxy_is_desktop_gl() && !strstr(src, "#version")) {
-                prefixed = g_strconcat("#version 100\n", src, NULL);
+            if (epoxy_is_desktop_gl() && !strstr(p, "#version")) {
+                prefixed = g_strconcat("#version 100\n", p, NULL);
                 p = prefixed;
                 plen = (GLint)strlen(prefixed);
             }
             glShaderSource((GLuint)wgl_name(ctx, argv[0]), 1, &p, &plen);
             g_free(prefixed);
+            g_free(rewritten);
         }
         JS_FreeCString(ctx, src);
     }
@@ -2050,6 +2283,7 @@ static JSValue
 wgl_deleteProgram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    wgl_forget_program(g, (GLuint)wgl_name(ctx, argv[0]));
     glDeleteProgram((GLuint)wgl_name(ctx, argv[0]));
     return JS_UNDEFINED;
 }
@@ -2074,6 +2308,7 @@ static JSValue
 wgl_linkProgram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    wgl_forget_program(g, (GLuint)wgl_name(ctx, argv[0]));
     glLinkProgram((GLuint)wgl_name(ctx, argv[0]));
     return JS_UNDEFINED;
 }
