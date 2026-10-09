@@ -3,6 +3,9 @@ Changelog:
 
 1.0.31:
 ======
+* Regular expressions may have up to 65535 capture groups instead of 255.
+  Discord's login bundle contains a pattern with more than 255 groups and
+  failed to load with `SyntaxError: too many captures`.
 * WebGL supports `WEBGL_multi_draw`: `multiDrawArraysWEBGL`,
   `multiDrawElementsWEBGL` and their instanced variants issue one draw
   per list entry with `gl_DrawID` set, after checking every range
