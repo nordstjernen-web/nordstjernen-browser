@@ -937,6 +937,7 @@ ns_box_free(ns_box *box)
                         g_ptr_array_index(cur->media->svg_foreign, i));
                 g_ptr_array_free(cur->media->svg_foreign, TRUE);
             }
+            g_free(cur->media->svg_foreign_xform);
             g_free(cur->media);
         }
         if (g_box_pool_n < (int)G_N_ELEMENTS(g_box_pool))
@@ -17524,6 +17525,35 @@ hit_deferred_cmp(const void *a, const void *b)
 
 static const ns_box *box_hit_test_tree(const ns_box *root, double x, double y);
 
+static const ns_box *box_hit_test_root(const ns_box *root, double x, double y);
+
+static const ns_box *
+svg_foreign_hit(const ns_box *svg_box, double x, double y)
+{
+    const ns_box_media *m = svg_box->media;
+    if (!m || !m->svg_foreign || !m->svg_foreign_xform) return NULL;
+    double lx = x - (svg_box->x + svg_box->margin.left + svg_box->border.left +
+                     svg_box->padding.left);
+    double ly = y - (svg_box->y + svg_box->margin.top + svg_box->border.top +
+                     svg_box->padding.top);
+    for (guint i = m->svg_foreign->len; i-- > 0;) {
+        const double *t = m->svg_foreign_xform + i * 7;
+        if (t[0] == 0) continue;
+        double det = t[1] * t[4] - t[2] * t[3];
+        if (fabs(det) < 1e-9) continue;
+        double dx = lx - t[5], dy = ly - t[6];
+        double fx = ( t[4] * dx - t[3] * dy) / det;
+        double fy = (-t[2] * dx + t[1] * dy) / det;
+        const ns_box *fo = g_ptr_array_index(m->svg_foreign, i);
+        if (fx < 0 || fy < 0 || fx > fo->content_width ||
+            fy > fo->content_height)
+            continue;
+        const ns_box *hit = box_hit_test_root(fo, fx, fy);
+        if (hit && hit != fo) return hit;
+    }
+    return NULL;
+}
+
 static const ns_box *
 hit_flush_deferred(GArray *list)
 {
@@ -17613,6 +17643,10 @@ box_hit_test_tree(const ns_box *root, double x, double y)
     }
     if (best) return best;
 self_test: ;
+    if (root->kind == NS_BOX_SVG) {
+        const ns_box *inner = svg_foreign_hit(root, x, y);
+        if (inner) return inner;
+    }
     double x0 = root->x;
     double y0 = root->y;
     gboolean block_edges = root->kind == NS_BOX_BLOCK ||

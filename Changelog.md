@@ -3,6 +3,10 @@ Changelog:
 
 1.0.31:
 ======
+* Clicks, hovers and `elementFromPoint` reach the HTML inside an SVG
+  `<foreignObject>`, mapped through the SVG's viewBox and transforms.
+  Discord's server icons, whose click handlers sit inside a
+  `foreignObject`, now switch servers.
 * A row flex item no longer keeps a stretched height from an earlier
   layout pass. When the container's height only became definite in a
   later pass, an item with `height: 100%` kept the content height it was
