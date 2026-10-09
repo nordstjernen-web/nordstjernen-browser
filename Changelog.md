@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* A scroll container that gets its height by being stretched (an
+  absolutely positioned box with `top`/`bottom` set, or a row flex item
+  stretched to its line) can scroll through all of its content. Its
+  scroll range was computed before the stretch and stayed 0, so setting
+  `scrollTop` did nothing; Discord's message list stayed on its loading
+  placeholders instead of showing the newest messages.
 * Clicks, hovers and `elementFromPoint` reach the HTML inside an SVG
   `<foreignObject>`, mapped through the SVG's viewBox and transforms.
   Discord's server icons, whose click handlers sit inside a
