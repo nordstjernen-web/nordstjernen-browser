@@ -81,6 +81,8 @@ typedef struct ns_video {
     double       duration;
     GPtrArray   *cues;
     gboolean     track_requested;
+    gboolean     sampled;
+    char        *cors_allow_origin;
 } ns_video;
 
 typedef struct ns_video_cache ns_video_cache;
@@ -90,6 +92,10 @@ typedef void (*ns_video_audio_cb)(const char *command, gpointer user_data);
 
 ns_video_cache *ns_video_cache_new(void);
 void            ns_video_cache_free(ns_video_cache *cache);
+ns_texture     *ns_video_cache_frame_for_node(ns_video_cache *cache,
+                                              const void *dom_node,
+                                              const char **out_url,
+                                              const char **out_cors);
 void            ns_video_cache_set_base(ns_video_cache *cache,
                                         const char *base_url);
 void            ns_video_cache_set_js_cb(ns_video_cache *cache,

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build a minimal, LGPL-licensed FFmpeg (libav*) carrying exactly the inline
-# media Nordstjernen decodes — VP9/VP8 video and Opus/Vorbis audio in Matroska
+# media Nordstjernen decodes — VP9/VP8/Theora video and Opus/Vorbis audio in Matroska
 # /WebM and Ogg containers — so it can be bundled into the redistributable
 # macOS and Windows packages without the GPL obligations of a stock FFmpeg.
 #
 # `--disable-gpl --disable-nonfree --disable-version3` keeps the result LGPL
 # v2.1+, and `--disable-autodetect` guarantees no external codec library
-# (libx264, libx265, …) is linked — the enabled VP8/VP9/Opus/Vorbis decoders
+# (libx264, libx265, …) is linked — the enabled VP8/VP9/Theora/Opus/Vorbis decoders
 # are FFmpeg's own native, LGPL implementations.
 #
 # Usage: scripts/build-ffmpeg-lgpl.sh <install-prefix>
@@ -63,8 +63,8 @@ cd "$SRC"
     --enable-avformat --enable-avcodec --enable-avutil \
     --enable-swscale --enable-swresample \
     --enable-demuxer=matroska,ogg \
-    --enable-decoder=vp8,vp9,opus,vorbis \
-    --enable-parser=vp8,vp9,opus,vorbis \
+    --enable-decoder=vp8,vp9,theora,opus,vorbis \
+    --enable-parser=vp8,vp9,vp3,opus,vorbis \
     --enable-protocol=file \
     $ASM_FLAG \
     "${CROSS[@]}" \

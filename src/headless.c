@@ -813,6 +813,16 @@ headless_mse_bytes(guint stream_id, char kind, gpointer ud)
     return cache ? ns_video_cache_mse_bytes(cache, stream_id, kind) : 0;
 }
 
+static ns_texture *
+headless_media_frame(const void *node, const char **out_url,
+                     const char **out_cors, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    return cache ? ns_video_cache_frame_for_node(cache, node, out_url,
+                                                 out_cors)
+                 : NULL;
+}
+
 typedef struct headless_flush_ctx {
     ns_node           *doc;
     ns_js             *js;
@@ -2257,6 +2267,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_mse_buffered_cb(js, headless_mse_buffered, video_cache);
         ns_js_set_mse_remove_cb(js, headless_mse_remove, video_cache);
         ns_js_set_mse_bytes_cb(js, headless_mse_bytes, video_cache);
+        ns_js_set_media_frame_cb(js, headless_media_frame, video_cache);
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
