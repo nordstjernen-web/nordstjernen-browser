@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* Pages with many stylesheets no longer re-parse all of them on every
+  relayout. The parsed-stylesheet caches were emptied whenever they held
+  more than 256 sheets; Discord links about 600, so each style change
+  re-parsed every one and a relayout cost 100-200 ms (growing as more
+  loaded) instead of about 16 ms, keeping the renderer at full CPU.
 * `transform-style: preserve-3d` is treated as `flat` on elements whose
   opacity, overflow, filter, clip-path, mask or blend mode force
   flattening, as CSS Transforms specifies. Such elements used to go
