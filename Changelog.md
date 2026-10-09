@@ -18,6 +18,8 @@ Changelog:
   rejected a seccomp socket rule with an incomplete argument comparison,
   and the release-build check in the pack scripts read meson's empty
   sanitizer list `[]` as a sanitizer and refused every release tree.
+  The musl build retries its Alpine package install, so one CDN edge
+  failing the TLS handshake for the package index no longer fails it.
 * Builds with the nghttp2 HTTP backend (`-Dhttp_backend=nghttp2`) follow
   the cookie settings and learn HSTS. That backend sent and stored
   cookies on every request, so cross-site requests carried the user's
