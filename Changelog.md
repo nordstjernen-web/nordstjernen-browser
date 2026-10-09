@@ -3,6 +3,9 @@ Changelog:
 
 1.0.31:
 ======
+* The parsed-stylesheet caches evict only sheets no cascade has used
+  for a long while, so a page with hundreds of stylesheets keeps them
+  all parsed while sheets from pages navigated away from are freed.
 * Pages with many stylesheets no longer re-parse all of them on every
   relayout. The parsed-stylesheet caches were emptied whenever they held
   more than 256 sheets; Discord links about 600, so each style change
