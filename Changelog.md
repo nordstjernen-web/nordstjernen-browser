@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* WebGL 2's sized texture uploads accept every image source:
+  `texImage2D`/`texSubImage2D` with explicit width and height, and
+  `texImage3D`/`texSubImage3D`, now take an `<img>`, canvas, video,
+  `ImageBitmap` or `ImageData` (and a byte offset into a bound
+  `PIXEL_UNPACK_BUFFER`) as well as a typed array. They used to upload
+  nothing for those, so three.js's WebGL fallback backend for
+  `WebGPURenderer` drew every texture black.
 * A playing `<video>` can be drawn into a 2D canvas and uploaded as a
   WebGL or WebGPU texture: `drawImage`, `texImage2D`/`texSubImage2D` and
   `copyExternalImageToTexture` take its current frame instead of only
