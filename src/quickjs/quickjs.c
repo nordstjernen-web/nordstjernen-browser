@@ -61328,8 +61328,13 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
     ta = p->u.typed_array;
     if (pbyte_offset)
         *pbyte_offset = ta->offset;
-    if (pbyte_length)
-        *pbyte_length = ta->length;
+    if (pbyte_length) {
+        if (ta->track_rab)
+            *pbyte_length = (size_t)p->u.array.count
+                            << typed_array_size_log2(p->class_id);
+        else
+            *pbyte_length = ta->length;
+    }
     if (pbytes_per_element) {
         *pbytes_per_element = 1 << typed_array_size_log2(p->class_id);
     }

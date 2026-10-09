@@ -165,6 +165,19 @@ JavaScript, `GPUQuerySet.destroy()` releases instead of destroying,
 never called, and a command buffer that failed validation at `finish()`
 or was already submitted is never passed to `wgpuQueueSubmit`.
 
+`queue.submit()` reads the whole command-buffer list into a private array
+before it touches any handle, so a getter on the argument that resubmits
+or frees a command buffer cannot leave a released handle in the batch, and
+a command buffer that appears twice (or whose getter already consumed it)
+is reported as a validation error rather than handed to `wgpuQueueSubmit`
+twice — both are abort paths in wgpu-native otherwise.
+
+`queue.writeBuffer()` and `queue.writeTexture()` clamp the source copy to
+the backing `ArrayBuffer`'s current byte length. A length-tracking typed
+array over a resizable buffer reports its live length (not the length it
+had before a `resize()`), so neither call reads past the end of a buffer
+that shrank after the view was created.
+
 ### Not yet implemented
 
 Real timestamp queries (accepted, but they record nothing), compilation
