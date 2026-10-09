@@ -4217,6 +4217,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 break;
             case NS_INLINE_PROGRESS:
             case NS_INLINE_METER:
+            case NS_INLINE_RANGE:
                 break;
             case NS_INLINE_FONT_SIZE:
                 a = ns_pango_attr_size_new_absolute(
@@ -4922,6 +4923,54 @@ inline_shift_rect(const ns_box *b, gsize byte, double *x0, double *y0,
 }
 
 static void
+paint_inline_ranges(cairo_t *cr, const ns_box *b, const ns_style *s,
+                    NsPangoLayout *layout, double text_x, double y_origin)
+{
+    for (guint i = 0; i < b->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
+        double w, h, m[4];
+        if (!ns_inline_range_geometry(r, b, &w, &h, m)) continue;
+        const ns_style *rs = r->style ? r->style : s;
+        const ns_css_value *ac = rs ? rs->values[NS_CSS_ACCENT_COLOR] : NULL;
+        rgba accent = rgba_of(
+            (ac && ac->kind == NS_CSS_V_COLOR) ? ac : NULL,
+            0.0, 0.459, 1.0, 1);
+        NsPangoRectangle r0;
+        ns_pango_layout_index_to_pos(layout, (int)r->start, &r0);
+        double x = text_x + (double)r0.x / NS_PANGO_SCALE + m[3];
+        double y = y_origin +
+            layout_baseline_at_index(layout, (int)r->start) - h;
+        double dx, dy;
+        ns_inline_offset_at(b, r->start, &dx, &dy);
+        x += dx;
+        y += dy;
+        gboolean native = !(rs && keyword_is(rs->values[NS_CSS_APPEARANCE],
+                                             "none"));
+        double knob = 16.0;
+        double frac = CLAMP(r->font_size_px, 0.0, 1.0);
+        double usable = MAX(0.0, w - knob);
+        double kx = x + knob / 2.0 + usable * frac;
+        double cy = y + h / 2.0;
+        cairo_save(cr);
+        if (native) {
+            double th = 4.0;
+            corner_radii tr = corner_radii_uniform(th / 2.0);
+            rounded_rect_path(cr, x + 1, cy - th / 2.0, MAX(0.0, w - 2), th, tr);
+            cairo_set_source_rgb(cr, 0.80, 0.80, 0.82);
+            cairo_fill(cr);
+            rounded_rect_path(cr, x + 1, cy - th / 2.0, MAX(0.0, kx - x - 1), th, tr);
+            cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
+            cairo_fill(cr);
+        }
+        cairo_new_sub_path(cr);
+        cairo_arc(cr, kx, cy, knob / 2.0 - 0.5, 0, 2 * G_PI);
+        cairo_set_source_rgba(cr, accent.r, accent.g, accent.b, accent.a);
+        cairo_fill(cr);
+        cairo_restore(cr);
+    }
+}
+
+static void
 paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b->text || !*b->text) return;
@@ -5347,6 +5396,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_restore(cr);
         }
     }
+
+    if (b->attrs)
+        paint_inline_ranges(cr, b, s, layout, text_x, y_origin);
 
     paint_inline_atomics(cr, b, layout, text_x, highlight, 0);
     paint_inline_defer_layers(cr, b, layout, &at, highlight);
