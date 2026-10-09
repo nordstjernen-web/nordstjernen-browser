@@ -222,6 +222,7 @@ struct NsProcView {
     gpointer     notify_ud;
 
     char       *current_url;
+    char       *pending_url;
     char       *current_title;
     int         security;
     char       *remote_ip;
@@ -603,6 +604,7 @@ pv_free(NsProcView *v)
         g_ptr_array_unref(v->history);
     g_free(v->renderer_path);
     g_free(v->current_url);
+    g_free(v->pending_url);
     g_free(v->current_title);
     g_free(v->remote_ip);
     g_free(v->deferred_url);
@@ -2878,6 +2880,10 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
         post_emit(v, NS_PROC_EVT_LOADING, "1");
     }
     set_busy_cursor(v);
+    g_free(v->pending_url);
+    v->pending_url = g_strdup(url);
+    if (user_activated && g_strcmp0(url, v->current_url) != 0)
+        post_emit(v, NS_PROC_EVT_URL, url);
     post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Loading…"));
 
     int vw = gtk_widget_get_width(v->area);
@@ -2972,6 +2978,12 @@ ns_proc_view_exit_fullscreen(NsProcView *v)
 }
 
 const char *ns_proc_view_url(NsProcView *v) { return v->current_url; }
+
+const char *
+ns_proc_view_display_url(NsProcView *v)
+{
+    return v->loading && v->pending_url ? v->pending_url : v->current_url;
+}
 const char *ns_proc_view_title(NsProcView *v) { return v->current_title; }
 int ns_proc_view_security(NsProcView *v) { return v ? v->security : 0; }
 const char *ns_proc_view_remote_ip(NsProcView *v) { return v ? v->remote_ip : NULL; }
@@ -3193,6 +3205,7 @@ on_result(gpointer data)
         v->js_redirects = 0;
         g_free(v->current_url);
         v->current_url = g_strdup(res->url);
+        g_clear_pointer(&v->pending_url, g_free);
         g_free(v->current_title);
         v->current_title = g_strdup(res->title);
         v->security = res->security;
