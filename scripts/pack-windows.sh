@@ -40,7 +40,7 @@ MINGW_PREFIX=$(resolve_mingw_prefix) || {
 release_build_or_die() {
     local cfg
     cfg=$(meson configure "$1" 2>/dev/null |
-          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{printf " %s=%s", $1, $2}')
+          awk '$1=="buildtype"||$1=="debug"||$1=="b_sanitize"{v=$2; if (v=="[]" || v=="[none]") v="none"; printf " %s=%s", $1, v}')
     case "$cfg " in
         *" buildtype=release "*|*" buildtype=minsize "*) ;;
         *) echo "$(basename "$0"): $1 is not a release build ($cfg ); refusing to package it" >&2

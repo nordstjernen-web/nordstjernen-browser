@@ -895,7 +895,7 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
-                               SCMP_A0(SCMP_CMP_EQ, (scmp_datum_t)domains[i]));
+                               SCMP_A0(SCMP_CMP_EQ, (scmp_datum_t)domains[i], 0));
     }
 #else
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);

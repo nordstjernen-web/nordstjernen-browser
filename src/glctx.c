@@ -186,6 +186,8 @@ ns_gl_context_destroy(ns_gl_context *c)
 
 #elif defined(NS_ENABLE_WEBGL) && defined(NS_HAVE_EGL)
 
+#define NS_GLCTX_BACKEND_EGL 1
+
 #include <string.h>
 
 #include <epoxy/egl.h>
@@ -357,7 +359,7 @@ void ns_gl_context_destroy(ns_gl_context *c) { (void)c; }
 
 #endif /* NS_ENABLE_WEBGL */
 
-#if !defined(NS_ENABLE_WEBGL) || !defined(NS_HAVE_EGL)
+#ifndef NS_GLCTX_BACKEND_EGL
 void
 ns_gl_prepare_for_sandbox(void)
 {
