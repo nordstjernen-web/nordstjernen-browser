@@ -66,7 +66,7 @@ typedef struct {
 
 typedef struct { WGPUErrorType type; char *message; } ns_wg_pending_error;
 typedef struct { WGPUQueue queue; ns_wg_error_sink *sink; } ns_wg_queue;
-typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean range_escaped; } ns_wg_buffer;
+typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean range_escaped; gboolean mapped; uint64_t map_offset; uint64_t map_size; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
 typedef struct { WGPUComputePipeline pipe; } ns_wg_compute_pipe;
 typedef struct { WGPUComputePassEncoder pass; } ns_wg_compute_pass;
@@ -726,7 +726,9 @@ wg_buffer_destroy(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
-    if (b && wg_buffer_detach_ranges(ctx, b) && b->buffer)
+    if (!b) return JS_UNDEFINED;
+    b->mapped = FALSE;
+    if (wg_buffer_detach_ranges(ctx, b) && b->buffer)
         wgpuBufferDestroy(b->buffer);
     return JS_UNDEFINED;
 }
@@ -751,16 +753,30 @@ wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
 {
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
     if (!b || !b->buffer) return JS_UNDEFINED;
+    if (!b->mapped)
+        return JS_ThrowTypeError(ctx,
+            "OperationError: getMappedRange: buffer is not mapped");
     int64_t offset = 0, size = -1;
     if (argc >= 1 && !JS_IsUndefined(argv[0])) JS_ToInt64(ctx, &offset, argv[0]);
     if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToInt64(ctx, &size, argv[1]);
-    if (offset < 0 || (uint64_t)offset > b->size) return JS_UNDEFINED;
-    size_t sz = size < 0 ? (size_t)(b->size - (uint64_t)offset) : (size_t)size;
-    void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, sz);
+    if (offset < 0 || (offset & 7))
+        return JS_ThrowTypeError(ctx,
+            "OperationError: getMappedRange: offset must be a non-negative "
+            "multiple of 8");
+    uint64_t map_end = b->map_offset + b->map_size;
+    if ((uint64_t)offset < b->map_offset || (uint64_t)offset > map_end)
+        return JS_ThrowTypeError(ctx,
+            "OperationError: getMappedRange: offset is outside the mapped range");
+    uint64_t sz = size < 0 ? map_end - (uint64_t)offset : (uint64_t)size;
+    if ((sz & 3) || sz > map_end - (uint64_t)offset)
+        return JS_ThrowTypeError(ctx,
+            "OperationError: getMappedRange: size must be a multiple of 4 "
+            "within the mapped range");
+    void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, (size_t)sz);
     if (!p) return JS_ThrowInternalError(ctx, "getMappedRange failed");
     JSValue *held = g_new(JSValue, 1);
     *held = JS_DupValue(ctx, this_val);
-    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, 0, wg_ab_free,
+    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, (size_t)sz, 0, wg_ab_free,
                                    held, false);
     if (JS_IsException(ab)) {
         JS_FreeValue(ctx, *held);
@@ -780,7 +796,9 @@ wg_buffer_unmap(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
-    if (b && wg_buffer_detach_ranges(ctx, b) && b->buffer)
+    if (!b) return JS_UNDEFINED;
+    b->mapped = FALSE;
+    if (wg_buffer_detach_ranges(ctx, b) && b->buffer)
         wgpuBufferUnmap(b->buffer);
     return JS_UNDEFINED;
 }
@@ -814,6 +832,9 @@ wg_buffer_mapAsync(JSContext *ctx, JSValueConst this_val,
     }
     if (!wait.done || wait.status != WGPUMapAsyncStatus_Success)
         return wg_promise_rejected(ctx, "OperationError: mapAsync failed");
+    b->mapped = TRUE;
+    b->map_offset = (uint64_t)offset;
+    b->map_size = sz;
     return wg_promise_resolved(ctx, JS_UNDEFINED);
 }
 
@@ -852,6 +873,11 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
     b->size = desc.size;
     b->usage = usage;
     b->device = d->device;
+    if (desc.mappedAtCreation) {
+        b->mapped = TRUE;
+        b->map_offset = 0;
+        b->map_size = desc.size;
+    }
     JS_SetOpaque(obj, b);
     JS_SetPropertyStr(ctx, obj, "size", JS_NewFloat64(ctx, (double)desc.size));
     JS_SetPropertyStr(ctx, obj, "usage", JS_NewUint32(ctx, usage));
