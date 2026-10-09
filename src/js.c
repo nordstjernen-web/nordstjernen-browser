@@ -604,6 +604,12 @@ ns_js_in_pump(const ns_js *js)
     return js && js->in_pump;
 }
 
+static gboolean
+ns_js_page_tasks_held(const ns_js *js)
+{
+    return js->in_pump || ns_engine_in_blocking_fetch();
+}
+
 static void
 ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 {
@@ -22516,7 +22522,7 @@ ns_abort_signal_timeout_fire(gpointer user_data)
     ns_abort_timeout *t = user_data;
     if (!t || !t->ctx) { g_free(t); return G_SOURCE_REMOVE; }
     ns_js *abort_js = js_from_ctx(t->ctx);
-    if (abort_js && abort_js->in_pump) {
+    if (abort_js && ns_js_page_tasks_held(abort_js)) {
         ns_js_attach_timeout(abort_js, 4, ns_abort_signal_timeout_fire, t);
         return G_SOURCE_REMOVE;
     }
@@ -23231,7 +23237,7 @@ ns_filereader_complete(gpointer ud)
 {
     ns_filereader_idle *fr = ud;
     ns_js *js = fr->js;
-    if (js && js->in_pump) {
+    if (js && ns_js_page_tasks_held(js)) {
         fr->source = ns_js_attach_timeout(js, 4, ns_filereader_complete, fr);
         return G_SOURCE_REMOVE;
     }
@@ -30590,7 +30596,7 @@ ns_observer_tick_timer(gpointer data)
     ns_js *js = data;
     if (!js) return G_SOURCE_REMOVE;
     if (!js->ctx) { js->observer_tick_source = 0; return G_SOURCE_REMOVE; }
-    if (js->in_pump || js->dispatch_depth > 0)
+    if (ns_js_page_tasks_held(js) || js->dispatch_depth > 0)
         return G_SOURCE_CONTINUE;
     js->observer_tick_source = 0;
     ns_intersection_observers_tick(js);
@@ -64650,7 +64656,7 @@ ns_js_async_script_timer(gpointer data)
     ns_js *js = data;
     if (!js) return G_SOURCE_REMOVE;
     js->async_script_source = 0;
-    if (js->eval_depth > 0 || js->in_pump) {
+    if (js->eval_depth > 0 || ns_js_page_tasks_held(js)) {
         ns_js_schedule_pending_script_drain(js);
         return G_SOURCE_REMOVE;
     }
@@ -66563,7 +66569,8 @@ ns_js_lifecycle_tick(gpointer data)
         ns_js_lifecycle_clear(js);
         return G_SOURCE_REMOVE;
     }
-    if (js->eval_depth > 0 || js->callback_depth > 0 || js->in_pump) {
+    if (js->eval_depth > 0 || js->callback_depth > 0 ||
+        ns_js_page_tasks_held(js)) {
         js->lifecycle_source =
             ns_js_attach_timeout(js, 4, ns_js_lifecycle_tick, js);
         return G_SOURCE_REMOVE;
