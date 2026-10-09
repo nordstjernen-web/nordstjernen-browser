@@ -14,7 +14,13 @@ The build is fully offline: Wuffs and pl_mpeg are vendored in the source
 tarball, and `build()` passes `-Dns-pango=disabled` so the one remaining
 subproject — ns-pango, which meson clones with git — is never reached.
 Text shapes through Alpine's `pango-dev` instead, and nothing is fetched
-during Alpine's network-isolated `build()` phase.
+during Alpine's network-isolated `build()` phase. `build()` also passes
+`-Dwebgpu=disabled`: wgpu-native publishes no musl release. The APKBUILD
+declares `arch="x86_64 aarch64"`.
+
+This is separate from the nightly Alpine `.apk`, which
+`scripts/pack-apk.sh` produces by repackaging the `scripts/pack-linux.sh`
+bundle with a hand-maintained `depends=` list (see `Nightly.md`).
 
 GitHub names the archive root after the repository, so the tarball unpacks
 to `nordstjernen-browser-$pkgver` rather than `$pkgname-$pkgver`; the

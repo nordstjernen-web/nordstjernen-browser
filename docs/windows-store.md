@@ -1,8 +1,7 @@
 # Nordstjernen in the Microsoft Store
 
-available in Microsoft store here now:
-https://apps.microsoft.com/detail/9nw8t7w5z4pl
-
+Nordstjernen is available in the Microsoft Store:
+<https://apps.microsoft.com/detail/9nw8t7w5z4pl>
 
 This document records the research, the packaging work, and the
 submission procedure for shipping Nordstjernen through the Microsoft
@@ -16,9 +15,9 @@ version 7.19, effective October 14, 2025 — re-check the live page
 before every submission, the version number bumps several times a
 year.
 
+## The blocker: policy 10.2.1 (browser engines)
 
-
-
+Policy 10.2.1 requires browsers to use the Chromium or Gecko engine.
 Nordstjernen is an independent engine — neither Chromium nor Gecko —
 so a straightforward "Web browser" submission **fails certification
 on 10.2.1 as written**. The policy was introduced in June 2022 (it
@@ -117,8 +116,8 @@ that shaped the manifest:
   the bundle plus tile PNGs rendered from
   `data/icons/hicolor/scalable/apps/nordstjernen.svg` with
   `rsvg-convert`: StoreLogo (50), Square44x44, Square71x71,
-  Square150x150 and Square310x310, each in `scale-100/125/150/200/400`
-  variants, plus `targetsize-16/24/32/48/256` (and
+  Square150x150, Square310x310 and Wide310x150, each in
+  `scale-100/125/150/200/400` variants, plus `targetsize-16/24/32/48/256` (and
   `altform-unplated`) variants of Square44x44 for taskbar and
   Start-list rendering. If `makepri.exe` is available the variants
   are indexed into `resources.pri` (without it Windows only uses
@@ -301,9 +300,9 @@ inside the package), and uninstall from Start removes it cleanly.
 >   process. WebGL use is visible and can be disabled globally. If it is launched
 >   with administrator rights, the browser drops them.
 > - **Modern web, no bloat.** HTML5, modern CSS and JavaScript,
->   WebAssembly, WebCrypto and WebGL — without WebGPU, ad
->   tech, or AI surface area. Audio and video hand off to the
->   player you already have.
+>   WebAssembly, WebCrypto, WebGL and experimental WebGPU — without
+>   ad tech or AI surface area. WebM, MPEG-1 and MP3 media play
+>   inline.
 > - **Yours.** Open source, with your history, cookies and settings
 >   stored only on your device. Search defaults to DuckDuckGo
 >   and is one setting away from anything else.

@@ -58,7 +58,7 @@ debian/
 ├── changelog       # version history; top entry sets the package version
 ├── control         # Section: web (main), build-deps, binary package
 ├── copyright       # DEP-5; GPL-3+ or NSL-1.0, plus bundled-engine licenses
-├── rules           # dh sequencer; configures meson with ai disabled
+├── rules           # dh sequencer; disables ns-pango and webgpu
 ├── source/format   # 3.0 (quilt)
 └── watch           # tracks upstream GitHub tags
 ```
@@ -83,12 +83,13 @@ Key choices:
 
 ## Build dependencies
 
-The Debian build needs (these mirror `Linux.md`):
+The Debian build needs the `Build-Depends` of `debian/control` plus the
+packaging tools:
 
     sudo apt install build-essential debhelper devscripts meson ninja-build \
         pkg-config libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
         libuchardet-dev libpsl-dev libsqlite3-dev libseccomp-dev \
-        libwebp-dev libavif-dev libjxl-dev libsdl2-dev libenchant-2-dev \
+        libwebp-dev libavif-dev libsdl2-dev libenchant-2-dev \
         libpango1.0-dev libfontconfig-dev \
         libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
         libswresample-dev
