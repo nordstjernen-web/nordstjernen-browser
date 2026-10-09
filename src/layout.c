@@ -5102,13 +5102,7 @@ first_media_source_url(const ns_node *n)
     if (src && *src) return src;
     src = ns_element_get_attr(n, "data-webm");
     if (src && *src) return src;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "source") != 0) continue;
-        const char *csrc = ns_element_get_attr(c, "src");
-        if (csrc && *csrc) return csrc;
-    }
-    return NULL;
+    return ns_media_select_source(n);
 }
 
 static ns_box *
