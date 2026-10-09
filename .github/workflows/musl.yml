@@ -30,11 +30,28 @@ jobs:
     steps:
       - name: Install build dependencies (musl)
         run: |
-          apk add --no-cache \
+          # dl-cdn.alpinelinux.org has failed the TLS handshake for the main
+          # repository's APKINDEX while serving community's, leaving apk
+          # unable to select build-base and the job dead before checkout.
+          # The next fetch usually reaches a healthy edge, so retry rather
+          # than let one bad CDN node fail the build.
+          attempt=0
+          until apk add --no-cache \
             build-base clang ccache pkgconf meson ninja git cmake \
             gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev libwebp-dev libavif-dev sdl2-dev \
             libseccomp-dev ffmpeg-dev \
             fontconfig font-dejavu ca-certificates file nodejs
+          do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 4 ]; then
+              echo "apk add failed $attempt times; the Alpine package" \
+                   "mirror is unreachable. This is a mirror outage, not a" \
+                   "build failure."
+              exit 1
+            fi
+            echo "apk add attempt $attempt failed; retrying"
+            sleep $((attempt * 15))
+          done
 
       - uses: actions/checkout@v7
 
