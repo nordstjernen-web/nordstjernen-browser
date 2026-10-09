@@ -6549,6 +6549,28 @@ paint_failed_image(cairo_t *cr, const ns_box *b)
 }
 
 static const ns_box *g_svg_foreign_owner;
+static cairo_matrix_t g_svg_foreign_base;
+
+static void
+record_svg_foreign_xform(const ns_box *svg_box, guint index, cairo_t *cr)
+{
+    ns_box_media *m = svg_box->media;
+    if (!m->svg_foreign_xform)
+        m->svg_foreign_xform = g_new0(double, (gsize)m->svg_foreign->len * 7);
+    cairo_matrix_t inv = g_svg_foreign_base;
+    if (cairo_matrix_invert(&inv) != CAIRO_STATUS_SUCCESS) return;
+    cairo_matrix_t cur, local;
+    cairo_get_matrix(cr, &cur);
+    cairo_matrix_multiply(&local, &cur, &inv);
+    double *t = m->svg_foreign_xform + index * 7;
+    t[0] = 1;
+    t[1] = local.xx;
+    t[2] = local.yx;
+    t[3] = local.xy;
+    t[4] = local.yy;
+    t[5] = local.x0;
+    t[6] = local.y0;
+}
 
 static void
 paint_svg_foreign(cairo_t *cr, const ns_node *fo, double width, double height,
@@ -6564,6 +6586,7 @@ paint_svg_foreign(cairo_t *cr, const ns_node *fo, double width, double height,
     for (guint i = 0; i < roots->len; i++) {
         const ns_box *root = g_ptr_array_index(roots, i);
         if (root->dom == fo) {
+            record_svg_foreign_xform(svg_box, i, cr);
             paint_walk(cr, root, NULL);
             return;
         }
@@ -6582,10 +6605,13 @@ paint_svg(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     cairo_translate(cr, x, y);
     const ns_box *outer = g_svg_foreign_owner;
+    cairo_matrix_t outer_base = g_svg_foreign_base;
     g_svg_foreign_owner = b;
+    cairo_get_matrix(cr, &g_svg_foreign_base);
     ns_svg_set_foreign_painter(paint_svg_foreign, NULL);
     ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
     g_svg_foreign_owner = outer;
+    g_svg_foreign_base = outer_base;
     if (!outer) ns_svg_set_foreign_painter(NULL, NULL);
     cairo_restore(cr);
 }

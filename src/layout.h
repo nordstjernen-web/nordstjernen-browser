@@ -128,6 +128,7 @@ typedef struct ns_box_media {
     gboolean intrinsic_ratio_only;
     double   image_density;
     GPtrArray *svg_foreign;
+    double    *svg_foreign_xform;
 } ns_box_media;
 
 typedef struct ns_grid_track_edges {
