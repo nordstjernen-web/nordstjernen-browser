@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* A row flex item no longer keeps a stretched height from an earlier
+  layout pass. When the container's height only became definite in a
+  later pass, an item with `height: 100%` kept the content height it was
+  stretched to before, and its own `height: 100%` children grew to it;
+  Discord's chat column ran 800 px past the window, hiding the messages
+  and the message box.
 * Changing an element that is not in the document (setting its `style`
   or other attributes, appending children to it, editing its text) no
   longer marks the page for a full restyle. React-style code that builds

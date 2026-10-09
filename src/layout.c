@@ -10941,7 +10941,8 @@ layout_flex_row(ns_box *box, double cw,
         c->y = inner_y;
         c->flex_main_size = a;
         c->has_flex_main = TRUE;
-        c->definite_height_before_flex = c->definite_height;
+        c->definite_height = 0;
+        c->definite_height_before_flex = 0;
         layout_box(c, a + c->margin.left + c->margin.right
                        + c->border.left + c->border.right
                        + c->padding.left + c->padding.right, child_inherited);
