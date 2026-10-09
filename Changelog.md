@@ -41,6 +41,23 @@ Changelog:
   an unpack-buffer offset even with no unpack buffer bound, where the
   driver reads it as a raw memory address; that now raises
   `INVALID_OPERATION`.
+* WebGPU no longer reads past the end of a page's typed array. A
+  length-tracking view (`new Uint8Array(rab)` over a resizable
+  `ArrayBuffer`) kept reporting its original byte length after the buffer
+  was shrunk with `resize()`, so `queue.writeBuffer` and
+  `queue.writeTexture` copied the old length out of the now-smaller
+  allocation and the page could read the adjacent heap back out of a GPU
+  buffer. The engine now reports such a view's live length, and the two
+  WebGPU uploads clamp the copy to the backing buffer's current size.
+* A page can no longer abort the WebGPU renderer through
+  `queue.submit()`. Resolving the command-buffer list ran page getters
+  that could resubmit or free a command buffer while the outer call was
+  still reading it, and a command buffer listed twice was handed to
+  wgpu-native twice; both reach a wgpu-native path that aborts the
+  process on the resulting validation error. The whole list is now read
+  before any command-buffer handle is used, and an invalid,
+  already-submitted or repeated command buffer raises a WebGPU validation
+  error instead of reaching that path.
 * The Linux renderer sandbox no longer lets a compromised renderer talk
   to local services. Landlock does not cover `connect()` on UNIX
   sockets, and the seccomp filter allowed `socket()` of any family, so
