@@ -988,6 +988,15 @@ browser_media_seek(const void *node, double seconds, gpointer ud)
                                     g_get_monotonic_time());
 }
 
+static ns_texture *
+browser_media_frame(const void *node, const char **out_url,
+                    const char **out_cors, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->videos) return NULL;
+    return ns_video_cache_frame_for_node(b->videos, node, out_url, out_cors);
+}
+
 static void
 browser_js_repaint(gpointer ud)
 {
@@ -1383,6 +1392,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_media_seek_cb(b->js, browser_media_seek, b);
         ns_js_set_media_play_cb(b->js, browser_media_play, b);
         ns_js_set_media_muted_cb(b->js, browser_media_muted, b);
+        ns_js_set_media_frame_cb(b->js, browser_media_frame, b);
         ns_js_set_mse_cb(b->js, browser_mse_data, b);
         ns_js_set_mse_buffered_cb(b->js, browser_mse_buffered, b);
         ns_js_set_mse_remove_cb(b->js, browser_mse_remove, b);

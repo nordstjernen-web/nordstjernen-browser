@@ -761,9 +761,20 @@ typedef struct ns_raf_entry {
     JSContext *ctx;
     JSValue  cb;
     gboolean video_frame;
+    gboolean waiting;
     ns_node *frame;
     ns_node *media;
 } ns_raf_entry;
+
+static gboolean
+ns_raf_has_runnable(const ns_js *js)
+{
+    if (!js || !js->raf_pending) return FALSE;
+    for (guint i = 0; i < js->raf_pending->len; i++)
+        if (!g_array_index(js->raf_pending, ns_raf_entry, i).waiting)
+            return TRUE;
+    return FALSE;
+}
 
 static ns_node *
 ns_js_context_frame(ns_js *js, JSContext *ctx)
@@ -1723,7 +1734,7 @@ ns_idle_timers_end(ns_js *js, gint64 now, gint64 end)
 static gint64
 ns_idle_frame_end(ns_js *js, gint64 now, gint64 end)
 {
-    if (!js || !js->raf_pending || js->raf_pending->len == 0) return end;
+    if (!ns_raf_has_runnable(js)) return end;
     gint64 frame = (js->raf_last_us > 0 ? js->raf_last_us : now) + 16667;
     if (frame > now && frame < end) end = frame;
     return end;
@@ -13061,6 +13072,8 @@ ns_media_container_supported(const char *container)
     if (native_opus && strcmp(container, "audio/opus") == 0)
         return TRUE;
     if (!libav) return FALSE;
+    if (strcmp(container, "video/ogg") == 0)
+        return ns_video_codec_available("theora");
     return strcmp(container, "video/webm")      == 0 ||
            strcmp(container, "audio/webm")      == 0 ||
            strcmp(container, "video/mp4")       == 0 ||
@@ -13088,7 +13101,7 @@ ns_media_container_is_manifest(const char *container)
            strcmp(container, "application/dash+xml")         == 0;
 }
 
-static const char *
+const char *
 ns_media_type_support(const char *type)
 {
     if (!type || !*type) return "";
@@ -13115,6 +13128,23 @@ ns_media_type_support(const char *type)
     g_free(container);
     g_free(lowered);
     return out;
+}
+
+const char *
+ns_media_select_source(const ns_node *media)
+{
+    if (!media) return NULL;
+    const char *src = ns_element_get_attr(media, "src");
+    if (src && *src) return src;
+    for (const ns_node *c = media->first_child; c; c = c->next_sibling) {
+        if (!ns_node_is_element_named(c, "source")) continue;
+        const char *csrc = ns_element_get_attr(c, "src");
+        if (!csrc || !*csrc) continue;
+        const char *type = ns_element_get_attr(c, "type");
+        if (type && *type && !*ns_media_type_support(type)) continue;
+        return csrc;
+    }
+    return NULL;
 }
 
 static gboolean
@@ -30728,7 +30758,7 @@ ns_raf_tick_timer(gpointer data)
     }
     if (js->in_pump || js->dispatch_depth > 0 || ns_engine_in_blocking_fetch())
         return G_SOURCE_CONTINUE;
-    if (!js->raf_pending || js->raf_pending->len == 0) {
+    if (!ns_raf_has_runnable(js)) {
         js->raf_tick_source = 0;
         return G_SOURCE_REMOVE;
     }
@@ -30737,7 +30767,7 @@ ns_raf_tick_timer(gpointer data)
         return G_SOURCE_REMOVE;
     }
     ns_js_run_animation_frame_internal(js);
-    if (js->raf_pending && js->raf_pending->len > 0)
+    if (ns_raf_has_runnable(js))
         return G_SOURCE_CONTINUE;
     js->raf_tick_source = 0;
     return G_SOURCE_REMOVE;
@@ -33168,6 +33198,23 @@ ns_js_run_animation_frame(ns_js *js)
 }
 
 static gboolean
+ns_rvfc_media_has_frame(JSContext *ctx, ns_node *media)
+{
+    if (!media) return TRUE;
+    JSValue el = ns_make_element(ctx, media);
+    if (!JS_IsObject(el)) {
+        JS_FreeValue(ctx, el);
+        return TRUE;
+    }
+    JSValue rs = JS_GetPropertyStr(ctx, el, "readyState");
+    int32_t ready = 0;
+    if (JS_IsNumber(rs)) JS_ToInt32(ctx, &ready, rs);
+    JS_FreeValue(ctx, rs);
+    JS_FreeValue(ctx, el);
+    return ready >= 2;
+}
+
+static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!js || js->halted || js->in_pump) return FALSE;
@@ -33178,7 +33225,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
     ns_drain_microtasks(js);
-    if (!js->raf_pending || js->raf_pending->len == 0)
+    if (!ns_raf_has_runnable(js))
         return js->mutated ? TRUE : FALSE;
     gint64 now_us = g_get_monotonic_time();
     js->raf_last_us = now_us;
@@ -33197,6 +33244,11 @@ ns_js_run_animation_frame_internal(ns_js *js)
             : (e->ctx ? e->ctx : js->ctx);
         if (!frame_connected) {
             JS_FreeValue(callback_ctx, e->cb);
+            continue;
+        }
+        if (e->video_frame && !ns_rvfc_media_has_frame(callback_ctx, e->media)) {
+            e->waiting = TRUE;
+            g_array_append_val(js->raf_pending, *e);
             continue;
         }
         JSContext *previous_ctx = js->ctx;
@@ -33295,7 +33347,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
 gboolean
 ns_js_has_pending_animation_frame(const ns_js *js)
 {
-    return js && js->raf_pending && js->raf_pending->len > 0;
+    return ns_raf_has_runnable(js);
 }
 
 gboolean
@@ -33311,7 +33363,7 @@ ns_js_has_pending_work(const ns_js *js)
             if (!t->is_idle) return TRUE;
         }
     }
-    if (js->raf_pending && js->raf_pending->len > 0) return TRUE;
+    if (ns_raf_has_runnable(js)) return TRUE;
     if (js->pending_fetches && js->pending_fetches->len > 0) return TRUE;
     if (js->pending_xhrs && js->pending_xhrs->len > 0) return TRUE;
     if (js->pending_ws && js->pending_ws->len > 0) return TRUE;
@@ -66759,6 +66811,14 @@ ns_js_set_selection(ns_js *js, const char *text, gboolean has_range,
 }
 
 void
+ns_js_set_media_frame_cb(ns_js *js, ns_js_media_frame_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->media_frame_cb = cb;
+    js->media_frame_user_data = user_data;
+}
+
+void
 ns_js_set_media_seek_cb(ns_js *js, ns_js_media_seek_cb cb, gpointer user_data)
 {
     if (!js) return;
@@ -66999,6 +67059,21 @@ ns_js_emit_audio(ns_js *js, const char *fmt, ...)
     g_free(cmd);
 }
 
+static void
+ns_rvfc_wake(ns_js *js, const ns_node *media)
+{
+    if (!js->raf_pending) return;
+    gboolean woke = FALSE;
+    for (guint i = 0; i < js->raf_pending->len; i++) {
+        ns_raf_entry *e = &g_array_index(js->raf_pending, ns_raf_entry, i);
+        if (e->waiting && e->media == media) {
+            e->waiting = FALSE;
+            woke = TRUE;
+        }
+    }
+    if (woke) ns_raf_schedule_tick(js);
+}
+
 void
 ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
 {
@@ -67019,8 +67094,10 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
         JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
                                   JS_PROP_C_W_E);
-        ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
+        ns_rvfc_wake(js, n);
         ns_js_dispatch_event(js, n, "durationchange", NULL);
+        ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
+        ns_js_dispatch_event(js, n, "loadeddata", NULL);
         ns_js_dispatch_event(js, n, "canplay", NULL);
         ns_js_dispatch_event(js, n, "canplaythrough", NULL);
     } else if (strcmp(kind, "vwidth") == 0) {

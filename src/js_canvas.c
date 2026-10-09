@@ -2089,6 +2089,17 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
             }
         }
     }
+    if (strcmp(n->name, "video") == 0 && js->media_frame_cb) {
+        const char *frame_url = NULL;
+        const char *frame_cors = NULL;
+        ns_texture *frame = js->media_frame_cb(n, &frame_url, &frame_cors,
+                                               js->media_frame_user_data);
+        if (frame) {
+            tex = frame;
+            source_url = frame_url;
+            cors_allow_origin = frame_cors;
+        }
+    }
     ns_image *im_cache = NULL;
     if (!tex && strcmp(n->name, "img") == 0) {
         const ns_image *im = ns_js_image_for_node(js, n);

@@ -3,6 +3,24 @@ Changelog:
 
 1.0.31:
 ======
+* A playing `<video>` can be drawn into a 2D canvas and uploaded as a
+  WebGL or WebGPU texture: `drawImage`, `texImage2D`/`texSubImage2D` and
+  `copyExternalImageToTexture` take its current frame instead of only
+  its poster, including when the video is `display:none` (the usual way
+  three.js feeds a `VideoTexture`). The three.js video panoramas and
+  video-material examples now show the video.
+* `<video>`/`<audio>` pick the first `<source>` whose `type` the browser
+  can play, as the HTML resource-selection algorithm says, instead of
+  the first `<source>` of any kind; a page listing an Ogg Theora file
+  before an MP4 used to get the Ogg and play nothing.
+* Ogg Theora video (`.ogv`) plays inline wherever FFmpeg's Theora
+  decoder is present, and the bundled LGPL FFmpeg build enables it.
+* `videoWidth`/`videoHeight` are set before `loadedmetadata` fires,
+  `loadeddata` fires, and `requestVideoFrameCallback` waits for the
+  first frame instead of firing at once on a 0×0 video (three.js sized
+  its GPU texture 1×1 from that and then failed every upload).
+* A `crossorigin` video served with `Access-Control-Allow-Origin` no
+  longer taints the canvas it is drawn into.
 * The address bar shows the URL being loaded as soon as the load
   starts. It stayed empty (or kept the previous page's address) until
   the renderer finished the first layout, which on script-heavy pages

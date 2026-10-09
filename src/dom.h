@@ -260,6 +260,8 @@ gboolean    ns_node_spellcheck_used(const ns_node *n);
 const ns_node *ns_node_spellcheck_host(const ns_node *n);
 const char *ns_node_editable_value(const ns_node *n);
 const char *ns_input_used_value(const ns_node *n);
+const char *ns_media_type_support(const char *type);
+const char *ns_media_select_source(const ns_node *media);
 char       *ns_textarea_default_value_dup(const ns_node *n);
 char       *ns_textarea_value_dup(const ns_node *n);
 gboolean    ns_input_is_checked(const ns_node *n);

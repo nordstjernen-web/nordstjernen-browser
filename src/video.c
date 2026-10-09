@@ -290,6 +290,7 @@ ns_video_free(gpointer p)
     if (v->cues) g_ptr_array_free(v->cues, TRUE);
     ns_texture_unref(v->poster_texture);
     g_free(v->poster_url);
+    g_free(v->cors_allow_origin);
     ns_texture_unref(v->frame_texture);
     ns_video_player_free(v->player);
     g_free(v);
@@ -709,6 +710,28 @@ ns_video_cache_find_by_node(ns_video_cache *cache, const void *dom_node)
         if (!best || cand->seq > best->seq) best = cand;
     }
     return best;
+}
+
+ns_texture *
+ns_video_cache_frame_for_node(ns_video_cache *cache, const void *dom_node,
+                              const char **out_url, const char **out_cors)
+{
+    ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
+    if (!v) return NULL;
+    if (!v->sampled && v->player && !v->frame_texture) {
+        gboolean ended = FALSE;
+        ns_texture *frame = ns_video_player_frame_at(v->player, v->cur_time,
+                                                     v->loop, &ended);
+        if (frame) v->frame_texture = ns_texture_ref(frame);
+    }
+    v->sampled = TRUE;
+    if (v->frame_texture) {
+        if (out_url) *out_url = v->url;
+        if (out_cors) *out_cors = v->cors_allow_origin;
+        return v->frame_texture;
+    }
+    if (out_url) *out_url = v->poster_url;
+    return v->poster_texture;
 }
 
 static ns_video *
@@ -1703,6 +1726,10 @@ on_video_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     }
     ns_video_build_player(pending, resp);
     ns_video *video = pending->video;
+    if (resp && !resp->error) {
+        g_free(video->cors_allow_origin);
+        video->cors_allow_origin = g_strdup(resp->cors_allow_origin);
+    }
     if (resp && !resp->error && resp->body && resp->body->len > 0 &&
         resp->body->len <= NS_VIDEO_MAX_BYTES && ns_video_helper_enabled()) {
         if (video->autoplay && !video->playing) {
@@ -1838,7 +1865,7 @@ url_is_inline_video(const char *url)
     static const char *const exts[] = {
         ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1",
 #ifdef NS_HAVE_LIBAV
-        ".mp4", ".m4v", ".webm",
+        ".mp4", ".m4v", ".webm", ".ogv",
 #endif
         NULL,
     };
@@ -1932,8 +1959,8 @@ ns_video_discover_element(ns_video_cache *cache, const ns_node *node)
 {
     if (node->kind == NS_NODE_ELEMENT && node->name &&
         strcmp(node->name, "video") == 0) {
-        const char *src = ns_element_get_attr(node, "src");
-        if (!src || !*src) src = ns_element_get_attr(node, NS_MEDIA_SRC_ATTR);
+        const char *src = ns_element_get_attr(node, NS_MEDIA_SRC_ATTR);
+        if (!src || !*src) src = ns_media_select_source(node);
         if (src && *src) {
             char *abs = g_str_has_prefix(src, "blob:")
                 ? g_strdup(src)
@@ -2115,11 +2142,11 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
 
         if (!v->meta_sent && v->duration > 0.0) {
             v->meta_sent = TRUE;
-            ns_video_queue_emit(emits, v, "meta", v->duration);
             if (v->natural_width > 0)
                 ns_video_queue_emit(emits, v, "vwidth", (double)v->natural_width);
             if (v->natural_height > 0)
                 ns_video_queue_emit(emits, v, "vheight", (double)v->natural_height);
+            ns_video_queue_emit(emits, v, "meta", v->duration);
         }
         if (!v->buf_sent) {
             v->buf_sent = TRUE;
@@ -2186,7 +2213,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         v->prev_tick_time = t;
 
         gboolean ended = FALSE;
-        ns_texture *frame = helper_owns ? NULL
+        ns_texture *frame = helper_owns && !v->sampled ? NULL
             : ns_video_player_frame_at(v->player, t, v->loop, &ended);
         if (helper_owns && !v->loop && v->duration > 0.0 && t >= v->duration)
             ended = TRUE;
