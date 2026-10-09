@@ -1576,6 +1576,13 @@ ns_js_run_due_timers(ns_js *js)
 }
 
 static void
+ns_js_note_mutation(ns_js *js, const ns_node *n)
+{
+    const ns_node *root = n ? ns_node_root(n) : NULL;
+    if (!root || root->kind == NS_NODE_DOCUMENT) js->mutated = TRUE;
+}
+
+static void
 ns_report_mutations(ns_js *js)
 {
     if (!js->mutated) return;
@@ -7348,7 +7355,7 @@ ns_element_append_data(JSContext *ctx, JSValueConst this_val,
     ns_node_replace_text_owned(n, merged);
     JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_mutation(_j, n); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -7372,7 +7379,7 @@ ns_element_delete_data(JSContext *ctx, JSValueConst this_val,
     char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, cnt_units, NULL, 0);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_mutation(_j, n); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -7399,7 +7406,7 @@ ns_element_insert_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, 0, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_mutation(_j, n); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -7428,7 +7435,7 @@ ns_element_replace_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, cnt_units, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_mutation(_j, n); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -7553,7 +7560,7 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
         if (!is_null) JS_FreeCString(ctx, s);
         ns_js *_j = js_from_ctx(ctx);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, n);
             ns_js_record_character_data(_j, n, old_copy);
         }
         g_free(old_copy);
@@ -29310,7 +29317,7 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
     if (js) {
         if (changed) {
             if (ns_css_attr_may_affect_style(n, name))
-                js->mutated = TRUE;
+                ns_js_note_mutation(js, n);
         }
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, new_value);
@@ -29341,7 +29348,7 @@ ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     ns_element_set_attr_ns(n, namespace_uri, prefix, local_name, name, new_value);
     if (js) {
         if (changed && ns_css_attr_may_affect_style(n, record_copy))
-            js->mutated = TRUE;
+            ns_js_note_mutation(js, n);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, new_value);
@@ -29362,7 +29369,7 @@ ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name)
                             ns_attr_local_name(old_attr));
     ns_element_remove_attr(n, name);
     if (js) {
-        if (ns_css_attr_may_affect_style(n, name)) js->mutated = TRUE;
+        if (ns_css_attr_may_affect_style(n, name)) ns_js_note_mutation(js, n);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, NULL);
     }
@@ -29382,7 +29389,7 @@ ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     ns_attr_detach_matching(js, n, namespace_uri, local_name);
     ns_element_remove_attr_ns(n, namespace_uri, local_name);
     if (js) {
-        if (ns_css_attr_may_affect_style(n, record_copy)) js->mutated = TRUE;
+        if (ns_css_attr_may_affect_style(n, record_copy)) ns_js_note_mutation(js, n);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, NULL);
@@ -34317,7 +34324,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
                                                  batch_prev, NULL);
         }
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, parent);
             ns_js_nodes_inserted(_j, parent, moved);
         }
         g_ptr_array_free(moved, FALSE);
@@ -34334,7 +34341,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
     ns_node_append_child(parent, child);
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         if (!inert_parent) {
@@ -34377,6 +34384,7 @@ static void
 ns_js_record_move_removal(ns_js *js, ns_node *node)
 {
     if (!js || !node || !node->parent) return;
+    ns_js_note_mutation(js, node);
     ns_js_record_child_change(js, node->parent, NULL, node,
                               node->prev_sibling, node->next_sibling);
 }
@@ -34539,7 +34547,7 @@ ns_element_moveBefore(JSContext *ctx, JSValueConst this_val,
         ns_node_append_child(parent, node);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
     }
@@ -34602,7 +34610,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         }
         g_ptr_array_free(added, FALSE);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, parent);
             if (!inert_parent) {
                 ns_js_run_inserted_scripts(_j, parent);
                 ns_ce_upgrade_subtree_all(_j, parent);
@@ -34624,7 +34632,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, parent, newc, ref);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_record_child_change(_j, parent, newc, NULL,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -36498,7 +36506,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         ns_body_forward_content_handler(ctx, n, name, val);
         if (changed && _j) {
             if (!img_src_paint_only && ns_css_attr_may_affect_style(n, name))
-                _j->mutated = TRUE;
+                ns_js_note_mutation(_j, n);
             if (img_src_paint_only && _j->repaint_cb)
                 _j->repaint_cb(_j->repaint_user_data);
         }

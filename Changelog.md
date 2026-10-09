@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* Changing an element that is not in the document (setting its `style`
+  or other attributes, appending children to it, editing its text) no
+  longer marks the page for a full restyle. React-style code that builds
+  detached nodes and then reads `getComputedStyle` paid a whole-document
+  cascade (about 300 ms on Discord) for every such read.
 * An absolutely positioned element sized by `top` and `bottom` (or
   `inset: 0`) with an auto height now gives its children a definite
   height when it is a flex container, so `flex: 1` columns and
