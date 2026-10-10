@@ -10,6 +10,13 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Media: a Media Source stream whose audio is muxed into the video
+  SourceBuffer keeps its sound past the first few seconds. The audio
+  helper's copy was written once from the bytes present when playback
+  began and never grew, so the sound ended after a segment and the
+  picture, which follows the audio clock, froze with it. The copy now
+  grows with the stream, as a separate audio SourceBuffer's already
+  did.
 * Media: the browser window composites every video the helper process
   decodes, not just the most recently opened one. Each tab had a
   single video slot, so a muted video ad that started after the main

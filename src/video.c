@@ -1443,6 +1443,7 @@ ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
         if (d > v->duration) v->duration = d;
     }
     gint64 now = g_get_monotonic_time();
+    gboolean has_side_audio = s->audio_bytes && s->audio_bytes->len > 0;
     if (s->video_bytes && s->video_bytes->len >= 4096 && s->video_dirty &&
         (s->eos || now - s->video_flush_us > G_GINT64_CONSTANT(250000))) {
         s->video_dirty = FALSE;
@@ -1450,8 +1451,11 @@ ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
         ns_video_materialize_video(cache, v, s->video_bytes->data,
                                    s->video_bytes->len, s->video_gen,
                                    s->video_gen_start);
+        if (!has_side_audio && v->has_audio && v->audio_file)
+            ns_video_materialize_audio(cache, v, s->video_bytes->data,
+                                       s->video_bytes->len, s->video_gen,
+                                       s->video_gen_start);
     }
-    gboolean has_side_audio = s->audio_bytes && s->audio_bytes->len > 0;
     if (has_side_audio && s->audio_bytes->len >= 4096 && s->audio_dirty &&
         (s->eos || now - s->audio_flush_us > G_GINT64_CONSTANT(250000))) {
         s->audio_dirty = FALSE;
