@@ -1023,6 +1023,25 @@ ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed)
     return href;
 }
 
+char *
+ns_rproc_http_release_at(ns_rproc_http *r, int x, int y, int *out_changed)
+{
+    if (out_changed) *out_changed = 0;
+    if (!r)
+        return NULL;
+    char json[48];
+    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char *body = request(r, "/release", json);
+    if (!body)
+        return NULL;
+    long changed = 0;
+    json_get_long(body, "changed", &changed);
+    char *href = json_get_str(body, "href");
+    free(body);
+    if (out_changed) *out_changed = changed != 0 ? 1 : 0;
+    return href;
+}
+
 int
 ns_rproc_http_focused_editable(ns_rproc_http *r)
 {
