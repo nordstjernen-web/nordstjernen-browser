@@ -3,6 +3,30 @@ Changelog:
 
 1.0.32:
 ======
+* JS: Streams follow the WHATWG Streams standard. `ReadableStream`,
+  `WritableStream` and `TransformStream` queue chunks by size, apply
+  backpressure through `highWaterMark`, call `pull()` only when there
+  is room, and `pipeTo()`/`pipeThrough()` honour `preventClose`,
+  `preventAbort`, `preventCancel` and an abort `signal`. `tee()`,
+  `ReadableStream.from()`, async iteration, BYOB readers over byte
+  streams (buffers are transferred, not copied), the queuing strategies
+  and the controller classes are there too. A stream that pulled
+  lazily, as ChatGPT's answer stream does, never delivered a chunk
+  before. Not there yet: `byobRequest` is always null and
+  `autoAllocateChunkSize` is ignored, so a byte source has to
+  `enqueue()` its chunks.
+* Fetch: `Response.body` and `Blob.stream()` are byte streams, so
+  `getReader({mode: 'byob'})` works on them. The body stream of a
+  buffered response is made on first use and copies nothing until it
+  is read. `clone()` tees a streamed body and gives the clone its own
+  copy of each chunk, and `bytes()` returns its own copy, so
+  transferring one buffer no longer empties the other. A body whose
+  stream is locked or was already read makes `text()`, `json()`,
+  `arrayBuffer()`, `bytes()`, `blob()` and `formData()` reject with a
+  TypeError, and `clone()` throws for it; a locked body keeps
+  `bodyUsed` false, and reading the body stream of a buffered response
+  sets it. Of the streams, fetch body, encoding stream and compression
+  web-platform tests, 1802 of 2289 subtests pass, up from 629 of 2039.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size
