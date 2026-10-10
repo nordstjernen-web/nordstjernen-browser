@@ -2551,6 +2551,8 @@ typedef struct scroller_walk {
     double vx, vy;
     GString *out;
     int left;
+    ns_js *js;
+    int wheel_left;
 } scroller_walk;
 
 static void
@@ -2574,6 +2576,27 @@ scroller_rect_emit(const ns_box *b, double ox, double oy, scroller_walk *w)
 }
 
 static void
+wheel_rect_emit(const ns_box *b, double ox, double oy, scroller_walk *w)
+{
+    gboolean fixed = box_under_fixed(b);
+    double x = b->x + b->margin.left + ox;
+    double y = b->y + b->margin.top + oy;
+    double bw = b->content_width + b->padding.left + b->padding.right +
+                b->border.left + b->border.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom +
+                b->border.top + b->border.bottom;
+    if (fixed) {
+        x -= w->vx;
+        y -= w->vy;
+    }
+    if (!(bw > 0 && bh > 0 && isfinite(x) && isfinite(y))) return;
+    g_string_append_printf(w->out, "wr %d %d %d %d %d\n", (int)floor(x),
+                           (int)floor(y), (int)ceil(bw), (int)ceil(bh),
+                           fixed ? 1 : 0);
+    w->wheel_left--;
+}
+
+static void
 scroller_rects_walk(const ns_box *b, double ox, double oy, scroller_walk *w)
 {
     if (!b || w->left <= 0) return;
@@ -2583,6 +2606,8 @@ scroller_rects_walk(const ns_box *b, double ox, double oy, scroller_walk *w)
     oy += hy;
     if (b->scrolls && (b->scroll_max_x > 0 || b->scroll_max_y > 0))
         scroller_rect_emit(b, ox, oy, w);
+    if (w->wheel_left > 0 && b->dom && ns_js_node_blocks_wheel(w->js, b->dom))
+        wheel_rect_emit(b, ox, oy, w);
     double cx = ox - b->scroll_x, cy = oy - b->scroll_y;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         scroller_rects_walk(c, cx, cy, w);
@@ -2592,11 +2617,37 @@ void
 ns_browser_scroller_rects(ns_browser *browser, GString *out, int max_rects)
 {
     if (!browser || !browser->layout || !out) return;
+    gboolean wheel_all = ns_js_document_blocks_wheel(browser->js);
     scroller_walk w = { browser->cur_scroll_x, browser->cur_scroll_y, out,
-                        max_rects };
+                        max_rects, browser->js, wheel_all ? 0 : max_rects };
     scroller_rects_walk(browser->layout, 0, 0, &w);
     if (w.left <= 0)
         g_string_append(out, "sr-all\n");
+    if (wheel_all || w.wheel_left <= 0)
+        g_string_append(out, "wr-all\n");
+}
+
+int
+ns_browser_wheel_event(ns_browser *browser, int x, int y, int dx, int dy,
+                       int mods, int *out_changed)
+{
+    if (out_changed) *out_changed = 0;
+    if (!browser || !browser->layout || !browser->js) return 0;
+    const ns_node *node = ns_box_hit_node(browser->layout, (double)x, (double)y);
+    if (!node) return 0;
+    gboolean prevented = FALSE;
+    ns_js_dispatch_wheel(browser->js, node,
+                         (double)x - browser->cur_scroll_x,
+                         (double)y - browser->cur_scroll_y,
+                         (double)x, (double)y, (double)dx, (double)dy,
+                         (mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0,
+                         (mods & 8) != 0, &prevented);
+    if (ns_js_consume_mutated(browser->js)) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+        if (out_changed) *out_changed = 1;
+    }
+    return prevented ? 1 : 0;
 }
 
 gboolean
