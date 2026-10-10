@@ -645,7 +645,8 @@ sheet_run_flush(sheet_collect_ctx *cc)
 {
     if (!cc->run_chunks || cc->run_chunks->len == 0) return;
     sheet_run_drop_repeats(cc);
-    const sheet_run_chunk *all = (const sheet_run_chunk *)cc->run_chunks->data;
+    const sheet_run_chunk *all = &g_array_index(cc->run_chunks,
+                                                sheet_run_chunk, 0);
     guint start = 0;
     for (guint i = 0; i < cc->run_chunks->len; i++) {
         if (all[i].len < SHEET_RUN_CHUNK_ALONE) continue;

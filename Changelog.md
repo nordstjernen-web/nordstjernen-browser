@@ -3,6 +3,10 @@ Changelog:
 
 1.0.31:
 ======
+* Build: the clang builds on Linux, macOS and Windows compile again.
+  The merged-stylesheet-run flush cast a `GArray`'s byte buffer straight
+  to its element type, which clang's `-Wcast-align` rejects under
+  `--werror`; it now takes the first element through `g_array_index`.
 * Performance: computing values of custom properties registered with
   `@property` no longer measures the element's and the root's fonts
   for `ex`, `ch`, `cap` and `ic` units unless a value might use one.
