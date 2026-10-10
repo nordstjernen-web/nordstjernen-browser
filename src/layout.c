@@ -2940,6 +2940,21 @@ counter_apply_style(GHashTable *current, const ns_style *s)
             s->values[NS_CSS_COUNTER_INCREMENT]->u.keyword, TRUE);
 }
 
+static gboolean
+pseudo_generates_box(const ns_style *ps)
+{
+    const ns_css_value *cv = ps ? ps->values[NS_CSS_CONTENT] : NULL;
+    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
+           strcmp(cv->u.keyword, "none") != 0 &&
+           strcmp(cv->u.keyword, "normal") != 0;
+}
+
+static void
+counter_apply_pseudo(GHashTable *current, const ns_style *ps)
+{
+    if (pseudo_generates_box(ps)) counter_apply_style(current, ps);
+}
+
 static void
 counter_walk(const ns_node *n, GHashTable *styles,
              GHashTable *current, GHashTable *snapshots, int depth)
@@ -2949,7 +2964,7 @@ counter_walk(const ns_node *n, GHashTable *styles,
     if (n->kind == NS_NODE_ELEMENT && styles) {
         s = g_hash_table_lookup(styles, n);
         counter_apply_style(current, s);
-        if (s) counter_apply_style(current, s->before);
+        if (s) counter_apply_pseudo(current, s->before);
         gboolean need = FALSE;
         if (s && s->before && s->before->values[NS_CSS_CONTENT]) {
             const ns_css_value *cv = s->before->values[NS_CSS_CONTENT];
@@ -2974,7 +2989,7 @@ counter_walk(const ns_node *n, GHashTable *styles,
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         counter_walk(c, styles, current, snapshots, depth + 1);
-    if (s) counter_apply_style(current, s->after);
+    if (s) counter_apply_pseudo(current, s->after);
 }
 
 static void
@@ -3285,15 +3300,6 @@ append_pseudo_content(GString *out, const ns_css_value *cv,
     g_string_append(out, txt);
     g_free(quote);
     g_free(resolved);
-}
-
-static gboolean
-pseudo_generates_box(const ns_style *ps)
-{
-    const ns_css_value *cv = ps ? ps->values[NS_CSS_CONTENT] : NULL;
-    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
-           strcmp(cv->u.keyword, "none") != 0 &&
-           strcmp(cv->u.keyword, "normal") != 0;
 }
 
 static ns_box *pseudo_block_with_text(const ns_style *ps, const char *txt);
@@ -5220,9 +5226,8 @@ static ns_box *
 build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
                         const ns_style *host_style)
 {
-    if (!ps) return NULL;
+    if (!pseudo_generates_box(ps)) return NULL;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
-    if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return NULL;
     gboolean inline_atomic = ns_display_is_atomic_inline(ns_css_display_of(ps));
     char *resolved = resolve_pseudo_content(cv->u.keyword, host);
     if (!resolved) {
@@ -5712,9 +5717,8 @@ static ns_box *
 build_pseudo_block_for(const ns_style *ps, const ns_node *host)
 {
     if (!ps) return NULL;
-    if (style_is_absolute_or_fixed(ps)) return NULL;
+    if (style_is_absolute_or_fixed(ps) || !pseudo_generates_box(ps)) return NULL;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
-    if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return NULL;
     ns_display d = ns_css_display_of(ps);
     if (!ps->values[NS_CSS_DISPLAY] || ns_display_is_none(d) ||
         d.outer == NS_DISPLAY_OUTER_INLINE)
@@ -5741,9 +5745,7 @@ static void
 register_abs_pseudo(const ns_node *host, const ns_style *ps)
 {
     if (!ps || !g_abs_pending) return;
-    if (!style_is_absolute_or_fixed(ps)) return;
-    const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
-    if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return;
+    if (!style_is_absolute_or_fixed(ps) || !pseudo_generates_box(ps)) return;
     ns_abs_entry e;
     e.dom = host;
     e.pseudo = ps;

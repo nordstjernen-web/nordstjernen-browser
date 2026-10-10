@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a `::before` or `::after` whose `content` is `none` or `normal`
+  generates no box, also when it is absolutely positioned or an
+  inline-block. Such pseudo-elements used to paint their background, so
+  a decorative `content:none; position:absolute; inset:0` gradient
+  covered the text around it. Such a pseudo-element also no longer
+  changes counters with `counter-increment`, `counter-reset` or
+  `counter-set`.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size
