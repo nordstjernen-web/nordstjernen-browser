@@ -2942,15 +2942,16 @@ browser_hover_dispatch(ns_browser *b, const ns_node *target, int x, int y,
                        const ns_node *related)
 {
     if (!b->js || !target) return;
+    int buttons = b->press_active ? 1 : 0;
     ns_js_dispatch_mouse_event(b->js, target, ptr_type,
                                (double)x - b->cur_scroll_x,
                                (double)y - b->cur_scroll_y,
-                               (double)x, (double)y, 0, 0,
+                               (double)x, (double)y, 0, buttons,
                                FALSE, FALSE, FALSE, FALSE, related, NULL);
     ns_js_dispatch_mouse_event(b->js, target, mouse_type,
                                (double)x - b->cur_scroll_x,
                                (double)y - b->cur_scroll_y,
-                               (double)x, (double)y, 0, 0,
+                               (double)x, (double)y, 0, buttons,
                                FALSE, FALSE, FALSE, FALSE, related, NULL);
 }
 
@@ -3745,8 +3746,29 @@ browser_dropdown_click(ns_browser *browser, const ns_node *node)
     return FALSE;
 }
 
+static const ns_node *
+browser_common_ancestor(const ns_node *a, const ns_node *b)
+{
+    for (const ns_node *x = a; x; x = x->parent)
+        for (const ns_node *y = b; y; y = y->parent)
+            if (x == y) return x;
+    return NULL;
+}
+
 char *
 ns_browser_release_click(ns_browser *browser, int *out_changed)
+{
+    if (!browser) {
+        if (out_changed) *out_changed = -1;
+        return NULL;
+    }
+    return ns_browser_release_click_at(browser, browser->press_x,
+                                       browser->press_y, out_changed);
+}
+
+char *
+ns_browser_release_click_at(ns_browser *browser, int x, int y,
+                            int *out_changed)
 {
     if (out_changed) *out_changed = 0;
     if (!browser) {
@@ -3757,9 +3779,15 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     g_clear_pointer(&browser->pending_nav, g_free);
 
     browser_prune_cached_nodes(browser);
-    const ns_node *node = browser->press_active ? browser->press_node : NULL;
-    int x = browser->press_x;
-    int y = browser->press_y;
+    const ns_node *press = browser->press_active ? browser->press_node : NULL;
+    const ns_node *up = press;
+    if (press && browser->layout &&
+        (x != browser->press_x || y != browser->press_y)) {
+        const ns_node *hit = browser_hit_node(browser, x, y);
+        if (hit) up = hit;
+    }
+    const ns_node *node = up == press ? press
+                                      : browser_common_ancestor(press, up);
     int mods = browser->press_mods;
     browser->press_node = NULL;
     browser->press_active = FALSE;
@@ -3770,19 +3798,21 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     browser_range_drag_end(browser);
 
     gboolean prevented = FALSE;
+    gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
+    gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
+    if (browser->js && up) {
+        ns_js_dispatch_mouse_event(browser->js, up, "pointerup",
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
+                                   0, 0, sh, ct, al, me, NULL, NULL);
+        ns_js_dispatch_mouse_event(browser->js, up, "mouseup",
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
+                                   0, 0, sh, ct, al, me, NULL, NULL);
+    }
     if (browser->js && node) {
-        gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
-        gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
-        ns_js_dispatch_mouse_event(browser->js, node, "pointerup",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 0, sh, ct, al, me, NULL, NULL);
-        ns_js_dispatch_mouse_event(browser->js, node, "mouseup",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 0, sh, ct, al, me, NULL, NULL);
         if (!drag_selected)
             ns_js_dispatch_mouse_event(browser->js, node, "click",
                                        (double)x - browser->cur_scroll_x,

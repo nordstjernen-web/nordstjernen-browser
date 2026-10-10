@@ -111,6 +111,12 @@ char *ns_browser_link_under(ns_browser *browser, int x, int y);
  * re-render, 0 if nothing changed, -1 if no page is open. */
 int ns_browser_release(ns_browser *browser);
 char *ns_browser_release_click(ns_browser *browser, int *out_changed);
+/* As ns_browser_release_click, with the pointer released at page
+ * coordinates (x, y): pointerup/mouseup target the element under that
+ * point and click goes to the nearest common ancestor of it and the
+ * pressed element. */
+char *ns_browser_release_click_at(ns_browser *browser, int x, int y,
+                                  int *out_changed);
 
 /* The computed CSS cursor keyword at page coordinates (CSS px) — one of the
  * standard cursor keywords ("pointer", "text", "move", ...) — or NULL when

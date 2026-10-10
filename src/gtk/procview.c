@@ -1861,7 +1861,7 @@ worker_main(gpointer data)
             res->type = RES_RELEASE;
             res->seq = req->seq;
             res->href = v->proc
-                ? ns_rproc_http_release_full(v->proc, &res->ok)
+                ? ns_rproc_http_release_at(v->proc, req->x, req->y, &res->ok)
                 : NULL;
             if (v->proc && (!res->href || !*res->href))
                 res->media_url = ns_rproc_http_media_at(v->proc, req->x, req->y,
