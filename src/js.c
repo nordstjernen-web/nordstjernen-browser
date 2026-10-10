@@ -268,6 +268,9 @@ static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
 static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
 static void ns_js_promote_deferred_iframes(ns_js *js);
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
+static gboolean ns_node_is_media_element(const ns_node *n);
+static void ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val,
+                                        ns_node *el);
 static gboolean ns_js_report_error_event(ns_js *js, const char *message,
                                          const char *filename, int lineno,
                                          int colno, JSValueConst error);
@@ -5765,6 +5768,8 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
         }
         if (magic == 3 && n->name && strcmp(n->name, "iframe") == 0)
             ns_js_schedule_iframe_load_full(js, n, TRUE);
+        if (magic == 3 && ns_node_is_media_element(n))
+            ns_media_run_load_algorithm(ctx, this_val, n);
         if (changed && n->name && strcmp(n->name, "object") == 0 &&
             g_ascii_strcasecmp(names[magic], "data") == 0)
             ns_js_schedule_iframe_load(js, n);
@@ -36528,6 +36533,9 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (changed && g_ascii_strcasecmp(name, "src") == 0 &&
             n->name && strcmp(n->name, "img") == 0)
             ns_js_start_image_load(js_from_ctx(ctx), n, val);
+        if (g_ascii_strcasecmp(name, "src") == 0 &&
+            ns_node_is_media_element(n))
+            ns_media_run_load_algorithm(ctx, this_val, n);
         if (n->name && strcmp(n->name, "iframe") == 0 &&
             (g_ascii_strcasecmp(name, "src") == 0 ||
              g_ascii_strcasecmp(name, "srcdoc") == 0))
@@ -48782,13 +48790,28 @@ ns_media_set_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static JSValue
-ns_media_load(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
+static void
+ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val, ns_node *el)
 {
-    (void)argc; (void)argv;
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!ns_node_is_media_element(el)) return JS_UNDEFINED;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue network_value = JS_GetPropertyStr(ctx, this_val, "_nd_networkState");
+    int32_t network_state = 0;
+    if (JS_IsNumber(network_value)) JS_ToInt32(ctx, &network_state, network_value);
+    JS_FreeValue(ctx, network_value);
+    JSValue playing_value = JS_GetPropertyStr(ctx, this_val, "_nd_playing");
+    gboolean was_playing = JS_ToBool(ctx, playing_value) > 0;
+    JS_FreeValue(ctx, playing_value);
+    if (js && was_playing) {
+        char *token = ns_media_existing_token(ctx, this_val);
+        if (token) {
+            ns_js_emit_audio(js, "pause %s", token);
+            g_free(token);
+        }
+        if (js->media_play_cb)
+            js->media_play_cb(el, FALSE, js->media_play_user_data);
+    }
+    if (js && js->media_seek_cb)
+        js->media_seek_cb(el, 0.0, js->media_seek_user_data);
     JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, 0.0));
     JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
@@ -48805,11 +48828,22 @@ ns_media_load(JSContext *ctx, JSValueConst this_val,
                               JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, this_val, "videoHeight",
                               JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    ns_js *js = js_from_ctx(ctx);
-    if (js && el) {
+    if (!js) return;
+    if (network_state == 1 || network_state == 2)
+        ns_js_dispatch_event(js, el, "abort", NULL);
+    if (network_state != 0)
         ns_js_dispatch_event(js, el, "emptied", NULL);
-        ns_js_dispatch_event(js, el, "loadstart", NULL);
-    }
+    ns_js_dispatch_event(js, el, "loadstart", NULL);
+}
+
+static JSValue
+ns_media_load(JSContext *ctx, JSValueConst this_val,
+              int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (!ns_node_is_media_element(el)) return JS_UNDEFINED;
+    ns_media_run_load_algorithm(ctx, this_val, el);
     return JS_UNDEFINED;
 }
 
