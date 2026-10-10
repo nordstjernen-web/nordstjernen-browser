@@ -3912,6 +3912,7 @@ pv_snapshot_page_video(GtkSnapshot *snapshot, double offset_x,
 {
     NsProcView *v = data;
     double fs = raster_scale(v);
+    pv_snapshot_videos(v, FALSE, fs, snapshot);
     gtk_snapshot_save(snapshot);
     gtk_snapshot_translate(snapshot,
                            &GRAPHENE_POINT_INIT((float)(-offset_x / fs),

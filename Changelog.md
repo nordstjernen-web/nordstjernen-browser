@@ -10,6 +10,12 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Media: video no longer turns into a blank white rectangle when the
+  browser window switches to tiled page rendering. In that mode the
+  window drew only videos whose position the page reported in page
+  coordinates, so one positioned relative to the viewport showed the
+  page background through its hole. The video helper also makes every
+  frame fully opaque, as the window now composites it.
 * Performance: video frames from the helper process are handed to GTK
   as premultiplied BGRA, the layout they already have, instead of
   BGRX. GTK converted every BGRX frame on its worker threads before
