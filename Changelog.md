@@ -7,6 +7,10 @@ Changelog:
   The merged-stylesheet-run flush cast a `GArray`'s byte buffer straight
   to its element type, which clang's `-Wcast-align` rejects under
   `--werror`; it now takes the first element through `g_array_index`.
+* Performance: the renderer remembers the page's scrollable size until
+  the next relayout or viewport change. Every tick it reports to the
+  browser window walked the whole box tree to find the page bottom,
+  which was about a tenth of renderer time on a large, busy page.
 * Performance: computing values of custom properties registered with
   `@property` no longer measures the element's and the root's fonts
   for `ex`, `ch`, `cap` and `ic` units unless a value might use one.
