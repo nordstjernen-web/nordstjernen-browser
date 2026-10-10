@@ -10,6 +10,11 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Service workers: the `fetch` event a worker receives carries its
+  `request`, `clientId`, `resultingClientId`, `preloadResponse` and
+  `handled` as the event's own members, built as a `FetchEvent`.
+  Workbox's router read `event.request.url` and threw for every
+  request the page made.
 * CSS: a `@keyframes` rule's `cssText` lists its keyframes as rules
   (`0% { … } to { … }`). It used to read like a declaration block with
   a stray `;` after the last keyframe. A page that copies stylesheet
