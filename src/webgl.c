@@ -1844,11 +1844,7 @@ static void
 wgl_dispatch_context_event(JSContext *ctx, ns_webgl *g, const char *type)
 {
     if (!JS_IsObject(g->canvas_obj)) return;
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "Event");
-    JSValue name = JS_NewString(ctx, type);
-    JSValue ev = JS_CallConstructor(ctx, ctor, 1, (JSValueConst *)&name);
-    JS_FreeValue(ctx, name);
+    JSValue ev = ns_js_realm_event(ctx, g->canvas_obj, type);
     if (!JS_IsException(ev)) {
         JSValue dispatch = JS_GetPropertyStr(ctx, g->canvas_obj, "dispatchEvent");
         JS_FreeValue(ctx, JS_Call(ctx, dispatch, g->canvas_obj, 1,
@@ -1857,8 +1853,6 @@ wgl_dispatch_context_event(JSContext *ctx, ns_webgl *g, const char *type)
     }
     if (JS_IsException(ev)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, ev);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
 }
 
 static JSValue

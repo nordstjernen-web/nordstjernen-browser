@@ -3,6 +3,19 @@ Changelog:
 
 1.0.32:
 ======
+* JS: events the browser creates itself (`message` on ports, windows
+  and workers, `error`, `unhandledrejection`, XMLHttpRequest progress
+  events, a worker's error events and WebGL context events) take their
+  prototype from the realm's own interfaces, recorded when the window,
+  frame or worker realm is set up, instead of looking `MessageEvent`,
+  `ErrorEvent` or `Event` up on the global object each time. A frame
+  starts from its parent's original interfaces, so a parent that
+  replaced one of them does not change what the frame receives. A
+  worker that deletes its globals for sandboxing, or a page that
+  replaces `window.MessageEvent`, no longer makes messages arrive
+  without `type` or `data`, and a worker whose `ErrorEvent` is gone
+  still runs `self.onerror`; ChatGPT's answer worker never replied and
+  the page spun until its scripts were halted.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size
