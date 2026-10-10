@@ -85,6 +85,7 @@ struct ns_browser {
     double          dppx;
     gboolean        cascade_dirty;
     gboolean        anim_paint_dirty;
+    gboolean        scroll_pass;
     gboolean        relaying;
     char           *pending_nav;
     gboolean        soft_nav_pushed;
@@ -224,43 +225,9 @@ browser_damp_reset(ns_browser *b)
     b->damp_logged = FALSE;
 }
 
-typedef struct { double x, y; } browser_scroll_pos;
-
-static void
-browser_collect_scroll(const ns_box *b, GHashTable *map)
-{
-    if (!b) return;
-    if (b->dom && (b->scroll_y != 0.0 || b->scroll_x != 0.0)) {
-        browser_scroll_pos *p = g_new(browser_scroll_pos, 1);
-        p->x = b->scroll_x;
-        p->y = b->scroll_y;
-        g_hash_table_insert(map, (gpointer)b->dom, p);
-    }
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        browser_collect_scroll(c, map);
-}
-
-static void
-browser_restore_scroll(ns_box *b, GHashTable *map)
-{
-    if (!b) return;
-    if (b->dom) {
-        browser_scroll_pos *p = g_hash_table_lookup(map, b->dom);
-        if (p) {
-            double maxy = b->scroll_max_y > 0 ? b->scroll_max_y : 0;
-            double maxx = b->scroll_max_x > 0 ? b->scroll_max_x : 0;
-            double y = p->y < 0 ? 0 : (p->y > maxy ? maxy : p->y);
-            double x = p->x < 0 ? 0 : (p->x > maxx ? maxx : p->x);
-            b->scroll_y = y;
-            b->scroll_x = x;
-        }
-    }
-    for (ns_box *c = b->first_child; c; c = c->next_sibling)
-        browser_restore_scroll(c, map);
-}
-
 static void browser_ensure_images(ns_browser *browser);
 static void browser_schedule_media_events(ns_browser *b);
+static void browser_relayout_scroll_pass(ns_browser *b);
 
 static void
 browser_relayout(ns_browser *b)
@@ -272,9 +239,7 @@ browser_relayout(ns_browser *b)
     if (b->js)
         (void)ns_js_consume_mutated(b->js);
     b->image_arrivals_since_layout = 0;
-    GHashTable *scroll_save =
-        g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
-    browser_collect_scroll(b->layout, scroll_save);
+    GHashTable *scroll_save = ns_box_scroll_save(b->layout);
     ns_css_set_viewport((double)b->vw, b->vh);
     ns_css_set_doc_language(b->doc_language);
     if (b->js) ns_js_sync_window_metrics(b->js);
@@ -313,9 +278,7 @@ browser_relayout(ns_browser *b)
     b->layout_seq++;
     b->relaying = FALSE;
     b->styles_serial = b->js ? ns_js_mutation_serial(b->js) : 0;
-    if (g_hash_table_size(scroll_save) > 0)
-        browser_restore_scroll(b->layout, scroll_save);
-    g_hash_table_destroy(scroll_save);
+    ns_box_scroll_restore(b->layout, scroll_save);
     b->images_fetched = FALSE;
     b->has_deferred_lazy = FALSE;
     b->images_arrived_since_layout = FALSE;
@@ -337,6 +300,37 @@ browser_relayout(ns_browser *b)
     }
     b->layout_sig[1] = b->layout_sig[0];
     b->layout_sig[0] = sig;
+    browser_relayout_scroll_pass(b);
+}
+
+static gboolean
+browser_sync_scroll_timelines(ns_browser *b)
+{
+    gboolean layout = FALSE;
+    double view_h = b->cur_viewport_h > 0.0 ? b->cur_viewport_h : b->vh;
+    if (!ns_engine_anim_scroll_sync(b->anim, b->layout, b->vw, view_h, &layout))
+        return FALSE;
+    b->anim_paint_dirty = TRUE;
+    b->dirty = b->dirty || layout;
+    return TRUE;
+}
+
+static void
+browser_scrolled(ns_browser *b)
+{
+    ns_box_note_scroll();
+    browser_sync_scroll_timelines(b);
+}
+
+static void
+browser_relayout_scroll_pass(ns_browser *b)
+{
+    if (b->scroll_pass || !ns_anim_scroll_fresh(b->anim) ||
+        !browser_sync_scroll_timelines(b))
+        return;
+    b->scroll_pass = TRUE;
+    browser_relayout(b);
+    b->scroll_pass = FALSE;
 }
 
 static void
@@ -774,6 +768,7 @@ settle_tick_cb(gpointer user_data)
                                    b->cur_scroll_y, b->cur_scale);
         ns_video_cache_tick(b->videos, now);
     }
+    browser_sync_scroll_timelines(b);
     if (b->anim && ns_anim_tick(b->anim, now)) {
         browser_note_anim_tick(b);
         if (ns_anim_needs_layout(b->anim)) b->dirty = TRUE;
@@ -782,6 +777,7 @@ settle_tick_cb(gpointer user_data)
     if (b->js) ns_js_run_animation_frame(b->js);
     if (b->js && ns_js_consume_mutated(b->js))
         b->dirty = TRUE;
+    browser_sync_scroll_timelines(b);
     if (b->dirty && browser_mutation_relayout_due(b)) {
         if (browser_relayout_from_mutation(b))
             b->dirty = FALSE;
@@ -1374,6 +1370,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     b->styles = ns_engine_compute_cascade(doc, base, b->css_cache, NULL);
 
     b->anim = ns_anim_new();
+    ns_engine_anim_track_layout(b->anim, &b->layout);
     ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
     ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
 
@@ -1898,6 +1895,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             changed = TRUE;
         }
     }
+    changed |= browser_sync_scroll_timelines(browser);
     for (;;) {
         gint64 now = g_get_monotonic_time();
         if (browser->images && ns_image_cache_tick(browser->images, now)) {
@@ -1950,6 +1948,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (++guard >= 4096) break;
         if (g_get_monotonic_time() >= deadline) break;
     }
+    changed |= browser_sync_scroll_timelines(browser);
     if (browser->js && ns_js_consume_mutated(browser->js))
         browser->dirty = TRUE;
     if (browser->dirty && browser_mutation_relayout_due(browser)) {
@@ -2208,6 +2207,7 @@ browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
     browser->cur_scale = scale;
     browser->cur_viewport_h = (double)height / scale;
     ns_box_set_hit_viewport(browser->cur_scroll_x, browser->cur_scroll_y);
+    browser_sync_scroll_timelines(browser);
     browser_ensure_images(browser);
     if (browser->videos && browser->layout) {
         gint64 now = g_get_monotonic_time();
@@ -3091,6 +3091,7 @@ ns_browser_scroll_at_full(ns_browser *browser, int x, int y, int dx, int dy,
                            box->scroll_y != moved_y;
         if (browser->js && box->dom)
             ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+        browser_scrolled(browser);
     }
     return consumed;
 }
@@ -3157,6 +3158,7 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
         if (ns < 0) ns = 0;
         if (ns > box->scroll_max_y) ns = box->scroll_max_y;
         box->scroll_y = ns;
+        browser_scrolled(browser);
         if (box_dom && browser->js) {
             ns_js_dispatch_event(browser->js, box_dom, "scroll", NULL);
             box = box_find_scrollable_by_dom(browser->layout, box_dom);
@@ -3194,6 +3196,7 @@ ns_browser_scrollbar_drag(ns_browser *browser, int x, int y)
     if (ns > box->scroll_max_y) ns = box->scroll_max_y;
     if (ns == box->scroll_y) return 0;
     box->scroll_y = ns;
+    browser_scrolled(browser);
     if (box->dom && browser->js)
         ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
     return 1;

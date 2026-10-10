@@ -258,6 +258,10 @@ typedef enum ns_css_prop {
     NS_CSS_WEBKIT_BOX_ORIENT,
     NS_CSS_MASK_CLIP,
     NS_CSS_MASK_COMPOSITE,
+    NS_CSS_SCROLL_TIMELINE_NAME,
+    NS_CSS_SCROLL_TIMELINE_AXIS,
+    NS_CSS_VIEW_TIMELINE_NAME,
+    NS_CSS_TIMELINE_SCOPE,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -333,6 +337,33 @@ typedef enum ns_css_anim_fill {
     NS_CSS_ANIM_FILL_BOTH,
 } ns_css_anim_fill;
 
+typedef enum ns_css_timeline_kind {
+    NS_CSS_TIMELINE_AUTO,
+    NS_CSS_TIMELINE_NONE,
+    NS_CSS_TIMELINE_NAMED,
+    NS_CSS_TIMELINE_SCROLL,
+    NS_CSS_TIMELINE_VIEW,
+} ns_css_timeline_kind;
+
+typedef enum ns_css_scroller {
+    NS_CSS_SCROLLER_NEAREST,
+    NS_CSS_SCROLLER_ROOT,
+    NS_CSS_SCROLLER_SELF,
+} ns_css_scroller;
+
+typedef enum ns_css_scroll_axis {
+    NS_CSS_SCROLL_AXIS_BLOCK,
+    NS_CSS_SCROLL_AXIS_INLINE,
+    NS_CSS_SCROLL_AXIS_X,
+    NS_CSS_SCROLL_AXIS_Y,
+} ns_css_scroll_axis;
+
+typedef struct ns_css_timeline {
+    ns_css_timeline_kind kind;
+    ns_css_scroller      scroller;
+    ns_css_scroll_axis   axis;
+} ns_css_timeline;
+
 typedef struct ns_css_anim_entry {
     ns_css_anim_target target;
     char         *name;
@@ -345,6 +376,7 @@ typedef struct ns_css_anim_entry {
     gboolean      paused;
     gboolean      duration_auto;
     gboolean      allow_discrete;
+    ns_css_timeline timeline;
 } ns_css_anim_entry;
 
 #define NS_CSS_ANIM_ENTRIES_MAX 8
@@ -365,6 +397,13 @@ char *ns_css_anim_shorthand_serialize(const ns_css_anim_list *list,
                                       gboolean is_animation);
 char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation);
 char *ns_css_ident_serialize(const char *name);
+gboolean ns_css_timeline_parse(const char *item, ns_css_timeline *out);
+gboolean ns_css_scroll_axis_parse(const char *item, ns_css_scroll_axis *out);
+int   ns_css_timeline_name_index(const struct ns_style *s, ns_css_prop prop,
+                                 const char *name);
+char *ns_css_timeline_name_at(const struct ns_style *s, int index);
+ns_css_scroll_axis ns_css_timeline_axis_at(const struct ns_style *s, int index);
+char *ns_css_scroll_timeline_compose(const char *names, const char *axes);
 char *ns_css_list_style_serialize(const char *type, const char *position,
                                   const char *image);
 char *ns_css_grid_shorthand_compose(char *const values[6], gboolean full);

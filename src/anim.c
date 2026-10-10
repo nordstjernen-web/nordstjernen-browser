@@ -67,6 +67,14 @@ typedef struct ns_anim_run {
     guint    generation;
     GHashTable *values;
     GHashTable *partials;
+    ns_css_timeline timeline;
+    gboolean       duration_auto;
+    gboolean       scroll_driven;
+    gboolean       tl_root;
+    gboolean       tl_inactive;
+    const ns_node *tl_source;
+    int            tl_axis;
+    double         tl_progress;
 } ns_anim_run;
 
 typedef struct ns_anim_partial {
@@ -95,6 +103,11 @@ typedef struct {
     double         elapsed_ms;
 } ns_anim_event;
 
+typedef struct {
+    double pos[2];
+    double max[2];
+} ns_anim_scroll_pos;
+
 struct ns_anim {
     GHashTable *states;
     GHashTable *active;
@@ -102,6 +115,17 @@ struct ns_anim {
     int         active_count;
     GArray     *events;
     gint64      now_us;
+    GHashTable *scroll_sources;
+    GHashTable *scroll_known;
+    ns_anim_scroll_pos viewport;
+    gboolean    viewport_known;
+    gboolean    scroll_sync;
+    int         scroll_runs;
+    int         scroll_root_runs;
+    guint       scroll_epoch;
+    gboolean    scroll_fresh;
+    ns_anim_scroll_lookup_cb scroll_lookup;
+    gpointer    scroll_lookup_user;
 };
 
 static gint64
@@ -246,6 +270,9 @@ ns_anim_new(void)
     a->active    = g_hash_table_new(g_direct_hash, g_direct_equal);
     a->keyframes = g_hash_table_new_full(g_str_hash, g_str_equal,
                                          g_free, ns_anim_keyframes_free);
+    a->scroll_sources = g_hash_table_new(g_direct_hash, g_direct_equal);
+    a->scroll_known = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                            NULL, g_free);
     return a;
 }
 
@@ -261,6 +288,8 @@ ns_anim_free(ns_anim *a)
     g_hash_table_destroy(a->active);
     g_hash_table_destroy(a->states);
     g_hash_table_destroy(a->keyframes);
+    g_hash_table_destroy(a->scroll_sources);
+    g_hash_table_destroy(a->scroll_known);
     if (a->events) {
         for (guint i = 0; i < a->events->len; i++)
             g_free(g_array_index(a->events, ns_anim_event, i).name);
@@ -820,6 +849,8 @@ run_cancel(ns_anim *a, ns_anim_state *s, ns_anim_run *r)
     r->finished = FALSE;
     r->pending = FALSE;
     r->phase = NS_ANIM_PHASE_IDLE;
+    r->scroll_driven = FALSE;
+    r->tl_progress = -1;
     if (r->values) g_hash_table_remove_all(r->values);
     if (r->partials) g_hash_table_remove_all(r->partials);
 }
@@ -833,13 +864,54 @@ run_configure(ns_anim_run *r, const ns_css_anim_entry *e)
     r->direction = e->direction;
     r->fill = e->fill;
     r->timing = e->timing;
+    r->timeline = e->timeline;
+    r->duration_auto = e->duration_auto;
+}
+
+static void
+run_load_keyframes(ns_anim *a, ns_anim_run *r, const ns_css_anim_entry *e,
+                   const ns_style *style)
+{
+    ns_css_keyframes_resolved_free(r->kf);
+    anim_stops_free(r->stops);
+    const ns_css_keyframes *gkf = g_hash_table_lookup(a->keyframes, e->name);
+    r->kf = gkf ? ns_css_keyframes_resolve(gkf, style->vars) : NULL;
+    r->stops = anim_stops_build(r->kf ? r->kf : gkf);
+    if (r->values) g_hash_table_remove_all(r->values);
+    if (r->partials) g_hash_table_remove_all(r->partials);
+}
+
+static void
+run_start_progress(ns_anim_state *s, ns_anim_run *r)
+{
+    r->active = FALSE;
+    r->pending = FALSE;
+    r->scroll_driven = TRUE;
+    r->tl_progress = -1;
+    r->generation = ++s->run_generation;
+}
+
+static gboolean
+entry_progress_based(const ns_css_anim_entry *e)
+{
+    return e->timeline.kind == NS_CSS_TIMELINE_SCROLL ||
+           e->timeline.kind == NS_CSS_TIMELINE_NAMED;
+}
+
+static gboolean
+run_matches_entry(const ns_anim_run *r, const ns_css_anim_entry *e)
+{
+    gboolean progress = entry_progress_based(e);
+    return r->name && strcmp(r->name, e->name) == 0 &&
+           progress == r->scroll_driven;
 }
 
 static void
 run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
           const ns_css_anim_entry *e, const ns_style *style, gint64 now_us)
 {
-    if (!r->active) {
+    gboolean progress = entry_progress_based(e);
+    if (!r->active && !progress) {
         if (a->active_count >= NS_ANIM_MAX_ACTIVE) return;
         a->active_count++;
     }
@@ -858,13 +930,13 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     r->phase = NS_ANIM_PHASE_IDLE;
     r->iters_emitted = 0;
     r->elapsed_base_ms = -e->delay_ms;
+    r->scroll_driven = FALSE;
     r->generation = ++s->run_generation;
-    ns_css_keyframes_resolved_free(r->kf);
-    anim_stops_free(r->stops);
-    const ns_css_keyframes *gkf = g_hash_table_lookup(a->keyframes, e->name);
-    r->kf = gkf ? ns_css_keyframes_resolve(gkf, style->vars) : NULL;
-    r->stops = anim_stops_build(r->kf ? r->kf : gkf);
-    if (r->values) g_hash_table_remove_all(r->values);
+    run_load_keyframes(a, r, e, style);
+    if (progress) {
+        run_start_progress(s, r);
+        return;
+    }
     advance_run(a, r, now_us);
     run_emit_progress(a, s, r, now_us);
 }
@@ -898,7 +970,7 @@ observe_animation(ns_anim *a, ns_anim_state *s, const ns_style *style,
             g_free(r->cancelled_name);
             r->cancelled_name = NULL;
         }
-        if (r->name && strcmp(r->name, e->name) == 0) {
+        if (run_matches_entry(r, e)) {
             run_configure(r, e);
             if (e->paused != r->css_paused && !r->api_override)
                 run_set_paused(r, e->paused, now_us);
@@ -932,6 +1004,9 @@ ancestor_hidden(GHashTable *styles, const ns_node *dom)
     return FALSE;
 }
 
+static void anim_resolve_timelines(ns_css_anim_list *av, GHashTable *styles,
+                                   const ns_node *dom, const ns_style *style);
+
 static void
 anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
                  gint64 now_us, GHashTable *styles)
@@ -944,6 +1019,7 @@ anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
     ns_css_anim_list tv, av;
     ns_css_anim_effective(style, FALSE, &tv);
     ns_css_anim_effective(style, TRUE, &av);
+    anim_resolve_timelines(&av, styles, dom, style);
     if (!s) {
         if (tv.n == 0 && av.n == 0) {
             ns_css_anim_list_clear(&tv);
@@ -998,6 +1074,8 @@ observe_item_cmp(gconstpointer x, gconstpointer y)
     return p->depth - q->depth;
 }
 
+static void anim_scroll_bind(ns_anim *a, GHashTable *styles);
+
 void
 ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
 {
@@ -1024,6 +1102,7 @@ ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
     }
     g_array_free(items, TRUE);
     ns_anim_prune(a, styles);
+    anim_scroll_bind(a, styles);
     ns_anim_apply(a, styles);
 }
 
@@ -1327,6 +1406,14 @@ run_last_iteration(const ns_anim_run *r)
 }
 
 static double
+run_end_progress(const ns_anim_run *r)
+{
+    int last = run_last_iteration(r);
+    double raw_end = isfinite(r->iterations) ? r->iterations - last : 1.0;
+    return directed_progress(last, CLAMP(raw_end, 0.0, 1.0), r->direction);
+}
+
+static double
 run_active_ms(const ns_anim_run *r)
 {
     if (!isfinite(r->iterations)) return INFINITY;
@@ -1415,11 +1502,7 @@ advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
             if (r->partials) g_hash_table_remove_all(r->partials);
             return TRUE;
         }
-        int last = run_last_iteration(r);
-        double raw_end = isfinite(r->iterations) ? r->iterations - last : 1.0;
-        if (raw_end < 0) raw_end = 0;
-        if (raw_end > 1) raw_end = 1;
-        run_sample_at(r, directed_progress(last, raw_end, r->direction));
+        run_sample_at(r, run_end_progress(r));
         return TRUE;
     }
     double iter_d = elapsed / r->duration_ms;
@@ -1532,10 +1615,16 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
     return any;
 }
 
+static gboolean
+anim_has_time_runs(const ns_anim *a)
+{
+    return a && a->active && g_hash_table_size(a->active) > 0;
+}
+
 gboolean
 ns_anim_has_active(const ns_anim *a)
 {
-    return a && a->active && g_hash_table_size(a->active) > 0;
+    return anim_has_time_runs(a) || (a && a->scroll_sync);
 }
 
 static gboolean
@@ -1604,8 +1693,443 @@ ns_anim_needs_layout(const ns_anim *a)
 gboolean
 ns_anim_paint_only(const ns_anim *a)
 {
-    return ns_anim_has_active(a) &&
+    return anim_has_time_runs(a) &&
            !anim_any_active_prop(a, anim_prop_moves_boxes);
+}
+
+static gboolean
+overflow_kw_container(const char *kw)
+{
+    return kw && g_ascii_strcasecmp(kw, "visible") != 0 &&
+           g_ascii_strcasecmp(kw, "clip") != 0;
+}
+
+static gboolean
+display_can_scroll(const ns_style *st)
+{
+    ns_display d = ns_css_display_of(st);
+    gboolean plain_inline = d.internal == NS_DISPLAY_INTERNAL_NONE &&
+                            d.outer == NS_DISPLAY_OUTER_INLINE &&
+                            d.inner == NS_DISPLAY_INNER_FLOW;
+    return d.box == NS_DISPLAY_BOX_NORMAL && !plain_inline;
+}
+
+static gboolean
+style_is_scroll_container(const ns_style *st)
+{
+    return st && display_can_scroll(st) &&
+           (overflow_kw_container(ns_style_overflow_keyword(st, NS_CSS_OVERFLOW_X)) ||
+            overflow_kw_container(ns_style_overflow_keyword(st, NS_CSS_OVERFLOW_Y)));
+}
+
+static gboolean
+node_is_root_element(const ns_node *n)
+{
+    return !n->parent || n->parent->kind != NS_NODE_ELEMENT;
+}
+
+static gboolean
+node_overflow_to_viewport(GHashTable *styles, const ns_node *n)
+{
+    const ns_node *root = n->parent;
+    return n->kind == NS_NODE_ELEMENT && n->name &&
+           g_ascii_strcasecmp(n->name, "body") == 0 && root &&
+           node_is_root_element(root) &&
+           !style_is_scroll_container(g_hash_table_lookup(styles, root));
+}
+
+static gboolean
+node_is_scroll_container(GHashTable *styles, const ns_node *n)
+{
+    return !node_overflow_to_viewport(styles, n) &&
+           style_is_scroll_container(g_hash_table_lookup(styles, n));
+}
+
+static int
+style_containing_kind(const ns_style *st)
+{
+    const char *kw = ns_style_keyword(st, NS_CSS_POSITION);
+    if (!kw) return 0;
+    if (g_ascii_strcasecmp(kw, "fixed") == 0) return 2;
+    return g_ascii_strcasecmp(kw, "absolute") == 0 ? 1 : 0;
+}
+
+static gboolean
+style_has_transform(const ns_style *st)
+{
+    static const ns_css_prop props[4] = {
+        NS_CSS_TRANSFORM, NS_CSS_TRANSLATE, NS_CSS_ROTATE, NS_CSS_SCALE,
+    };
+    for (int i = 0; i < 4; i++) {
+        const ns_css_value *v = st->values[props[i]];
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+style_makes_fixed_cb(const ns_style *st)
+{
+    const ns_css_value *pv = st ? st->values[NS_CSS_PERSPECTIVE] : NULL;
+    const char *filter = ns_style_keyword(st, NS_CSS_FILTER);
+    if (!st) return FALSE;
+    return style_has_transform(st) ||
+           (pv && pv->kind == NS_CSS_V_LENGTH && pv->u.length.v > 0) ||
+           (filter && g_ascii_strcasecmp(filter, "none") != 0);
+}
+
+static gboolean
+style_contains_kind(const ns_style *st, int kind)
+{
+    const char *kw = ns_style_keyword(st, NS_CSS_POSITION);
+    gboolean positioned = kw && g_ascii_strcasecmp(kw, "static") != 0;
+    if (kind == 0) return TRUE;
+    return (kind == 1 && positioned) || style_makes_fixed_cb(st);
+}
+
+static const ns_node *
+node_root_element(const ns_node *n)
+{
+    while (!node_is_root_element(n)) n = n->parent;
+    return n;
+}
+
+static const ns_node *
+timeline_named_source(GHashTable *styles, const ns_node *n, const char *name,
+                      int *index)
+{
+    for (const ns_node *p = n; p; p = p->parent) {
+        int i = ns_css_timeline_name_index(g_hash_table_lookup(styles, p),
+                                           NS_CSS_SCROLL_TIMELINE_NAME, name);
+        if (i < 0) continue;
+        *index = i;
+        return p;
+    }
+    return NULL;
+}
+
+static const ns_node *
+timeline_nearest_source(GHashTable *styles, const ns_node *n)
+{
+    int kind = style_containing_kind(g_hash_table_lookup(styles, n));
+    const ns_node *p = n->parent;
+    while (p && !node_is_root_element(p)) {
+        const ns_style *st = g_hash_table_lookup(styles, p);
+        if (style_contains_kind(st, kind)) {
+            if (node_is_scroll_container(styles, p)) return p;
+            kind = style_containing_kind(st);
+        }
+        p = p->parent;
+    }
+    return p;
+}
+
+static gboolean
+style_declares_view_name(const ns_style *st, const char *name)
+{
+    return ns_css_timeline_name_index(st, NS_CSS_VIEW_TIMELINE_NAME, name) >= 0 ||
+           ns_css_timeline_name_index(st, NS_CSS_TIMELINE_SCOPE, name) >= 0 ||
+           ns_css_timeline_name_index(st, NS_CSS_TIMELINE_SCOPE, "all") >= 0;
+}
+
+static gboolean
+timeline_view_declared(GHashTable *styles, const ns_node *n, const char *name)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (style_declares_view_name(g_hash_table_lookup(styles, p), name))
+            return TRUE;
+    return FALSE;
+}
+
+static ns_css_timeline_kind
+timeline_name_kind(GHashTable *styles, const ns_node *dom, const char *name)
+{
+    int index = 0;
+    if (!styles || !name) return NS_CSS_TIMELINE_NONE;
+    if (timeline_named_source(styles, dom, name, &index))
+        return NS_CSS_TIMELINE_NAMED;
+    return timeline_view_declared(styles, dom, name) ? NS_CSS_TIMELINE_VIEW
+                                                     : NS_CSS_TIMELINE_NONE;
+}
+
+static void
+entry_resolve_timeline(ns_css_anim_entry *e, GHashTable *styles,
+                       const ns_node *dom, const ns_style *style, int index)
+{
+    if (e->timeline.kind == NS_CSS_TIMELINE_NAMED) {
+        char *name = ns_css_timeline_name_at(style, index);
+        e->timeline.kind = timeline_name_kind(styles, dom, name);
+        g_free(name);
+    }
+    e->paused |= e->timeline.kind == NS_CSS_TIMELINE_NONE;
+}
+
+static void
+anim_resolve_timelines(ns_css_anim_list *av, GHashTable *styles,
+                       const ns_node *dom, const ns_style *style)
+{
+    for (int i = 0; i < av->n; i++)
+        entry_resolve_timeline(&av->entries[i], styles, dom, style, i);
+}
+
+static const ns_node *
+timeline_source_node(GHashTable *styles, const ns_node *n, const char *name,
+                     const ns_css_timeline *t, ns_css_scroll_axis *axis)
+{
+    int index = 0;
+    *axis = t->axis;
+    if (t->kind == NS_CSS_TIMELINE_NAMED) {
+        const ns_node *src = name ? timeline_named_source(styles, n, name, &index)
+                                  : NULL;
+        if (src) *axis = ns_css_timeline_axis_at(g_hash_table_lookup(styles, src), index);
+        return src;
+    }
+    if (t->kind != NS_CSS_TIMELINE_SCROLL) return NULL;
+    if (t->scroller == NS_CSS_SCROLLER_SELF) return n;
+    if (t->scroller == NS_CSS_SCROLLER_ROOT) return node_root_element(n);
+    return timeline_nearest_source(styles, n);
+}
+
+static int
+timeline_physical_axis(const ns_style *st, ns_css_scroll_axis axis)
+{
+    gboolean vertical = ns_css_writing_mode(st) != 0;
+    if (axis == NS_CSS_SCROLL_AXIS_X) return 0;
+    if (axis == NS_CSS_SCROLL_AXIS_Y) return 1;
+    return (axis == NS_CSS_SCROLL_AXIS_BLOCK) != vertical ? 1 : 0;
+}
+
+static double
+run_scroll_progress(const ns_anim *a, const ns_anim_run *r)
+{
+    const ns_anim_scroll_pos *pos = r->tl_root
+        ? (a->viewport_known ? &a->viewport : NULL)
+        : g_hash_table_lookup(a->scroll_known, r->tl_source);
+    double max = pos ? pos->max[r->tl_axis] : 0;
+    if (!r->tl_source && !r->tl_root) return -1;
+    if (r->tl_inactive) return -1;
+    if (!pos) return 0.0;
+    if (!(max > 0)) return -1;
+    return CLAMP(pos->pos[r->tl_axis] / max, 0.0, 1.0);
+}
+
+static gboolean
+run_timeline_zero(const ns_anim_run *r)
+{
+    return r->iterations <= 0 || !isfinite(r->iterations) ||
+           (!r->duration_auto && r->duration_ms <= 0);
+}
+
+static gboolean
+run_fills_forwards(const ns_anim_run *r)
+{
+    return r->fill == NS_CSS_ANIM_FILL_FORWARDS || r->fill == NS_CSS_ANIM_FILL_BOTH;
+}
+
+static double
+run_timeline_progress(const ns_anim_run *r, double p)
+{
+    double overall = p * r->iterations;
+    if (run_timeline_zero(r) || overall >= r->iterations)
+        return run_end_progress(r);
+    int iter = (int)overall;
+    return directed_progress(iter, overall - iter, r->direction);
+}
+
+static gboolean
+run_clear_values(ns_anim_run *r)
+{
+    gboolean had = (r->values && g_hash_table_size(r->values) > 0) ||
+                   (r->partials && g_hash_table_size(r->partials) > 0);
+    if (r->values) g_hash_table_remove_all(r->values);
+    if (r->partials) g_hash_table_remove_all(r->partials);
+    return had;
+}
+
+static gboolean
+run_scroll_sample(ns_anim *a, ns_anim_run *r)
+{
+    double p = run_scroll_progress(a, r);
+    if (p == r->tl_progress) return FALSE;
+    r->tl_progress = p;
+    if (p < 0 || (run_timeline_zero(r) && !run_fills_forwards(r)))
+        return run_clear_values(r);
+    return run_resample(r, run_timeline_progress(r, p));
+}
+
+static void
+anim_scroll_lookup(ns_anim *a, const ns_node *src)
+{
+    ns_anim_scroll_pos pos = { { 0, 0 }, { 0, 0 } };
+    if (!src || g_hash_table_contains(a->scroll_known, src)) return;
+    a->scroll_fresh = TRUE;
+    if (a->scroll_lookup &&
+        a->scroll_lookup(src, pos.pos, pos.max, a->scroll_lookup_user))
+        g_hash_table_insert(a->scroll_known, (gpointer)src,
+                            g_memdup2(&pos, sizeof pos));
+}
+
+static void
+run_bind_timeline(ns_anim *a, ns_anim_run *r, GHashTable *styles,
+                  const ns_node *n)
+{
+    ns_css_scroll_axis axis = NS_CSS_SCROLL_AXIS_BLOCK;
+    char *name = ns_css_timeline_name_at(g_hash_table_lookup(styles, n), r->index);
+    const ns_node *src = timeline_source_node(styles, n, name, &r->timeline, &axis);
+    const ns_style *src_style = src ? g_hash_table_lookup(styles, src) : NULL;
+    g_free(name);
+    r->tl_root = src && node_is_root_element(src);
+    r->tl_source = src && !r->tl_root ? src : NULL;
+    r->tl_inactive = r->tl_source && !node_is_scroll_container(styles, src);
+    r->tl_axis = timeline_physical_axis(src_style, axis);
+    if (r->tl_source) g_hash_table_add(a->scroll_sources, (gpointer)r->tl_source);
+    anim_scroll_lookup(a, r->tl_source);
+    a->scroll_fresh |= r->tl_root && !a->viewport_known;
+    r->tl_progress = -2;
+    a->scroll_runs++;
+    a->scroll_root_runs += r->tl_root;
+    run_scroll_sample(a, r);
+}
+
+static void
+anim_scroll_bind(ns_anim *a, GHashTable *styles)
+{
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_remove_all(a->scroll_sources);
+    a->scroll_runs = 0;
+    a->scroll_root_runs = 0;
+    g_hash_table_iter_init(&it, a->states);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_anim_state *s = val;
+        for (guint i = 0; s->runs && i < s->runs->len; i++) {
+            ns_anim_run *r = s->runs->pdata[i];
+            if (r->name && r->scroll_driven)
+                run_bind_timeline(a, r, styles, key);
+        }
+    }
+    a->scroll_sync = a->scroll_runs > 0;
+}
+
+static gboolean
+run_touches_layout(const ns_anim_run *r)
+{
+    GHashTable *tables[2] = { r->values, r->partials };
+    for (int t = 0; t < 2; t++) {
+        GHashTableIter it;
+        gpointer key, val;
+        if (!tables[t]) continue;
+        g_hash_table_iter_init(&it, tables[t]);
+        while (g_hash_table_iter_next(&it, &key, &val))
+            if (anim_prop_needs_relayout(GPOINTER_TO_INT(key))) return TRUE;
+    }
+    return FALSE;
+}
+
+void
+ns_anim_set_scroll_lookup(ns_anim *a, ns_anim_scroll_lookup_cb cb, gpointer user)
+{
+    if (!a) return;
+    a->scroll_lookup = cb;
+    a->scroll_lookup_user = user;
+}
+
+gboolean
+ns_anim_is_scroll_source(const ns_anim *a, const ns_node *node)
+{
+    return a && node && g_hash_table_contains(a->scroll_sources, node);
+}
+
+gboolean
+ns_anim_scroll_uses_root(const ns_anim *a)
+{
+    return a && a->scroll_root_runs > 0;
+}
+
+gboolean
+ns_anim_scroll_has_sources(const ns_anim *a)
+{
+    return a && g_hash_table_size(a->scroll_sources) > 0;
+}
+
+gboolean
+ns_anim_scroll_fresh(const ns_anim *a)
+{
+    return a && a->scroll_fresh;
+}
+
+gboolean
+ns_anim_scroll_needs_sync(const ns_anim *a, guint epoch)
+{
+    return a && a->scroll_runs > 0 && (a->scroll_sync || epoch != a->scroll_epoch);
+}
+
+void
+ns_anim_scroll_reset(ns_anim *a, guint epoch)
+{
+    if (!a) return;
+    g_hash_table_remove_all(a->scroll_known);
+    a->viewport_known = FALSE;
+    a->scroll_epoch = epoch;
+}
+
+void
+ns_anim_note_scroll(ns_anim *a, const ns_node *node, double x, double y,
+                    double max_x, double max_y)
+{
+    if (!a) return;
+    ns_anim_scroll_pos pos = { { x, y }, { max_x, max_y } };
+    if (!node) {
+        a->viewport = pos;
+        a->viewport_known = TRUE;
+        return;
+    }
+    if (g_hash_table_contains(a->scroll_known, node)) return;
+    g_hash_table_insert(a->scroll_known, (gpointer)node,
+                        g_memdup2(&pos, sizeof pos));
+}
+
+static gboolean
+run_scroll_resample(ns_anim *a, ns_anim_run *r, gboolean *layout)
+{
+    if (!r->name || !r->scroll_driven) return FALSE;
+    gboolean before = run_touches_layout(r);
+    if (!run_scroll_sample(a, r)) return FALSE;
+    if (before || run_touches_layout(r)) *layout = TRUE;
+    return TRUE;
+}
+
+static void
+anim_scroll_mark_missing(ns_anim *a)
+{
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, a->scroll_sources);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        if (!g_hash_table_contains(a->scroll_known, key))
+            g_hash_table_insert(a->scroll_known, key,
+                                g_new0(ns_anim_scroll_pos, 1));
+}
+
+gboolean
+ns_anim_scroll_resample(ns_anim *a, gboolean *out_layout)
+{
+    GHashTableIter it;
+    gpointer key, val;
+    gboolean any = FALSE, layout = FALSE;
+    if (!a) return FALSE;
+    a->scroll_sync = FALSE;
+    a->scroll_fresh = FALSE;
+    anim_scroll_mark_missing(a);
+    g_hash_table_iter_init(&it, a->states);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_anim_state *s = val;
+        for (guint i = 0; s->runs && i < s->runs->len; i++)
+            any |= run_scroll_resample(a, s->runs->pdata[i], &layout);
+    }
+    if (out_layout) *out_layout = layout;
+    return any;
 }
 
 static const ns_css_value *
@@ -1755,10 +2279,16 @@ run_info(const ns_anim_state *s, const ns_anim_run *r, gint64 now_us,
 }
 
 static gboolean
+run_is_live(const ns_anim_run *r)
+{
+    return r->active || r->scroll_driven;
+}
+
+static gboolean
 run_in_effect(const ns_anim_run *r)
 {
     if (!r->name) return FALSE;
-    if (r->active) return TRUE;
+    if (run_is_live(r)) return TRUE;
     return r->finished && (r->fill == NS_CSS_ANIM_FILL_FORWARDS ||
                            r->fill == NS_CSS_ANIM_FILL_BOTH);
 }
