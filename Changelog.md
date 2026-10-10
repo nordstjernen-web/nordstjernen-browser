@@ -10,6 +10,13 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* CSS: a `@keyframes` rule's `cssText` lists its keyframes as rules
+  (`0% { … } to { … }`). It used to read like a declaration block with
+  a stray `;` after the last keyframe. A page that copies stylesheet
+  text through the CSSOM fed that back to the parser, which then lost
+  the rule after every `@keyframes`. The parser now also recovers from
+  a stray `;` among keyframes as the syntax specification says: the
+  next keyframe rule is dropped and the block still closes there.
 * Media: `buffered` on a `<video>` or `<audio>` playing a Media Source
   stream starts where its media does (the later of the audio and video
   starts, after any `remove()`), not at 0. Players read the range to
