@@ -8345,10 +8345,33 @@ replaced_size_keyword(const ns_css_value *v)
             strcmp(v->u.keyword, "max-content") == 0);
 }
 
+static double
+box_cb_basis(const ns_box *box, double fallback)
+{
+    return box->cb_width_set ? box->cb_width_override : fallback;
+}
+
+static double
+image_content_limit(const ns_css_value *v, double base, double extras)
+{
+    double lim = length_resolve(v, base, -1);
+    if (lim < 0) return lim;
+    return MAX(lim - extras, 0);
+}
+
+static double
+image_border_box_extras(const ns_box *box)
+{
+    if (!flex_box_is_border_box(box)) return 0;
+    return box->padding.left + box->padding.right +
+           box->border.left + box->border.right;
+}
+
 static void
 layout_image(ns_box *box, double parent_content_width)
 {
-    edges_from_style(box->style, parent_content_width,
+    double cb_basis = box_cb_basis(box, parent_content_width);
+    edges_from_style(box->style, cb_basis,
                      &box->margin, &box->padding, &box->border);
     const ns_css_value *wv  = box->style ? box->style->values[NS_CSS_WIDTH]      : NULL;
     const ns_css_value *hv  = box->style ? box->style->values[NS_CSS_HEIGHT]     : NULL;
@@ -8364,7 +8387,7 @@ layout_image(ns_box *box, double parent_content_width)
         box_is_flex_container(box->parent) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
-    double pct_width_base = parent_content_width;
+    double pct_width_base = cb_basis;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
     double w = -1, h = -1;
@@ -8459,9 +8482,10 @@ layout_image(ns_box *box, double parent_content_width)
     if (metadata_video && w <= 0 && h > 0 && nat_w > 0 && nat_h > 0)
         w = h * (nat_w / nat_h);
 
-    double max_w = length_resolve(mxw, pct_width_base, -1);
+    double bs_extras = image_border_box_extras(box);
+    double max_w = image_content_limit(mxw, pct_width_base, bs_extras);
     double max_h = resolve_used_height(box, mxh, parent_content_width, -1);
-    double min_w = length_resolve(mnw, pct_width_base, -1);
+    double min_w = image_content_limit(mnw, pct_width_base, bs_extras);
     double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
     double keyword_w = intrinsic_ratio > 0 && h_specified ? h * intrinsic_ratio : nat_w;
     if (max_w < 0 && replaced_size_keyword(mxw) && keyword_w >= 0) max_w = keyword_w;
@@ -9644,7 +9668,8 @@ table_collapse_borders(ns_box *box, guint max_cols)
 static void
 layout_table(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
-    edges_from_style(box->style, parent_content_width,
+    double cb_basis = box_cb_basis(box, parent_content_width);
+    edges_from_style(box->style, cb_basis,
                      &box->margin, &box->padding, &box->border);
     double horiz_total = box->margin.left + box->margin.right +
                          box->padding.left + box->padding.right +
@@ -9658,18 +9683,18 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         : 0;
     double cw;
     if (explicit_width) {
-        cw = length_resolve(wv, parent_content_width, 0) - sizing_extras;
+        cw = length_resolve(wv, cb_basis, 0) - sizing_extras;
     } else {
         cw = parent_content_width - horiz_total;
     }
     const ns_css_value *mxw = box->style ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
     if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
-        double m = length_resolve(mxw, parent_content_width, -1);
+        double m = length_resolve(mxw, cb_basis, -1);
         if (m >= 0 && cw > m - sizing_extras) cw = m - sizing_extras;
     }
     const ns_css_value *mnw = box->style ? box->style->values[NS_CSS_MIN_WIDTH] : NULL;
     if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
-        double m = length_resolve(mnw, parent_content_width, -1);
+        double m = length_resolve(mnw, cb_basis, -1);
         if (m >= 0 && cw < m - sizing_extras) cw = m - sizing_extras;
     }
     if (cw < 0) cw = 0;
@@ -11494,7 +11519,8 @@ flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
                    c->padding.left + c->padding.right +
                    c->border.left + c->border.right;
     }
-    (void)cw;
+    c->cb_width_override = cw;
+    c->cb_width_set = TRUE;
     c->definite_height = 0;
     c->measured_content_height = -1;
     layout_box(c, parent_w, child_inherited);
@@ -12907,6 +12933,17 @@ grid_row_basis(const ns_box *box, double cw)
     return box_inset_definite_height(box);
 }
 
+static double
+grid_item_fit_border_width(ns_box *c, const ns_style *child_inherited,
+                           double area)
+{
+    double nat = measure_natural_width(c, child_inherited);
+    if (nat < 0) return area;
+    double fit = nat + c->padding.left + c->padding.right
+        + c->border.left + c->border.right;
+    return MIN(fit, area);
+}
+
 static void
 layout_grid(ns_box *box, double cw,
             double inner_x, double inner_y,
@@ -13391,9 +13428,7 @@ layout_grid(ns_box *box, double cw,
                                    iwv->kind == NS_CSS_V_CALC);
         double item_w = cw_for_item;
         if (!j_stretch && !i_has_w) {
-            double nat = measure_natural_width(c, child_inherited);
-            if (nat >= 0 && nat < item_w) item_w = nat;
-            if (item_w < 0) item_w = 0;
+            item_w = grid_item_fit_border_width(c, child_inherited, item_w);
         }
         ns_subgrid_cols subctx = {0};
         if (sp >= 1 && box_is_grid_container(c) &&
@@ -13438,6 +13473,8 @@ layout_grid(ns_box *box, double cw,
             area_h += base_row_height[placed_row + k] + (k > 0 ? base_gap : 0);
         }
         c->cb_height_override = area_h;
+        c->cb_width_override = w;
+        c->cb_width_set = TRUE;
         layout_box(c, item_w + c->margin.left + c->margin.right, child_inherited);
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
@@ -14163,8 +14200,7 @@ static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
     inline_runs_join_splits(box);
-    double cb_pct_basis = box->cb_width_override > 0
-        ? box->cb_width_override : parent_content_width;
+    double cb_pct_basis = box_cb_basis(box, parent_content_width);
     edges_from_style(box->style, cb_pct_basis,
                      &box->margin, &box->padding, &box->border);
     box->margin_top_through = 0;
@@ -14447,8 +14483,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 if (cw_for_float < 0) cw_for_float = 0;
             }
             if (mxw2 && (mxw2->kind == NS_CSS_V_LENGTH || mxw2->kind == NS_CSS_V_CALC)) {
-                double mx = length_resolve(mxw2, cw, 0);
-                if (mx > 0 && cw_for_float > mx - float_sizing_extras)
+                double mx = length_resolve(mxw2, cw, -1);
+                if (mx >= 0 && cw_for_float > mx - float_sizing_extras)
                     cw_for_float = MAX(mx - float_sizing_extras, 0);
             }
             if (mnw2 && (mnw2->kind == NS_CSS_V_LENGTH || mnw2->kind == NS_CSS_V_CALC)) {
@@ -14499,7 +14535,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             else
                 c->x = inner_x + cw - right_off - tentative_outer;
             c->y = float_y;
-            double saved_cw = c->content_width;
+            c->cb_width_override = cw;
+            c->cb_width_set = TRUE;
             c->content_width = cw_for_float;
             gboolean explicit_float_w = wv2 &&
                 (wv2->kind == NS_CSS_V_LENGTH || wv2->kind == NS_CSS_V_CALC);
@@ -14510,7 +14547,6 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                          + c->border.left + c->border.right
                          + c->margin.left + c->margin.right,
                        child_inherited);
-            (void)saved_cw;
             double actual_outer = c->content_width
                 + c->padding.left + c->padding.right
                 + c->border.left + c->border.right
@@ -16499,6 +16535,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (r_set) inset_w -= length_resolve(arv, avail, 0);
         if (inset_w < 0) inset_w = 0;
         abox->cb_width_override = avail;
+        abox->cb_width_set = TRUE;
         if (stretch_w) {
             double l = l_set ? length_resolve(alv, avail, 0) : 0;
             double r = r_set ? length_resolve(arv, avail, 0) : 0;
