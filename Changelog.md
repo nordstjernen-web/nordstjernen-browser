@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* DOM: setting an inline style property to the value it already has
+  (`el.style.display = 'none'` when it is already `none`), or removing
+  a property the element does not have, no longer rewrites the `style`
+  attribute. Each rewrite queued a mutation record, so a page whose
+  MutationObserver re-applies a style on every `style` change fed
+  itself forever; the page's JavaScript never went idle and was halted
+  by the runaway-script monitor a minute later, leaving its content
+  (such as a grid of live rooms) unrendered.
 * Layout: `position: fixed` and absolutely positioned elements inside
   an iframe are placed against the iframe's own viewport. The lookup
   for their containing block walked out of the frame's document into

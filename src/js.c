@@ -2864,6 +2864,14 @@ ns_style_get_length(JSContext *ctx, JSValueConst this_val)
     return JS_NewInt32(ctx, (int32_t)names->len);
 }
 
+static void
+ns_style_attr_update(ns_js *js, ns_node *n, const char *old,
+                     const char *new_style)
+{
+    if (old ? strcmp(old, new_style) == 0 : !*new_style) return;
+    ns_js_set_attr_recorded(js, n, "style", new_style);
+}
+
 static int
 ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                       JSValueConst val, JSValueConst receiver, int flags)
@@ -2897,7 +2905,7 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
     }
     const char *old = ns_element_get_attr(n, "style");
     char *new_style = ns_inline_style_set(old, css, vstr ? vstr : "");
-    ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
+    ns_style_attr_update(js_from_ctx(ctx), n, old, new_style);
     g_free(new_style);
     g_free(css);
     if (vstr) JS_FreeCString(ctx, vstr);
@@ -4258,7 +4266,7 @@ ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
                        : g_strdup(value ? value : "");
         char *new_style = ns_inline_style_set(old, css_name, stored);
         g_free(stored);
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
+        ns_style_attr_update(js_from_ctx(ctx), n, old, new_style);
         g_free(new_style);
     }
     g_free(css_name);
@@ -4279,7 +4287,7 @@ ns_style_removeProperty(JSContext *ctx, JSValueConst this_val,
     const char *style = ns_element_get_attr(n, "style");
     char *old_val = ns_inline_style_get(style, name);
     char *new_style = ns_inline_style_set(style, name, "");
-    ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
+    ns_style_attr_update(js_from_ctx(ctx), n, style, new_style);
     g_free(new_style);
     JS_FreeCString(ctx, name);
     if (old_val) ns_inline_value_strip_important(old_val);
