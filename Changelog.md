@@ -4,11 +4,14 @@ Changelog:
 1.0.31:
 ======
 * Performance: collecting a page's stylesheets for a relayout no longer
-  re-tokenizes every small `<style>` element to decide whether it can be
-  merged with its neighbours. The answer (and whether the text has
-  viewport-dependent `@media` rules) is remembered per distinct style
-  text, which matters on pages whose scripts force many layouts by
-  reading element geometry.
+  re-reads every small `<style>` element. Each element's final CSS text
+  and its traits (whether it can join the merged run of neighbouring
+  styles, whether it has viewport-dependent `@media` rules) are
+  remembered against a fingerprint of its text, and the merged run is
+  looked up by a digest of its parts, so its text is only assembled when
+  it changed. A page with ~760 CSS-in-JS `<style>` elements (1.5 MB)
+  that forces hundreds of layouts by reading element geometry no longer
+  copies and hashes all of it several times per layout.
 * DOM: setting an inline style property to the value it already has
   (`el.style.display = 'none'` when it is already `none`), or removing
   a property the element does not have, no longer rewrites the `style`
