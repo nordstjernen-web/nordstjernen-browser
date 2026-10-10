@@ -1033,6 +1033,21 @@ node_is_frame_fallback(const ns_node *n)
            (strcmp(p->name, "iframe") == 0 || strcmp(p->name, "frame") == 0);
 }
 
+static gboolean
+node_is_frame_element(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT && n->name &&
+           (strcmp(n->name, "iframe") == 0 || strcmp(n->name, "frame") == 0 ||
+            strcmp(n->name, "object") == 0);
+}
+
+static const ns_node *
+frame_document_host(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_DOCUMENT) return NULL;
+    return node_is_frame_element(n->parent) ? n->parent : NULL;
+}
+
 static GHashTable *g_contains_block_media_cache;
 
 static const ns_node *layout_slot_host(const ns_node *slot);
@@ -15778,6 +15793,8 @@ fixed_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
         return e->dom;
     for (const ns_node *p = layout_flat_parent(e->dom); p;
          p = layout_flat_parent(p)) {
+        const ns_node *frame = frame_document_host(p);
+        if (frame) return frame;
         if (p->kind != NS_NODE_ELEMENT) continue;
         if (style_creates_fixed_cb(g_hash_table_lookup(styles, p))) return p;
     }
@@ -15987,6 +16004,8 @@ static const ns_node *
 find_abs_containing_block_dom(const ns_node *n, GHashTable *styles)
 {
     for (const ns_node *p = layout_flat_parent(n); p; p = layout_flat_parent(p)) {
+        const ns_node *frame = frame_document_host(p);
+        if (frame) return frame;
         if (p->kind != NS_NODE_ELEMENT) continue;
         const ns_style *ps = g_hash_table_lookup(styles, p);
         if (style_creates_abs_cb(ps)) return p;
@@ -17306,7 +17325,8 @@ ns_box_is_fixed(const ns_box *b)
         !keyword_is(b->style->values[NS_CSS_POSITION], "fixed"))
         return FALSE;
     for (const ns_box *p = b->parent; p; p = p->parent)
-        if (style_creates_fixed_cb(p->style)) return FALSE;
+        if (style_creates_fixed_cb(p->style) || node_is_frame_element(p->dom))
+            return FALSE;
     return TRUE;
 }
 
