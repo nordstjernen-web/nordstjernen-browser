@@ -153,6 +153,8 @@ int   ns_rproc_http_scrollbar(ns_rproc_http *r, int kind, int x, int y);
 int   ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
                                const char *const *paths, int n_paths);
 char *ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed);
+char *ns_rproc_http_release_at(ns_rproc_http *r, int x, int y,
+                               int *out_changed);
 int   ns_rproc_http_focused_editable(ns_rproc_http *r);
 char *ns_rproc_http_focused_editable_value(ns_rproc_http *r,
                                            size_t *out_caret,
