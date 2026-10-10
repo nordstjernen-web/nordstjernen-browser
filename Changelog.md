@@ -10,6 +10,14 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Media: setting a `<video>` or `<audio>` element's `src` runs the
+  media element load algorithm, as `load()` already did. The element
+  pauses, rewinds to 0 and fires `abort`, `emptied` and `loadstart`.
+  A player that reuses one element for a pre-roll ad and then the
+  programme used to start the programme at the ad's end time, already
+  "playing", so its `play()` raised no `play`/`playing` events. The
+  player stayed in its buffering state and gave up after half a
+  minute.
 * DOM: reading `contentDocument` on a `<div>` threw "Illegal
   invocation", which broke jQuery's `.contents()` on every div. The
   polyfill copied the frame-only native getter onto
