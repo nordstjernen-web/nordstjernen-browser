@@ -11,6 +11,16 @@ Changelog:
   video inside it was drawn at the page's left edge instead of in its
   slot. Fixed boxes inside a frame also no longer follow the top-level
   scroll.
+* Media: pages with more than four playing videos (a main video
+  next to several video ads) no longer leave the main video black.
+  The video helper held four players and silently dropped the oldest
+  paused one, which was often the main video before its pre-roll
+  finished. It now holds eight, and an evicted video is reopened at
+  its position when it is played again. Videos are also no longer
+  stopped as "not painted" while the page sits still, a regression
+  from noting video positions only after a relayout or scroll, and
+  looping `<video loop>` clips played by the helper restart from the
+  beginning instead of freezing on their last frame.
 * Media: in-process playback of a fragmented-MP4 Media Source stream
   (HLS players such as hls.js transmux into one) no longer stalls
   once the decoder catches up with the bytes it was opened over. The
