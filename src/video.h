@@ -56,6 +56,7 @@ typedef struct ns_video {
     double       clip_x, clip_y, clip_w, clip_h;
     int          rect_fit;
     gint64       last_paint_us;
+    guint        layout_note_gen;
     gboolean     rect_dirty;
     gint64       rect_sent_us;
     double       sent_rect_x, sent_rect_y, sent_rect_w, sent_rect_h;
