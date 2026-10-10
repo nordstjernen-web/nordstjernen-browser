@@ -8214,6 +8214,33 @@
             return out.join(' ');
         }
 
+        function serializeKeyframeList(block) {
+            var s = String(block), out = [], head = '', i = 0;
+            while (i < s.length) {
+                var c = s.charAt(i);
+                if (c === '{') {
+                    var depth = 1, j = i + 1, quote = 0;
+                    for (; j < s.length && depth; j++) {
+                        var d = s.charAt(j);
+                        if (quote) {
+                            if (d === quote && s.charAt(j - 1) !== '\\') quote = 0;
+                        } else if (d === '"' || d === "'") quote = d;
+                        else if (d === '{') depth++;
+                        else if (d === '}') depth--;
+                    }
+                    var sel = head.replace(/[;\s]+/g, ' ').replace(/^ | $/g, '');
+                    var decls = serializeDeclBlock(s.slice(i + 1, j - 1));
+                    if (sel) out.push(sel + (decls ? ' { ' + decls + ' }' : ' { }'));
+                    head = '';
+                    i = j;
+                    continue;
+                }
+                head += c;
+                i++;
+            }
+            return out.join(' ');
+        }
+
         function makeAtStatement(prelude, sheet, parentRule) {
             var kw = atKeyword(prelude);
             var StmtCtor = kw === 'import' ? CSSImportRule :
@@ -8330,7 +8357,8 @@
                     }
                 } else {
                     var head = prelude.replace(/\s+/g, ' ').replace(/^ | $/g, '');
-                    var body = serializeDeclBlock(block);
+                    var body = atType === 7 ? serializeKeyframeList(block)
+                                            : serializeDeclBlock(block);
                     var raw = head + (body ? ' { ' + body + ' }' : ' { }');
                     ar.__cssText = function () { return raw; };
                 }

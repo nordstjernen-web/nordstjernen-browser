@@ -20933,6 +20933,7 @@ parse_rules_until(const char **pp, const char *end,
                     p++;
                     GArray *stops = g_array_new(FALSE, FALSE,
                                                 sizeof(ns_css_keyframe_stop));
+                    gboolean stray_prelude = FALSE;
                     while (p < end) {
                         p = css_skip_ws_comments(p, end);
                         if (p < end && *p == '}') { p++; break; }
@@ -20940,12 +20941,22 @@ parse_rules_until(const char **pp, const char *end,
                         char sel_term = 0;
                         const char *sel_end =
                             css_scan_segment(p, end, &sel_term);
-                        if (sel_term != '{') break;
+                        if (sel_term == ';') {
+                            stray_prelude = TRUE;
+                            p = sel_end + 1;
+                            continue;
+                        }
+                        if (sel_term == '}') { p = sel_end + 1; break; }
+                        if (sel_term != '{') { p = sel_end; break; }
                         const char *body_start = sel_end + 1;
                         const char *block_end = css_skip_to_block_end(sel_end, end);
                         const char *body_end = css_block_body_end(body_start,
                                                                   block_end);
                         p = block_end;
+                        if (stray_prelude) {
+                            stray_prelude = FALSE;
+                            continue;
+                        }
                         gsize sel_len = (gsize)(sel_end - sel_start);
                         char *sel = g_strndup(sel_start, sel_len);
                         g_strstrip(sel);
