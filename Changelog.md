@@ -3,6 +3,23 @@ Changelog:
 
 1.0.31:
 ======
+* DOM: XPath 1.0 is implemented: `document.evaluate`,
+  `document.createExpression`, `createNSResolver`, `XPathResult`,
+  `XPathExpression` and `XPathEvaluator`, with all axes, the core
+  function library and every result type. `XPathResult` was undefined
+  before, so scripts that locate nodes by XPath threw.
+* Canvas: `ctx.font` is parsed in CSS shorthand order. A numeric weight
+  such as `'500 14px Roboto'` was taken as the font size (text drew at
+  500px), and `bold`/`italic` were read by Pango as part of the family
+  name. Map labels rendered through a 2D canvas now appear.
+* Layout: percentages on an absolutely positioned, shrink-to-fit box
+  (`max-width: calc(100% - 740px)`, padding, margins) resolve against
+  its containing block instead of its own content width, and a box with
+  only `left` or `right` set fits into the space beside that inset.
+* Layout: an inline-block inside an inline run contributes its
+  min-content width to the run's min-content width. Flex items holding
+  inline-block buttons with multi-word labels no longer refuse to shrink
+  and overlap their neighbours.
 * Performance: runs of small `<style>` elements are merged into sheets
   of roughly 32-128 KB split at content-defined boundaries, instead of
   one sheet per run. A page that adds or edits one CSS-in-JS style
