@@ -28,7 +28,8 @@
 
 #include "../media_shm.h"
 
-#define NS_VIDEO_MAX_PLAYERS 4
+#define NS_VIDEO_MAX_PLAYERS 8
+#define NS_VIDEO_MAX_EVICTED 16
 #define NS_VIDEO_MAX_DIM     4096
 
 typedef struct {
@@ -36,6 +37,7 @@ typedef struct {
     char       path[PATH_MAX];
     int        used;
     int        playing;
+    int        loop;
     unsigned long open_seq;
     int        quit;
     int        want_reopen;
@@ -55,6 +57,17 @@ typedef struct {
 } ns_video_player;
 
 static ns_video_player g_players[NS_VIDEO_MAX_PLAYERS];
+
+typedef struct {
+    char   token[64];
+    char   path[PATH_MAX];
+    double position;
+    int    loop;
+    int    used;
+} ns_video_evicted;
+
+static ns_video_evicted g_evicted[NS_VIDEO_MAX_EVICTED];
+static unsigned         g_next_evicted;
 static unsigned long   g_open_seq;
 static pthread_mutex_t g_emit_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned        g_next_shm;
@@ -270,7 +283,7 @@ vdec_packet_wanted(ns_vdec *d, const AVPacket *pkt)
 }
 
 static int
-vdec_next_frame(ns_vdec *d, const char *path)
+vdec_next_frame(ns_vdec *d, const char *path, int may_grow)
 {
     while (1) {
         int rr = avcodec_receive_frame(d->dec, d->frame);
@@ -289,7 +302,8 @@ vdec_next_frame(ns_vdec *d, const char *path)
             if (rr < 0) {
                 if (vdec_file_grew(d, path)) return NS_VDEC_GREW;
                 if (!d->eof_since_us) d->eof_since_us = now_us();
-                if (now_us() - d->eof_since_us < NS_VDEC_GROWTH_WAIT_US)
+                if (may_grow &&
+                    now_us() - d->eof_since_us < NS_VDEC_GROWTH_WAIT_US)
                     return NS_VDEC_WAITING;
                 avcodec_send_packet(d->dec, NULL);
                 d->draining = 1;
@@ -576,7 +590,13 @@ player_thread(void *ud)
         ring_clock_store_locked(p, clock);
         pthread_mutex_unlock(&p->lock);
 
-        int rr = vdec_next_frame(&d, local_path_for(path));
+        pthread_mutex_lock(&p->lock);
+        int loop = p->loop;
+        double duration = p->duration;
+        pthread_mutex_unlock(&p->lock);
+        int at_loop_end = loop && duration > 0.0 &&
+                          decoded_until >= duration - 0.15;
+        int rr = vdec_next_frame(&d, local_path_for(path), !at_loop_end);
         if (rr == NS_VDEC_GREW) {
             pthread_mutex_lock(&p->lock);
             p->want_reopen = 1;
@@ -591,6 +611,16 @@ player_thread(void *ud)
                                                   __ATOMIC_ACQUIRE);
             uint32_t released = __atomic_load_n(&p->ring->released,
                                                  __ATOMIC_ACQUIRE);
+            if (loop && rr == 0 && published <= released + 1u) {
+                pthread_mutex_lock(&p->lock);
+                p->seek_to = 0.0;
+                p->want_seek = 1;
+                p->reset_queue = 1;
+                pthread_mutex_unlock(&p->lock);
+                eof_since = 0;
+                stalled_reported = 0;
+                continue;
+            }
             if (!stalled_reported && published <= released + 1u &&
                 now_us() - eof_since > 3000000) {
                 emit("stalled %s", p->token);
@@ -647,9 +677,42 @@ player_release(ns_video_player *p, int emit_closed)
     p->used = 0;
 }
 
+static ns_video_evicted *
+evicted_find(const char *token)
+{
+    for (int i = 0; i < NS_VIDEO_MAX_EVICTED; i++)
+        if (g_evicted[i].used && strcmp(g_evicted[i].token, token) == 0)
+            return &g_evicted[i];
+    return NULL;
+}
+
+static void
+evicted_remember(ns_video_player *p)
+{
+    pthread_mutex_lock(&p->lock);
+    double position = player_position_locked(p);
+    int loop = p->loop;
+    pthread_mutex_unlock(&p->lock);
+    ns_video_evicted *e = evicted_find(p->token);
+    if (!e) e = &g_evicted[g_next_evicted++ % NS_VIDEO_MAX_EVICTED];
+    snprintf(e->token, sizeof e->token, "%s", p->token);
+    snprintf(e->path, sizeof e->path, "%s", p->path);
+    e->position = position;
+    e->loop = loop;
+    e->used = 1;
+}
+
+static void
+evicted_forget(const char *token)
+{
+    ns_video_evicted *e = evicted_find(token);
+    if (e) e->used = 0;
+}
+
 static void
 cmd_open(const char *token, const char *url)
 {
+    evicted_forget(token);
     ns_video_player *p = player_find(token);
     if (p) player_release(p, 0);
     p = NULL;
@@ -664,7 +727,9 @@ cmd_open(const char *token, const char *url)
                  c->open_seq < victim->open_seq))
                 victim = c;
         }
-        player_release(victim, 1);
+        evicted_remember(victim);
+        emit("evicted %s", victim->token);
+        player_release(victim, 0);
         p = victim;
     }
     memset(p, 0, sizeof *p);
@@ -693,10 +758,49 @@ cmd_reload(const char *token, const char *url)
     pthread_mutex_unlock(&p->lock);
 }
 
+static ns_video_player *
+player_find_or_restore(const char *token)
+{
+    ns_video_player *p = player_find(token);
+    if (p) return p;
+    ns_video_evicted *e = evicted_find(token);
+    if (!e) return NULL;
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s", e->path);
+    double position = e->position;
+    int loop = e->loop;
+    cmd_open(token, path);
+    p = player_find(token);
+    if (!p) return NULL;
+    pthread_mutex_lock(&p->lock);
+    p->loop = loop;
+    p->cur = position;
+    if (position > 0.0) {
+        p->seek_to = position;
+        p->want_seek = 1;
+    }
+    pthread_mutex_unlock(&p->lock);
+    return p;
+}
+
+static void
+cmd_loop(const char *token, int loop)
+{
+    ns_video_player *p = player_find(token);
+    if (!p) {
+        ns_video_evicted *e = evicted_find(token);
+        if (e) e->loop = loop;
+        return;
+    }
+    pthread_mutex_lock(&p->lock);
+    p->loop = loop;
+    pthread_mutex_unlock(&p->lock);
+}
+
 static void
 cmd_play(const char *token)
 {
-    ns_video_player *p = player_find(token);
+    ns_video_player *p = player_find_or_restore(token);
     if (!p) return;
     pthread_mutex_lock(&p->lock);
     if (!p->playing) {
@@ -725,7 +829,11 @@ static void
 cmd_seek(const char *token, double seconds)
 {
     ns_video_player *p = player_find(token);
-    if (!p) return;
+    if (!p) {
+        ns_video_evicted *e = evicted_find(token);
+        if (e) e->position = seconds < 0 ? 0 : seconds;
+        return;
+    }
     pthread_mutex_lock(&p->lock);
     p->seek_to = seconds < 0 ? 0 : seconds;
     p->want_seek = 1;
@@ -755,6 +863,7 @@ cmd_resync(const char *token, double seconds)
 static void
 cmd_stop(const char *token)
 {
+    evicted_forget(token);
     ns_video_player *p = player_find(token);
     if (!p) return;
     player_release(p, 1);
@@ -834,6 +943,9 @@ main(void)
             cmd_resync(token, v ? atof(v) : 0.0);
         } else if (strcmp(op, "stop") == 0) {
             cmd_stop(token);
+        } else if (strcmp(op, "loop") == 0) {
+            char *v = next_token(&cur);
+            cmd_loop(token, v ? atoi(v) != 0 : 1);
         }
     }
 
