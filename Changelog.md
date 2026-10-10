@@ -3,6 +3,16 @@ Changelog:
 
 1.0.31:
 ======
+* Input: pages receive `wheel` events (and the legacy `mousewheel` when
+  only that is listened for) from the mouse wheel and touchpad, one per
+  notch with `deltaY` 100, at the pointer. Over an element with a
+  non-passive wheel listener the browser waits for the page before
+  scrolling, so `preventDefault()` keeps the page still; maps zoom and
+  custom scrollers work. Elsewhere scrolling starts at once as before.
+* Input: `pointerup`, `mouseup` and `click` carry the position where the
+  button was released, not where it was pressed, and moves while a
+  button is held report `buttons = 1`. Dragging a map pans it with the
+  pointer instead of flinging it back.
 * DOM: XPath 1.0 is implemented: `document.evaluate`,
   `document.createExpression`, `createNSResolver`, `XPathResult`,
   `XPathExpression` and `XPathEvaluator`, with all axes, the core

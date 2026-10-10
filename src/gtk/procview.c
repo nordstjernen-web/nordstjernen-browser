@@ -151,6 +151,8 @@ typedef struct {
     gboolean         animating;
     gboolean         caret_blinking;
     gboolean         wheel_snapped;
+    gboolean         wheel_answered;
+    gboolean         wheel_prevented;
     gboolean         frame_unchanged;
     int              requested_scroll_y, requested_scroll_x;
     int              find_total, find_current, find_scroll_y;
@@ -323,6 +325,10 @@ struct NsProcView {
     double      wheel_left_x, wheel_left_y;
     gboolean    wheel_viewport;
     double      wheel_pend_x, wheel_pend_y;
+    double      wev_dx, wev_dy;
+    int         wev_x, wev_y, wev_mods;
+    double      wev_hold_x, wev_hold_y;
+    double      wev_sent_x, wev_sent_y;
     double      fling_vx, fling_vy;
     guint       wheel_tick_id;
     gint64      wheel_last_us;
@@ -1681,6 +1687,8 @@ worker_main(gpointer data)
                 res->animating = fr.animating ? TRUE : FALSE;
                 res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
                 res->wheel_snapped = fr.wheel_snapped ? TRUE : FALSE;
+                res->wheel_answered = fr.wheel_answered ? TRUE : FALSE;
+                res->wheel_prevented = fr.wheel_prevented ? TRUE : FALSE;
                 res->pw = fr.page_w;
                 res->ph = fr.page_h;
                 res->requested_scroll_y = fr.scroll_y;
@@ -2244,6 +2252,18 @@ start_render(NsProcView *v)
         req->wheel.y = v->scroll_y + (int)(v->pointer_y / s);
         req->wheel.viewport = v->wheel_viewport;
     }
+    if (v->wev_dx != 0 || v->wev_dy != 0) {
+        req->wheel.ev = 1;
+        req->wheel.ev_x = v->wev_x;
+        req->wheel.ev_y = v->wev_y;
+        req->wheel.ev_dx = (int)lround(v->wev_dx);
+        req->wheel.ev_dy = (int)lround(v->wev_dy);
+        req->wheel.ev_mods = v->wev_mods;
+        v->wev_dx = v->wev_dy = 0;
+        v->wev_sent_x += v->wev_hold_x;
+        v->wev_sent_y += v->wev_hold_y;
+        v->wev_hold_x = v->wev_hold_y = 0;
+    }
     push_req(v, req);
 }
 
@@ -2354,6 +2374,47 @@ pv_wheel_scrolling(const NsProcView *v)
 {
     return v->hover_after_scroll_id != 0 || !wheel_animation_idle(v) ||
            v->wheel_pend_x != 0 || v->wheel_pend_y != 0;
+}
+
+static gboolean
+pv_queue_wheel_event(NsProcView *v, double dx, double dy, GdkModifierType mods)
+{
+    double s = cur_scale(v);
+    v->wev_dx += dx;
+    v->wev_dy += dy;
+    v->wev_x = v->scroll_x + (int)(v->pointer_x / s);
+    v->wev_y = v->scroll_y + (int)(v->pointer_y / s);
+    v->wev_mods = ((mods & GDK_SHIFT_MASK) ? 1 : 0) |
+                  ((mods & GDK_ALT_MASK)   ? 4 : 0) |
+                  ((mods & GDK_META_MASK)  ? 8 : 0);
+    gboolean held = v->wev_hold_x != 0 || v->wev_hold_y != 0 ||
+        ns_page_layers_wheel_listener_at(v->layers, v->pointer_x / s,
+                                         v->pointer_y / s, v->scroll_x,
+                                         v->scroll_y);
+    if (held) {
+        v->wev_hold_x += dx;
+        v->wev_hold_y += dy;
+    }
+    if (!v->opened)
+        return held;
+    if (v->render_inflight)
+        v->render_pending = TRUE;
+    else
+        start_render(v);
+    return held;
+}
+
+static void arm_wheel_animation(NsProcView *v);
+
+static void
+pv_wheel_answered(NsProcView *v, gboolean prevented)
+{
+    if (!prevented && (v->wev_sent_x != 0 || v->wev_sent_y != 0)) {
+        v->wheel_left_x += v->wev_sent_x;
+        v->wheel_left_y += v->wev_sent_y;
+        arm_wheel_animation(v);
+    }
+    v->wev_sent_x = v->wev_sent_y = 0;
 }
 
 static gboolean
@@ -3337,6 +3398,8 @@ on_result(gpointer data)
         gboolean current = res->seq == v->render_seq;
         if (res->ok && res->wheel_snapped)
             stop_wheel_animation(v);
+        if (res->ok && res->wheel_answered)
+            pv_wheel_answered(v, res->wheel_prevented);
         if (current && res->ok) {
             v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;
@@ -4022,7 +4085,12 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
     double s = cur_scale(v);
     v->fling_vx = v->fling_vy = 0;
     v->wheel_viewport = FALSE;
-    if (gtk_event_controller_scroll_get_unit(ctrl) == GDK_SCROLL_UNIT_SURFACE) {
+    gboolean surface =
+        gtk_event_controller_scroll_get_unit(ctrl) == GDK_SCROLL_UNIT_SURFACE;
+    double step = surface ? 1.0 : NS_PV_WHEEL_STEP_PX;
+    if (pv_queue_wheel_event(v, dx * step / s, dy * step / s, mods))
+        return TRUE;
+    if (surface) {
         queue_wheel_scroll(v, dx / s, dy / s);
         return TRUE;
     }

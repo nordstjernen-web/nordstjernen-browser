@@ -31,6 +31,9 @@ void ns_page_layers_evict(NsPageLayers *pl, double y0, double y1);
 gboolean ns_page_layers_scroller_at(const NsPageLayers *pl, double x,
                                     double y, double scroll_x,
                                     double scroll_y, gboolean vertical);
+gboolean ns_page_layers_wheel_listener_at(const NsPageLayers *pl, double x,
+                                          double y, double scroll_x,
+                                          double scroll_y);
 typedef void (*NsPageLayersUnder)(GtkSnapshot *snapshot, double offset_x,
                                   double offset_y, gpointer data);
 

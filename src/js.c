@@ -33976,23 +33976,18 @@ ns_event_put(JSContext *ctx, JSValueConst event, const char *name, JSValue value
     JS_DefinePropertyValueStr(ctx, event, name, value, JS_PROP_C_W_E);
 }
 
-gboolean
-ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
-                           double client_x, double client_y,
-                           double page_x, double page_y,
-                           int button, int buttons,
-                           gboolean shift, gboolean ctrl, gboolean alt, gboolean meta,
-                           const ns_node *related, gboolean *default_prevented)
+static JSValue
+ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
+                        double client_x, double client_y,
+                        double page_x, double page_y,
+                        int button, int buttons,
+                        gboolean shift, gboolean ctrl, gboolean alt,
+                        gboolean meta, const ns_node *related,
+                        JSContext **out_ctx)
 {
-    if (default_prevented) *default_prevented = FALSE;
-    if (!js || !target || !type) return FALSE;
-    if (js->halted || js->in_pump) return FALSE;
-    if (strcmp(type, "mousedown") == 0 || strcmp(type, "pointerdown") == 0 ||
-        strcmp(type, "mouseup") == 0 || strcmp(type, "pointerup") == 0 ||
-        strcmp(type, "click") == 0 || strcmp(type, "dblclick") == 0)
-        ns_js_note_user_activation(js);
     JSContext *ctx = ns_js_node_realm_context(js, target);
     if (!ctx) ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    *out_ctx = ctx;
     double frame_x = 0, frame_y = 0;
     const ns_node *owner_iframe = ns_node_owner_iframe(target);
     const ns_box *owner_box = js->layout_root && owner_iframe
@@ -34093,10 +34088,127 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
                           JS_NewFloat64(ctx, G_PI / 2));
         ns_event_put(ctx, event, "azimuthAngle", JS_NewInt32(ctx, 0));
     }
+    return event;
+}
+
+gboolean
+ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
+                           double client_x, double client_y,
+                           double page_x, double page_y,
+                           int button, int buttons,
+                           gboolean shift, gboolean ctrl, gboolean alt, gboolean meta,
+                           const ns_node *related, gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !target || !type) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    if (strcmp(type, "mousedown") == 0 || strcmp(type, "pointerdown") == 0 ||
+        strcmp(type, "mouseup") == 0 || strcmp(type, "pointerup") == 0 ||
+        strcmp(type, "click") == 0 || strcmp(type, "dblclick") == 0)
+        ns_js_note_user_activation(js);
+    JSContext *ctx = NULL;
+    JSValue event = ns_js_build_mouse_event(js, target, type, client_x,
+                                            client_y, page_x, page_y, button,
+                                            buttons, shift, ctrl, alt, meta,
+                                            related, &ctx);
     if (strcmp(type, "pointerdown") == 0 || strcmp(type, "pointerup") == 0) {
         ns_js_popover_light_dismiss(js, target, type[7] == 'u');
         ns_js_dialog_light_dismiss(js, target, type[7] == 'u');
     }
+    return ns_js_dispatch_built_event(js, target, type, event,
+                                      default_prevented);
+}
+
+static gboolean
+ns_listener_blocks_wheel(ns_js *js, ns_listener *l)
+{
+    return !ns_listener_is_tombstoned(l) && !l->passive && l->type &&
+           (strcmp(l->type, "wheel") == 0 ||
+            strcmp(l->type, "mousewheel") == 0) &&
+           !ns_listener_signal_aborted(js, l);
+}
+
+gboolean
+ns_js_node_blocks_wheel(ns_js *js, const ns_node *node)
+{
+    if (!js || !node || !(node->flags & NS_NODE_HAS_LISTENERS)) return FALSE;
+    GPtrArray *own = ns_listeners_of(js, node);
+    gboolean found = FALSE;
+    js->listener_snapshots++;
+    for (guint i = 0; !found && own && i < own->len; i++) {
+        ns_listener *l = g_ptr_array_index(own, i);
+        found = l->target == node && !l->window_level &&
+                ns_listener_blocks_wheel(js, l);
+    }
+    js->listener_snapshots--;
+    return found;
+}
+
+gboolean
+ns_js_document_blocks_wheel(ns_js *js)
+{
+    if (!js || !js->listeners) return FALSE;
+    gboolean found = FALSE;
+    js->listener_snapshots++;
+    for (guint i = 0; !found && i < js->listeners->len; i++) {
+        ns_listener *l = g_ptr_array_index(js->listeners, i);
+        found = (l->window_level || !l->target || !l->target->parent) &&
+                ns_listener_blocks_wheel(js, l);
+    }
+    js->listener_snapshots--;
+    return found;
+}
+
+static gboolean
+ns_path_has_listener(ns_js *js, const ns_node *target, const char *type)
+{
+    if (!js || !js->listeners) return FALSE;
+    gboolean found = FALSE;
+    js->listener_snapshots++;
+    for (guint i = 0; !found && i < js->listeners->len; i++) {
+        ns_listener *l = g_ptr_array_index(js->listeners, i);
+        if (ns_listener_is_tombstoned(l) || !l->type ||
+            strcmp(l->type, type) != 0)
+            continue;
+        if (l->window_level) found = TRUE;
+        for (const ns_node *cur = target; !found && cur; cur = cur->parent)
+            if (l->target == cur) found = TRUE;
+    }
+    js->listener_snapshots--;
+    return found;
+}
+
+gboolean
+ns_js_dispatch_wheel(ns_js *js, const ns_node *target,
+                     double client_x, double client_y,
+                     double page_x, double page_y, double dx, double dy,
+                     gboolean shift, gboolean ctrl, gboolean alt,
+                     gboolean meta, gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !target || js->halted || js->in_pump) return FALSE;
+    const char *type = !ns_path_has_listener(js, target, "wheel") &&
+                       ns_path_has_listener(js, target, "mousewheel")
+                     ? "mousewheel" : "wheel";
+    JSContext *ctx = NULL;
+    JSValue event = ns_js_build_mouse_event(js, target, type, client_x,
+                                            client_y, page_x, page_y, 0, 0,
+                                            shift, ctrl, alt, meta, NULL,
+                                            &ctx);
+    ns_event_put(ctx, event, "cancelable",
+                 ns_path_has_active_listener(js, target, type)
+                     ? JS_TRUE : JS_FALSE);
+    ns_event_put(ctx, event, "detail", JS_NewInt32(ctx, 0));
+    ns_event_put(ctx, event, "deltaX", JS_NewFloat64(ctx, dx));
+    ns_event_put(ctx, event, "deltaY", JS_NewFloat64(ctx, dy));
+    ns_event_put(ctx, event, "deltaZ", JS_NewFloat64(ctx, 0));
+    ns_event_put(ctx, event, "deltaMode", JS_NewInt32(ctx, 0));
+    ns_event_put(ctx, event, "wheelDelta",
+                 JS_NewInt32(ctx, (int)lround(-(dy != 0 ? dy : dx) * 1.2)));
+    ns_event_put(ctx, event, "wheelDeltaX",
+                 JS_NewInt32(ctx, (int)lround(-dx * 1.2)));
+    ns_event_put(ctx, event, "wheelDeltaY",
+                 JS_NewInt32(ctx, (int)lround(-dy * 1.2)));
     return ns_js_dispatch_built_event(js, target, type, event,
                                       default_prevented);
 }

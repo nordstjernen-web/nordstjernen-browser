@@ -30,6 +30,8 @@ typedef struct {
     int                  animating;
     int                  caret_blinking;
     int                  wheel_snapped;
+    int                  wheel_answered;
+    int                  wheel_prevented;
     int                  page_w;
     int                  page_h;
     int                  scroll_y;
@@ -109,6 +111,10 @@ typedef struct ns_rproc_http_wheel {
     int x, y;
     int dx, dy;
     int viewport;
+    int ev;
+    int ev_x, ev_y;
+    int ev_dx, ev_dy;
+    int ev_mods;
 } ns_rproc_http_wheel;
 
 int  ns_rproc_http_render_wheel(ns_rproc_http *r, int width, int height,

@@ -602,6 +602,12 @@ render_request_json(const ns_rproc_http *r, char *json, size_t cap, int width,
                        "\"wheel_viewport\":%d",
                        wheel->x, wheel->y, wheel->dx, wheel->dy,
                        wheel->viewport ? 1 : 0);
+    if (wheel && wheel->ev)
+        jn += snprintf(json + jn, cap - (size_t)jn,
+                       ",\"wev\":1,\"wev_x\":%d,\"wev_y\":%d,"
+                       "\"wev_dx\":%d,\"wev_dy\":%d,\"wev_mods\":%d",
+                       wheel->ev_x, wheel->ev_y, wheel->ev_dx, wheel->ev_dy,
+                       wheel->ev_mods);
     jn += snprintf(json + jn, cap - (size_t)jn, "}");
     return jn;
 }
@@ -619,6 +625,8 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->animating = (head->x_anim & 1) != 0;
     out->caret_blinking = (head->x_anim & 2) != 0;
     out->wheel_snapped = (head->x_anim & 4) != 0;
+    out->wheel_answered = (head->x_anim & 8) != 0;
+    out->wheel_prevented = (head->x_anim & 16) != 0;
     out->page_w = (int)head->x_page_w;
     out->page_h = (int)head->x_page_h;
     out->scroll_y = (int)head->x_scroll_y;

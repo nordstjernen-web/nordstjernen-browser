@@ -350,6 +350,8 @@ typedef struct render_view {
     int    requested_x, requested_y;
     int    page_w, page_h;
     int    wheel_snapped;
+    int    wheel_answered;
+    int    wheel_prevented;
     int    unchanged;
     int    render_rc;
 } render_view;
@@ -403,6 +405,25 @@ render_apply_wheel(ns_renderer_session *s, const char *body, render_view *rv,
     long ny = clamp((int)(rv->sy + wheel_dy), 0, max_y);
     if (nx != rv->sx) rv->requested_x = (int)(rv->sx = nx);
     if (ny != rv->sy) rv->requested_y = (int)(rv->sy = ny);
+}
+
+static void
+render_dispatch_wheel(ns_renderer_session *s, const char *body,
+                      render_view *rv)
+{
+    long ev = 0, x = 0, y = 0, dx = 0, dy = 0, mods = 0;
+    if (json_get_long(body, "wev", &ev) != 0 || !ev) return;
+    json_get_long(body, "wev_x", &x);
+    json_get_long(body, "wev_y", &y);
+    json_get_long(body, "wev_dx", &dx);
+    json_get_long(body, "wev_dy", &dy);
+    json_get_long(body, "wev_mods", &mods);
+    int changed = 0;
+    rv->wheel_answered = 1;
+    rv->wheel_prevented = ns_browser_wheel_event(s->cur, (int)x, (int)y,
+                                                 (int)dx, (int)dy, (int)mods,
+                                                 &changed);
+    if (changed) s->frame_valid = 0;
 }
 
 static void
@@ -478,6 +499,8 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     int animating = session_animating(s) ? 1 : 0;
     if (ns_browser_caret_blinking(s->cur)) animating |= 2;
     if (rv->wheel_snapped) animating |= 4;
+    if (rv->wheel_answered) animating |= 8;
+    if (rv->wheel_prevented) animating |= 16;
     int clipboard_pending = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
     char hdrs[32768];
     int hn = snprintf(hdrs, sizeof hdrs,
@@ -572,6 +595,9 @@ session_render(ns_renderer_session *s, int ctrl_w, const char *body)
     json_get_long(body, "fill", &fill);
     rv.ticked = s->frame_valid && !fill ? session_tick(s) : 0;
     render_apply_pending_scroll(s, &rv);
+    render_dispatch_wheel(s, body, &rv);
+    if (rv.wheel_prevented)
+        wheel_dx = wheel_dy = 0;
     render_apply_wheel(s, body, &rv, wheel_dx, wheel_dy);
     render_apply_snap(s, &rv, wheel_dx || wheel_dy);
     rv.caret_changed = ns_browser_set_caret_blink_active(s->cur, rv.caret);
