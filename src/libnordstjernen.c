@@ -130,6 +130,11 @@ struct ns_browser {
     gint64          hover_relayout_us;
     gint64          relayout_cost_us;
     guint           layout_seq;
+    guint           page_size_seq;
+    int             page_size_vw;
+    double          page_size_vh;
+    int             page_size_w;
+    int             page_size_h;
     guint           videos_noted_seq;
     double          videos_noted_scroll_x;
     double          videos_noted_scroll_y;
@@ -2063,6 +2068,13 @@ int
 ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
 {
     if (!browser || !browser->layout) return -1;
+    if (browser->page_size_seq == browser->layout_seq &&
+        browser->page_size_vw == browser->vw &&
+        browser->page_size_vh == browser->vh) {
+        if (out_width)  *out_width  = browser->page_size_w;
+        if (out_height) *out_height = browser->page_size_h;
+        return 0;
+    }
     gboolean hide_x = root_axis_overflow_hidden(browser->layout,
                                                 NS_CSS_OVERFLOW_X);
     gboolean hide_y = root_axis_overflow_hidden(browser->layout,
@@ -2073,9 +2085,14 @@ ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
     if (!hide_y)
         bottom = ns_box_max_bottom(browser->layout, bottom);
     if (!(bottom > 0)) bottom = 0;
-    if (out_width)  *out_width  = (int)w;
     int ypad = (!hide_y && bottom > browser->vh + 0.5) ? 32 : 0;
-    if (out_height) *out_height = (int)bottom + ypad;
+    browser->page_size_seq = browser->layout_seq;
+    browser->page_size_vw = browser->vw;
+    browser->page_size_vh = browser->vh;
+    browser->page_size_w = (int)w;
+    browser->page_size_h = (int)bottom + ypad;
+    if (out_width)  *out_width  = browser->page_size_w;
+    if (out_height) *out_height = browser->page_size_h;
     return 0;
 }
 
