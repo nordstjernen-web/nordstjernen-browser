@@ -6313,6 +6313,65 @@ text_measure_key_free(gpointer p)
     g_free(k);
 }
 
+typedef struct {
+    GByteArray *buf;
+    gboolean    uncacheable;
+} text_measure_attr_sink;
+
+static void
+text_measure_attr_append_str(GByteArray *buf, const char *str)
+{
+    guint32 n = str ? (guint32)strlen(str) : 0;
+    g_byte_array_append(buf, (const guint8 *)&n, sizeof n);
+    if (n) g_byte_array_append(buf, (const guint8 *)str, n);
+}
+
+static gboolean
+text_measure_attr_append(NsPangoAttribute *attr, gpointer data)
+{
+    text_measure_attr_sink *sink = data;
+    if (sink->uncacheable) return FALSE;
+    GByteArray *buf = sink->buf;
+    guint32 head[3] = { (guint32)attr->klass->type, attr->start_index,
+                        attr->end_index };
+    g_byte_array_append(buf, (const guint8 *)head, sizeof head);
+    NsPangoAttrInt *ai;
+    NsPangoAttrSize *as;
+    NsPangoAttrFloat *af;
+    NsPangoAttrString *astr;
+    NsPangoAttrColor *ac;
+    NsPangoAttrLanguage *al;
+    NsPangoAttrFontDesc *afd;
+    NsPangoAttrFontFeatures *aff;
+    if (attr->klass->type == NS_PANGO_ATTR_SHAPE) {
+        sink->uncacheable = TRUE;
+    } else if ((as = ns_pango_attribute_as_size(attr))) {
+        gint32 v[2] = { as->size, as->absolute };
+        g_byte_array_append(buf, (const guint8 *)v, sizeof v);
+    } else if ((ai = ns_pango_attribute_as_int(attr))) {
+        gint32 v = ai->value;
+        g_byte_array_append(buf, (const guint8 *)&v, sizeof v);
+    } else if ((af = ns_pango_attribute_as_float(attr))) {
+        g_byte_array_append(buf, (const guint8 *)&af->value, sizeof af->value);
+    } else if ((astr = ns_pango_attribute_as_string(attr))) {
+        text_measure_attr_append_str(buf, astr->value);
+    } else if ((ac = ns_pango_attribute_as_color(attr))) {
+        guint16 v[3] = { ac->color.red, ac->color.green, ac->color.blue };
+        g_byte_array_append(buf, (const guint8 *)v, sizeof v);
+    } else if ((al = ns_pango_attribute_as_language(attr))) {
+        text_measure_attr_append_str(buf, ns_pango_language_to_string(al->value));
+    } else if ((afd = ns_pango_attribute_as_font_desc(attr))) {
+        char *desc = ns_pango_font_description_to_string(afd->desc);
+        text_measure_attr_append_str(buf, desc);
+        g_free(desc);
+    } else if ((aff = ns_pango_attribute_as_font_features(attr))) {
+        text_measure_attr_append_str(buf, aff->features);
+    } else {
+        sink->uncacheable = TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean
 text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
 {
@@ -6322,11 +6381,6 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
         return FALSE;
     }
     NsPangoAttrList *attrs = ns_pango_layout_get_attributes(layout);
-    char *attr_str = attrs ? ns_pango_attr_list_to_string(attrs) : NULL;
-    if (attr_str && strstr(attr_str, " shape")) {
-        g_free(attr_str);
-        return FALSE;
-    }
     text_measure_head head;
     memset(&head, 0, sizeof head);
     head.serial = ns_pango_context_get_serial(ns_pango_layout_get_context(layout));
@@ -6341,15 +6395,21 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
                  (guint)ns_pango_layout_get_alignment(layout) << 4 |
                  (guint)ns_pango_layout_get_wrap(layout) << 8 |
                  (guint)ns_pango_layout_get_ellipsize(layout) << 12;
-    head.attrs_len = attr_str ? (guint)strlen(attr_str) : 0;
     if (!g_text_measure_scratch) g_text_measure_scratch = g_byte_array_new();
     GByteArray *buf = g_text_measure_scratch;
     g_byte_array_set_size(buf, 0);
     g_byte_array_append(buf, (const guint8 *)&head, sizeof head);
-    if (attr_str) g_byte_array_append(buf, (const guint8 *)attr_str, head.attrs_len);
+    if (attrs) {
+        text_measure_attr_sink sink = { buf, FALSE };
+        NsPangoAttrList *none = ns_pango_attr_list_filter(
+            attrs, text_measure_attr_append, &sink);
+        if (none) ns_pango_attr_list_unref(none);
+        if (sink.uncacheable) return FALSE;
+        head.attrs_len = buf->len - (guint)sizeof head;
+        memcpy(buf->data, &head, sizeof head);
+    }
     const char *text = ns_pango_layout_get_text(layout);
     g_byte_array_append(buf, (const guint8 *)text, (guint)strlen(text));
-    g_free(attr_str);
     guint32 h = 2166136261u;
     for (guint i = 0; i < buf->len; i++) h = (h ^ buf->data[i]) * 16777619u;
     const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);

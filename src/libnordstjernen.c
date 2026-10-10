@@ -129,6 +129,11 @@ struct ns_browser {
     gboolean        damp_logged;
     gint64          hover_relayout_us;
     gint64          relayout_cost_us;
+    guint           layout_seq;
+    guint           videos_noted_seq;
+    double          videos_noted_scroll_x;
+    double          videos_noted_scroll_y;
+    double          videos_noted_scale;
     gboolean        hover_restyle_pending;
     ns_box         *sb_box;
     const ns_node  *sb_node;
@@ -300,6 +305,7 @@ browser_relayout(ns_browser *b)
                                    b->caret_byte, b->sel_anchor_byte,
                                    &b->layout);
     b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
+    b->layout_seq++;
     b->relaying = FALSE;
     b->styles_serial = b->js ? ns_js_mutation_serial(b->js) : 0;
     if (g_hash_table_size(scroll_save) > 0)
@@ -1908,11 +1914,21 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             other_changed = TRUE;
         }
         if (browser->videos && browser->layout) {
-            ns_video_cache_discover(browser->videos, browser->layout, browser->doc, now);
-            ns_video_cache_note_layout(browser->videos, browser->layout,
-                                       browser->cur_scroll_x,
-                                       browser->cur_scroll_y,
-                                       browser->cur_scale);
+            if (browser->videos_noted_seq != browser->layout_seq ||
+                browser->videos_noted_scroll_x != browser->cur_scroll_x ||
+                browser->videos_noted_scroll_y != browser->cur_scroll_y ||
+                browser->videos_noted_scale != browser->cur_scale) {
+                ns_video_cache_discover(browser->videos, browser->layout,
+                                        browser->doc, now);
+                ns_video_cache_note_layout(browser->videos, browser->layout,
+                                           browser->cur_scroll_x,
+                                           browser->cur_scroll_y,
+                                           browser->cur_scale);
+                browser->videos_noted_seq = browser->layout_seq;
+                browser->videos_noted_scroll_x = browser->cur_scroll_x;
+                browser->videos_noted_scroll_y = browser->cur_scroll_y;
+                browser->videos_noted_scale = browser->cur_scale;
+            }
             if (ns_video_cache_tick(browser->videos, now)) {
                 changed = TRUE;
                 video_changed = TRUE;
