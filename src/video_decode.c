@@ -32,6 +32,12 @@ typedef struct {
     int                vstream;
     AVRational         time_base;
     gboolean           draining;
+    gboolean           reopen_on_growth;
+    gsize              opened_len;
+    int64_t            last_dts;
+    int64_t            resume_after_dts;
+    double             last_out_pts;
+    double             skip_until_pts;
 } ns_lav;
 #endif
 
@@ -132,6 +138,12 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     memcpy(L->data, bytes, len);
     L->len = len;
     L->cap = len;
+    L->reopen_on_growth = bytes_are_isobmff(bytes, len);
+    L->opened_len = len;
+    L->last_dts = AV_NOPTS_VALUE;
+    L->resume_after_dts = AV_NOPTS_VALUE;
+    L->last_out_pts = -1.0;
+    L->skip_until_pts = -1.0;
 
     size_t bufsz = 32768;
     unsigned char *iobuf = av_malloc(bufsz);
@@ -272,11 +284,21 @@ ns_lav_probe_chunk_range(const guint8 *init, gsize init_len,
 }
 
 static void
+ns_lav_forget_position(ns_lav *L)
+{
+    avcodec_flush_buffers(L->vdec);
+    L->draining = FALSE;
+    L->last_dts = AV_NOPTS_VALUE;
+    L->resume_after_dts = AV_NOPTS_VALUE;
+    L->last_out_pts = -1.0;
+    L->skip_until_pts = -1.0;
+}
+
+static void
 ns_lav_rewind(ns_lav *L)
 {
     av_seek_frame(L->fmt, L->vstream, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(L->vdec);
-    L->draining = FALSE;
+    ns_lav_forget_position(L);
 }
 
 static gboolean
@@ -285,8 +307,7 @@ ns_lav_seek_to(ns_lav *L, double seconds)
     int64_t ts = (int64_t)(seconds / av_q2d(L->time_base));
     if (av_seek_frame(L->fmt, L->vstream, ts, AVSEEK_FLAG_BACKWARD) < 0)
         return FALSE;
-    avcodec_flush_buffers(L->vdec);
-    L->draining = FALSE;
+    ns_lav_forget_position(L);
     return TRUE;
 }
 
@@ -316,6 +337,48 @@ ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame, int w, int h)
 }
 
 static gboolean
+ns_lav_follow_growth(ns_lav *L)
+{
+    if (!L->reopen_on_growth || L->len <= L->opened_len) return FALSE;
+    L->opened_len = L->len;
+    if (avio_seek(L->avio, 0, SEEK_SET) < 0) return FALSE;
+    AVFormatContext *fmt = avformat_alloc_context();
+    if (!fmt) return FALSE;
+    fmt->pb = L->avio;
+    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) return FALSE;
+    if (L->vstream >= (int)fmt->nb_streams ||
+        fmt->streams[L->vstream]->codecpar->codec_id != L->vdec->codec_id) {
+        avformat_close_input(&fmt);
+        return FALSE;
+    }
+    avformat_close_input(&L->fmt);
+    L->fmt = fmt;
+    if (L->last_dts != AV_NOPTS_VALUE)
+        av_seek_frame(fmt, L->vstream, L->last_dts, AVSEEK_FLAG_BACKWARD);
+    if (L->draining) {
+        avcodec_flush_buffers(L->vdec);
+        L->draining = FALSE;
+        L->skip_until_pts = L->last_out_pts;
+        L->resume_after_dts = AV_NOPTS_VALUE;
+    } else {
+        L->resume_after_dts = L->last_dts;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_lav_packet_wanted(ns_lav *L, const AVPacket *pkt)
+{
+    if (pkt->stream_index != L->vstream) return FALSE;
+    if (L->resume_after_dts != AV_NOPTS_VALUE) {
+        if (pkt->dts != AV_NOPTS_VALUE && pkt->dts <= L->resume_after_dts)
+            return FALSE;
+        L->resume_after_dts = AV_NOPTS_VALUE;
+    }
+    return TRUE;
+}
+
+static gboolean
 ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
 {
     ns_lav *L = player->lav;
@@ -325,21 +388,34 @@ ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
             double t = (L->frame->pts == AV_NOPTS_VALUE)
                 ? player->pending_time
                 : (double)L->frame->pts * av_q2d(L->time_base);
+            if (L->skip_until_pts >= 0.0) {
+                if (t <= L->skip_until_pts + 1e-6) {
+                    av_frame_unref(L->frame);
+                    continue;
+                }
+                L->skip_until_pts = -1.0;
+            }
             *out_tex = ns_lav_frame_to_texture(L, L->frame,
                                                player->width, player->height);
             *out_pts = t;
+            L->last_out_pts = t;
             av_frame_unref(L->frame);
             return TRUE;
         }
+        if (r == AVERROR_EOF && ns_lav_follow_growth(L))
+            continue;
         if (r == AVERROR_EOF || (r < 0 && r != AVERROR(EAGAIN)))
             return FALSE;
 
         int rr;
         while ((rr = av_read_frame(L->fmt, L->pkt)) >= 0 &&
-               L->pkt->stream_index != L->vstream)
+               !ns_lav_packet_wanted(L, L->pkt))
             av_packet_unref(L->pkt);
 
+        if (rr < 0 && !L->draining && ns_lav_follow_growth(L))
+            continue;
         if (rr >= 0) {
+            if (L->pkt->dts != AV_NOPTS_VALUE) L->last_dts = L->pkt->dts;
             avcodec_send_packet(L->vdec, L->pkt);
             av_packet_unref(L->pkt);
         } else if (!L->draining) {
@@ -555,7 +631,7 @@ ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
     L->len = len;
     L->avio->eof_reached = 0;
     L->avio->error = 0;
-    if (L->draining) {
+    if (L->draining && !L->reopen_on_growth) {
         avcodec_flush_buffers(L->vdec);
         L->draining = FALSE;
     }
