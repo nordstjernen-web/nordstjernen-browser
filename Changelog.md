@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* Performance: collecting a page's stylesheets for a relayout no longer
+  re-tokenizes every small `<style>` element to decide whether it can be
+  merged with its neighbours. The answer (and whether the text has
+  viewport-dependent `@media` rules) is remembered per distinct style
+  text, which matters on pages whose scripts force many layouts by
+  reading element geometry.
 * DOM: setting an inline style property to the value it already has
   (`el.style.display = 'none'` when it is already `none`), or removing
   a property the element does not have, no longer rewrites the `style`
