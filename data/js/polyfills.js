@@ -11222,4 +11222,926 @@
         });
     })();
 
+    (function () {
+        if (typeof global.XPathResult === 'function' || !global.Document) return;
+
+        var XHTML_NS = 'http://www.w3.org/1999/xhtml';
+        var XML_NS = 'http://www.w3.org/XML/1998/namespace';
+
+        function xpathError(name, message) {
+            if (typeof global.DOMException === 'function')
+                return new global.DOMException(message, name);
+            var e = new Error(message);
+            e.name = name;
+            return e;
+        }
+
+        var AXES = {
+            'ancestor': 1, 'ancestor-or-self': 1, 'attribute': 1, 'child': 1,
+            'descendant': 1, 'descendant-or-self': 1, 'following': 1,
+            'following-sibling': 1, 'namespace': 1, 'parent': 1,
+            'preceding': 1, 'preceding-sibling': 1, 'self': 1
+        };
+        var REVERSE_AXES = {
+            'ancestor': 1, 'ancestor-or-self': 1, 'preceding': 1,
+            'preceding-sibling': 1
+        };
+        var NODE_TYPES = {
+            'node': 1, 'text': 1, 'comment': 1, 'processing-instruction': 1
+        };
+        var OPERATOR_NAMES = { 'and': 1, 'or': 1, 'mod': 1, 'div': 1 };
+
+        function tokenize(src) {
+            var tokens = [];
+            var i = 0, n = src.length;
+            var nameStart = /[A-Za-z_À-￿]/;
+            var nameChar = /[A-Za-z0-9_.\-·À-￿]/;
+            function readNCName() {
+                var s = i;
+                while (i < n && nameChar.test(src[i])) i++;
+                return src.slice(s, i);
+            }
+            while (i < n) {
+                var c = src[i];
+                if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { i++; continue; }
+                var two = src.substr(i, 2);
+                if (two === '//' || two === '::' || two === '..' || two === '!=' ||
+                    two === '<=' || two === '>=') {
+                    tokens.push({ t: 'op', v: two });
+                    i += 2;
+                    continue;
+                }
+                if (c === '.' && i + 1 < n && /[0-9]/.test(src[i + 1]) ||
+                    /[0-9]/.test(c)) {
+                    var ns = i;
+                    while (i < n && /[0-9]/.test(src[i])) i++;
+                    if (src[i] === '.') {
+                        i++;
+                        while (i < n && /[0-9]/.test(src[i])) i++;
+                    }
+                    tokens.push({ t: 'num', v: parseFloat(src.slice(ns, i)) });
+                    continue;
+                }
+                if ('/|+-=<>()[].@,*'.indexOf(c) >= 0) {
+                    tokens.push({ t: 'op', v: c });
+                    i++;
+                    continue;
+                }
+                if (c === '"' || c === "'") {
+                    var end = src.indexOf(c, i + 1);
+                    if (end < 0) throw xpathError('SyntaxError', 'Unterminated string literal');
+                    tokens.push({ t: 'str', v: src.slice(i + 1, end) });
+                    i = end + 1;
+                    continue;
+                }
+                if (c === '$') {
+                    i++;
+                    var vname = readNCName();
+                    if (src[i] === ':' && src[i + 1] !== ':') { i++; vname += ':' + readNCName(); }
+                    tokens.push({ t: 'var', v: vname });
+                    continue;
+                }
+                if (nameStart.test(c)) {
+                    var name = readNCName();
+                    if (src[i] === ':' && src[i + 1] !== ':') {
+                        if (src[i + 1] === '*') {
+                            tokens.push({ t: 'name', prefix: name, v: '*' });
+                            i += 2;
+                            continue;
+                        }
+                        if (i + 1 < n && nameStart.test(src[i + 1])) {
+                            i++;
+                            tokens.push({ t: 'name', prefix: name, v: readNCName() });
+                            continue;
+                        }
+                    }
+                    tokens.push({ t: 'name', prefix: null, v: name });
+                    continue;
+                }
+                throw xpathError('SyntaxError', 'Unexpected character ' + c);
+            }
+            for (var k = 0; k < tokens.length; k++) {
+                var tok = tokens[k];
+                var prev = tokens[k - 1];
+                var prevIsOperand = prev && !(prev.t === 'op' &&
+                    ['@', '::', '(', '[', ',', '/', '//', '|', '+', '-', '=', '!=',
+                     '<', '<=', '>', '>='].indexOf(prev.v) >= 0) &&
+                    !(prev.t === 'name' && prev.operator);
+                if (tok.t === 'op' && tok.v === '*' && prevIsOperand) tok.multiply = true;
+                if (tok.t === 'name' && !tok.prefix && prevIsOperand && OPERATOR_NAMES[tok.v])
+                    tok.operator = true;
+            }
+            return tokens;
+        }
+
+        function Parser(src) {
+            this.tokens = tokenize(src);
+            this.pos = 0;
+        }
+        Parser.prototype.peek = function (k) { return this.tokens[this.pos + (k || 0)]; };
+        Parser.prototype.isOp = function (v, k) {
+            var t = this.peek(k);
+            return !!t && t.t === 'op' && t.v === v && !t.multiply;
+        };
+        Parser.prototype.isOperatorName = function (v) {
+            var t = this.peek();
+            return !!t && t.t === 'name' && t.operator && t.v === v;
+        };
+        Parser.prototype.expect = function (v) {
+            if (!this.isOp(v)) throw xpathError('SyntaxError', 'Expected ' + v);
+            this.pos++;
+        };
+        Parser.prototype.parse = function () {
+            var e = this.expr();
+            if (this.pos < this.tokens.length)
+                throw xpathError('SyntaxError', 'Unexpected token in XPath expression');
+            return e;
+        };
+        Parser.prototype.expr = function () { return this.orExpr(); };
+        Parser.prototype.binaryLevel = function (next, ops, named) {
+            var left = next.call(this);
+            for (;;) {
+                var t = this.peek();
+                if (!t) return left;
+                var op = null;
+                if (named && t.t === 'name' && t.operator && ops.indexOf(t.v) >= 0) op = t.v;
+                else if (t.t === 'op' && ops.indexOf(t.v) >= 0 &&
+                         (t.v !== '*' || t.multiply)) op = t.v;
+                if (!op) return left;
+                this.pos++;
+                left = { k: 'bin', op: op, a: left, b: next.call(this) };
+            }
+        };
+        Parser.prototype.orExpr = function () {
+            return this.binaryLevel(this.andExpr, ['or'], true);
+        };
+        Parser.prototype.andExpr = function () {
+            return this.binaryLevel(this.equalityExpr, ['and'], true);
+        };
+        Parser.prototype.equalityExpr = function () {
+            return this.binaryLevel(this.relationalExpr, ['=', '!=']);
+        };
+        Parser.prototype.relationalExpr = function () {
+            return this.binaryLevel(this.additiveExpr, ['<', '<=', '>', '>=']);
+        };
+        Parser.prototype.additiveExpr = function () {
+            return this.binaryLevel(this.multiplicativeExpr, ['+', '-']);
+        };
+        Parser.prototype.multiplicativeExpr = function () {
+            return this.binaryLevel(this.unaryExpr, ['*', 'div', 'mod'], true);
+        };
+        Parser.prototype.unaryExpr = function () {
+            if (this.isOp('-')) {
+                this.pos++;
+                return { k: 'neg', a: this.unaryExpr() };
+            }
+            return this.unionExpr();
+        };
+        Parser.prototype.unionExpr = function () {
+            var left = this.pathExpr();
+            while (this.isOp('|')) {
+                this.pos++;
+                left = { k: 'union', a: left, b: this.pathExpr() };
+            }
+            return left;
+        };
+        Parser.prototype.startsFilterExpr = function () {
+            var t = this.peek();
+            if (!t) return false;
+            if (t.t === 'var' || t.t === 'str' || t.t === 'num') return true;
+            if (t.t === 'op' && t.v === '(') return true;
+            if (t.t === 'name' && !t.operator && this.isOp('(', 1) &&
+                !(t.prefix === null && NODE_TYPES[t.v])) return true;
+            return false;
+        };
+        Parser.prototype.pathExpr = function () {
+            if (this.startsFilterExpr()) {
+                var filter = this.filterExpr();
+                if (this.isOp('/') || this.isOp('//')) {
+                    var steps = [];
+                    this.relativeSteps(steps);
+                    return { k: 'path', filter: filter, steps: steps };
+                }
+                return filter;
+            }
+            var path = { k: 'path', absolute: false, steps: [] };
+            if (this.isOp('/')) {
+                this.pos++;
+                path.absolute = true;
+                if (!this.startsStep()) return path;
+            } else if (this.isOp('//')) {
+                this.pos++;
+                path.absolute = true;
+                path.steps.push(descendantOrSelfStep());
+            }
+            path.steps.push(this.step());
+            this.moreSteps(path.steps);
+            return path;
+        };
+        Parser.prototype.relativeSteps = function (steps) {
+            while (this.isOp('/') || this.isOp('//')) {
+                if (this.peek().v === '//') steps.push(descendantOrSelfStep());
+                this.pos++;
+                steps.push(this.step());
+            }
+        };
+        Parser.prototype.moreSteps = function (steps) { this.relativeSteps(steps); };
+        Parser.prototype.startsStep = function () {
+            var t = this.peek();
+            if (!t) return false;
+            if (t.t === 'name' && !t.operator) return true;
+            if (t.t === 'op' && (t.v === '.' || t.v === '..' || t.v === '@' ||
+                (t.v === '*' && !t.multiply))) return true;
+            return false;
+        };
+        Parser.prototype.step = function () {
+            if (this.isOp('.')) { this.pos++; return { axis: 'self', test: { k: 'node' }, preds: [] }; }
+            if (this.isOp('..')) { this.pos++; return { axis: 'parent', test: { k: 'node' }, preds: [] }; }
+            var axis = 'child';
+            var t = this.peek();
+            if (this.isOp('@')) {
+                this.pos++;
+                axis = 'attribute';
+            } else if (t && t.t === 'name' && !t.prefix && this.isOp('::', 1)) {
+                if (!AXES[t.v]) throw xpathError('SyntaxError', 'Unknown axis ' + t.v);
+                axis = t.v;
+                this.pos += 2;
+            }
+            var step = { axis: axis, test: this.nodeTest(), preds: [] };
+            while (this.isOp('[')) step.preds.push(this.predicate());
+            return step;
+        };
+        Parser.prototype.nodeTest = function () {
+            var t = this.peek();
+            if (!t) throw xpathError('SyntaxError', 'Expected node test');
+            if (t.t === 'op' && t.v === '*') {
+                this.pos++;
+                return { k: 'name', prefix: null, local: '*' };
+            }
+            if (t.t !== 'name') throw xpathError('SyntaxError', 'Expected node test');
+            this.pos++;
+            if (!t.prefix && NODE_TYPES[t.v] && this.isOp('(')) {
+                this.pos++;
+                var test = { k: t.v };
+                if (t.v === 'processing-instruction' && this.peek() && this.peek().t === 'str') {
+                    test.target = this.peek().v;
+                    this.pos++;
+                }
+                this.expect(')');
+                return test;
+            }
+            return { k: 'name', prefix: t.prefix, local: t.v };
+        };
+        Parser.prototype.predicate = function () {
+            this.expect('[');
+            var e = this.expr();
+            this.expect(']');
+            return e;
+        };
+        Parser.prototype.filterExpr = function () {
+            var t = this.peek();
+            var primary;
+            if (t.t === 'var') { this.pos++; primary = { k: 'var', name: t.v }; }
+            else if (t.t === 'str') { this.pos++; primary = { k: 'lit', v: t.v }; }
+            else if (t.t === 'num') { this.pos++; primary = { k: 'lit', v: t.v }; }
+            else if (t.t === 'op' && t.v === '(') {
+                this.pos++;
+                primary = this.expr();
+                this.expect(')');
+            } else {
+                this.pos += 2;
+                var args = [];
+                if (!this.isOp(')')) {
+                    args.push(this.expr());
+                    while (this.isOp(',')) { this.pos++; args.push(this.expr()); }
+                }
+                this.expect(')');
+                var fname = t.prefix ? t.prefix + ':' + t.v : t.v;
+                if (!FUNCTIONS[fname]) throw xpathError('SyntaxError', 'Unknown function ' + fname);
+                primary = { k: 'fn', name: fname, args: args };
+            }
+            var preds = [];
+            while (this.isOp('[')) preds.push(this.predicate());
+            return preds.length ? { k: 'filter', a: primary, preds: preds } : primary;
+        };
+
+        function descendantOrSelfStep() {
+            return { axis: 'descendant-or-self', test: { k: 'node' }, preds: [] };
+        }
+
+        function collapseSteps(steps) {
+            var out = [];
+            for (var i = 0; i < steps.length; i++) {
+                var s = steps[i], next = steps[i + 1];
+                if (s.axis === 'descendant-or-self' && s.test.k === 'node' && !s.preds.length &&
+                    next && next.axis === 'child' && !next.preds.length) {
+                    out.push({ axis: 'descendant', test: next.test, preds: [] });
+                    i++;
+                    continue;
+                }
+                out.push(s);
+            }
+            return out;
+        }
+
+        function optimize(e) {
+            if (!e || typeof e !== 'object') return e;
+            if (e.k === 'path') {
+                e.steps = collapseSteps(e.steps);
+                e.steps.forEach(function (s) { s.preds = s.preds.map(optimize); });
+                if (e.filter) e.filter = optimize(e.filter);
+            } else if (e.k === 'bin' || e.k === 'union') {
+                e.a = optimize(e.a);
+                e.b = optimize(e.b);
+            } else if (e.k === 'neg') {
+                e.a = optimize(e.a);
+            } else if (e.k === 'filter') {
+                e.a = optimize(e.a);
+                e.preds = e.preds.map(optimize);
+            } else if (e.k === 'fn') {
+                e.args = e.args.map(optimize);
+            }
+            return e;
+        }
+
+        function isAttr(n) { return n.nodeType === 2; }
+
+        function parentOf(n) { return isAttr(n) ? n.ownerElement : n.parentNode; }
+
+        function attributesOf(n) {
+            if (n.nodeType !== 1 || !n.attributes) return [];
+            var out = [];
+            for (var i = 0; i < n.attributes.length; i++) {
+                var a = n.attributes[i];
+                if (a.name === 'xmlns' || a.name.slice(0, 6) === 'xmlns:') continue;
+                out.push(a);
+            }
+            return out;
+        }
+
+        function pushDescendants(n, out) {
+            for (var c = n.firstChild; c; c = c.nextSibling) {
+                out.push(c);
+                if (c.firstChild) pushDescendants(c, out);
+            }
+        }
+
+        function axisNodes(axis, n) {
+            var out = [], p;
+            switch (axis) {
+            case 'self': out.push(n); break;
+            case 'child':
+                if (!isAttr(n)) for (p = n.firstChild; p; p = p.nextSibling) out.push(p);
+                break;
+            case 'descendant': if (!isAttr(n)) pushDescendants(n, out); break;
+            case 'descendant-or-self':
+                out.push(n);
+                if (!isAttr(n)) pushDescendants(n, out);
+                break;
+            case 'parent': p = parentOf(n); if (p) out.push(p); break;
+            case 'ancestor': for (p = parentOf(n); p; p = p.parentNode) out.push(p); break;
+            case 'ancestor-or-self':
+                out.push(n);
+                for (p = parentOf(n); p; p = p.parentNode) out.push(p);
+                break;
+            case 'following-sibling':
+                if (!isAttr(n)) for (p = n.nextSibling; p; p = p.nextSibling) out.push(p);
+                break;
+            case 'preceding-sibling':
+                if (!isAttr(n)) for (p = n.previousSibling; p; p = p.previousSibling) out.push(p);
+                break;
+            case 'following':
+                var start = n;
+                if (isAttr(n)) {
+                    start = n.ownerElement;
+                    if (start) pushDescendants(start, out);
+                }
+                for (p = start; p; p = p.parentNode) {
+                    for (var s = p.nextSibling; s; s = s.nextSibling) {
+                        out.push(s);
+                        pushDescendants(s, out);
+                    }
+                }
+                break;
+            case 'preceding':
+                var origin = isAttr(n) ? n.ownerElement : n;
+                for (p = origin; p; p = p.parentNode) {
+                    for (var q = p.previousSibling; q; q = q.previousSibling) {
+                        var sub = [q];
+                        pushDescendants(q, sub);
+                        for (var r = sub.length - 1; r >= 0; r--) out.push(sub[r]);
+                    }
+                }
+                break;
+            case 'attribute': out = attributesOf(n); break;
+            }
+            return out;
+        }
+
+        function isHTMLDocument(doc) {
+            return !!doc && (doc.contentType === undefined || doc.contentType === 'text/html');
+        }
+
+        function matchesTest(test, n, axis, ctx) {
+            var type = n.nodeType;
+            switch (test.k) {
+            case 'node': return true;
+            case 'text': return type === 3 || type === 4;
+            case 'comment': return type === 8;
+            case 'processing-instruction':
+                return type === 7 && (test.target === undefined || n.target === test.target);
+            }
+            var principal = axis === 'attribute' ? 2 : 1;
+            if (type !== principal) return false;
+            var ns = n.namespaceURI || null;
+            if (test.prefix) {
+                if (ns !== ctx.resolve(test.prefix)) return false;
+                return test.local === '*' || n.localName === test.local;
+            }
+            if (test.local === '*') return true;
+            if (principal === 1 && ns === XHTML_NS && ctx.html)
+                return n.localName === test.local.toLowerCase();
+            if (ns !== null) return false;
+            return n.localName === test.local;
+        }
+
+        function orderKey(n) {
+            if (isAttr(n)) {
+                var owner = n.ownerElement;
+                var attrs = owner ? attributesOf(owner) : [];
+                return { node: owner, attrIndex: attrs.indexOf(n) + 1 };
+            }
+            return { node: n, attrIndex: 0 };
+        }
+
+        function compareOrder(a, b) {
+            if (a === b) return 0;
+            var ka = orderKey(a), kb = orderKey(b);
+            if (ka.node === kb.node) return ka.attrIndex - kb.attrIndex;
+            if (!ka.node || !kb.node) return 0;
+            var pos = ka.node.compareDocumentPosition(kb.node);
+            if (pos & 4) return -1;
+            if (pos & 2) return 1;
+            return 0;
+        }
+
+        function uniqueSorted(nodes) {
+            var seen = new Set();
+            var out = [];
+            for (var i = 0; i < nodes.length; i++) {
+                if (seen.has(nodes[i])) continue;
+                seen.add(nodes[i]);
+                out.push(nodes[i]);
+            }
+            if (out.length > 1) out.sort(compareOrder);
+            return out;
+        }
+
+        function stringValue(n) {
+            switch (n.nodeType) {
+            case 1: case 11: return n.textContent || '';
+            case 9: return n.documentElement ? n.documentElement.textContent || '' : '';
+            case 2: return n.value;
+            default: return n.nodeValue || '';
+            }
+        }
+
+        function numberToString(v) {
+            if (v !== v) return 'NaN';
+            if (v === 0) return '0';
+            if (v === Infinity) return 'Infinity';
+            if (v === -Infinity) return '-Infinity';
+            var s = String(v);
+            if (s.indexOf('e') < 0) return s;
+            var neg = v < 0;
+            var abs = Math.abs(v);
+            s = abs >= 1 ? BigInt(Math.round(abs)).toString() : abs.toFixed(20).replace(/0+$/, '');
+            return (neg ? '-' : '') + s;
+        }
+
+        function stringToNumber(s) {
+            s = s.replace(/^[\x20\x09\x0a\x0d]+|[\x20\x09\x0a\x0d]+$/g, '');
+            return /^-?(\d+(\.\d*)?|\.\d+)$/.test(s) ? parseFloat(s) : NaN;
+        }
+
+        function toStr(v) {
+            if (Array.isArray(v)) return v.length ? stringValue(v[0]) : '';
+            if (typeof v === 'number') return numberToString(v);
+            if (typeof v === 'boolean') return v ? 'true' : 'false';
+            return v;
+        }
+
+        function toNum(v) {
+            if (typeof v === 'number') return v;
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            return stringToNumber(toStr(v));
+        }
+
+        function toBool(v) {
+            if (Array.isArray(v)) return v.length > 0;
+            if (typeof v === 'number') return v !== 0 && v === v;
+            if (typeof v === 'string') return v.length > 0;
+            return v;
+        }
+
+        function compareAtoms(op, a, b) {
+            if (op === '=' || op === '!=') {
+                var eq;
+                if (typeof a === 'boolean' || typeof b === 'boolean') eq = toBool(a) === toBool(b);
+                else if (typeof a === 'number' || typeof b === 'number') eq = toNum(a) === toNum(b);
+                else eq = toStr(a) === toStr(b);
+                return op === '=' ? eq : !eq;
+            }
+            var x = toNum(a), y = toNum(b);
+            switch (op) {
+            case '<': return x < y;
+            case '<=': return x <= y;
+            case '>': return x > y;
+            default: return x >= y;
+            }
+        }
+
+        function compare(op, a, b) {
+            var aSet = Array.isArray(a), bSet = Array.isArray(b);
+            var i, j;
+            if (aSet && bSet) {
+                var bs = b.map(stringValue);
+                for (i = 0; i < a.length; i++) {
+                    var as = stringValue(a[i]);
+                    for (j = 0; j < bs.length; j++) if (compareAtoms(op, as, bs[j])) return true;
+                }
+                return false;
+            }
+            if (aSet || bSet) {
+                var set = aSet ? a : b, other = aSet ? b : a;
+                if (typeof other === 'boolean')
+                    return aSet ? compareAtoms(op, toBool(set), other) : compareAtoms(op, other, toBool(set));
+                for (i = 0; i < set.length; i++) {
+                    var sv = stringValue(set[i]);
+                    var atom = typeof other === 'number' ? stringToNumber(sv) : sv;
+                    if (aSet ? compareAtoms(op, atom, other) : compareAtoms(op, other, atom)) return true;
+                }
+                return false;
+            }
+            return compareAtoms(op, a, b);
+        }
+
+        function nodeSetArg(v) {
+            if (!Array.isArray(v)) throw new TypeError('XPath function expects a node-set');
+            return v;
+        }
+
+        function nameOf(n) {
+            if (!n) return '';
+            if (n.nodeType === 1 || n.nodeType === 2) {
+                var html = n.nodeType === 1 && n.namespaceURI === XHTML_NS;
+                return n.prefix ? n.prefix + ':' + n.localName : html ? n.localName : (n.nodeName || n.localName);
+            }
+            if (n.nodeType === 7) return n.target;
+            return '';
+        }
+
+        function firstOrContext(args, ctx, i) {
+            if (args.length > i) {
+                var set = nodeSetArg(evalExpr(args[i], ctx));
+                return set[0];
+            }
+            return ctx.node;
+        }
+
+        function argStr(args, ctx, i) { return toStr(evalExpr(args[i], ctx)); }
+
+        var FUNCTIONS = {
+            'last': function (args, ctx) { return ctx.size; },
+            'position': function (args, ctx) { return ctx.pos; },
+            'count': function (args, ctx) { return nodeSetArg(evalExpr(args[0], ctx)).length; },
+            'id': function (args, ctx) {
+                var v = evalExpr(args[0], ctx);
+                var ids = (Array.isArray(v) ? v.map(stringValue).join(' ') : toStr(v))
+                    .split(/[\x20\x09\x0a\x0d]+/);
+                var root = ctx.node.nodeType === 9 ? ctx.node : ctx.node.ownerDocument;
+                var out = [];
+                ids.forEach(function (id) {
+                    if (!id || !root || !root.getElementById) return;
+                    var el = root.getElementById(id);
+                    if (el) out.push(el);
+                });
+                return uniqueSorted(out);
+            },
+            'local-name': function (args, ctx) {
+                var n = firstOrContext(args, ctx, 0);
+                return n && (n.nodeType === 1 || n.nodeType === 2) ? n.localName
+                    : n && n.nodeType === 7 ? n.target : '';
+            },
+            'namespace-uri': function (args, ctx) {
+                var n = firstOrContext(args, ctx, 0);
+                return n && (n.nodeType === 1 || n.nodeType === 2) ? n.namespaceURI || '' : '';
+            },
+            'name': function (args, ctx) { return nameOf(firstOrContext(args, ctx, 0)); },
+            'string': function (args, ctx) {
+                return args.length ? argStr(args, ctx, 0) : stringValue(ctx.node);
+            },
+            'concat': function (args, ctx) {
+                if (args.length < 2) throw xpathError('SyntaxError', 'concat() needs two arguments');
+                return args.map(function (a) { return toStr(evalExpr(a, ctx)); }).join('');
+            },
+            'starts-with': function (args, ctx) {
+                return argStr(args, ctx, 0).indexOf(argStr(args, ctx, 1)) === 0;
+            },
+            'contains': function (args, ctx) {
+                return argStr(args, ctx, 0).indexOf(argStr(args, ctx, 1)) >= 0;
+            },
+            'substring-before': function (args, ctx) {
+                var s = argStr(args, ctx, 0), t = argStr(args, ctx, 1);
+                var i = s.indexOf(t);
+                return i < 0 ? '' : s.slice(0, i);
+            },
+            'substring-after': function (args, ctx) {
+                var s = argStr(args, ctx, 0), t = argStr(args, ctx, 1);
+                var i = s.indexOf(t);
+                return i < 0 ? '' : s.slice(i + t.length);
+            },
+            'substring': function (args, ctx) {
+                var chars = Array.from(argStr(args, ctx, 0));
+                var start = Math.round(toNum(evalExpr(args[1], ctx)));
+                var end = args.length > 2 ? start + Math.round(toNum(evalExpr(args[2], ctx))) : Infinity;
+                var out = '';
+                for (var i = 0; i < chars.length; i++) {
+                    var p = i + 1;
+                    if (p >= start && p < end) out += chars[i];
+                }
+                return out;
+            },
+            'string-length': function (args, ctx) {
+                return Array.from(args.length ? argStr(args, ctx, 0) : stringValue(ctx.node)).length;
+            },
+            'normalize-space': function (args, ctx) {
+                var s = args.length ? argStr(args, ctx, 0) : stringValue(ctx.node);
+                return s.replace(/[\x20\x09\x0a\x0d]+/g, ' ').replace(/^ | $/g, '');
+            },
+            'translate': function (args, ctx) {
+                var s = Array.from(argStr(args, ctx, 0));
+                var from = Array.from(argStr(args, ctx, 1));
+                var to = Array.from(argStr(args, ctx, 2));
+                return s.map(function (c) {
+                    var i = from.indexOf(c);
+                    return i < 0 ? c : i < to.length ? to[i] : '';
+                }).join('');
+            },
+            'boolean': function (args, ctx) { return toBool(evalExpr(args[0], ctx)); },
+            'not': function (args, ctx) { return !toBool(evalExpr(args[0], ctx)); },
+            'true': function () { return true; },
+            'false': function () { return false; },
+            'lang': function (args, ctx) {
+                var want = argStr(args, ctx, 0).toLowerCase();
+                for (var n = ctx.node; n; n = parentOf(n)) {
+                    if (n.nodeType !== 1) continue;
+                    var v = n.getAttributeNS ? n.getAttributeNS(XML_NS, 'lang') : null;
+                    if (v === null || v === undefined) v = n.getAttribute('lang');
+                    if (v === null || v === undefined) continue;
+                    v = v.toLowerCase();
+                    return v === want || v.indexOf(want + '-') === 0;
+                }
+                return false;
+            },
+            'number': function (args, ctx) {
+                return args.length ? toNum(evalExpr(args[0], ctx)) : stringToNumber(stringValue(ctx.node));
+            },
+            'sum': function (args, ctx) {
+                return nodeSetArg(evalExpr(args[0], ctx)).reduce(function (acc, n) {
+                    return acc + stringToNumber(stringValue(n));
+                }, 0);
+            },
+            'floor': function (args, ctx) { return Math.floor(toNum(evalExpr(args[0], ctx))); },
+            'ceiling': function (args, ctx) { return Math.ceil(toNum(evalExpr(args[0], ctx))); },
+            'round': function (args, ctx) {
+                var v = toNum(evalExpr(args[0], ctx));
+                if (v !== v || !isFinite(v)) return v;
+                if (v < 0 && v >= -0.5) return -0;
+                return Math.floor(v + 0.5);
+            }
+        };
+
+        function applyPredicates(nodes, preds, ctx) {
+            for (var p = 0; p < preds.length; p++) {
+                var size = nodes.length;
+                var kept = [];
+                for (var i = 0; i < size; i++) {
+                    var sub = { node: nodes[i], pos: i + 1, size: size, resolve: ctx.resolve, html: ctx.html };
+                    var v = evalExpr(preds[p], sub);
+                    if (typeof v === 'number' ? v === i + 1 : toBool(v)) kept.push(nodes[i]);
+                }
+                nodes = kept;
+            }
+            return nodes;
+        }
+
+        function evalSteps(start, steps, ctx) {
+            var current = start;
+            for (var s = 0; s < steps.length; s++) {
+                var step = steps[s];
+                var next = [];
+                for (var i = 0; i < current.length; i++) {
+                    var candidates = axisNodes(step.axis, current[i]);
+                    var matched = [];
+                    for (var j = 0; j < candidates.length; j++)
+                        if (matchesTest(step.test, candidates[j], step.axis, ctx)) matched.push(candidates[j]);
+                    if (step.preds.length) matched = applyPredicates(matched, step.preds, ctx);
+                    if (REVERSE_AXES[step.axis]) matched.reverse();
+                    for (j = 0; j < matched.length; j++) next.push(matched[j]);
+                }
+                current = current.length > 1 || REVERSE_AXES[step.axis] ? uniqueSorted(next) : next;
+            }
+            return current;
+        }
+
+        function rootOf(n) {
+            if (isAttr(n)) n = n.ownerElement || n;
+            while (n.parentNode) n = n.parentNode;
+            return n;
+        }
+
+        function evalExpr(e, ctx) {
+            switch (e.k) {
+            case 'lit': return e.v;
+            case 'var': throw xpathError('NamespaceError', 'XPath variables are not supported');
+            case 'neg': return -toNum(evalExpr(e.a, ctx));
+            case 'fn': return FUNCTIONS[e.name](e.args, ctx);
+            case 'filter':
+                var base = evalExpr(e.a, ctx);
+                if (!Array.isArray(base)) throw new TypeError('Predicate applied to a non-node-set');
+                return applyPredicates(base, e.preds, ctx);
+            case 'union':
+                var a = evalExpr(e.a, ctx), b = evalExpr(e.b, ctx);
+                if (!Array.isArray(a) || !Array.isArray(b))
+                    throw new TypeError('Union of non-node-sets');
+                return uniqueSorted(a.concat(b));
+            case 'path':
+                var start;
+                if (e.filter) {
+                    start = evalExpr(e.filter, ctx);
+                    if (!Array.isArray(start)) throw new TypeError('Path step from a non-node-set');
+                } else {
+                    start = [e.absolute ? rootOf(ctx.node) : ctx.node];
+                }
+                return evalSteps(start, e.steps, ctx);
+            case 'bin':
+                switch (e.op) {
+                case 'or': return toBool(evalExpr(e.a, ctx)) || toBool(evalExpr(e.b, ctx));
+                case 'and': return toBool(evalExpr(e.a, ctx)) && toBool(evalExpr(e.b, ctx));
+                case '+': return toNum(evalExpr(e.a, ctx)) + toNum(evalExpr(e.b, ctx));
+                case '-': return toNum(evalExpr(e.a, ctx)) - toNum(evalExpr(e.b, ctx));
+                case '*': return toNum(evalExpr(e.a, ctx)) * toNum(evalExpr(e.b, ctx));
+                case 'div': return toNum(evalExpr(e.a, ctx)) / toNum(evalExpr(e.b, ctx));
+                case 'mod': return toNum(evalExpr(e.a, ctx)) % toNum(evalExpr(e.b, ctx));
+                default: return compare(e.op, evalExpr(e.a, ctx), evalExpr(e.b, ctx));
+                }
+            }
+            throw xpathError('SyntaxError', 'Bad XPath expression');
+        }
+
+        var TYPE_NAMES = [
+            'ANY_TYPE', 'NUMBER_TYPE', 'STRING_TYPE', 'BOOLEAN_TYPE',
+            'UNORDERED_NODE_ITERATOR_TYPE', 'ORDERED_NODE_ITERATOR_TYPE',
+            'UNORDERED_NODE_SNAPSHOT_TYPE', 'ORDERED_NODE_SNAPSHOT_TYPE',
+            'ANY_UNORDERED_NODE_TYPE', 'FIRST_ORDERED_NODE_TYPE'
+        ];
+
+        var resultState = new WeakMap();
+
+        function XPathResult() { throw new TypeError('Illegal constructor'); }
+
+        function makeResult(value, type) {
+            if (type === 0) {
+                type = typeof value === 'number' ? 1 : typeof value === 'string' ? 2
+                    : typeof value === 'boolean' ? 3 : 4;
+            }
+            if (type >= 4 && !Array.isArray(value))
+                throw new TypeError('XPath result is not a node-set');
+            var r = Object.create(XPathResult.prototype);
+            var st = { type: type, index: 0 };
+            if (type === 1) st.number = toNum(value);
+            else if (type === 2) st.string = toStr(value);
+            else if (type === 3) st.bool = toBool(value);
+            else if (type === 8 || type === 9) st.single = value[0] || null;
+            else st.nodes = value.slice();
+            resultState.set(r, st);
+            return r;
+        }
+
+        function stateOf(r) {
+            var st = resultState.get(r);
+            if (!st) throw new TypeError('Illegal invocation');
+            return st;
+        }
+
+        function resultGetter(name, types, read) {
+            Object.defineProperty(XPathResult.prototype, name, {
+                configurable: true, enumerable: true,
+                get: function () {
+                    var st = stateOf(this);
+                    if (types && types.indexOf(st.type) < 0)
+                        throw new TypeError('XPathResult.' + name + ' is not available for this result type');
+                    return read(st);
+                }
+            });
+        }
+
+        resultGetter('resultType', null, function (st) { return st.type; });
+        resultGetter('numberValue', [1], function (st) { return st.number; });
+        resultGetter('stringValue', [2], function (st) { return st.string; });
+        resultGetter('booleanValue', [3], function (st) { return st.bool; });
+        resultGetter('singleNodeValue', [8, 9], function (st) { return st.single; });
+        resultGetter('invalidIteratorState', null, function () { return false; });
+        resultGetter('snapshotLength', [6, 7], function (st) { return st.nodes.length; });
+        Object.defineProperty(XPathResult.prototype, 'iterateNext', {
+            configurable: true, writable: true,
+            value: function iterateNext() {
+                var st = stateOf(this);
+                if (st.type !== 4 && st.type !== 5)
+                    throw new TypeError('iterateNext() requires an iterator result');
+                return st.index < st.nodes.length ? st.nodes[st.index++] : null;
+            }
+        });
+        Object.defineProperty(XPathResult.prototype, 'snapshotItem', {
+            configurable: true, writable: true,
+            value: function snapshotItem(i) {
+                var st = stateOf(this);
+                if (st.type !== 6 && st.type !== 7)
+                    throw new TypeError('snapshotItem() requires a snapshot result');
+                i = Number(i);
+                return i >= 0 && i < st.nodes.length ? st.nodes[Math.floor(i)] : null;
+            }
+        });
+        TYPE_NAMES.forEach(function (name, i) {
+            Object.defineProperty(XPathResult, name, { value: i, enumerable: true });
+            Object.defineProperty(XPathResult.prototype, name, { value: i, enumerable: true });
+        });
+        Object.defineProperty(XPathResult.prototype, Symbol.toStringTag, {
+            value: 'XPathResult', configurable: true
+        });
+
+        function makeResolver(resolver) {
+            return function (prefix) {
+                if (prefix === 'xml') return XML_NS;
+                var uri = null;
+                if (typeof resolver === 'function') uri = resolver(prefix);
+                else if (resolver && typeof resolver.lookupNamespaceURI === 'function')
+                    uri = resolver.lookupNamespaceURI(prefix);
+                if (uri === null || uri === undefined || uri === '')
+                    throw xpathError('NamespaceError', 'Unresolvable namespace prefix ' + prefix);
+                return String(uri);
+            };
+        }
+
+        var expressionState = new WeakMap();
+
+        function XPathExpression() { throw new TypeError('Illegal constructor'); }
+
+        function compile(expression, resolver) {
+            var ast = optimize(new Parser(String(expression)).parse());
+            var x = Object.create(XPathExpression.prototype);
+            expressionState.set(x, { ast: ast, resolve: makeResolver(resolver) });
+            return x;
+        }
+
+        Object.defineProperty(XPathExpression.prototype, 'evaluate', {
+            configurable: true, writable: true,
+            value: function evaluate(contextNode, type) {
+                var st = expressionState.get(this);
+                if (!st) throw new TypeError('Illegal invocation');
+                if (!contextNode || typeof contextNode.nodeType !== 'number')
+                    throw new TypeError('XPath context is not a Node');
+                type = type === undefined ? 0 : Number(type) >>> 0;
+                if (type > 9) throw xpathError('NotSupportedError', 'Unknown XPathResult type');
+                var doc = contextNode.nodeType === 9 ? contextNode : contextNode.ownerDocument;
+                var ctx = { node: contextNode, pos: 1, size: 1, resolve: st.resolve, html: isHTMLDocument(doc) };
+                return makeResult(evalExpr(st.ast, ctx), type);
+            }
+        });
+
+
+        function XPathEvaluator() {
+            if (!(this instanceof XPathEvaluator)) throw new TypeError("Constructor XPathEvaluator requires 'new'");
+        }
+        var evaluatorMethods = {
+            createExpression: function createExpression(expression, resolver) {
+                return compile(expression, resolver);
+            },
+            createNSResolver: function createNSResolver(nodeResolver) { return nodeResolver; },
+            evaluate: function evaluate(expression, contextNode, resolver, type) {
+                return compile(expression, resolver).evaluate(contextNode, type);
+            }
+        };
+        Object.keys(evaluatorMethods).forEach(function (name) {
+            var desc = { configurable: true, writable: true, enumerable: true, value: evaluatorMethods[name] };
+            Object.defineProperty(XPathEvaluator.prototype, name, desc);
+            Object.defineProperty(global.Document.prototype, name, desc);
+        });
+
+        defineCtor('XPathResult', XPathResult);
+        defineCtor('XPathExpression', XPathExpression);
+        defineCtor('XPathEvaluator', XPathEvaluator);
+    })();
+
 })(typeof globalThis !== 'undefined' ? globalThis : this);
