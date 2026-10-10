@@ -27919,7 +27919,8 @@ ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
 }
 
 static void
-syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px)
+syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px,
+                     gboolean font_units)
 {
     double font_px = style_font_px(s);
     if (root_px <= 0) root_px = font_px;
@@ -27937,6 +27938,20 @@ syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px)
     ctx->root_font_size = root_px;
     ctx->line_height = syntax_line_height_px(s, font_px);
     ctx->root_line_height = root_line;
+    ctx->viewport_w = viewport_resolve(100, NS_CSS_UNIT_VW);
+    ctx->viewport_h = viewport_resolve(100, NS_CSS_UNIT_VH);
+    ctx->container_w = ns_css_container_w();
+    ctx->container_h = ns_css_container_h();
+    ctx->current_color = NULL;
+    if (!font_units) {
+        ctx->ex_px = ctx->ch_px = font_px * 0.5;
+        ctx->cap_px = font_px * 0.7;
+        ctx->ic_px = font_px;
+        ctx->root_ex_px = ctx->root_ch_px = root_px * 0.5;
+        ctx->root_cap_px = root_px * 0.7;
+        ctx->root_ic_px = root_px;
+        return;
+    }
     ctx->ex_px  = font_relative_unit_px(NS_CSS_UNIT_EX, font_px, family,
                                         weight, italic);
     ctx->ch_px  = font_relative_unit_px(NS_CSS_UNIT_CH, font_px, family,
@@ -27953,11 +27968,28 @@ syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px)
                                              400, FALSE);
     ctx->root_ic_px  = font_relative_unit_px(NS_CSS_UNIT_IC, root_px, NULL,
                                              400, FALSE);
-    ctx->viewport_w = viewport_resolve(100, NS_CSS_UNIT_VW);
-    ctx->viewport_h = viewport_resolve(100, NS_CSS_UNIT_VH);
-    ctx->container_w = ns_css_container_w();
-    ctx->container_h = ns_css_container_h();
-    ctx->current_color = NULL;
+}
+
+static gboolean
+syntax_value_may_use_font_units(const char *v)
+{
+    if (!v) return FALSE;
+    if (strstr(v, "var(")) return TRUE;
+    for (const char *p = v; *p; p++) {
+        if (!g_ascii_isdigit(*p) && *p != '.') continue;
+        while (g_ascii_isdigit(*p) || *p == '.') p++;
+        const char *u = p;
+        if (*u == 'r' || *u == 'R') u++;
+        static const char *const units[] = { "ex", "ch", "cap", "ic" };
+        for (gsize i = 0; i < G_N_ELEMENTS(units); i++) {
+            gsize n = strlen(units[i]);
+            if (g_ascii_strncasecmp(u, units[i], n) == 0 &&
+                !g_ascii_isalnum(u[n]))
+                return TRUE;
+        }
+        if (!*p) break;
+    }
+    return FALSE;
 }
 
 static void
@@ -27970,6 +28002,7 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
 
     ns_css_syntax_ctx ctx;
     gboolean have_ctx = FALSE;
+    gboolean have_font_units = FALSE;
     char *current_color = NULL;
     GHashTableIter it;
     gpointer k, v;
@@ -27979,11 +28012,15 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
             g_hash_table_lookup(g_registered_props, k);
         if (!pr || !pr->syntax || ns_css_syntax_def_universal(pr->syntax))
             continue;
-        if (!have_ctx) {
-            syntax_ctx_for_style(&ctx, s, root_px);
-            current_color = ns_css_value_serialize(s->values[NS_CSS_COLOR]);
+        gboolean font_units = syntax_value_may_use_font_units(v);
+        if (!have_ctx || (font_units && !have_font_units)) {
+            syntax_ctx_for_style(&ctx, s, root_px, font_units);
+            if (!current_color)
+                current_color =
+                    ns_css_value_serialize(s->values[NS_CSS_COLOR]);
             ctx.current_color = current_color;
             have_ctx = TRUE;
+            have_font_units = font_units;
         }
         char *computed = ns_css_syntax_def_compute(pr->syntax, v, &ctx);
         if (computed) g_hash_table_iter_replace(&it, computed);

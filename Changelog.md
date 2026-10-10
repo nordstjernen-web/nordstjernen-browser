@@ -3,6 +3,12 @@ Changelog:
 
 1.0.31:
 ======
+* Performance: computing values of custom properties registered with
+  `@property` no longer measures the element's and the root's fonts
+  for `ex`, `ch`, `cap` and `ic` units unless a value might use one.
+  Those eight font-metric lookups ran for every element that sets a
+  registered property, and were half of that work on a page that
+  registers many properties.
 * Performance: collecting a page's stylesheets for a relayout no longer
   re-reads every small `<style>` element. Each element's final CSS text
   and its traits (whether it can join the merged run of neighbouring
