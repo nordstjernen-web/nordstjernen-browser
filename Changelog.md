@@ -3,6 +3,14 @@ Changelog:
 
 1.0.31:
 ======
+* Layout: `position: fixed` and absolutely positioned elements inside
+  an iframe are placed against the iframe's own viewport. The lookup
+  for their containing block walked out of the frame's document into
+  the host page, so an ad frame whose `<body>` is `position: fixed;
+  left: 0; width: 100%` was laid out across the whole window, and the
+  video inside it was drawn at the page's left edge instead of in its
+  slot. Fixed boxes inside a frame also no longer follow the top-level
+  scroll.
 * Media: in-process playback of a fragmented-MP4 Media Source stream
   (HLS players such as hls.js transmux into one) no longer stalls
   once the decoder catches up with the bytes it was opened over. The
