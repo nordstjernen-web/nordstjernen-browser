@@ -599,6 +599,8 @@ sheet_run_chunks_new(void)
 }
 
 #define SHEET_RUN_CHUNK_ALONE 16384
+#define SHEET_RUN_GROUP_MIN   (32 * 1024)
+#define SHEET_RUN_GROUP_MAX   (128 * 1024)
 
 typedef struct {
     const sheet_run_chunk *chunks;
@@ -648,11 +650,22 @@ sheet_run_flush(sheet_collect_ctx *cc)
     const sheet_run_chunk *all = &g_array_index(cc->run_chunks,
                                                 sheet_run_chunk, 0);
     guint start = 0;
+    gsize group_len = 0;
     for (guint i = 0; i < cc->run_chunks->len; i++) {
-        if (all[i].len < SHEET_RUN_CHUNK_ALONE) continue;
-        sheet_run_emit(cc, all + start, i - start, FALSE);
-        sheet_run_emit(cc, all + i, 1, TRUE);
-        start = i + 1;
+        if (all[i].len >= SHEET_RUN_CHUNK_ALONE) {
+            sheet_run_emit(cc, all + start, i - start, FALSE);
+            sheet_run_emit(cc, all + i, 1, TRUE);
+            start = i + 1;
+            group_len = 0;
+            continue;
+        }
+        group_len += all[i].len;
+        if ((group_len >= SHEET_RUN_GROUP_MIN && (all[i].fp & 3) == 0) ||
+            group_len >= SHEET_RUN_GROUP_MAX) {
+            sheet_run_emit(cc, all + start, i + 1 - start, FALSE);
+            start = i + 1;
+            group_len = 0;
+        }
     }
     sheet_run_emit(cc, all + start, cc->run_chunks->len - start, FALSE);
     g_array_set_size(cc->run_chunks, 0);

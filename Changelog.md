@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* Performance: runs of small `<style>` elements are merged into sheets
+  of roughly 32-128 KB split at content-defined boundaries, instead of
+  one sheet per run. A page that adds or edits one CSS-in-JS style
+  element now re-parses only the group it belongs to, not every
+  neighbouring style (368 KB of CSS per change on one page).
 * Build: the clang builds on Linux, macOS and Windows compile again.
   The merged-stylesheet-run flush cast a `GArray`'s byte buffer straight
   to its element type, which clang's `-Wcast-align` rejects under
