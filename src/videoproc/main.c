@@ -413,6 +413,17 @@ ring_has_space(ns_video_player *p)
     return published - released < r->nslots;
 }
 
+static void
+ring_force_opaque(uint8_t *base, uint32_t width, uint32_t height,
+                  uint32_t stride)
+{
+    if (!width || !height || base[3] == 0xFF) return;
+    for (uint32_t y = 0; y < height; y++) {
+        uint8_t *px = base + (size_t)y * stride + 3;
+        for (uint32_t x = 0; x < width; x++, px += 4) *px = 0xFF;
+    }
+}
+
 static int
 ring_publish(ns_video_player *p, ns_vdec *d, const AVFrame *frame,
              double pts, double duration)
@@ -435,6 +446,7 @@ ring_publish(ns_video_player *p, ns_vdec *d, const AVFrame *frame,
     __atomic_store_n(&meta->sequence, 0u, __ATOMIC_RELEASE);
     sws_scale(d->sws, (const uint8_t *const *)frame->data, frame->linesize,
               0, frame->height, dst, dst_stride);
+    ring_force_opaque(base, r->width, r->height, r->stride);
     meta->generation = __atomic_load_n(&r->generation, __ATOMIC_ACQUIRE);
     meta->pts = pts;
     meta->duration = duration;
