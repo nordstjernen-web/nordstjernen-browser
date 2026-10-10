@@ -240,6 +240,15 @@ gboolean ns_js_dispatch_clipboard_event(ns_js *js, const ns_node *target,
                                         const char *type, const char *text,
                                         gboolean *default_prevented);
 
+gboolean ns_js_dispatch_wheel(ns_js *js, const ns_node *target,
+                              double client_x, double client_y,
+                              double page_x, double page_y,
+                              double dx, double dy,
+                              gboolean shift, gboolean ctrl,
+                              gboolean alt, gboolean meta,
+                              gboolean *default_prevented);
+gboolean ns_js_node_blocks_wheel(ns_js *js, const ns_node *node);
+gboolean ns_js_document_blocks_wheel(ns_js *js);
 gboolean ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target,
                                     const char *type,
                                     double client_x, double client_y,

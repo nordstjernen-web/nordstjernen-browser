@@ -51,6 +51,8 @@ struct NsLayerUpdate {
     GArray     *keeps;
     GArray     *scrollers;
     gboolean    scrollers_all;
+    GArray     *wheels;
+    gboolean    wheels_all;
 };
 
 struct NsPageLayers {
@@ -66,6 +68,8 @@ struct NsPageLayers {
     GHashTable *tiles;
     GArray     *scrollers;
     gboolean    scrollers_all;
+    GArray     *wheels;
+    gboolean    wheels_all;
 };
 
 static void
@@ -189,6 +193,20 @@ pl_parse_scroller(NsLayerUpdate *u, const char *line)
 }
 
 static void
+pl_parse_wheel(NsLayerUpdate *u, const char *line)
+{
+    int x, y, w, h, fixed;
+    if (strcmp(line, "wr-all") == 0) {
+        u->wheels_all = TRUE;
+        return;
+    }
+    if (sscanf(line, "wr %d %d %d %d %d", &x, &y, &w, &h, &fixed) != 5)
+        return;
+    PlScroller s = { x, y, w, h, 3, fixed != 0 };
+    g_array_append_val(u->wheels, s);
+}
+
+static void
 pl_parse_keep(NsLayerUpdate *u, const char *line)
 {
     long index = 0;
@@ -208,6 +226,8 @@ pl_parse_line(NsLayerUpdate *u, const char *line, const unsigned char *map,
         pl_parse_vp(u, line, map, map_size);
     else if (g_str_has_prefix(line, "sr"))
         pl_parse_scroller(u, line);
+    else if (g_str_has_prefix(line, "wr"))
+        pl_parse_wheel(u, line);
 }
 
 NsLayerUpdate *
@@ -220,6 +240,7 @@ ns_layer_update_parse(const char *desc, const unsigned char *map,
     u->tiles = g_ptr_array_new_with_free_func(pl_tile_free);
     u->keeps = g_array_new(FALSE, FALSE, sizeof(long));
     u->scrollers = g_array_new(FALSE, FALSE, sizeof(PlScroller));
+    u->wheels = g_array_new(FALSE, FALSE, sizeof(PlScroller));
     char **lines = g_strsplit(desc, "\n", -1);
     gboolean ok = lines[0] && pl_parse_gen(u, lines[0]);
     for (int i = 1; ok && lines[i]; i++)
@@ -241,6 +262,7 @@ ns_layer_update_free(NsLayerUpdate *u)
     g_ptr_array_unref(u->tiles);
     g_array_unref(u->keeps);
     g_array_unref(u->scrollers);
+    g_array_unref(u->wheels);
     g_free(u);
 }
 
@@ -252,6 +274,7 @@ ns_page_layers_new(void)
     pl->tiles = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free,
                                       pl_tile_free);
     pl->scrollers = g_array_new(FALSE, FALSE, sizeof(PlScroller));
+    pl->wheels = g_array_new(FALSE, FALSE, sizeof(PlScroller));
     return pl;
 }
 
@@ -264,6 +287,8 @@ ns_page_layers_reset(NsPageLayers *pl)
     g_hash_table_remove_all(pl->tiles);
     g_array_set_size(pl->scrollers, 0);
     pl->scrollers_all = FALSE;
+    g_array_set_size(pl->wheels, 0);
+    pl->wheels_all = FALSE;
 }
 
 void
@@ -273,6 +298,7 @@ ns_page_layers_free(NsPageLayers *pl)
     g_ptr_array_unref(pl->vp);
     g_hash_table_destroy(pl->tiles);
     g_array_unref(pl->scrollers);
+    g_array_unref(pl->wheels);
     g_free(pl);
 }
 
@@ -316,6 +342,10 @@ pl_adopt_geometry(NsPageLayers *pl, NsLayerUpdate *u)
     pl->scrollers = u->scrollers;
     u->scrollers = sc;
     pl->scrollers_all = u->scrollers_all;
+    GArray *wh = pl->wheels;
+    pl->wheels = u->wheels;
+    u->wheels = wh;
+    pl->wheels_all = u->wheels_all;
 }
 
 static void
@@ -443,6 +473,21 @@ ns_page_layers_scroller_at(const NsPageLayers *pl, double x, double y,
         const PlScroller *s = &g_array_index(pl->scrollers, PlScroller, i);
         if ((s->axes & axis) &&
             pl_scroller_contains(s, s->fixed ? x : x + scroll_x,
+                                 s->fixed ? y : y + scroll_y))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+gboolean
+ns_page_layers_wheel_listener_at(const NsPageLayers *pl, double x, double y,
+                                 double scroll_x, double scroll_y)
+{
+    if (!pl || !pl->active) return TRUE;
+    if (pl->wheels_all) return TRUE;
+    for (guint i = 0; i < pl->wheels->len; i++) {
+        const PlScroller *s = &g_array_index(pl->wheels, PlScroller, i);
+        if (pl_scroller_contains(s, s->fixed ? x : x + scroll_x,
                                  s->fixed ? y : y + scroll_y))
             return TRUE;
     }
