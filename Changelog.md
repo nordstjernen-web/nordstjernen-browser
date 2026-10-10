@@ -10,6 +10,11 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Performance: the renderer no longer walks the whole box tree on every
+  animation tick to find `<video>` boxes; it does so after a relayout
+  or when the scroll position changes. Text-measurement cache keys are
+  built from the Pango attributes' values directly, instead of
+  printing the attribute list to a string for every measured run.
 * Media: video no longer turns into a blank white rectangle when the
   browser window switches to tiled page rendering. In that mode the
   window drew only videos whose position the page reported in page
