@@ -3,6 +3,46 @@ Changelog:
 
 1.0.32:
 ======
+* Paint: elements with a negative `z-index` paint and receive clicks
+  below the in-flow content of their stacking context (CSS 2.1
+  Appendix E step 3), not inside their nearest positioned parent. A
+  `z-index: -1` background inside a `position: relative` wrapper with
+  no `z-index` used to sit on top of the text after the wrapper and
+  swallow its clicks, which is how chatgpt.com backgrounds covered
+  text. Positioned elements and flex or grid items qualify. A layer
+  inside an overflow clip stays in the clip, the layers of the root
+  context paint above the background propagated from `html` or `body`,
+  and clicks on `body` outside its children still reach `body`.
+  Layers with the same `z-index` keep document order, with `::before`
+  ahead of the element's children and `::after` behind them. Not
+  lifted yet: positioned inline elements and inline-blocks with a
+  negative `z-index`, which still paint with the line that holds them.
+* Paint: paint and hit testing share one stacking-context test: the
+  root, `fixed` and `sticky`, positioned or flex/grid items with a
+  `z-index`, opacity below 1, transforms, `perspective`,
+  `preserve-3d`, `filter`, `backdrop-filter`, `clip-path`, masks,
+  `mix-blend-mode`, `isolation: isolate`, `will-change` of those,
+  `contain` with layout or paint, and `content-visibility` other than
+  `visible`. Such an element keeps its positioned descendants inside
+  it and, like a positioned element, paints and takes clicks above
+  the in-flow content that follows it. A dropdown inside a wrapper
+  with `opacity`, `transform` or `will-change` was drawn under the
+  next block and clicks on it went to that block. Inline-blocks and
+  images that form a stacking context still paint and take clicks in
+  their line, as before.
+* Input: hit testing skips the contents of `content-visibility:
+  hidden` elements and elements hidden by `clip: rect(0 0 0 0)`, as
+  painting does, and boxes outside the point are dropped before they
+  are queued as layers. `elementFromPoint` on a list of 4000
+  `position: relative` rows took 20 ms and now takes 0.3 ms.
+* CSS: `isolation`, `will-change`, `contain` and `backdrop-filter` are
+  parsed from style sheets (they were only read from inline styles by
+  `getComputedStyle`). Invalid values are dropped, so a later invalid
+  declaration no longer overrides a valid one, and `CSS.supports`
+  answers for them; `backdrop-filter` is checked as a filter list.
+  `will-change` keeps the case of the names it lists. Integer
+  properties such as `z-index` clamp to the 32-bit range, so
+  `z-index: 99999999999` stays on top (on x86-64 it turned negative).
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

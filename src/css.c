@@ -434,6 +434,10 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_WEBKIT_BOX_ORIENT]    = "-webkit-box-orient",
     [NS_CSS_MASK_CLIP]            = "mask-clip",
     [NS_CSS_MASK_COMPOSITE]       = "mask-composite",
+    [NS_CSS_ISOLATION]            = "isolation",
+    [NS_CSS_WILL_CHANGE]          = "will-change",
+    [NS_CSS_CONTAIN]              = "contain",
+    [NS_CSS_BACKDROP_FILTER]      = "backdrop-filter",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9666,6 +9670,8 @@ ns_css_initial_value_text(const char *name)
         { "empty-cells",                "show" },
         { "border-image-source",        "none" },
         { "will-change",                "auto" },
+        { "contain",                    "none" },
+        { "backdrop-filter",            "none" },
         { "touch-action",               "auto" },
         { "scroll-behavior",            "auto" },
     };
@@ -11139,6 +11145,13 @@ integer_prop_keyword(ns_css_prop prop)
     }
 }
 
+static double
+css_integer_clamp(double v)
+{
+    if (isnan(v)) return 0;
+    return CLAMP(v, (double)G_MININT, (double)G_MAXINT);
+}
+
 static ns_css_value *
 parse_integer_property(ns_css_prop prop, const char *t)
 {
@@ -11152,7 +11165,7 @@ parse_integer_property(ns_css_prop prop, const char *t)
     if (css_is_integer_token(t)) {
         ns_css_value *v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_LENGTH;
-        v->u.length.v = (double)g_ascii_strtoll(t, NULL, 10);
+        v->u.length.v = css_integer_clamp((double)g_ascii_strtoll(t, NULL, 10));
         v->u.length.unit = NS_CSS_UNIT_NUMBER;
         return v;
     }
@@ -11160,7 +11173,7 @@ parse_integer_property(ns_css_prop prop, const char *t)
     if (cv) {
         if (cv->kind == NS_CSS_V_LENGTH &&
             cv->u.length.unit == NS_CSS_UNIT_NUMBER) {
-            cv->u.length.v = round(cv->u.length.v);
+            cv->u.length.v = css_integer_clamp(round(cv->u.length.v));
             return cv;
         }
         ns_css_value_free(cv);
@@ -12669,6 +12682,149 @@ parse_vertical_align_length(const char *t)
     return v;
 }
 
+static gboolean
+keyword_choice_valid(const char *t, const char *choices)
+{
+    ns_css_value *v = parse_keyword_choice(t, choices);
+    gboolean ok = v != NULL;
+    ns_css_value_free(v);
+    return ok;
+}
+
+static guint
+contain_keyword_bit(const char *kw)
+{
+    static const char *const names[] = {
+        "size", "inline-size", "layout", "style", "paint",
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(names); i++)
+        if (g_ascii_strcasecmp(kw, names[i]) == 0) return 1u << i;
+    return 0;
+}
+
+static gboolean
+contain_value_valid(const char *t)
+{
+    if (keyword_choice_valid(t, "none strict content")) return TRUE;
+    char **w = g_strsplit_set(t, " \t\n", -1);
+    guint seen = 0;
+    gboolean ok = TRUE;
+    for (int i = 0; ok && w[i]; i++) {
+        if (!*w[i]) continue;
+        guint bit = contain_keyword_bit(w[i]);
+        ok = bit && !(seen & bit);
+        seen |= bit;
+    }
+    g_strfreev(w);
+    return ok && seen && (seen & 3u) != 3u;
+}
+
+static gboolean
+will_change_item_valid(const char *item)
+{
+    if (!*item || g_ascii_isdigit(*item)) return FALSE;
+    for (const char *p = item; *p; p++)
+        if (!g_ascii_isalnum(*p) && *p != '-' && *p != '_') return FALSE;
+    return !keyword_choice_valid(item, "will-change none all auto initial "
+                                       "inherit unset default revert "
+                                       "revert-layer");
+}
+
+static gboolean
+will_change_value_valid(const char *t)
+{
+    if (keyword_choice_valid(t, "auto")) return TRUE;
+    char **items = g_strsplit(t, ",", -1);
+    gboolean ok = items[0] != NULL;
+    for (int i = 0; ok && items[i]; i++)
+        ok = will_change_item_valid(g_strstrip(items[i]));
+    g_strfreev(items);
+    return ok;
+}
+
+static ns_css_value *
+will_change_value_new(const char *t)
+{
+    char **items = g_strsplit(t, ",", -1);
+    GString *out = g_string_new(NULL);
+    for (int i = 0; items[i]; i++) {
+        const char *item = g_strstrip(items[i]);
+        char *text = keyword_choice_valid(item, "auto contents scroll-position")
+            ? g_ascii_strdown(item, -1) : g_strdup(item);
+        g_string_append(out, i ? ", " : "");
+        g_string_append(out, text);
+        g_free(text);
+    }
+    g_strfreev(items);
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = g_string_free(out, FALSE);
+    return v;
+}
+
+static const char *
+filter_skip_spaces(const char *p)
+{
+    while (g_ascii_isspace(*p)) p++;
+    return p;
+}
+
+static gboolean
+filter_name_known(const char *name, gsize n)
+{
+    static const char *const names[] = {
+        "blur", "brightness", "contrast", "drop-shadow", "grayscale",
+        "hue-rotate", "invert", "opacity", "saturate", "sepia", "url",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        if (strlen(names[i]) == n &&
+            g_ascii_strncasecmp(name, names[i], n) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static const char *
+filter_skip_arguments(const char *p)
+{
+    int depth = 0;
+    for (; *p; p++) {
+        if (*p == '(') depth++;
+        else if (*p == ')' && --depth == 0) return p + 1;
+    }
+    return NULL;
+}
+
+gboolean
+ns_css_filter_list_valid(const char *s)
+{
+    const char *p = filter_skip_spaces(s);
+    if (!*p) return FALSE;
+    if (g_ascii_strncasecmp(p, "none", 4) == 0)
+        return !*filter_skip_spaces(p + 4);
+    while (*p) {
+        const char *start = p;
+        while (g_ascii_isalpha(*p) || *p == '-') p++;
+        if (!filter_name_known(start, (gsize)(p - start)) || *p != '(')
+            return FALSE;
+        p = filter_skip_arguments(p);
+        if (!p) return FALSE;
+        p = filter_skip_spaces(p);
+    }
+    return TRUE;
+}
+
+static gboolean
+stacking_keyword_valid(ns_css_prop prop, const char *t)
+{
+    switch (prop) {
+    case NS_CSS_ISOLATION:   return keyword_choice_valid(t, "auto isolate");
+    case NS_CSS_CONTAIN:     return contain_value_valid(t);
+    case NS_CSS_WILL_CHANGE: return will_change_value_valid(t);
+    case NS_CSS_BACKDROP_FILTER: return ns_css_filter_list_valid(t);
+    default:                 return TRUE;
+    }
+}
+
 static ns_css_value *
 parse_keyword_value(ns_css_prop prop, const char *t)
 {
@@ -12679,6 +12835,14 @@ parse_keyword_value(ns_css_prop prop, const char *t)
     v->kind = NS_CSS_V_KEYWORD;
     v->u.keyword = ascii_lower(t, strlen(t));
     return v;
+}
+
+static ns_css_value *
+parse_valid_keyword_value(ns_css_prop prop, const char *t)
+{
+    if (!stacking_keyword_valid(prop, t)) return NULL;
+    if (prop == NS_CSS_WILL_CHANGE) return will_change_value_new(t);
+    return parse_keyword_value(prop, t);
 }
 
 static ns_css_value *
@@ -13983,7 +14147,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     default:
-        v = parse_keyword_value(prop, t);
+        v = parse_valid_keyword_value(prop, t);
         break;
     }
     if (v && !v->next_layer)
