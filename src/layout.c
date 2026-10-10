@@ -14282,7 +14282,9 @@ static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
     inline_runs_join_splits(box);
-    edges_from_style(box->style, parent_content_width,
+    double cb_pct_basis = box->cb_width_override > 0
+        ? box->cb_width_override : parent_content_width;
+    edges_from_style(box->style, cb_pct_basis,
                      &box->margin, &box->padding, &box->border);
     box->margin_top_through = 0;
 
@@ -14319,7 +14321,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_RIGHT] : NULL))
             flex_col_item_stretch = FALSE;
     }
-    double pct_width_base = parent_content_width;
+    double pct_width_base = cb_pct_basis;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
     if (box->has_flex_main) {
@@ -16612,10 +16614,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             ((l_set && r_set && js_stretch) || height_keyword_stretches(awv));
         double layout_w = avail;
         double inset_w = avail;
-        if (l_set && r_set) {
-            inset_w = avail - length_resolve(alv, avail, 0) - length_resolve(arv, avail, 0);
-            if (inset_w < 0) inset_w = 0;
-        }
+        if (l_set) inset_w -= length_resolve(alv, avail, 0);
+        if (r_set) inset_w -= length_resolve(arv, avail, 0);
+        if (inset_w < 0) inset_w = 0;
+        abox->cb_width_override = avail;
         if (stretch_w) {
             double l = l_set ? length_resolve(alv, avail, 0) : 0;
             double r = r_set ? length_resolve(arv, avail, 0) : 0;
