@@ -3,6 +3,13 @@ Changelog:
 
 1.0.31:
 ======
+* Media: in-process playback of a fragmented-MP4 Media Source stream
+  (HLS players such as hls.js transmux into one) no longer stalls
+  once the decoder catches up with the bytes it was opened over. The
+  MP4 demuxer treats its first end of data as the end of the file, so
+  the player fired `waiting` every second and repeated frames while
+  minutes of video sat buffered. It is now reopened over the grown
+  buffer and resumes after the last packet it decoded.
 * Security: fixes from Northstar's audit and a use-after-free that
   AddressSanitizer found there on github.com, ported here.
   - Page script no longer runs in the middle of layout. Layout waits for
