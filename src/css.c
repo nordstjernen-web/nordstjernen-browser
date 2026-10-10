@@ -33803,6 +33803,7 @@ typedef struct {
     const char *base;
     const char *css;
     gsize       len;
+    guint64     digest;
     guint       hash;
 } ns_merged_style_key;
 
@@ -33863,10 +33864,13 @@ static gboolean
 ns_merged_style_key_equal(gconstpointer pa, gconstpointer pb)
 {
     const ns_merged_style_key *a = pa, *b = pb;
-    return a->hash == b->hash && a->len == b->len &&
-           a->vw == b->vw && a->vh == b->vh &&
-           g_strcmp0(a->base, b->base) == 0 &&
-           memcmp(a->css, b->css, a->len) == 0;
+    if (a->hash != b->hash || a->len != b->len ||
+        a->vw != b->vw || a->vh != b->vh ||
+        g_strcmp0(a->base, b->base) != 0)
+        return FALSE;
+    if (!a->css || !b->css)
+        return !a->css && !b->css && a->digest == b->digest;
+    return memcmp(a->css, b->css, a->len) == 0;
 }
 
 static void
@@ -34048,6 +34052,51 @@ ns_css_merged_styles_cached(const char *css, gssize len, const char *base_url)
     memcpy(copy, css, (gsize)len);
     copy[len] = '\0';
     key->css = copy;
+    g_hash_table_replace(g_merged_style_cache, key, entry);
+    return sh;
+}
+
+ns_css_stylesheet *
+ns_css_merged_styles_cached_digest(guint64 digest, gsize len,
+                                   const char *base_url,
+                                   ns_css_text_builder build, gpointer data)
+{
+    if (len == 0 || !build) return NULL;
+    if (!g_merged_style_cache)
+        g_merged_style_cache =
+            g_hash_table_new_full(ns_merged_style_key_hash,
+                                  ns_merged_style_key_equal,
+                                  ns_merged_style_key_free,
+                                  ns_merged_style_cached_free);
+    ns_merged_style_key probe = {
+        .vw = rint(ns_css_media_viewport_current_w()),
+        .vh = rint(ns_css_media_viewport_current_h()),
+        .base = base_url,
+        .len = len,
+        .digest = digest,
+    };
+    probe.hash = (guint)(digest ^ (digest >> 32)) ^
+                 (base_url ? g_str_hash(base_url) * 31u : 0) ^
+                 (guint)probe.vw * 7919u ^ (guint)probe.vh * 104729u;
+    ns_merged_style_cached *hit =
+        g_hash_table_lookup(g_merged_style_cache, &probe);
+    if (hit) {
+        hit->stamp = ++g_merged_style_cache_clock;
+        return hit->sheet;
+    }
+    GString *text = g_string_sized_new(len + 1);
+    build(text, data);
+    ns_css_stylesheet *sh = ns_css_stylesheet_parse(text->str,
+                                                    (gssize)text->len);
+    g_string_free(text, TRUE);
+    if (!sh) return NULL;
+    sh->cached = TRUE;
+    ns_merged_style_cached *entry = g_new0(ns_merged_style_cached, 1);
+    entry->sheet = sh;
+    entry->stamp = ++g_merged_style_cache_clock;
+    ns_merged_style_key *key = g_new(ns_merged_style_key, 1);
+    *key = probe;
+    key->base = g_strdup(base_url);
     g_hash_table_replace(g_merged_style_cache, key, entry);
     return sh;
 }
