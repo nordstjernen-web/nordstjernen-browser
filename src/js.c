@@ -55351,33 +55351,6 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
         JS_FreeValue(ctx, svglen);
     }
 
-    {
-        static const struct { const char *name; int value; } constants[] = {
-            { "ANY_TYPE", 0 }, { "NUMBER_TYPE", 1 }, { "STRING_TYPE", 2 },
-            { "BOOLEAN_TYPE", 3 }, { "UNORDERED_NODE_ITERATOR_TYPE", 4 },
-            { "ORDERED_NODE_ITERATOR_TYPE", 5 },
-            { "UNORDERED_NODE_SNAPSHOT_TYPE", 6 },
-            { "ORDERED_NODE_SNAPSHOT_TYPE", 7 },
-            { "ANY_UNORDERED_NODE_TYPE", 8 },
-            { "FIRST_ORDERED_NODE_TYPE", 9 },
-        };
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "XPathResult");
-        JSValue proto = JS_IsObject(ctor)
-            ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
-        if (JS_IsObject(proto)) {
-            ns_bind_fn(ctx, proto, "iterateNext", ns_returns_null, 0);
-            ns_bind_fn(ctx, proto, "snapshotItem", ns_returns_null, 1);
-            for (gsize i = 0; i < G_N_ELEMENTS(constants); i++) {
-                JS_DefinePropertyValueStr(ctx, ctor, constants[i].name,
-                    JS_NewInt32(ctx, constants[i].value), 0);
-                JS_DefinePropertyValueStr(ctx, proto, constants[i].name,
-                    JS_NewInt32(ctx, constants[i].value), 0);
-            }
-        }
-        JS_FreeValue(ctx, proto);
-        JS_FreeValue(ctx, ctor);
-    }
-
     ns_install_event_handler_props(ctx, global);
 
     static const char *const bars[] = {
