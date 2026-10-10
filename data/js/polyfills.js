@@ -1018,7 +1018,6 @@
                         node.setAttribute('data-audio-src', audioUrl);
                     if (node.setAttribute) node.setAttribute('src', to);
                     else node.src = to;
-                    if (typeof node.load === 'function') node.load();
                 } catch (e) {}
             }
         }
