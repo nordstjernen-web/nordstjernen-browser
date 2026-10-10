@@ -5418,6 +5418,8 @@ svg_foreign_width(const ns_node *fo, double fallback)
     return end != a && v > 0 ? v : fallback;
 }
 
+static void extend_scroll_ranges_from_abs(ns_box *b);
+
 static ns_box *
 layout_svg_foreign_object(const ns_node *fo, GHashTable *styles, double width)
 {
@@ -5451,6 +5453,7 @@ layout_svg_foreign_object(const ns_node *fo, GHashTable *styles, double width)
     apply_position_offsets(root, width, root->content_height);
     process_absolute_boxes(root, styles, width);
     ns_paint_sync_inline_atomic_offsets(root);
+    extend_scroll_ranges_from_abs(root);
     compute_paint_bounds(root);
 
     g_array_free(g_abs_pending, TRUE);
@@ -16380,6 +16383,171 @@ abs_place_at_static_run(ns_box *abox, const ns_abs_static *st)
     abox->y = st->run->y + st->rel_y + dy;
 }
 
+enum { ABS_AXIS_X = 1, ABS_AXIS_Y = 2 };
+
+typedef struct {
+    double right, bottom;
+    double pad_right, pad_bottom;
+    gboolean flip_x, flip_y;
+} abs_overflow;
+
+static gboolean
+style_hides_overflow_contribution(const ns_style *s)
+{
+    const ns_css_value *cv = s ? s->values[NS_CSS_CONTENT_VISIBILITY] : NULL;
+    return cv && (is_keyword(cv, "hidden") || is_keyword(cv, "auto"));
+}
+
+static int
+box_overflow_clip_axes(const ns_box *c)
+{
+    if (!c->style || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
+        return 0;
+    const char *ox = overflow_axis_keyword(c->style, NS_CSS_OVERFLOW_X);
+    const char *oy = overflow_axis_keyword(c->style, NS_CSS_OVERFLOW_Y);
+    if (overflow_kw_scroll_container(ox) || overflow_kw_scroll_container(oy))
+        return ABS_AXIS_X | ABS_AXIS_Y;
+    return (overflow_kw_clips(ox) ? ABS_AXIS_X : 0) |
+           (overflow_kw_clips(oy) ? ABS_AXIS_Y : 0);
+}
+
+static gboolean
+abs_overflow_unreachable(const abs_overflow *acc, double left, double top)
+{
+    return (acc->flip_x && left >= acc->pad_right) ||
+           (acc->flip_y && top >= acc->pad_bottom);
+}
+
+static void
+abs_overflow_add(const ns_box *c, abs_overflow *acc, int axes)
+{
+    double w = c->content_width + c->padding.left + c->padding.right +
+               c->border.left + c->border.right;
+    double h = c->content_height + c->padding.top + c->padding.bottom +
+               c->border.top + c->border.bottom;
+    if (w <= 0 || h <= 0) return;
+    double left = c->x + c->margin.left;
+    double top = c->y + c->margin.top;
+    if (abs_overflow_unreachable(acc, left, top)) return;
+    if ((axes & ABS_AXIS_X) && left + w > acc->right) acc->right = left + w;
+    if ((axes & ABS_AXIS_Y) && top + h > acc->bottom) acc->bottom = top + h;
+}
+
+static void
+abs_overflow_walk(const ns_box *b, gboolean in_abs, int axes,
+                  abs_overflow *acc, int depth);
+
+static void
+abs_overflow_visit(const ns_box *c, gboolean in_abs, int axes,
+                   abs_overflow *acc, int depth)
+{
+    if (ns_box_is_fixed(c) || box_has_transform_style(c)) return;
+    gboolean c_abs = in_abs || style_is_absolute_or_fixed(c->style);
+    if (c_abs) abs_overflow_add(c, acc, axes);
+    if (style_hides_overflow_contribution(c->style)) return;
+    int inner = axes & ~box_overflow_clip_axes(c);
+    if (inner) abs_overflow_walk(c, c_abs, inner, acc, depth + 1);
+}
+
+static void
+abs_overflow_walk(const ns_box *b, gboolean in_abs, int axes,
+                  abs_overflow *acc, int depth)
+{
+    if (depth > 512) return;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        abs_overflow_visit(c, in_abs, axes, acc, depth);
+    if (!b->inline_atomics) return;
+    for (guint i = 0; i < b->inline_atomics->len; i++) {
+        const ns_box *ab =
+            g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab) abs_overflow_visit(ab, in_abs, axes, acc, depth);
+    }
+}
+
+static void
+scroll_axis_flips(const ns_box *b, gboolean *fx, gboolean *fy)
+{
+    const ns_style *s = b->style;
+    *fx = self_start_is_far_side(s, TRUE);
+    *fy = self_start_is_far_side(s, FALSE);
+    if (!style_is_flex_container(s)) return;
+    const char *dir = flex_direction_of(s);
+    gboolean column = strncmp(dir, "column", 6) == 0;
+    gboolean wrap_rev =
+        strcmp(keyword_or(s, NS_CSS_FLEX_WRAP, "nowrap"), "wrap-reverse") == 0;
+    if (strstr(dir, "-reverse")) {
+        if (column) *fy = !*fy; else *fx = !*fx;
+    }
+    if (wrap_rev) {
+        if (column) *fx = !*fx; else *fy = !*fy;
+    }
+}
+
+static gboolean
+scroll_owned_by_viewport(const ns_box *b)
+{
+    if (!box_is_doc_root(b)) return FALSE;
+    if (strcmp(b->dom->name, "html") == 0) return TRUE;
+    const ns_box *p = b->parent;
+    if (!p || !p->style) return TRUE;
+    return !overflow_kw_clips(overflow_axis_keyword(p->style, NS_CSS_OVERFLOW_X)) &&
+           !overflow_kw_clips(overflow_axis_keyword(p->style, NS_CSS_OVERFLOW_Y));
+}
+
+static gboolean
+scroll_range_grow(double *max, double extent)
+{
+    double whole = floor(extent + 0.5);
+    if (whole < 1 || whole <= MAX(*max, 0)) return FALSE;
+    *max = whole;
+    return TRUE;
+}
+
+static gboolean
+scroll_candidate_axes(const ns_box *b, gboolean *sx, gboolean *sy)
+{
+    if (!b->parent || !b->style) return FALSE;
+    *sx = overflow_kw_scrolls(overflow_axis_keyword(b->style, NS_CSS_OVERFLOW_X));
+    *sy = overflow_kw_scrolls(overflow_axis_keyword(b->style, NS_CSS_OVERFLOW_Y));
+    return (*sx || *sy) && box_clips_children(b) &&
+           !scroll_owned_by_viewport(b) &&
+           !style_hides_overflow_contribution(b->style);
+}
+
+static void
+extend_scroll_range_from_abs(ns_box *b)
+{
+    gboolean sx, sy;
+    if (!scroll_candidate_axes(b, &sx, &sy)) return;
+    abs_overflow acc = {0};
+    scroll_axis_flips(b, &acc.flip_x, &acc.flip_y);
+    acc.pad_right = b->x + b->margin.left + b->border.left + b->padding.left +
+                    b->content_width + b->padding.right;
+    acc.pad_bottom = b->y + b->margin.top + b->border.top + b->padding.top +
+                     b->content_height + b->padding.bottom;
+    acc.right = acc.pad_right;
+    acc.bottom = acc.pad_bottom;
+    abs_overflow_walk(b, FALSE, ABS_AXIS_X | ABS_AXIS_Y, &acc, 0);
+    gboolean grew_x = sx && !acc.flip_x &&
+        scroll_range_grow(&b->scroll_max_x, acc.right - acc.pad_right);
+    gboolean grew_y = sy && !acc.flip_y &&
+        scroll_range_grow(&b->scroll_max_y, acc.bottom - acc.pad_bottom);
+    if (grew_x || grew_y) b->scrolls = TRUE;
+}
+
+static void
+extend_scroll_ranges_from_abs(ns_box *b)
+{
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        extend_scroll_ranges_from_abs(c);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++) {
+            ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+            if (ab) extend_scroll_ranges_from_abs(ab);
+        }
+    extend_scroll_range_from_abs(b);
+}
+
 static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
@@ -16717,6 +16885,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     apply_position_offsets(root, viewport_width, root->content_height);
     process_absolute_boxes(root, styles, viewport_width);
     ns_paint_sync_inline_atomic_offsets(root);
+    extend_scroll_ranges_from_abs(root);
     compute_paint_bounds(root);
 
     g_array_free(g_abs_pending, TRUE);
