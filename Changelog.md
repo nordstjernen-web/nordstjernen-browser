@@ -10,6 +10,12 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Media: the browser window composites every video the helper process
+  decodes, not just the most recently opened one. Each tab had a
+  single video slot, so a muted video ad that started after the main
+  player took the slot and the player (and every other video) showed
+  the blank page background. A finished or stalled video that was not
+  in the slot also never told the page it had ended.
 * Media: setting a `<video>` or `<audio>` element's `src` runs the
   media element load algorithm, as `load()` already did. The element
   pauses, rewinds to 0 and fires `abort`, `emptied` and `loadstart`.

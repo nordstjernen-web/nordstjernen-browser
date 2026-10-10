@@ -165,6 +165,30 @@ typedef struct {
     double           print_scale;
 } Res;
 
+typedef struct {
+    char        token[64];
+    char        shm[64];
+    void       *ring;
+    void       *ring_map;
+    gsize       ring_bytes;
+    GdkTexture *texture;
+    guint32     tex_sequence;
+    guint32     tex_generation;
+    double      x, y, w, h;
+    double      clip_x, clip_y, clip_w, clip_h;
+    int         fit;
+    gboolean    rect_valid;
+    gboolean    page;
+    gboolean    playing;
+    gint64      resync_us;
+    guint32     sequence;
+    guint32     generation;
+    guint32     slot;
+    double      pts;
+    guint64     presented;
+    guint64     dropped;
+} PvVideo;
+
 struct NsProcView {
     grefcount   rc;
 
@@ -194,29 +218,9 @@ struct NsProcView {
     GSubprocess      *video_proc;
     GOutputStream    *video_in;
     GDataInputStream *video_out;
-    void             *vring;
-    void             *vring_map;
-    gsize             vring_bytes;
-    GdkTexture       *vid_texture;
-    guint32           vid_tex_sequence;
-    guint32           vid_tex_generation;
-    char              vid_token[64];
-    char              vid_shm[64];
-    double            vid_x, vid_y, vid_w, vid_h;
-    double            vid_clip_x, vid_clip_y, vid_clip_w, vid_clip_h;
-    int               vid_fit;
-    gboolean          vid_rect_valid;
-    gboolean          vid_page;
-    gboolean          vid_playing;
+    GPtrArray        *videos;
     guint             vid_tick_id;
     guint             vid_tick_count;
-    gint64            vid_resync_us;
-    guint32           vid_sequence;
-    guint32           vid_generation;
-    guint32           vid_slot;
-    double            vid_pts;
-    guint64           vid_presented;
-    guint64           vid_dropped;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -569,6 +573,7 @@ set_busy_cursor(NsProcView *v)
 
 static void pv_audio_shutdown(NsProcView *v);
 static void pv_video_shutdown(NsProcView *v);
+static PvVideo *pv_video_find(NsProcView *v, const char *token);
 
 static void
 pv_free(NsProcView *v)
@@ -602,6 +607,8 @@ pv_free(NsProcView *v)
     g_free(v->ctx_link);
     if (v->history)
         g_ptr_array_unref(v->history);
+    if (v->videos)
+        g_ptr_array_unref(v->videos);
     g_free(v->renderer_path);
     g_free(v->current_url);
     g_free(v->pending_url);
@@ -824,15 +831,16 @@ pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
         if (sscanf(line + 6, "%63s", name) == 1)
             pv_audio_clock_adopt(v, name);
     }
-    if (v && v->video_proc && v->vid_playing && v->vid_token[0] &&
-        g_str_has_prefix(line, "pos ")) {
+    if (v && v->video_proc && g_str_has_prefix(line, "pos ")) {
         char tok[64], valstr[64];
-        if (sscanf(line + 4, "%63s %63s", tok, valstr) == 2 &&
-            strcmp(tok, v->vid_token) == 0) {
+        PvVideo *s = NULL;
+        if (sscanf(line + 4, "%63s %63s", tok, valstr) == 2)
+            s = pv_video_find(v, tok);
+        if (s && s->playing) {
             double sec = g_ascii_strtod(valstr, NULL);
             gint64 nowu = g_get_monotonic_time();
-            if (sec >= 0.0 && nowu - v->vid_resync_us > 950000) {
-                v->vid_resync_us = nowu;
+            if (sec >= 0.0 && nowu - s->resync_us > 950000) {
+                s->resync_us = nowu;
                 char valbuf[G_ASCII_DTOSTR_BUF_SIZE];
                 g_ascii_formatd(valbuf, sizeof valbuf, "%.3f", sec);
                 char cmd[96];
@@ -1044,33 +1052,83 @@ ns_proc_video_helper_available(void)
 }
 
 static void
-pv_video_texture_clear(NsProcView *v)
+pv_video_texture_clear(PvVideo *s)
 {
-    if (!v) return;
-    g_clear_object(&v->vid_texture);
-    v->vid_tex_sequence = 0;
-    v->vid_tex_generation = 0;
+    if (!s) return;
+    g_clear_object(&s->texture);
+    s->tex_sequence = 0;
+    s->tex_generation = 0;
 }
 
 static void
-pv_vring_unmap(NsProcView *v)
+pv_video_unmap(PvVideo *s)
 {
 #ifdef G_OS_WIN32
-    if (v->vring) UnmapViewOfFile(v->vring);
-    if (v->vring_map) CloseHandle(v->vring_map);
-    v->vring_map = NULL;
+    if (s->ring) UnmapViewOfFile(s->ring);
+    if (s->ring_map) CloseHandle(s->ring_map);
+    s->ring_map = NULL;
 #else
-    if (v->vring) munmap(v->vring, v->vring_bytes);
+    if (s->ring) munmap(s->ring, s->ring_bytes);
 #endif
-    v->vring = NULL;
-    v->vring_bytes = 0;
-    v->vid_shm[0] = '\0';
-    v->vid_rect_valid = FALSE;
-    v->vid_playing = FALSE;
-    v->vid_sequence = 0;
-    v->vid_generation = 0;
-    v->vid_slot = 0;
-    v->vid_pts = 0.0;
+    s->ring = NULL;
+    s->ring_bytes = 0;
+    s->shm[0] = '\0';
+    s->rect_valid = FALSE;
+    s->playing = FALSE;
+    s->sequence = 0;
+    s->generation = 0;
+    s->slot = 0;
+    s->pts = 0.0;
+}
+
+static void
+pv_video_free(gpointer data)
+{
+    PvVideo *s = data;
+    if (!s) return;
+    pv_video_unmap(s);
+    pv_video_texture_clear(s);
+    g_free(s);
+}
+
+static PvVideo *
+pv_video_find(NsProcView *v, const char *token)
+{
+    if (!v->videos || !token || !*token) return NULL;
+    for (guint i = 0; i < v->videos->len; i++) {
+        PvVideo *s = g_ptr_array_index(v->videos, i);
+        if (strcmp(s->token, token) == 0) return s;
+    }
+    return NULL;
+}
+
+static PvVideo *
+pv_video_ensure(NsProcView *v, const char *token)
+{
+    PvVideo *s = pv_video_find(v, token);
+    if (s || !token || !*token) return s;
+    if (!v->videos) v->videos = g_ptr_array_new_with_free_func(pv_video_free);
+    s = g_new0(PvVideo, 1);
+    g_strlcpy(s->token, token, sizeof s->token);
+    g_ptr_array_add(v->videos, s);
+    return s;
+}
+
+static void
+pv_video_remove(NsProcView *v, PvVideo *s)
+{
+    if (v->videos && s) g_ptr_array_remove(v->videos, s);
+}
+
+static gboolean
+pv_video_any_playing(NsProcView *v)
+{
+    if (!v->videos) return FALSE;
+    for (guint i = 0; i < v->videos->len; i++) {
+        PvVideo *s = g_ptr_array_index(v->videos, i);
+        if (s->ring && s->playing) return TRUE;
+    }
+    return FALSE;
 }
 
 static void request_render(NsProcView *v);
@@ -1081,18 +1139,21 @@ static void print_run(NsProcView *v, GPtrArray *pages,
 static void request_tick(NsProcView *v);
 static void push_req(NsProcView *v, Req *req);
 
-static GdkTexture *pv_video_frame_texture(NsProcView *v);
+static GdkTexture *pv_video_frame_texture(NsProcView *v, PvVideo *s);
 
 static gboolean
 pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
     (void)clock;
     NsProcView *v = data;
-    if (!v->vring || !v->vid_playing) {
+    if (!pv_video_any_playing(v)) {
         v->vid_tick_id = 0;
         return G_SOURCE_REMOVE;
     }
-    pv_video_frame_texture(v);
+    for (guint i = 0; i < v->videos->len; i++) {
+        PvVideo *s = g_ptr_array_index(v->videos, i);
+        if (s->ring && s->playing) pv_video_frame_texture(v, s);
+    }
     gtk_widget_queue_draw(widget);
     v->vid_tick_count++;
     request_tick(v);
@@ -1112,7 +1173,7 @@ pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 static void
 pv_video_ensure_tick(NsProcView *v)
 {
-    if (!v->vid_tick_id && v->vring && v->vid_playing)
+    if (!v->vid_tick_id && pv_video_any_playing(v))
         v->vid_tick_id = gtk_widget_add_tick_callback(v->area, pv_video_tick,
                                                       v, NULL);
 }
@@ -1126,18 +1187,16 @@ pv_video_handle_line(NsProcView *v, const char *line)
         g_printerr("[video-helper] %s\n", clean);
     char **tok = g_strsplit(clean, " ", 8);
     guint n = g_strv_length(tok);
-    if (n >= 6 && strcmp(tok[0], "shm") == 0 &&
-        strcmp(tok[1], v->vid_token) != 0) {
-        if (g_getenv("NS_DBG_AUDIO"))
-            g_printerr("[shm-reject] line-tok=%s cur-tok=%s\n",
-                       tok[1], v->vid_token);
-    } else if (n >= 6 && strcmp(tok[0], "shm") == 0) {
-        gboolean was_playing = v->vid_playing;
-        gboolean had_rect = v->vid_rect_valid;
+    PvVideo *s = n >= 2 ? pv_video_find(v, tok[1]) : NULL;
+    if (n >= 6 && strcmp(tok[0], "shm") == 0) {
+        if (!s) s = pv_video_ensure(v, tok[1]);
+        gboolean was_playing = s->playing;
+        gboolean had_rect = s->rect_valid;
+        pv_video_unmap(s);
+        pv_video_texture_clear(s);
+        s->playing = was_playing;
+        s->rect_valid = had_rect;
 #ifdef G_OS_WIN32
-        pv_vring_unmap(v);
-        v->vid_playing = was_playing;
-        v->vid_rect_valid = had_rect;
         HANDLE hm = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, tok[2]);
         if (hm) {
             void *map = MapViewOfFile(hm, FILE_MAP_ALL_ACCESS, 0, 0, 0);
@@ -1150,23 +1209,18 @@ pv_video_handle_line(NsProcView *v, const char *line)
                 hdr->version == NS_VIDEO_RING_VERSION &&
                 hdr->nslots == NS_VIDEO_RING_SLOTS &&
                 sizeof *hdr + (gsize)hdr->nslots * hdr->frame_bytes <= view_bytes) {
-                v->vring = map;
-                v->vring_map = hm;
-                v->vring_bytes = view_bytes;
-                g_strlcpy(v->vid_shm, tok[2], sizeof v->vid_shm);
-                g_strlcpy(v->vid_token, tok[1], sizeof v->vid_token);
+                s->ring = map;
+                s->ring_map = hm;
+                s->ring_bytes = view_bytes;
+                g_strlcpy(s->shm, tok[2], sizeof s->shm);
             } else {
                 if (map) UnmapViewOfFile(map);
                 CloseHandle(hm);
             }
         }
-        pv_video_ensure_tick(v);
 #else
         if (g_getenv("NS_DBG_AUDIO"))
             g_printerr("[shm-adopt] %s %s\n", tok[1], tok[2]);
-        pv_vring_unmap(v);
-        v->vid_playing = was_playing;
-        v->vid_rect_valid = had_rect;
         int fd = shm_open(tok[2], O_RDWR, 0);
         if (fd >= 0) {
             struct stat st;
@@ -1181,10 +1235,9 @@ pv_video_handle_line(NsProcView *v, const char *line)
                         hdr->nslots == NS_VIDEO_RING_SLOTS &&
                         sizeof *hdr + (gsize)hdr->nslots * hdr->frame_bytes
                             <= (gsize)st.st_size) {
-                        v->vring = map;
-                        v->vring_bytes = (gsize)st.st_size;
-                        g_strlcpy(v->vid_shm, tok[2], sizeof v->vid_shm);
-                        g_strlcpy(v->vid_token, tok[1], sizeof v->vid_token);
+                        s->ring = map;
+                        s->ring_bytes = (gsize)st.st_size;
+                        g_strlcpy(s->shm, tok[2], sizeof s->shm);
                     } else {
                         munmap(map, (size_t)st.st_size);
                     }
@@ -1192,35 +1245,36 @@ pv_video_handle_line(NsProcView *v, const char *line)
             }
             close(fd);
         }
-        pv_video_ensure_tick(v);
 #endif
+        pv_video_ensure_tick(v);
+        gtk_widget_queue_draw(v->area);
     } else if (n >= 2 && strcmp(tok[0], "closed") == 0) {
-        if (strcmp(tok[1], v->vid_token) == 0) {
-            pv_vring_unmap(v);
-            pv_video_texture_clear(v);
+        if (s) {
+            pv_video_remove(v, s);
+            gtk_widget_queue_draw(v->area);
         }
     } else if (n >= 2 && strcmp(tok[0], "playing") == 0) {
-        if (strcmp(tok[1], v->vid_token) == 0) {
-            v->vid_playing = TRUE;
+        if (s) {
+            s->playing = TRUE;
             pv_video_ensure_tick(v);
         }
     } else if (n >= 2 && (strcmp(tok[0], "paused") == 0 ||
                           strcmp(tok[0], "ended") == 0 ||
                           strcmp(tok[0], "stalled") == 0)) {
-        if (strcmp(tok[1], v->vid_token) == 0) {
+        if (s) {
             gboolean waiting = strcmp(tok[0], "paused") != 0;
-            v->vid_playing = waiting;
+            s->playing = waiting;
             if (waiting) pv_video_ensure_tick(v);
             gtk_widget_queue_draw(v->area);
-            if (strcmp(tok[0], "ended") == 0 ||
-                strcmp(tok[0], "stalled") == 0) {
-                Req *req = g_new0(Req, 1);
-                req->type = REQ_VIDEO_EVENT;
-                req->seq = v->load_seq;
-                req->key = g_strdup(tok[1]);
-                req->query = g_strdup(tok[0]);
-                g_async_queue_push_front(v->queue, req);
-            }
+        }
+        if (strcmp(tok[0], "ended") == 0 ||
+            strcmp(tok[0], "stalled") == 0) {
+            Req *req = g_new0(Req, 1);
+            req->type = REQ_VIDEO_EVENT;
+            req->seq = v->load_seq;
+            req->key = g_strdup(tok[1]);
+            req->query = g_strdup(tok[0]);
+            g_async_queue_push_front(v->queue, req);
         }
     }
     g_strfreev(tok);
@@ -1299,44 +1353,44 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
         int fields = sscanf(cmd + 5, "%63s %d %d %d %d %d %d %d %d %d %d",
                             token, &x, &y, &w, &h, &fit,
                             &cx, &cy, &cw, &ch, &page);
-        if (fields >= 5 &&
-            (strcmp(token, v->vid_token) == 0 || !v->vid_token[0])) {
-            v->vid_x = x;
-            v->vid_y = y;
-            v->vid_w = w;
-            v->vid_h = h;
-            v->vid_fit = fit;
-            v->vid_clip_x = fields >= 10 ? cx : x;
-            v->vid_clip_y = fields >= 10 ? cy : y;
-            v->vid_clip_w = fields >= 10 ? cw : w;
-            v->vid_clip_h = fields >= 10 ? ch : h;
-            v->vid_rect_valid = w > 0 && h > 0;
-            v->vid_page = fields >= 11 && page;
+        PvVideo *s = fields >= 5 ? pv_video_ensure(v, token) : NULL;
+        if (s) {
+            s->x = x;
+            s->y = y;
+            s->w = w;
+            s->h = h;
+            s->fit = fit;
+            s->clip_x = fields >= 10 ? cx : x;
+            s->clip_y = fields >= 10 ? cy : y;
+            s->clip_w = fields >= 10 ? cw : w;
+            s->clip_h = fields >= 10 ? ch : h;
+            s->rect_valid = w > 0 && h > 0;
+            s->page = fields >= 11 && page;
             if (g_getenv("NS_DBG_AUDIO"))
-                g_printerr("[video-rect] %d,%d %dx%d clip=%d,%d %dx%d "
-                           "valid=%d\n", x, y, w, h, cx, cy, cw, ch,
-                           v->vid_rect_valid);
+                g_printerr("[video-rect] %s %d,%d %dx%d clip=%d,%d %dx%d "
+                           "valid=%d\n", token, x, y, w, h, cx, cy, cw, ch,
+                           s->rect_valid);
             gtk_widget_queue_draw(v->area);
         }
         return;
     }
     char cmd_tok[64] = "";
     if (g_str_has_prefix(cmd, "open ")) {
-        char token[64] = "";
-        sscanf(cmd + 5, "%63s", token);
-        if (strcmp(token, v->vid_token) != 0)
-            pv_video_texture_clear(v);
-        g_strlcpy(v->vid_token, token, sizeof v->vid_token);
-        v->vid_rect_valid = FALSE;
+        sscanf(cmd + 5, "%63s", cmd_tok);
+        PvVideo *s = pv_video_ensure(v, cmd_tok);
+        if (s) {
+            pv_video_texture_clear(s);
+            s->rect_valid = FALSE;
+        }
     } else if (g_str_has_prefix(cmd, "play ")) {
         sscanf(cmd + 5, "%63s", cmd_tok);
-        if (strcmp(cmd_tok, v->vid_token) == 0)
-            v->vid_playing = TRUE;
+        PvVideo *s = pv_video_find(v, cmd_tok);
+        if (s) s->playing = TRUE;
     } else if (g_str_has_prefix(cmd, "pause ") ||
                g_str_has_prefix(cmd, "stop ")) {
         sscanf(cmd + (cmd[0] == 'p' ? 6 : 5), "%63s", cmd_tok);
-        if (strcmp(cmd_tok, v->vid_token) == 0)
-            v->vid_playing = FALSE;
+        PvVideo *s = pv_video_find(v, cmd_tok);
+        if (s) s->playing = FALSE;
     }
     pv_video_send(v, cmd);
     pv_video_ensure_tick(v);
@@ -1345,8 +1399,7 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
 static void
 pv_video_shutdown(NsProcView *v)
 {
-    pv_vring_unmap(v);
-    pv_video_texture_clear(v);
+    if (v->videos) g_ptr_array_set_size(v->videos, 0);
     if (!v->video_proc) return;
     if (v->video_in) {
         g_output_stream_write_all(v->video_in, "quit\n", 5, NULL, NULL, NULL);
@@ -1422,17 +1475,19 @@ pv_append_media_process_stats(NsProcView *v, GString *out)
                                rss >= 0 ? rss / 1024.0 : 0.0);
         pv_append_proc_threads(out, procs[i].pid);
     }
-    if (any && v->vring) {
-        ns_video_ring_hdr *r = v->vring;
+    for (guint i = 0; any && v->videos && i < v->videos->len; i++) {
+        PvVideo *s = g_ptr_array_index(v->videos, i);
+        ns_video_ring_hdr *r = s->ring;
+        if (!r) continue;
         guint32 published = __atomic_load_n(&r->published, __ATOMIC_ACQUIRE);
         guint32 released = __atomic_load_n(&r->released, __ATOMIC_ACQUIRE);
         g_string_append_printf(out,
-                               "video queue %ux%u stride %u queued %u frame %u "
-                               "pts %.2fs shown %" G_GUINT64_FORMAT " dropped %"
-                               G_GUINT64_FORMAT "\n",
-                               r->width, r->height, r->stride,
-                               published - released, v->vid_sequence, v->vid_pts,
-                               v->vid_presented, v->vid_dropped);
+                               "video %s queue %ux%u stride %u queued %u "
+                               "frame %u pts %.2fs shown %" G_GUINT64_FORMAT
+                               " dropped %" G_GUINT64_FORMAT "\n",
+                               s->token, r->width, r->height, r->stride,
+                               published - released, s->sequence, s->pts,
+                               s->presented, s->dropped);
     }
 }
 
@@ -2435,7 +2490,7 @@ anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
         v->last_anim_frame_us = 0;
         return G_SOURCE_REMOVE;
     }
-    if (v->vring && v->vid_playing)
+    if (pv_video_any_playing(v))
         return G_SOURCE_CONTINUE;
     gint64 now = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     if (now <= 0) now = g_get_monotonic_time();
@@ -2775,7 +2830,9 @@ maybe_update_viewport(NsProcView *v)
     double dpr = page_dpr(v);
     if (w == v->last_vp_w && h == v->last_vp_h && dpr == v->last_vp_dpr)
         return FALSE;
-    v->vid_rect_valid = FALSE;
+    if (v->videos)
+        for (guint i = 0; i < v->videos->len; i++)
+            ((PvVideo *)g_ptr_array_index(v->videos, i))->rect_valid = FALSE;
     gtk_widget_queue_draw(v->area);
     v->last_vp_w = w;
     v->last_vp_h = h;
@@ -3258,7 +3315,7 @@ on_result(gpointer data)
                 if (res->pw > 0) v->page_w = res->pw;
                 configure_adjustments(v);
             }
-            if (res->kind && v->vring && v->vid_playing)
+            if (res->kind && pv_video_any_playing(v))
                 pv_request_render_beside_video(v);
             else if (res->kind)
                 request_render(v);
@@ -3604,12 +3661,13 @@ done:
 }
 
 static void
-pv_video_ring_position(NsProcView *v, ns_video_ring_hdr *r, double *position)
+pv_video_ring_position(NsProcView *v, PvVideo *s, ns_video_ring_hdr *r,
+                       double *position)
 {
-    if (pv_audio_clock_position(v, v->vid_token, position)) return;
+    if (pv_audio_clock_position(v, s->token, position)) return;
     guint32 seq1 = __atomic_load_n(&r->clock_sequence, __ATOMIC_ACQUIRE);
     if (!seq1 || (seq1 & 1u)) {
-        *position = v->vid_pts;
+        *position = s->pts;
         return;
     }
     guint32 flags = r->clock_flags;
@@ -3617,7 +3675,7 @@ pv_video_ring_position(NsProcView *v, ns_video_ring_hdr *r, double *position)
     double sample_position = r->clock_position;
     guint32 seq2 = __atomic_load_n(&r->clock_sequence, __ATOMIC_ACQUIRE);
     if (seq1 != seq2 || !(flags & NS_MEDIA_CLOCK_USED)) {
-        *position = v->vid_pts;
+        *position = s->pts;
         return;
     }
     if (flags & NS_MEDIA_CLOCK_PLAYING) {
@@ -3629,30 +3687,30 @@ pv_video_ring_position(NsProcView *v, ns_video_ring_hdr *r, double *position)
 }
 
 static gboolean
-pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
+pv_video_pick_frame(NsProcView *v, PvVideo *s, ns_video_ring_hdr *r,
                     guint32 *out_slot, guint32 *out_sequence,
                     double *out_pts)
 {
     guint32 generation = __atomic_load_n(&r->generation, __ATOMIC_ACQUIRE);
-    if (generation != v->vid_generation) {
-        v->vid_generation = generation;
-        v->vid_sequence = 0;
-        v->vid_pts = 0.0;
+    if (generation != s->generation) {
+        s->generation = generation;
+        s->sequence = 0;
+        s->pts = 0.0;
     }
 
     double position = 0.0;
-    pv_video_ring_position(v, r, &position);
+    pv_video_ring_position(v, s, r, &position);
     guint32 published = __atomic_load_n(&r->published, __ATOMIC_ACQUIRE);
     guint32 selected_sequence = 0;
     guint32 selected_slot = 0;
     double selected_pts = 0.0;
 
-    if (v->vid_sequence) {
-        ns_video_ring_slot *meta = &r->slots[v->vid_slot];
+    if (s->sequence) {
+        ns_video_ring_slot *meta = &r->slots[s->slot];
         guint32 sequence = __atomic_load_n(&meta->sequence, __ATOMIC_ACQUIRE);
-        if (sequence == v->vid_sequence && meta->generation == generation) {
+        if (sequence == s->sequence && meta->generation == generation) {
             selected_sequence = sequence;
-            selected_slot = v->vid_slot;
+            selected_slot = s->slot;
             selected_pts = meta->pts;
         }
     }
@@ -3673,7 +3731,7 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
         }
     }
 
-    if (!selected_sequence && !v->vid_playing) {
+    if (!selected_sequence && !s->playing) {
         for (guint32 age = NS_VIDEO_RING_SLOTS; age > 0; age--) {
             if (age > published) continue;
             guint32 sequence = published - age + 1u;
@@ -3698,9 +3756,9 @@ pv_video_pick_frame(NsProcView *v, ns_video_ring_hdr *r,
 }
 
 static GdkTexture *
-pv_video_frame_texture(NsProcView *v)
+pv_video_frame_texture(NsProcView *v, PvVideo *s)
 {
-    ns_video_ring_hdr *r = v->vring;
+    ns_video_ring_hdr *r = s->ring;
     guint32 slot = 0;
     guint32 sequence = 0;
     double pts = 0.0;
@@ -3711,17 +3769,17 @@ pv_video_frame_texture(NsProcView *v)
     guint32 fbytes  = r->frame_bytes;
     if (r->magic != NS_VIDEO_RING_MAGIC ||
         r->version != NS_VIDEO_RING_VERSION ||
-        !pv_video_pick_frame(v, r, &slot, &sequence, &pts) ||
+        !pv_video_pick_frame(v, s, r, &slot, &sequence, &pts) ||
         slot >= nslots || fw == 0 || fh == 0 ||
         (guint64)fstride < (guint64)fw * 4 ||
         (guint64)fstride * fh > fbytes ||
         sizeof(ns_video_ring_hdr) + (gsize)(slot + 1) * fbytes
-            > v->vring_bytes)
-        return v->vid_texture;
+            > s->ring_bytes)
+        return s->texture;
     guint32 generation = r->slots[slot].generation;
-    if (v->vid_texture && sequence == v->vid_tex_sequence &&
-        generation == v->vid_tex_generation)
-        return v->vid_texture;
+    if (s->texture && sequence == s->tex_sequence &&
+        generation == s->tex_generation)
+        return s->texture;
 
     const unsigned char *px = (const unsigned char *)r +
                               sizeof(ns_video_ring_hdr) + (gsize)slot * fbytes;
@@ -3730,18 +3788,18 @@ pv_video_frame_texture(NsProcView *v)
                                                  GDK_MEMORY_B8G8R8X8,
                                                  bytes, fstride);
     g_bytes_unref(bytes);
-    g_clear_object(&v->vid_texture);
-    v->vid_texture = texture;
-    v->vid_tex_sequence = sequence;
-    v->vid_tex_generation = generation;
+    g_clear_object(&s->texture);
+    s->texture = texture;
+    s->tex_sequence = sequence;
+    s->tex_generation = generation;
 
-    if (sequence != v->vid_sequence) {
-        if (v->vid_sequence && sequence > v->vid_sequence + 1u)
-            v->vid_dropped += sequence - v->vid_sequence - 1u;
-        v->vid_sequence = sequence;
-        v->vid_slot = slot;
-        v->vid_pts = pts;
-        v->vid_presented++;
+    if (sequence != s->sequence) {
+        if (s->sequence && sequence > s->sequence + 1u)
+            s->dropped += sequence - s->sequence - 1u;
+        s->sequence = sequence;
+        s->slot = slot;
+        s->pts = pts;
+        s->presented++;
     }
     guint32 released = __atomic_load_n(&r->released, __ATOMIC_ACQUIRE);
     guint32 target = sequence - 1u;
@@ -3751,25 +3809,25 @@ pv_video_frame_texture(NsProcView *v)
 }
 
 static graphene_rect_t
-pv_video_fit_rect(NsProcView *v, GdkTexture *texture, double fs)
+pv_video_fit_rect(PvVideo *s, GdkTexture *texture, double fs)
 {
     double fw = gdk_texture_get_width(texture);
     double fh = gdk_texture_get_height(texture);
-    double draw_x = v->vid_x;
-    double draw_y = v->vid_y;
-    double draw_w = v->vid_w;
-    double draw_h = v->vid_h;
-    if (v->vid_fit != 0) {
-        double scale_x = v->vid_w / fw;
-        double scale_y = v->vid_h / fh;
+    double draw_x = s->x;
+    double draw_y = s->y;
+    double draw_w = s->w;
+    double draw_h = s->h;
+    if (s->fit != 0) {
+        double scale_x = s->w / fw;
+        double scale_y = s->h / fh;
         double scale = MIN(scale_x, scale_y);
-        if (v->vid_fit == 2) scale = MAX(scale_x, scale_y);
-        else if (v->vid_fit == 3) scale = 1.0;
-        else if (v->vid_fit == 4) scale = MIN(1.0, scale);
+        if (s->fit == 2) scale = MAX(scale_x, scale_y);
+        else if (s->fit == 3) scale = 1.0;
+        else if (s->fit == 4) scale = MIN(1.0, scale);
         draw_w = fw * scale;
         draw_h = fh * scale;
-        draw_x += (v->vid_w - draw_w) * 0.5;
-        draw_y += (v->vid_h - draw_h) * 0.5;
+        draw_x += (s->w - draw_w) * 0.5;
+        draw_y += (s->h - draw_h) * 0.5;
     }
     return GRAPHENE_RECT_INIT((float)(draw_x / fs), (float)(draw_y / fs),
                               (float)(draw_w / fs), (float)(draw_h / fs));
@@ -3794,23 +3852,24 @@ pv_frame_covers(NsProcView *v, double fs, const graphene_rect_t *area)
 }
 
 static void
-pv_snapshot_video(NsProcView *v, double fs, GtkSnapshot *snapshot)
+pv_snapshot_one_video(NsProcView *v, PvVideo *s, double fs,
+                      GtkSnapshot *snapshot)
 {
-    if (!v->vring || !v->vid_rect_valid)
+    if (!s->ring || !s->rect_valid)
         return;
     graphene_rect_t clip = GRAPHENE_RECT_INIT(
-        (float)(v->vid_clip_x / fs), (float)(v->vid_clip_y / fs),
-        (float)(MAX(v->vid_clip_w, 0.0) / fs),
-        (float)(MAX(v->vid_clip_h, 0.0) / fs));
+        (float)(s->clip_x / fs), (float)(s->clip_y / fs),
+        (float)(MAX(s->clip_w, 0.0) / fs),
+        (float)(MAX(s->clip_h, 0.0) / fs));
     graphene_rect_t box = GRAPHENE_RECT_INIT(
-        (float)(v->vid_x / fs), (float)(v->vid_y / fs),
-        (float)(v->vid_w / fs), (float)(v->vid_h / fs));
+        (float)(s->x / fs), (float)(s->y / fs),
+        (float)(s->w / fs), (float)(s->h / fs));
     GdkRGBA letterbox = { 0.10f, 0.10f, 0.10f, 1.0f };
     gtk_snapshot_push_clip(snapshot, &clip);
     gtk_snapshot_append_color(snapshot, &letterbox, &box);
-    GdkTexture *texture = pv_video_frame_texture(v);
+    GdkTexture *texture = pv_video_frame_texture(v, s);
     if (texture) {
-        graphene_rect_t dst = pv_video_fit_rect(v, texture, fs);
+        graphene_rect_t dst = pv_video_fit_rect(s, texture, fs);
         gtk_snapshot_push_clip(snapshot, &box);
         gtk_snapshot_append_scaled_texture(snapshot, texture,
                                            GSK_SCALING_FILTER_LINEAR, &dst);
@@ -3825,13 +3884,25 @@ pv_snapshot_video(NsProcView *v, double fs, GtkSnapshot *snapshot)
         gint64 now_us = g_get_monotonic_time();
         if (now_us - last_us > 1000000) {
             last_us = now_us;
-            g_printerr("[composite] draws=%d/s new=%" G_GUINT64_FORMAT
+            g_printerr("[composite] %s draws=%d/s new=%" G_GUINT64_FORMAT
                        "/s dropped=%" G_GUINT64_FORMAT " seq=%u pts=%.3f\n",
-                       draws, v->vid_presented - last_presented,
-                       v->vid_dropped, v->vid_sequence, v->vid_pts);
-            last_presented = v->vid_presented;
+                       s->token, draws, s->presented - last_presented,
+                       s->dropped, s->sequence, s->pts);
+            last_presented = s->presented;
             draws = 0;
         }
+    }
+}
+
+static void
+pv_snapshot_videos(NsProcView *v, gboolean page, double fs,
+                   GtkSnapshot *snapshot)
+{
+    if (!v->videos) return;
+    for (guint i = 0; i < v->videos->len; i++) {
+        PvVideo *s = g_ptr_array_index(v->videos, i);
+        if (!s->page == !page)
+            pv_snapshot_one_video(v, s, fs, snapshot);
     }
 }
 
@@ -3840,14 +3911,12 @@ pv_snapshot_page_video(GtkSnapshot *snapshot, double offset_x,
                        double offset_y, gpointer data)
 {
     NsProcView *v = data;
-    if (!v->vid_page)
-        return;
     double fs = raster_scale(v);
     gtk_snapshot_save(snapshot);
     gtk_snapshot_translate(snapshot,
                            &GRAPHENE_POINT_INIT((float)(-offset_x / fs),
                                                 (float)(-offset_y / fs)));
-    pv_snapshot_video(v, fs, snapshot);
+    pv_snapshot_videos(v, TRUE, fs, snapshot);
     gtk_snapshot_restore(snapshot);
 }
 
@@ -3874,8 +3943,7 @@ ns_proc_view_area_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         GdkRGBA white = { 1.0f, 1.0f, 1.0f, 1.0f };
         gtk_snapshot_append_color(snapshot, &white, &area);
     }
-    if (!v->vid_page)
-        pv_snapshot_video(v, fs, snapshot);
+    pv_snapshot_videos(v, FALSE, fs, snapshot);
     if (!v->frame)
         return;
     graphene_rect_t bounds = GRAPHENE_RECT_INIT(
