@@ -695,6 +695,40 @@ css_bytes_have_viewport_media(GBytes *bytes)
     return seen;
 }
 
+enum {
+    STYLE_TEXT_VIEWPORT_MEDIA = 1,
+    STYLE_TEXT_NEEDS_OWN_SHEET = 2,
+    STYLE_TEXT_KNOWN = 4,
+};
+
+#define STYLE_TEXT_MEMO_MAX_BYTES (8u << 20)
+
+static GHashTable *g_style_text_memo;
+static gsize       g_style_text_memo_bytes;
+
+static int
+style_text_traits(const char *css)
+{
+    if (!g_style_text_memo)
+        g_style_text_memo = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, NULL);
+    gpointer memo = g_hash_table_lookup(g_style_text_memo, css);
+    if (memo) return GPOINTER_TO_INT(memo);
+    gsize len = strlen(css);
+    int traits = STYLE_TEXT_KNOWN;
+    if (css_has_viewport_media(css)) traits |= STYLE_TEXT_VIEWPORT_MEDIA;
+    if (strstr(css, "@import") || !ns_css_syntax_is_self_contained(css, len))
+        traits |= STYLE_TEXT_NEEDS_OWN_SHEET;
+    if (g_style_text_memo_bytes + len > STYLE_TEXT_MEMO_MAX_BYTES) {
+        g_hash_table_remove_all(g_style_text_memo);
+        g_style_text_memo_bytes = 0;
+    }
+    g_hash_table_insert(g_style_text_memo, g_strdup(css),
+                        GINT_TO_POINTER(traits));
+    g_style_text_memo_bytes += len;
+    return traits;
+}
+
 static void
 frame_viewport_px(const ns_node *frame, double *w, double *h)
 {
@@ -1127,11 +1161,11 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
         char *css = collect_large_style(n, base_url, cc)
             ? NULL : ns_css_style_element_text(n);
         if (css) {
-            if (css_has_viewport_media(css)) cc->media_seen = TRUE;
+            int traits = style_text_traits(css);
+            if (traits & STYLE_TEXT_VIEWPORT_MEDIA) cc->media_seen = TRUE;
             if (cc->run_base && cc->run_base != base_url)
                 sheet_run_flush(cc);
-            if (strstr(css, "@import") ||
-                !ns_css_syntax_is_self_contained(css, strlen(css))) {
+            if (traits & STYLE_TEXT_NEEDS_OWN_SHEET) {
                 sheet_run_flush(cc);
                 ns_css_stylesheet *sh =
                     ns_css_stylesheet_from_style_element_cached(n);
