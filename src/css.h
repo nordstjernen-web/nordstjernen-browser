@@ -950,6 +950,11 @@ char              *ns_css_shadow_adopted_css(ns_node *root);
 guint              ns_css_stylesheet_cache_generation(void);
 ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
                                                const char *base_url);
+typedef void (*ns_css_text_builder)(GString *out, gpointer data);
+ns_css_stylesheet *ns_css_merged_styles_cached_digest(guint64 digest, gsize len,
+                                                      const char *base_url,
+                                                      ns_css_text_builder build,
+                                                      gpointer data);
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
                                                       const char *css,
                                                       gssize len);
