@@ -3785,7 +3785,7 @@ pv_video_frame_texture(NsProcView *v, PvVideo *s)
                               sizeof(ns_video_ring_hdr) + (gsize)slot * fbytes;
     GBytes *bytes = g_bytes_new(px, (gsize)fstride * fh);
     GdkTexture *texture = gdk_memory_texture_new((int)fw, (int)fh,
-                                                 GDK_MEMORY_B8G8R8X8,
+                                                 GDK_MEMORY_B8G8R8A8_PREMULTIPLIED,
                                                  bytes, fstride);
     g_bytes_unref(bytes);
     g_clear_object(&s->texture);

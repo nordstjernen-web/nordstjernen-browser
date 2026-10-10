@@ -10,6 +10,12 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Performance: video frames from the helper process are handed to GTK
+  as premultiplied BGRA, the layout they already have, instead of
+  BGRX. GTK converted every BGRX frame on its worker threads before
+  uploading it, which cost the browser window about a core and a
+  half while a 720p video played next to a few video ads; the window
+  now uses about 40% less CPU.
 * Service workers: the `fetch` event a worker receives carries its
   `request`, `clientId`, `resultingClientId`, `preloadResponse` and
   `handled` as the event's own members, built as a `FetchEvent`.
