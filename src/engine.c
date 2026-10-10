@@ -510,8 +510,7 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
 typedef struct {
     GPtrArray  *out;
     GHashTable *cache;
-    GString    *run;
-    GPtrArray  *run_chunks;
+    GArray     *run_chunks;
     const char *run_base;
     const char *top_url;
     gboolean    strict_css_mime;
@@ -532,13 +531,42 @@ engine_node_in_head(const ns_node *n)
     return FALSE;
 }
 
+typedef struct {
+    const char *css;
+    gsize       len;
+    guint64     fp;
+    gboolean    has_at;
+} sheet_run_chunk;
+
 static void
-sheet_run_append(sheet_collect_ctx *cc, const char *css, const char *base_url)
+sheet_run_chunk_clear(gpointer data)
 {
-    g_string_append(cc->run, css);
-    g_string_append_c(cc->run, '\n');
-    g_ptr_array_add(cc->run_chunks, g_strdup(css));
+    sheet_run_chunk *chunk = data;
+    g_ref_string_release((char *)chunk->css);
+}
+
+static void
+sheet_run_append(sheet_collect_ctx *cc, char *css, gsize len,
+                 guint64 fp, gboolean has_at, const char *base_url)
+{
+    sheet_run_chunk chunk = { g_ref_string_acquire(css), len, fp, has_at };
+    g_array_append_val(cc->run_chunks, chunk);
     cc->run_base = base_url;
+}
+
+static guint
+sheet_run_chunk_hash(gconstpointer p)
+{
+    const sheet_run_chunk *c = p;
+    return (guint)(c->fp ^ (c->fp >> 32));
+}
+
+static gboolean
+sheet_run_chunk_equal(gconstpointer pa, gconstpointer pb)
+{
+    const sheet_run_chunk *a = pa, *b = pb;
+    return a->fp == b->fp && a->len == b->len &&
+           memcmp(a->css, b->css, a->len) == 0;
 }
 
 static void
@@ -546,28 +574,64 @@ sheet_run_drop_repeats(sheet_collect_ctx *cc)
 {
     guint n = cc->run_chunks->len;
     if (n < 2) return;
-    GHashTable *later = g_hash_table_new(g_str_hash, g_str_equal);
+    GHashTable *later = g_hash_table_new(sheet_run_chunk_hash,
+                                         sheet_run_chunk_equal);
     gboolean *drop = g_new0(gboolean, n);
     for (guint i = n; i-- > 0; ) {
-        const char *chunk = g_ptr_array_index(cc->run_chunks, i);
-        if (strchr(chunk, '@')) continue;
+        sheet_run_chunk *chunk = &g_array_index(cc->run_chunks,
+                                                sheet_run_chunk, i);
+        if (chunk->has_at) continue;
         if (g_hash_table_contains(later, chunk)) drop[i] = TRUE;
-        else g_hash_table_add(later, (gpointer)chunk);
+        else g_hash_table_add(later, chunk);
     }
     g_hash_table_destroy(later);
     for (guint i = n; i-- > 0; )
-        if (drop[i]) g_ptr_array_remove_index(cc->run_chunks, i);
+        if (drop[i]) g_array_remove_index(cc->run_chunks, i);
     g_free(drop);
+}
+
+static GArray *
+sheet_run_chunks_new(void)
+{
+    GArray *chunks = g_array_new(FALSE, FALSE, sizeof(sheet_run_chunk));
+    g_array_set_clear_func(chunks, sheet_run_chunk_clear);
+    return chunks;
 }
 
 #define SHEET_RUN_CHUNK_ALONE 16384
 
+typedef struct {
+    const sheet_run_chunk *chunks;
+    guint                  count;
+    gboolean               alone;
+} sheet_run_span;
+
 static void
-sheet_run_emit(sheet_collect_ctx *cc, const char *css, gsize len)
+sheet_run_span_text(GString *out, gpointer data)
 {
-    if (len == 0) return;
-    ns_css_stylesheet *sh = ns_css_merged_styles_cached(css, (gssize)len,
-                                                        cc->run_base);
+    const sheet_run_span *span = data;
+    for (guint i = 0; i < span->count; i++) {
+        g_string_append_len(out, span->chunks[i].css,
+                            (gssize)span->chunks[i].len);
+        if (!span->alone) g_string_append_c(out, '\n');
+    }
+}
+
+static void
+sheet_run_emit(sheet_collect_ctx *cc, const sheet_run_chunk *chunks,
+               guint count, gboolean alone)
+{
+    if (count == 0) return;
+    guint64 digest = alone ? 0x9e3779b97f4a7c15ULL : 1469598103934665603ULL;
+    gsize len = 0;
+    for (guint i = 0; i < count; i++) {
+        digest = (digest ^ chunks[i].fp) * 1099511628211ULL;
+        digest ^= (guint64)chunks[i].len * 0x100000001b3ULL;
+        len += chunks[i].len + (alone ? 0 : 1);
+    }
+    sheet_run_span span = { chunks, count, alone };
+    ns_css_stylesheet *sh = ns_css_merged_styles_cached_digest(
+        digest, len, cc->run_base, sheet_run_span_text, &span);
     if (!sh) return;
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
@@ -579,24 +643,18 @@ sheet_run_emit(sheet_collect_ctx *cc, const char *css, gsize len)
 static void
 sheet_run_flush(sheet_collect_ctx *cc)
 {
-    if (!cc->run || cc->run->len == 0) return;
+    if (!cc->run_chunks || cc->run_chunks->len == 0) return;
     sheet_run_drop_repeats(cc);
-    g_string_set_size(cc->run, 0);
+    const sheet_run_chunk *all = (const sheet_run_chunk *)cc->run_chunks->data;
+    guint start = 0;
     for (guint i = 0; i < cc->run_chunks->len; i++) {
-        const char *chunk = g_ptr_array_index(cc->run_chunks, i);
-        gsize len = strlen(chunk);
-        if (len < SHEET_RUN_CHUNK_ALONE) {
-            g_string_append_len(cc->run, chunk, (gssize)len);
-            g_string_append_c(cc->run, '\n');
-            continue;
-        }
-        sheet_run_emit(cc, cc->run->str, cc->run->len);
-        g_string_set_size(cc->run, 0);
-        sheet_run_emit(cc, chunk, len);
+        if (all[i].len < SHEET_RUN_CHUNK_ALONE) continue;
+        sheet_run_emit(cc, all + start, i - start, FALSE);
+        sheet_run_emit(cc, all + i, 1, TRUE);
+        start = i + 1;
     }
-    sheet_run_emit(cc, cc->run->str, cc->run->len);
-    g_ptr_array_set_size(cc->run_chunks, 0);
-    g_string_set_size(cc->run, 0);
+    sheet_run_emit(cc, all + start, cc->run_chunks->len - start, FALSE);
+    g_array_set_size(cc->run_chunks, 0);
     cc->run_base = NULL;
 }
 
@@ -698,34 +756,18 @@ css_bytes_have_viewport_media(GBytes *bytes)
 enum {
     STYLE_TEXT_VIEWPORT_MEDIA = 1,
     STYLE_TEXT_NEEDS_OWN_SHEET = 2,
-    STYLE_TEXT_KNOWN = 4,
+    STYLE_TEXT_HAS_AT_RULE = 4,
 };
 
-#define STYLE_TEXT_MEMO_MAX_BYTES (8u << 20)
-
-static GHashTable *g_style_text_memo;
-static gsize       g_style_text_memo_bytes;
-
 static int
-style_text_traits(const char *css)
+style_text_traits(const char *css, gsize len)
 {
-    if (!g_style_text_memo)
-        g_style_text_memo = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                  g_free, NULL);
-    gpointer memo = g_hash_table_lookup(g_style_text_memo, css);
-    if (memo) return GPOINTER_TO_INT(memo);
-    gsize len = strlen(css);
-    int traits = STYLE_TEXT_KNOWN;
+    int traits = 0;
     if (css_has_viewport_media(css)) traits |= STYLE_TEXT_VIEWPORT_MEDIA;
-    if (strstr(css, "@import") || !ns_css_syntax_is_self_contained(css, len))
+    if (strchr(css, '@')) traits |= STYLE_TEXT_HAS_AT_RULE;
+    if (((traits & STYLE_TEXT_HAS_AT_RULE) && strstr(css, "@import")) ||
+        !ns_css_syntax_is_self_contained(css, len))
         traits |= STYLE_TEXT_NEEDS_OWN_SHEET;
-    if (g_style_text_memo_bytes + len > STYLE_TEXT_MEMO_MAX_BYTES) {
-        g_hash_table_remove_all(g_style_text_memo);
-        g_style_text_memo_bytes = 0;
-    }
-    g_hash_table_insert(g_style_text_memo, g_strdup(css),
-                        GINT_TO_POINTER(traits));
-    g_style_text_memo_bytes += len;
     return traits;
 }
 
@@ -947,11 +989,14 @@ cached_sheets_trim(GHashTable *table)
     }
 }
 
+static void style_node_memos_trim(void);
+
 static void
 adopted_sheets_trim(void)
 {
     cached_sheets_trim(g_adopted_sheets);
     cached_sheets_trim(g_large_style_sheets);
+    style_node_memos_trim();
 }
 
 static void
@@ -979,6 +1024,88 @@ style_shadow_host_id(const ns_node *style)
     return NULL;
 }
 
+typedef struct {
+    guint64  text_hash;
+    gsize    text_len;
+    guint64  context;
+    char    *css;
+    gsize    css_len;
+    guint64  css_hash;
+    int      traits;
+    guint64  pass;
+} style_node_memo;
+
+static GHashTable *g_style_node_memos;
+
+static void
+style_node_memo_free(gpointer data)
+{
+    style_node_memo *m = data;
+    if (m->css) g_ref_string_release(m->css);
+    g_free(m);
+}
+
+static guint64
+style_node_context(const ns_node *style)
+{
+    const ns_node *root = style;
+    while (root->parent) root = root->parent;
+    guint64 context = (guint64)(guintptr)root * 0x9e3779b97f4a7c15ULL;
+    const char *media = ns_element_get_attr(style, "media");
+    if (media && *media) {
+        context ^= adopted_text_hash(media, strlen(media));
+        if (ns_css_media_query_matches(media)) context ^= 0x5bd1e995ULL;
+    }
+    const char *host = style_shadow_host_id(style);
+    if (host) context ^= adopted_text_hash(host, strlen(host)) * 31;
+    return context;
+}
+
+static const style_node_memo *
+style_node_memo_get(ns_node *style, guint64 text_hash, gsize text_len)
+{
+    if (!g_style_node_memos)
+        g_style_node_memos = g_hash_table_new_full(g_direct_hash,
+                                                   g_direct_equal, NULL,
+                                                   style_node_memo_free);
+    guint64 context = style_node_context(style);
+    style_node_memo *m = g_hash_table_lookup(g_style_node_memos, style);
+    if (m && m->text_hash == text_hash && m->text_len == text_len &&
+        m->context == context) {
+        m->pass = g_adopted_pass;
+        return m;
+    }
+    m = g_new0(style_node_memo, 1);
+    m->text_hash = text_hash;
+    m->text_len = text_len;
+    m->context = context;
+    m->pass = g_adopted_pass;
+    char *css = ns_css_style_element_text(style);
+    if (css) {
+        m->css_len = strlen(css);
+        m->css = g_ref_string_new_len(css, (gssize)m->css_len);
+        m->css_hash = adopted_text_hash(css, m->css_len);
+        m->traits = style_text_traits(css, m->css_len);
+        g_free(css);
+    }
+    g_hash_table_replace(g_style_node_memos, style, m);
+    return m;
+}
+
+static void
+style_node_memos_trim(void)
+{
+    if (!g_style_node_memos || g_hash_table_size(g_style_node_memos) < 4096)
+        return;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, g_style_node_memos);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        style_node_memo *m = value;
+        if (m->pass + 1 < g_adopted_pass) g_hash_table_iter_remove(&it);
+    }
+}
+
 static adopted_sheet_entry *
 large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
 {
@@ -1004,12 +1131,10 @@ large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
 }
 
 static gboolean
-collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc)
+collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc,
+                    guint64 hash, gsize len)
 {
     if (cc->frame_depth > 0) return FALSE;
-    guint64 hash = 1469598103934665603ULL;
-    gsize len = 0;
-    style_text_fingerprint(style, &hash, &len, 0);
     if (len < SHEET_RUN_CHUNK_ALONE) return FALSE;
     const char *media = ns_element_get_attr(style, "media");
     if (media && *media && !ns_css_media_query_matches(media)) return TRUE;
@@ -1158,10 +1283,14 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     GHashTable *cache = cc->cache;
     if (named && ns_node_is_element_named(n, "style") &&
         style_sheet_enabled(n)) {
-        char *css = collect_large_style(n, base_url, cc)
-            ? NULL : ns_css_style_element_text(n);
-        if (css) {
-            int traits = style_text_traits(css);
+        guint64 text_hash = 1469598103934665603ULL;
+        gsize text_len = 0;
+        style_text_fingerprint(n, &text_hash, &text_len, 0);
+        const style_node_memo *memo =
+            collect_large_style(n, base_url, cc, text_hash, text_len)
+            ? NULL : style_node_memo_get(n, text_hash, text_len);
+        if (memo && memo->css) {
+            int traits = memo->traits;
             if (traits & STYLE_TEXT_VIEWPORT_MEDIA) cc->media_seen = TRUE;
             if (cc->run_base && cc->run_base != base_url)
                 sheet_run_flush(cc);
@@ -1180,9 +1309,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                     g_hash_table_destroy(seen);
                 }
             } else {
-                sheet_run_append(cc, css, base_url);
+                sheet_run_append(cc, memo->css, memo->css_len, memo->css_hash,
+                                 (traits & STYLE_TEXT_HAS_AT_RULE) != 0,
+                                 base_url);
             }
-            g_free(css);
         }
     } else if (named && ns_node_is_element_named(n, "link") && base_url) {
         sheet_run_flush(cc);
@@ -1251,8 +1381,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
     adopted_sheets_trim();
     sheet_collect_ctx cc = {
         .out = out, .cache = css_cache,
-        .run = g_string_new(NULL),
-        .run_chunks = g_ptr_array_new_with_free_func(g_free),
+        .run_chunks = sheet_run_chunks_new(),
         .run_base = NULL,
         .top_url = base_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
@@ -1260,8 +1389,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
     };
     collect_stylesheets_walk(doc, base_url, &cc, 0);
     sheet_docs_sync(&cc);
-    g_string_free(cc.run, TRUE);
-    g_ptr_array_free(cc.run_chunks, TRUE);
+    g_array_free(cc.run_chunks, TRUE);
     ns_css_style_element_cache_end();
 }
 
