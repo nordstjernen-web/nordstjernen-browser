@@ -48618,15 +48618,17 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     double dur = 0;
+    double start = 0;
     int32_t len = 0;
     JS_ToFloat64(ctx, &dur, func_data[0]);
     JS_ToInt32(ctx, &len, func_data[1]);
+    JS_ToFloat64(ctx, &start, func_data[2]);
     int32_t idx = 0;
     if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx < 0 || idx >= len)
         return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
                                       "index out of TimeRanges bounds");
-    return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
+    return JS_NewFloat64(ctx, magic == 0 ? start : dur);
 }
 
 static void
@@ -48644,20 +48646,29 @@ ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
 }
 
 static JSValue
-ns_media_time_ranges_for(JSContext *ctx, double dur)
+ns_media_time_range_span(JSContext *ctx, double start, double end)
 {
-    int len = dur > 0 ? 1 : 0;
+    if (!(start >= 0) || start >= end) start = 0;
+    int len = end > 0 ? 1 : 0;
     JSValue obj = JS_NewObject(ctx);
     ns_obj_adopt_global_proto(ctx, obj, "TimeRanges");
     JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, len));
-    JSValue data[2] = { JS_NewFloat64(ctx, dur), JS_NewInt32(ctx, len) };
+    JSValue data[3] = { JS_NewFloat64(ctx, end), JS_NewInt32(ctx, len),
+                        JS_NewFloat64(ctx, start) };
     JS_SetPropertyStr(ctx, obj, "start",
-        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 0, 2, data));
+        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 0, 3, data));
     JS_SetPropertyStr(ctx, obj, "end",
-        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 1, 2, data));
+        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 1, 3, data));
     JS_FreeValue(ctx, data[0]);
     JS_FreeValue(ctx, data[1]);
+    JS_FreeValue(ctx, data[2]);
     return obj;
+}
+
+static JSValue
+ns_media_time_ranges_for(JSContext *ctx, double dur)
+{
+    return ns_media_time_range_span(ctx, 0, dur);
 }
 
 static double
@@ -48682,7 +48693,8 @@ static JSValue
 ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
 {
     double end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
-    return ns_media_time_ranges_for(ctx, end);
+    double start = ns_media_prop_number(ctx, this_val, "_nd_buffered_start");
+    return ns_media_time_range_span(ctx, start, end);
 }
 
 static JSValue
@@ -48815,6 +48827,7 @@ ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val, ns_node *el)
     JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, 0.0));
     JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_buffered_start", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_nd_played_end", JS_NewFloat64(ctx, 0.0));
@@ -67172,6 +67185,8 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
     } else if (strcmp(kind, "unmuted") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_muted", JS_FALSE);
         ns_js_dispatch_event(js, n, "volumechange", NULL);
+    } else if (strcmp(kind, "bufstart") == 0) {
+        JS_SetPropertyStr(ctx, el, "_nd_buffered_start", JS_NewFloat64(ctx, value));
     } else if (strcmp(kind, "buf") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "progress", NULL);
