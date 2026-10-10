@@ -1579,48 +1579,125 @@ ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_canvas_font_size_token(const char *tok, double *size_px)
+{
+    static const struct { const char *name; double px; } keywords[] = {
+        { "xx-small", 9 }, { "x-small", 10 }, { "small", 13 },
+        { "medium", 16 }, { "large", 18 }, { "x-large", 24 },
+        { "xx-large", 32 }, { "xxx-large", 48 },
+        { "smaller", 13 }, { "larger", 19 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(keywords); i++) {
+        gsize n = strlen(keywords[i].name);
+        if (g_ascii_strncasecmp(tok, keywords[i].name, n) == 0 &&
+            (tok[n] == '\0' || tok[n] == '/')) {
+            *size_px = keywords[i].px;
+            return TRUE;
+        }
+    }
+    if (!g_ascii_isdigit(tok[0]) && tok[0] != '.') return FALSE;
+    char *endp = NULL;
+    double v = g_ascii_strtod(tok, &endp);
+    if (!endp || endp == tok) return FALSE;
+    static const struct { const char *unit; double scale; } units[] = {
+        { "px", 1.0 }, { "pt", 96.0 / 72.0 }, { "pc", 16.0 },
+        { "in", 96.0 }, { "cm", 96.0 / 2.54 }, { "mm", 96.0 / 25.4 },
+        { "q", 96.0 / 101.6 }, { "rem", 16.0 }, { "em", 16.0 },
+        { "ex", 8.0 }, { "ch", 8.0 }, { "%", 0.16 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(units); i++) {
+        gsize n = strlen(units[i].unit);
+        if (g_ascii_strncasecmp(endp, units[i].unit, n) == 0 &&
+            (endp[n] == '\0' || endp[n] == '/')) {
+            *size_px = v * units[i].scale;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_canvas_font_prefix_token(const char *tok, NsPangoFontDescription *desc)
+{
+    if (g_ascii_strcasecmp(tok, "italic") == 0) {
+        ns_pango_font_description_set_style(desc, NS_PANGO_STYLE_ITALIC);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(tok, "oblique") == 0) {
+        ns_pango_font_description_set_style(desc, NS_PANGO_STYLE_OBLIQUE);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(tok, "bold") == 0 ||
+        g_ascii_strcasecmp(tok, "bolder") == 0) {
+        ns_pango_font_description_set_weight(desc, NS_PANGO_WEIGHT_BOLD);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(tok, "lighter") == 0) {
+        ns_pango_font_description_set_weight(desc, NS_PANGO_WEIGHT_LIGHT);
+        return TRUE;
+    }
+    if (g_ascii_isdigit(tok[0])) {
+        char *endp = NULL;
+        gint64 weight = g_ascii_strtoll(tok, &endp, 10);
+        if (endp && *endp == '\0' && weight >= 1 && weight <= 1000) {
+            ns_pango_font_description_set_weight(desc, (NsPangoWeight)weight);
+            return TRUE;
+        }
+        return FALSE;
+    }
+    static const char *const ignored[] = {
+        "normal", "small-caps", "ultra-condensed", "extra-condensed", "condensed",
+        "semi-condensed", "semi-expanded", "expanded", "extra-expanded",
+        "ultra-expanded",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(ignored); i++)
+        if (g_ascii_strcasecmp(tok, ignored[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 NsPangoFontDescription *
 ns_canvas_font_desc(const char *css_font)
 {
     const char *src = css_font && *css_font ? css_font : "10px sans-serif";
+    NsPangoFontDescription *desc = ns_pango_font_description_new();
+    char **tokens = g_strsplit_set(src, " \t\n\r\f", -1);
     double size_px = 10.0;
-    const char *p = src;
-    GString *rest = g_string_new(NULL);
     gboolean found_size = FALSE;
-    while (*p) {
-        while (*p && g_ascii_isspace(*p)) p++;
-        const char *start = p;
-        while (*p && !g_ascii_isspace(*p)) p++;
-        gsize len = (gsize)(p - start);
-        if (len == 0) continue;
-        if (!found_size && len >= 3 && g_ascii_isdigit(start[0])) {
-            char *endp = NULL;
-            double v = g_ascii_strtod(start, &endp);
-            if (endp && endp > start) {
-                gsize used = (gsize)(endp - start);
-                if (used + 2 <= len &&
-                    (g_ascii_strncasecmp(endp, "px", 2) == 0 ||
-                     g_ascii_strncasecmp(endp, "pt", 2) == 0)) {
-                    if (g_ascii_strncasecmp(endp, "pt", 2) == 0)
-                        v = v * 96.0 / 72.0;
-                    size_px = v;
-                    found_size = TRUE;
-                    continue;
-                }
-                if (used == len) {
-                    size_px = v;
-                    found_size = TRUE;
-                    continue;
-                }
+    gboolean skip_line_height = FALSE;
+    GString *family = g_string_new(NULL);
+    for (char **t = tokens; *t; t++) {
+        const char *tok = *t;
+        if (!*tok) continue;
+        if (!found_size) {
+            if (ns_canvas_font_size_token(tok, &size_px)) {
+                found_size = TRUE;
+                const char *slash = strchr(tok, '/');
+                skip_line_height = slash && slash[1] == '\0';
+                continue;
             }
+            if (ns_canvas_font_prefix_token(tok, desc)) continue;
+            found_size = TRUE;
         }
-        if (rest->len) g_string_append_c(rest, ' ');
-        g_string_append_len(rest, start, len);
+        if (skip_line_height) {
+            skip_line_height = FALSE;
+            continue;
+        }
+        if (!family->len && tok[0] == '/') {
+            skip_line_height = tok[1] == '\0';
+            continue;
+        }
+        if (family->len) g_string_append_c(family, ' ');
+        g_string_append(family, tok);
     }
-    NsPangoFontDescription *desc = ns_pango_font_description_from_string(
-        rest->len ? rest->str : "sans-serif");
-    g_string_free(rest, TRUE);
-    if (size_px <= 0) size_px = 10;
+    g_strfreev(tokens);
+    char *pango_family = ns_css_font_family_for_pango(
+        family->len ? family->str : "sans-serif");
+    ns_pango_font_description_set_family(desc,
+        pango_family && *pango_family ? pango_family : "sans-serif");
+    g_free(pango_family);
+    g_string_free(family, TRUE);
+    if (!(size_px > 0)) size_px = 10;
     ns_pango_font_description_set_absolute_size(
         desc, ns_paint_pango_font_size(size_px));
     return desc;
