@@ -31755,14 +31755,20 @@ incr_mark_attr_change(ns_node *target, const char *name, const char *old_value)
         incr_mark_queued_attr_change(target, name, old_value);
 }
 
+static gboolean
+attr_key_or_link_rel(const ns_node *target, const char *low)
+{
+    return g_hash_table_contains(g_attr_keys, low) ||
+           (strcmp(low, "rel") == 0 && ns_node_is_element_named(target, "link"));
+}
+
 gboolean
 ns_css_attr_may_affect_style(const ns_node *target, const char *name)
 {
-    (void)target;
     if (!name || !*name || !g_struct_ready || !g_attr_keys) return TRUE;
     if (is_presentational_attr_name(name)) return TRUE;
     char *low = g_ascii_strdown(name, -1);
-    gboolean affects = g_hash_table_contains(g_attr_keys, low);
+    gboolean affects = attr_key_or_link_rel(target, low);
     static const char *const intrinsic[] = {
         "class", "id", "style", "hidden", "lang", "xml:lang", "dir",
         "width", "height", "src", "srcset", "sizes", "href", "type",

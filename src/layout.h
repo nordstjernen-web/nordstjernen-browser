@@ -222,6 +222,7 @@ gboolean ns_inline_shift_bounds(const ns_box *box, double *x0, double *y0,
                                 double *x1, double *y1);
 gboolean ns_inline_unshift_point(const ns_box *box, struct _PangoLayout *layout,
                                  double *x, double *y);
+char *ns_layout_select_srcset(const char *srcset, const char *sizes);
 double ns_text_indent_px(const ns_style *s, double basis);
 double ns_inline_text_indent_px(const ns_box *run, const ns_style *s,
                                 double basis);

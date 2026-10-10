@@ -3,6 +3,25 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: `<link rel="preload">` with a known `as` (style, script, font,
+  image, track, fetch) fires `load` or `error` once its fetch ends. The
+  fetch runs in the background and reuses what the engine's preloader
+  already fetched; a `media` that does not match or a `type` the `as`
+  cannot use skips the preload without an event, and CSP (with the
+  element's nonce) and mixed-content blocking give `error`. `fetch` and
+  `track` preloads load on any HTTP response, the others on a 2xx status.
+  A connected `<link>` loads again when its `rel`, `href`, `as` or
+  `imagesrcset` changes in a way that needs a new fetch, and when it is
+  inserted again: switching `rel` from `preload` to `stylesheet` applies
+  the sheet and fires `load` without a second request, and switching back
+  to `preload` fires nothing, so a handler that toggles `rel` cannot loop.
+  A preload does not hold back the window `load` event, and takes one
+  resource timing entry that its first consumer reuses.
+  An `as=image` preload with only `imagesrcset` loads the chosen
+  candidate. The "preload, then swap to stylesheet" pattern never
+  finished before, and apps that waited for it stalled; ChatGPT reloaded
+  itself every few seconds. Animation frame callbacks no longer run while
+  the engine blocks on a stylesheet fetch during a style flush.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size
