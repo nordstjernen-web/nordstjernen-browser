@@ -875,7 +875,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/release") == 0) {
         s->frame_valid = 0;
         int changed = 0;
-        char *href = s->cur ? ns_browser_release_click(s->cur, &changed) : NULL;
+        long x = 0, y = 0;
+        gboolean at = json_get_long(body, "x", &x) == 0 &&
+                      json_get_long(body, "y", &y) == 0;
+        char *href = !s->cur ? NULL
+                   : at ? ns_browser_release_click_at(s->cur, (int)x, (int)y,
+                                                      &changed)
+                        : ns_browser_release_click(s->cur, &changed);
         session_stash_post(s, href);
         reply_href_changed(ctrl_w, href, changed > 0);
         free(href);
