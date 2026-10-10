@@ -9054,7 +9054,9 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
         if (!ab) continue;
         gboolean cyclic = replaced_width_is_cyclic(ab) ||
             (!max_content && replaced_width_is_percent(ab));
-        if (cyclic) {
+        gboolean to_min_content = !max_content && !cyclic &&
+            (ab->kind == NS_BOX_BLOCK || ab->kind == NS_BOX_TABLE);
+        if (cyclic || to_min_content) {
             if (!saved)
                 saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
             ns_atomic_geometry g = {
@@ -9065,6 +9067,10 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
         }
         if (inline_atomic_needs_layout(ab))
             layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+        if (to_min_content) {
+            double w = min_width_of(ab, parent_style);
+            if (w >= 0 && w < ab->content_width) ab->content_width = w;
+        }
         if (cyclic) {
             double w = replaced_intrinsic_contribution(ab, max_content);
             double ratio = ab->content_width > 0 && ab->content_height > 0
