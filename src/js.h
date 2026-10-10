@@ -141,6 +141,7 @@ void   ns_js_dispatch_hashchange(ns_js *js,
 void   ns_js_free(ns_js *js);
 
 gboolean ns_js_in_pump(const ns_js *js);
+gboolean ns_js_page_busy(const ns_js *js);
 
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url);
 
