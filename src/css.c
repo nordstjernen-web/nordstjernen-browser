@@ -6690,6 +6690,21 @@ done:
 }
 
 static void
+gradient_hint_color(ns_css_gradient_stop *hint, const ns_css_gradient_stop *prev,
+                    const ns_css_gradient_stop *next)
+{
+    double a = (prev->a + next->a) / 2.0;
+    double p[3] = { prev->r, prev->g, prev->b };
+    double n[3] = { next->r, next->g, next->b };
+    guint8 *out[3] = { &hint->r, &hint->g, &hint->b };
+    for (int k = 0; k < 3; k++) {
+        double pm = (p[k] * prev->a + n[k] * next->a) / 2.0;
+        *out[k] = (guint8)(a > 0 ? pm / a + 0.5 : (p[k] + n[k]) / 2.0);
+    }
+    hint->a = (guint8)(a + 0.5);
+}
+
+static void
 gradient_finish_stops(ns_css_gradient *gr)
 {
     int n = MIN(gr->n_stops, NS_CSS_GRADIENT_STOPS_MAX);
@@ -6714,13 +6729,8 @@ gradient_finish_stops(ns_css_gradient *gr)
         }
         i = j;
     }
-    for (int i = 1; i + 1 < n; i++) {
-        if (!st[i].is_hint) continue;
-        st[i].r = (guint8)((st[i - 1].r + st[i + 1].r) / 2);
-        st[i].g = (guint8)((st[i - 1].g + st[i + 1].g) / 2);
-        st[i].b = (guint8)((st[i - 1].b + st[i + 1].b) / 2);
-        st[i].a = (guint8)((st[i - 1].a + st[i + 1].a) / 2);
-    }
+    for (int i = 1; i + 1 < n; i++)
+        if (st[i].is_hint) gradient_hint_color(&st[i], &st[i - 1], &st[i + 1]);
 }
 
 static gboolean
