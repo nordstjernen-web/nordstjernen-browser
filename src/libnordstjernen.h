@@ -111,6 +111,12 @@ char *ns_browser_link_under(ns_browser *browser, int x, int y);
  * re-render, 0 if nothing changed, -1 if no page is open. */
 int ns_browser_release(ns_browser *browser);
 char *ns_browser_release_click(ns_browser *browser, int *out_changed);
+/* Dispatch a wheel event of (dx, dy) CSS pixels at page coordinates
+ * (x, y) to the element there. Returns 1 if the page cancelled it, so
+ * the caller should not scroll; *out_changed is set when the handlers
+ * changed the page. */
+int ns_browser_wheel_event(ns_browser *browser, int x, int y, int dx, int dy,
+                           int mods, int *out_changed);
 /* As ns_browser_release_click, with the pointer released at page
  * coordinates (x, y): pointerup/mouseup target the element under that
  * point and click goes to the nearest common ancestor of it and the
