@@ -1253,6 +1253,14 @@ pv_video_handle_line(NsProcView *v, const char *line)
             pv_video_remove(v, s);
             gtk_widget_queue_draw(v->area);
         }
+    } else if (n >= 2 && strcmp(tok[0], "evicted") == 0) {
+        if (s) {
+            gboolean had_rect = s->rect_valid;
+            pv_video_unmap(s);
+            pv_video_texture_clear(s);
+            s->rect_valid = had_rect;
+            gtk_widget_queue_draw(v->area);
+        }
     } else if (n >= 2 && strcmp(tok[0], "playing") == 0) {
         if (s) {
             s->playing = TRUE;

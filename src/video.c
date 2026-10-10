@@ -176,6 +176,7 @@ struct ns_video_cache {
     guint             next_token;
     guint             next_seq;
     gboolean          page_coords;
+    guint             layout_note_gen;
 };
 
 typedef struct ns_pending {
@@ -499,12 +500,14 @@ ns_video_cache_note_layout(ns_video_cache *cache, const ns_box *root,
     if (!cache || !root) return;
     if (!(scale > 0.0)) scale = 1.0;
     if (cache->page_coords) scroll_y = 0;
+    cache->layout_note_gen++;
     GPtrArray *videos = g_ptr_array_new();
     ns_layout_collect_videos(root, videos);
     for (guint i = 0; i < videos->len; i++) {
         ns_box *box = g_ptr_array_index(videos, i);
         ns_video *v = box->media ? box->media->video : NULL;
         if (!v) continue;
+        v->layout_note_gen = cache->layout_note_gen;
         ns_video_note_paint_rect(v,
                                  (box->x - scroll_x) * scale,
                                  (box->y - scroll_y) * scale,
@@ -1347,6 +1350,8 @@ ns_video_materialize_video(ns_video_cache *cache, ns_video *v,
         ns_video_emit_audio(cache, "video open %s %s", v->token,
                             v->video_file);
         v->video_opened = TRUE;
+        if (v->loop)
+            ns_video_emit_audio(cache, "video loop %s 1", v->token);
         if (v->cur_time > 0)
             ns_video_helper_seek(cache, v, v->cur_time);
         if (v->playing)
@@ -2127,7 +2132,9 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         gboolean superseded = opened_count >= 2 && newest_audible &&
             v != newest_audible && v->mse_id &&
             v->seq < newest_audible->seq;
-        gboolean stale = v->last_paint_us > 0 &&
+        gboolean in_layout = cache->layout_note_gen != 0 &&
+            v->layout_note_gen == cache->layout_note_gen;
+        gboolean stale = !in_layout && v->last_paint_us > 0 &&
             now_us - v->last_paint_us > (gint64)3000000;
         if (opened_count >= 2 && (v->video_opened || v->audio_opened) &&
             (superseded || stale)) {
