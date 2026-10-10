@@ -3,6 +3,17 @@ Changelog:
 
 1.0.32:
 ======
+* Paint: gradients interpolate in premultiplied alpha, as CSS requires.
+  A stop that is `transparent` (transparent black) no longer pulls the
+  colour of its neighbour towards black, so
+  `linear-gradient(transparent, #fcfcfc)` fades without a grey band and
+  `linear-gradient(red, transparent)` stays red as it fades. This covers
+  linear, radial, repeating and conic gradients and mask gradients; a
+  transition hint takes the premultiplied average of its neighbours at
+  its position (its curve is still a straight segment through that
+  colour). Colour stops placed before the previous stop, for example
+  `red 50%, blue 20px`, are clamped to it instead of scrambling the
+  colours.
 * Layout: a `::before` or `::after` whose `content` is `none` or `normal`
   generates no box, also when it is absolutely positioned or an
   inline-block. Such pseudo-elements used to paint their background, so
