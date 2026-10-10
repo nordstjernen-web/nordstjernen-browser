@@ -3,6 +3,23 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a grid item stretched to its row (`align-self: normal` or
+  `stretch`, `height: auto`) has a definite height, so `height: 100%`
+  on its children resolves against the stretched size, as in Chrome. A
+  child with `height:100%` used to collapse to its content, so content
+  meant to sit centred between `1fr` rows stuck to the top instead. A
+  stretched item that is itself a flex container is laid out against the
+  stretched height, so `justify-content`, `align-items` and `flex-grow`
+  inside it use the row height. The stretch respects the item's
+  `min-height` and `max-height`, percentages against the grid area, and
+  skips items that behave as `start` (`align-self: normal` with an
+  `aspect-ratio` or an intrinsic `height`).
+* Layout: a column flex container whose height comes from its flex
+  parent (a stretched row item or the main size of a column) no longer
+  subtracts its padding and border a second time with
+  `box-sizing: border-box`, so its children are no longer placed too
+  high, and a `height: 100%` card in such a column keeps its size when
+  the row is laid out twice.
 * Paint: gradients interpolate in premultiplied alpha, as CSS requires.
   A stop that is `transparent` (transparent black) no longer pulls the
   colour of its neighbour towards black, so
