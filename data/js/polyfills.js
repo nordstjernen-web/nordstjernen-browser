@@ -2079,14 +2079,13 @@
                 }
                 function defineFrameAccessor(name, getter) {
                     if (Object.getOwnPropertyDescriptor(elementProto, name)) return;
-                    var nativeGet = null;
                     for (var anc = Object.getPrototypeOf(elementProto); anc;
                          anc = Object.getPrototypeOf(anc)) {
                         var d = Object.getOwnPropertyDescriptor(anc, name);
-                        if (d && d.get) { nativeGet = d.get; break; }
+                        if (d && d.get) return;
                     }
                     Object.defineProperty(elementProto, name, {
-                        configurable: true, get: nativeGet || getter
+                        configurable: true, get: getter
                     });
                 }
                 function isFrameElement(el) {
@@ -5951,6 +5950,44 @@
                 })
             });
         } catch (e) {}
+        if (navigator.storage && typeof navigator.storage.estimate === 'function') {
+            var makeStorageQuota = function () {
+                var quota = {};
+                Object.defineProperty(quota, 'queryUsageAndQuota', {
+                    configurable: true, enumerable: true, writable: true,
+                    value: nativeize(function queryUsageAndQuota(success, failure) {
+                        navigator.storage.estimate().then(function (est) {
+                            if (typeof success === 'function')
+                                success(est.usage, est.quota);
+                        }, function (err) {
+                            if (typeof failure === 'function') failure(err);
+                        });
+                    })
+                });
+                Object.defineProperty(quota, 'requestQuota', {
+                    configurable: true, enumerable: true, writable: true,
+                    value: nativeize(function requestQuota(size, success, failure) {
+                        navigator.storage.estimate().then(function (est) {
+                            if (typeof success === 'function')
+                                success(Math.min(Number(size) || 0, est.quota));
+                        }, function (err) {
+                            if (typeof failure === 'function') failure(err);
+                        });
+                    })
+                });
+                return quota;
+            };
+            try {
+                Object.defineProperty(navigator, 'webkitTemporaryStorage', {
+                    configurable: true, enumerable: true,
+                    value: makeStorageQuota()
+                });
+                Object.defineProperty(navigator, 'webkitPersistentStorage', {
+                    configurable: true, enumerable: true,
+                    value: makeStorageQuota()
+                });
+            } catch (e) {}
+        }
         try {
             Object.defineProperty(navigator, 'getAutoplayPolicy', {
                 configurable: true, enumerable: true,
