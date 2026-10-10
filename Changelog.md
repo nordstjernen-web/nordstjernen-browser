@@ -10,6 +10,14 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* DOM: reading `contentDocument` on a `<div>` threw "Illegal
+  invocation", which broke jQuery's `.contents()` on every div. The
+  polyfill copied the frame-only native getter onto
+  `HTMLDivElement.prototype`; it now leaves the native accessor alone.
+* `navigator.webkitTemporaryStorage` and `webkitPersistentStorage`
+  (`queryUsageAndQuota`, `requestQuota`) exist, as in the Chrome the
+  user agent names, and report what `navigator.storage.estimate()`
+  does.
 * Security: fixes from Northstar's audit and a use-after-free that
   AddressSanitizer found there on github.com, ported here.
   - Page script no longer runs in the middle of layout. Layout waits for
