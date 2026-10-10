@@ -17330,6 +17330,50 @@ ns_computed_box_shorthand(JSContext *ctx, const ns_node *n,
 }
 
 static char *
+ns_computed_scroll_timeline(JSContext *ctx, const ns_node *n)
+{
+    char *names = ns_computed_lookup(ctx, n, "scroll-timeline-name");
+    char *axes = ns_computed_lookup(ctx, n, "scroll-timeline-axis");
+    char *out = ns_css_scroll_timeline_compose(names, axes);
+    g_free(names);
+    g_free(axes);
+    return out;
+}
+
+static char *
+ns_computed_simple_shorthand(JSContext *ctx, const ns_node *n,
+                             const char *name, gboolean *matched)
+{
+    static const struct {
+        const char *name;
+        const char *parts[4];
+    } boxes[] = {
+        { "margin", { "margin-top", "margin-right", "margin-bottom",
+                      "margin-left" } },
+        { "padding", { "padding-top", "padding-right", "padding-bottom",
+                       "padding-left" } },
+        { "border-width", { "border-top-width", "border-right-width",
+                            "border-bottom-width", "border-left-width" } },
+        { "border-color", { "border-top-color", "border-right-color",
+                            "border-bottom-color", "border-left-color" } },
+        { "border-style", { "border-top-style", "border-right-style",
+                            "border-bottom-style", "border-left-style" } },
+        { "inset", { "top", "right", "bottom", "left" } },
+    };
+    *matched = TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(boxes); i++)
+        if (strcmp(name, boxes[i].name) == 0)
+            return ns_computed_box_shorthand(ctx, n, boxes[i].parts[0],
+                                             boxes[i].parts[1],
+                                             boxes[i].parts[2],
+                                             boxes[i].parts[3]);
+    if (strcmp(name, "scroll-timeline") == 0)
+        return ns_computed_scroll_timeline(ctx, n);
+    *matched = FALSE;
+    return NULL;
+}
+
+static char *
 ns_computed_box_edge_px(const ns_box *b, const char *name)
 {
     if (!b) return NULL;
@@ -18032,30 +18076,9 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(fsize); g_free(flh); g_free(ffamily);
         return g_string_free(out, FALSE);
     }
-    if (strcmp(name, "margin") == 0)
-        return ns_computed_box_shorthand(ctx, n, "margin-top", "margin-right",
-                                         "margin-bottom", "margin-left");
-    if (strcmp(name, "padding") == 0)
-        return ns_computed_box_shorthand(ctx, n, "padding-top", "padding-right",
-                                         "padding-bottom", "padding-left");
-    if (strcmp(name, "border-width") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-width",
-                                         "border-right-width",
-                                         "border-bottom-width",
-                                         "border-left-width");
-    if (strcmp(name, "border-color") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-color",
-                                         "border-right-color",
-                                         "border-bottom-color",
-                                         "border-left-color");
-    if (strcmp(name, "border-style") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-style",
-                                         "border-right-style",
-                                         "border-bottom-style",
-                                         "border-left-style");
-    if (strcmp(name, "inset") == 0)
-        return ns_computed_box_shorthand(ctx, n, "top", "right",
-                                         "bottom", "left");
+    gboolean simple_matched = FALSE;
+    char *simple = ns_computed_simple_shorthand(ctx, n, name, &simple_matched);
+    if (simple_matched) return simple;
     static const char *const border_sides[4] = {
         "top", "right", "bottom", "left",
     };
@@ -18769,7 +18792,7 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
         "gap", "grid", "grid-area", "grid-column", "grid-row",
         "grid-template", "inset", "list-style", "margin", "outline",
         "overflow", "padding", "place-content", "place-items", "place-self",
-        "text-decoration", "transition",
+        "scroll-timeline", "text-decoration", "transition",
     };
     gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
     for (gsize i = 0; !ok && i < G_N_ELEMENTS(shorthands); i++)
@@ -44240,6 +44263,7 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         if (next_x != p->scroll_x || next_y != p->scroll_y) {
             p->scroll_x = next_x;
             p->scroll_y = next_y;
+            ns_box_note_scroll();
             changed = TRUE;
             if (p->dom) g_ptr_array_add(scrolled, (gpointer)p->dom);
         }

@@ -1616,6 +1616,91 @@ ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us)
     ns_anim_observe_all(anim, styles, now_us);
 }
 
+typedef gboolean (*engine_box_fn)(const ns_box *b, gpointer user);
+
+static gboolean
+engine_box_walk(const ns_box *b, engine_box_fn fn, gpointer user)
+{
+    if (!b) return FALSE;
+    if (fn(b, user)) return TRUE;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (engine_box_walk(c, fn, user)) return TRUE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++)
+        if (engine_box_walk(g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                            fn, user))
+            return TRUE;
+    return FALSE;
+}
+
+typedef struct {
+    const ns_node *node;
+    double        *pos;
+    double        *max;
+} engine_scroll_find;
+
+static gboolean
+engine_scroll_find_box(const ns_box *b, gpointer user)
+{
+    engine_scroll_find *f = user;
+    if (b->dom != f->node) return FALSE;
+    f->pos[0] = b->scroll_x;
+    f->pos[1] = b->scroll_y;
+    f->max[0] = b->scroll_max_x;
+    f->max[1] = b->scroll_max_y;
+    return TRUE;
+}
+
+static gboolean
+engine_scroll_lookup(const ns_node *node, double pos[2], double max[2],
+                     gpointer user)
+{
+    ns_box *const *layout = user;
+    engine_scroll_find f = { node, pos, max };
+    return engine_box_walk(*layout, engine_scroll_find_box, &f);
+}
+
+static gboolean
+engine_scroll_note_box(const ns_box *b, gpointer user)
+{
+    ns_anim *anim = user;
+    if (ns_anim_is_scroll_source(anim, b->dom))
+        ns_anim_note_scroll(anim, b->dom, b->scroll_x, b->scroll_y,
+                            b->scroll_max_x, b->scroll_max_y);
+    return FALSE;
+}
+
+static void
+engine_scroll_note_root(ns_anim *anim, const ns_box *layout, double vw,
+                        double vh)
+{
+    double x = 0, y = 0;
+    double width = layout->content_width;
+    double bottom = ns_box_max_bottom(layout, layout->content_height);
+    ns_box_hit_viewport(&x, &y);
+    ns_anim_note_scroll(anim, NULL, x, y, MAX(width - vw, 0.0),
+                        MAX(bottom - vh, 0.0));
+}
+
+void
+ns_engine_anim_track_layout(ns_anim *anim, ns_box **layout)
+{
+    ns_anim_set_scroll_lookup(anim, engine_scroll_lookup, layout);
+}
+
+gboolean
+ns_engine_anim_scroll_sync(ns_anim *anim, const ns_box *layout, double vw,
+                           double vh, gboolean *out_layout)
+{
+    guint epoch = ns_box_scroll_epoch();
+    if (!layout || !ns_anim_scroll_needs_sync(anim, epoch)) return FALSE;
+    ns_anim_scroll_reset(anim, epoch);
+    if (ns_anim_scroll_uses_root(anim))
+        engine_scroll_note_root(anim, layout, vw, vh);
+    if (ns_anim_scroll_has_sources(anim))
+        engine_box_walk(layout, engine_scroll_note_box, anim);
+    return ns_anim_scroll_resample(anim, out_layout);
+}
+
 typedef struct {
     GMainLoop      *loop;
     int             pending;
