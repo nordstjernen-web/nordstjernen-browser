@@ -1031,6 +1031,21 @@ ns_video_buffered_end(ns_video_cache *cache, const ns_video *v)
     return v->player ? ns_video_player_buffered_end(v->player) : 0.0;
 }
 
+static double
+ns_video_buffered_start(ns_video_cache *cache, const ns_video *v)
+{
+    if (!v->mse_id) return 0.0;
+    double video_start = 0.0, audio_start = 0.0;
+    double video_end = ns_video_cache_mse_buffered(cache, v->mse_id, 'v',
+                                                   &video_start);
+    double audio_end = ns_video_cache_mse_buffered(cache, v->mse_id, 'a',
+                                                   &audio_start);
+    double start = 0.0;
+    if (video_end > 0.0) start = video_start;
+    if (audio_end > 0.0 && audio_start > start) start = audio_start;
+    return start;
+}
+
 static guint
 ns_mse_url_id(const char *url)
 {
@@ -2156,8 +2171,13 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->buf_sent = TRUE;
             double buffered_end = ns_video_buffered_end(cache, v);
             if (buffered_end <= 0.0) buffered_end = v->duration;
-            if (buffered_end > 0.0 && buffered_end != v->sent_buffered_end) {
+            double buffered_start = ns_video_buffered_start(cache, v);
+            if (buffered_end > 0.0 &&
+                (buffered_end != v->sent_buffered_end ||
+                 buffered_start != v->sent_buffered_start)) {
                 v->sent_buffered_end = buffered_end;
+                v->sent_buffered_start = buffered_start;
+                ns_video_queue_emit(emits, v, "bufstart", buffered_start);
                 ns_video_queue_emit(emits, v, "buf", buffered_end);
             }
         }

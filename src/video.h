@@ -69,6 +69,7 @@ typedef struct ns_video {
     gboolean     meta_sent;
     gboolean     buf_sent;
     double       sent_buffered_end;
+    double       sent_buffered_start;
     guint        seq;
     gint64       base_us;
     gint64       last_refresh_us;

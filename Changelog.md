@@ -10,6 +10,10 @@ Changelog:
   the player fired `waiting` every second and repeated frames while
   minutes of video sat buffered. It is now reopened over the grown
   buffer and resumes after the last packet it decoded.
+* Media: `buffered` on a `<video>` or `<audio>` playing a Media Source
+  stream starts where its media does (the later of the audio and video
+  starts, after any `remove()`), not at 0. Players read the range to
+  decide what to fetch after a seek and when to evict old segments.
 * Media: a Media Source stream whose audio is muxed into the video
   SourceBuffer keeps its sound past the first few seconds. The audio
   helper's copy was written once from the bytes present when playback
