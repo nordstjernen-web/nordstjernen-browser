@@ -191,6 +191,7 @@ void        ns_doc_tag_index_build(ns_node *doc);
 void        ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root);
 void        ns_doc_tag_index_subtree_removed(ns_node *doc, ns_node *root);
 GPtrArray  *ns_doc_tag_index_lookup(const ns_node *doc, const char *tag);
+ns_node       *ns_select_next_option(const ns_node *select, const ns_node *prev);
 const ns_node *ns_select_first_selected_option(const ns_node *select);
 const ns_node *ns_select_chosen_option(const ns_node *select);
 char       *ns_option_value_dup(const ns_node *option);
