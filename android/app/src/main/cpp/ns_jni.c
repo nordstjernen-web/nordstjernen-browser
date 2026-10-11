@@ -49,6 +49,7 @@ typedef struct {
 } AndroidPage;
 
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_session_lock = PTHREAD_MUTEX_INITIALIZER;
 static int             g_engine_inited;
 
 static int
@@ -106,13 +107,17 @@ renderer_thread_main(void *data)
             body[head.content_length] = '\0';
         }
 
+        pthread_mutex_lock(&g_session_lock);
         int quit = ns_renderer_session_handle(r->session, &head, body);
+        pthread_mutex_unlock(&g_session_lock);
         free(body);
         if (quit)
             break;
     }
 
+    pthread_mutex_lock(&g_session_lock);
     ns_renderer_session_free(r->session);
+    pthread_mutex_unlock(&g_session_lock);
     close_pair(r->ctrl_r, r->ctrl_w);
     free(r);
     LOGI("renderer thread exited");
@@ -128,7 +133,9 @@ android_inproc_attach(int ctrl_r, int ctrl_w, unsigned char *fb,
         return NULL;
     r->ctrl_r = ctrl_r;
     r->ctrl_w = ctrl_w;
+    pthread_mutex_lock(&g_session_lock);
     r->session = ns_renderer_session_new(ctrl_w, fb, max_w, max_h, 1);
+    pthread_mutex_unlock(&g_session_lock);
     if (!r->session) {
         free(r);
         return NULL;
@@ -136,7 +143,9 @@ android_inproc_attach(int ctrl_r, int ctrl_w, unsigned char *fb,
 
     pthread_t thread;
     if (pthread_create(&thread, NULL, renderer_thread_main, r) != 0) {
+        pthread_mutex_lock(&g_session_lock);
         ns_renderer_session_free(r->session);
+        pthread_mutex_unlock(&g_session_lock);
         free(r);
         return NULL;
     }
@@ -385,8 +394,10 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeSetDisplayPrefs(JNIEnv *env
                                                                     jboolean reduce_motion)
 {
     (void)env; (void)clazz;
+    pthread_mutex_lock(&g_session_lock);
     ns_browser_set_color_scheme(dark == JNI_TRUE);
     ns_browser_set_reduced_motion(reduce_motion == JNI_TRUE);
+    pthread_mutex_unlock(&g_session_lock);
 }
 
 JNIEXPORT jlong JNICALL
@@ -1177,7 +1188,9 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeShutdown(JNIEnv *env,
     (void)env; (void)clazz;
     pthread_mutex_lock(&g_init_lock);
     if (g_engine_inited) {
+        pthread_mutex_lock(&g_session_lock);
         ns_browser_shutdown();
+        pthread_mutex_unlock(&g_session_lock);
         g_engine_inited = 0;
     }
     pthread_mutex_unlock(&g_init_lock);
