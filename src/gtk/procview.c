@@ -245,8 +245,6 @@ struct NsProcView {
     int              scroll_dir;
     gulong           surface_scale_handler;
     GdkSurface      *scale_surface;
-    cairo_surface_t *stage[2];
-    int              stage_next;
 
     GdkPaintable    *favicon;
 

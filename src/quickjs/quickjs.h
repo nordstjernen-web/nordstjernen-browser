@@ -720,7 +720,6 @@ typedef struct JSEvalOptions {
 #define JS_INVALID_CLASS_ID 0
 JS_EXTERN JSClassID JS_NewClassID(JSRuntime *rt, JSClassID *pclass_id);
 JS_EXTERN int JS_GetClassCount(JSRuntime *rt);
-JS_EXTERN void JS_SetHostFunctionMode(JSContext *ctx, bool on);
 JS_EXTERN bool JS_IsHostAccess(JSContext *ctx);
 JS_EXTERN bool JS_IsHostCaller(JSContext *ctx);
 JS_EXTERN bool JS_IsEngineFunction(JSValueConst fn);

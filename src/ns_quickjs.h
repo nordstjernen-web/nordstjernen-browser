@@ -135,15 +135,6 @@ JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
     return -1;
 }
 
-/* The original QuickJS cannot tell the embedder's own property accesses
- * from a page script's, so every access counts as the embedder's. */
-static inline void
-JS_SetHostFunctionMode(JSContext *ctx, bool on)
-{
-    (void)ctx;
-    (void)on;
-}
-
 static inline bool
 JS_IsHostAccess(JSContext *ctx)
 {

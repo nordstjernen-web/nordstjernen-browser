@@ -271,7 +271,6 @@ struct ns_js {
     int           iframe_load_depth;
     GArray       *pending_storage_events;
     gboolean      storage_events_draining;
-    gint64        last_pump_us;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
     /* listener lists copied for a dispatch in progress (kept from sweeps) */
@@ -297,7 +296,6 @@ struct ns_js {
     double        selection_x, selection_y, selection_w, selection_h;
     int           module_load_count;
     gsize         module_load_bytes;
-    gint64        module_load_deadline_us;
     gboolean      module_load_capped;
     GPtrArray    *import_map;
     gint64        time_origin_us;

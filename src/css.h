@@ -391,7 +391,6 @@ typedef struct ns_css_transform_op {
     double a, b, c, d, e, f;
     double m3d[16];
     gboolean a_is_percent, b_is_percent;
-    gboolean e_is_percent, f_is_percent;
     double a_pct, b_pct;
     double em[3], rem[3];
 } ns_css_transform_op;
