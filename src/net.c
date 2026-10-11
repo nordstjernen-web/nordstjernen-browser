@@ -3869,6 +3869,81 @@ file_directory_error_page(const char *url, long status, const char *error)
                                   "<p>Cannot read folder.</p>");
 }
 
+static GString *
+dir_listing_begin(const char *title, const char *parent_uri)
+{
+    char *esc_title = ns_html_escape_text(title);
+    char *esc_parent = parent_uri ? ns_html_escape_text(parent_uri) : NULL;
+    GString *out = g_string_new(NULL);
+    g_string_append(out, "<!doctype html><html><head><meta charset=\"utf-8\">");
+    g_string_append(out, "<title>Index of ");
+    g_string_append(out, esc_title);
+    g_string_append(out, "</title><style>"
+        "body{font-family:serif;margin:8px;color:#000;background:#fff}"
+        "h1{font-size:2em;margin:.4em 0}"
+        "table{border-collapse:collapse}"
+        "th{text-align:left;font-weight:bold;padding:0 3em .25em 0}"
+        "td{padding:0 3em 0 0;white-space:nowrap}"
+        "td.name{min-width:22em}"
+        "td.size{text-align:right}"
+        ".ico{display:inline-block;width:1.35em;margin-right:.35em;"
+        "text-align:center;font-family:\"Segoe UI Emoji\",\"Apple Color Emoji\","
+        "\"Noto Color Emoji\",sans-serif}"
+        "a{color:#00e;text-decoration:underline}"
+        "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
+        "</style></head><body><h1>Index of ");
+    g_string_append(out, esc_title);
+    g_string_append(out, "</h1><hr><table><thead><tr>"
+        "<th>Name</th><th>Size</th><th>Date modified</th>"
+        "</tr></thead><tbody>");
+    if (parent_uri) {
+        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico dir\""
+            " aria-hidden=\"true\">&#128193;</span><a href=\"");
+        g_string_append(out, esc_parent);
+        g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
+            "<td></td></tr>");
+    }
+    g_free(esc_title);
+    g_free(esc_parent);
+    return out;
+}
+
+static void
+dir_listing_row(GString *out, const char *uri, const char *name,
+                gboolean is_dir, const char *size, const char *date)
+{
+    char *esc_uri = ns_html_escape_text(uri);
+    char *esc_name = ns_html_escape_text(name);
+    char *esc_size = ns_html_escape_text(size);
+    char *esc_date = ns_html_escape_text(date);
+    g_string_append(out, "<tr><td class=\"name\"><span class=\"ico ");
+    g_string_append(out, is_dir ? "dir" : "file");
+    g_string_append(out, "\" aria-hidden=\"true\">");
+    g_string_append(out, is_dir ? "&#128193;" : "&#128196;");
+    g_string_append(out, "</span><a href=\"");
+    g_string_append(out, esc_uri);
+    g_string_append(out, "\">");
+    g_string_append(out, esc_name);
+    if (is_dir)
+        g_string_append_c(out, '/');
+    g_string_append(out, "</a></td><td class=\"size\">");
+    g_string_append(out, esc_size);
+    g_string_append(out, "</td><td>");
+    g_string_append(out, esc_date);
+    g_string_append(out, "</td></tr>");
+    g_free(esc_uri);
+    g_free(esc_name);
+    g_free(esc_size);
+    g_free(esc_date);
+}
+
+static char *
+dir_listing_end(GString *out)
+{
+    g_string_append(out, "</tbody></table><hr></body></html>");
+    return g_string_free(out, FALSE);
+}
+
 static char *
 file_directory_listing_page(const char *path, const char *url, long *status_out)
 {
@@ -3912,75 +3987,22 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
     g_ptr_array_sort(entries, file_listing_entry_compare);
 
     char *display_path = g_filename_display_name(path);
-    char *esc_path = ns_html_escape_text(display_path ? display_path : path);
     char *parent_uri = file_listing_parent_uri(path);
-    char *esc_parent = parent_uri ? ns_html_escape_text(parent_uri) : NULL;
-    GString *out = g_string_new(NULL);
-    g_string_append(out, "<!doctype html><html><head><meta charset=\"utf-8\">");
-    g_string_append(out, "<title>Index of ");
-    g_string_append(out, esc_path);
-    g_string_append(out, "</title><style>"
-        "body{font-family:serif;margin:8px;color:#000;background:#fff}"
-        "h1{font-size:2em;margin:.4em 0}"
-        "table{border-collapse:collapse}"
-        "th{text-align:left;font-weight:bold;padding:0 3em .25em 0}"
-        "td{padding:0 3em 0 0;white-space:nowrap}"
-        "td.name{min-width:22em}"
-        "td.size{text-align:right}"
-        ".ico{display:inline-block;width:1.35em;margin-right:.35em;"
-        "text-align:center;font-family:\"Segoe UI Emoji\",\"Apple Color Emoji\","
-        "\"Noto Color Emoji\",sans-serif}"
-        "a{color:#00e;text-decoration:underline}"
-        "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
-        "</style></head><body><h1>Index of ");
-    g_string_append(out, esc_path);
-    g_string_append(out, "</h1><hr><table><thead><tr>"
-        "<th>Name</th><th>Size</th><th>Date modified</th>"
-        "</tr></thead><tbody>");
-    if (parent_uri) {
-        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico dir\""
-            " aria-hidden=\"true\">&#128193;</span><a href=\"");
-        g_string_append(out, esc_parent);
-        g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
-            "<td></td></tr>");
-    }
+    GString *out = dir_listing_begin(display_path ? display_path : path,
+                                     parent_uri);
     for (guint i = 0; i < entries->len; i++) {
         ns_file_listing_entry *e = g_ptr_array_index(entries, i);
-        char *esc_uri = ns_html_escape_text(e->uri);
-        char *esc_name = ns_html_escape_text(e->display ? e->display : e->name);
         char *size = e->is_dir ? g_strdup("") : file_size_label(e->size);
         char *date = e->have_stat ? file_mtime_label(e->mtime) : g_strdup("");
-        char *esc_size = ns_html_escape_text(size);
-        char *esc_date = ns_html_escape_text(date);
-        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico ");
-        g_string_append(out, e->is_dir ? "dir" : "file");
-        g_string_append(out, "\" aria-hidden=\"true\">");
-        g_string_append(out, e->is_dir ? "&#128193;" : "&#128196;");
-        g_string_append(out, "</span><a href=\"");
-        g_string_append(out, esc_uri);
-        g_string_append(out, "\">");
-        g_string_append(out, esc_name);
-        if (e->is_dir)
-            g_string_append_c(out, '/');
-        g_string_append(out, "</a></td><td class=\"size\">");
-        g_string_append(out, esc_size);
-        g_string_append(out, "</td><td>");
-        g_string_append(out, esc_date);
-        g_string_append(out, "</td></tr>");
-        g_free(esc_uri);
-        g_free(esc_name);
+        dir_listing_row(out, e->uri, e->display ? e->display : e->name,
+                        e->is_dir, size, date);
         g_free(size);
         g_free(date);
-        g_free(esc_size);
-        g_free(esc_date);
     }
-    g_string_append(out, "</tbody></table><hr></body></html>");
     g_ptr_array_free(entries, TRUE);
     g_free(display_path);
-    g_free(esc_path);
     g_free(parent_uri);
-    g_free(esc_parent);
-    return g_string_free(out, FALSE);
+    return dir_listing_end(out);
 }
 
 typedef struct ns_ftp_listing_entry {
@@ -4208,73 +4230,19 @@ ftp_directory_listing_page(const char *url, GByteArray *body)
     g_free(listing);
     g_ptr_array_sort(entries, ftp_listing_entry_compare);
 
-    char *esc_url = ns_html_escape_text(url ? url : "ftp://");
     char *parent_uri = ftp_listing_parent_uri(url);
-    char *esc_parent = parent_uri ? ns_html_escape_text(parent_uri) : NULL;
-    GString *out = g_string_new(NULL);
-    g_string_append(out, "<!doctype html><html><head><meta charset=\"utf-8\">");
-    g_string_append(out, "<title>Index of ");
-    g_string_append(out, esc_url);
-    g_string_append(out, "</title><style>"
-        "body{font-family:serif;margin:8px;color:#000;background:#fff}"
-        "h1{font-size:2em;margin:.4em 0}"
-        "table{border-collapse:collapse}"
-        "th{text-align:left;font-weight:bold;padding:0 3em .25em 0}"
-        "td{padding:0 3em 0 0;white-space:nowrap}"
-        "td.name{min-width:22em}"
-        "td.size{text-align:right}"
-        ".ico{display:inline-block;width:1.35em;margin-right:.35em;"
-        "text-align:center;font-family:\"Segoe UI Emoji\",\"Apple Color Emoji\","
-        "\"Noto Color Emoji\",sans-serif}"
-        "a{color:#00e;text-decoration:underline}"
-        "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
-        "</style></head><body><h1>Index of ");
-    g_string_append(out, esc_url);
-    g_string_append(out, "</h1><hr><table><thead><tr>"
-        "<th>Name</th><th>Size</th><th>Date modified</th>"
-        "</tr></thead><tbody>");
-    if (parent_uri) {
-        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico dir\""
-            " aria-hidden=\"true\">&#128193;</span><a href=\"");
-        g_string_append(out, esc_parent);
-        g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
-            "<td></td></tr>");
-    }
+    GString *out = dir_listing_begin(url ? url : "ftp://", parent_uri);
     for (guint i = 0; i < entries->len; i++) {
         ns_ftp_listing_entry *e = g_ptr_array_index(entries, i);
-        char *esc_uri = ns_html_escape_text(e->uri);
-        char *esc_name = ns_html_escape_text(e->display ? e->display : e->name);
         char *size = (!e->is_dir && e->have_size) ? file_size_label(e->size)
                                                   : g_strdup("");
-        char *esc_size = ns_html_escape_text(size);
-        char *esc_date = ns_html_escape_text(e->date ? e->date : "");
-        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico ");
-        g_string_append(out, e->is_dir ? "dir" : "file");
-        g_string_append(out, "\" aria-hidden=\"true\">");
-        g_string_append(out, e->is_dir ? "&#128193;" : "&#128196;");
-        g_string_append(out, "</span><a href=\"");
-        g_string_append(out, esc_uri);
-        g_string_append(out, "\">");
-        g_string_append(out, esc_name);
-        if (e->is_dir)
-            g_string_append_c(out, '/');
-        g_string_append(out, "</a></td><td class=\"size\">");
-        g_string_append(out, esc_size);
-        g_string_append(out, "</td><td>");
-        g_string_append(out, esc_date);
-        g_string_append(out, "</td></tr>");
-        g_free(esc_uri);
-        g_free(esc_name);
+        dir_listing_row(out, e->uri, e->display ? e->display : e->name,
+                        e->is_dir, size, e->date ? e->date : "");
         g_free(size);
-        g_free(esc_size);
-        g_free(esc_date);
     }
-    g_string_append(out, "</tbody></table><hr></body></html>");
     g_ptr_array_free(entries, TRUE);
-    g_free(esc_url);
     g_free(parent_uri);
-    g_free(esc_parent);
-    return g_string_free(out, FALSE);
+    return dir_listing_end(out);
 }
 
 static gboolean
