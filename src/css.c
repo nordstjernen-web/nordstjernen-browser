@@ -1960,80 +1960,22 @@ lab_to_srgb(double l, double a, double b, guint8 *r, guint8 *g, guint8 *bl)
 }
 
 static gboolean
-parse_lab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
+parse_lab_like_func(const char *s, gboolean ok, guint8 *r, guint8 *g,
+                    guint8 *b, guint8 *alpha)
 {
-    gboolean is_lch = g_ascii_strncasecmp(s, "lch(", 4) == 0;
-    gboolean is_lab = !is_lch && g_ascii_strncasecmp(s, "lab(", 4) == 0;
+    const char *lch_prefix = ok ? "oklch(" : "lch(";
+    const char *lab_prefix = ok ? "oklab(" : "lab(";
+    gsize prefix_len = strlen(lch_prefix);
+    gboolean is_lch = g_ascii_strncasecmp(s, lch_prefix, prefix_len) == 0;
+    gboolean is_lab = !is_lch &&
+                      g_ascii_strncasecmp(s, lab_prefix, prefix_len) == 0;
     if (!is_lch && !is_lab) return FALSE;
     if (strchr(s, ',')) return FALSE;
     const char *p = strchr(s, '(');
     if (!p) return FALSE;
     p++;
-    double values[4] = { 0, 0, 0, 1 };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (count == 0) {
-            if (*end == '%') end++;
-        } else if (count == 1) {
-            if (*end == '%') {
-                v *= 1.25;
-                end++;
-            }
-            if (is_lch && v < 0) v = 0;
-        } else if (count == 2) {
-            if (is_lch) {
-                v = css_angle_value_degrees(v, &end);
-                if (is_ident(*end)) return FALSE;
-            } else if (*end == '%') {
-                v *= 1.25;
-                end++;
-            }
-        } else if (count == 3) {
-            if (*end == '%') {
-                v /= 100.0;
-                end++;
-            }
-        }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double l = CLAMP(values[0], 0.0, 100.0);
-    double aa = values[1];
-    double bb = values[2];
-    if (is_lch) {
-        double rad = values[2] * G_PI / 180.0;
-        aa = values[1] * cos(rad);
-        bb = values[1] * sin(rad);
-    }
-    lab_to_srgb(l, aa, bb, r, g, b);
-    double av = count >= 4 ? values[3] : 1.0;
-    *alpha = (guint8)CLAMP((int)(CLAMP(av, 0.0, 1.0) * 255 + 0.5), 0, 255);
-    return TRUE;
-}
-
-static gboolean
-parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
-{
-    gboolean is_lch = g_ascii_strncasecmp(s, "oklch(", 6) == 0;
-    gboolean is_lab = !is_lch && g_ascii_strncasecmp(s, "oklab(", 6) == 0;
-    if (!is_lch && !is_lab) return FALSE;
-    if (strchr(s, ',')) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
+    double l_percent_div = ok ? 100.0 : 1.0;
+    double ab_percent_scale = ok ? 0.004 : 1.25;
     double values[4] = { 0, 0, 0, 1 };
     int count = 0;
     while (*p && *p != ')' && count < 4) {
@@ -2051,12 +1993,12 @@ parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
         if (!end || end == p) return FALSE;
         if (count == 0) {
             if (*end == '%') {
-                v /= 100.0;
+                v /= l_percent_div;
                 end++;
             }
         } else if (count == 1) {
             if (*end == '%') {
-                v *= 0.004;
+                v *= ab_percent_scale;
                 end++;
             }
             if (is_lch && v < 0) v = 0;
@@ -2065,7 +2007,7 @@ parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
                 v = css_angle_value_degrees(v, &end);
                 if (is_ident(*end)) return FALSE;
             } else if (*end == '%') {
-                v *= 0.004;
+                v *= ab_percent_scale;
                 end++;
             }
         } else if (count == 3) {
@@ -2078,7 +2020,7 @@ parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
         p = end;
     }
     if (count < 3) return FALSE;
-    double l = CLAMP(values[0], 0.0, 1.0);
+    double l = CLAMP(values[0], 0.0, ok ? 1.0 : 100.0);
     double aa = values[1];
     double bb = values[2];
     if (is_lch) {
@@ -2086,7 +2028,10 @@ parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
         aa = values[1] * cos(rad);
         bb = values[1] * sin(rad);
     }
-    oklab_to_srgb(l, aa, bb, r, g, b);
+    if (ok)
+        oklab_to_srgb(l, aa, bb, r, g, b);
+    else
+        lab_to_srgb(l, aa, bb, r, g, b);
     double av = count >= 4 ? values[3] : 1.0;
     *alpha = (guint8)CLAMP((int)(CLAMP(av, 0.0, 1.0) * 255 + 0.5), 0, 255);
     return TRUE;
@@ -2382,8 +2327,8 @@ parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
     if (parse_rgb_func(s, r, g, b, a)) return TRUE;
     if (parse_hsl_func(s, r, g, b, a)) return TRUE;
     if (parse_hwb_func(s, r, g, b, a)) return TRUE;
-    if (parse_lab_func(s, r, g, b, a)) return TRUE;
-    if (parse_oklab_func(s, r, g, b, a)) return TRUE;
+    if (parse_lab_like_func(s, FALSE, r, g, b, a)) return TRUE;
+    if (parse_lab_like_func(s, TRUE, r, g, b, a)) return TRUE;
     if (parse_color_mix_func(s, r, g, b, a, depth)) return TRUE;
     if (parse_light_dark_func(s, r, g, b, a, depth)) return TRUE;
     if (s[0] == '#') {
@@ -20313,11 +20258,13 @@ css_selector_segment_has_scope_marker(const char *p, const char *end)
     return FALSE;
 }
 
-static void
-css_scope_append_amp_rewritten(GString *out, const char *p, const char *end)
+static gboolean
+css_append_amp_replaced(GString *out, const char *p, const char *end,
+                        const char *replacement)
 {
     char quote = 0;
     int bracket = 0;
+    gboolean replaced = FALSE;
     while (p < end) {
         char c = *p;
         if (quote) {
@@ -20351,13 +20298,15 @@ css_scope_append_amp_rewritten(GString *out, const char *p, const char *end)
         if (c == '[') bracket++;
         else if (c == ']' && bracket > 0) bracket--;
         if (c == '&' && bracket == 0) {
-            g_string_append(out, ":scope");
+            g_string_append(out, replacement);
+            replaced = TRUE;
             p++;
             continue;
         }
         g_string_append_c(out, c);
         p++;
     }
+    return replaced;
 }
 
 static char *
@@ -20381,7 +20330,7 @@ css_scope_selector_list_text(const char *start, const char *end)
                 g_string_append(out, ":where(:scope) ");
                 g_string_append_len(out, s, (gssize)(e - s));
             } else {
-                css_scope_append_amp_rewritten(out, s, e);
+                css_append_amp_replaced(out, s, e, ":scope");
             }
         }
         p = term == ',' ? seg_end + 1 : seg_end;
@@ -21273,59 +21222,6 @@ parse_rules_until(const char **pp, const char *end,
     if (nested) at_depth--;
 }
 
-static gboolean
-css_append_nested_selector(GString *out, const char *part,
-                           const char *parent_expr)
-{
-    const char *p = part;
-    const char *end = part + strlen(part);
-    char quote = 0;
-    int bracket = 0;
-    gboolean replaced = FALSE;
-    while (p < end) {
-        char c = *p;
-        if (quote) {
-            if (c == '\\' && p + 1 < end) {
-                g_string_append_len(out, p, 2);
-                p += 2;
-                continue;
-            }
-            g_string_append_c(out, c);
-            if (c == quote) quote = 0;
-            p++;
-            continue;
-        }
-        if (c == '/' && p + 1 < end && p[1] == '*') {
-            const char *q = css_skip_comment(p, end);
-            g_string_append_len(out, p, (gssize)(q - p));
-            p = q;
-            continue;
-        }
-        if (c == '\\' && p + 1 < end) {
-            g_string_append_len(out, p, 2);
-            p += 2;
-            continue;
-        }
-        if (c == '"' || c == '\'') {
-            quote = c;
-            g_string_append_c(out, c);
-            p++;
-            continue;
-        }
-        if (c == '[') bracket++;
-        else if (c == ']' && bracket > 0) bracket--;
-        if (c == '&' && bracket == 0) {
-            g_string_append(out, parent_expr);
-            replaced = TRUE;
-            p++;
-            continue;
-        }
-        g_string_append_c(out, c);
-        p++;
-    }
-    return replaced;
-}
-
 static char *
 css_combine_selectors(const char *parent, const char *child, gsize max_len)
 {
@@ -21361,7 +21257,8 @@ css_combine_selectors(const char *parent, const char *child, gsize max_len)
         if (out->len) g_string_append(out, ", ");
         char *isparent = g_strdup_printf(":is(%s)", pc);
         GString *piece = g_string_new(NULL);
-        if (css_append_nested_selector(piece, part, isparent))
+        if (css_append_amp_replaced(piece, part, part + strlen(part),
+                                    isparent))
             g_string_append_len(out, piece->str, (gssize)piece->len);
         else
             g_string_append_printf(out, ":is(%s) %s", pc, part);
