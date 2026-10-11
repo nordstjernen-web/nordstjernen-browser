@@ -642,63 +642,37 @@ pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
     return old;
 }
 
+static char *
+ns_proc_sibling_exe_path(const char *base)
+{
+#ifdef G_OS_WIN32
+    char *name = g_strconcat(base, ".exe", NULL);
+#else
+    char *name = g_strdup(base);
+#endif
+    const char *exe = ns_app_self_exe();
+    if (!exe) return name;
+    char *dir = g_path_get_dirname(exe);
+    char *cand = g_build_filename(dir, name, NULL);
+    if (!g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
+        g_free(cand);
+        cand = g_build_filename(dir, "..", name, NULL);
+        if (!g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE))
+            g_clear_pointer(&cand, g_free);
+    }
+    g_free(dir);
+    if (!cand) return name;
+    g_free(name);
+    return cand;
+}
+
 char *
 ns_proc_renderer_path(void)
 {
     const char *env = g_getenv(NS_PROC_RENDERER_ENV);
     if (env && *env)
         return g_strdup(env);
-#ifdef G_OS_WIN32
-    const char *name = NS_PROC_RENDERER_NAME ".exe";
-#else
-    const char *name = NS_PROC_RENDERER_NAME;
-#endif
-    const char *exe = ns_app_self_exe();
-    if (exe) {
-        char *dir = g_path_get_dirname(exe);
-        char *parent = g_build_filename("..", name, NULL);
-        const char *rel[] = { name, parent, NULL };
-        for (int i = 0; rel[i]; i++) {
-            char *cand = g_build_filename(dir, rel[i], NULL);
-            if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
-                g_free(parent);
-                g_free(dir);
-                return cand;
-            }
-            g_free(cand);
-        }
-        g_free(parent);
-        g_free(dir);
-    }
-    return g_strdup(name);
-}
-
-static char *
-ns_proc_audio_helper_path(void)
-{
-#ifdef G_OS_WIN32
-    const char *name = "nordstjernen-audio.exe";
-#else
-    const char *name = "nordstjernen-audio";
-#endif
-    const char *exe = ns_app_self_exe();
-    if (exe) {
-        char *dir = g_path_get_dirname(exe);
-        char *parent = g_build_filename("..", name, NULL);
-        const char *rel[] = { name, parent, NULL };
-        for (int i = 0; rel[i]; i++) {
-            char *cand = g_build_filename(dir, rel[i], NULL);
-            if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
-                g_free(parent);
-                g_free(dir);
-                return cand;
-            }
-            g_free(cand);
-        }
-        g_free(parent);
-        g_free(dir);
-    }
-    return g_strdup(name);
+    return ns_proc_sibling_exe_path(NS_PROC_RENDERER_NAME);
 }
 
 static void
@@ -948,7 +922,7 @@ pv_audio_pump(NsProcView *v, const char *commands)
 {
     if (!commands || !*commands) return;
     if (!v->audio_proc) {
-        char *path = ns_proc_audio_helper_path();
+        char *path = ns_proc_sibling_exe_path("nordstjernen-audio");
         GError *err = NULL;
         GSubprocessLauncher *launcher = g_subprocess_launcher_new(
             G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
@@ -1011,38 +985,10 @@ pv_audio_shutdown(NsProcView *v)
     pv_audio_clock_unmap(v);
 }
 
-static char *
-ns_proc_video_helper_path(void)
-{
-#ifdef G_OS_WIN32
-    const char *name = "nordstjernen-video.exe";
-#else
-    const char *name = "nordstjernen-video";
-#endif
-    const char *exe = ns_app_self_exe();
-    if (exe) {
-        char *dir = g_path_get_dirname(exe);
-        char *parent = g_build_filename("..", name, NULL);
-        const char *rel[] = { name, parent, NULL };
-        for (int i = 0; rel[i]; i++) {
-            char *cand = g_build_filename(dir, rel[i], NULL);
-            if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
-                g_free(parent);
-                g_free(dir);
-                return cand;
-            }
-            g_free(cand);
-        }
-        g_free(parent);
-        g_free(dir);
-    }
-    return g_strdup(name);
-}
-
 gboolean
 ns_proc_video_helper_available(void)
 {
-    char *path = ns_proc_video_helper_path();
+    char *path = ns_proc_sibling_exe_path("nordstjernen-video");
     gboolean ok = g_path_is_absolute(path)
         ? g_file_test(path, G_FILE_TEST_IS_EXECUTABLE)
         : FALSE;
@@ -1324,7 +1270,7 @@ static void
 pv_video_send(NsProcView *v, const char *cmd)
 {
     if (!v->video_proc) {
-        char *path = ns_proc_video_helper_path();
+        char *path = ns_proc_sibling_exe_path("nordstjernen-video");
         GError *err = NULL;
         GSubprocessLauncher *launcher = g_subprocess_launcher_new(
             G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
