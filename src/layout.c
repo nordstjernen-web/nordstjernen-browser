@@ -17627,24 +17627,73 @@ static const ns_box *box_hit_test_tree(const ns_box *root, double x, double y);
 
 static const ns_box *box_hit_test_root(const ns_box *root, double x, double y);
 
+static double
+svg_foreign_coord(const ns_node *fo, const char *name)
+{
+    const char *a = ns_element_get_attr(fo, name);
+    if (!a || !*a || strchr(a, '%')) return 0;
+    return g_ascii_strtod(a, NULL);
+}
+
+const ns_box *
+ns_layout_svg_foreign_root(const ns_box *svg_box, const ns_node *fo)
+{
+    if (!svg_box || !svg_box->media || !svg_box->media->svg_foreign)
+        return NULL;
+    GPtrArray *roots = svg_box->media->svg_foreign;
+    for (guint i = 0; i < roots->len; i++) {
+        const ns_box *root = g_ptr_array_index(roots, i);
+        if (root->dom == fo) return root;
+    }
+    return NULL;
+}
+
+gboolean
+ns_layout_svg_foreign_xform(const ns_box *svg_box, const ns_node *fo,
+                            double xform[6])
+{
+    if (!svg_box || !svg_box->dom || !fo) return FALSE;
+    ns_svg_geometry g;
+    if (!ns_svg_node_geometry(svg_box->dom, fo, svg_box->content_width,
+                              svg_box->content_height, svg_box->svg_styles,
+                              svg_box->style, &g) || !g.found)
+        return FALSE;
+    cairo_matrix_t m = g.to_root;
+    cairo_matrix_translate(&m, g.has_box ? g.x : svg_foreign_coord(fo, "x"),
+                           g.has_box ? g.y : svg_foreign_coord(fo, "y"));
+    xform[0] = m.xx;
+    xform[1] = m.yx;
+    xform[2] = m.xy;
+    xform[3] = m.yy;
+    xform[4] = m.x0;
+    xform[5] = m.y0;
+    return TRUE;
+}
+
 static const ns_box *
 svg_foreign_hit(const ns_box *svg_box, double x, double y)
 {
     const ns_box_media *m = svg_box->media;
-    if (!m || !m->svg_foreign || !m->svg_foreign_xform) return NULL;
+    if (!m || !m->svg_foreign) return NULL;
     double lx = x - (svg_box->x + svg_box->margin.left + svg_box->border.left +
                      svg_box->padding.left);
     double ly = y - (svg_box->y + svg_box->margin.top + svg_box->border.top +
                      svg_box->padding.top);
     for (guint i = m->svg_foreign->len; i-- > 0;) {
-        const double *t = m->svg_foreign_xform + i * 7;
-        if (t[0] == 0) continue;
-        double det = t[1] * t[4] - t[2] * t[3];
-        if (fabs(det) < 1e-9) continue;
-        double dx = lx - t[5], dy = ly - t[6];
-        double fx = ( t[4] * dx - t[3] * dy) / det;
-        double fy = (-t[2] * dx + t[1] * dy) / det;
         const ns_box *fo = g_ptr_array_index(m->svg_foreign, i);
+        double computed[6];
+        const double *t;
+        if (m->svg_foreign_xform && m->svg_foreign_xform[i * 7] != 0)
+            t = m->svg_foreign_xform + i * 7 + 1;
+        else if (ns_layout_svg_foreign_xform(svg_box, fo->dom, computed))
+            t = computed;
+        else
+            continue;
+        double det = t[0] * t[3] - t[1] * t[2];
+        if (fabs(det) < 1e-9) continue;
+        double dx = lx - t[4], dy = ly - t[5];
+        double fx = ( t[3] * dx - t[2] * dy) / det;
+        double fy = (-t[1] * dx + t[0] * dy) / det;
         if (fx < 0 || fy < 0 || fx > fo->content_width ||
             fy > fo->content_height)
             continue;

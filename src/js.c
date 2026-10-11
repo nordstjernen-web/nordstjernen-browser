@@ -38323,6 +38323,9 @@ ns_box_border_box(const ns_box *b, double *x, double *y, double *w, double *h)
                            + b->border.top   + b->border.bottom;
 }
 
+static const ns_box *ns_svg_foreign_lookup(ns_js *js, const ns_node *node,
+                                           const ns_box **svg_box);
+
 static const ns_box *
 ns_box_for_this(JSContext *ctx, JSValueConst this_val)
 {
@@ -38332,7 +38335,10 @@ ns_box_for_this(JSContext *ctx, JSValueConst this_val)
     if (!js->layout_root) return NULL;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return NULL;
-    return ns_box_find_by_dom(js->layout_root, n);
+    const ns_box *b = ns_box_find_by_dom(js->layout_root, n);
+    if (b) return b;
+    const ns_box *foreign_root = ns_svg_foreign_lookup(js, n, NULL);
+    return foreign_root ? ns_box_find_by_dom(foreign_root, n) : NULL;
 }
 
 static gboolean
@@ -38500,6 +38506,27 @@ ns_svg_owner_root(const ns_node *n)
     return svg;
 }
 
+static const ns_node *
+ns_svg_foreign_ancestor(const ns_node *n)
+{
+    for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent)
+        if (p->kind == NS_NODE_ELEMENT && g_strcmp0(p->name, "foreignObject") == 0)
+            return p;
+    return NULL;
+}
+
+static const ns_box *
+ns_svg_foreign_lookup(ns_js *js, const ns_node *node, const ns_box **svg_box)
+{
+    const ns_node *fo = ns_svg_foreign_ancestor(node);
+    if (!fo || !js->layout_root) return NULL;
+    const ns_node *svg = ns_svg_owner_root(fo);
+    const ns_box *owner = svg ? ns_box_find_by_dom(js->layout_root, svg) : NULL;
+    const ns_box *root = ns_layout_svg_foreign_root(owner, fo);
+    if (root && svg_box) *svg_box = owner;
+    return root;
+}
+
 static void
 ns_svg_page_matrix(const ns_box *svg_box, const cairo_matrix_t *to_root,
                    cairo_matrix_t *to_page)
@@ -38577,6 +38604,37 @@ ns_svg_client_rect(JSContext *ctx, const ns_node *node,
     return TRUE;
 }
 
+static gboolean
+ns_svg_foreign_client_rect(JSContext *ctx, const ns_node *node,
+                           double *x, double *y, double *w, double *h)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !ns_svg_foreign_ancestor(node)) return FALSE;
+    ns_js_flush_layout(js);
+    const ns_box *svg_box = NULL;
+    const ns_box *root = ns_svg_foreign_lookup(js, node, &svg_box);
+    if (!root) return FALSE;
+    double bx, by, bw, bh;
+    const ns_box *inner = ns_box_find_by_dom(root, node);
+    if (inner)
+        ns_box_visual_border_box(inner, &bx, &by, &bw, &bh);
+    else if (!ns_box_inline_rect_for_dom(root, node, &bx, &by, &bw, &bh))
+        return FALSE;
+    double t[6];
+    if (!ns_layout_svg_foreign_xform(svg_box, root->dom, t)) return FALSE;
+    cairo_matrix_t to_svg, to_page;
+    cairo_matrix_init(&to_svg, t[0], t[1], t[2], t[3], t[4], t[5]);
+    ns_svg_page_matrix(svg_box, &to_svg, &to_page);
+    ns_svg_geometry content = { .x = bx, .y = by, .width = bw, .height = bh };
+    double left, top, right, bottom;
+    ns_svg_mapped_bounds(&content, &to_page, &left, &top, &right, &bottom);
+    *x = left;
+    *y = top;
+    *w = right - left;
+    *h = bottom - top;
+    return TRUE;
+}
+
 static JSValue
 ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
@@ -38584,6 +38642,10 @@ ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     double x = 0, y = 0, w = 0, h = 0;
     const ns_node *node = ns_unwrap_element(this_val);
+    if (ns_svg_foreign_client_rect(ctx, node, &x, &y, &w, &h)) {
+        ns_point_to_client(ctx, node, &x, &y);
+        return ns_make_dom_rect(ctx, x, y, w, h);
+    }
     const ns_box *b = ns_box_for_this(ctx, this_val);
     gboolean got_box = b != NULL;
     if (!b && ns_svg_client_rect(ctx, node, &x, &y, &w, &h))
