@@ -24062,55 +24062,46 @@ inline_property_is_all_covered(const char *name)
            ns_css_named_property_supported(name);
 }
 
+typedef struct {
+    const char *prefix;
+    char       *all_value;
+    gboolean    all_important;
+} inline_all_scan;
+
+static void
+inline_all_visit(gpointer user, const char *name, const char *vstart,
+                 const char *vend)
+{
+    inline_all_scan *st = user;
+    const char *prefix = st->prefix;
+    char *value = css_trim_dup_range(vstart, vend);
+    gboolean important = FALSE;
+    css_strip_important(value, &important);
+    g_strstrip(value);
+    if (g_ascii_strcasecmp(name, "all") == 0 &&
+        ns_css_named_declaration_valid("all", value) &&
+        (!st->all_value || important || !st->all_important)) {
+        g_free(st->all_value);
+        st->all_value = g_strdup(value);
+        st->all_important = important;
+    } else if (st->all_value && inline_property_is_all_covered(name) &&
+               (!prefix || g_ascii_strcasecmp(name, prefix) == 0 ||
+                (g_ascii_strncasecmp(name, prefix, strlen(prefix)) == 0 &&
+                 name[strlen(prefix)] == '-')) &&
+               ns_css_named_declaration_valid(name, value) &&
+               (important || !st->all_important)) {
+        g_clear_pointer(&st->all_value, g_free);
+        st->all_important = FALSE;
+    }
+    g_free(value);
+}
+
 static char *
 inline_all_value_for(const char *style, const char *prefix)
 {
-    const char *p = style ? style : "";
-    const char *end = p + strlen(p);
-    char *all_value = NULL;
-    gboolean all_important = FALSE;
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') p = css_skip_ws_comments(p + 1, end);
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *name = css_trim_dup_range(p, kend);
-        if (term != ':') {
-            g_free(name);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        char *value = css_trim_dup_range(p, vend);
-        gboolean important = FALSE;
-        css_strip_important(value, &important);
-        g_strstrip(value);
-        if (g_ascii_strcasecmp(name, "all") == 0 &&
-            ns_css_named_declaration_valid("all", value) &&
-            (!all_value || important || !all_important)) {
-            g_free(all_value);
-            all_value = g_strdup(value);
-            all_important = important;
-        } else if (all_value && inline_property_is_all_covered(name) &&
-                   (!prefix || g_ascii_strcasecmp(name, prefix) == 0 ||
-                    (g_ascii_strncasecmp(name, prefix, strlen(prefix)) == 0 &&
-                     name[strlen(prefix)] == '-')) &&
-                   ns_css_named_declaration_valid(name, value) &&
-                   (important || !all_important)) {
-            g_clear_pointer(&all_value, g_free);
-            all_important = FALSE;
-        }
-        g_free(name);
-        g_free(value);
-        p = term == ';' ? vend + 1 : vend;
-    }
-    return all_value;
+    inline_all_scan st = { .prefix = prefix };
+    inline_scan_declarations(style ? style : "", inline_all_visit, &st);
+    return st.all_value;
 }
 
 static char *
@@ -25308,6 +25299,57 @@ inline_anim_expanded(const char *prop, const char *value)
     return g_string_free(out, FALSE);
 }
 
+typedef struct {
+    GString    *out;
+    const char *prop;
+    const char *value;
+    gboolean    custom;
+    gboolean    set_all;
+    gboolean    append_elsewhere;
+    const int  *anim_member_ids;
+    int         n_anim_members;
+    gboolean    found;
+} inline_set_scan;
+
+static void
+inline_set_append(GString *out, const char *key, const char *value)
+{
+    if (out->len > 0) g_string_append(out, "; ");
+    g_string_append(out, key);
+    g_string_append(out, ": ");
+    g_string_append(out, value);
+}
+
+static void
+inline_set_visit(gpointer user, const char *key, const char *vstart,
+                 const char *vend)
+{
+    inline_set_scan *st = user;
+    gboolean match = strlen(key) == strlen(st->prop) &&
+                     (st->custom ? strcmp(key, st->prop) == 0
+                                 : g_ascii_strcasecmp(key, st->prop) == 0);
+    int key_id = ns_css_prop_id(key);
+    gboolean anim_member = FALSE;
+    for (int m = 0; m < st->n_anim_members; m++)
+        if (key_id == st->anim_member_ids[m]) anim_member = TRUE;
+    gboolean remove_for_all = g_ascii_strcasecmp(st->prop, "all") == 0 &&
+                              inline_property_is_all_covered(key);
+    if ((st->set_all && (match || remove_for_all)) ||
+        (st->append_elsewhere && (match || anim_member))) {
+        st->found = TRUE;
+        return;
+    }
+    if (match || remove_for_all) {
+        if (st->value && *st->value && !st->found)
+            inline_set_append(st->out, key, st->value);
+        st->found = TRUE;
+        return;
+    }
+    char *old_value = css_trim_dup_range(vstart, vend);
+    inline_set_append(st->out, key, old_value);
+    g_free(old_value);
+}
+
 char *
 ns_inline_style_set(const char *style, const char *prop, const char *value)
 {
@@ -25321,7 +25363,6 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         }
     }
     GString *out = g_string_new(NULL);
-    gboolean found = FALSE;
     gboolean set_all = g_ascii_strcasecmp(prop, "all") == 0;
     char *active_all = !set_all && inline_property_is_all_covered(prop)
         ? inline_all_value(style) : NULL;
@@ -25340,91 +25381,24 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
     int set_prop_id = ns_css_prop_id(prop);
     gboolean append_after_shorthand = set_prop_id >= 0 &&
         inline_shorthand_follows(style, prop, set_prop_id);
-    gsize plen = prop ? strlen(prop) : 0;
-    const char *p = style ? style : "";
-    const char *end = p + strlen(p);
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') {
-            p++;
-            p = css_skip_ws_comments(p, end);
-        }
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        const char *kstart = p;
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *key = css_trim_dup_range(kstart, kend);
-        if (term != ':') {
-            g_free(key);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vstart = p;
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        char *old_value = css_trim_dup_range(vstart, vend);
-        gboolean custom = prop && prop[0] == '-' && prop[1] == '-';
-        gboolean match = strlen(key) == plen && prop &&
-                         (custom ? strcmp(key, prop) == 0
-                                 : g_ascii_strcasecmp(key, prop) == 0);
-        int key_id = ns_css_prop_id(key);
-        gboolean anim_member = FALSE;
-        for (int m = 0; m < n_anim_members; m++)
-            if (key_id == anim_member_ids[m]) anim_member = TRUE;
-        gboolean remove_for_all = prop &&
-            g_ascii_strcasecmp(prop, "all") == 0 &&
-            inline_property_is_all_covered(key);
-        if (set_all && (match || remove_for_all)) {
-            found = TRUE;
-            g_free(key);
-            g_free(old_value);
-            p = term == ';' ? vend + 1 : vend;
-            continue;
-        }
-        if ((append_after_all || append_after_shorthand ||
-             n_anim_members > 0) && (match || anim_member)) {
-            found = TRUE;
-            g_free(key);
-            g_free(old_value);
-            p = term == ';' ? vend + 1 : vend;
-            continue;
-        }
-        if (match || remove_for_all) {
-            if (!value || !*value || found) {
-                found = TRUE;
-                g_free(key);
-                g_free(old_value);
-                p = term == ';' ? vend + 1 : vend;
-                continue;
-            }
-            if (out->len > 0) g_string_append(out, "; ");
-            g_string_append(out, key);
-            g_string_append(out, ": ");
-            g_string_append(out, value);
-            found = TRUE;
-        } else {
-            if (out->len > 0) g_string_append(out, "; ");
-            g_string_append(out, key);
-            g_string_append(out, ": ");
-            g_string_append(out, old_value);
-        }
-        g_free(key);
-        g_free(old_value);
-        p = term == ';' ? vend + 1 : vend;
-    }
-    if ((set_all || append_after_all || append_after_shorthand ||
-         n_anim_members > 0 || !found) && value && *value) {
-        if (out->len > 0) g_string_append(out, "; ");
+    inline_set_scan st = {
+        .out = out,
+        .prop = prop,
+        .value = value,
+        .custom = prop[0] == '-' && prop[1] == '-',
+        .set_all = set_all,
+        .append_elsewhere = append_after_all || append_after_shorthand ||
+                            n_anim_members > 0,
+        .anim_member_ids = anim_member_ids,
+        .n_anim_members = n_anim_members,
+    };
+    inline_scan_declarations(style ? style : "", inline_set_visit, &st);
+    if ((set_all || st.append_elsewhere || !st.found) && value && *value) {
         if (anim_expanded) {
+            if (out->len > 0) g_string_append(out, "; ");
             g_string_append(out, anim_expanded);
         } else {
-            g_string_append(out, prop);
-            g_string_append(out, ": ");
-            g_string_append(out, value);
+            inline_set_append(out, prop, value);
         }
     }
     g_free(anim_expanded);
