@@ -29491,13 +29491,9 @@ ns_mut_observer_observe(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static JSValue
-ns_mut_observer_disconnect(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
+static void
+ns_mut_observer_release(JSContext *ctx, ns_mut_observer *o)
 {
-    (void)argc; (void)argv;
-    ns_mut_observer *o = ns_unwrap_mut_observer(this_val);
-    if (!o) return JS_UNDEFINED;
     o->disconnected = TRUE;
     ns_mut_observer_targets_clear(o);
     if (o->records) g_ptr_array_set_size(o->records, 0);
@@ -29505,6 +29501,15 @@ ns_mut_observer_disconnect(JSContext *ctx, JSValueConst this_val,
         o->pinned = FALSE;
         JS_FreeValue(ctx, o->wrapper);
     }
+}
+
+static JSValue
+ns_mut_observer_disconnect(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_mut_observer *o = ns_unwrap_mut_observer(this_val);
+    if (o) ns_mut_observer_release(ctx, o);
     return JS_UNDEFINED;
 }
 
@@ -61450,14 +61455,7 @@ ns_js_reset_runtime_state(ns_js *js)
     if (js->mutation_observers) {
         for (guint i = 0; i < js->mutation_observers->len; i++) {
             ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, i);
-            if (!o) continue;
-            o->disconnected = TRUE;
-            ns_mut_observer_targets_clear(o);
-            if (o->records) g_ptr_array_set_size(o->records, 0);
-            if (o->pinned) {
-                o->pinned = FALSE;
-                JS_FreeValue(js->ctx, o->wrapper);
-            }
+            if (o) ns_mut_observer_release(js->ctx, o);
         }
     }
 
@@ -61473,14 +61471,7 @@ ns_js_reset_runtime_state(ns_js *js)
     if (js->perf_observers) {
         for (guint i = 0; i < js->perf_observers->len; i++) {
             ns_perf_observer *o = g_ptr_array_index(js->perf_observers, i);
-            if (!o) continue;
-            o->disconnected = TRUE;
-            if (o->records) g_ptr_array_set_size(o->records, 0);
-            if (o->entry_types) g_ptr_array_set_size(o->entry_types, 0);
-            if (o->pinned) {
-                o->pinned = FALSE;
-                JS_FreeValue(js->ctx, o->wrapper);
-            }
+            if (o) ns_perf_observer_release(js->ctx, o);
         }
     }
     js->perf_drain_scheduled = FALSE;
@@ -61606,6 +61597,24 @@ ns_document_lift_methods_to_proto(JSContext *ctx, JSValueConst document)
         JS_FreePropertyEnum(ctx, tab, len);
     }
     JS_FreeValue(ctx, proto);
+}
+
+static void
+ns_link_class_ctor(JSContext *ctx, JSValueConst global, const char *name,
+                   JSClassID class_id)
+{
+    JSValue ctor = JS_GetPropertyStr(ctx, global, name);
+    JSValue proto = JS_GetClassProto(ctx, class_id);
+    if (JS_IsObject(ctor) && JS_IsObject(proto)) {
+        JS_DefinePropertyValueStr(ctx, proto, "constructor",
+                                  JS_DupValue(ctx, ctor),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValueStr(ctx, ctor, "prototype", proto,
+                                  JS_PROP_WRITABLE);
+    } else {
+        JS_FreeValue(ctx, proto);
+    }
+    JS_FreeValue(ctx, ctor);
 }
 
 static void
@@ -61961,48 +61970,9 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_install_dom_hierarchy(js, ctx, global);
     ns_install_web_api_shapes(ctx, global);
     ns_bind_ctor(ctx, global, "FontFace", ns_window_fontface_ctor, 3);
-    {
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleDeclaration");
-        JSValue proto = JS_GetClassProto(ctx, ns_style_class_id);
-        if (JS_IsObject(ctor) && JS_IsObject(proto)) {
-            JS_DefinePropertyValueStr(ctx, proto, "constructor",
-                                      JS_DupValue(ctx, ctor),
-                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-            JS_DefinePropertyValueStr(ctx, ctor, "prototype", proto,
-                                      JS_PROP_WRITABLE);
-        } else {
-            JS_FreeValue(ctx, proto);
-        }
-        JS_FreeValue(ctx, ctor);
-    }
-    {
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMStringMap");
-        JSValue proto = JS_GetClassProto(ctx, ns_dataset_class_id);
-        if (JS_IsObject(ctor) && JS_IsObject(proto)) {
-            JS_DefinePropertyValueStr(ctx, proto, "constructor",
-                                      JS_DupValue(ctx, ctor),
-                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-            JS_DefinePropertyValueStr(ctx, ctor, "prototype", proto,
-                                      JS_PROP_WRITABLE);
-        } else {
-            JS_FreeValue(ctx, proto);
-        }
-        JS_FreeValue(ctx, ctor);
-    }
-    {
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMTokenList");
-        JSValue proto = JS_GetClassProto(ctx, ns_token_list_class_id);
-        if (JS_IsObject(ctor) && JS_IsObject(proto)) {
-            JS_DefinePropertyValueStr(ctx, proto, "constructor",
-                                      JS_DupValue(ctx, ctor),
-                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-            JS_DefinePropertyValueStr(ctx, ctor, "prototype", proto,
-                                      JS_PROP_WRITABLE);
-        } else {
-            JS_FreeValue(ctx, proto);
-        }
-        JS_FreeValue(ctx, ctor);
-    }
+    ns_link_class_ctor(ctx, global, "CSSStyleDeclaration", ns_style_class_id);
+    ns_link_class_ctor(ctx, global, "DOMStringMap", ns_dataset_class_id);
+    ns_link_class_ctor(ctx, global, "DOMTokenList", ns_token_list_class_id);
     ns_bind_ctor(ctx, global, "XMLSerializer", ns_xml_serializer_ctor, 0);
 
     ns_bind_fn(ctx, global, "__ns_zlib_create", ns_zlib_create, 2);
@@ -62151,14 +62121,7 @@ ns_js_free(ns_js *js)
     if (js->perf_observers) {
         for (guint i = 0; i < js->perf_observers->len; i++) {
             ns_perf_observer *o = g_ptr_array_index(js->perf_observers, i);
-            if (!o) continue;
-            o->disconnected = TRUE;
-            if (o->records) g_ptr_array_set_size(o->records, 0);
-            if (o->entry_types) g_ptr_array_set_size(o->entry_types, 0);
-            if (o->pinned) {
-                o->pinned = FALSE;
-                JS_FreeValue(js->ctx, o->wrapper);
-            }
+            if (o) ns_perf_observer_release(js->ctx, o);
         }
         g_ptr_array_free(js->perf_observers, TRUE);
         js->perf_observers = NULL;

@@ -771,6 +771,7 @@ JSValue ns_own_data_props_toJSON(JSContext *ctx, JSValueConst this_val,
 gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
                              gboolean *was_set);
 
+void ns_perf_observer_release(JSContext *ctx, ns_perf_observer *o);
 double ns_perf_now_ms(const ns_js *js);
 /* A frame realm's own time origin (its document's start), the page's for
  * every other realm. */
