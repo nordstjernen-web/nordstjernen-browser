@@ -314,53 +314,6 @@ static const ns_api_method ns_ctx2d_methods[] = {
     { "translate", ns_ctx_translate, 2 },
 };
 
-static const ns_api_method ns_offscreen_ctx2d_methods[] = {
-    { "arc", ns_ctx_arc, 5 },
-    { "arcTo", ns_ctx_arcTo, 5 },
-    { "beginPath", ns_ctx_beginPath, 0 },
-    { "bezierCurveTo", ns_ctx_bezierCurveTo, 6 },
-    { "clearRect", ns_ctx_clearRect, 4 },
-    { "clip", ns_ctx_clip, 0 },
-    { "closePath", ns_ctx_closePath, 0 },
-    { "createConicGradient", ns_ctx_createConicGradient, 3 },
-    { "createImageData", ns_ctx_createImageData, 1 },
-    { "createLinearGradient", ns_ctx_createLinearGradient, 4 },
-    { "createPattern", ns_ctx_createPattern, 2 },
-    { "createRadialGradient", ns_ctx_createRadialGradient, 6 },
-    { "drawImage", ns_ctx_drawImage, 3 },
-    { "ellipse", ns_ctx_ellipse, 7 },
-    { "fill", ns_ctx_fill, 0 },
-    { "fillRect", ns_ctx_fillRect, 4 },
-    { "fillText", ns_ctx_fillText, 3 },
-    { "getContextAttributes", ns_ctx_get_attrs, 0 },
-    { "getImageData", ns_ctx_getImageData, 4 },
-    { "getLineDash", ns_ctx_getLineDash, 0 },
-    { "getTransform", ns_ctx_getTransform, 0 },
-    { "isContextLost", ns_ctx_is_context_lost, 0 },
-    { "isPointInPath", ns_ctx_isPointInPath, 2 },
-    { "isPointInStroke", ns_ctx_isPointInStroke, 2 },
-    { "lineTo", ns_ctx_lineTo, 2 },
-    { "measureText", ns_ctx_measureText, 1 },
-    { "moveTo", ns_ctx_moveTo, 2 },
-    { "putImageData", ns_ctx_putImageData, 3 },
-    { "quadraticCurveTo", ns_ctx_quadraticCurveTo, 4 },
-    { "rect", ns_ctx_rect, 4 },
-    { "reset", ns_ctx_reset, 0 },
-    { "resetTransform", ns_ctx_resetTransform, 0 },
-    { "restore", ns_ctx_restore, 0 },
-    { "rotate", ns_ctx_rotate, 1 },
-    { "roundRect", ns_ctx_roundRect, 4 },
-    { "save", ns_ctx_save, 0 },
-    { "scale", ns_ctx_scale, 2 },
-    { "setLineDash", ns_ctx_setLineDash, 1 },
-    { "setTransform", ns_ctx_setTransform, 0 },
-    { "stroke", ns_ctx_stroke, 0 },
-    { "strokeRect", ns_ctx_strokeRect, 4 },
-    { "strokeText", ns_ctx_strokeText, 3 },
-    { "transform", ns_ctx_transform, 6 },
-    { "translate", ns_ctx_translate, 2 },
-};
-
 static const ns_api_method ns_gradient_methods[] = {
     { "addColorStop", ns_ctx_gradient_addColorStop, 2 },
 };
@@ -494,7 +447,7 @@ static const ns_api_table ns_api_tables[NS_TBL_COUNT] = {
     [NS_TBL_OFFSCREEN_CTX2D] = { "OffscreenCanvasRenderingContext2D",
         ns_brand_offscreen_ctx2d,
         ns_ctx2d_attrs, G_N_ELEMENTS(ns_ctx2d_attrs),
-        ns_offscreen_ctx2d_methods, G_N_ELEMENTS(ns_offscreen_ctx2d_methods) },
+        ns_ctx2d_methods, G_N_ELEMENTS(ns_ctx2d_methods) },
     [NS_TBL_GRADIENT] = { "CanvasGradient", ns_brand_gradient, NULL, 0,
         ns_gradient_methods, G_N_ELEMENTS(ns_gradient_methods) },
     [NS_TBL_PATTERN] = { "CanvasPattern", ns_brand_pattern, NULL, 0,
@@ -886,11 +839,15 @@ static void
 ns_api_define_members(JSContext *ctx, JSValueConst proto, int table)
 {
     const ns_api_table *t = &ns_api_tables[table];
-    for (guint i = 0; i < t->n_methods; i++)
+    for (guint i = 0; i < t->n_methods; i++) {
+        if (table == NS_TBL_OFFSCREEN_CTX2D &&
+            t->methods[i].fn == ns_ctx_draw_focus_if_needed)
+            continue;
         JS_SetPropertyStr(ctx, proto, t->methods[i].name,
             JS_NewCFunctionMagic(ctx, ns_api_call, t->methods[i].name,
                                  t->methods[i].length, JS_CFUNC_generic_magic,
                                  NS_MAGIC(table, NS_MAGIC_METHOD, i)));
+    }
     for (guint i = 0; i < t->n_attrs; i++) {
         const ns_attr_def *a = &t->attrs[i];
         char *get_name = g_strconcat("get ", a->name, NULL);
