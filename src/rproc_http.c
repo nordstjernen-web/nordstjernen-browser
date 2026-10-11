@@ -50,8 +50,11 @@ open_fb_fd(size_t size)
         if (fd >= 0)
             shm_unlink(name);
     }
-    if (fd < 0)
+    if (fd < 0) {
+        fprintf(stderr, "nordstjernen: renderer framebuffer: %s\n",
+                strerror(errno));
         return -1;
+    }
     if (ftruncate(fd, (off_t)size) != 0) {
         close(fd);
         return -1;
@@ -197,6 +200,10 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         if (priv) argv[ai++] = (char *)"private";
         argv[ai] = NULL;
         execv(renderer_path, argv);
+        static const char exec_failed[] =
+            "nordstjernen: cannot execute the renderer\n";
+        ssize_t ignored = write(2, exec_failed, sizeof exec_failed - 1);
+        (void)ignored;
         _exit(127);
     }
     close(sv[1]);

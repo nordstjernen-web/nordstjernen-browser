@@ -40,6 +40,11 @@ Changelog:
   music began part-way through, and even `start(ctx.currentTime)` lost the
   first tenth of a second. A start or stop time in the past now means the
   next sample the context renders, and audio nodes carry their `context`.
+* When a tab's renderer cannot start, the status bar keeps saying "Failed
+  to load page". The message was replaced by "Done" at once, so the tab
+  showed a blank page with no hint of what went wrong (#186). The reason is
+  also printed to the terminal: the framebuffer could not be created, the
+  renderer could not be executed, or it did not start.
 
 1.0.31:
 ======

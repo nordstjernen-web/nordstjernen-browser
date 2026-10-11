@@ -1617,10 +1617,14 @@ worker_main(gpointer data)
             g_free(req);
             break;
         }
-        if (!v->proc && !v->closed)
+        if (!v->proc && !v->closed) {
             pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                      NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
                                      v->private_mode));
+            if (!v->proc)
+                g_printerr("nordstjernen: could not start renderer %s\n",
+                           v->renderer_path);
+        }
         if (v->proc && req->dpr > 0)
             ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
 
@@ -3314,9 +3318,9 @@ on_result(gpointer data)
         if (res->seq != v->load_seq)
             goto done;
         if (!res->ok) {
-            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Failed to load page"));
             finish_loading(v);
             clear_busy_cursor(v);
+            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Failed to load page"));
             goto done;
         }
         if (res->nav && *res->nav) {
