@@ -869,6 +869,31 @@ request(ns_rproc_http *r, const char *path, const char *json_body)
     return body;
 }
 
+static int
+request_ok(ns_rproc_http *r, const char *path, char *json)
+{
+    char *body = json ? request(r, path, json) : NULL;
+    free(json);
+    int ok = body != NULL;
+    free(body);
+    return ok ? 0 : -1;
+}
+
+static int
+resolve_permission(ns_rproc_http *r, const char *path, const char *origin,
+                   int allow)
+{
+    if (!r || !origin)
+        return -1;
+    char *oe = json_escape(origin);
+    char *json = NULL;
+    if (asprintf(&json, "{\"origin\":\"%s\",\"allow\":%d}",
+                 oe ? oe : "", allow ? 1 : 0) < 0)
+        json = NULL;
+    free(oe);
+    return request_ok(r, path, json);
+}
+
 int
 ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
 {
@@ -1300,19 +1325,7 @@ ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
 int
 ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin, int allow)
 {
-    if (!r || !origin)
-        return -1;
-    char *oe = json_escape(origin);
-    char *json = NULL;
-    if (asprintf(&json, "{\"origin\":\"%s\",\"allow\":%d}",
-                 oe ? oe : "", allow ? 1 : 0) < 0)
-        json = NULL;
-    free(oe);
-    char *body = json ? request(r, "/webgl", json) : NULL;
-    free(json);
-    int ok = body != NULL;
-    free(body);
-    return ok ? 0 : -1;
+    return resolve_permission(r, "/webgl", origin, allow);
 }
 
 int
@@ -1323,29 +1336,13 @@ ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark)
     char *json = NULL;
     if (asprintf(&json, "{\"dark\":%d}", dark ? 1 : 0) < 0)
         json = NULL;
-    char *body = json ? request(r, "/colorscheme", json) : NULL;
-    free(json);
-    int ok = body != NULL;
-    free(body);
-    return ok ? 0 : -1;
+    return request_ok(r, "/colorscheme", json);
 }
 
 int
 ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
 {
-    if (!r || !origin)
-        return -1;
-    char *oe = json_escape(origin);
-    char *json = NULL;
-    if (asprintf(&json, "{\"origin\":\"%s\",\"allow\":%d}",
-                 oe ? oe : "", allow ? 1 : 0) < 0)
-        json = NULL;
-    free(oe);
-    char *body = json ? request(r, "/camera", json) : NULL;
-    free(json);
-    int ok = body != NULL;
-    free(body);
-    return ok ? 0 : -1;
+    return resolve_permission(r, "/camera", origin, allow);
 }
 
 int
@@ -1361,11 +1358,7 @@ ns_rproc_http_video_event(ns_rproc_http *r, const char *token,
         json = NULL;
     free(te);
     free(ke);
-    char *body = json ? request(r, "/video-event", json) : NULL;
-    free(json);
-    int ok = body != NULL;
-    free(body);
-    return ok ? 0 : -1;
+    return request_ok(r, "/video-event", json);
 }
 
 char *
