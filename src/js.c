@@ -2126,12 +2126,11 @@ ns_event_define_own_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
 }
 
 static int
-ns_event_set_state_property(JSContext *ctx, ns_event_data *d, JSValueConst obj,
-                            JSAtom prop, JSValueConst value, int flags)
+ns_state_set_property(JSContext *ctx, JSValueConst state, JSValueConst obj,
+                      JSAtom prop, JSValueConst value, int flags)
 {
-    /* An accessor the engine put in the state runs on the event. */
     JSPropertyDescriptor desc;
-    int has = JS_GetOwnProperty(ctx, &desc, d->state, prop);
+    int has = JS_GetOwnProperty(ctx, &desc, state, prop);
     if (has < 0) return -1;
     if (has) {
         JS_FreeValue(ctx, desc.value);
@@ -2149,21 +2148,14 @@ ns_event_set_state_property(JSContext *ctx, ns_event_data *d, JSValueConst obj,
         JS_FreeValue(ctx, desc.getter);
         JS_FreeValue(ctx, desc.setter);
     }
-    return JS_SetPropertyReceiver(ctx, d->state, prop,
-                                  JS_DupValue(ctx, value), d->state, flags);
+    return JS_SetPropertyReceiver(ctx, state, prop,
+                                  JS_DupValue(ctx, value), state, flags);
 }
 
 static int
-ns_event_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
+ns_proto_ordinary_set(JSContext *ctx, JSValueConst obj, JSAtom prop,
                       JSValueConst value, JSValueConst receiver, int flags)
 {
-    ns_event_data *d = ns_event_data_of(obj);
-    if (d && JS_IsHostAccess(ctx) &&
-        JS_VALUE_GET_PTR(receiver) == JS_VALUE_GET_PTR(obj) &&
-        !ns_event_keeps_own(ctx, obj, prop, value))
-        return ns_event_set_state_property(ctx, d, obj, prop, value, flags);
-    /* The page's assignment: an ordinary [[Set]], which finds the
-     * interface's getter on the prototype or adds an own property. */
     JSValue proto = JS_GetPrototype(ctx, obj);
     int ret;
     if (JS_IsObject(proto))
@@ -2177,6 +2169,18 @@ ns_event_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                                 JS_PROP_HAS_CONFIGURABLE);
     JS_FreeValue(ctx, proto);
     return ret;
+}
+
+static int
+ns_event_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                      JSValueConst value, JSValueConst receiver, int flags)
+{
+    ns_event_data *d = ns_event_data_of(obj);
+    if (d && JS_IsHostAccess(ctx) &&
+        JS_VALUE_GET_PTR(receiver) == JS_VALUE_GET_PTR(obj) &&
+        !ns_event_keeps_own(ctx, obj, prop, value))
+        return ns_state_set_property(ctx, d->state, obj, prop, value, flags);
+    return ns_proto_ordinary_set(ctx, obj, prop, value, receiver, flags);
 }
 
 static JSClassExoticMethods ns_event_exotic = {
@@ -9066,11 +9070,11 @@ ns_event_type_is_passive_default(const char *type)
 }
 
 static JSValue
-ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
+ns_add_node_listener(JSContext *ctx, ns_node *target, int argc,
+                     JSValueConst *argv, gboolean window_level,
+                     gboolean element)
 {
-    const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || argc < 2 || !js_from_ctx(ctx)) return JS_UNDEFINED;
+    if (!target || argc < 2 || !js_from_ctx(ctx)) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
     gboolean capture = FALSE, once = FALSE, passive = FALSE, passive_set = FALSE;
@@ -9092,7 +9096,7 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     }
     ns_js *_js = js_from_ctx(ctx);
-    GPtrArray *own = ns_listeners_of(_js, n);
+    GPtrArray *own = ns_listeners_of(_js, target);
     _js->listener_snapshots++;
     for (guint i = 0; own && i < own->len; i++) {
         ns_listener *ex = g_ptr_array_index(own, i);
@@ -9103,7 +9107,8 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             ns_listener_tombstone(ctx, ex);
             continue;
         }
-        if (ex->target == n && strcmp(ex->type, type) == 0 &&
+        if (ex->target == target && strcmp(ex->type, type) == 0 &&
+            (element || !!ex->window_level == !!window_level) &&
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
@@ -9114,36 +9119,41 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
         }
     }
     _js->listener_snapshots--;
-    if (!passive_set && ns_event_type_is_passive_default(type) &&
-        _js->current_doc) {
-        ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
-            ? _js->current_doc
-            : ns_node_find_first_element(_js->current_doc, "html");
-        ns_node *body = ns_node_find_first_element(_js->current_doc, "body");
-        if (n == html || n == body) passive = TRUE;
+    if (!passive_set && ns_event_type_is_passive_default(type)) {
+        if (!element) {
+            passive = TRUE;
+        } else if (_js->current_doc) {
+            ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
+                ? _js->current_doc
+                : ns_node_find_first_element(_js->current_doc, "html");
+            ns_node *body = ns_node_find_first_element(_js->current_doc, "body");
+            if (target == html || target == body) passive = TRUE;
+        }
     }
     ns_listener *l = g_new0(ns_listener, 1);
-    l->target = n;
+    l->target = target;
     l->type   = g_strdup(type);
     l->cb     = JS_DupValue(ctx, argv[1]);
     l->signal = signal;
     l->capture = capture;
     l->once    = once;
     l->passive = passive;
+    l->window_level = window_level;
     g_ptr_array_add(_js->listeners, l);
     ns_listener_index_add(_js, l);
-    ((ns_node *)n)->flags |= NS_NODE_HAS_LISTENERS;
-    ns_node_arm_js_invalidate((ns_node *)n);
+    if (element) target->flags |= NS_NODE_HAS_LISTENERS;
+    ns_node_arm_js_invalidate(target);
     JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
 }
 
 static JSValue
-ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
-                               int argc, JSValueConst *argv)
+ns_remove_node_listener(JSContext *ctx, ns_node *target, int argc,
+                        JSValueConst *argv, gboolean window_level,
+                        gboolean element)
 {
-    const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || argc < 2 || !js_from_ctx(ctx)) return JS_UNDEFINED;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !target || argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
     gboolean capture = FALSE, once = FALSE;
@@ -9152,11 +9162,11 @@ ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
         ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
                                   FALSE);
     JS_FreeValue(ctx, signal);
-    ns_js *js = js_from_ctx(ctx);
     for (guint i = 0; i < js->listeners->len; i++) {
         ns_listener *l = g_ptr_array_index(js->listeners, i);
         if (ns_listener_is_tombstoned(l)) continue;
-        if (l->target == n && strcmp(l->type, type) == 0 &&
+        if (l->target == target && strcmp(l->type, type) == 0 &&
+            (element || !!l->window_level == !!window_level) &&
             !!l->capture == !!capture &&
             JS_VALUE_GET_TAG(l->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(l->cb) == JS_VALUE_GET_PTR(argv[1])) {
@@ -9167,6 +9177,22 @@ ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
     ns_listeners_sweep(js);
     JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    return ns_add_node_listener(ctx, (ns_node *)ns_unwrap_element(this_val),
+                                argc, argv, FALSE, TRUE);
+}
+
+static JSValue
+ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    return ns_remove_node_listener(ctx, (ns_node *)ns_unwrap_element(this_val),
+                                   argc, argv, FALSE, TRUE);
 }
 
 static gboolean
@@ -10358,53 +10384,14 @@ ns_hostobj_define_own_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
 }
 
 static int
-ns_hostobj_set_state_property(JSContext *ctx, ns_hostobj *d, JSValueConst obj,
-                              JSAtom prop, JSValueConst value, int flags)
-{
-    JSPropertyDescriptor desc;
-    int has = JS_GetOwnProperty(ctx, &desc, d->state, prop);
-    if (has < 0) return -1;
-    if (has) {
-        JS_FreeValue(ctx, desc.value);
-        if (desc.flags & JS_PROP_GETSET) {
-            int ret = TRUE;
-            if (JS_IsFunction(ctx, desc.setter)) {
-                JSValue r = JS_Call(ctx, desc.setter, obj, 1, &value);
-                ret = JS_IsException(r) ? -1 : TRUE;
-                JS_FreeValue(ctx, r);
-            }
-            JS_FreeValue(ctx, desc.getter);
-            JS_FreeValue(ctx, desc.setter);
-            return ret;
-        }
-        JS_FreeValue(ctx, desc.getter);
-        JS_FreeValue(ctx, desc.setter);
-    }
-    return JS_SetPropertyReceiver(ctx, d->state, prop,
-                                  JS_DupValue(ctx, value), d->state, flags);
-}
-
-static int
 ns_hostobj_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                         JSValueConst value, JSValueConst receiver, int flags)
 {
     ns_hostobj *d = ns_ho_data(obj);
     if (d && JS_IsHostAccess(ctx) &&
         JS_VALUE_GET_PTR(receiver) == JS_VALUE_GET_PTR(obj))
-        return ns_hostobj_set_state_property(ctx, d, obj, prop, value, flags);
-    JSValue proto = JS_GetPrototype(ctx, obj);
-    int ret;
-    if (JS_IsObject(proto))
-        ret = JS_SetPropertyReceiver(ctx, proto, prop, JS_DupValue(ctx, value),
-                                     receiver, flags);
-    else
-        ret = JS_DefineProperty(ctx, receiver, prop, value, JS_UNDEFINED,
-                                JS_UNDEFINED, JS_PROP_C_W_E |
-                                JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
-                                JS_PROP_HAS_ENUMERABLE |
-                                JS_PROP_HAS_CONFIGURABLE);
-    JS_FreeValue(ctx, proto);
-    return ret;
+        return ns_state_set_property(ctx, d->state, obj, prop, value, flags);
+    return ns_proto_ordinary_set(ctx, obj, prop, value, receiver, flags);
 }
 
 static JSClassExoticMethods ns_hostobj_exotic = {
@@ -49652,6 +49639,54 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     return root;
 }
 
+#define NS_IFRAME_LOCATION_HISTORY_JS \
+    "  function mk(u, b){ try { return new realWin.URL(u, b || url); } catch(e){ return null; } }" \
+    "  function fire(list, on, ev){" \
+    "    var c = list.slice();" \
+    "    for (var i=0;i<c.length;i++){ try { c[i].call(win, ev); } catch(e){} }" \
+    "    if (on) { try { on.call(win, ev); } catch(e){} }" \
+    "  }" \
+    "  function evt(type, props){" \
+    "    var e = null;" \
+    "    try { if (realWin.Event) { e = new realWin.Event(type); } } catch(x){}" \
+    "    if (!e) e = { type: type };" \
+    "    if (props) for (var k in props) { try { e[k] = props[k]; } catch(x){} }" \
+    "    return e;" \
+    "  }" \
+    "  function fireHash(o, n){ fire(hashL, onhash, evt('hashchange', {oldURL:o, newURL:n})); }" \
+    "  function firePop(){ fire(popL, onpop, evt('popstate', {state:state})); }" \
+    "  function sameDoc(a, b){ var ua=mk(a), ub=mk(b);" \
+    "    return !!ua && !!ub && ua.origin===ub.origin && ua.pathname===ub.pathname && ua.search===ub.search; }" \
+    "  var loc = {};" \
+    "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){" \
+    "    Object.defineProperty(loc, p, { configurable:true, enumerable:true," \
+    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });" \
+    "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true," \
+    "    get: function(){ return vis(); }," \
+    "    set: function(v){ var u=mk(v);" \
+    "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');" \
+    "      var o=vis(); url=u.href; shown='';" \
+    "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });" \
+    "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true," \
+    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; }," \
+    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();" \
+    "      if (shown) shown=u.href; else url=u.href;" \
+    "      if (o!==vis()) fireHash(o,vis()); } });" \
+    "  loc.assign = function(v){ this.href = v; };" \
+    "  loc.replace = function(v){ this.href = v; };" \
+    "  loc.reload = function(){};" \
+    "  loc.toString = function(){ return vis(); };" \
+    "  var topHist = realWin.history;" \
+    "  var topPush = topHist && topHist.pushState, topReplace = topHist && topHist.replaceState;" \
+    "  var hist = {" \
+    "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto'," \
+    "    pushState: function(s,t,u){ if (this === topHist && topPush) return topPush.apply(topHist, arguments);" \
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } }," \
+    "    replaceState: function(s,t,u){ if (this === topHist && topReplace) return topReplace.apply(topHist, arguments);" \
+    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } }," \
+    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }" \
+    "  };"
+
 static const char ns_iframe_scope_bootstrap[] =
     "(function(realWin, iframeDoc, initialURL, sandbox, docURL){"
     "  var url = initialURL || 'about:blank';"
@@ -49660,52 +49695,7 @@ static const char ns_iframe_scope_bootstrap[] =
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win;"
-    "  function mk(u, b){ try { return new realWin.URL(u, b || url); } catch(e){ return null; } }"
-    "  function fire(list, on, ev){"
-    "    var c = list.slice();"
-    "    for (var i=0;i<c.length;i++){ try { c[i].call(win, ev); } catch(e){} }"
-    "    if (on) { try { on.call(win, ev); } catch(e){} }"
-    "  }"
-    "  function evt(type, props){"
-    "    var e = null;"
-    "    try { if (realWin.Event) { e = new realWin.Event(type); } } catch(x){}"
-    "    if (!e) e = { type: type };"
-    "    if (props) for (var k in props) { try { e[k] = props[k]; } catch(x){} }"
-    "    return e;"
-    "  }"
-    "  function fireHash(o, n){ fire(hashL, onhash, evt('hashchange', {oldURL:o, newURL:n})); }"
-    "  function firePop(){ fire(popL, onpop, evt('popstate', {state:state})); }"
-    "  function sameDoc(a, b){ var ua=mk(a), ub=mk(b);"
-    "    return !!ua && !!ub && ua.origin===ub.origin && ua.pathname===ub.pathname && ua.search===ub.search; }"
-    "  var loc = {};"
-    "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
-    "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
-    "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return vis(); },"
-    "    set: function(v){ var u=mk(v);"
-    "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=vis(); url=u.href; shown='';"
-    "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
-    "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
-    "      if (shown) shown=u.href; else url=u.href;"
-    "      if (o!==vis()) fireHash(o,vis()); } });"
-    "  loc.assign = function(v){ this.href = v; };"
-    "  loc.replace = function(v){ this.href = v; };"
-    "  loc.reload = function(){};"
-    "  loc.toString = function(){ return vis(); };"
-    "  var topHist = realWin.history;"
-    "  var topPush = topHist && topHist.pushState, topReplace = topHist && topHist.replaceState;"
-    "  var hist = {"
-    "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ if (this === topHist && topPush) return topPush.apply(topHist, arguments);"
-    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    replaceState: function(s,t,u){ if (this === topHist && topReplace) return topReplace.apply(topHist, arguments);"
-    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
-    "  };"
+    NS_IFRAME_LOCATION_HISTORY_JS
     "  var ov = {"
     "    location: loc, history: hist, document: iframeDoc,"
     "    fetch: function(input, init){"
@@ -49823,52 +49813,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win = G;"
-    "  function mk(u, b){ try { return new realWin.URL(u, b || url); } catch(e){ return null; } }"
-    "  function fire(list, on, ev){"
-    "    var c = list.slice();"
-    "    for (var i=0;i<c.length;i++){ try { c[i].call(win, ev); } catch(e){} }"
-    "    if (on) { try { on.call(win, ev); } catch(e){} }"
-    "  }"
-    "  function evt(type, props){"
-    "    var e = null;"
-    "    try { if (realWin.Event) { e = new realWin.Event(type); } } catch(x){}"
-    "    if (!e) e = { type: type };"
-    "    if (props) for (var k in props) { try { e[k] = props[k]; } catch(x){} }"
-    "    return e;"
-    "  }"
-    "  function fireHash(o, n){ fire(hashL, onhash, evt('hashchange', {oldURL:o, newURL:n})); }"
-    "  function firePop(){ fire(popL, onpop, evt('popstate', {state:state})); }"
-    "  function sameDoc(a, b){ var ua=mk(a), ub=mk(b);"
-    "    return !!ua && !!ub && ua.origin===ub.origin && ua.pathname===ub.pathname && ua.search===ub.search; }"
-    "  var loc = {};"
-    "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
-    "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
-    "      get: function(){ var u=mk(vis()); return u ? u[p] : ''; } }); });"
-    "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
-    "    get: function(){ return vis(); },"
-    "    set: function(v){ var u=mk(v);"
-    "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');"
-    "      var o=vis(); url=u.href; shown='';"
-    "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
-    "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
-    "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; },"
-    "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();"
-    "      if (shown) shown=u.href; else url=u.href;"
-    "      if (o!==vis()) fireHash(o,vis()); } });"
-    "  loc.assign = function(v){ this.href = v; };"
-    "  loc.replace = function(v){ this.href = v; };"
-    "  loc.reload = function(){};"
-    "  loc.toString = function(){ return vis(); };"
-    "  var topHist = realWin.history;"
-    "  var topPush = topHist && topHist.pushState, topReplace = topHist && topHist.replaceState;"
-    "  var hist = {"
-    "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ if (this === topHist && topPush) return topPush.apply(topHist, arguments);"
-    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    replaceState: function(s,t,u){ if (this === topHist && topReplace) return topReplace.apply(topHist, arguments);"
-    "      state=s; if(u!=null){ var n=mk(u); if(n){ url=n.href; shown=''; } } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
-    "  };"
+    NS_IFRAME_LOCATION_HISTORY_JS
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
     "  def('window',     { value: win, writable: true });"
     "  def('self',       { value: win, writable: true });"
@@ -56141,6 +56086,31 @@ ns_install_node_shapes(JSContext *ctx)
  * the members of the SVG element interfaces this engine does not have yet
  * (getBBox() and the rest; an <svg> or <circle> is an SVGElement here), and
  * Element and HTMLElement then keep only their own. */
+#define NS_GLOBAL_EVENT_HANDLER_NAMES \
+    "onabort onanimationcancel onanimationend " \
+    "onanimationiteration onanimationstart onauxclick onbeforeinput " \
+    "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel " \
+    "oncanplay oncanplaythrough onchange onclick onclose oncommand " \
+    "oncontentvisibilityautostatechange oncontextlost oncontextmenu " \
+    "oncontextrestored oncopy oncuechange oncut ondblclick ondrag " \
+    "ondragend ondragenter ondragleave ondragover ondragstart ondrop " \
+    "ondurationchange onemptied onended onerror onfocus onformdata " \
+    "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup " \
+    "onload onloadeddata onloadedmetadata onloadstart " \
+    "onlostpointercapture onmousedown onmouseenter onmouseleave " \
+    "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste " \
+    "onpause onplay onplaying onpointercancel onpointerdown " \
+    "onpointerenter onpointerleave onpointermove onpointerout " \
+    "onpointerover onpointerrawupdate onpointerup onprogress " \
+    "onratechange onreset onresize onscroll onscrollend " \
+    "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation " \
+    "onseeked onseeking onselect onselectionchange onselectstart " \
+    "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle " \
+    "ontransitioncancel ontransitionend ontransitionrun " \
+    "ontransitionstart onvolumechange onwaiting onwebkitanimationend " \
+    "onwebkitanimationiteration onwebkitanimationstart " \
+    "onwebkittransitionend onwheel "
+
 static const char ns_element_shapes_src[] =
     "(function(G){"
     "  var W = {"
@@ -56186,55 +56156,13 @@ static const char ns_element_shapes_src[] =
         "draggable editContext enterKeyHint focus focusGroup "
         "focusGroupStart hidden hidePopover inert innerText inputMode "
         "isContentEditable lang nonce offsetHeight offsetLeft offsetParent "
-        "offsetTop offsetWidth onabort onanimationcancel onanimationend "
-        "onanimationiteration onanimationstart onauxclick onbeforeinput "
-        "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel "
-        "oncanplay oncanplaythrough onchange onclick onclose oncommand "
-        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
-        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
-        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
-        "ondurationchange onemptied onended onerror onfocus onformdata "
-        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
-        "onload onloadeddata onloadedmetadata onloadstart "
-        "onlostpointercapture onmousedown onmouseenter onmouseleave "
-        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
-        "onpause onplay onplaying onpointercancel onpointerdown "
-        "onpointerenter onpointerleave onpointermove onpointerout "
-        "onpointerover onpointerrawupdate onpointerup onprogress "
-        "onratechange onreset onresize onscroll onscrollend "
-        "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation "
-        "onseeked onseeking onselect onselectionchange onselectstart "
-        "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle "
-        "ontransitioncancel ontransitionend ontransitionrun "
-        "ontransitionstart onvolumechange onwaiting onwebkitanimationend "
-        "onwebkitanimationiteration onwebkitanimationstart "
-        "onwebkittransitionend onwheel outerText popover showPopover "
+        "offsetTop offsetWidth " NS_GLOBAL_EVENT_HANDLER_NAMES
+        "outerText popover showPopover "
         "spellcheck style tabIndex title togglePopover translate "
         "virtualKeyboardPolicy writingSuggestions',"
         "  MathMLElement: 'attributeStyleMap autofocus blur dataset focus focusGroup "
-        "focusGroupStart nonce onabort onanimationcancel onanimationend "
-        "onanimationiteration onanimationstart onauxclick onbeforeinput "
-        "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel "
-        "oncanplay oncanplaythrough onchange onclick onclose oncommand "
-        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
-        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
-        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
-        "ondurationchange onemptied onended onerror onfocus onformdata "
-        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
-        "onload onloadeddata onloadedmetadata onloadstart "
-        "onlostpointercapture onmousedown onmouseenter onmouseleave "
-        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
-        "onpause onplay onplaying onpointercancel onpointerdown "
-        "onpointerenter onpointerleave onpointermove onpointerout "
-        "onpointerover onpointerrawupdate onpointerup onprogress "
-        "onratechange onreset onresize onscroll onscrollend "
-        "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation "
-        "onseeked onseeking onselect onselectionchange onselectstart "
-        "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle "
-        "ontransitioncancel ontransitionend ontransitionrun "
-        "ontransitionstart onvolumechange onwaiting onwebkitanimationend "
-        "onwebkitanimationiteration onwebkitanimationstart "
-        "onwebkittransitionend onwheel style tabIndex',"
+        "focusGroupStart nonce " NS_GLOBAL_EVENT_HANDLER_NAMES
+        "style tabIndex',"
         "  SVGElement: 'LENGTHADJUST_SPACING LENGTHADJUST_SPACINGANDGLYPHS "
         "LENGTHADJUST_UNKNOWN SVG_CHANNEL_A SVG_CHANNEL_B SVG_CHANNEL_G "
         "SVG_CHANNEL_R SVG_CHANNEL_UNKNOWN SVG_EDGEMODE_DUPLICATE "
@@ -60191,136 +60119,35 @@ ns_document_querySelectorAll(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_document_add_listener_impl(JSContext *ctx, ns_node *target, int argc,
-                              JSValueConst *argv, gboolean window_level)
-{
-    if (!js_from_ctx(ctx) || !target || argc < 2) return JS_UNDEFINED;
-    const char *type = JS_ToCString(ctx, argv[0]);
-    if (!type) return JS_UNDEFINED;
-    gboolean capture = FALSE, once = FALSE, passive = FALSE, passive_set = FALSE;
-    JSValue signal = JS_NULL;
-    if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &passive,
-                                   &passive_set, &signal, TRUE)) {
-        JS_FreeCString(ctx, type);
-        return JS_EXCEPTION;
-    }
-    if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
-        JS_FreeValue(ctx, signal);
-        JS_FreeCString(ctx, type);
-        return JS_UNDEFINED;
-    }
-    if (ns_signal_is_aborted(ctx, signal)) {
-        JS_FreeValue(ctx, signal);
-        JS_FreeCString(ctx, type);
-        return JS_UNDEFINED;
-    }
-    ns_js *_js = js_from_ctx(ctx);
-    GPtrArray *own = ns_listeners_of(_js, target);
-    _js->listener_snapshots++;
-    for (guint i = 0; own && i < own->len; i++) {
-        ns_listener *ex = g_ptr_array_index(own, i);
-        if (ns_listener_is_tombstoned(ex)) continue;
-        gboolean aborted = ns_listener_signal_aborted(_js, ex);
-        if (ns_listener_is_tombstoned(ex)) continue;
-        if (aborted) {
-            ns_listener_tombstone(ctx, ex);
-            continue;
-        }
-        if (ex->target == target && strcmp(ex->type, type) == 0 &&
-            !!ex->window_level == !!window_level &&
-            !!ex->capture == !!capture &&
-            JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
-            JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
-            _js->listener_snapshots--;
-            JS_FreeValue(ctx, signal);
-            JS_FreeCString(ctx, type);
-            return JS_UNDEFINED;
-        }
-    }
-    _js->listener_snapshots--;
-    if (!passive_set && ns_event_type_is_passive_default(type))
-        passive = TRUE;
-    ns_listener *l = g_new0(ns_listener, 1);
-    l->target = target;
-    l->type   = g_strdup(type);
-    l->cb     = JS_DupValue(ctx, argv[1]);
-    l->signal = signal;
-    l->capture = capture;
-    l->once    = once;
-    l->passive = passive;
-    l->window_level = window_level;
-    g_ptr_array_add(_js->listeners, l);
-    ns_listener_index_add(_js, l);
-    ns_node_arm_js_invalidate(target);
-    JS_FreeCString(ctx, type);
-    return JS_UNDEFINED;
-}
-
-static JSValue
 ns_document_addEventListener(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    return ns_document_add_listener_impl(ctx,
-        ns_document_root_for(ctx, this_val), argc, argv, FALSE);
+    return ns_add_node_listener(ctx, ns_document_root_for(ctx, this_val),
+                                argc, argv, FALSE, FALSE);
 }
 
 static JSValue
 ns_window_addEventListener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    return ns_document_add_listener_impl(ctx,
-                                         ns_window_document_for(ctx, this_val),
-                                         argc, argv, TRUE);
-}
-
-static JSValue
-ns_document_remove_listener_impl(JSContext *ctx, ns_node *target, int argc,
-                                 JSValueConst *argv, gboolean window_level)
-{
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !target || argc < 2) return JS_UNDEFINED;
-    const char *type = JS_ToCString(ctx, argv[0]);
-    if (!type) return JS_UNDEFINED;
-    gboolean capture = FALSE, once = FALSE;
-    JSValue signal = JS_NULL;
-    if (argc >= 3)
-        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
-                                  FALSE);
-    JS_FreeValue(ctx, signal);
-    for (guint i = 0; i < js->listeners->len; i++) {
-        ns_listener *l = g_ptr_array_index(js->listeners, i);
-        if (ns_listener_is_tombstoned(l)) continue;
-        if (l->target == target && strcmp(l->type, type) == 0 &&
-            !!l->window_level == !!window_level &&
-            !!l->capture == !!capture &&
-            JS_VALUE_GET_TAG(l->cb) == JS_VALUE_GET_TAG(argv[1]) &&
-            JS_VALUE_GET_PTR(l->cb) == JS_VALUE_GET_PTR(argv[1])) {
-            ns_listener_tombstone(ctx, l);
-            break;
-        }
-    }
-    ns_listeners_sweep(js);
-    JS_FreeCString(ctx, type);
-    return JS_UNDEFINED;
+    return ns_add_node_listener(ctx, ns_window_document_for(ctx, this_val),
+                                argc, argv, TRUE, FALSE);
 }
 
 static JSValue
 ns_document_removeEventListener(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv)
 {
-    return ns_document_remove_listener_impl(ctx,
-        ns_document_root_for(ctx, this_val), argc, argv, FALSE);
+    return ns_remove_node_listener(ctx, ns_document_root_for(ctx, this_val),
+                                   argc, argv, FALSE, FALSE);
 }
 
 static JSValue
 ns_window_removeEventListener(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    return ns_document_remove_listener_impl(ctx,
-                                            ns_window_document_for(ctx,
-                                                                   this_val),
-                                            argc, argv, TRUE);
+    return ns_remove_node_listener(ctx, ns_window_document_for(ctx, this_val),
+                                   argc, argv, TRUE, FALSE);
 }
 
 static void
