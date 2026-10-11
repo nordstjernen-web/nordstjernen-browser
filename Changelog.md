@@ -33,6 +33,13 @@ Changelog:
   page's array. The bounds check multiplied the offset before comparing,
   so an offset near 2^62 wrapped around and the draw read its first and
   count values from memory before the array.
+* Web Audio: a sound started with `start()` or `start(0)` plays from its
+  beginning. The start time was kept as given, so once the context had run
+  longer than a clip, the real-time output treated the clip as already
+  finished and stayed silent (most game sound effects, Howler.js), looped
+  music began part-way through, and even `start(ctx.currentTime)` lost the
+  first tenth of a second. A start or stop time in the past now means the
+  next sample the context renders, and audio nodes carry their `context`.
 
 1.0.31:
 ======

@@ -13289,6 +13289,13 @@ ns_audio_node_schedule(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1 && !JS_IsUndefined(argv[0]))
         JS_ToFloat64(ctx, &when, argv[0]);
     if (!(when >= 0.0)) when = 0.0;
+    JSValue audio_ctx = JS_GetPropertyStr(ctx, this_val, "context");
+    if (JS_IsObject(audio_ctx)) {
+        double floor_time = ns_webaudio_schedule_floor(js_from_ctx(ctx), ctx,
+                                                       audio_ctx);
+        if (when < floor_time) when = floor_time;
+    }
+    JS_FreeValue(ctx, audio_ctx);
     JS_SetPropertyStr(ctx, this_val, field, JS_NewFloat64(ctx, when));
     return JS_UNDEFINED;
 }
@@ -13426,7 +13433,7 @@ static JSValue
 ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv, int magic)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     static const char *const kinds[] = {
         "gain", "analyser", "mediaelementsource", "mediastreamsource",
         "buffersource", "oscillator", "delay", "biquad", "merger",
@@ -13436,7 +13443,10 @@ ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
     };
     const char *kind = magic >= 0 && magic < (int)G_N_ELEMENTS(kinds)
                      ? kinds[magic] : "gain";
-    return ns_audio_make_node(ctx, kind);
+    JSValue n = ns_audio_make_node(ctx, kind);
+    if (JS_IsObject(this_val))
+        JS_SetPropertyStr(ctx, n, "context", JS_DupValue(ctx, this_val));
+    return n;
 }
 
 static JSValue ns_audio_make_buffer(JSContext *ctx, uint32_t channels,

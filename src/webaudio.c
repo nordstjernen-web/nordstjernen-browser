@@ -630,6 +630,18 @@ ns_wa_rt_render(ns_js *js, ns_wa_rt *rt, gint64 now)
     g_free(pcm);
 }
 
+double
+ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx, JSValueConst audio_ctx)
+{
+    const ns_wa_rt *rt = js ? ns_wa_rt_find(js, audio_ctx) : NULL;
+    if (!rt || rt->closed || !(rt->rate > 0))
+        return ns_wa_num(ctx, audio_ctx, "currentTime", 0.0);
+    double elapsed = ns_wa_rt_elapsed(rt, g_get_monotonic_time());
+    double next = rt->frames_done < elapsed - NS_WA_RT_BEHIND_S * rt->rate
+                ? floor(elapsed) : rt->frames_done;
+    return next / rt->rate;
+}
+
 gboolean
 ns_webaudio_rt_pump(ns_js *js)
 {
