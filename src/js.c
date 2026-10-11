@@ -37664,6 +37664,43 @@ ns_css_filter_nulls(const char *s, size_t len)
     return g_string_free(buf, FALSE);
 }
 
+typedef struct {
+    const ns_node *prev_scope;
+    const ns_node *prev_focus;
+    char          *fragment;
+} ns_selector_match_ctx;
+
+static void
+ns_selector_match_begin(JSContext *ctx, const ns_node *scope,
+                        ns_selector_match_ctx *mc)
+{
+    mc->prev_scope = ns_css_set_match_scope(scope);
+    ns_js *js = js_from_ctx(ctx);
+    mc->fragment = ns_element_target_fragment(ctx, scope);
+    ns_css_set_target_fragment(mc->fragment);
+    mc->prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+}
+
+static void
+ns_selector_match_end(ns_selector_match_ctx *mc)
+{
+    ns_css_set_focus_node(mc->prev_focus);
+    ns_css_set_match_scope(mc->prev_scope);
+    ns_css_set_target_fragment(NULL);
+    g_free(mc->fragment);
+}
+
+static GPtrArray *
+ns_selectors_parse_or_throw(JSContext *ctx, const char *sel)
+{
+    gboolean valid = FALSE;
+    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
+    if (valid) return sels;
+    g_ptr_array_free(sels, TRUE);
+    ns_throw_selector_syntax_error(ctx, sel);
+    return NULL;
+}
+
 static JSValue
 ns_query_selector_impl(JSContext *ctx, const ns_node *root,
                        int argc, JSValueConst *argv, gboolean want_all,
@@ -37686,21 +37723,12 @@ ns_query_selector_impl(JSContext *ctx, const ns_node *root,
         g_free(sel);
         return fast;
     }
-    gboolean valid = FALSE;
-    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
-    if (!valid) {
-        g_ptr_array_free(sels, TRUE);
-        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
-        g_free(sel);
-        return exc;
-    }
+    GPtrArray *sels = ns_selectors_parse_or_throw(ctx, sel);
     g_free(sel);
+    if (!sels) return JS_EXCEPTION;
     ns_css_selector_batch_begin();
-    const ns_node *prev_scope = ns_css_set_match_scope(root);
-    ns_js *js = js_from_ctx(ctx);
-    char *cur_frag = ns_element_target_fragment(ctx, root);
-    ns_css_set_target_fragment(cur_frag);
-    const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+    ns_selector_match_ctx mc;
+    ns_selector_match_begin(ctx, root, &mc);
     JSValue ret;
     if (!ns_query_key_index(ctx, root, sels, want_all, include_self, &ret)) {
         if (want_all) {
@@ -37723,10 +37751,7 @@ ns_query_selector_impl(JSContext *ctx, const ns_node *root,
             ret = ns_make_element(ctx, m);
         }
     }
-    ns_css_set_focus_node(prev_focus);
-    ns_css_set_match_scope(prev_scope);
-    ns_css_set_target_fragment(NULL);
-    g_free(cur_frag);
+    ns_selector_match_end(&mc);
     ns_css_selector_batch_end();
     g_ptr_array_free(sels, TRUE);
     return ret;
@@ -37777,9 +37802,9 @@ ns_is_valid_ident_start(const char *s)
 }
 
 static gboolean
-ns_is_simple_class_selector(const char *sel)
+ns_is_simple_prefixed_selector(const char *sel, char prefix)
 {
-    if (!sel || sel[0] != '.' || sel[1] == '\0') return FALSE;
+    if (!sel || sel[0] != prefix || sel[1] == '\0') return FALSE;
     if (!ns_is_valid_ident_start(sel + 1)) return FALSE;
     for (const char *p = sel + 1; *p; p++) {
         unsigned char c = (unsigned char)*p;
@@ -37789,6 +37814,12 @@ ns_is_simple_class_selector(const char *sel)
             return FALSE;
     }
     return TRUE;
+}
+
+static gboolean
+ns_is_simple_class_selector(const char *sel)
+{
+    return ns_is_simple_prefixed_selector(sel, '.');
 }
 
 static gboolean
@@ -37806,16 +37837,7 @@ ns_is_simple_tag_selector(const char *sel)
 static gboolean
 ns_is_simple_id_selector(const char *sel)
 {
-    if (!sel || sel[0] != '#' || sel[1] == '\0') return FALSE;
-    if (!ns_is_valid_ident_start(sel + 1)) return FALSE;
-    for (const char *p = sel + 1; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (c <= ' ' || c == '.' || c == '#' || c == ':' || c == '[' ||
-            c == '>' || c == '+' || c == '~' || c == ',' || c == '*' ||
-            c == '(' || c == ')')
-            return FALSE;
-    }
-    return TRUE;
+    return ns_is_simple_prefixed_selector(sel, '#');
 }
 
 static gboolean
@@ -37897,25 +37919,13 @@ ns_element_matches(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, sel);
         return m ? JS_TRUE : JS_FALSE;
     }
-    gboolean valid = FALSE;
-    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
-    if (!valid) {
-        g_ptr_array_free(sels, TRUE);
-        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
-        JS_FreeCString(ctx, sel);
-        return exc;
-    }
+    GPtrArray *sels = ns_selectors_parse_or_throw(ctx, sel);
     JS_FreeCString(ctx, sel);
-    const ns_node *prev_scope = ns_css_set_match_scope(el);
-    ns_js *js = js_from_ctx(ctx);
-    char *cur_frag = ns_element_target_fragment(ctx, el);
-    ns_css_set_target_fragment(cur_frag);
-    const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+    if (!sels) return JS_EXCEPTION;
+    ns_selector_match_ctx mc;
+    ns_selector_match_begin(ctx, el, &mc);
     gboolean m = ns_matches_any_selector(sels, el);
-    ns_css_set_focus_node(prev_focus);
-    ns_css_set_match_scope(prev_scope);
-    ns_css_set_target_fragment(NULL);
-    g_free(cur_frag);
+    ns_selector_match_end(&mc);
     g_ptr_array_free(sels, TRUE);
     return m ? JS_TRUE : JS_FALSE;
 }
@@ -37971,38 +37981,23 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, sel);
         return JS_NULL;
     }
-    gboolean valid = FALSE;
-    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
-    if (!valid) {
-        g_ptr_array_free(sels, TRUE);
-        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
-        JS_FreeCString(ctx, sel);
-        return exc;
-    }
+    GPtrArray *sels = ns_selectors_parse_or_throw(ctx, sel);
     JS_FreeCString(ctx, sel);
-    const ns_node *prev_scope = ns_css_set_match_scope(el);
-    ns_js *js = js_from_ctx(ctx);
-    char *cur_frag = ns_element_target_fragment(ctx, el);
-    ns_css_set_target_fragment(cur_frag);
-    const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+    if (!sels) return JS_EXCEPTION;
+    ns_selector_match_ctx mc;
+    ns_selector_match_begin(ctx, el, &mc);
     const ns_node *cur = el;
     int depth = 0;
     while (cur && cur->kind == NS_NODE_ELEMENT &&
              !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH) {
         if (ns_matches_any_selector(sels, cur)) {
-            ns_css_set_focus_node(prev_focus);
-            ns_css_set_match_scope(prev_scope);
-            ns_css_set_target_fragment(NULL);
-            g_free(cur_frag);
+            ns_selector_match_end(&mc);
             g_ptr_array_free(sels, TRUE);
             return ns_make_element(ctx, cur);
         }
         cur = cur->parent;
     }
-    ns_css_set_focus_node(prev_focus);
-    ns_css_set_match_scope(prev_scope);
-    ns_css_set_target_fragment(NULL);
-    g_free(cur_frag);
+    ns_selector_match_end(&mc);
     g_ptr_array_free(sels, TRUE);
     return JS_NULL;
 }
