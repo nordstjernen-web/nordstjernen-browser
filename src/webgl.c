@@ -1700,7 +1700,8 @@ wgl_int_list(JSContext *ctx, JSValueConst list, int64_t offset, int64_t count)
     JSValue hold;
     const uint8_t *bytes = view_bytes(ctx, list, &len, &hold);
     if (bytes) {
-        gboolean ok = (uint64_t)(offset + count) * 4u <= len;
+        gboolean ok = (uint64_t)offset <= len / 4u &&
+                      (uint64_t)count <= len / 4u - (uint64_t)offset;
         if (ok) memcpy(out, bytes + offset * 4, (size_t)count * 4u);
         if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         if (!ok) { g_free(out); return NULL; }
