@@ -1435,12 +1435,13 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
 }
 
 GHashTable *
-ns_engine_restyle(ns_node *doc, const char *base_url,
+ns_engine_restyle(ns_node *doc, const char *page_url,
                   int viewport_width, double viewport_height,
                   ns_image_cache *images, ns_anim *anim,
                   ns_js *js, GHashTable *css_cache,
                   const ns_node *focused, const ns_node *hover)
 {
+    g_autofree char *base_url = g_strdup(page_url);
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);

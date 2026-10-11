@@ -16,6 +16,14 @@ Changelog:
   compiled with the group count cut to one byte, so the matcher ran the
   group indices as instructions: the expression matched wrongly and could
   read past the engine's opcode table or hang.
+* Security: page script no longer runs while a restyle waits for a
+  stylesheet. 1.0.31 held timers and other page tasks during blocking
+  fetches, but `fetch()` and `XMLHttpRequest` completions still ran there,
+  and restyling (from `getComputedStyle()` after adding a `<link>`) kept
+  using the page's own URL string. A completion handler that called
+  `history.replaceState()` freed that string while the restyle still read
+  it. Restyle now works on its own copy, and fetch and XHR results wait
+  for the stylesheet like the other page tasks.
 
 1.0.31:
 ======
