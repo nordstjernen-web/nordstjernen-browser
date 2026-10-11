@@ -2126,9 +2126,11 @@ static int re_parse_term(REParseState *s, bool is_backward_dir)
                     }
                     is_forward = true;
                 }
+                if (n > 255)
+                    return re_parse_error(s, "too many named groups");
                 last_atom_start = s->byte_code.size;
                 last_capture_count = s->capture_count;
-                
+
                 /* emit back references to all the captures indexes matching the group name */
                 re_emit_op_u8(s, REOP_back_reference + 2 * is_backward_dir + s->ignore_case, n);
                 if (is_forward) {
