@@ -121,6 +121,7 @@ void ns_net_shutdown(void);
 
 gboolean ns_net_idle(void);
 
+char *ns_net_exe_dir(void);
 const char *ns_net_default_accept_language(void);
 const char *ns_net_effective_accept_language(void);
 char      **ns_net_navigator_languages(void);

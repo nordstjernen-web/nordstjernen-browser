@@ -2,17 +2,11 @@
 
 #define _GNU_SOURCE
 #include "safebrowsing.h"
+#include "net.h"
 
 #include <string.h>
 
 #include <openssl/evp.h>
-
-#ifdef G_OS_WIN32
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
-#include <stdlib.h>
-#endif
 
 static GHashTable *g_blocked;
 static GHashTable *g_allow;
@@ -58,46 +52,6 @@ load_file(const char *path)
     g_free(contents);
 }
 
-static char *
-self_exe_dir(void)
-{
-#ifdef G_OS_WIN32
-    DWORD cap = MAX_PATH;
-    wchar_t *buf = g_new(wchar_t, cap);
-    DWORD n = GetModuleFileNameW(NULL, buf, cap);
-    while (n >= cap && cap < 32768) {
-        cap *= 2;
-        buf = g_renew(wchar_t, buf, cap);
-        n = GetModuleFileNameW(NULL, buf, cap);
-    }
-    char *utf8 = NULL;
-    if (n > 0 && n < cap)
-        utf8 = g_utf16_to_utf8((gunichar2 *)buf, -1, NULL, NULL, NULL);
-    g_free(buf);
-    if (!utf8) return NULL;
-    char *dir = g_path_get_dirname(utf8);
-    g_free(utf8);
-    return dir;
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(NULL, &size);
-    if (size == 0 || size > 32768) return NULL;
-    char *raw = g_malloc(size);
-    if (_NSGetExecutablePath(raw, &size) != 0) { g_free(raw); return NULL; }
-    char *real = realpath(raw, NULL);
-    char *dir = g_path_get_dirname(real ? real : raw);
-    free(real);
-    g_free(raw);
-    return dir;
-#else
-    char *exe = g_file_read_link("/proc/self/exe", NULL);
-    if (!exe) return NULL;
-    char *dir = g_path_get_dirname(exe);
-    g_free(exe);
-    return dir;
-#endif
-}
-
 static gboolean
 load_bundled(void)
 {
@@ -110,7 +64,7 @@ load_bundled(void)
         "../../data/safebrowsing.list",
         "../../../data/safebrowsing.list",
     };
-    char *dir = self_exe_dir();
+    char *dir = ns_net_exe_dir();
     if (dir) {
         for (gsize i = 0; i < G_N_ELEMENTS(rel); i++) {
             char *path = g_build_filename(dir, rel[i], NULL);
