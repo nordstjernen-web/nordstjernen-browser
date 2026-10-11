@@ -10,6 +10,12 @@ Changelog:
   collapsed. The rectangle now follows the foreignObject's position, the
   `viewBox` scale and its transforms, and `elementFromPoint` reaches that
   HTML before the page is first painted.
+* Security: a regular expression with a named backreference to more than
+  255 groups of the same name (`(?<a>…)|(?<a>…)|…\k<a>`) is a syntax
+  error again. Since 1.0.31 raised the capture limit, 256 such groups
+  compiled with the group count cut to one byte, so the matcher ran the
+  group indices as instructions: the expression matched wrongly and could
+  read past the engine's opcode table or hang.
 
 1.0.31:
 ======
