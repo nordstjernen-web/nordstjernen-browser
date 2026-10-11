@@ -6,6 +6,7 @@
 #include "history.h"
 #include "about_style.h"
 #include "config.h"
+#include "db.h"
 
 #include <glib/gstdio.h>
 #include <sqlite3.h>
@@ -18,35 +19,10 @@ static sqlite3 *g_history_db;
 static gboolean g_history_disabled;
 static GMutex   g_history_mutex;
 
-static void
-history_harden(sqlite3 *db)
-{
-#ifdef SQLITE_DBCONFIG_DEFENSIVE
-    sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, NULL);
-#endif
-    sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 0, NULL);
-#ifdef SQLITE_DBCONFIG_TRUSTED_SCHEMA
-    sqlite3_db_config(db, SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0, NULL);
-#endif
-#ifdef SQLITE_DBCONFIG_DQS_DDL
-    sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DDL, 0, NULL);
-#endif
-#ifdef SQLITE_DBCONFIG_DQS_DML
-    sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, 0, NULL);
-#endif
-}
-
 static gboolean
 history_exec(const char *sql)
 {
-    if (!g_history_db) return FALSE;
-    char *err = NULL;
-    int rc = sqlite3_exec(g_history_db, sql, NULL, NULL, &err);
-    if (rc != SQLITE_OK)
-        g_warning("history: sqlite exec failed: %s",
-                  err ? err : sqlite3_errstr(rc));
-    if (err) sqlite3_free(err);
-    return rc == SQLITE_OK;
+    return ns_db_exec(g_history_db, sql, "history");
 }
 
 static gboolean
@@ -103,20 +79,14 @@ ns_history_init(void)
     char *path = g_build_filename(dir, "history.sqlite", NULL);
     g_free(dir);
 
-    int rc = sqlite3_open_v2(path, &g_history_db,
-                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
-    if (rc != SQLITE_OK) {
-        g_warning("history: could not open %s: %s", path,
-                  g_history_db ? sqlite3_errmsg(g_history_db)
-                               : sqlite3_errstr(rc));
-        if (g_history_db) { sqlite3_close(g_history_db); g_history_db = NULL; }
+    g_history_db = ns_db_open(path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                              "history");
+    if (!g_history_db) {
         g_history_disabled = TRUE;
         g_free(path);
         g_mutex_unlock(&g_history_mutex);
         return;
     }
-    history_harden(g_history_db);
-    sqlite3_busy_timeout(g_history_db, 2500);
     if (!history_schema()) {
         sqlite3_close(g_history_db);
         g_history_db = NULL;
