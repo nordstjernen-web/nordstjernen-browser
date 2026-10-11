@@ -24590,56 +24590,34 @@ inline_custom_winner_free(gpointer data)
     g_free(w);
 }
 
+static void
+inline_custom_index_visit(gpointer user, const char *key, const char *vstart,
+                          const char *vend)
+{
+    GHashTable *winners = user;
+    if (key[0] != '-' || key[1] != '-') return;
+    char *value = css_trim_dup_range(vstart, vend);
+    char *probe = g_strdup(value);
+    gboolean important = FALSE;
+    css_strip_important(probe, &important);
+    g_free(probe);
+    inline_custom_winner *prev = g_hash_table_lookup(winners, key);
+    if (!prev || important || !prev->important) {
+        inline_custom_winner *w = g_new0(inline_custom_winner, 1);
+        w->value = value;
+        w->important = important;
+        g_hash_table_replace(winners, g_strdup(key), w);
+    } else {
+        g_free(value);
+    }
+}
+
 static GHashTable *
 inline_custom_index_build(const char *style)
 {
     GHashTable *winners = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                                 inline_custom_winner_free);
-    const char *p = style;
-    const char *end = style + strlen(style);
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') {
-            p++;
-            p = css_skip_ws_comments(p, end);
-        }
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        const char *kstart = p;
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *key = css_trim_dup_range(kstart, kend);
-        if (term != ':') {
-            g_free(key);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vstart = p;
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        if (key[0] == '-' && key[1] == '-') {
-            char *value = css_trim_dup_range(vstart, vend);
-            char *probe = g_strdup(value);
-            gboolean important = FALSE;
-            css_strip_important(probe, &important);
-            g_free(probe);
-            inline_custom_winner *prev = g_hash_table_lookup(winners, key);
-            if (!prev || important || !prev->important) {
-                inline_custom_winner *w = g_new0(inline_custom_winner, 1);
-                w->value = value;
-                w->important = important;
-                g_hash_table_replace(winners, key, w);
-                key = NULL;
-            } else {
-                g_free(value);
-            }
-        }
-        g_free(key);
-        p = term == ';' ? vend + 1 : vend;
-    }
+    inline_scan_declarations(style, inline_custom_index_visit, winners);
     return winners;
 }
 
@@ -24881,84 +24859,60 @@ inline_serialize_memo_keep(const char *key, char *out)
     return out;
 }
 
+static void
+inline_serialize_visit(gpointer user, const char *key, const char *vstart,
+                       const char *vend)
+{
+    GPtrArray *decls = user;
+    char *value = css_trim_dup_range(vstart, vend);
+    gboolean custom = key[0] == '-' && key[1] == '-';
+    char *name = custom ? g_strdup(key) : g_ascii_strdown(key, -1);
+    if (!custom && strcmp(name, "-webkit-line-clamp") == 0) {
+        g_free(name);
+        name = g_strdup("line-clamp");
+    }
+    gboolean important = FALSE;
+    css_strip_important(value, &important);
+    g_strstrip(value);
+    if (!*name || !*value || !ns_css_named_property_supported(name) ||
+        !ns_css_named_declaration_valid(name, value)) {
+        g_free(name);
+        g_free(value);
+        return;
+    }
+    value = css_inline_value_canonical(name, value);
+    char *canonical = custom ? NULL
+        : ns_css_specified_canonical(name, value);
+    if (canonical) {
+        g_free(value);
+        value = canonical;
+    }
+    ns_inline_decl *decl = inline_decl_find(decls, name);
+    if (!decl) {
+        decl = g_new0(ns_inline_decl, 1);
+        decl->name = name;
+        decl->value = value;
+        decl->important = important;
+        g_ptr_array_add(decls, decl);
+    } else {
+        g_free(name);
+        if (important || !decl->important) {
+            g_free(decl->value);
+            decl->value = value;
+            decl->important = important;
+        } else {
+            g_free(value);
+        }
+    }
+}
+
 char *
 ns_inline_style_serialize(const char *style)
 {
     char *hit = inline_serialize_memo_hit(style ? style : "");
     if (hit) return hit;
     GPtrArray *decls = g_ptr_array_new_with_free_func(inline_decl_free);
-    const char *p = style ? style : "";
-    const char *end = p + strlen(p);
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') {
-            p++;
-            p = css_skip_ws_comments(p, end);
-        }
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        const char *kstart = p;
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *name = css_trim_dup_range(kstart, kend);
-        if (term != ':') {
-            g_free(name);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vstart = p;
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        char *value = css_trim_dup_range(vstart, vend);
-        gboolean custom = name[0] == '-' && name[1] == '-';
-        if (!custom) {
-            char *lower = g_ascii_strdown(name, -1);
-            g_free(name);
-            name = lower;
-            if (strcmp(name, "-webkit-line-clamp") == 0) {
-                g_free(name);
-                name = g_strdup("line-clamp");
-            }
-        }
-        gboolean important = FALSE;
-        css_strip_important(value, &important);
-        g_strstrip(value);
-        if (!*name || !*value || !ns_css_named_property_supported(name) ||
-            !ns_css_named_declaration_valid(name, value)) {
-            g_free(name);
-            g_free(value);
-            p = term == ';' ? vend + 1 : vend;
-            continue;
-        }
-        value = css_inline_value_canonical(name, value);
-        char *canonical = custom ? NULL
-            : ns_css_specified_canonical(name, value);
-        if (canonical) {
-            g_free(value);
-            value = canonical;
-        }
-        ns_inline_decl *decl = inline_decl_find(decls, name);
-        if (!decl) {
-            decl = g_new0(ns_inline_decl, 1);
-            decl->name = name;
-            decl->value = value;
-            decl->important = important;
-            g_ptr_array_add(decls, decl);
-        } else {
-            g_free(name);
-            if (important || !decl->important) {
-                g_free(decl->value);
-                decl->value = value;
-                decl->important = important;
-            } else {
-                g_free(value);
-            }
-        }
-        p = term == ';' ? vend + 1 : vend;
-    }
+    inline_scan_declarations(style ? style : "", inline_serialize_visit, decls);
     gint all_index = -1;
     for (guint i = 0; i < decls->len; i++) {
         ns_inline_decl *decl = g_ptr_array_index(decls, i);
@@ -25248,53 +25202,43 @@ ns_inline_value_strip_important(char *value)
     return important;
 }
 
+typedef struct {
+    const char *prop;
+    int         prop_id;
+    gboolean    seen_prop;
+    gboolean    found;
+} inline_follow_scan;
+
+static void
+inline_follow_visit(gpointer user, const char *key, const char *vstart,
+                    const char *vend)
+{
+    inline_follow_scan *st = user;
+    if (st->found) return;
+    if (g_ascii_strcasecmp(key, st->prop) == 0) {
+        st->seen_prop = TRUE;
+        return;
+    }
+    int key_id = ns_css_prop_id(key);
+    if (!st->seen_prop || (key_id >= 0 && key_id != NS_CSS_BORDER_RADIUS))
+        return;
+    char *value = css_trim_dup_range(vstart, vend);
+    gboolean important = FALSE;
+    char *expanded = inline_expanded_value(key, value, st->prop_id, &important);
+    g_free(value);
+    if (expanded) {
+        g_free(expanded);
+        st->found = TRUE;
+    }
+}
+
 static gboolean
 inline_shorthand_follows(const char *style, const char *prop, int prop_id)
 {
     if (!style || !*style) return FALSE;
-    const char *p = style;
-    const char *end = p + strlen(p);
-    gboolean seen_prop = FALSE;
-    while (p < end) {
-        p = css_skip_ws_comments(p, end);
-        while (p < end && *p == ';') {
-            p++;
-            p = css_skip_ws_comments(p, end);
-        }
-        if (p >= end) break;
-        if (*p == '@') {
-            p = inline_skip_at_rule(p, end);
-            continue;
-        }
-        char term = 0;
-        const char *kend = css_scan_until(p, end, ":;", &term);
-        char *key = css_trim_dup_range(p, kend);
-        if (term != ':') {
-            g_free(key);
-            p = term == ';' ? kend + 1 : kend;
-            continue;
-        }
-        p = css_skip_ws_comments(kend + 1, end);
-        const char *vend = css_scan_declaration_value(p, end, &term);
-        if (g_ascii_strcasecmp(key, prop) == 0) {
-            seen_prop = TRUE;
-        } else if (seen_prop && (ns_css_prop_id(key) < 0 ||
-                                 ns_css_prop_id(key) == NS_CSS_BORDER_RADIUS)) {
-            char *value = css_trim_dup_range(p, vend);
-            gboolean important = FALSE;
-            char *expanded = inline_expanded_value(key, value, prop_id,
-                                                   &important);
-            g_free(value);
-            if (expanded) {
-                g_free(expanded);
-                g_free(key);
-                return TRUE;
-            }
-        }
-        g_free(key);
-        p = term == ';' ? vend + 1 : vend;
-    }
-    return FALSE;
+    inline_follow_scan st = { .prop = prop, .prop_id = prop_id };
+    inline_scan_declarations(style, inline_follow_visit, &st);
+    return st.found;
 }
 
 static int
