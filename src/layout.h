@@ -124,7 +124,6 @@ typedef struct ns_box_media {
     void  *video;
     gboolean declared_image_size;
     gboolean placeholder_image_size;
-    gboolean size_independent_of_image;
     gboolean intrinsic_ratio_only;
     double   image_density;
     GPtrArray *svg_foreign;

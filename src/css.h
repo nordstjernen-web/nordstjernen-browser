@@ -339,7 +339,6 @@ typedef struct ns_css_anim_entry {
     double        duration_ms;
     double        delay_ms;
     ns_css_timing timing;
-    int           iter_count;
     double        iterations;
     ns_css_anim_direction direction;
     ns_css_anim_fill      fill;
@@ -521,7 +520,6 @@ typedef struct ns_css_gradient {
     gboolean conic;
     gboolean repeating;
     gboolean circle;
-    gboolean shape_explicit;
     ns_css_gradient_size size;
     double size_x, size_y;
     double size_x_pct, size_y_pct;
@@ -882,14 +880,6 @@ void ns_css_clear_registered_properties(void);
 
 typedef struct ns_css_keyframe_stop {
     double pct;
-    double opacity;
-    gboolean has_opacity;
-    ns_css_transform transform;
-    gboolean has_transform;
-    guint8 color[4];
-    gboolean has_color;
-    guint8 bg_color[4];
-    gboolean has_bg_color;
     char *raw_props;
 } ns_css_keyframe_stop;
 
@@ -904,7 +894,6 @@ struct ns_css_rule_index;
 typedef struct ns_css_page_rule {
     double   width, height;
     gboolean has_size;
-    gboolean landscape;
     double   margin[4];
     gboolean has_margin[4];
 } ns_css_page_rule;

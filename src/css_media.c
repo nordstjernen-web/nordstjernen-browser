@@ -193,7 +193,6 @@ typedef struct {
     double denom;
     char   unit[8];
     char   ident[24];
-    gboolean is_ident;
 } mq_value;
 
 typedef enum {
@@ -494,7 +493,6 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
         for (gsize i = 0; i < f->nkw; i++)
             if (strcmp(ident, f->kw[i]) == 0) {
                 g_strlcpy(out->ident, f->kw[i], sizeof out->ident);
-                out->is_ident = TRUE;
                 return TRUE;
             }
         return FALSE;

@@ -27,19 +27,6 @@
 #define NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT  0x84FF
 #define NS_TEXTURE_MAX_ANISOTROPY_EXT      0x84FE
 
-#define NS_WEBGL_MAX_VATTRIBS 32
-
-typedef struct ns_gl_vattr {
-    unsigned enabled : 1;
-    unsigned has_ptr : 1;
-    GLuint   buffer;
-    GLint    size;
-    GLenum   type;
-    GLsizei  stride;
-    GLintptr offset;
-    GLuint   divisor;
-} ns_gl_vattr;
-
 typedef struct ns_webgl {
     ns_js         *js;
     JSContext     *ctx;
@@ -76,7 +63,6 @@ typedef struct ns_webgl {
     GHashTable    *buffer_sizes;
     GHashTable    *elem_data;
     GHashTable    *uncleared_rbs;
-    ns_gl_vattr    attribs[NS_WEBGL_MAX_VATTRIBS];
     int            next_sync;
 } ns_webgl;
 
@@ -2582,7 +2568,6 @@ wgl_enableVertexAttribArray(JSContext *ctx, JSValueConst this_val, int argc, JSV
     WGL_GET(0);
     GLuint index = (GLuint)argi(ctx, argc, argv, 0);
     glEnableVertexAttribArray(index);
-    if (index < NS_WEBGL_MAX_VATTRIBS) g->attribs[index].enabled = 1;
     return JS_UNDEFINED;
 }
 
@@ -2592,7 +2577,6 @@ wgl_disableVertexAttribArray(JSContext *ctx, JSValueConst this_val, int argc, JS
     WGL_GET(0);
     GLuint index = (GLuint)argi(ctx, argc, argv, 0);
     glDisableVertexAttribArray(index);
-    if (index < NS_WEBGL_MAX_VATTRIBS) g->attribs[index].enabled = 0;
     return JS_UNDEFINED;
 }
 
@@ -2609,15 +2593,6 @@ wgl_vertexAttribPointer(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     if (size < 0 || stride < 0 || offset < 0) return JS_UNDEFINED;
     glVertexAttribPointer(index, size, type, norm, stride,
                           (const void *)offset);
-    if (index < NS_WEBGL_MAX_VATTRIBS) {
-        ns_gl_vattr *a = &g->attribs[index];
-        a->has_ptr = 1;
-        a->buffer = g->bound_array_buffer;
-        a->size = size;
-        a->type = type;
-        a->stride = stride;
-        a->offset = offset;
-    }
     return JS_UNDEFINED;
 }
 
@@ -3716,7 +3691,6 @@ wgl_vertexAttribDivisor(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     GLuint index = (GLuint)argi(ctx, argc, argv, 0);
     GLuint divisor = (GLuint)argi(ctx, argc, argv, 1);
     glVertexAttribDivisor(index, divisor);
-    if (index < NS_WEBGL_MAX_VATTRIBS) g->attribs[index].divisor = divisor;
     return JS_UNDEFINED;
 }
 

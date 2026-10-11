@@ -297,7 +297,6 @@ typedef struct ns_h2 {
     gboolean          informational;
     gboolean          got_first_byte;
     gboolean          sink_full;
-    gboolean          stream_closed;
     gboolean          proto_error;
     size_t            header_bytes;
 
@@ -1001,7 +1000,6 @@ ns_h2_stream_close_cb(nghttp2_session *session, int32_t stream_id,
     ns_h2 *c = nghttp2_session_get_stream_user_data(session, stream_id);
     conn->last_used_us = g_get_monotonic_time();
     if (c) {
-        c->stream_closed = TRUE;
         c->stream_ok = (error_code == NGHTTP2_NO_ERROR);
         c->refused = (error_code == NGHTTP2_REFUSED_STREAM);
         c->done = TRUE;
@@ -2007,7 +2005,7 @@ ns_h2_perform(const ns_hop_req *req, ns_write_ctx *wctx, ns_header_ctx *hctx,
             reused = FALSE;
             via_h2 = FALSE;
             c.done = c.stream_ok = c.submitted = c.refused = FALSE;
-            c.stream_closed = c.rst = c.got_first_byte = c.status_line_fed = FALSE;
+            c.rst = c.got_first_byte = c.status_line_fed = FALSE;
             c.informational = FALSE;
             c.header_bytes = 0;
             c.status = 0;

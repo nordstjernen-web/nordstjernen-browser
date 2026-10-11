@@ -1925,7 +1925,6 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->dom_node = dom;
     v->autoplay = attr_present(dom, "autoplay");
     v->loop = attr_present(dom, "loop");
-    v->controls = attr_present(dom, "controls");
     v->muted = attr_present(dom, "muted");
     v->volume = 1.0;
     v->cur_time = 0.0;
