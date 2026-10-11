@@ -255,15 +255,8 @@ char *ns_vertical_stack_text(const char *text);
 void ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes);
 void ns_layout_collect_videos(const ns_box *root, GPtrArray *out_boxes);
 
-
-gboolean ns_box_tree_has_sticky(const ns_box *root);
-
-
 const char *ns_box_hit_link(const ns_box *root, double x, double y);
 const ns_link_range *ns_box_hit_link_range(const ns_box *root, double x, double y);
-
-const ns_box *ns_box_find_by_id(const ns_box *root, const char *id);
-const ns_box *ns_box_find_by_id_or_name(const ns_box *root, const char *frag);
 
 const ns_box *ns_box_hit_test(const ns_box *root, double x, double y);
 const ns_box *ns_box_hit_test_local(const ns_box *root, double x, double y,
@@ -291,7 +284,6 @@ gboolean ns_box_subtree_extent_y(const ns_box *b, double *top,
                                  double *bottom);
 gboolean ns_box_sticky_y_model(const ns_box *b, double viewport_h,
                                ns_sticky_y *out);
-double ns_sticky_y_offset(const ns_sticky_y *m, double scroll_y);
 
 ns_box *ns_box_hit_scrollable(ns_box *root, double x, double y);
 

@@ -593,7 +593,6 @@ void     ns_css_set_device_size(double w, double h);
 void     ns_css_set_device_pixel_ratio(double dppx);
 double   ns_css_device_pixel_ratio(void);
 void     ns_css_set_print_media(gboolean printing);
-gboolean ns_css_print_media(void);
 
 typedef struct ns_css_value {
     ns_css_value_kind kind;
@@ -948,8 +947,6 @@ ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
 char              *ns_css_shadow_adopted_css(ns_node *root);
 guint              ns_css_stylesheet_cache_generation(void);
-ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
-                                               const char *base_url);
 typedef void (*ns_css_text_builder)(GString *out, gpointer data);
 ns_css_stylesheet *ns_css_merged_styles_cached_digest(guint64 digest, gsize len,
                                                       const char *base_url,
@@ -1157,12 +1154,6 @@ ns_display_is_table_wrapper(ns_display d)
     return ns_display_inner_is(d, NS_DISPLAY_INNER_TABLE);
 }
 
-static inline gboolean
-ns_display_is_list_item(ns_display d)
-{
-    return d.box == NS_DISPLAY_BOX_NORMAL && d.list_item;
-}
-
 int ns_css_writing_mode(const ns_style *s);
 int ns_css_text_orientation(const ns_style *s);
 
@@ -1247,7 +1238,6 @@ ns_css_value *ns_css_value_dup(const ns_css_value *v);
 void ns_css_value_free(ns_css_value *v);
 GArray *ns_css_parse_declarations(const char *text);
 void ns_css_declarations_free(GArray *decls);
-gboolean ns_css_prop_affects_layout(int prop);
 void ns_css_incremental_exclude(const void *node, gboolean exclude);
 char *ns_css_unicode_range_canonical(const char *text);
 char *ns_css_container_condition_canonical(const char *cond);

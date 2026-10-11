@@ -26500,29 +26500,6 @@ ns_css_incremental_exclude(const void *node, gboolean exclude)
     else g_hash_table_remove(g_incr_exclude, node);
 }
 
-gboolean
-ns_css_prop_affects_layout(int prop)
-{
-    switch (prop) {
-    case NS_CSS_OPACITY:
-    case NS_CSS_COLOR:
-    case NS_CSS_BACKGROUND_COLOR:
-    case NS_CSS_TRANSFORM:
-    case NS_CSS_VISIBILITY:
-    case NS_CSS_BOX_SHADOW:
-    case NS_CSS_TEXT_SHADOW:
-    case NS_CSS_FILTER:
-    case NS_CSS_BORDER_TOP_COLOR:
-    case NS_CSS_BORDER_RIGHT_COLOR:
-    case NS_CSS_BORDER_BOTTOM_COLOR:
-    case NS_CSS_BORDER_LEFT_COLOR:
-    case NS_CSS_OUTLINE_COLOR:
-        return FALSE;
-    default:
-        return TRUE;
-    }
-}
-
 static char *
 value_serialize_one(const ns_css_value *v)
 {
@@ -33838,7 +33815,6 @@ typedef struct {
     double      vw;
     double      vh;
     const char *base;
-    const char *css;
     gsize       len;
     guint64     digest;
     guint       hash;
@@ -33870,27 +33846,6 @@ ns_style_el_cached_free(gpointer data)
     g_free(e);
 }
 
-static ns_merged_style_key
-ns_merged_style_key_make(const char *css, gsize len, const char *base)
-{
-    ns_merged_style_key k = {
-        .vw = rint(ns_css_media_viewport_current_w()),
-        .vh = rint(ns_css_media_viewport_current_h()),
-        .base = base,
-        .css = css,
-        .len = len,
-    };
-    guint h = 2166136261u;
-    for (gsize i = 0; i < len; i++) {
-        h ^= (guchar)css[i];
-        h *= 16777619u;
-    }
-    h ^= base ? g_str_hash(base) * 31u : 0;
-    h ^= (guint)k.vw * 7919u ^ (guint)k.vh * 104729u;
-    k.hash = h;
-    return k;
-}
-
 static guint
 ns_merged_style_key_hash(gconstpointer p)
 {
@@ -33901,13 +33856,9 @@ static gboolean
 ns_merged_style_key_equal(gconstpointer pa, gconstpointer pb)
 {
     const ns_merged_style_key *a = pa, *b = pb;
-    if (a->hash != b->hash || a->len != b->len ||
-        a->vw != b->vw || a->vh != b->vh ||
-        g_strcmp0(a->base, b->base) != 0)
-        return FALSE;
-    if (!a->css || !b->css)
-        return !a->css && !b->css && a->digest == b->digest;
-    return memcmp(a->css, b->css, a->len) == 0;
+    return a->hash == b->hash && a->len == b->len &&
+           a->vw == b->vw && a->vh == b->vh &&
+           a->digest == b->digest && g_strcmp0(a->base, b->base) == 0;
 }
 
 static void
@@ -33915,7 +33866,6 @@ ns_merged_style_key_free(gpointer data)
 {
     ns_merged_style_key *k = data;
     g_free((char *)k->base);
-    g_free((char *)k->css);
     g_free(k);
 }
 
@@ -34055,42 +34005,6 @@ ns_css_style_element_cache_end(void)
 {
     if (g_css_relayout_depth > 1) return;
     ns_merged_style_cache_trim(g_merged_style_pass_start);
-}
-
-ns_css_stylesheet *
-ns_css_merged_styles_cached(const char *css, gssize len, const char *base_url)
-{
-    if (!css || len == 0) return NULL;
-    if (len < 0) len = (gssize)strlen(css);
-    if (!g_merged_style_cache)
-        g_merged_style_cache =
-            g_hash_table_new_full(ns_merged_style_key_hash,
-                                  ns_merged_style_key_equal,
-                                  ns_merged_style_key_free,
-                                  ns_merged_style_cached_free);
-    ns_merged_style_key probe =
-        ns_merged_style_key_make(css, (gsize)len, base_url);
-    ns_merged_style_cached *hit =
-        g_hash_table_lookup(g_merged_style_cache, &probe);
-    if (hit) {
-        hit->stamp = ++g_merged_style_cache_clock;
-        return hit->sheet;
-    }
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, len);
-    if (!sh) return NULL;
-    sh->cached = TRUE;
-    ns_merged_style_cached *entry = g_new0(ns_merged_style_cached, 1);
-    entry->sheet = sh;
-    entry->stamp = ++g_merged_style_cache_clock;
-    ns_merged_style_key *key = g_new(ns_merged_style_key, 1);
-    *key = probe;
-    key->base = g_strdup(base_url);
-    char *copy = g_malloc((gsize)len + 1);
-    memcpy(copy, css, (gsize)len);
-    copy[len] = '\0';
-    key->css = copy;
-    g_hash_table_replace(g_merged_style_cache, key, entry);
-    return sh;
 }
 
 ns_css_stylesheet *

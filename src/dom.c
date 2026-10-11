@@ -2514,12 +2514,6 @@ ns_node_collect_all_text_len(const ns_node *root, size_t *out_len)
     return g_string_free(out, FALSE);
 }
 
-char *
-ns_node_collect_all_text(const ns_node *root)
-{
-    return ns_node_collect_all_text_len(root, NULL);
-}
-
 #include "html.h"
 #define is_void_tag ns_html_is_void
 

@@ -16917,21 +16917,6 @@ ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes)
     collect_images_walk(root, out_boxes);
 }
 
-gboolean
-ns_box_tree_has_sticky(const ns_box *root)
-{
-    if (!root) return FALSE;
-    if (root->style) {
-        const ns_css_value *v = root->style->values[NS_CSS_POSITION];
-        if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
-            strcmp(v->u.keyword, "sticky") == 0)
-            return TRUE;
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
-        if (ns_box_tree_has_sticky(c)) return TRUE;
-    return FALSE;
-}
-
 static guint
 count_matches_in_text(const char *text, const char *needle,
                       gboolean case_sensitive)
@@ -17532,17 +17517,6 @@ ns_box_sticky_y_model(const ns_box *b, double viewport_h, ns_sticky_y *out)
            isfinite(out->bottom_start) && isfinite(out->bottom_cap);
 }
 
-double
-ns_sticky_y_offset(const ns_sticky_y *m, double scroll_y)
-{
-    double dy = 0;
-    if (m->has_top && scroll_y > m->top_start)
-        dy = MIN(scroll_y - m->top_start, m->top_cap);
-    if (m->has_bottom && dy == 0 && scroll_y < m->bottom_start)
-        dy = MAX(scroll_y - m->bottom_start, m->bottom_cap);
-    return dy;
-}
-
 void
 ns_box_hit_offset(const ns_box *b, double *dx, double *dy)
 {
@@ -18054,41 +18028,6 @@ ns_box_hit_node(const ns_box *root, double x, double y)
         if (area) target = area;
     }
     return target;
-}
-
-const ns_box *
-ns_box_find_by_id(const ns_box *root, const char *id)
-{
-    if (!root || !id) return NULL;
-    if (root->dom && root->dom->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(root->dom, "id");
-        if (eid && strcmp(eid, id) == 0) return root;
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
-        const ns_box *m = ns_box_find_by_id(c, id);
-        if (m) return m;
-    }
-    return NULL;
-}
-
-const ns_box *
-ns_box_find_by_id_or_name(const ns_box *root, const char *frag)
-{
-    if (!root || !frag) return NULL;
-    if (root->dom && root->dom->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(root->dom, "id");
-        if (eid && strcmp(eid, frag) == 0) return root;
-        if (root->dom->name &&
-            g_ascii_strcasecmp(root->dom->name, "a") == 0) {
-            const char *nm = ns_element_get_attr(root->dom, "name");
-            if (nm && strcmp(nm, frag) == 0) return root;
-        }
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
-        const ns_box *m = ns_box_find_by_id_or_name(c, frag);
-        if (m) return m;
-    }
-    return NULL;
 }
 
 static gboolean

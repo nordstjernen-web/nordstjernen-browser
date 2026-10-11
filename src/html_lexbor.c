@@ -837,14 +837,6 @@ ns_html_parse_fragment_in_context(const ns_node *context, const char *input,
     return parse_fragment_in_namespace(tag, ns, input, len, scripting);
 }
 
-ns_node *
-ns_html_parse_fragment_in(const char *context_tag,
-                          const char *input, gssize len)
-{
-    return ns_html_parse_fragment_with_scripting(context_tag, input, len,
-                                                 TRUE);
-}
-
 void
 ns_html_convert_declarative_shadow(ns_node *root)
 {
