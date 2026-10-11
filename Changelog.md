@@ -3,6 +3,18 @@ Changelog:
 
 1.0.32:
 ======
+* SVG `<use>`: the referenced content inherits its style from the `use`
+  element. Shapes drawn through `<use>` kept the `color`, `fill`,
+  `stroke`, stroke geometry, `visibility` and font they inherit where
+  their definition sits in the document, so an icon from a sprite sheet
+  painted `currentColor` in the sprite's colour (a white arrow on a dark
+  button came out black), a stroke set on the sprite leaked into every
+  icon, and a sprite hidden with `visibility: hidden` drew nothing. An
+  instance now inherits from the referencing element and keeps only what
+  the referenced elements declare themselves, a `<symbol>`'s own
+  properties reach its content, and `fill: currentColor` from a rule
+  stays tied to the text colour on elements that share one computed
+  style.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

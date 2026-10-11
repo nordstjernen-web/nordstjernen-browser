@@ -65,6 +65,7 @@ typedef struct {
     gboolean          hidden;
     gboolean          stroke_first;
     gboolean          non_scaling_stroke;
+    gboolean          instanced;
 } svg_state;
 
 typedef struct {
@@ -415,7 +416,9 @@ svg_apply_css_paint(svg_state *st, const ns_style *s, ns_css_prop prop,
 {
     const ns_css_value *v = s->values[prop];
     if (!v) return;
-    if (v->kind == NS_CSS_V_COLOR) {
+    if (ns_style_prop_from_currentcolor(s, prop)) {
+        svg_parse_paint("currentcolor", st, out);
+    } else if (v->kind == NS_CSS_V_COLOR) {
         svg_paint_clear(out);
         out->kind = SVG_PAINT_COLOR;
         out->r = v->u.color.r / 255.0;
@@ -441,11 +444,40 @@ svg_css_number(const ns_style *s, ns_css_prop prop, double basis,
     return ns_css_length_or(v, fallback);
 }
 
-static void
-svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
+static const ns_css_prop svg_inherited_props[] = {
+    NS_CSS_COLOR, NS_CSS_FILL, NS_CSS_STROKE, NS_CSS_FILL_OPACITY,
+    NS_CSS_STROKE_OPACITY, NS_CSS_STROKE_WIDTH, NS_CSS_STROKE_MITERLIMIT,
+    NS_CSS_STROKE_DASHOFFSET, NS_CSS_STROKE_DASHARRAY, NS_CSS_STROKE_LINECAP,
+    NS_CSS_STROKE_LINEJOIN, NS_CSS_FILL_RULE, NS_CSS_CLIP_RULE,
+    NS_CSS_TEXT_ANCHOR, NS_CSS_PAINT_ORDER, NS_CSS_VISIBILITY,
+    NS_CSS_FONT_SIZE, NS_CSS_FONT_WEIGHT, NS_CSS_FONT_STYLE,
+    NS_CSS_FONT_FAMILY,
+};
+
+static const ns_style *
+svg_node_style(svg_ctx *ctx, const svg_state *st, const ns_node *n,
+               ns_style *own)
 {
     const ns_style *s = ctx->styles
         ? g_hash_table_lookup(ctx->styles, (gpointer)n) : NULL;
+    const ns_style *from = s && st->instanced && n->parent
+        ? g_hash_table_lookup(ctx->styles, (gpointer)n->parent) : NULL;
+    if (!from) return s;
+    *own = *s;
+    for (gsize i = 0; i < G_N_ELEMENTS(svg_inherited_props); i++) {
+        ns_css_prop prop = svg_inherited_props[i];
+        if (s->values[prop] == from->values[prop] &&
+            !ns_style_prop_from_currentcolor(s, prop))
+            own->values[prop] = NULL;
+    }
+    return own;
+}
+
+static void
+svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
+{
+    ns_style own;
+    const ns_style *s = svg_node_style(ctx, st, n, &own);
     double basis = svg_diag_basis(ctx->vw, ctx->vh);
     double inherited_font_size = st->font_size;
     gboolean font_size_from_attr = FALSE;
@@ -1327,6 +1359,7 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     ctx->depth++;
     svg_state ms;
     svg_state_copy(&ms, st);
+    ms.instanced = FALSE;
     svg_paint_clear(&ms.fill);
     ms.fill.kind = SVG_PAINT_COLOR;
     ms.fill.r = ms.fill.g = ms.fill.b = ms.fill.a = 1.0;
@@ -1889,6 +1922,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
             cairo_translate(cr, x, y);
             ctx->depth++;
+            st.instanced = TRUE;
             if (t->name && strcmp(t->name, "symbol") == 0) {
                 double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
                 double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
@@ -1898,6 +1932,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
                 cairo_matrix_t vm;
                 svg_viewbox_matrix(t, w, h, &vm);
                 cairo_transform(cr, &vm);
+                svg_state_apply_node(ctx, &st, t);
                 svg_render_children(ctx, t, &st);
             } else {
                 svg_render_node(ctx, t, &st);
@@ -2155,6 +2190,9 @@ svg_measure_use(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                                 svg_attr_length(n, "x", ctx->vw, fs, 0),
                                 svg_attr_length(n, "y", ctx->vh, fs, 0));
     svg_extent content = { 0 };
+    svg_state instance;
+    svg_state_copy(&instance, st);
+    instance.instanced = TRUE;
     ctx->depth++;
     if (referenced->name && strcmp(referenced->name, "symbol") == 0) {
         double w = svg_attr_length(n, "width", ctx->vw, fs, ctx->vw);
@@ -2163,12 +2201,14 @@ svg_measure_use(svg_ctx *ctx, const ns_node *n, const svg_state *st,
         svg_viewbox_matrix(referenced, w, h, &fitted);
         cairo_matrix_multiply(&placed, &fitted, &placed);
         svg_frame inner = svg_frame_inside(frame, &placed);
-        svg_measure_children(ctx, referenced, st, &inner, &content);
+        svg_state_apply_node(ctx, &instance, referenced);
+        svg_measure_children(ctx, referenced, &instance, &inner, &content);
     } else {
         svg_frame inner = svg_frame_inside(frame, &placed);
-        svg_measure_node(ctx, referenced, st, &inner, &content);
+        svg_measure_node(ctx, referenced, &instance, &inner, &content);
     }
     ctx->depth--;
+    svg_state_clear(&instance);
     svg_extent_add_mapped(own, &content, &placed);
 }
 
