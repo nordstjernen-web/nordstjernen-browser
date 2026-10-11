@@ -1607,12 +1607,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                              &doc_charset);
     const ns_config *parse_cfg = ns_config_get();
     gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
-    ns_node *doc = scripting_on
-        ? ns_html_parse(decoded ? decoded : "",
-                        decoded ? (gssize)strlen(decoded) : 0)
-        : ns_html_parse_with_scripting(decoded ? decoded : "",
-                                       decoded ? (gssize)strlen(decoded) : 0,
-                                       FALSE);
+    ns_node *doc = ns_html_parse_with_scripting(
+        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
+        scripting_on);
     g_free(decoded);
     int sec = resp->security;
     if (sec == NS_SEC_NONE) {
@@ -1623,19 +1620,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             sec = NS_SEC_PLAIN;
     }
     char *ip = g_strdup(resp->remote_ip);
-    ns_js_navigation_timing navigation_timing = {
-        .origin_us = resp->request_start_us,
-        .origin_real_ms = resp->request_start_real_ms,
-        .domain_lookup_start_ms = 0,
-        .domain_lookup_end_ms = resp->domain_lookup_ms,
-        .connect_start_ms = resp->domain_lookup_ms,
-        .connect_end_ms = resp->connect_ms,
-        .secure_connection_start_ms = resp->connect_ms < resp->tls_ms
-            ? resp->connect_ms : 0,
-        .request_start_ms = resp->pretransfer_ms,
-        .response_start_ms = resp->response_start_ms,
-        .response_end_ms = resp->response_end_ms,
-    };
+    ns_js_navigation_timing navigation_timing =
+        ns_engine_navigation_timing(resp);
     ns_response_free(resp);
 
     ns_browser *b = browser_build_from_doc(doc, base, viewport_width,

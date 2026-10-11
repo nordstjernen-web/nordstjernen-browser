@@ -2194,12 +2194,9 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                                              &g_headless_doc_charset);
     const ns_config *parse_cfg = ns_config_get();
     gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
-    ns_node *doc = scripting_on
-        ? ns_html_parse(decoded ? decoded : "",
-                        decoded ? (gssize)strlen(decoded) : 0)
-        : ns_html_parse_with_scripting(decoded ? decoded : "",
-                                       decoded ? (gssize)strlen(decoded) : 0,
-                                       FALSE);
+    ns_node *doc = ns_html_parse_with_scripting(
+        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
+        scripting_on);
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
     g_timing.parse_us += g_get_monotonic_time() - phase_t0;
 
@@ -2234,19 +2231,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     g_timing.style_us += g_get_monotonic_time() - phase_t0;
 
     headless_nav_capture nav_cap = {0};
-    ns_js_navigation_timing navigation_timing = {
-        .origin_us = resp->request_start_us,
-        .origin_real_ms = resp->request_start_real_ms,
-        .domain_lookup_start_ms = 0,
-        .domain_lookup_end_ms = resp->domain_lookup_ms,
-        .connect_start_ms = resp->domain_lookup_ms,
-        .connect_end_ms = resp->connect_ms,
-        .secure_connection_start_ms = resp->connect_ms < resp->tls_ms
-            ? resp->connect_ms : 0,
-        .request_start_ms = resp->pretransfer_ms,
-        .response_start_ms = resp->response_start_ms,
-        .response_end_ms = resp->response_end_ms,
-    };
+    ns_js_navigation_timing navigation_timing =
+        ns_engine_navigation_timing(resp);
     ns_js *js = ns_js_new(headless_js_log, NULL,
                           headless_js_mutated, NULL,
                           headless_js_navigate, &nav_cap,
