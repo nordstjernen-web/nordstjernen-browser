@@ -1437,6 +1437,24 @@ engine_pass_end(GPtrArray *sheets, GPtrArray *sheet_docs)
     ns_css_relayout_leave();
 }
 
+ns_js_navigation_timing
+ns_engine_navigation_timing(const ns_response *resp)
+{
+    return (ns_js_navigation_timing){
+        .origin_us = resp->request_start_us,
+        .origin_real_ms = resp->request_start_real_ms,
+        .domain_lookup_start_ms = 0,
+        .domain_lookup_end_ms = resp->domain_lookup_ms,
+        .connect_start_ms = resp->domain_lookup_ms,
+        .connect_end_ms = resp->connect_ms,
+        .secure_connection_start_ms = resp->connect_ms < resp->tls_ms
+            ? resp->connect_ms : 0,
+        .request_start_ms = resp->pretransfer_ms,
+        .response_start_ms = resp->response_start_ms,
+        .response_end_ms = resp->response_end_ms,
+    };
+}
+
 GHashTable *
 ns_engine_compute_cascade(ns_node *doc, const char *page_url,
                           GHashTable *css_cache, ns_anim *anim)
