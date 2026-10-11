@@ -12796,6 +12796,27 @@ ns_subtle_digest(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_subtle_crypto_new(JSContext *ctx)
+{
+    ns_new_class_id(&ns_cryptokey_class_id);
+    JS_NewClass(JS_GetRuntime(ctx), ns_cryptokey_class_id, &ns_cryptokey_class);
+    JSValue subtle = JS_NewObject(ctx);
+    ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
+    ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
+    ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
+    ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
+    ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
+    ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
+    ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
+    ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
+    ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
+    ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
+    ns_bind_fn(ctx, subtle, "wrapKey",     ns_subtle_wrapKey,     4);
+    ns_bind_fn(ctx, subtle, "unwrapKey",   ns_subtle_unwrapKey,   7);
+    return subtle;
+}
+
+static JSValue
 ns_clipboard_writeText(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
@@ -19909,10 +19930,9 @@ ns_window_document_fragment_ctor(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
+ns_char_data_ctor(JSContext *ctx, int argc, JSValueConst *argv,
+                  ns_node *(*make)(char *data, guint32 len))
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NULL;
     char *dup;
@@ -19926,7 +19946,7 @@ ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
     } else {
         dup = g_strdup("");
     }
-    ns_node *n = ns_node_new_text_len(dup, (guint32)len);
+    ns_node *n = make(dup, (guint32)len);
     g_hash_table_add(js->orphan_nodes, n);
     JSValue wrapper = ns_make_element(ctx, n);
     ns_tag_caller_document(ctx, wrapper);
@@ -19934,28 +19954,19 @@ ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_char_data_ctor(ctx, argc, argv, ns_node_new_text_len);
+}
+
+static JSValue
 ns_window_comment_ctor(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_NULL;
-    char *dup;
-    size_t len = 0;
-    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
-        const char *s = JS_ToCStringLen(ctx, &len, argv[0]);
-        if (!s) return JS_EXCEPTION;
-        dup = g_memdup2(s, len + 1);
-        dup[len] = '\0';
-        JS_FreeCString(ctx, s);
-    } else {
-        dup = g_strdup("");
-    }
-    ns_node *n = ns_node_new_comment_len(dup, (guint32)len);
-    g_hash_table_add(js->orphan_nodes, n);
-    JSValue wrapper = ns_make_element(ctx, n);
-    ns_tag_caller_document(ctx, wrapper);
-    return wrapper;
+    return ns_char_data_ctor(ctx, argc, argv, ns_node_new_comment_len);
 }
 
 
@@ -28082,21 +28093,7 @@ ns_worker_js_new(ns_worker_host *host)
         JSValue crypto = JS_NewObject(ctx);
         ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);
         ns_bind_fn(ctx, crypto, "randomUUID",      ns_window_randomUUID,      0);
-        ns_new_class_id(&ns_cryptokey_class_id);
-        JS_NewClass(js->rt, ns_cryptokey_class_id, &ns_cryptokey_class);
-        JSValue subtle = JS_NewObject(ctx);
-        ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
-        ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
-        ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
-        ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
-        ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
-        ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
-        ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
-        ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
-        ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
-        ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
-        ns_bind_fn(ctx, subtle, "wrapKey",     ns_subtle_wrapKey,     4);
-        ns_bind_fn(ctx, subtle, "unwrapKey",   ns_subtle_unwrapKey,   7);
+        JSValue subtle = ns_subtle_crypto_new(ctx);
         JS_SetPropertyStr(ctx, crypto, "subtle", subtle);
         JS_SetPropertyStr(ctx, global, "crypto", crypto);
     }
@@ -35512,6 +35509,40 @@ ns_element_cloneNode(JSContext *ctx, JSValueConst this_val,
     return ns_make_element(ctx, copy);
 }
 
+static void
+ns_select_choose(ns_node *select, ns_node *chosen)
+{
+    for (ns_node *o = ns_select_next_option(select, NULL); o;
+         o = ns_select_next_option(select, o))
+        ns_element_remove_attr(o, "selected");
+    if (chosen) {
+        ns_element_set_attr(chosen, "selected", "");
+        ns_element_remove_attr(select, "data-nd-noselect");
+    } else {
+        ns_element_set_attr(select, "data-nd-noselect", "1");
+    }
+}
+
+static int
+ns_select_option_index(const ns_node *select, const ns_node *option)
+{
+    int idx = 0;
+    for (const ns_node *o = ns_select_next_option(select, NULL); o;
+         o = ns_select_next_option(select, o), idx++)
+        if (o == option) return idx;
+    return -1;
+}
+
+static ns_node *
+ns_select_option_at(const ns_node *select, int index)
+{
+    if (index < 0) return NULL;
+    ns_node *o = ns_select_next_option(select, NULL);
+    for (int i = 0; o && i < index; i++)
+        o = ns_select_next_option(select, o);
+    return o;
+}
+
 static JSValue
 ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -35523,20 +35554,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
         int32_t idx = -1;
         JS_ToInt32(ctx, &idx, argv[0]);
         if (idx >= 0) {
-            int32_t i = 0;
-            ns_node *target = NULL;
-            for (ns_node *c = n->first_child; c && !target; c = c->next_sibling) {
-                if (ns_node_is_element_named(c, "option")) {
-                    if (i == idx) target = c;
-                    i++;
-                } else if (ns_node_is_element_named(c, "optgroup")) {
-                    for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                        if (!ns_node_is_element_named(cc, "option")) continue;
-                        if (i == idx) { target = cc; break; }
-                        i++;
-                    }
-                }
-            }
+            ns_node *target = ns_select_option_at(n, idx);
             if (target) {
                 ns_node *old_parent = target->parent;
                 ns_node *saved_prev = target->prev_sibling;
@@ -39963,15 +39981,9 @@ ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
         if (ns_node_is_element_named(p, "select") &&
             !ns_element_get_attr(p, "multiple")) {
-            for (ns_node *c = p->first_child; c; c = c->next_sibling) {
-                if (ns_node_is_element_named(c, "option")) {
-                    if (c != n) ns_element_remove_attr(c, "selected");
-                } else if (ns_node_is_element_named(c, "optgroup")) {
-                    for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                        if (ns_node_is_element_named(cc, "option") && cc != n)
-                            ns_element_remove_attr(cc, "selected");
-                }
-            }
+            for (ns_node *o = ns_select_next_option(p, NULL); o;
+                 o = ns_select_next_option(p, o))
+                if (o != n) ns_element_remove_attr(o, "selected");
         }
     }
     if (on) ns_js_set_attr_recorded(_j, n, "selected", "");
@@ -42068,40 +42080,13 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     }
     if (el->name && strcmp(el->name, "select") == 0) {
         ns_node *chosen = NULL;
-        for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-            if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-            if (strcmp(c->name, "option") == 0) {
-                char *ov = ns_option_value_dup(c);
-                if (ov && strcmp(ov, s) == 0) { chosen = c; g_free(ov); break; }
-                g_free(ov);
-            } else if (strcmp(c->name, "optgroup") == 0) {
-                for (ns_node *cc = c->first_child; cc && !chosen; cc = cc->next_sibling) {
-                    if (cc->kind != NS_NODE_ELEMENT || !cc->name) continue;
-                    if (strcmp(cc->name, "option") == 0) {
-                        char *ov = ns_option_value_dup(cc);
-                        if (ov && strcmp(ov, s) == 0) chosen = cc;
-                        g_free(ov);
-                    }
-                }
-                if (chosen) break;
-            }
+        for (ns_node *o = ns_select_next_option(el, NULL); o && !chosen;
+             o = ns_select_next_option(el, o)) {
+            char *ov = ns_option_value_dup(o);
+            if (ov && strcmp(ov, s) == 0) chosen = o;
+            g_free(ov);
         }
-        for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-            if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-            if (strcmp(c->name, "option") == 0)
-                ns_element_remove_attr(c, "selected");
-            else if (strcmp(c->name, "optgroup") == 0) {
-                for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                    if (ns_node_is_element_named(cc, "option"))
-                        ns_element_remove_attr(cc, "selected");
-            }
-        }
-        if (chosen) {
-            ns_element_set_attr(chosen, "selected", "");
-            ns_element_remove_attr(el, "data-nd-noselect");
-        } else {
-            ns_element_set_attr(el, "data-nd-noselect", "1");
-        }
+        ns_select_choose(el, chosen);
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
         { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
@@ -42168,22 +42153,7 @@ ns_element_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
         return JS_NewInt32(ctx, -1);
     const ns_node *chosen = ns_select_chosen_option(el);
     if (!chosen) return JS_NewInt32(ctx, -1);
-    int idx = 0;
-    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (c == chosen) return JS_NewInt32(ctx, idx);
-            idx++;
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option")) {
-                    if (cc == chosen) return JS_NewInt32(ctx, idx);
-                    idx++;
-                }
-            }
-        }
-    }
-    return JS_NewInt32(ctx, -1);
+    return JS_NewInt32(ctx, ns_select_option_index(el, chosen));
 }
 
 static JSValue
@@ -42195,38 +42165,7 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     int32_t wanted = -1;
     JS_ToInt32(ctx, &wanted, val);
-    int idx = 0;
-    ns_node *chosen = NULL;
-    for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (idx == wanted) chosen = c;
-            idx++;
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option")) {
-                    if (idx == wanted) chosen = cc;
-                    idx++;
-                }
-            }
-        }
-    }
-    for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-        }
-    }
-    if (chosen) {
-        ns_element_set_attr(chosen, "selected", "");
-        ns_element_remove_attr(el, "data-nd-noselect");
-    } else {
-        ns_element_set_attr(el, "data-nd-noselect", "1");
-    }
+    ns_select_choose(el, ns_select_option_at(el, wanted));
     ns_js *_j = js_from_ctx(ctx);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
@@ -42863,22 +42802,7 @@ ns_element_get_option_index(JSContext *ctx, JSValueConst this_val)
         if (ns_node_is_element_named(p, "select")) { sel = p; break; }
     }
     if (!sel) return JS_NewInt32(ctx, -1);
-    int idx = 0;
-    for (const ns_node *c = sel->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (c == opt) return JS_NewInt32(ctx, idx);
-            idx++;
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option")) {
-                    if (cc == opt) return JS_NewInt32(ctx, idx);
-                    idx++;
-                }
-            }
-        }
-    }
-    return JS_NewInt32(ctx, -1);
+    return JS_NewInt32(ctx, ns_select_option_index(sel, opt));
 }
 
 static JSValue
@@ -42888,14 +42812,9 @@ ns_element_get_select_length(JSContext *ctx, JSValueConst this_val)
     if (!sel || !sel->name || strcmp(sel->name, "select") != 0)
         return JS_NewInt32(ctx, 0);
     int count = 0;
-    for (const ns_node *c = sel->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) count++;
-        else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option")) count++;
-        }
-    }
+    for (const ns_node *o = ns_select_next_option(sel, NULL); o;
+         o = ns_select_next_option(sel, o))
+        count++;
     return JS_NewInt32(ctx, count);
 }
 
@@ -43606,16 +43525,9 @@ ns_element_get_options(JSContext *ctx, JSValueConst this_val)
     JSValue arr = JS_NewArray(ctx);
     if (!el || !el->name || strcmp(el->name, "select") != 0) goto bind;
     uint32_t i = 0;
-    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-        else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, cc));
-        }
-    }
+    for (const ns_node *o = ns_select_next_option(el, NULL); o;
+         o = ns_select_next_option(el, o))
+        JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, o));
 bind:
     JS_DefinePropertyValueStr(ctx, arr, "item",
         JS_NewCFunction(ctx, ns_array_item,      "item",      1), 0);
@@ -43646,18 +43558,10 @@ ns_element_get_selectedOptions(JSContext *ctx, JSValueConst this_val)
         if (opt) JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, opt));
         goto bind;
     }
-    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (ns_element_get_attr(c, "selected"))
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected"))
-                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, cc));
-        }
-    }
+    for (const ns_node *o = ns_select_next_option(el, NULL); o;
+         o = ns_select_next_option(el, o))
+        if (ns_element_get_attr(o, "selected"))
+            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, o));
 bind:
     JS_DefinePropertyValueStr(ctx, arr, "item",
         JS_NewCFunction(ctx, ns_array_item,      "item",      1), 0);
@@ -46981,17 +46885,7 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
         select = select->parent;
     if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0)
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-    }
-    ns_element_set_attr(option, "selected", "");
-    ns_element_remove_attr(select, "data-nd-noselect");
+    ns_select_choose(select, option);
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
@@ -47023,16 +46917,9 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
 static void
 ns_select_collect_options(ns_node *select, GPtrArray *out)
 {
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            g_ptr_array_add(out, c);
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *o = c->first_child; o; o = o->next_sibling)
-                if (ns_node_is_element_named(o, "option"))
-                    g_ptr_array_add(out, o);
-        }
-    }
+    for (ns_node *o = ns_select_next_option(select, NULL); o;
+         o = ns_select_next_option(select, o))
+        g_ptr_array_add(out, o);
 }
 
 static int
@@ -58545,21 +58432,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_set_tostring_tag(ctx, css_obj, "CSS");
     JS_SetPropertyStr(ctx, global, "CSS", css_obj);
 
-    ns_new_class_id(&ns_cryptokey_class_id);
-    JS_NewClass(js->rt, ns_cryptokey_class_id, &ns_cryptokey_class);
-    JSValue subtle = JS_NewObject(ctx);
-    ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
-    ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
-    ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
-    ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
-    ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
-    ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
-    ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
-    ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
-    ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
-    ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
-    ns_bind_fn(ctx, subtle, "wrapKey",     ns_subtle_wrapKey,     4);
-    ns_bind_fn(ctx, subtle, "unwrapKey",   ns_subtle_unwrapKey,   7);
+    JSValue subtle = ns_subtle_crypto_new(ctx);
     JSValue crypto_obj = JS_GetPropertyStr(ctx, global, "crypto");
     if (!JS_IsUndefined(crypto_obj) && !JS_IsNull(crypto_obj))
         JS_SetPropertyStr(ctx, crypto_obj, "subtle", subtle);

@@ -2241,26 +2241,39 @@ ns_option_value_dup(const ns_node *option)
     return ns_option_text_dup(option);
 }
 
+ns_node *
+ns_select_next_option(const ns_node *select, const ns_node *prev)
+{
+    const ns_node *c;
+    if (!prev) {
+        c = select->first_child;
+    } else if (prev->parent != select) {
+        for (const ns_node *o = prev->next_sibling; o; o = o->next_sibling)
+            if (ns_node_is_element_named(o, "option")) return (ns_node *)o;
+        c = prev->parent->next_sibling;
+    } else {
+        c = prev->next_sibling;
+    }
+    for (; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "option")) return (ns_node *)c;
+        if (ns_node_is_element_named(c, "optgroup"))
+            for (const ns_node *o = c->first_child; o; o = o->next_sibling)
+                if (ns_node_is_element_named(o, "option")) return (ns_node *)o;
+    }
+    return NULL;
+}
+
 const ns_node *
 ns_select_first_selected_option(const ns_node *select)
 {
     if (!select) return NULL;
     gboolean last_wins = !ns_element_get_attr(select, "multiple");
     const ns_node *found = NULL;
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected")) {
-                    if (!last_wins) return cc;
-                    found = cc;
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected")) {
-            if (!last_wins) return c;
-            found = c;
-        }
+    for (const ns_node *o = ns_select_next_option(select, NULL); o;
+         o = ns_select_next_option(select, o)) {
+        if (!ns_element_get_attr(o, "selected")) continue;
+        if (!last_wins) return o;
+        found = o;
     }
     return found;
 }
