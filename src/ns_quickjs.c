@@ -497,6 +497,21 @@ JS_ToNumber(JSContext *ctx, JSValueConst val)
     return JS_NewFloat64(ctx, d);
 }
 
+JSValue
+JS_GetPropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx)
+{
+    if (idx >= 0 && idx <= UINT32_MAX - 1)
+        return JS_GetPropertyUint32(ctx, obj, (uint32_t)idx);
+    JSValue key = JS_NewInt64(ctx, idx);
+    JSAtom atom = JS_ValueToAtom(ctx, key);
+    JS_FreeValue(ctx, key);
+    if (atom == JS_ATOM_NULL)
+        return JS_EXCEPTION;
+    JSValue v = JS_GetProperty(ctx, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    return v;
+}
+
 int
 JS_GetClassCount(JSRuntime *rt)
 {

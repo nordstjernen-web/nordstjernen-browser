@@ -93,6 +93,7 @@ JSValue __js_printf_like(3, 4) JS_ThrowDOMException(JSContext *ctx,
                                                     const char *fmt, ...);
 const char *JS_GetVersion(void);
 JSValue JS_ToNumber(JSContext *ctx, JSValueConst val);
+JSValue JS_GetPropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx);
 int JS_GetClassCount(JSRuntime *rt);
 JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
                         int length, bool constructor);
