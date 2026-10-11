@@ -1,6 +1,16 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.32:
+======
+* SVG `foreignObject`: scripts can measure the HTML inside it.
+  `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
+  0 for every element in a foreignObject, so diagram labels that size
+  themselves by measuring their `<div>` (Mermaid, draw.io, D3 charts)
+  collapsed. The rectangle now follows the foreignObject's position, the
+  `viewBox` scale and its transforms, and `elementFromPoint` reaches that
+  HTML before the page is first painted.
+
 1.0.31:
 ======
 * Android: the app no longer crashes when a page is opened while another

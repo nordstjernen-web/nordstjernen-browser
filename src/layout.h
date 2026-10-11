@@ -325,6 +325,11 @@ gboolean ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                                     double *x, double *y,
                                     double *w, double *h);
 
+const ns_box *ns_layout_svg_foreign_root(const ns_box *svg_box,
+                                         const ns_node *fo);
+gboolean ns_layout_svg_foreign_xform(const ns_box *svg_box, const ns_node *fo,
+                                     double xform[6]);
+
 char *ns_img_chosen_url(const ns_node *n);
 double ns_img_chosen_density(const ns_node *n);
 
