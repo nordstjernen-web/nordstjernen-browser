@@ -29,6 +29,10 @@ Changelog:
   video. Those uploads reset the row length and skip settings before
   handing GL the decoded pixels but kept `UNPACK_SKIP_IMAGES` and
   `UNPACK_IMAGE_HEIGHT`, so GL read past the pixels into the texture.
+* Security: `WEBGL_multi_draw` rejects list offsets past the end of the
+  page's array. The bounds check multiplied the offset before comparing,
+  so an offset near 2^62 wrapped around and the draw read its first and
+  count values from memory before the array.
 
 1.0.31:
 ======
