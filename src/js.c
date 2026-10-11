@@ -33234,7 +33234,6 @@ gboolean
 ns_js_run_animation_frame(ns_js *js)
 {
     if (!js) return FALSE;
-    js->raf_host_us = g_get_monotonic_time();
     return ns_js_run_animation_frame_internal(js);
 }
 

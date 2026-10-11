@@ -31,7 +31,6 @@ typedef struct ns_video {
     gboolean     is_camera;
     gboolean     autoplay;
     gboolean     loop;
-    gboolean     controls;
     gboolean     muted;
     gboolean     has_audio;
     gboolean     audio_opened;

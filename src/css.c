@@ -6539,7 +6539,6 @@ gradient_parse_prelude(ns_gradient_parse *gp, char **tok, int n)
         if (token_eq(t, "circle") || token_eq(t, "ellipse")) {
             if (seen_shape) return FALSE;
             gr->circle = token_eq(t, "circle");
-            gr->shape_explicit = TRUE;
             seen_shape = TRUE;
             i++;
             continue;
@@ -9179,7 +9178,6 @@ anim_entry_init(ns_css_anim_entry *e, gboolean is_animation)
     memset(e, 0, sizeof *e);
     e->target = is_animation ? NS_CSS_ANIM_TARGET_ALL : NS_CSS_ANIM_TARGET_ALL;
     e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
-    e->iter_count = 1;
     e->iterations = 1;
 }
 
@@ -9247,12 +9245,10 @@ anim_apply_longhand(ns_css_anim_list *out, const ns_css_value *v, ns_css_prop pr
             break;
         case NS_CSS_ANIMATION_ITERATION_COUNT:
             if (g_ascii_strcasecmp(item, "infinite") == 0) {
-                e->iter_count = -1;
                 e->iterations = INFINITY;
             } else {
                 double num = g_ascii_strtod(item, NULL);
                 e->iterations = num < 0 ? 0 : num;
-                e->iter_count = num <= 0 ? 0 : (int)num;
             }
             break;
         case NS_CSS_ANIMATION_DIRECTION:
@@ -10056,7 +10052,6 @@ parse_anim_value(const char *text, gboolean is_animation)
         memset(e, 0, sizeof *e);
         e->target = NS_CSS_ANIM_TARGET_ALL;
         e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
-        e->iter_count = 1;
         e->iterations = 1;
         e->duration_auto = is_animation;
         gboolean got_dur = FALSE, got_delay = FALSE, got_timing = FALSE,
@@ -10099,13 +10094,11 @@ parse_anim_value(const char *text, gboolean is_animation)
             double num = g_ascii_strtod(tok, &endp);
             if (endp != tok && *endp == '\0') {
                 if (!is_animation || got_iter || num < 0) { valid = FALSE; break; }
-                e->iter_count = num <= 0 ? 0 : (int)num;
                 e->iterations = num;
                 got_iter = TRUE;
                 continue;
             }
             if (is_animation && g_ascii_strcasecmp(tok, "infinite") == 0 && !got_iter) {
-                e->iter_count = -1;
                 e->iterations = INFINITY;
                 got_iter = TRUE;
                 continue;
@@ -18499,47 +18492,8 @@ ns_css_keyframes_resolve(const ns_css_keyframes *kf,
            (gsize)kf->n_stops * sizeof(ns_css_keyframe_stop));
     for (int i = 0; i < out->n_stops; i++) {
         ns_css_keyframe_stop *s = &out->stops[i];
-        const char *rawp = s->raw_props;
-        s->raw_props = NULL;
-        if (!rawp) continue;
-        char *resolved = substitute_vars_with(rawp, vars, 0);
-        if (!resolved) continue;
-        ns_css_transform ind = { 0 };
-        ns_css_transform list = s->has_transform ? s->transform
-                                                 : (ns_css_transform){ 0 };
-        char **decls = g_strsplit(resolved, ";", -1);
-        for (int d = 0; decls[d]; d++) {
-            char *colon = strchr(decls[d], ':');
-            if (!colon) continue;
-            *colon = '\0';
-            char *prop = g_strstrip(decls[d]);
-            char *val  = g_strstrip(colon + 1);
-            ns_css_value *tv = NULL;
-            if (g_ascii_strcasecmp(prop, "transform") == 0) {
-                tv = parse_transform(val);
-                if (tv) list = tv->u.transform;
-            } else if (g_ascii_strcasecmp(prop, "translate") == 0) {
-                tv = parse_translate_prop(val);
-            } else if (g_ascii_strcasecmp(prop, "rotate") == 0) {
-                tv = parse_rotate_prop(val);
-            } else if (g_ascii_strcasecmp(prop, "scale") == 0) {
-                tv = parse_scale_prop(val);
-            }
-            if (tv && g_ascii_strcasecmp(prop, "transform") != 0 &&
-                ind.n_ops < NS_CSS_TRANSFORM_OPS_MAX)
-                ind.ops[ind.n_ops++] = tv->u.transform.ops[0];
-            if (tv) ns_css_value_free(tv);
-        }
-        g_strfreev(decls);
-        s->raw_props = resolved;
-        ns_css_transform merged = ind;
-        for (int k = 0; k < list.n_ops &&
-                        merged.n_ops < NS_CSS_TRANSFORM_OPS_MAX; k++)
-            merged.ops[merged.n_ops++] = list.ops[k];
-        if (merged.n_ops > 0) {
-            s->transform = merged;
-            s->has_transform = TRUE;
-        }
+        if (s->raw_props)
+            s->raw_props = substitute_vars_with(s->raw_props, vars, 0);
     }
     return out;
 }
@@ -20501,7 +20455,6 @@ page_apply_size(ns_css_page_rule *pr, const char *text)
     pr->width = w;
     pr->height = h;
     pr->has_size = TRUE;
-    pr->landscape = w > h;
 }
 
 static void
@@ -20960,13 +20913,6 @@ parse_rules_until(const char **pp, const char *end,
                         gsize sel_len = (gsize)(sel_end - sel_start);
                         char *sel = g_strndup(sel_start, sel_len);
                         g_strstrip(sel);
-                        double op = 0;
-                        gboolean has_op = FALSE;
-                        ns_css_transform tf = { 0 };
-                        gboolean has_tf = FALSE;
-                        ns_css_transform tf_ind = { 0 };
-                        guint8 col[4] = { 0 }, bgcol[4] = { 0 };
-                        gboolean has_col = FALSE, has_bgcol = FALSE;
                         GString *raw = NULL;
                         const char *decl_p = body_start;
                         while (decl_p < body_end) {
@@ -20987,62 +20933,12 @@ parse_rules_until(const char **pp, const char *end,
                             *colon = '\0';
                             char *prop = g_strstrip(line);
                             char *val  = g_strstrip(colon + 1);
-                            gboolean tf_prop =
-                                g_ascii_strcasecmp(prop, "transform") == 0 ||
-                                g_ascii_strcasecmp(prop, "translate") == 0 ||
-                                g_ascii_strcasecmp(prop, "rotate") == 0 ||
-                                g_ascii_strcasecmp(prop, "scale") == 0;
                             if (!raw) raw = g_string_new(NULL);
                             if (raw->len) g_string_append_c(raw, ';');
                             g_string_append_printf(raw, "%s:%s", prop, val);
-                            if (tf_prop && strstr(val, "var(")) {
-                            } else if (g_ascii_strcasecmp(prop, "opacity") == 0) {
-                                op = g_ascii_strtod(val, NULL);
-                                has_op = TRUE;
-                            } else if (g_ascii_strcasecmp(prop, "transform") == 0) {
-                                ns_css_value *tv = parse_transform(val);
-                                if (tv) {
-                                    tf = tv->u.transform;
-                                    has_tf = TRUE;
-                                    ns_css_value_free(tv);
-                                }
-                            } else if (g_ascii_strcasecmp(prop, "translate") == 0 ||
-                                       g_ascii_strcasecmp(prop, "rotate") == 0 ||
-                                       g_ascii_strcasecmp(prop, "scale") == 0) {
-                                ns_css_value *tv =
-                                    g_ascii_strcasecmp(prop, "translate") == 0
-                                        ? parse_translate_prop(val)
-                                    : g_ascii_strcasecmp(prop, "rotate") == 0
-                                        ? parse_rotate_prop(val)
-                                        : parse_scale_prop(val);
-                                if (tv) {
-                                    if (tf_ind.n_ops < NS_CSS_TRANSFORM_OPS_MAX)
-                                        tf_ind.ops[tf_ind.n_ops++] =
-                                            tv->u.transform.ops[0];
-                                    ns_css_value_free(tv);
-                                }
-                            } else if (g_ascii_strcasecmp(prop, "color") == 0) {
-                                if (parse_color(val, &col[0], &col[1],
-                                                &col[2], &col[3]))
-                                    has_col = TRUE;
-                            } else if (g_ascii_strcasecmp(prop, "background-color") == 0 ||
-                                       g_ascii_strcasecmp(prop, "background") == 0) {
-                                if (parse_color(val, &bgcol[0], &bgcol[1],
-                                                &bgcol[2], &bgcol[3]))
-                                    has_bgcol = TRUE;
-                            }
                             g_free(decl);
                             if (!dterm) break;
                             decl_p = decl_end + 1;
-                        }
-                        if (tf_ind.n_ops > 0) {
-                            ns_css_transform merged = tf_ind;
-                            for (int k = 0; k < tf.n_ops &&
-                                            merged.n_ops < NS_CSS_TRANSFORM_OPS_MAX;
-                                 k++)
-                                merged.ops[merged.n_ops++] = tf.ops[k];
-                            tf = merged;
-                            has_tf = TRUE;
                         }
                         const char *sel_p = sel;
                         const char *sel_all_end = sel + strlen(sel);
@@ -21055,14 +20951,9 @@ parse_rules_until(const char **pp, const char *end,
                             if (parse_keyframe_stop_pct(one, &pct)) {
                                 ns_css_keyframe_stop s = {
                                     .pct = pct,
-                                    .opacity = op, .has_opacity = has_op,
-                                    .transform = tf, .has_transform = has_tf,
-                                    .has_color = has_col, .has_bg_color = has_bgcol,
                                     .raw_props = raw && raw->len
                                         ? g_strdup(raw->str) : NULL,
                                 };
-                                memcpy(s.color, col, 4);
-                                memcpy(s.bg_color, bgcol, 4);
                                 g_array_append_val(stops, s);
                             }
                             g_free(one);

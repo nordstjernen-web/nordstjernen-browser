@@ -53,7 +53,6 @@ typedef struct ns_hop_req {
     const char        *cookie_js_path;
     gboolean           follow_redirects;
     long               max_redirs;
-    gboolean           is_navigation;
     gboolean           request_ftp;
     gboolean           initial_https;
     long               http_version_pref;

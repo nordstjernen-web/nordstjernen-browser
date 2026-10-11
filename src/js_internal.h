@@ -286,7 +286,6 @@ struct ns_js {
     guint         observer_tick_source;
     gboolean      observer_ticking;
     guint         raf_tick_source;
-    gint64        raf_host_us;
     gboolean      raf_host_driven;
     JSValue       iframe_doc;
     int           iframe_doc_set;

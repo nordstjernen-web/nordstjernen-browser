@@ -24,7 +24,6 @@ typedef struct ns_anim_chan {
     gboolean      discrete;
     gboolean      pending;
     int           phase;
-    gboolean      started;
     gboolean      paused;
     gboolean      finished;
     double        start_us;
@@ -51,7 +50,6 @@ typedef struct ns_anim_run {
     gboolean paused;
     gboolean css_paused;
     gboolean api_override;
-    gboolean started;
     gboolean finished;
     gboolean pending;
     int      phase;
@@ -87,7 +85,6 @@ typedef struct ns_anim_state {
     GPtrArray     *scripts;
     GHashTable    *base_values;
     ns_style      *prev_style;
-    gboolean       has_transition;
     guint          run_generation;
 } ns_anim_state;
 
@@ -583,7 +580,6 @@ chan_start(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
     ch->to = new_to;
     ch->current = new_current;
     ch->active = TRUE;
-    ch->started = FALSE;
     ch->paused = FALSE;
     ch->finished = FALSE;
     ch->cancelled = FALSE;
@@ -718,8 +714,6 @@ static void
 observe_transition(ns_anim *a, ns_anim_state *s, const ns_style *style,
                    const ns_css_anim_list *tv, gint64 now_us)
 {
-    gboolean has_list = tv->n > 0;
-    s->has_transition = has_list;
     const ns_css_anim_entry *by_prop[NS_CSS_PROP_COUNT];
     memset(by_prop, 0, sizeof by_prop);
     gboolean touched[NS_CSS_PROP_COUNT];
@@ -824,7 +818,6 @@ run_cancel(ns_anim *a, ns_anim_state *s, ns_anim_run *r)
         r->name = NULL;
     }
     r->finished = FALSE;
-    r->started = FALSE;
     r->pending = FALSE;
     r->phase = NS_ANIM_PHASE_IDLE;
     if (r->values) g_hash_table_remove_all(r->values);
@@ -861,7 +854,6 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     r->css_paused = e->paused;
     r->api_override = FALSE;
     r->pending = !e->paused;
-    r->started = FALSE;
     r->finished = FALSE;
     r->phase = NS_ANIM_PHASE_IDLE;
     r->iters_emitted = 0;
@@ -1191,7 +1183,6 @@ advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
         ch->current = ns_css_value_dup(ch->from);
         return moved;
     }
-    ch->started = TRUE;
     if (cur == NS_ANIM_PHASE_AFTER) {
         ns_css_value_free(ch->current);
         ch->current = ns_css_value_dup(ch->to);
@@ -1473,20 +1464,17 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
         if (cur == NS_ANIM_PHASE_ACTIVE) {
             anim_emit(a, s->node, "animationstart", r->name,
                       old == NS_ANIM_PHASE_AFTER ? end_el : start_el);
-            r->started = TRUE;
             r->iters_emitted = (int)MIN(el / MAX(r->duration_ms, 1e-9), 1e9);
             if (old == NS_ANIM_PHASE_AFTER) r->iters_emitted = run_last_iteration(r);
         } else if (cur == NS_ANIM_PHASE_AFTER) {
             if (old != NS_ANIM_PHASE_ACTIVE)
                 anim_emit(a, s->node, "animationstart", r->name, start_el);
             anim_emit(a, s->node, "animationend", r->name, end_el);
-            r->started = FALSE;
         } else if (cur == NS_ANIM_PHASE_BEFORE) {
             if (old == NS_ANIM_PHASE_AFTER)
                 anim_emit(a, s->node, "animationstart", r->name, end_el);
             if (old != NS_ANIM_PHASE_IDLE)
                 anim_emit(a, s->node, "animationend", r->name, 0.0);
-            r->started = FALSE;
         }
         r->phase = cur;
         return;
@@ -1892,7 +1880,6 @@ ns_anim_script_start(ns_anim *a, const ns_node *node,
     r->active = TRUE;
     r->paused = FALSE;
     r->pending = TRUE;
-    r->started = FALSE;
     r->finished = FALSE;
     r->iters_emitted = 0;
     r->elapsed_base_ms = 0;
@@ -2045,7 +2032,6 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
                 r->finished = FALSE;
                 r->paused = FALSE;
                 r->pending = TRUE;
-                r->started = FALSE;
                 r->start_us = now;
                 a->active_count++;
                 advance_run(a, r, now);
@@ -2084,7 +2070,6 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
         ch->active = TRUE;
         ch->finished = FALSE;
         ch->paused = FALSE;
-        ch->started = FALSE;
         ch->phase = NS_ANIM_PHASE_IDLE;
         ch->start_us = now;
         ns_css_value_free(ch->current);
