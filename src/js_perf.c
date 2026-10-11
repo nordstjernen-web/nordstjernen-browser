@@ -974,13 +974,9 @@ ns_perf_observer_observe(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-JSValue
-ns_perf_observer_disconnect(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
+void
+ns_perf_observer_release(JSContext *ctx, ns_perf_observer *o)
 {
-    (void)argc; (void)argv;
-    ns_perf_observer *o = ns_unwrap_perf_observer(this_val);
-    if (!o) return JS_UNDEFINED;
     o->disconnected = TRUE;
     if (o->records) g_ptr_array_set_size(o->records, 0);
     if (o->entry_types) g_ptr_array_set_size(o->entry_types, 0);
@@ -988,6 +984,15 @@ ns_perf_observer_disconnect(JSContext *ctx, JSValueConst this_val,
         o->pinned = FALSE;
         JS_FreeValue(ctx, o->wrapper);
     }
+}
+
+JSValue
+ns_perf_observer_disconnect(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_perf_observer *o = ns_unwrap_perf_observer(this_val);
+    if (o) ns_perf_observer_release(ctx, o);
     return JS_UNDEFINED;
 }
 
