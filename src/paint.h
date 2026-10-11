@@ -108,6 +108,8 @@ void ns_paint_sync_inline_atomic_offsets(ns_box *root);
 void ns_paint_register_font_oracle(void);
 
 void ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *style);
+void ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s);
+NsPangoAttribute *ns_paint_inline_font_attr(const ns_inline_attr *r);
 int ns_paint_pango_font_size(double size_px);
 
 /* The shared Pango context for measuring and painting page text: unhinted

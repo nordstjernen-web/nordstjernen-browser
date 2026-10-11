@@ -210,6 +210,8 @@ typedef struct ns_box {
 struct _PangoAttrList;
 struct _PangoLayout;
 void ns_inline_apply_atomic_shapes(struct _PangoAttrList *list, const ns_box *box);
+void ns_inline_apply_spacing(struct _PangoAttrList *list, const ns_style *style,
+                             const char *text);
 gboolean ns_inline_toggle_geometry(const ns_inline_attr *r, double *side,
                                    double margins[4]);
 gboolean ns_inline_range_geometry(const ns_inline_attr *r, const ns_box *box,
@@ -224,6 +226,8 @@ gboolean ns_inline_unshift_point(const ns_box *box, struct _PangoLayout *layout,
 double ns_text_indent_px(const ns_style *s, double basis);
 double ns_inline_text_indent_px(const ns_box *run, const ns_style *s,
                                 double basis);
+double ns_control_dim_px(const ns_css_value *v, double font_size, double basis);
+double ns_inline_attr_control_width(const ns_inline_attr *r, const ns_box *box);
 double ns_control_css_extra_w(const ns_node *dom, const ns_style *s);
 double ns_control_css_extra_h(const ns_node *dom, const ns_style *s);
 
