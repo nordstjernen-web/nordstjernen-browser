@@ -24,6 +24,11 @@ Changelog:
   `history.replaceState()` freed that string while the restyle still read
   it. Restyle now works on its own copy, and fetch and XHR results wait
   for the stylesheet like the other page tasks.
+* Security: a WebGL 2 page can no longer crash the renderer or read its
+  memory through `texImage3D`/`texSubImage3D` from an image, canvas or
+  video. Those uploads reset the row length and skip settings before
+  handing GL the decoded pixels but kept `UNPACK_SKIP_IMAGES` and
+  `UNPACK_IMAGE_HEIGHT`, so GL read past the pixels into the texture.
 
 1.0.31:
 ======

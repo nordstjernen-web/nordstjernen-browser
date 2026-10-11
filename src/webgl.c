@@ -2991,7 +2991,7 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
 }
 
 typedef struct {
-    GLint align, row_length, skip_rows, skip_pixels;
+    GLint align, row_length, skip_rows, skip_pixels, image_height, skip_images;
 } wgl_unpack_state;
 
 static void
@@ -3003,9 +3003,13 @@ wgl_unpack_tight(ns_webgl *g, wgl_unpack_state *saved)
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &saved->row_length);
     glGetIntegerv(GL_UNPACK_SKIP_ROWS, &saved->skip_rows);
     glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &saved->skip_pixels);
+    glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT, &saved->image_height);
+    glGetIntegerv(GL_UNPACK_SKIP_IMAGES, &saved->skip_images);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+    glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
 }
 
 static void
@@ -3016,6 +3020,8 @@ wgl_unpack_restore(ns_webgl *g, const wgl_unpack_state *saved)
     glPixelStorei(GL_UNPACK_ROW_LENGTH, saved->row_length);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, saved->skip_rows);
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, saved->skip_pixels);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, saved->image_height);
+    glPixelStorei(GL_UNPACK_SKIP_IMAGES, saved->skip_images);
 }
 
 static GLenum
