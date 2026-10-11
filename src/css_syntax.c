@@ -351,56 +351,6 @@ ns_css_component_values_parse(const char *input, gssize len, gboolean *valid)
     return components;
 }
 
-const char *
-ns_css_syntax_scan(const char *input, const char *end,
-                   const char *terminators, char *terminator)
-{
-    const char *p = input;
-    char quote = 0;
-    char stack[128];
-    guint depth = 0;
-    if (terminator) *terminator = 0;
-    while (p < end) {
-        char c = *p;
-        if (quote) {
-            if (c == '\\' && p + 1 < end) {
-                p += 2;
-                continue;
-            }
-            if (c == quote) quote = 0;
-            p++;
-            continue;
-        }
-        if (c == '/' && p + 1 < end && p[1] == '*') {
-            p += 2;
-            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
-            p = p + 1 < end ? p + 2 : end;
-            continue;
-        }
-        if (c == '\\' && p + 1 < end) {
-            p += 2;
-            continue;
-        }
-        if (c == '"' || c == '\'') {
-            quote = c;
-            p++;
-            continue;
-        }
-        if (depth == 0 && strchr(terminators, c)) {
-            if (terminator) *terminator = c;
-            return p;
-        }
-        if (c == '(' || c == '[' || c == '{') {
-            if (depth < G_N_ELEMENTS(stack))
-                stack[depth++] = c == '(' ? ')' : c == '[' ? ']' : '}';
-        } else if (depth > 0 && c == stack[depth - 1]) {
-            depth--;
-        }
-        p++;
-    }
-    return p;
-}
-
 gboolean
 ns_css_syntax_is_self_contained(const char *input, gsize len)
 {
@@ -462,14 +412,4 @@ ns_css_syntax_is_self_contained(const char *input, gsize len)
         p++;
     }
     return !quote && depth == 0 && stmt == STMT_NONE;
-}
-
-gboolean
-ns_css_component_value_valid(const char *input)
-{
-    gboolean valid = FALSE;
-    GPtrArray *components =
-        ns_css_component_values_parse(input ? input : "", -1, &valid);
-    g_ptr_array_free(components, TRUE);
-    return valid;
 }

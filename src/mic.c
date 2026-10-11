@@ -72,12 +72,6 @@ ns_mic_release(void)
     }
 }
 
-gboolean
-ns_mic_active(void)
-{
-    return g_mic_dev != 0;
-}
-
 void
 ns_mic_fill_time_domain(guint8 *out, int n)
 {
@@ -133,7 +127,6 @@ ns_mic_fill_frequency(guint8 *out, int n)
 
 gboolean ns_mic_acquire(void) { return FALSE; }
 void     ns_mic_release(void) {}
-gboolean ns_mic_active(void) { return FALSE; }
 void ns_mic_fill_time_domain(guint8 *out, int n) {
     if (out && n > 0) memset(out, 128, (gsize)n);
 }
