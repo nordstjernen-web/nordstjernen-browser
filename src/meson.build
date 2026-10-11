@@ -56,6 +56,7 @@ nordstjernen_engine_sources = files(
   'css_syntax.c',
   'datetime.c',
   'debuglog.c',
+  'db.c',
   'dom.c',
   'engine.c',
   'eventsource.c',
