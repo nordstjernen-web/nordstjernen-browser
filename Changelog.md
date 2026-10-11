@@ -53,6 +53,16 @@ Changelog:
   `~/.cache/nordstjernen/fontconfig`. CI now also loads pages through the
   packaged renderer process with Homebrew moved out of the way, the
   setup issue #186 was reported from.
+* Build: `-Dquickjs=quickjs` compiles again. The WebGL `multi_draw` fix
+  called a QuickJS function the original engine does not export; the
+  adapter now provides it.
+* Code cleanup: removed engine functions, macros and struct fields that
+  nothing used (found by relinking every executable with
+  `--print-gc-sections` and checking the Android, iOS, Java and macOS
+  hosts), and merged duplicated code: the inline-text setup, font
+  attributes, text alignment and form-control sizing that layout and
+  painting each carried a copy of, and the OffscreenCanvas 2D method
+  table. Rendering is unchanged.
 
 1.0.31:
 ======
