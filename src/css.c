@@ -32268,6 +32268,7 @@ ns_style_clone_shared(const ns_style *s)
     c->share_id = s->share_id;
     c->display  = s->display;
     c->explicit_inherit = s->explicit_inherit;
+    c->currentcolor_bits = s->currentcolor_bits;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         c->values[i] = s->values[i];
         if (c->values[i]) c->values[i]->ref++;
