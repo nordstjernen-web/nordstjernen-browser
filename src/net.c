@@ -1905,7 +1905,7 @@ ns_xferinfo_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
 
 extern const char *ns_app_self_exe(void);
 
-static char *
+char *
 ns_net_exe_dir(void)
 {
     const char *self = ns_app_self_exe();
@@ -1935,7 +1935,9 @@ ns_net_exe_dir(void)
     if (size == 0 || size > 32768) return NULL;
     char *raw = g_malloc(size);
     if (_NSGetExecutablePath(raw, &size) != 0) { g_free(raw); return NULL; }
-    char *dir = g_path_get_dirname(raw);
+    char *real = realpath(raw, NULL);
+    char *dir = g_path_get_dirname(real ? real : raw);
+    free(real);
     g_free(raw);
     return dir;
 #elif defined(__linux__)
