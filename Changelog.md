@@ -3,6 +3,11 @@ Changelog:
 
 1.0.31:
 ======
+* Android: the app no longer crashes when a page is opened while another
+  is still loading or animating, as when going to google.com from the
+  address bar. Each page's renderer runs as a thread in the app, and two
+  of them could run scripts, layout and text shaping at the same time;
+  the engine now serves one renderer at a time.
 * Input: pages receive `wheel` events (and the legacy `mousewheel` when
   only that is listened for) from the mouse wheel and touchpad, one per
   notch with `deltaY` 100, at the pointer. Over an element with a
