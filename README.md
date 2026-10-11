@@ -14,7 +14,7 @@ Supported platforms:
 * [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
 * Java
 
-**Current release:** **1.0.30** (October 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.31** (October 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope

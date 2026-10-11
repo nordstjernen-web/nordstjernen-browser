@@ -60,6 +60,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.31" date="2026-10-11">
+      <description>
+        <p>Input, media and security release.</p>
+        <ul>
+          <li>Pages receive wheel events and can cancel scrolling, and pointer releases report where the button was let go, so maps zoom and pan as expected.</li>
+          <li>XPath 1.0 is implemented through document.evaluate and XPathResult.</li>
+          <li>Web Audio plays sound, YouTube videos no longer skip or stutter, and Ogg Theora video plays inline.</li>
+          <li>WebGPU is on by default, like WebGL, and Google Maps draws its map on NVIDIA graphics.</li>
+          <li>Inline SVG foreignObject renders its HTML content, and many layout fixes for absolutely positioned, flex and scrolled boxes.</li>
+          <li>Restyling, relayout and stylesheet handling are faster on pages with many styles.</li>
+          <li>Security fixes: web pages can no longer read local files, change settings or wipe browsing data, and WebGL, WebGPU and Web Audio no longer touch freed memory.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.30" date="2026-10-08">
       <description>
         <p>WebGL, WebGPU and WebAssembly release.</p>
