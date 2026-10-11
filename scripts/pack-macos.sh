@@ -340,6 +340,22 @@ if [ ! -f "$CA_DST" ]; then
     exit 1
 fi
 
+mkdir -p "$RES/etc/fonts/conf.d"
+cp -L "$BREW_PREFIX"/etc/fonts/conf.d/*.conf "$RES/etc/fonts/conf.d/" 2>/dev/null || true
+cat > "$RES/etc/fonts/fonts.conf" <<'FONTS_EOF'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <dir>/System/Library/Fonts</dir>
+  <dir>/Library/Fonts</dir>
+  <dir>~/Library/Fonts</dir>
+  <dir>/System/Library/AssetsV2/com_apple_MobileAsset_Font7</dir>
+  <dir>/System/Library/AssetsV2/com_apple_MobileAsset_Font8</dir>
+  <cachedir prefix="xdg">nordstjernen/fontconfig</cachedir>
+  <include ignore_missing="yes">conf.d</include>
+</fontconfig>
+FONTS_EOF
+
 # Sign the bundle inside-out — nested code first, the .app last — so the seal
 # stays valid. Without an Apple Developer ID the project signs ad-hoc ("-"),
 # which seals the bundle so it launches once the user clears the download

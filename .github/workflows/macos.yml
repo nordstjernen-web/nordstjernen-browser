@@ -225,6 +225,28 @@ jobs:
           "$BIN" --headless --dump=text https://example.com | tee bundle-smoke.txt
           grep -qiE "Example Domain|documentation examples" bundle-smoke.txt
 
+      # --headless renders in-process, so nothing above runs shm_open, the
+      # fork/execv of nordstjernen-renderer, or the renderer's own dylibs and
+      # fontconfig. Drive the bundled renderer process with Homebrew hidden.
+      - name: Smoke test the bundled renderer process without Homebrew
+        if: hashFiles('dist/Nordstjernen.app/Contents/MacOS/nordstjernen-renderer') != ''
+        run: |
+          set -o pipefail
+          APP="$PWD/dist/Nordstjernen.app/Contents/MacOS"
+          sudo mv /opt/homebrew /opt/homebrew.hidden
+          trap 'sudo mv /opt/homebrew.hidden /opt/homebrew' EXIT
+          smoke() {
+            NS_HEADLESS_RENDERER="$APP/nordstjernen-renderer" \
+              "$APP/Nordstjernen" --headless --dump=text "$1" 2>smoke.err | tee smoke.txt
+            cat smoke.err
+            grep -qiE "$2" smoke.txt
+            if grep -qiE "Library not loaded|Fontconfig error|cannot execute|renderer framebuffer" smoke.err; then
+              exit 1
+            fi
+          }
+          smoke about:start Nordstjernen
+          smoke https://example.com "Example Domain|documentation examples"
+
       - name: Publish pack-macos log on failure
         if: always() && hashFiles('pack-macos.log') != ''
         run: |

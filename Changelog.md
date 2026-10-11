@@ -45,6 +45,14 @@ Changelog:
   showed a blank page with no hint of what went wrong (#186). The reason is
   also printed to the terminal: the framebuffer could not be created, the
   renderer could not be executed, or it did not start.
+* macOS: the app carries its own fontconfig configuration. The bundled
+  fontconfig looked for Homebrew's `/opt/homebrew/etc/fonts`, so on a Mac
+  without Homebrew it ran on a built-in fallback and, unable to save a
+  cache under the renderer sandbox, every tab rescanned all system fonts.
+  It now reads the system font folders and caches them in
+  `~/.cache/nordstjernen/fontconfig`. CI now also loads pages through the
+  packaged renderer process with Homebrew moved out of the way, the
+  setup issue #186 was reported from.
 
 1.0.31:
 ======

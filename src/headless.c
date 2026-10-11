@@ -640,6 +640,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
 
 typedef struct {
     const ns_headless_opts *opts;
+    const char             *renderer_path;
     GMainLoop              *loop;
     int                     rc;
 } rdrv_ctx;
@@ -659,7 +660,7 @@ rdrv_thread(gpointer data)
     int vw = o->viewport_width > 0 ? o->viewport_width : 1000;
     int vh = o->viewport_height > 0 ? o->viewport_height
                                     : (int)((double)vw * 0.75);
-    ns_rproc_http *r = ns_rproc_http_spawn_shm(NULL, vw, vh);
+    ns_rproc_http *r = ns_rproc_http_spawn_shm(c->renderer_path, vw, vh);
     if (!r) {
         c->rc = 2;
         g_idle_add(rdrv_quit, c->loop);
@@ -714,8 +715,12 @@ rdrv_thread(gpointer data)
 static int
 ns_headless_run_via_renderer(const ns_headless_opts *opts)
 {
-    ns_rproc_single_process_enable();
-    rdrv_ctx ctx = { opts, g_main_loop_new(NULL, FALSE), 0 };
+    const char *renderer = g_getenv("NS_HEADLESS_RENDERER");
+    if (!renderer || !*renderer) {
+        renderer = NULL;
+        ns_rproc_single_process_enable();
+    }
+    rdrv_ctx ctx = { opts, renderer, g_main_loop_new(NULL, FALSE), 0 };
     GThread *t = g_thread_new("ns-headless-drv", rdrv_thread, &ctx);
     g_main_loop_run(ctx.loop);
     g_thread_join(t);

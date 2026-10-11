@@ -299,6 +299,17 @@ ns_macos_anchor_gtk_data(void)
     }
     g_free(ca);
 
+    char *fonts = g_build_filename(res, "etc", "fonts", NULL);
+    char *fonts_conf = g_build_filename(fonts, "fonts.conf", NULL);
+    if (g_file_test(fonts_conf, G_FILE_TEST_EXISTS)) {
+        if (!g_getenv("FONTCONFIG_FILE"))
+            g_setenv("FONTCONFIG_FILE", fonts_conf, TRUE);
+        if (!g_getenv("FONTCONFIG_PATH"))
+            g_setenv("FONTCONFIG_PATH", fonts, TRUE);
+    }
+    g_free(fonts_conf);
+    g_free(fonts);
+
     g_free(res);
 }
 #endif
