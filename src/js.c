@@ -27916,6 +27916,21 @@ ns_worker_report_error(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_UNDEFINED;
 }
 
+static void
+ns_worker_js_abandon(ns_js *js)
+{
+    if (js->perf_entries) g_ptr_array_free(js->perf_entries, TRUE);
+    if (js->timers) g_hash_table_destroy(js->timers);
+    if (js->pending_fetches) g_ptr_array_free(js->pending_fetches, TRUE);
+    if (js->fetch_states_by_id) g_hash_table_destroy(js->fetch_states_by_id);
+    if (js->pending_xhrs) g_ptr_array_free(js->pending_xhrs, TRUE);
+    if (js->pending_ws) g_ptr_array_free(js->pending_ws, TRUE);
+    if (js->pending_aborts) g_ptr_array_free(js->pending_aborts, TRUE);
+    if (js->listeners) g_ptr_array_free(js->listeners, TRUE);
+    if (js->pinned_wrappers_set) g_hash_table_destroy(js->pinned_wrappers_set);
+    g_free(js);
+}
+
 static ns_js *
 ns_worker_js_new(ns_worker_host *host)
 {
@@ -27944,16 +27959,7 @@ ns_worker_js_new(ns_worker_host *host)
 
     js->rt = JS_NewRuntime();
     if (!js->rt) {
-        if (js->perf_entries) g_ptr_array_free(js->perf_entries, TRUE);
-        if (js->timers) g_hash_table_destroy(js->timers);
-        if (js->pending_fetches) g_ptr_array_free(js->pending_fetches, TRUE);
-        if (js->fetch_states_by_id) g_hash_table_destroy(js->fetch_states_by_id);
-        if (js->pending_xhrs) g_ptr_array_free(js->pending_xhrs, TRUE);
-        if (js->pending_ws) g_ptr_array_free(js->pending_ws, TRUE);
-        if (js->pending_aborts) g_ptr_array_free(js->pending_aborts, TRUE);
-        if (js->listeners) g_ptr_array_free(js->listeners, TRUE);
-        if (js->pinned_wrappers_set) g_hash_table_destroy(js->pinned_wrappers_set);
-        g_free(js);
+        ns_worker_js_abandon(js);
         return NULL;
     }
     const ns_config *c = ns_config_get();
@@ -27969,16 +27975,7 @@ ns_worker_js_new(ns_worker_host *host)
     if (js->ctx) ns_js_add_engine_private_names(js->ctx);
     if (!js->ctx) {
         JS_FreeRuntime(js->rt);
-        if (js->perf_entries) g_ptr_array_free(js->perf_entries, TRUE);
-        if (js->timers) g_hash_table_destroy(js->timers);
-        if (js->pending_fetches) g_ptr_array_free(js->pending_fetches, TRUE);
-        if (js->fetch_states_by_id) g_hash_table_destroy(js->fetch_states_by_id);
-        if (js->pending_xhrs) g_ptr_array_free(js->pending_xhrs, TRUE);
-        if (js->pending_ws) g_ptr_array_free(js->pending_ws, TRUE);
-        if (js->pending_aborts) g_ptr_array_free(js->pending_aborts, TRUE);
-        if (js->listeners) g_ptr_array_free(js->listeners, TRUE);
-        if (js->pinned_wrappers_set) g_hash_table_destroy(js->pinned_wrappers_set);
-        g_free(js);
+        ns_worker_js_abandon(js);
         return NULL;
     }
     js->main_realm_ctx = js->ctx;
@@ -32751,6 +32748,26 @@ ns_dispatch_finish_mutations(ns_js *js)
 }
 
 static void
+ns_event_dispatch_finish(ns_js *js, JSValue event,
+                         gboolean *default_prevented, ns_budget_guard *bg)
+{
+    JS_SetPropertyStr(js->ctx, event, "currentTarget", JS_NULL);
+    JS_SetPropertyStr(js->ctx, event, "eventPhase", JS_NewInt32(js->ctx, 0));
+    JS_SetPropertyStr(js->ctx, event, "_propagation_stopped", JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "_immediate_stopped", JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_FALSE);
+
+    if (default_prevented) {
+        JSValue dp = JS_GetPropertyStr(js->ctx, event, "defaultPrevented");
+        *default_prevented = JS_ToBool(js->ctx, dp) ? TRUE : FALSE;
+        JS_FreeValue(js->ctx, dp);
+    }
+    JS_FreeValue(js->ctx, event);
+    ns_dispatch_finish_mutations(js);
+    ns_js_budget_pop(js, bg);
+}
+
+static void
 ns_js_dispatch_window_only_event(ns_js *js, const ns_node *target_doc,
                                  const char *type, JSValue event,
                                  gboolean *default_prevented)
@@ -32769,20 +32786,7 @@ ns_js_dispatch_window_only_event(ns_js *js, const ns_node *target_doc,
         ns_invoke_window_listeners_full(js, target_doc, type, event,
                                         FALSE, TRUE, &fired);
 
-    JS_SetPropertyStr(js->ctx, event, "currentTarget", JS_NULL);
-    JS_SetPropertyStr(js->ctx, event, "eventPhase", JS_NewInt32(js->ctx, 0));
-    JS_SetPropertyStr(js->ctx, event, "_propagation_stopped", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "_immediate_stopped", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_FALSE);
-
-    if (default_prevented) {
-        JSValue dp = JS_GetPropertyStr(js->ctx, event, "defaultPrevented");
-        *default_prevented = JS_ToBool(js->ctx, dp) ? TRUE : FALSE;
-        JS_FreeValue(js->ctx, dp);
-    }
-    JS_FreeValue(js->ctx, event);
-    ns_dispatch_finish_mutations(js);
-    ns_js_budget_pop(js, &bg);
+    ns_event_dispatch_finish(js, event, default_prevented, &bg);
 }
 
 static gboolean
@@ -32902,20 +32906,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     g_ptr_array_free(path, TRUE);
     g_array_free(shadow_flags, TRUE);
 
-    JS_SetPropertyStr(js->ctx, event, "currentTarget", JS_NULL);
-    JS_SetPropertyStr(js->ctx, event, "eventPhase", JS_NewInt32(js->ctx, 0));
-    JS_SetPropertyStr(js->ctx, event, "_propagation_stopped", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "_immediate_stopped", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_FALSE);
-
-    if (default_prevented) {
-        JSValue dp = JS_GetPropertyStr(js->ctx, event, "defaultPrevented");
-        *default_prevented = JS_ToBool(js->ctx, dp) ? TRUE : FALSE;
-        JS_FreeValue(js->ctx, dp);
-    }
-    JS_FreeValue(js->ctx, event);
-    ns_dispatch_finish_mutations(js);
-    ns_js_budget_pop(js, &bg);
+    ns_event_dispatch_finish(js, event, default_prevented, &bg);
     if (target_frame) ns_frame_url_leave(js, &fu);
     js->raf_frame_ctx = saved_frame;
     js->current_doc = saved_doc;
@@ -41378,6 +41369,22 @@ ns_element_get_scrollWidth(JSContext *ctx, JSValueConst this_val)
     return JS_NewInt32(ctx, (int)(w + 0.5));
 }
 
+static void
+ns_element_scrolled(JSContext *ctx, JSValueConst this_val, ns_box *b)
+{
+    ns_box_scroll_snap(b);
+    ns_js *js = js_from_ctx(ctx);
+    if (js) {
+        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+        const ns_node *el = ns_unwrap_element(this_val);
+        if (el) {
+            ns_js_dispatch_event(js, el, "scroll", NULL);
+            ns_js_queue_scrollend(js, el);
+        }
+        ns_observer_schedule_tick(js);
+    }
+}
+
 static JSValue
 ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -41396,17 +41403,7 @@ ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val
     if (v > max) v = max;
     if (v == b->scroll_y) return JS_UNDEFINED;
     b->scroll_y = v;
-    ns_box_scroll_snap(b);
-    ns_js *js = js_from_ctx(ctx);
-    if (js) {
-        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
-        const ns_node *el = ns_unwrap_element(this_val);
-        if (el) {
-            ns_js_dispatch_event(js, el, "scroll", NULL);
-            ns_js_queue_scrollend(js, el);
-        }
-        ns_observer_schedule_tick(js);
-    }
+    ns_element_scrolled(ctx, this_val, b);
     return JS_UNDEFINED;
 }
 
@@ -41428,17 +41425,7 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (v > max) v = max;
     if (v == b->scroll_x) return JS_UNDEFINED;
     b->scroll_x = v;
-    ns_box_scroll_snap(b);
-    ns_js *js = js_from_ctx(ctx);
-    if (js) {
-        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
-        const ns_node *el = ns_unwrap_element(this_val);
-        if (el) {
-            ns_js_dispatch_event(js, el, "scroll", NULL);
-            ns_js_queue_scrollend(js, el);
-        }
-        ns_observer_schedule_tick(js);
-    }
+    ns_element_scrolled(ctx, this_val, b);
     return JS_UNDEFINED;
 }
 
@@ -61187,6 +61174,19 @@ ns_location_nav_in_iframe(ns_js *js)
     return js && js->iframe_load_depth > 0;
 }
 
+static void
+ns_location_navigate_to(ns_js *js, const char *s)
+{
+    if (!ns_location_target_allowed(s)) {
+        ns_location_log_blocked(js, s);
+        return;
+    }
+    if (ns_location_nav_in_iframe(js)) return;
+    g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
+    if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
+        js->nav_cb(s, FALSE, js->nav_user_data);
+}
+
 static JSValue
 ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -61200,16 +61200,7 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         return ns_throw_dom_exception(ctx, "SyntaxError", 12,
                                       "location.href: invalid URL");
     }
-    if (!ns_location_target_allowed(s)) {
-        ns_location_log_blocked(js, s);
-        JS_FreeCString(ctx, s);
-        return JS_UNDEFINED;
-    }
-    if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
-        if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
-            js->nav_cb(s, FALSE, js->nav_user_data);
-    }
+    ns_location_navigate_to(js, s);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -61222,16 +61213,7 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     if (!js || !js->nav_cb || argc < 1) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, argv[0]);
     if (!s) return JS_UNDEFINED;
-    if (!ns_location_target_allowed(s)) {
-        ns_location_log_blocked(js, s);
-        JS_FreeCString(ctx, s);
-        return JS_UNDEFINED;
-    }
-    if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
-        if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
-            js->nav_cb(s, FALSE, js->nav_user_data);
-    }
+    ns_location_navigate_to(js, s);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
