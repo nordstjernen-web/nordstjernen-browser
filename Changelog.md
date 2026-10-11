@@ -59,10 +59,16 @@ Changelog:
 * Code cleanup: removed engine functions, macros and struct fields that
   nothing used (found by relinking every executable with
   `--print-gc-sections` and checking the Android, iOS, Java and macOS
-  hosts), and merged duplicated code: the inline-text setup, font
+  hosts), including fields that were written but never read, such as the
+  pre-parsed `@keyframes` values and a shadow copy of WebGL vertex
+  attribute state. Merged duplicated code: the inline-text setup, font
   attributes, text alignment and form-control sizing that layout and
-  painting each carried a copy of, and the OffscreenCanvas 2D method
-  table. Rendering is unchanged.
+  painting each carried a copy of; the OffscreenCanvas 2D method table;
+  the Wuffs image decoder setup; the `lab()`/`oklab()` colour parsers;
+  the inline `style` attribute scanners; the file:// and ftp:// folder
+  listings; the hardened SQLite open used by history, the HTTP cache and
+  IndexedDB (now `src/db.c`); and the helper and executable path
+  lookups. Rendering is unchanged.
 
 1.0.31:
 ======
