@@ -1163,7 +1163,7 @@ struct JSObject {
     uint8_t tmp_mark : 1; /* used in JS_WriteObjectRec() */
     uint8_t is_HTMLDDA : 1; /* specific annex B IsHtmlDDA behavior */
     uint8_t is_host_function : 1; /* a C function the embedder made (see
-                                     JS_SetHostFunctionMode) */
+                                     JS_IsHostAccess) */
     uint8_t is_immutable_prototype : 1; /* page scripts cannot change its
                                            [[Prototype]] (JS_SetImmutablePrototype) */
     uint16_t class_id; /* see JS_CLASS_x */
@@ -6819,12 +6819,6 @@ void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
     (void)ctx;
     if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT)
         JS_VALUE_GET_OBJ(obj)->is_immutable_prototype = true;
-}
-
-/* Functions made from now on in ctx are the embedder's own (JS_IsHostAccess). */
-void JS_SetHostFunctionMode(JSContext *ctx, bool on)
-{
-    ctx->host_functions = on;
 }
 
 /* Whether the property access now running is the embedder's: made from C
