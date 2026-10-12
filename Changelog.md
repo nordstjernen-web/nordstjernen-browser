@@ -3,6 +3,30 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: scroll-driven animations. `scroll-timeline-name`,
+  `scroll-timeline-axis` and the `scroll-timeline` shorthand are parsed,
+  serialised and reported by `getComputedStyle`, and `animation-timeline`
+  takes `none`, a named timeline or `scroll(nearest|root|self
+  block|inline|x|y)`. Such an animation follows its scroller's scroll
+  position instead of the clock, with iteration count, direction, fill and
+  easing applied, and updates on the next frame after a script, wheel or
+  scrollbar scroll, laying the page out again when it animates a layout
+  property. The nearest scroller is looked up along the containing block
+  chain, a `body` whose overflow belongs to the viewport counts as the
+  root scroller, and an animation without a declared duration spans the
+  whole scroll range. `none` and a name that no element declares hold the
+  animation at time zero, with its delay, fill and an auto duration of
+  zero applied as on the document clock. `view-timeline-name`,
+  `timeline-scope` and the names in the `view-timeline` shorthand are
+  parsed, and a name that only they declare runs on the document clock
+  like `view()` does, since view timelines are not implemented yet.
+  Changing `animation-timeline` between the clock and a scroll timeline
+  restarts the animation. A sidebar whose grid columns are driven by a
+  named horizontal scroll timeline now opens at its full width. Not yet
+  supported: view timelines, `view-timeline-axis` and
+  `view-timeline-inset`, scroll timelines shared through
+  `timeline-scope`, `animation-delay` and `animation-range` on scroll
+  timelines, and the scripting API of a scroll-driven animation.
 * Layout: a grid item stretched to its row (`align-self: normal` or
   `stretch`, `height: auto`) has a definite height, so `height: 100%`
   on its children resolves against the stretched size, as in Chrome. A

@@ -273,6 +273,11 @@ const ns_box *ns_box_hit_test_local(const ns_box *root, double x, double y,
 const ns_node *ns_box_image_map_area(const ns_box *b, double local_x,
                                      double local_y);
 void ns_box_set_hit_viewport(double scroll_x, double scroll_y);
+void ns_box_hit_viewport(double *scroll_x, double *scroll_y);
+void ns_box_note_scroll(void);
+guint ns_box_scroll_epoch(void);
+GHashTable *ns_box_scroll_save(const ns_box *root);
+void ns_box_scroll_restore(ns_box *root, GHashTable *map);
 gboolean ns_box_is_fixed(const ns_box *b);
 void ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
                              double sp_x1, double sp_y1,

@@ -17735,6 +17735,7 @@ snap_solve(ns_box *root, const char *type, const snap_port *port,
 void
 ns_box_scroll_snap_from(ns_box *scroller, double prev_x, double prev_y)
 {
+    ns_box_note_scroll();
     if (!scroller || !scroller->style) return;
     const char *type = ns_style_keyword(scroller->style,
                                         NS_CSS_SCROLL_SNAP_TYPE);
@@ -17850,12 +17851,86 @@ static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
 static __thread double        g_hit_local_x, g_hit_local_y;
 static double g_hit_vp_x, g_hit_vp_y;
+static guint g_box_scroll_epoch;
+
+void
+ns_box_note_scroll(void)
+{
+    g_box_scroll_epoch++;
+}
+
+guint
+ns_box_scroll_epoch(void)
+{
+    return g_box_scroll_epoch;
+}
 
 void
 ns_box_set_hit_viewport(double scroll_x, double scroll_y)
 {
-    g_hit_vp_x = isfinite(scroll_x) ? scroll_x : 0;
-    g_hit_vp_y = isfinite(scroll_y) ? scroll_y : 0;
+    double x = isfinite(scroll_x) ? scroll_x : 0;
+    double y = isfinite(scroll_y) ? scroll_y : 0;
+    g_box_scroll_epoch += (x != g_hit_vp_x) | (y != g_hit_vp_y);
+    g_hit_vp_x = x;
+    g_hit_vp_y = y;
+}
+
+void
+ns_box_hit_viewport(double *scroll_x, double *scroll_y)
+{
+    *scroll_x = g_hit_vp_x;
+    *scroll_y = g_hit_vp_y;
+}
+
+typedef struct { double x, y; } box_scroll_pos;
+
+static void
+box_collect_scroll(const ns_box *b, GHashTable *map)
+{
+    if (!b) return;
+    if (b->dom && (b->scroll_y != 0.0 || b->scroll_x != 0.0)) {
+        box_scroll_pos *p = g_new(box_scroll_pos, 1);
+        p->x = b->scroll_x;
+        p->y = b->scroll_y;
+        g_hash_table_insert(map, (gpointer)b->dom, p);
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        box_collect_scroll(c, map);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++)
+        box_collect_scroll(g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                           map);
+}
+
+static void
+box_restore_scroll(ns_box *b, GHashTable *map)
+{
+    if (!b) return;
+    const box_scroll_pos *p = b->dom ? g_hash_table_lookup(map, b->dom) : NULL;
+    if (p) {
+        b->scroll_y = CLAMP(p->y, 0.0, MAX(b->scroll_max_y, 0.0));
+        b->scroll_x = CLAMP(p->x, 0.0, MAX(b->scroll_max_x, 0.0));
+    }
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        box_restore_scroll(c, map);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++)
+        box_restore_scroll(g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                           map);
+}
+
+GHashTable *
+ns_box_scroll_save(const ns_box *root)
+{
+    GHashTable *map =
+        g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+    box_collect_scroll(root, map);
+    return map;
+}
+
+void
+ns_box_scroll_restore(ns_box *root, GHashTable *map)
+{
+    if (g_hash_table_size(map) > 0) box_restore_scroll(root, map);
+    g_hash_table_destroy(map);
 }
 
 gboolean

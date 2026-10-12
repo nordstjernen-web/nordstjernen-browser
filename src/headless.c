@@ -844,6 +844,7 @@ typedef struct headless_flush_ctx {
     gsize              caret;
     gsize              anchor;
     gboolean           relaying;
+    gboolean           scroll_pass;
     GHashTable        *retired_styles;
     guint64            styles_serial;
     guint64            layout_serial;
@@ -859,6 +860,20 @@ headless_focus(const headless_flush_ctx *c)
     return focused ? focused : c->focused;
 }
 
+static void headless_relayout(headless_flush_ctx *c);
+
+static void
+headless_relayout_scroll_pass(headless_flush_ctx *c)
+{
+    gboolean layout = FALSE;
+    if (c->scroll_pass || !ns_anim_scroll_fresh(c->anim) ||
+        !ns_engine_anim_scroll_sync(c->anim, *c->layout, c->vw, c->vh, &layout))
+        return;
+    c->scroll_pass = TRUE;
+    headless_relayout(c);
+    c->scroll_pass = FALSE;
+}
+
 static void
 headless_relayout(headless_flush_ctx *c)
 {
@@ -869,6 +884,7 @@ headless_relayout(headless_flush_ctx *c)
     }
     c->relaying = TRUE;
     if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
+    GHashTable *scroll_save = ns_box_scroll_save(*c->layout);
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
     if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
     g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
@@ -879,9 +895,11 @@ headless_relayout(headless_flush_ctx *c)
                                     c->image_cache, c->anim, c->js,
                                     c->css_cache, headless_focus(c), NULL,
                                     c->caret, c->anchor, c->layout);
+    ns_box_scroll_restore(*c->layout, scroll_save);
     c->relaying = FALSE;
     c->layout_serial++;
     c->styles_serial = c->js ? ns_js_mutation_serial(c->js) : 0;
+    headless_relayout_scroll_pass(c);
 }
 
 static void
@@ -917,6 +935,16 @@ headless_stop_images(headless_flush_ctx *c)
 {
     g_clear_pointer(&c->image_sessions, g_ptr_array_unref);
     g_clear_pointer(&c->images_requested, g_hash_table_destroy);
+}
+
+static void
+headless_sync_scroll_timelines(headless_flush_ctx *fc)
+{
+    gboolean layout = FALSE;
+    if (!ns_engine_anim_scroll_sync(fc->anim, *fc->layout, fc->vw, fc->vh, &layout))
+        return;
+    g_headless_styles_stale = TRUE;
+    if (layout) g_headless_layout_dirty = TRUE;
 }
 
 static void headless_flush_layout(gpointer ud);
@@ -985,6 +1013,7 @@ settle_tick_media(headless_flush_ctx *fc, gint64 now)
 static gboolean
 settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
 {
+    headless_sync_scroll_timelines(fc);
     if (fc->anim && ns_anim_tick(fc->anim, now)) {
         g_headless_styles_stale = TRUE;
         if (ns_anim_needs_layout(fc->anim)) g_headless_layout_dirty = TRUE;
@@ -2243,6 +2272,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_video_cache *video_cache = ns_video_cache_new();
     ns_box *layout = NULL;
+    ns_engine_anim_track_layout(anim, &layout);
     const char *flush_base = resp->final_url ? resp->final_url : opts->url;
     headless_flush_ctx flush_ctx = {
         .doc = doc, .js = js, .base = flush_base, .vw = vw, .vh = vh,
