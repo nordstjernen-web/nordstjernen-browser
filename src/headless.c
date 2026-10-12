@@ -1023,6 +1023,7 @@ static gboolean
 settle_raf_tick(gpointer user_data)
 {
     settle_state *s = user_data;
+    if (ns_js_page_busy(s->fc->js)) return G_SOURCE_CONTINUE;
     gint64 now = g_get_monotonic_time();
     settle_tick_media(s->fc, now);
     if (settle_tick_scripts(s->fc, now)) s->pending_mutation = TRUE;
@@ -1080,7 +1081,8 @@ static gboolean
 wpt_poll_cb(gpointer user_data)
 {
     wpt_wait_state *w = user_data;
-    if (!wpt_results_ready(w->fc->js)) return G_SOURCE_CONTINUE;
+    if (ns_js_page_busy(w->fc->js) || !wpt_results_ready(w->fc->js))
+        return G_SOURCE_CONTINUE;
     w->done = TRUE;
     g_main_loop_quit(w->loop);
     return G_SOURCE_REMOVE;

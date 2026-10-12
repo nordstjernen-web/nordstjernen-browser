@@ -758,15 +758,22 @@ browser_settle_quiet(ns_browser *b)
 }
 
 static gboolean
+settle_tick_skipped(settle_ctx *ctx, gint64 now)
+{
+    if (now >= ctx->deadline_us) {
+        g_main_loop_quit(ctx->loop);
+        return TRUE;
+    }
+    return ns_js_page_busy(ctx->b->js);
+}
+
+static gboolean
 settle_tick_cb(gpointer user_data)
 {
     settle_ctx *ctx = user_data;
     ns_browser *b = ctx->b;
     gint64 now = g_get_monotonic_time();
-    if (now >= ctx->deadline_us) {
-        g_main_loop_quit(ctx->loop);
-        return G_SOURCE_CONTINUE;
-    }
+    if (settle_tick_skipped(ctx, now)) return G_SOURCE_CONTINUE;
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->videos && b->layout) {
         ns_video_cache_discover(b->videos, b->layout, b->doc, now);
