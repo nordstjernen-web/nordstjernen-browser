@@ -3,6 +3,19 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: percentage `max-width`, `min-width`, padding and margins on a
+  floated box, a column flex item or a grid item that is not stretched
+  (images, tables and absolutely positioned boxes included) now resolve
+  against the containing block instead of the box's own fitted width.
+  A chat bubble with `max-width: 70%` in a column flex container used to
+  be squeezed to 70% of its own text width and wrapped mid-word; it now
+  keeps the width of its text. A floated image with `padding: 0 5%` in a
+  600px container is now 160px wide, not 126px. A grid item that is
+  fitted by `justify-self` or `justify-items` other than stretch now
+  includes its padding and border in the fitted width. A float with
+  `max-width: 50%` inside a zero-width parent is 0px wide. Images with
+  `box-sizing: border-box`, padding and `max-width: 100%` no longer
+  overflow their container by the padding.
 * Layout: an absolutely positioned box inside a scrolling element
   (`overflow: auto` or `scroll`) now counts toward how far that element
   can scroll when the element or a box between it and the positioned box
