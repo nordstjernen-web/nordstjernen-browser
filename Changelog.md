@@ -27,6 +27,147 @@ Changelog:
   `bodyUsed` false, and reading the body stream of a buffered response
   sets it. Of the streams, fetch body, encoding stream and compression
   web-platform tests, 1802 of 2289 subtests pass, up from 629 of 2039.
+* CSS: scroll-driven animations. `scroll-timeline-name`,
+  `scroll-timeline-axis` and the `scroll-timeline` shorthand are parsed,
+  serialised and reported by `getComputedStyle`, and `animation-timeline`
+  takes `none`, a named timeline or `scroll(nearest|root|self
+  block|inline|x|y)`. Such an animation follows its scroller's scroll
+  position instead of the clock, with iteration count, direction, fill and
+  easing applied, and updates on the next frame after a script, wheel or
+  scrollbar scroll, laying the page out again when it animates a layout
+  property. The nearest scroller is looked up along the containing block
+  chain, a `body` whose overflow belongs to the viewport counts as the
+  root scroller, and an animation without a declared duration spans the
+  whole scroll range. `none` and a name that no element declares hold the
+  animation at time zero, with its delay, fill and an auto duration of
+  zero applied as on the document clock. `view-timeline-name`,
+  `timeline-scope` and the names in the `view-timeline` shorthand are
+  parsed, and a name that only they declare runs on the document clock
+  like `view()` does, since view timelines are not implemented yet.
+  Changing `animation-timeline` between the clock and a scroll timeline
+  restarts the animation. A sidebar whose grid columns are driven by a
+  named horizontal scroll timeline now opens at its full width. Not yet
+  supported: view timelines, `view-timeline-axis` and
+  `view-timeline-inset`, scroll timelines shared through
+  `timeline-scope`, `animation-delay` and `animation-range` on scroll
+  timelines, and the scripting API of a scroll-driven animation.
+* Layout: a grid item stretched to its row (`align-self: normal` or
+  `stretch`, `height: auto`) has a definite height, so `height: 100%`
+  on its children resolves against the stretched size, as in Chrome. A
+  child with `height:100%` used to collapse to its content, so content
+  meant to sit centred between `1fr` rows stuck to the top instead. A
+  stretched item that is itself a flex container is laid out against the
+  stretched height, so `justify-content`, `align-items` and `flex-grow`
+  inside it use the row height. The stretch respects the item's
+  `min-height` and `max-height`, percentages against the grid area, and
+  skips items that behave as `start` (`align-self: normal` with an
+  `aspect-ratio` or an intrinsic `height`).
+* Layout: a column flex container whose height comes from its flex
+  parent (a stretched row item or the main size of a column) no longer
+  subtracts its padding and border a second time with
+  `box-sizing: border-box`, so its children are no longer placed too
+  high, and a `height: 100%` card in such a column keeps its size when
+  the row is laid out twice.
+* Paint: gradients interpolate in premultiplied alpha, as CSS requires.
+  A stop that is `transparent` (transparent black) no longer pulls the
+  colour of its neighbour towards black, so
+  `linear-gradient(transparent, #fcfcfc)` fades without a grey band and
+  `linear-gradient(red, transparent)` stays red as it fades. This covers
+  linear, radial, repeating and conic gradients and mask gradients; a
+  transition hint takes the premultiplied average of its neighbours at
+  its position (its curve is still a straight segment through that
+  colour). Colour stops placed before the previous stop, for example
+  `red 50%, blue 20px`, are clamped to it instead of scrambling the
+  colours.
+* Layout: a `::before` or `::after` whose `content` is `none` or `normal`
+  generates no box, also when it is absolutely positioned or an
+  inline-block. Such pseudo-elements used to paint their background, so
+  a decorative `content:none; position:absolute; inset:0` gradient
+  covered the text around it. Such a pseudo-element also no longer
+  changes counters with `counter-increment`, `counter-reset` or
+  `counter-set`.
+* Layout: percentage `max-width`, `min-width`, padding and margins on a
+  floated box, a column flex item or a grid item that is not stretched
+  (images, tables and absolutely positioned boxes included) now resolve
+  against the containing block instead of the box's own fitted width.
+  A chat bubble with `max-width: 70%` in a column flex container used to
+  be squeezed to 70% of its own text width and wrapped mid-word; it now
+  keeps the width of its text. A floated image with `padding: 0 5%` in a
+  600px container is now 160px wide, not 126px. A grid item that is
+  fitted by `justify-self` or `justify-items` other than stretch now
+  includes its padding and border in the fitted width. A float with
+  `max-width: 50%` inside a zero-width parent is 0px wide. Images with
+  `box-sizing: border-box`, padding and `max-width: 100%` no longer
+  overflow their container by the padding.
+* Layout: an absolutely positioned box inside a scrolling element
+  (`overflow: auto` or `scroll`) now counts toward how far that element
+  can scroll when the element or a box between it and the positioned box
+  is the containing block, including the box's own descendants and boxes
+  inside inline-blocks. Before, `scrollWidth` reported the overflow but
+  `scrollLeft` stayed at 0 and no scrollbar appeared, so a 410px-wide
+  positioned bar in a 200px scroller could not be scrolled; it now
+  scrolls up to 210px like Chrome, rounded to whole pixels. Transformed
+  boxes and everything inside them, fixed boxes, zero-size boxes,
+  `content-visibility` subtrees and subtrees clipped by an inner
+  `overflow` are not counted, so a centered `translate(-50%, -50%)`
+  modal adds no scrollbar. In right-to-left and reversed (`row-reverse`,
+  `column-reverse`, `wrap-reverse`) scrollers the flipped axis gets no
+  range and boxes lying past its start edge are ignored on the other
+  axis; the page's own `html`/`body` scroller is untouched.
+* Paint: elements with a negative `z-index` paint and receive clicks
+  below the in-flow content of their stacking context (CSS 2.1
+  Appendix E step 3), not inside their nearest positioned parent. A
+  `z-index: -1` background inside a `position: relative` wrapper with
+  no `z-index` used to sit on top of the text after the wrapper and
+  swallow its clicks, which is how chatgpt.com backgrounds covered
+  text. Positioned elements and flex or grid items qualify. A layer
+  inside an overflow clip stays in the clip, the layers of the root
+  context paint above the background propagated from `html` or `body`,
+  and clicks on `body` outside its children still reach `body`.
+  Layers with the same `z-index` keep document order, with `::before`
+  ahead of the element's children and `::after` behind them. Not
+  lifted yet: positioned inline elements and inline-blocks with a
+  negative `z-index`, which still paint with the line that holds them.
+* Paint: paint and hit testing share one stacking-context test: the
+  root, `fixed` and `sticky`, positioned or flex/grid items with a
+  `z-index`, opacity below 1, transforms, `perspective`,
+  `preserve-3d`, `filter`, `backdrop-filter`, `clip-path`, masks,
+  `mix-blend-mode`, `isolation: isolate`, `will-change` of those,
+  `contain` with layout or paint, and `content-visibility` other than
+  `visible`. Such an element keeps its positioned descendants inside
+  it and, like a positioned element, paints and takes clicks above
+  the in-flow content that follows it. A dropdown inside a wrapper
+  with `opacity`, `transform` or `will-change` was drawn under the
+  next block and clicks on it went to that block. Inline-blocks and
+  images that form a stacking context still paint and take clicks in
+  their line, as before.
+* Input: hit testing skips the contents of `content-visibility:
+  hidden` elements and elements hidden by `clip: rect(0 0 0 0)`, as
+  painting does, and boxes outside the point are dropped before they
+  are queued as layers. `elementFromPoint` on a list of 4000
+  `position: relative` rows took 20 ms and now takes 0.3 ms.
+* CSS: `isolation`, `will-change`, `contain` and `backdrop-filter` are
+  parsed from style sheets (they were only read from inline styles by
+  `getComputedStyle`). Invalid values are dropped, so a later invalid
+  declaration no longer overrides a valid one, and `CSS.supports`
+  answers for them; `backdrop-filter` is checked as a filter list.
+  `will-change` keeps the case of the names it lists. Integer
+  properties such as `z-index` clamp to the 32-bit range, so
+  `z-index: 99999999999` stays on top (on x86-64 it turned negative).
+* JS: microtasks, `requestAnimationFrame` callbacks, ResizeObserver and
+  IntersectionObserver callbacks and the rendering tick no longer run in
+  the middle of another script. The microtask checkpoint after a script
+  inserted by other script (`appendChild()` of an inline script,
+  `document.write()`) is left to the outer task, as the HTML standard
+  says. While a script waits for a stylesheet that `getComputedStyle()`,
+  `offsetWidth` or `getAnimations()` needs, or for a synchronous
+  `XMLHttpRequest`, the rendering tick, animation frames, animation
+  events and observer deliveries wait until it returns. Observer
+  callbacks forced by a layout read run after the script, resize
+  observations before intersection ones, each followed by a microtask
+  checkpoint. ChatGPT spun in its render loop at startup until its
+  scripts were halted, because its own queued flush ran inside the
+  flush that was waiting for a stylesheet.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

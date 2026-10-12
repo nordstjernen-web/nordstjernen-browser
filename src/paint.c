@@ -1265,6 +1265,27 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
 }
 
 static void
+gradient_stop_color(const ns_css_gradient_stop *st, double c[4])
+{
+    c[0] = st->r / 255.0;
+    c[1] = st->g / 255.0;
+    c[2] = st->b / 255.0;
+    c[3] = st->a / 255.0;
+}
+
+static void
+gradient_lerp_premultiplied(const double a[4], const double b[4], double t,
+                            double out[4])
+{
+    double al = a[3] + (b[3] - a[3]) * t;
+    for (int ch = 0; ch < 3; ch++) {
+        double pm = a[ch] * a[3] + (b[ch] * b[3] - a[ch] * a[3]) * t;
+        out[ch] = al > 0 ? pm / al : a[ch] + (b[ch] - a[ch]) * t;
+    }
+    out[3] = al;
+}
+
+static void
 conic_color_at(const ns_css_gradient *gr, double frac,
                double *r, double *g, double *b, double *a)
 {
@@ -1285,10 +1306,73 @@ conic_color_at(const ns_css_gradient *gr, double frac,
             (gr->stops[hi].pos - gr->stops[lo].pos);
     if (t < 0) t = 0;
     if (t > 1) t = 1;
-    *r = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
-    *g = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
-    *b = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
-    *a = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
+    double c0[4], c1[4], c[4];
+    gradient_stop_color(&gr->stops[lo], c0);
+    gradient_stop_color(&gr->stops[hi], c1);
+    gradient_lerp_premultiplied(c0, c1, t, c);
+    *r = c[0];
+    *g = c[1];
+    *b = c[2];
+    *a = c[3];
+}
+
+static gboolean
+gradient_segment_blends(double o0, double o1, const double a[4],
+                        const double b[4])
+{
+    return o1 > o0 && a[3] != b[3] && a[3] > 0 && b[3] > 0 &&
+           (a[0] != b[0] || a[1] != b[1] || a[2] != b[2]);
+}
+
+static void
+gradient_add_premultiplied_stop(cairo_pattern_t *pat, double offset,
+                                const double a[4], const double b[4],
+                                double t)
+{
+    double c[4];
+    gradient_lerp_premultiplied(a, b, t, c);
+    cairo_pattern_add_color_stop_rgba(pat, offset, c[0], c[1], c[2], c[3]);
+}
+
+static void
+gradient_add_segment(cairo_pattern_t *pat, double o0, double o1,
+                     const double a[4], const double b[4])
+{
+    int steps = gradient_segment_blends(o0, o1, a, b) ? 8 : 1;
+    for (int k = 0; k <= steps; k++) {
+        double t = (double)k / steps;
+        gradient_add_premultiplied_stop(pat, o0 + (o1 - o0) * t, a, b, t);
+    }
+}
+
+static void
+gradient_add_stops(cairo_pattern_t *pat, const ns_css_gradient *gr,
+                   const double *frac, double period)
+{
+    double a[4], b[4];
+    if (gr->n_stops == 1) {
+        gradient_stop_color(&gr->stops[0], a);
+        cairo_pattern_add_color_stop_rgba(pat, frac[0] / period,
+                                          a[0], a[1], a[2], a[3]);
+        return;
+    }
+    for (int i = 0; i + 1 < gr->n_stops; i++) {
+        gradient_stop_color(&gr->stops[i], a);
+        gradient_stop_color(&gr->stops[i + 1], b);
+        if (a[3] <= 0) memcpy(a, b, 3 * sizeof(double));
+        if (b[3] <= 0) memcpy(b, a, 3 * sizeof(double));
+        gradient_add_segment(pat, frac[i] / period, frac[i + 1] / period, a, b);
+    }
+}
+
+static void
+gradient_stop_fractions(const ns_css_gradient *gr, double line_len,
+                        double *frac)
+{
+    for (int i = 0; i < gr->n_stops; i++) {
+        frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+        if (i > 0 && frac[i] < frac[i - 1]) frac[i] = frac[i - 1];
+    }
 }
 
 static void
@@ -1371,8 +1455,7 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         }
         if (line_len <= 0) line_len = 1;
         double frac[NS_CSS_GRADIENT_STOPS_MAX];
-        for (int i = 0; i < gr->n_stops; i++)
-            frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+        gradient_stop_fractions(gr, line_len, frac);
         double period = (gr->repeating && gr->n_stops > 0)
             ? frac[gr->n_stops - 1] : 1.0;
         if (period <= 0) period = 1.0;
@@ -1389,11 +1472,7 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
                 x0, y0,
                 x0 + (x1 - x0) * period, y0 + (y1 - y0) * period);
         }
-        for (int i = 0; i < gr->n_stops; i++) {
-            const ns_css_gradient_stop *st = &gr->stops[i];
-            cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
-                st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
-        }
+        gradient_add_stops(pat, gr, frac, period);
         if (gr->repeating)
             cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
         cairo_save(cr);
@@ -7343,18 +7422,6 @@ box_opacity(const ns_box *b)
 }
 
 static gboolean
-box_is_positioned(const ns_box *b)
-{
-    const ns_style *s = b ? b->style : NULL;
-    if (!s) return FALSE;
-    const ns_css_value *v = s->values[NS_CSS_POSITION];
-    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return FALSE;
-    const char *kw = v->u.keyword;
-    return strcmp(kw, "relative") == 0 || strcmp(kw, "absolute") == 0 ||
-           strcmp(kw, "fixed") == 0    || strcmp(kw, "sticky") == 0;
-}
-
-static gboolean
 box_clip_hides(const ns_box *b)
 {
     const ns_style *s = b ? b->style : NULL;
@@ -7388,7 +7455,7 @@ style_z_index(const ns_style *s)
 static int
 box_z_index(const ns_box *b)
 {
-    return style_z_index(b ? b->style : NULL);
+    return ns_box_layer_z(b);
 }
 
 typedef struct paint_entry {
@@ -7405,54 +7472,6 @@ paint_entry_cmp(const void *a, const void *b)
     if (pa->key != pb->key) return pa->key < pb->key ? -1 : 1;
     if (pa->order != pb->order) return pa->order < pb->order ? -1 : 1;
     return 0;
-}
-
-static gboolean
-style_z_index_is_auto(const ns_style *s)
-{
-    const ns_css_value *v = s ? s->values[NS_CSS_Z_INDEX] : NULL;
-    return !v || v->kind != NS_CSS_V_LENGTH;
-}
-
-static gboolean
-box_z_index_is_auto(const ns_box *b)
-{
-    return style_z_index_is_auto(b ? b->style : NULL);
-}
-
-static gboolean
-box_is_flex_or_grid_item(const ns_box *b)
-{
-    const ns_box *p = b ? b->parent : NULL;
-    while (p && !p->style) p = p->parent;
-    if (!p) return FALSE;
-    ns_display d = ns_css_display_of(p->style);
-    return ns_display_is_flex_container(d) || ns_display_is_grid_container(d);
-}
-
-static gboolean
-box_defers_to_positioned_layer(const ns_box *b)
-{
-    if (box_z_index(b) < 0) return FALSE;
-    return box_is_positioned(b) ||
-           (!box_z_index_is_auto(b) && box_is_flex_or_grid_item(b));
-}
-
-static gboolean
-style_isolates_positioned_descendants(const ns_style *s)
-{
-    if (!style_z_index_is_auto(s)) return TRUE;
-    if (!s) return FALSE;
-    const ns_css_value *pos = s->values[NS_CSS_POSITION];
-    if (keyword_is(pos, "fixed") || keyword_is(pos, "sticky")) return TRUE;
-    const ns_css_value *filter = s->values[NS_CSS_FILTER];
-    return filter && !keyword_is(filter, "none");
-}
-
-static gboolean
-box_isolates_positioned_descendants(const ns_box *b)
-{
-    return style_isolates_positioned_descendants(b->style);
 }
 
 static int
@@ -7541,7 +7560,7 @@ paint_defer_inline_layer(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
     cap->at = *at;
     cap->dom = owner->dom;
     cap->z = style_z_index(owner->style);
-    cap->isolates = style_isolates_positioned_descendants(owner->style);
+    cap->isolates = ns_style_is_stacking_context(owner->style);
     cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
     g_ptr_array_add(g_paint_deferred_list, cap);
 }
@@ -7613,7 +7632,7 @@ static gboolean
 deferred_capture_isolates(const deferred_capture *cap)
 {
     return cap->layout ? cap->isolates
-                       : box_isolates_positioned_descendants(cap->box);
+                       : ns_box_is_stacking_context(cap->box);
 }
 
 static void
@@ -7717,6 +7736,27 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
 }
 
 static double g_paint_anchor_dx, g_paint_anchor_dy;
+static const ns_box *g_paint_skip_box;
+
+static gboolean
+paint_box_skipped(const ns_box *b)
+{
+    return b == g_paint_skip_box ||
+           (b->negative_lifted && b != g_paint_flush_box);
+}
+
+static void
+paint_negative_layers(cairo_t *cr, const ns_box *b, const char *highlight)
+{
+    const GPtrArray *layers = b->negative_layers;
+    if (!layers) return;
+    const ns_box *saved_flush = g_paint_flush_box;
+    for (guint i = 0; i < layers->len; i++) {
+        g_paint_flush_box = g_ptr_array_index(layers, i);
+        paint_walk(cr, g_paint_flush_box, highlight);
+    }
+    g_paint_flush_box = saved_flush;
+}
 
 static void
 paint_anchor_leave(cairo_t *cr, double saved_dx, double saved_dy)
@@ -7772,7 +7812,6 @@ blend_mode_operator(const ns_style *s)
     return CAIRO_OPERATOR_OVER;
 }
 
-static const ns_box *g_paint_skip_box;
 static ns_paint_stats g_paint_stats;
 static gboolean g_paint_collect_stats;
 static gboolean g_paint_have_clip;
@@ -7799,8 +7838,7 @@ mask_gradient_pattern(const ns_css_gradient *gr,
     }
     if (line_len <= 0) line_len = 1;
     double frac[NS_CSS_GRADIENT_STOPS_MAX];
-    for (int i = 0; i < gr->n_stops; i++)
-        frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+    gradient_stop_fractions(gr, line_len, frac);
     double period = (gr->repeating && gr->n_stops > 0) ? frac[gr->n_stops - 1] : 1.0;
     if (period <= 0) period = 1.0;
     cairo_pattern_t *pat;
@@ -7815,11 +7853,7 @@ mask_gradient_pattern(const ns_css_gradient *gr,
         pat = cairo_pattern_create_linear(x0, y0,
             x0 + 2.0 * dxh * period, y0 + 2.0 * dyh * period);
     }
-    for (int i = 0; i < gr->n_stops; i++) {
-        const ns_css_gradient_stop *st = &gr->stops[i];
-        cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
-            st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
-    }
+    gradient_add_stops(pat, gr, frac, period);
     if (gr->repeating) cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
     return pat;
 }
@@ -8428,6 +8462,18 @@ ns_paint_3d_invalidate(void)
 }
 
 gboolean
+ns_paint_box_clip_hides(const ns_box *b)
+{
+    return box_clip_hides(b);
+}
+
+gboolean
+ns_paint_box_paints_children(const ns_box *b)
+{
+    return !box_is_hidden(b) && !box_clip_hides(b) && !box_skips_contents(b);
+}
+
+gboolean
 ns_paint_3d_registered(const ns_box *b)
 {
     if (g_paint_3d_reg && g_hash_table_contains(g_paint_3d_reg, (gpointer)b))
@@ -8583,12 +8629,25 @@ collect_root_quads(const ns_box *b)
 }
 
 static void
+paint_3d_root_below_quads(cairo_t *cr, const ns_box *b, const char *highlight)
+{
+    if (!box_establishes_3d(b)) return;
+    if (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
+        b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL)
+        paint_block(cr, b);
+    paint_negative_layers(cr, b, highlight);
+}
+
+gboolean
+ns_paint_box_establishes_3d(const ns_box *b)
+{
+    return box_establishes_3d(b);
+}
+
+static void
 paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
 {
-    if (box_establishes_3d(b) &&
-        (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
-         b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL))
-        paint_block(cr, b);
+    paint_3d_root_below_quads(cr, b, highlight);
     GArray *quads = collect_root_quads(b);
     paint_3d_register(b, quads);
     if (g_getenv("NS_3D_DEBUG")) {
@@ -8713,6 +8772,16 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
                x0, y0, x1 - x0, y1 - y0, bg, kx0, ky0, kx1, ky1);
 }
 
+static gboolean
+paint_owns_layer_scope(const ns_box *b, gboolean grouped,
+                       gboolean has_transform, gboolean clip_overflow,
+                       gboolean has_path_clip)
+{
+    if (grouped || has_transform || clip_overflow || has_path_clip)
+        return TRUE;
+    return b == g_paint_tex_root || ns_box_is_stacking_context(b);
+}
+
 static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -8727,12 +8796,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (g_paint_collect_stats) g_paint_stats.hidden++;
         return;
     }
-    if (b == g_paint_skip_box) {
+    if (paint_box_skipped(b)) {
         if (g_paint_collect_stats) g_paint_stats.skipped_top++;
         return;
     }
     if (g_paint_defer_depth > 0 && b != g_paint_flush_box &&
-        box_defers_to_positioned_layer(b)) {
+        ns_box_is_upper_layer(b)) {
         if (!g_paint_deferred_list)
             g_paint_deferred_list =
                 g_ptr_array_new_with_free_func(deferred_capture_free);
@@ -8973,12 +9042,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_entry e;
             e.box = c;
             e.order = order++;
-            if (box_is_positioned(c)) {
-                e.key = box_z_index(c);
-                if (e.key != 0) any_z = TRUE;
-            } else {
-                e.key = 0;
-            }
+            e.key = ns_box_stack_key(c);
+            if (e.key != 0) any_z = TRUE;
             entries[e.order] = e;
         }
     }
@@ -9031,7 +9096,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
              (bs->values[NS_CSS_WIDTH] &&
               (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
                bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC)));
-        gboolean sized_by_container = box_is_flex_or_grid_item(b);
+        gboolean sized_by_container = ns_box_is_flex_or_grid_item(b);
         if ((pw > 0 || explicit_w || sized_by_container) &&
             (ph > 0 || explicit_h || sized_by_container)) {
             cairo_save(cr);
@@ -9067,11 +9132,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     } else {
         clip_overflow = FALSE;
     }
-    gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
-                               clip_overflow || has_path_clip ||
-                               b == g_paint_tex_root ||
-                               (b == g_paint_flush_box &&
-                                box_isolates_positioned_descendants(b));
+    gboolean own_layer_scope = paint_owns_layer_scope(
+        b, grouped, has_transform, clip_overflow, has_path_clip);
     GPtrArray *saved_layer_list = NULL;
     if (own_layer_scope) {
         saved_layer_list = g_paint_deferred_list;
@@ -9079,6 +9141,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         g_paint_defer_depth++;
     }
     if (has_transform || has_sticky) g_paint_no_cull++;
+    paint_negative_layers(cr, b, highlight);
     for (guint i = 0; i < n_children; i++)
         paint_walk(cr, entries[i].box, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;

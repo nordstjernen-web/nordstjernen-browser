@@ -613,6 +613,33 @@ ns_js_page_tasks_held(const ns_js *js)
     return js->in_pump || ns_engine_in_blocking_fetch();
 }
 
+static gboolean
+ns_js_script_on_stack(const ns_js *js)
+{
+    return js->callback_depth > 0 || js->eval_depth > 0 ||
+           (js->ctx && JS_IsRunningScript(js->ctx));
+}
+
+gboolean
+ns_js_page_busy(const ns_js *js)
+{
+    if (!js) return ns_engine_in_blocking_fetch();
+    return ns_js_page_tasks_held(js) || ns_js_script_on_stack(js);
+}
+
+static gboolean
+ns_js_frame_may_run(const ns_js *js)
+{
+    return js && !js->halted && !ns_js_page_tasks_held(js) &&
+           !ns_js_script_on_stack(js);
+}
+
+static gboolean
+ns_js_microtasks_may_drain(const ns_js *js)
+{
+    return js && !(js->ctx && JS_IsRunningScript(js->ctx));
+}
+
 static void
 ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 {
@@ -1481,7 +1508,7 @@ ns_function_realm(JSContext *ctx, JSValueConst fn)
 static void
 ns_drain_microtasks(ns_js *js)
 {
-    if (!js) return;
+    if (!ns_js_microtasks_may_drain(js)) return;
     ns_budget_guard g = {0};
     ns_js_budget_push(js, &g);
     JSContext *ctx_out = NULL;
@@ -17331,6 +17358,50 @@ ns_computed_box_shorthand(JSContext *ctx, const ns_node *n,
 }
 
 static char *
+ns_computed_scroll_timeline(JSContext *ctx, const ns_node *n)
+{
+    char *names = ns_computed_lookup(ctx, n, "scroll-timeline-name");
+    char *axes = ns_computed_lookup(ctx, n, "scroll-timeline-axis");
+    char *out = ns_css_scroll_timeline_compose(names, axes);
+    g_free(names);
+    g_free(axes);
+    return out;
+}
+
+static char *
+ns_computed_simple_shorthand(JSContext *ctx, const ns_node *n,
+                             const char *name, gboolean *matched)
+{
+    static const struct {
+        const char *name;
+        const char *parts[4];
+    } boxes[] = {
+        { "margin", { "margin-top", "margin-right", "margin-bottom",
+                      "margin-left" } },
+        { "padding", { "padding-top", "padding-right", "padding-bottom",
+                       "padding-left" } },
+        { "border-width", { "border-top-width", "border-right-width",
+                            "border-bottom-width", "border-left-width" } },
+        { "border-color", { "border-top-color", "border-right-color",
+                            "border-bottom-color", "border-left-color" } },
+        { "border-style", { "border-top-style", "border-right-style",
+                            "border-bottom-style", "border-left-style" } },
+        { "inset", { "top", "right", "bottom", "left" } },
+    };
+    *matched = TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(boxes); i++)
+        if (strcmp(name, boxes[i].name) == 0)
+            return ns_computed_box_shorthand(ctx, n, boxes[i].parts[0],
+                                             boxes[i].parts[1],
+                                             boxes[i].parts[2],
+                                             boxes[i].parts[3]);
+    if (strcmp(name, "scroll-timeline") == 0)
+        return ns_computed_scroll_timeline(ctx, n);
+    *matched = FALSE;
+    return NULL;
+}
+
+static char *
 ns_computed_box_edge_px(const ns_box *b, const char *name)
 {
     if (!b) return NULL;
@@ -18033,30 +18104,9 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(fsize); g_free(flh); g_free(ffamily);
         return g_string_free(out, FALSE);
     }
-    if (strcmp(name, "margin") == 0)
-        return ns_computed_box_shorthand(ctx, n, "margin-top", "margin-right",
-                                         "margin-bottom", "margin-left");
-    if (strcmp(name, "padding") == 0)
-        return ns_computed_box_shorthand(ctx, n, "padding-top", "padding-right",
-                                         "padding-bottom", "padding-left");
-    if (strcmp(name, "border-width") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-width",
-                                         "border-right-width",
-                                         "border-bottom-width",
-                                         "border-left-width");
-    if (strcmp(name, "border-color") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-color",
-                                         "border-right-color",
-                                         "border-bottom-color",
-                                         "border-left-color");
-    if (strcmp(name, "border-style") == 0)
-        return ns_computed_box_shorthand(ctx, n, "border-top-style",
-                                         "border-right-style",
-                                         "border-bottom-style",
-                                         "border-left-style");
-    if (strcmp(name, "inset") == 0)
-        return ns_computed_box_shorthand(ctx, n, "top", "right",
-                                         "bottom", "left");
+    gboolean simple_matched = FALSE;
+    char *simple = ns_computed_simple_shorthand(ctx, n, name, &simple_matched);
+    if (simple_matched) return simple;
     static const char *const border_sides[4] = {
         "top", "right", "bottom", "left",
     };
@@ -18770,7 +18820,7 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
         "gap", "grid", "grid-area", "grid-column", "grid-row",
         "grid-template", "inset", "list-style", "margin", "outline",
         "overflow", "padding", "place-content", "place-items", "place-self",
-        "text-decoration", "transition",
+        "scroll-timeline", "text-decoration", "transition",
     };
     gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
     for (gsize i = 0; !ok && i < G_N_ELEMENTS(shorthands); i++)
@@ -26743,7 +26793,7 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
         JS_FreeValue(js->ctx, ex);
     }
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
     return ok;
 }
@@ -30228,6 +30278,7 @@ ns_intersection_observers_tick(ns_js *js)
         if (n_entries > 0) {
             ns_io_call_cb(ctx, o, entries);
             JS_FreeValue(ctx, entries);
+            ns_js_microtask_checkpoint(js);
         } else if (!JS_IsUndefined(entries)) {
             JS_FreeValue(ctx, entries);
         }
@@ -30621,6 +30672,7 @@ ns_resize_observers_tick(ns_js *js)
                 ns_target_report_exception(js, ctx, "ResizeObserver");
             ns_js_realm_scope_leave(js, &scope);
             JS_FreeValue(ctx, ret);
+            ns_js_microtask_checkpoint(js);
         }
         if (!JS_IsUndefined(entries)) JS_FreeValue(ctx, entries);
         JS_FreeValue(ctx, cb);
@@ -30633,18 +30685,25 @@ ns_resize_observers_tick(ns_js *js)
     js->observer_ticking = FALSE;
 }
 
+static void
+ns_js_deliver_observations(ns_js *js)
+{
+    ns_resize_observers_tick(js);
+    ns_js_microtask_checkpoint(js);
+    ns_intersection_observers_tick(js);
+    ns_js_microtask_checkpoint(js);
+}
+
 static gboolean
 ns_observer_tick_timer(gpointer data)
 {
     ns_js *js = data;
     if (!js) return G_SOURCE_REMOVE;
     if (!js->ctx) { js->observer_tick_source = 0; return G_SOURCE_REMOVE; }
-    if (ns_js_page_tasks_held(js) || js->dispatch_depth > 0)
+    if (ns_js_page_busy(js) || js->dispatch_depth > 0)
         return G_SOURCE_CONTINUE;
     js->observer_tick_source = 0;
-    ns_intersection_observers_tick(js);
-    ns_resize_observers_tick(js);
-    ns_drain_microtasks(js);
+    ns_js_deliver_observations(js);
     return G_SOURCE_REMOVE;
 }
 
@@ -33266,7 +33325,7 @@ ns_rvfc_media_has_frame(JSContext *ctx, ns_node *media)
 static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
-    if (!js || js->halted || js->in_pump) return FALSE;
+    if (!ns_js_frame_may_run(js)) return FALSE;
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
@@ -39203,6 +39262,24 @@ ns_element_get_offsetParent(JSContext *ctx, JSValueConst this_val)
     return fallback ? ns_make_element(ctx, fallback) : JS_NULL;
 }
 
+static gboolean
+ns_js_has_observers(const ns_js *js)
+{
+    return (js->resize_observers && js->resize_observers->len > 0) ||
+           (js->intersection_observers && js->intersection_observers->len > 0);
+}
+
+static void
+ns_js_observers_after_layout(ns_js *js)
+{
+    if (js->observer_ticking || !ns_js_has_observers(js)) return;
+    if (ns_js_page_busy(js)) {
+        ns_observer_schedule_tick(js);
+        return;
+    }
+    ns_js_deliver_observations(js);
+}
+
 void
 ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
 {
@@ -39219,8 +39296,7 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
     ns_js_sync_window_metrics(js);
     if (root) {
         ns_js_promote_deferred_iframes(js);
-        ns_intersection_observers_tick(js);
-        ns_resize_observers_tick(js);
+        ns_js_observers_after_layout(js);
     }
 }
 
@@ -44269,6 +44345,7 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         if (next_x != p->scroll_x || next_y != p->scroll_y) {
             p->scroll_x = next_x;
             p->scroll_y = next_y;
+            ns_box_note_scroll();
             changed = TRUE;
             if (p->dom) g_ptr_array_add(scrolled, (gpointer)p->dom);
         }
@@ -63015,7 +63092,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     }
     ns_js_apply_site_quirks(js);
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
 }
 
@@ -63791,7 +63868,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
         }
     }
     JS_FreeValue(ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
 }
 
@@ -63979,7 +64056,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
             JS_FreeValue(realm, exception);
         }
         JS_FreeValue(realm, value);
-        ns_drain_microtasks(js);
+        ns_js_microtask_checkpoint(js);
         ns_js_budget_pop(js, &budget);
     }
 
@@ -67197,7 +67274,7 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
         if (s) JS_FreeCString(js->ctx, s);
     }
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
     return out;
 }
