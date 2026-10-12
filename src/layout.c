@@ -902,6 +902,7 @@ ns_box_free(ns_box *box)
             c = next;
         }
         if (cur->paint_layout) ns_paint_drop_box_cache(cur);
+        g_clear_pointer(&cur->negative_layers, g_ptr_array_unref);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
         if (cur->table_col_hints) g_array_free(cur->table_col_hints, TRUE);
@@ -5407,6 +5408,7 @@ static void apply_position_offsets(ns_box *box, double parent_w,
 static void process_absolute_boxes(ns_box *root, GHashTable *styles,
                                    double viewport_width);
 static void compute_paint_bounds(ns_box *b);
+static void negative_layers_scan_root(ns_box *root);
 
 static double
 svg_foreign_width(const ns_node *fo, double fallback)
@@ -5455,6 +5457,7 @@ layout_svg_foreign_object(const ns_node *fo, GHashTable *styles, double width)
     ns_paint_sync_inline_atomic_offsets(root);
     extend_scroll_ranges_from_abs(root);
     compute_paint_bounds(root);
+    negative_layers_scan_root(root);
 
     g_array_free(g_abs_pending, TRUE);
     g_hash_table_destroy(g_abs_seen);
@@ -7878,20 +7881,6 @@ box_blocks_hit_testing(const ns_box *b)
     return b && style_blocks_hit_testing(b->style);
 }
 
-static int
-hit_box_stack_key(const ns_box *b)
-{
-    if (!b || !b->style) return 0;
-    const ns_css_value *p = b->style->values[NS_CSS_POSITION];
-    if (!p || p->kind != NS_CSS_V_KEYWORD || !p->u.keyword) return 0;
-    const char *kw = p->u.keyword;
-    if (strcmp(kw, "relative") && strcmp(kw, "absolute") &&
-        strcmp(kw, "fixed") && strcmp(kw, "sticky")) return 0;
-    const ns_css_value *v = b->style->values[NS_CSS_Z_INDEX];
-    if (!v || v->kind != NS_CSS_V_LENGTH) return 0;
-    return (int)v->u.length.v;
-}
-
 typedef struct {
     const ns_box *box;
     int          key;
@@ -7925,7 +7914,7 @@ hit_children_stacked(const ns_box *parent, guint *out_n)
     guint n = 0;
     gboolean need = FALSE;
     for (const ns_box *c = parent->first_child; c; c = c->next_sibling) {
-        if (hit_box_stack_key(c) != 0) need = TRUE;
+        if (ns_box_stack_key(c) != 0) need = TRUE;
         n++;
     }
     if (!need || n == 0) { *out_n = 0; return NULL; }
@@ -7933,7 +7922,7 @@ hit_children_stacked(const ns_box *parent, guint *out_n)
     guint i = 0;
     for (const ns_box *c = parent->first_child; c; c = c->next_sibling) {
         e[i].box = c;
-        e[i].key = hit_box_stack_key(c);
+        e[i].key = ns_box_stack_key(c);
         e[i].order = i;
         i++;
     }
@@ -7943,6 +7932,377 @@ hit_children_stacked(const ns_box *parent, guint *out_n)
     g_free(e);
     *out_n = n;
     return arr;
+}
+
+static gboolean
+style_is_positioned(const ns_style *s)
+{
+    const ns_css_value *p = s ? s->values[NS_CSS_POSITION] : NULL;
+    return keyword_is(p, "relative") || keyword_is(p, "absolute") ||
+           keyword_is(p, "fixed") || keyword_is(p, "sticky");
+}
+
+static gboolean
+style_has_z_index(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_Z_INDEX] : NULL;
+    return v && v->kind == NS_CSS_V_LENGTH;
+}
+
+gboolean
+ns_box_is_flex_or_grid_item(const ns_box *b)
+{
+    const ns_box *p = b ? b->parent : NULL;
+    while (p && !p->style) p = p->parent;
+    if (!p) return FALSE;
+    ns_display d = ns_css_display_of(p->style);
+    return ns_display_is_flex_container(d) || ns_display_is_grid_container(d);
+}
+
+static gboolean
+box_z_index_applies(const ns_box *b)
+{
+    return style_has_z_index(b->style) &&
+           (style_is_positioned(b->style) || ns_box_is_flex_or_grid_item(b));
+}
+
+int
+ns_box_layer_z(const ns_box *b)
+{
+    if (!b || !box_z_index_applies(b)) return 0;
+    double z = b->style->values[NS_CSS_Z_INDEX]->u.length.v;
+    if (isnan(z)) return 0;
+    return (int)CLAMP(z, (double)G_MININT, (double)G_MAXINT);
+}
+
+int
+ns_box_stack_key(const ns_box *b)
+{
+    return b && style_is_positioned(b->style) ? ns_box_layer_z(b) : 0;
+}
+
+static gboolean
+style_differs_from(const ns_style *s, ns_css_prop prop, const char *initial)
+{
+    const ns_css_value *v = s->values[prop];
+    return v && !keyword_is(v, initial);
+}
+
+static gboolean
+style_has_layer_transform(const ns_style *s)
+{
+    static const ns_css_prop props[] = {
+        NS_CSS_TRANSFORM, NS_CSS_TRANSLATE, NS_CSS_ROTATE, NS_CSS_SCALE,
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(props); i++) {
+        const ns_css_value *v = s->values[props[i]];
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+style_has_mask(const ns_style *s)
+{
+    for (const ns_css_value *l = s->values[NS_CSS_MASK_IMAGE]; l;
+         l = l->next_layer)
+        if (!keyword_is(l, "none")) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+style_has_compositing_effect(const ns_style *s)
+{
+    const ns_css_value *op = s->values[NS_CSS_OPACITY];
+    if (op && op->kind == NS_CSS_V_LENGTH && op->u.length.v < 1.0)
+        return TRUE;
+    return style_differs_from(s, NS_CSS_FILTER, "none") ||
+           style_differs_from(s, NS_CSS_BACKDROP_FILTER, "none") ||
+           style_differs_from(s, NS_CSS_CLIP_PATH, "none") ||
+           style_differs_from(s, NS_CSS_MIX_BLEND_MODE, "normal") ||
+           keyword_is(s->values[NS_CSS_ISOLATION], "isolate") ||
+           style_has_mask(s);
+}
+
+static gboolean
+style_has_3d_layer(const ns_style *s)
+{
+    return style_has_layer_transform(s) ||
+           style_differs_from(s, NS_CSS_PERSPECTIVE, "none") ||
+           keyword_is(s->values[NS_CSS_TRANSFORM_STYLE], "preserve-3d");
+}
+
+static gboolean
+keyword_list_has(const ns_css_value *v, const char *const *names, gsize n)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return FALSE;
+    for (const char *p = v->u.keyword; *p;) {
+        p += strspn(p, " ,\t\n");
+        gsize len = strcspn(p, " ,\t\n");
+        for (gsize k = 0; len && k < n; k++)
+            if (!g_ascii_strncasecmp(p, names[k], len) && !names[k][len])
+                return TRUE;
+        p += len;
+    }
+    return FALSE;
+}
+
+static gboolean
+style_has_containment_layer(const ns_style *s)
+{
+    static const char *const contain[] = {
+        "layout", "paint", "strict", "content",
+    };
+    static const char *const will_change[] = {
+        "opacity", "transform", "translate", "rotate", "scale",
+        "perspective", "filter", "backdrop-filter", "clip-path", "mask",
+        "mask-image", "-webkit-mask", "-webkit-mask-image", "isolation",
+        "mix-blend-mode", "contain", "offset-path",
+    };
+    return keyword_list_has(s->values[NS_CSS_CONTAIN], contain,
+                            G_N_ELEMENTS(contain)) ||
+           keyword_list_has(s->values[NS_CSS_WILL_CHANGE], will_change,
+                            G_N_ELEMENTS(will_change)) ||
+           style_differs_from(s, NS_CSS_CONTENT_VISIBILITY, "visible");
+}
+
+static gboolean
+style_has_positioned_layer(const ns_style *s)
+{
+    const ns_css_value *p = s->values[NS_CSS_POSITION];
+    return keyword_is(p, "fixed") || keyword_is(p, "sticky") ||
+           (style_has_z_index(s) && style_is_positioned(s));
+}
+
+gboolean
+ns_style_is_stacking_context(const ns_style *s)
+{
+    if (!s) return FALSE;
+    return style_has_positioned_layer(s) || style_has_compositing_effect(s) ||
+           style_has_3d_layer(s) || style_has_containment_layer(s);
+}
+
+enum {
+    BOX_LAYER_KNOWN = 1,
+    BOX_LAYER_STACKING = 2,
+    BOX_LAYER_UPPER = 4,
+};
+
+static gboolean
+box_computes_stacking_context(const ns_box *b)
+{
+    if (!b->parent) return TRUE;
+    return b->style && (ns_style_is_stacking_context(b->style) ||
+                        box_z_index_applies(b));
+}
+
+static guint8
+box_layer_flags(const ns_box *b)
+{
+    if (b->layer_flags) return b->layer_flags;
+    guint8 f = BOX_LAYER_KNOWN;
+    gboolean sc = box_computes_stacking_context(b);
+    if (sc) f |= BOX_LAYER_STACKING;
+    if (b->parent && b->style && ns_box_layer_z(b) >= 0 &&
+        (sc || style_is_positioned(b->style)))
+        f |= BOX_LAYER_UPPER;
+    return f;
+}
+
+gboolean
+ns_box_is_stacking_context(const ns_box *b)
+{
+    return b && (box_layer_flags(b) & BOX_LAYER_STACKING);
+}
+
+gboolean
+ns_box_is_upper_layer(const ns_box *b)
+{
+    return b && (box_layer_flags(b) & BOX_LAYER_UPPER);
+}
+
+static gboolean
+box_is_negative_layer(const ns_box *b)
+{
+    return b->style && ns_box_layer_z(b) < 0;
+}
+
+static gboolean
+box_is_viewport_root(const ns_box *b)
+{
+    return ns_node_is_element_named(b->dom, "html") ||
+           ns_node_is_element_named(b->dom, "body");
+}
+
+static gboolean
+box_in_3d_context(const ns_box *b)
+{
+    return b->parent && b->parent->style &&
+           keyword_is(b->parent->style->values[NS_CSS_TRANSFORM_STYLE],
+                      "preserve-3d");
+}
+
+static gboolean
+box_is_perspective_child(const ns_box *b)
+{
+    const ns_style *ps = b->parent ? b->parent->style : NULL;
+    const ns_css_value *d = ps ? ps->values[NS_CSS_PERSPECTIVE] : NULL;
+    return d && d->kind == NS_CSS_V_LENGTH && d->u.length.v > 0;
+}
+
+static gboolean
+style_has_background(const ns_style *s)
+{
+    const ns_css_value *c = s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL;
+    if (c && c->kind == NS_CSS_V_COLOR && c->u.color.a > 0) return TRUE;
+    return s && style_differs_from(s, NS_CSS_BACKGROUND_IMAGE, "none");
+}
+
+static gboolean
+box_paints_canvas_background(const ns_box *b)
+{
+    if (ns_node_is_element_named(b->dom, "html"))
+        return style_has_background(b->style);
+    return ns_node_is_element_named(b->dom, "body") && b->parent &&
+           !style_has_background(b->parent->style) &&
+           style_has_background(b->style);
+}
+
+static gboolean
+box_holds_negative_layers(const ns_box *b)
+{
+    if (ns_box_is_stacking_context(b)) return TRUE;
+    if (box_is_viewport_root(b)) return box_paints_canvas_background(b);
+    return box_clips_children(b);
+}
+
+typedef struct {
+    ns_box *box;
+    guint order;
+} negative_layer_entry;
+
+typedef struct {
+    const ns_node *node;
+    int part;
+} tree_position;
+
+static gboolean node_is_ancestor_of(const ns_node *a, const ns_node *n);
+
+static const ns_box *
+box_pseudo_host_box(const ns_box *b)
+{
+    const ns_box *h = b->parent;
+    while (h && !h->dom) h = h->parent;
+    return h;
+}
+
+static tree_position
+box_tree_position(const ns_box *b)
+{
+    if (b->dom) return (tree_position){ b->dom, 0 };
+    if (b->pseudo_host)
+        return (tree_position){ b->pseudo_host, b->pseudo_after ? 2 : 1 };
+    const ns_box *h = box_pseudo_host_box(b);
+    if (!h) return (tree_position){ NULL, 0 };
+    gboolean after = h->style && h->style->after == b->style;
+    return (tree_position){ h->dom, after ? 2 : 1 };
+}
+
+static int
+tree_position_cmp(tree_position a, tree_position b)
+{
+    if (a.node == b.node) return (a.part > b.part) - (a.part < b.part);
+    if (!a.node || !b.node) return a.node ? 1 : -1;
+    if (node_is_ancestor_of(a.node, b.node)) return a.part == 2 ? 1 : -1;
+    if (node_is_ancestor_of(b.node, a.node)) return b.part == 2 ? -1 : 1;
+    return ns_node_document_order_cmp(a.node, b.node);
+}
+
+static int
+negative_layer_cmp(const ns_box *a, const ns_box *b)
+{
+    int za = ns_box_layer_z(a), zb = ns_box_layer_z(b);
+    if (za != zb) return za < zb ? -1 : 1;
+    return tree_position_cmp(box_tree_position(a), box_tree_position(b));
+}
+
+static int
+negative_layer_entry_cmp(const void *pa, const void *pb)
+{
+    const negative_layer_entry *a = pa, *b = pb;
+    int c = negative_layer_cmp(a->box, b->box);
+    if (c) return c;
+    return a->order < b->order ? -1 : a->order > b->order ? 1 : 0;
+}
+
+static gboolean
+negative_layers_sorted(const GPtrArray *layers)
+{
+    for (guint i = 1; i < layers->len; i++)
+        if (negative_layer_cmp(g_ptr_array_index(layers, i - 1),
+                               g_ptr_array_index(layers, i)) > 0)
+            return FALSE;
+    return TRUE;
+}
+
+static void
+negative_layers_sort(GPtrArray *layers)
+{
+    if (!layers || negative_layers_sorted(layers)) return;
+    negative_layer_entry *e = g_new(negative_layer_entry, layers->len);
+    for (guint i = 0; i < layers->len; i++)
+        e[i] = (negative_layer_entry){ g_ptr_array_index(layers, i), i };
+    qsort(e, layers->len, sizeof *e, negative_layer_entry_cmp);
+    for (guint i = 0; i < layers->len; i++) layers->pdata[i] = e[i].box;
+    g_free(e);
+}
+
+static ns_box *
+negative_layers_scope_of(ns_box *scope, ns_box *c)
+{
+    c->layer_flags = box_layer_flags(c);
+    if (!scope) return NULL;
+    if (box_in_3d_context(c)) return c;
+    if (box_is_negative_layer(c) && !box_is_perspective_child(c)) {
+        if (!scope->negative_layers)
+            scope->negative_layers = g_ptr_array_new();
+        g_ptr_array_add(scope->negative_layers, c);
+        c->negative_lifted = TRUE;
+        return c;
+    }
+    return box_holds_negative_layers(c) ? c : scope;
+}
+
+static void negative_layers_scan(ns_box *scope, ns_box *b);
+
+static void
+negative_layers_scan_atomics(ns_box *b, gboolean painted)
+{
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (!ab) continue;
+        ab->layer_flags = box_layer_flags(ab);
+        negative_layers_scan(painted ? ab : NULL, ab);
+    }
+}
+
+static void
+negative_layers_scan(ns_box *scope, ns_box *b)
+{
+    gboolean painted = scope && ns_paint_box_paints_children(b);
+    ns_box *inner = painted ? scope : NULL;
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        negative_layers_scan(negative_layers_scope_of(inner, c), c);
+    negative_layers_scan_atomics(b, painted);
+    if (painted && scope == b) negative_layers_sort(b->negative_layers);
+}
+
+static void
+negative_layers_scan_root(ns_box *root)
+{
+    root->layer_flags = box_layer_flags(root);
+    negative_layers_scan(root, root);
 }
 
 static gboolean box_hit_untransform_point(const ns_box *b, double *x,
@@ -16549,6 +16909,14 @@ extend_scroll_ranges_from_abs(ns_box *b)
 }
 
 static void
+box_mark_abs_pseudo(ns_box *abox, GHashTable *styles, const ns_abs_entry *e)
+{
+    const ns_style *hs = g_hash_table_lookup(styles, e->dom);
+    abox->pseudo_host = e->dom;
+    abox->pseudo_after = hs && hs->after == e->pseudo;
+}
+
+static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
     if (!g_abs_pending || g_abs_pending->len == 0) return;
@@ -16591,6 +16959,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (e.pseudo) {
             abox = box_new(NS_BOX_BLOCK);
             abox->style = e.pseudo;
+            box_mark_abs_pseudo(abox, styles, &e);
             collect_box_bg_image(abox, e.pseudo);
             ns_box *gen = build_pseudo_inline_for(e.pseudo, e.dom, NULL);
             if (gen && gen->kind == NS_BOX_INLINE && gen->text && !*gen->text &&
@@ -16887,6 +17256,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     ns_paint_sync_inline_atomic_offsets(root);
     extend_scroll_ranges_from_abs(root);
     compute_paint_bounds(root);
+    negative_layers_scan_root(root);
 
     g_array_free(g_abs_pending, TRUE);
     g_abs_pending = NULL;
@@ -17593,25 +17963,9 @@ hit_enter_box(const ns_box *b, double *x, double *y)
 static gboolean
 box_defers_hit_layer(const ns_box *b, int *out_z)
 {
-    if (!b || !b->style) return FALSE;
-    const ns_css_value *p = b->style->values[NS_CSS_POSITION];
-    if (!p || p->kind != NS_CSS_V_KEYWORD || !p->u.keyword) return FALSE;
-    const char *kw = p->u.keyword;
-    if (strcmp(kw, "relative") && strcmp(kw, "absolute") &&
-        strcmp(kw, "fixed") && strcmp(kw, "sticky")) return FALSE;
-    const ns_css_value *v = b->style->values[NS_CSS_Z_INDEX];
-    int z = (v && v->kind == NS_CSS_V_LENGTH) ? (int)v->u.length.v : 0;
-    if (z < 0) return FALSE;
-    if (out_z) *out_z = z;
+    if (!ns_box_is_upper_layer(b)) return FALSE;
+    *out_z = ns_box_layer_z(b);
     return TRUE;
-}
-
-static gboolean
-box_has_hit_transform(const ns_box *b)
-{
-    const ns_style *s = b ? b->style : NULL;
-    return s && (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
-                 s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]);
 }
 
 static gboolean
@@ -17738,10 +18092,132 @@ hit_flush_deferred(GArray *list)
     return best;
 }
 
+static gboolean
+hit_box_unreachable(const ns_box *b)
+{
+    return !b || (b->negative_lifted && b != g_hit_flush_box) ||
+           ns_paint_box_clip_hides(b);
+}
+
+static gboolean
+hit_contents_unreachable(const ns_box *b, gboolean clipped,
+                         double x, double y)
+{
+    if (b->style &&
+        keyword_is(b->style->values[NS_CSS_CONTENT_VISIBILITY], "hidden"))
+        return TRUE;
+    return clipped && !box_padding_contains(b, x, y);
+}
+
+static gboolean
+hit_layers_below_self(const ns_box *b)
+{
+    return b->negative_layers &&
+           ns_node_is_element_named(b->dom, "body") &&
+           !ns_box_is_stacking_context(b);
+}
+
+static gboolean
+hit_point_in_box(const ns_box *b, double x, double y)
+{
+    gboolean block_edges = b->kind == NS_BOX_BLOCK ||
+                           b->kind == NS_BOX_TABLE_CAPTION;
+    double x1 = b->x + b->content_width
+              + (block_edges ? b->padding.left + b->padding.right +
+                               b->border.left + b->border.right +
+                               b->margin.left + b->margin.right : 0);
+    double y1 = b->y + b->content_height
+              + (block_edges ? b->padding.top + b->padding.bottom +
+                               b->border.top + b->border.bottom +
+                               b->margin.top + b->margin.bottom : 0);
+    return x >= b->x && x <= x1 && y >= b->y && y <= y1;
+}
+
+static const ns_box *
+hit_self_test(const ns_box *root, double x, double y)
+{
+    if (root->kind == NS_BOX_SVG) {
+        const ns_box *inner = svg_foreign_hit(root, x, y);
+        if (inner) return inner;
+    }
+    if (box_blocks_hit_testing(root) || box_svg_yields_hit(root) ||
+        !root->dom || !hit_point_in_box(root, x, y))
+        return NULL;
+    g_hit_local_x = x;
+    g_hit_local_y = y;
+    return root;
+}
+
+static gboolean
+hit_owns_layer_scope(const ns_box *b, gboolean clipped)
+{
+    return b == g_hit_flush_box || clipped || ns_box_is_stacking_context(b);
+}
+
+static const ns_box *
+hit_negative_layers(const ns_box *root, double x, double y,
+                    const ns_box *best)
+{
+    const GPtrArray *layers = root->negative_layers;
+    if (!layers) return best;
+    const ns_box *saved_flush = g_hit_flush_box;
+    for (guint i = 0; i < layers->len; i++) {
+        g_hit_flush_box = g_ptr_array_index(layers, i);
+        const ns_box *m = box_hit_test_tree(g_hit_flush_box, x, y);
+        if (m) best = m;
+    }
+    g_hit_flush_box = saved_flush;
+    return best;
+}
+
+static const ns_box *
+hit_3d_root(const ns_box *root, double x, double y)
+{
+    const ns_box *m = ns_paint_3d_pick(root, x, y);
+    if (!m && ns_paint_box_establishes_3d(root))
+        m = hit_negative_layers(root, x + root->scroll_x, y + root->scroll_y,
+                                NULL);
+    return m ? m : hit_self_test(root, x, y);
+}
+
+static const ns_box *
+hit_inline_atomic(const ns_box *ab, double x, double y)
+{
+    if (style_is_positioned(ab->style) || !ns_box_is_stacking_context(ab))
+        return box_hit_test_tree(ab, x, y);
+    const ns_box *saved_flush = g_hit_flush_box;
+    g_hit_flush_box = ab;
+    const ns_box *m = box_hit_test_tree(ab, x, y);
+    g_hit_flush_box = saved_flush;
+    return m;
+}
+
+static const ns_box *
+hit_inline_atomics(const ns_box *root, double x, double y, const ns_box *best)
+{
+    for (guint i = 0; root->inline_atomics && i < root->inline_atomics->len;
+         i++) {
+        const ns_inline_atomic *atomic =
+            &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+        if (!atomic->box) continue;
+        double ax, ay;
+        inline_atomic_hit_point(root, atomic, x, y, &ax, &ay);
+        const ns_box *m = hit_inline_atomic(atomic->box, ax, ay);
+        if (m) best = m;
+    }
+    return best;
+}
+
 static const ns_box *
 box_hit_test_tree(const ns_box *root, double x, double y)
 {
-    if (!root) return NULL;
+    if (hit_box_unreachable(root)) return NULL;
+    double lx = x, ly = y;
+    hit_enter_box(root, &lx, &ly);
+    if (!box_hit_untransform_point(root, &lx, &ly)) return NULL;
+    if (root->paint_bottom > root->paint_top &&
+        (ly < root->paint_top - 1.0 || ly > root->paint_bottom + 1.0))
+        return NULL;
     int defer_z = 0;
     if (g_hit_defer_depth > 0 && root != g_hit_flush_box &&
         box_defers_hit_layer(root, &defer_z)) {
@@ -17751,30 +18227,23 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         g_array_append_val(g_hit_deferred, d);
         return NULL;
     }
-    hit_enter_box(root, &x, &y);
-    if (!box_hit_untransform_point(root, &x, &y)) return NULL;
-    if (root->paint_bottom > root->paint_top &&
-        (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
-        return NULL;
+    x = lx;
+    y = ly;
     gboolean clipped = box_clips_children(root);
-    if (clipped && !box_padding_contains(root, x, y))
-        goto self_test;
-    if (ns_paint_3d_registered(root)) {
-        const ns_box *m3 = ns_paint_3d_pick(root, x, y);
-        if (m3) return m3;
-        goto self_test;
-    }
-    const ns_box *best = NULL;
+    if (hit_contents_unreachable(root, clipped, x, y))
+        return hit_self_test(root, x, y);
+    if (ns_paint_3d_registered(root)) return hit_3d_root(root, x, y);
     double cx = x + root->scroll_x;
     double cy = y + root->scroll_y;
-    gboolean own_scope = root->parent == NULL || root == g_hit_flush_box ||
-                         clipped || box_has_hit_transform(root);
+    gboolean own_scope = hit_owns_layer_scope(root, clipped);
     GArray *saved_deferred = NULL;
     if (own_scope) {
         saved_deferred = g_hit_deferred;
         g_hit_deferred = NULL;
         g_hit_defer_depth++;
     }
+    const ns_box *under = hit_negative_layers(root, cx, cy, NULL);
+    const ns_box *best = hit_layers_below_self(root) ? NULL : under;
     guint sn = 0;
     const ns_box **stacked = hit_children_stacked(root, &sn);
     if (stacked) {
@@ -17789,17 +18258,7 @@ box_hit_test_tree(const ns_box *root, double x, double y)
             if (m) best = m;
         }
     }
-    if (root->inline_atomics)
-        for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_inline_atomic *atomic =
-                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
-            const ns_box *ab = atomic->box;
-            if (!ab) continue;
-            double ax, ay;
-            inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
-            const ns_box *m = box_hit_test_tree(ab, ax, ay);
-            if (m) best = m;
-        }
+    best = hit_inline_atomics(root, cx, cy, best);
     if (own_scope) {
         GArray *mine = g_hit_deferred;
         g_hit_deferred = saved_deferred;
@@ -17809,30 +18268,8 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         if (mine) g_array_free(mine, TRUE);
     }
     if (best) return best;
-self_test: ;
-    if (root->kind == NS_BOX_SVG) {
-        const ns_box *inner = svg_foreign_hit(root, x, y);
-        if (inner) return inner;
-    }
-    double x0 = root->x;
-    double y0 = root->y;
-    gboolean block_edges = root->kind == NS_BOX_BLOCK ||
-                           root->kind == NS_BOX_TABLE_CAPTION;
-    double x1 = x0 + root->content_width
-              + (block_edges ? root->padding.left + root->padding.right +
-                               root->border.left + root->border.right +
-                               root->margin.left + root->margin.right : 0);
-    double y1 = y0 + root->content_height
-              + (block_edges ? root->padding.top + root->padding.bottom +
-                               root->border.top + root->border.bottom +
-                               root->margin.top + root->margin.bottom : 0);
-    if (!box_blocks_hit_testing(root) && !box_svg_yields_hit(root) &&
-        x >= x0 && x <= x1 && y >= y0 && y <= y1 && root->dom) {
-        g_hit_local_x = x;
-        g_hit_local_y = y;
-        return root;
-    }
-    return NULL;
+    const ns_box *self = hit_self_test(root, x, y);
+    return self ? self : under;
 }
 
 static const ns_box *
