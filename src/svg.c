@@ -27,6 +27,8 @@ enum {
     NS_SVG_DEFAULT_OBJECT_H = 150,
     NS_SVG_MAX_HREF_CHAIN   = 16,
     NS_SVG_MAX_DASHES       = 256,
+    NS_SVG_MAX_RESOURCES    = 32,
+    NS_SVG_MAX_RESOURCE_BYTES = 4 * 1024 * 1024,
 };
 
 typedef enum {
@@ -77,6 +79,7 @@ typedef struct {
     int            nodes;
     double         vw, vh;
     struct svg_measure *measure;
+    const struct svg_resource *resource;
 } svg_ctx;
 
 static void svg_render_node(svg_ctx *ctx, const ns_node *n,
@@ -979,6 +982,91 @@ svg_index_ids(svg_ctx *ctx, const ns_node *n)
     }
 }
 
+typedef struct svg_resource {
+    ns_node    *doc;
+    GHashTable *ids;
+} svg_resource;
+
+static GHashTable *g_svg_resources;
+static GPtrArray  *g_svg_resources_wanted;
+static GHashTable *g_svg_page_urls;
+
+static void
+svg_resource_free(gpointer data)
+{
+    svg_resource *r = data;
+    if (r->ids) g_hash_table_destroy(r->ids);
+    if (r->doc) ns_node_free(r->doc);
+    g_free(r);
+}
+
+static void
+svg_resource_index(svg_resource *r)
+{
+    r->ids = g_hash_table_new(g_str_hash, g_str_equal);
+    for (const ns_node *c = r->doc; c;
+         c = ns_node_next_in_subtree(c, r->doc, TRUE)) {
+        const char *id = c->kind == NS_NODE_ELEMENT
+            ? ns_element_get_attr(c, "id") : NULL;
+        if (id && *id && !g_hash_table_contains(r->ids, id))
+            g_hash_table_insert(r->ids, (gpointer)id, (gpointer)c);
+    }
+}
+
+static const svg_resource *
+svg_resource_of(const ns_node *doc)
+{
+    GHashTableIter it;
+    gpointer value;
+    if (!g_svg_resources) return NULL;
+    g_hash_table_iter_init(&it, g_svg_resources);
+    while (g_hash_table_iter_next(&it, NULL, &value))
+        if (((const svg_resource *)value)->doc == doc) return value;
+    return NULL;
+}
+
+static gboolean
+svg_in_frame(const ns_node *n)
+{
+    for (const ns_node *p = n->parent; p; p = p->parent)
+        if (ns_node_is_element_named(p, "iframe") ||
+            ns_node_is_element_named(p, "frame") ||
+            ns_node_is_element_named(p, "object"))
+            return TRUE;
+    return FALSE;
+}
+
+static char *
+svg_resource_url(const char *page_url, const char *href,
+                 const char **fragment)
+{
+    const char *hash = strchr(href, '#');
+    if (!page_url || !hash || hash == href || !hash[1]) return NULL;
+    char *url = ns_url_resolve_len(page_url, href, (size_t)(hash - href));
+    if (url && ns_url_is_http_or_https(url) &&
+        ns_url_same_origin(page_url, url)) {
+        *fragment = hash + 1;
+        return url;
+    }
+    g_free(url);
+    return NULL;
+}
+
+static const ns_node *
+svg_resource_target(svg_ctx *ctx, const ns_node *n, const char *href)
+{
+    const char *fragment = NULL;
+    if (ctx->resource || !ctx->styles || !g_svg_page_urls || svg_in_frame(n))
+        return NULL;
+    const char *page_url = g_hash_table_lookup(g_svg_page_urls,
+                                               ns_node_root(n));
+    char *url = svg_resource_url(page_url, href, &fragment);
+    const svg_resource *r = url ? g_hash_table_lookup(g_svg_resources, url)
+                                : NULL;
+    g_free(url);
+    return r && r->ids ? g_hash_table_lookup(r->ids, fragment) : NULL;
+}
+
 static const ns_node *
 svg_by_id(svg_ctx *ctx, const char *id)
 {
@@ -998,6 +1086,13 @@ svg_by_id(svg_ctx *ctx, const char *id)
     return ns_node_find_by_id(doc, id);
 }
 
+static const ns_node *
+svg_scoped_by_id(svg_ctx *ctx, const char *id)
+{
+    if (!ctx->resource) return svg_by_id(ctx, id);
+    return id ? g_hash_table_lookup(ctx->resource->ids, id) : NULL;
+}
+
 static const char *
 svg_href(const ns_node *n)
 {
@@ -1012,8 +1107,25 @@ svg_href_target(svg_ctx *ctx, const ns_node *n)
     const char *h = svg_href(n);
     if (!h) return NULL;
     while (*h && svg_is_ws(*h)) h++;
-    if (*h != '#') return NULL;
-    return svg_by_id(ctx, h + 1);
+    if (*h != '#') return svg_resource_target(ctx, n, h);
+    return svg_scoped_by_id(ctx, h + 1);
+}
+
+static const svg_resource *
+svg_use_enter(svg_ctx *ctx, const ns_node *target)
+{
+    const svg_resource *outer = ctx->resource;
+    const ns_node *home = ns_node_root(target);
+    if (home != ns_node_root(ctx->root)) ctx->resource = svg_resource_of(home);
+    ctx->depth++;
+    return outer;
+}
+
+static void
+svg_use_leave(svg_ctx *ctx, const svg_resource *outer)
+{
+    ctx->depth--;
+    ctx->resource = outer;
 }
 
 static const char *
@@ -1185,7 +1297,7 @@ svg_set_paint(svg_ctx *ctx, const svg_paint *paint, const svg_state *st,
         return TRUE;
     }
 
-    const ns_node *g = svg_by_id(ctx, paint->ref);
+    const ns_node *g = svg_scoped_by_id(ctx, paint->ref);
     if (g && g->name &&
         (strcmp(g->name, "linearGradient") == 0 ||
          strcmp(g->name, "radialGradient") == 0)) {
@@ -1286,7 +1398,7 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     if (!mv) return NULL;
     char *id = svg_url_id(mv, NULL);
     if (!id) return NULL;
-    const ns_node *mask = svg_by_id(ctx, id);
+    const ns_node *mask = svg_scoped_by_id(ctx, id);
     g_free(id);
     if (!mask || !mask->name || strcmp(mask->name, "mask") != 0) return NULL;
     if (ctx->depth >= NS_SVG_MAX_DEPTH) return NULL;
@@ -1372,7 +1484,7 @@ svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     if (!cp) return;
     char *id = svg_url_id(cp, NULL);
     if (!id) return;
-    const ns_node *clip = svg_by_id(ctx, id);
+    const ns_node *clip = svg_scoped_by_id(ctx, id);
     g_free(id);
     if (!clip || !clip->name || strcmp(clip->name, "clipPath") != 0) return;
     if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
@@ -1605,7 +1717,7 @@ svg_marker_ref(svg_ctx *ctx, const ns_node *n, const char *prop)
     if (!v) return NULL;
     char *id = svg_url_id(v, NULL);
     if (!id) return NULL;
-    const ns_node *m = svg_by_id(ctx, id);
+    const ns_node *m = svg_scoped_by_id(ctx, id);
     g_free(id);
     if (!m || !m->name || strcmp(m->name, "marker") != 0) return NULL;
     return m;
@@ -1888,7 +2000,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             double x = svg_attr_length(n, "x", ctx->vw, st.font_size, 0);
             double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
             cairo_translate(cr, x, y);
-            ctx->depth++;
+            const svg_resource *outer = svg_use_enter(ctx, t);
             if (t->name && strcmp(t->name, "symbol") == 0) {
                 double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
                 double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
@@ -1902,7 +2014,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             } else {
                 svg_render_node(ctx, t, &st);
             }
-            ctx->depth--;
+            svg_use_leave(ctx, outer);
         }
     } else if (strcmp(tag, "foreignObject") == 0) {
         double x = svg_attr_length(n, "x", ctx->vw, st.font_size, 0);
@@ -2155,7 +2267,7 @@ svg_measure_use(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                                 svg_attr_length(n, "x", ctx->vw, fs, 0),
                                 svg_attr_length(n, "y", ctx->vh, fs, 0));
     svg_extent content = { 0 };
-    ctx->depth++;
+    const svg_resource *outer = svg_use_enter(ctx, referenced);
     if (referenced->name && strcmp(referenced->name, "symbol") == 0) {
         double w = svg_attr_length(n, "width", ctx->vw, fs, ctx->vw);
         double h = svg_attr_length(n, "height", ctx->vh, fs, ctx->vh);
@@ -2168,7 +2280,7 @@ svg_measure_use(svg_ctx *ctx, const ns_node *n, const svg_state *st,
         svg_frame inner = svg_frame_inside(frame, &placed);
         svg_measure_node(ctx, referenced, st, &inner, &content);
     }
-    ctx->depth--;
+    svg_use_leave(ctx, outer);
     svg_extent_add_mapped(own, &content, &placed);
 }
 
@@ -2499,6 +2611,87 @@ const ns_node *
 ns_svg_document_root(const ns_node *doc)
 {
     return svg_find_root(doc);
+}
+
+static void
+svg_resources_note_page(const ns_node *page, const char *page_url)
+{
+    if (!g_svg_page_urls) {
+        g_svg_page_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                NULL, g_free);
+        g_svg_resources = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, svg_resource_free);
+        g_svg_resources_wanted = g_ptr_array_new_with_free_func(g_free);
+    }
+    if (g_strcmp0(g_hash_table_lookup(g_svg_page_urls, page), page_url) == 0)
+        return;
+    if (g_hash_table_size(g_svg_page_urls) >= NS_SVG_MAX_RESOURCES)
+        g_hash_table_remove_all(g_svg_page_urls);
+    g_hash_table_insert(g_svg_page_urls, (gpointer)page, g_strdup(page_url));
+}
+
+static gboolean
+svg_resource_is_foreign(gpointer url, gpointer resource, gpointer page_url)
+{
+    (void)resource;
+    return !ns_url_same_origin(page_url, url);
+}
+
+static void
+svg_resource_want(const ns_node *use, const char *page_url)
+{
+    const char *href = svg_href(use);
+    const char *fragment = NULL;
+    while (href && svg_is_ws(*href)) href++;
+    char *url = href ? svg_resource_url(page_url, href, &fragment) : NULL;
+    if (!url) return;
+    if (!g_hash_table_contains(g_svg_resources, url) &&
+        g_hash_table_size(g_svg_resources) >= NS_SVG_MAX_RESOURCES)
+        g_hash_table_foreach_remove(g_svg_resources, svg_resource_is_foreign,
+                                    (gpointer)page_url);
+    if (g_hash_table_contains(g_svg_resources, url) ||
+        g_hash_table_size(g_svg_resources) >= NS_SVG_MAX_RESOURCES) {
+        g_free(url);
+        return;
+    }
+    g_ptr_array_add(g_svg_resources_wanted, g_strdup(url));
+    g_hash_table_insert(g_svg_resources, url, g_new0(svg_resource, 1));
+}
+
+void
+ns_svg_note_resources(const ns_node *svg, const char *page_url)
+{
+    if (!svg || !page_url || svg_in_frame(svg)) return;
+    svg_resources_note_page(ns_node_root(svg), page_url);
+    for (const ns_node *c = svg->first_child; c;
+         c = ns_node_next_in_subtree(c, svg, TRUE))
+        if (ns_node_is_element_named(c, "use"))
+            svg_resource_want(c, page_url);
+}
+
+void
+ns_svg_take_wanted_resources(const char *page_url, GHashTable *urls)
+{
+    if (!g_svg_resources_wanted || !page_url) return;
+    for (guint i = g_svg_resources_wanted->len; i-- > 0; ) {
+        const char *url = g_ptr_array_index(g_svg_resources_wanted, i);
+        if (!ns_url_same_origin(page_url, url)) continue;
+        g_hash_table_add(urls, g_strdup(url));
+        g_ptr_array_remove_index_fast(g_svg_resources_wanted, i);
+    }
+}
+
+void
+ns_svg_offer_resource(const char *url, const char *final_url,
+                      const guchar *data, gsize len)
+{
+    svg_resource *r = g_svg_resources && url
+        ? g_hash_table_lookup(g_svg_resources, url) : NULL;
+    if (!r || r->doc || len > NS_SVG_MAX_RESOURCE_BYTES) return;
+    if (final_url && !ns_url_same_origin(url, final_url)) return;
+    if (!ns_svg_bytes_look_like_svg(data, len)) return;
+    r->doc = ns_html_parse((const char *)data, (gssize)len);
+    if (r->doc) svg_resource_index(r);
 }
 
 gboolean

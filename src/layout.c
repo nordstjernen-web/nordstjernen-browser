@@ -5945,6 +5945,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
         ns_svg_size size;
         ns_svg_intrinsic_size(n, &size);
+        ns_svg_note_resources(n, g_base_url_for_layout);
 
         double css_w = -1, css_h = -1;
         if (s) {

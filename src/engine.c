@@ -19,6 +19,7 @@
 #include "paint.h"
 #include "print.h"
 #include "render.h"
+#include "svg.h"
 
 typedef struct fetch_state {
     GMainLoop  *loop;
@@ -1638,6 +1639,8 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
         ns_image *img = ns_image_cache_insert_encoded(it->st->cache, it->abs,
                                                       resp->body->data,
                                                       resp->body->len);
+        ns_svg_offer_resource(it->abs, resp->final_url, resp->body->data,
+                              resp->body->len);
         if (img && !img->final_url) {
             img->final_url = g_strdup(resp->final_url);
             img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
@@ -1723,6 +1726,7 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
         g_ptr_array_free(srcs, TRUE);
     }
     g_ptr_array_free(imgs, TRUE);
+    ns_svg_take_wanted_resources(base_url, wanted);
     return wanted;
 }
 
@@ -1761,6 +1765,8 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
         ns_image *img = ns_image_cache_insert_encoded(s->cache, it->abs,
                                                       resp->body->data,
                                                       resp->body->len);
+        ns_svg_offer_resource(it->abs, resp->final_url, resp->body->data,
+                              resp->body->len);
         if (img && !img->final_url) {
             img->final_url = g_strdup(resp->final_url);
             img->cors_allow_origin = g_strdup(resp->cors_allow_origin);

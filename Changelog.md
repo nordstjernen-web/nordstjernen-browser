@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* SVG `use` elements can reference another file. An icon written as
+  `<use href="/icons.svg#name">` was not drawn at all, because only
+  references into the same document were followed. A page's inline SVG now
+  loads same-origin SVG files named by its `use` elements and draws the
+  referenced symbol, shape or group with the colour and fill inherited
+  from the `use` element; references and gradients inside the file resolve
+  within that file. Files from another origin, `data:` URLs, SVG shown as
+  an image and SVG inside frames do not load such files.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

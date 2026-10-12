@@ -67,6 +67,13 @@ gboolean ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
 
 gboolean ns_svg_bytes_look_like_svg(const guchar *data, gsize len);
 
+void ns_svg_note_resources(const ns_node *svg, const char *page_url);
+
+void ns_svg_take_wanted_resources(const char *page_url, GHashTable *urls);
+
+void ns_svg_offer_resource(const char *url, const char *final_url,
+                           const guchar *data, gsize len);
+
 G_END_DECLS
 
 #endif
