@@ -43,6 +43,20 @@ Changelog:
   `will-change` keeps the case of the names it lists. Integer
   properties such as `z-index` clamp to the 32-bit range, so
   `z-index: 99999999999` stays on top (on x86-64 it turned negative).
+* JS: microtasks, `requestAnimationFrame` callbacks, ResizeObserver and
+  IntersectionObserver callbacks and the rendering tick no longer run in
+  the middle of another script. The microtask checkpoint after a script
+  inserted by other script (`appendChild()` of an inline script,
+  `document.write()`) is left to the outer task, as the HTML standard
+  says. While a script waits for a stylesheet that `getComputedStyle()`,
+  `offsetWidth` or `getAnimations()` needs, or for a synchronous
+  `XMLHttpRequest`, the rendering tick, animation frames, animation
+  events and observer deliveries wait until it returns. Observer
+  callbacks forced by a layout read run after the script, resize
+  observations before intersection ones, each followed by a microtask
+  checkpoint. ChatGPT spun in its render loop at startup until its
+  scripts were halted, because its own queued flush ran inside the
+  flush that was waiting for a stylesheet.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size
