@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* Adding, removing or moving a comment node no longer forces a layout
+  pass. A comment has no box and no selector looks at it, yet every
+  `appendChild`, `insertBefore`, `removeChild` and `remove()` of one marked
+  the whole page for a new layout. Pages whose framework keeps comment
+  nodes as position markers and churns them from a scroll listener paid a
+  full layout for each scroll step; scrolling such a list inside a
+  scrolling box now takes less than half the time per step.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

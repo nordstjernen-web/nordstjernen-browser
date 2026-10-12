@@ -1592,6 +1592,19 @@ ns_js_note_mutation(ns_js *js, const ns_node *n)
 }
 
 static void
+ns_js_note_child_mutation(ns_js *js, const ns_node *parent,
+                          const ns_node *child)
+{
+    if (child->kind != NS_NODE_COMMENT) ns_js_note_mutation(js, parent);
+}
+
+static void
+ns_js_note_child_removal(ns_js *js, const ns_node *child)
+{
+    if (child->kind != NS_NODE_COMMENT) js->mutated = TRUE;
+}
+
+static void
 ns_report_mutations(ns_js *js)
 {
     if (!js->mutated) return;
@@ -34466,7 +34479,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
     ns_node_append_child(parent, child);
     if (_j) {
-        ns_js_note_mutation(_j, parent);
+        ns_js_note_child_mutation(_j, parent, child);
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         if (!inert_parent) {
@@ -34498,7 +34511,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_node_remove(child);
     if (_j2) {
         g_hash_table_add(_j2->orphan_nodes, child);
-        _j2->mutated = TRUE;
+        ns_js_note_child_removal(_j2, child);
         ns_js_record_child_change(_j2, parent, NULL, child,
                                   saved_prev, saved_next);
     }
@@ -34509,7 +34522,7 @@ static void
 ns_js_record_move_removal(ns_js *js, ns_node *node)
 {
     if (!js || !node || !node->parent) return;
-    ns_js_note_mutation(js, node);
+    ns_js_note_child_mutation(js, node->parent, node);
     ns_js_record_child_change(js, node->parent, NULL, node,
                               node->prev_sibling, node->next_sibling);
 }
@@ -34757,7 +34770,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, parent, newc, ref);
     }
     if (_j) {
-        ns_js_note_mutation(_j, parent);
+        ns_js_note_child_mutation(_j, parent, newc);
         ns_js_record_child_change(_j, parent, newc, NULL,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -35569,7 +35582,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
         g_hash_table_add(_j->orphan_nodes, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
                                   saved_prev, saved_next);
-        _j->mutated = TRUE;
+        ns_js_note_child_removal(_j, n);
     }
     return JS_UNDEFINED;
 }
