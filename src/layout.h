@@ -154,12 +154,18 @@ typedef struct ns_box {
     double measured_content_height;
     double cb_height_override;
     double cb_width_override;
+    gboolean cb_width_set;
     double flex_main_size;
     gboolean has_flex_main;
     gboolean is_rendered_legend;
     gboolean inline_split_tail;
     double margin_top_through;
     double paint_top, paint_bottom;
+    GPtrArray *negative_layers;
+    gboolean negative_lifted;
+    guint8 layer_flags;
+    gboolean pseudo_after;
+    const ns_node *pseudo_host;
     ns_edges margin, padding, border;
 
     double scroll_x, scroll_y;
@@ -280,6 +286,12 @@ void ns_box_sticky_offset(const ns_box *b, double vp_x0, double vp_y0,
                           double vp_x1, double vp_y1,
                           double *out_dx, double *out_dy);
 void ns_box_hit_offset(const ns_box *b, double *dx, double *dy);
+gboolean ns_box_is_stacking_context(const ns_box *b);
+gboolean ns_style_is_stacking_context(const ns_style *s);
+gboolean ns_box_is_upper_layer(const ns_box *b);
+gboolean ns_box_is_flex_or_grid_item(const ns_box *b);
+int ns_box_layer_z(const ns_box *b);
+int ns_box_stack_key(const ns_box *b);
 
 typedef struct ns_sticky_y {
     gboolean has_top, has_bottom;
