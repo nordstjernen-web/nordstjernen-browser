@@ -3,6 +3,41 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a grid item stretched to its row (`align-self: normal` or
+  `stretch`, `height: auto`) has a definite height, so `height: 100%`
+  on its children resolves against the stretched size, as in Chrome. A
+  child with `height:100%` used to collapse to its content, so content
+  meant to sit centred between `1fr` rows stuck to the top instead. A
+  stretched item that is itself a flex container is laid out against the
+  stretched height, so `justify-content`, `align-items` and `flex-grow`
+  inside it use the row height. The stretch respects the item's
+  `min-height` and `max-height`, percentages against the grid area, and
+  skips items that behave as `start` (`align-self: normal` with an
+  `aspect-ratio` or an intrinsic `height`).
+* Layout: a column flex container whose height comes from its flex
+  parent (a stretched row item or the main size of a column) no longer
+  subtracts its padding and border a second time with
+  `box-sizing: border-box`, so its children are no longer placed too
+  high, and a `height: 100%` card in such a column keeps its size when
+  the row is laid out twice.
+* Paint: gradients interpolate in premultiplied alpha, as CSS requires.
+  A stop that is `transparent` (transparent black) no longer pulls the
+  colour of its neighbour towards black, so
+  `linear-gradient(transparent, #fcfcfc)` fades without a grey band and
+  `linear-gradient(red, transparent)` stays red as it fades. This covers
+  linear, radial, repeating and conic gradients and mask gradients; a
+  transition hint takes the premultiplied average of its neighbours at
+  its position (its curve is still a straight segment through that
+  colour). Colour stops placed before the previous stop, for example
+  `red 50%, blue 20px`, are clamped to it instead of scrambling the
+  colours.
+* Layout: a `::before` or `::after` whose `content` is `none` or `normal`
+  generates no box, also when it is absolutely positioned or an
+  inline-block. Such pseudo-elements used to paint their background, so
+  a decorative `content:none; position:absolute; inset:0` gradient
+  covered the text around it. Such a pseudo-element also no longer
+  changes counters with `counter-increment`, `counter-reset` or
+  `counter-set`.
 * Layout: percentage `max-width`, `min-width`, padding and margins on a
   floated box, a column flex item or a grid item that is not stretched
   (images, tables and absolutely positioned boxes included) now resolve

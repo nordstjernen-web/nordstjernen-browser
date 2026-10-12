@@ -1265,6 +1265,27 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
 }
 
 static void
+gradient_stop_color(const ns_css_gradient_stop *st, double c[4])
+{
+    c[0] = st->r / 255.0;
+    c[1] = st->g / 255.0;
+    c[2] = st->b / 255.0;
+    c[3] = st->a / 255.0;
+}
+
+static void
+gradient_lerp_premultiplied(const double a[4], const double b[4], double t,
+                            double out[4])
+{
+    double al = a[3] + (b[3] - a[3]) * t;
+    for (int ch = 0; ch < 3; ch++) {
+        double pm = a[ch] * a[3] + (b[ch] * b[3] - a[ch] * a[3]) * t;
+        out[ch] = al > 0 ? pm / al : a[ch] + (b[ch] - a[ch]) * t;
+    }
+    out[3] = al;
+}
+
+static void
 conic_color_at(const ns_css_gradient *gr, double frac,
                double *r, double *g, double *b, double *a)
 {
@@ -1285,10 +1306,73 @@ conic_color_at(const ns_css_gradient *gr, double frac,
             (gr->stops[hi].pos - gr->stops[lo].pos);
     if (t < 0) t = 0;
     if (t > 1) t = 1;
-    *r = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
-    *g = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
-    *b = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
-    *a = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
+    double c0[4], c1[4], c[4];
+    gradient_stop_color(&gr->stops[lo], c0);
+    gradient_stop_color(&gr->stops[hi], c1);
+    gradient_lerp_premultiplied(c0, c1, t, c);
+    *r = c[0];
+    *g = c[1];
+    *b = c[2];
+    *a = c[3];
+}
+
+static gboolean
+gradient_segment_blends(double o0, double o1, const double a[4],
+                        const double b[4])
+{
+    return o1 > o0 && a[3] != b[3] && a[3] > 0 && b[3] > 0 &&
+           (a[0] != b[0] || a[1] != b[1] || a[2] != b[2]);
+}
+
+static void
+gradient_add_premultiplied_stop(cairo_pattern_t *pat, double offset,
+                                const double a[4], const double b[4],
+                                double t)
+{
+    double c[4];
+    gradient_lerp_premultiplied(a, b, t, c);
+    cairo_pattern_add_color_stop_rgba(pat, offset, c[0], c[1], c[2], c[3]);
+}
+
+static void
+gradient_add_segment(cairo_pattern_t *pat, double o0, double o1,
+                     const double a[4], const double b[4])
+{
+    int steps = gradient_segment_blends(o0, o1, a, b) ? 8 : 1;
+    for (int k = 0; k <= steps; k++) {
+        double t = (double)k / steps;
+        gradient_add_premultiplied_stop(pat, o0 + (o1 - o0) * t, a, b, t);
+    }
+}
+
+static void
+gradient_add_stops(cairo_pattern_t *pat, const ns_css_gradient *gr,
+                   const double *frac, double period)
+{
+    double a[4], b[4];
+    if (gr->n_stops == 1) {
+        gradient_stop_color(&gr->stops[0], a);
+        cairo_pattern_add_color_stop_rgba(pat, frac[0] / period,
+                                          a[0], a[1], a[2], a[3]);
+        return;
+    }
+    for (int i = 0; i + 1 < gr->n_stops; i++) {
+        gradient_stop_color(&gr->stops[i], a);
+        gradient_stop_color(&gr->stops[i + 1], b);
+        if (a[3] <= 0) memcpy(a, b, 3 * sizeof(double));
+        if (b[3] <= 0) memcpy(b, a, 3 * sizeof(double));
+        gradient_add_segment(pat, frac[i] / period, frac[i + 1] / period, a, b);
+    }
+}
+
+static void
+gradient_stop_fractions(const ns_css_gradient *gr, double line_len,
+                        double *frac)
+{
+    for (int i = 0; i < gr->n_stops; i++) {
+        frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+        if (i > 0 && frac[i] < frac[i - 1]) frac[i] = frac[i - 1];
+    }
 }
 
 static void
@@ -1371,8 +1455,7 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         }
         if (line_len <= 0) line_len = 1;
         double frac[NS_CSS_GRADIENT_STOPS_MAX];
-        for (int i = 0; i < gr->n_stops; i++)
-            frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+        gradient_stop_fractions(gr, line_len, frac);
         double period = (gr->repeating && gr->n_stops > 0)
             ? frac[gr->n_stops - 1] : 1.0;
         if (period <= 0) period = 1.0;
@@ -1389,11 +1472,7 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
                 x0, y0,
                 x0 + (x1 - x0) * period, y0 + (y1 - y0) * period);
         }
-        for (int i = 0; i < gr->n_stops; i++) {
-            const ns_css_gradient_stop *st = &gr->stops[i];
-            cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
-                st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
-        }
+        gradient_add_stops(pat, gr, frac, period);
         if (gr->repeating)
             cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
         cairo_save(cr);
@@ -7759,8 +7838,7 @@ mask_gradient_pattern(const ns_css_gradient *gr,
     }
     if (line_len <= 0) line_len = 1;
     double frac[NS_CSS_GRADIENT_STOPS_MAX];
-    for (int i = 0; i < gr->n_stops; i++)
-        frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
+    gradient_stop_fractions(gr, line_len, frac);
     double period = (gr->repeating && gr->n_stops > 0) ? frac[gr->n_stops - 1] : 1.0;
     if (period <= 0) period = 1.0;
     cairo_pattern_t *pat;
@@ -7775,11 +7853,7 @@ mask_gradient_pattern(const ns_css_gradient *gr,
         pat = cairo_pattern_create_linear(x0, y0,
             x0 + 2.0 * dxh * period, y0 + 2.0 * dyh * period);
     }
-    for (int i = 0; i < gr->n_stops; i++) {
-        const ns_css_gradient_stop *st = &gr->stops[i];
-        cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
-            st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
-    }
+    gradient_add_stops(pat, gr, frac, period);
     if (gr->repeating) cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
     return pat;
 }
