@@ -613,6 +613,33 @@ ns_js_page_tasks_held(const ns_js *js)
     return js->in_pump || ns_engine_in_blocking_fetch();
 }
 
+static gboolean
+ns_js_script_on_stack(const ns_js *js)
+{
+    return js->callback_depth > 0 || js->eval_depth > 0 ||
+           (js->ctx && JS_IsRunningScript(js->ctx));
+}
+
+gboolean
+ns_js_page_busy(const ns_js *js)
+{
+    if (!js) return ns_engine_in_blocking_fetch();
+    return ns_js_page_tasks_held(js) || ns_js_script_on_stack(js);
+}
+
+static gboolean
+ns_js_frame_may_run(const ns_js *js)
+{
+    return js && !js->halted && !ns_js_page_tasks_held(js) &&
+           !ns_js_script_on_stack(js);
+}
+
+static gboolean
+ns_js_microtasks_may_drain(const ns_js *js)
+{
+    return js && !(js->ctx && JS_IsRunningScript(js->ctx));
+}
+
 static void
 ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 {
@@ -1481,7 +1508,7 @@ ns_function_realm(JSContext *ctx, JSValueConst fn)
 static void
 ns_drain_microtasks(ns_js *js)
 {
-    if (!js) return;
+    if (!ns_js_microtasks_may_drain(js)) return;
     ns_budget_guard g = {0};
     ns_js_budget_push(js, &g);
     JSContext *ctx_out = NULL;
@@ -26739,7 +26766,7 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
         JS_FreeValue(js->ctx, ex);
     }
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
     return ok;
 }
@@ -30222,6 +30249,7 @@ ns_intersection_observers_tick(ns_js *js)
         if (n_entries > 0) {
             ns_io_call_cb(ctx, o, entries);
             JS_FreeValue(ctx, entries);
+            ns_js_microtask_checkpoint(js);
         } else if (!JS_IsUndefined(entries)) {
             JS_FreeValue(ctx, entries);
         }
@@ -30615,6 +30643,7 @@ ns_resize_observers_tick(ns_js *js)
                 ns_target_report_exception(js, ctx, "ResizeObserver");
             ns_js_realm_scope_leave(js, &scope);
             JS_FreeValue(ctx, ret);
+            ns_js_microtask_checkpoint(js);
         }
         if (!JS_IsUndefined(entries)) JS_FreeValue(ctx, entries);
         JS_FreeValue(ctx, cb);
@@ -30627,18 +30656,25 @@ ns_resize_observers_tick(ns_js *js)
     js->observer_ticking = FALSE;
 }
 
+static void
+ns_js_deliver_observations(ns_js *js)
+{
+    ns_resize_observers_tick(js);
+    ns_js_microtask_checkpoint(js);
+    ns_intersection_observers_tick(js);
+    ns_js_microtask_checkpoint(js);
+}
+
 static gboolean
 ns_observer_tick_timer(gpointer data)
 {
     ns_js *js = data;
     if (!js) return G_SOURCE_REMOVE;
     if (!js->ctx) { js->observer_tick_source = 0; return G_SOURCE_REMOVE; }
-    if (ns_js_page_tasks_held(js) || js->dispatch_depth > 0)
+    if (ns_js_page_busy(js) || js->dispatch_depth > 0)
         return G_SOURCE_CONTINUE;
     js->observer_tick_source = 0;
-    ns_intersection_observers_tick(js);
-    ns_resize_observers_tick(js);
-    ns_drain_microtasks(js);
+    ns_js_deliver_observations(js);
     return G_SOURCE_REMOVE;
 }
 
@@ -33260,7 +33296,7 @@ ns_rvfc_media_has_frame(JSContext *ctx, ns_node *media)
 static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
-    if (!js || js->halted || js->in_pump) return FALSE;
+    if (!ns_js_frame_may_run(js)) return FALSE;
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
@@ -39197,6 +39233,24 @@ ns_element_get_offsetParent(JSContext *ctx, JSValueConst this_val)
     return fallback ? ns_make_element(ctx, fallback) : JS_NULL;
 }
 
+static gboolean
+ns_js_has_observers(const ns_js *js)
+{
+    return (js->resize_observers && js->resize_observers->len > 0) ||
+           (js->intersection_observers && js->intersection_observers->len > 0);
+}
+
+static void
+ns_js_observers_after_layout(ns_js *js)
+{
+    if (js->observer_ticking || !ns_js_has_observers(js)) return;
+    if (ns_js_page_busy(js)) {
+        ns_observer_schedule_tick(js);
+        return;
+    }
+    ns_js_deliver_observations(js);
+}
+
 void
 ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
 {
@@ -39213,8 +39267,7 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
     ns_js_sync_window_metrics(js);
     if (root) {
         ns_js_promote_deferred_iframes(js);
-        ns_intersection_observers_tick(js);
-        ns_resize_observers_tick(js);
+        ns_js_observers_after_layout(js);
     }
 }
 
@@ -63010,7 +63063,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     }
     ns_js_apply_site_quirks(js);
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
 }
 
@@ -63786,7 +63839,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
         }
     }
     JS_FreeValue(ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
 }
 
@@ -63974,7 +64027,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
             JS_FreeValue(realm, exception);
         }
         JS_FreeValue(realm, value);
-        ns_drain_microtasks(js);
+        ns_js_microtask_checkpoint(js);
         ns_js_budget_pop(js, &budget);
     }
 
@@ -67192,7 +67245,7 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
         if (s) JS_FreeCString(js->ctx, s);
     }
     JS_FreeValue(js->ctx, v);
-    ns_drain_microtasks(js);
+    ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
     return out;
 }
