@@ -438,6 +438,10 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_WILL_CHANGE]          = "will-change",
     [NS_CSS_CONTAIN]              = "contain",
     [NS_CSS_BACKDROP_FILTER]      = "backdrop-filter",
+    [NS_CSS_SCROLL_TIMELINE_NAME] = "scroll-timeline-name",
+    [NS_CSS_SCROLL_TIMELINE_AXIS] = "scroll-timeline-axis",
+    [NS_CSS_VIEW_TIMELINE_NAME]   = "view-timeline-name",
+    [NS_CSS_TIMELINE_SCOPE]       = "timeline-scope",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -8907,12 +8911,7 @@ anim_longhand_item_valid(ns_css_prop prop, const char *item)
                g_ascii_strcasecmp(item, "add") == 0 ||
                g_ascii_strcasecmp(item, "accumulate") == 0;
     case NS_CSS_ANIMATION_TIMELINE:
-        if (g_ascii_strcasecmp(item, "auto") == 0 ||
-            g_ascii_strcasecmp(item, "none") == 0) return TRUE;
-        if (item[0] == '-' && item[1] == '-') return content_ident_valid(item);
-        return (g_ascii_strncasecmp(item, "scroll(", 7) == 0 ||
-                g_ascii_strncasecmp(item, "view(", 5) == 0) &&
-               item[strlen(item) - 1] == ')';
+        return ns_css_timeline_parse(item, NULL);
     case NS_CSS_ANIMATION_RANGE_START:
     case NS_CSS_ANIMATION_RANGE_END:
         return anim_range_item_canonical(item, prop == NS_CSS_ANIMATION_RANGE_END,
@@ -9004,6 +9003,246 @@ anim_range_item_canonical(const char *item, gboolean is_end, char **out)
     return ok;
 }
 
+static const char *const kScrollAxisNames[] = { "block", "inline", "x", "y" };
+static const char *const kScrollerNames[] = { "nearest", "root", "self" };
+
+static int
+keyword_index(const char *tok, const char *const *names, int n)
+{
+    for (int i = 0; tok && i < n; i++)
+        if (g_ascii_strcasecmp(tok, names[i]) == 0) return i;
+    return -1;
+}
+
+gboolean
+ns_css_scroll_axis_parse(const char *item, ns_css_scroll_axis *out)
+{
+    int i = keyword_index(item, kScrollAxisNames, G_N_ELEMENTS(kScrollAxisNames));
+    if (i < 0) return FALSE;
+    if (out) *out = (ns_css_scroll_axis)i;
+    return TRUE;
+}
+
+static gboolean
+timeline_dashed_ident(const char *item)
+{
+    return item[0] == '-' && item[1] == '-' && content_ident_valid(item);
+}
+
+static gboolean
+scroll_timeline_name_item_valid(const char *item)
+{
+    return g_ascii_strcasecmp(item, "none") == 0 || timeline_dashed_ident(item);
+}
+
+static gboolean
+scroll_notation_token(const char *tok, ns_css_timeline *t, guint *seen)
+{
+    int scroller = keyword_index(tok, kScrollerNames, G_N_ELEMENTS(kScrollerNames));
+    if (!(*seen & 1) && ns_css_scroll_axis_parse(tok, &t->axis)) {
+        *seen |= 1;
+        return TRUE;
+    }
+    if ((*seen & 2) || scroller < 0) return FALSE;
+    t->scroller = (ns_css_scroller)scroller;
+    *seen |= 2;
+    return TRUE;
+}
+
+static gboolean
+scroll_notation_parse(const char *item, gsize len, ns_css_timeline *t)
+{
+    char *args = g_strndup(item + 7, len - 8);
+    char *toks[3] = { 0 };
+    int n = split_ws_limit(args, toks, 3);
+    guint seen = 0;
+    gboolean ok = n <= 2;
+    for (int i = 0; i < n; i++) {
+        if (ok) ok = scroll_notation_token(toks[i], t, &seen);
+        g_free(toks[i]);
+    }
+    g_free(args);
+    return ok;
+}
+
+static gboolean
+timeline_function_parse(const char *item, ns_css_timeline *t)
+{
+    gsize len = strlen(item);
+    if (len < 2 || item[len - 1] != ')') return FALSE;
+    if (g_ascii_strncasecmp(item, "view(", 5) == 0) {
+        t->kind = NS_CSS_TIMELINE_VIEW;
+        return TRUE;
+    }
+    if (g_ascii_strncasecmp(item, "scroll(", 7) != 0) return FALSE;
+    t->kind = NS_CSS_TIMELINE_SCROLL;
+    return scroll_notation_parse(item, len, t);
+}
+
+gboolean
+ns_css_timeline_parse(const char *item, ns_css_timeline *out)
+{
+    ns_css_timeline t = { 0 };
+    gboolean ok = TRUE;
+    if (!item || !*item) return FALSE;
+    if (g_ascii_strcasecmp(item, "none") == 0) {
+        t.kind = NS_CSS_TIMELINE_NONE;
+    } else if (timeline_dashed_ident(item)) {
+        t.kind = NS_CSS_TIMELINE_NAMED;
+    } else if (g_ascii_strcasecmp(item, "auto") != 0) {
+        ok = timeline_function_parse(item, &t);
+    }
+    if (ok && out) *out = t;
+    return ok;
+}
+
+static char *
+timeline_scroll_serialize(const ns_css_timeline *t)
+{
+    GString *out = g_string_new("scroll(");
+    gboolean scroller = t->scroller != NS_CSS_SCROLLER_NEAREST;
+    if (scroller) g_string_append(out, kScrollerNames[t->scroller]);
+    if (t->axis != NS_CSS_SCROLL_AXIS_BLOCK) {
+        if (scroller) g_string_append_c(out, ' ');
+        g_string_append(out, kScrollAxisNames[t->axis]);
+    }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
+}
+
+static char *
+anim_timeline_item_canonical(const char *item)
+{
+    ns_css_timeline t;
+    if (!ns_css_timeline_parse(item, &t)) return NULL;
+    if (t.kind == NS_CSS_TIMELINE_SCROLL) return timeline_scroll_serialize(&t);
+    if (t.kind == NS_CSS_TIMELINE_NAMED) return g_strdup(item);
+    return g_ascii_strdown(item, -1);
+}
+
+static gboolean
+anim_item_has_canonical(ns_css_prop prop)
+{
+    return prop == NS_CSS_ANIMATION_RANGE_START ||
+           prop == NS_CSS_ANIMATION_RANGE_END ||
+           prop == NS_CSS_ANIMATION_TIMELINE;
+}
+
+static char *
+anim_item_canonical(ns_css_prop prop, const char *item)
+{
+    char *c = NULL;
+    if (prop == NS_CSS_ANIMATION_TIMELINE) return anim_timeline_item_canonical(item);
+    anim_range_item_canonical(item, prop == NS_CSS_ANIMATION_RANGE_END, &c);
+    return c;
+}
+
+static ns_css_value *
+keyword_value_take(GString *canon, gboolean ok)
+{
+    if (!ok) {
+        g_string_free(canon, TRUE);
+        return NULL;
+    }
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = g_string_free(canon, FALSE);
+    return v;
+}
+
+static ns_css_value *
+parse_scroll_timeline_longhand(ns_css_prop prop, const char *t)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = anim_list_split(t, items, (int)G_N_ELEMENTS(items));
+    gboolean names = prop != NS_CSS_SCROLL_TIMELINE_AXIS;
+    gboolean ok = n > 0;
+    GString *canon = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        ns_css_scroll_axis axis = NS_CSS_SCROLL_AXIS_BLOCK;
+        if (ok) ok = names ? scroll_timeline_name_item_valid(items[i])
+                           : ns_css_scroll_axis_parse(items[i], &axis);
+        if (i) g_string_append(canon, ", ");
+        if (names && g_ascii_strcasecmp(items[i], "none") != 0)
+            g_string_append(canon, items[i]);
+        else
+            g_string_append(canon, names ? "none" : kScrollAxisNames[axis]);
+        g_free(items[i]);
+    }
+    return keyword_value_take(canon, ok);
+}
+
+static const char *const kTimelineScopeKeywords[] = { "none", "all" };
+
+static ns_css_value *
+parse_timeline_scope(const char *t)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = anim_list_split(t, items, (int)G_N_ELEMENTS(items));
+    int keyword = n == 1 ? keyword_index(items[0], kTimelineScopeKeywords,
+                                         G_N_ELEMENTS(kTimelineScopeKeywords))
+                         : -1;
+    gboolean ok = n > 0;
+    GString *canon = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (ok) ok = keyword >= 0 || timeline_dashed_ident(items[i]);
+        if (i) g_string_append(canon, ", ");
+        g_string_append(canon, keyword >= 0 ? kTimelineScopeKeywords[keyword]
+                                            : items[i]);
+        g_free(items[i]);
+    }
+    return keyword_value_take(canon, ok);
+}
+
+static int
+style_list_items(const ns_style *s, ns_css_prop prop, char *items[], int max)
+{
+    const ns_css_value *v = s ? s->values[prop] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
+    return anim_list_split(v->u.keyword, items, max);
+}
+
+int
+ns_css_timeline_name_index(const ns_style *s, ns_css_prop prop, const char *name)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    const ns_css_value *v = s && name ? s->values[prop] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
+        !strstr(v->u.keyword, name))
+        return -1;
+    int n = style_list_items(s, prop, items, (int)G_N_ELEMENTS(items));
+    int found = -1;
+    for (int i = 0; i < n; i++) {
+        if (found < 0 && strcmp(items[i], name) == 0) found = i;
+        g_free(items[i]);
+    }
+    return found;
+}
+
+char *
+ns_css_timeline_name_at(const ns_style *s, int index)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = style_list_items(s, NS_CSS_ANIMATION_TIMELINE, items,
+                             (int)G_N_ELEMENTS(items));
+    const char *item = n > 0 && index >= 0 ? items[index % n] : NULL;
+    char *name = item && timeline_dashed_ident(item) ? g_strdup(item) : NULL;
+    for (int i = 0; i < n; i++) g_free(items[i]);
+    return name;
+}
+
+ns_css_scroll_axis
+ns_css_timeline_axis_at(const ns_style *s, int index)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = style_list_items(s, NS_CSS_SCROLL_TIMELINE_AXIS, items,
+                             (int)G_N_ELEMENTS(items));
+    ns_css_scroll_axis axis = NS_CSS_SCROLL_AXIS_BLOCK;
+    if (n > 0 && index >= 0) ns_css_scroll_axis_parse(items[index % n], &axis);
+    for (int i = 0; i < n; i++) g_free(items[i]);
+    return axis;
+}
+
 static ns_css_value *
 parse_animation_duration(const char *t)
 {
@@ -9075,8 +9314,7 @@ parse_anim_longhand(ns_css_prop prop, const char *t)
     int n = anim_list_split(t, items, (int)G_N_ELEMENTS(items));
     gboolean ok = n > 0;
     gboolean lower = prop != NS_CSS_ANIMATION_NAME && prop != NS_CSS_ANIMATION_TIMELINE;
-    gboolean range = prop == NS_CSS_ANIMATION_RANGE_START ||
-                     prop == NS_CSS_ANIMATION_RANGE_END;
+    gboolean special = anim_item_has_canonical(prop);
     GString *canon = g_string_new(NULL);
     for (int i = 0; i < n; i++) {
         if (!*items[i] || !anim_longhand_item_valid(prop, items[i])) ok = FALSE;
@@ -9084,9 +9322,8 @@ parse_anim_longhand(ns_css_prop prop, const char *t)
             g_ascii_strcasecmp(items[i], "none") == 0) ok = FALSE;
         if (ok) {
             if (i) g_string_append(canon, ", ");
-            if (range) {
-                char *c = NULL;
-                anim_range_item_canonical(items[i], prop == NS_CSS_ANIMATION_RANGE_END, &c);
+            if (special) {
+                char *c = anim_item_canonical(prop, items[i]);
                 g_string_append(canon, c ? c : items[i]);
                 g_free(c);
             } else if (prop == NS_CSS_ANIMATION_NAME) {
@@ -9236,6 +9473,22 @@ anim_apply_longhand(ns_css_anim_list *out, const ns_css_value *v, ns_css_prop pr
     for (int i = 0; i < n; i++) g_free(items[i]);
 }
 
+static void
+anim_apply_timelines(ns_css_anim_list *out, const ns_css_value *v,
+                     gboolean duration_unset)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    int n = anim_list_split(v->u.keyword, items, (int)G_N_ELEMENTS(items));
+    for (int i = 0; i < out->n && n > 0; i++) {
+        ns_css_anim_entry *e = &out->entries[i];
+        ns_css_timeline_parse(items[i % n], &e->timeline);
+        e->duration_auto |= duration_unset &&
+                            e->timeline.kind != NS_CSS_TIMELINE_AUTO;
+    }
+    for (int i = 0; i < n; i++) g_free(items[i]);
+}
+
 void
 ns_css_anim_list_clear(ns_css_anim_list *list)
 {
@@ -9284,6 +9537,8 @@ anim_build_list(const ns_style *s, gboolean is_animation, int n,
         anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_DIRECTION], NS_CSS_ANIMATION_DIRECTION);
         anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_FILL_MODE], NS_CSS_ANIMATION_FILL_MODE);
         anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_PLAY_STATE], NS_CSS_ANIMATION_PLAY_STATE);
+        anim_apply_timelines(out, s->values[NS_CSS_ANIMATION_TIMELINE],
+                             !s->values[NS_CSS_ANIMATION_DURATION]);
     } else {
         anim_apply_longhand(out, s->values[NS_CSS_TRANSITION_DURATION], NS_CSS_TRANSITION_DURATION);
         anim_apply_longhand(out, s->values[NS_CSS_TRANSITION_DELAY], NS_CSS_TRANSITION_DELAY);
@@ -9663,6 +9918,10 @@ ns_css_initial_value_text(const char *name)
         { "-webkit-box-orient",         "horizontal" },
         { "mask-clip",                  "border-box" },
         { "mask-composite",             "add" },
+        { "scroll-timeline-name",       "none" },
+        { "scroll-timeline-axis",       "block" },
+        { "view-timeline-name",         "none" },
+        { "timeline-scope",             "none" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -12835,12 +13094,34 @@ stacking_keyword_valid(ns_css_prop prop, const char *t)
     }
 }
 
+static gboolean
+prop_is_timeline_list(ns_css_prop prop)
+{
+    return prop == NS_CSS_SCROLL_TIMELINE_NAME ||
+           prop == NS_CSS_SCROLL_TIMELINE_AXIS ||
+           prop == NS_CSS_VIEW_TIMELINE_NAME;
+}
+
+static gboolean
+parse_keyword_special(ns_css_prop prop, const char *t, ns_css_value **out)
+{
+    if (prop_is_timeline_list(prop)) {
+        *out = parse_scroll_timeline_longhand(prop, t);
+        return TRUE;
+    }
+    if (prop == NS_CSS_TIMELINE_SCOPE) {
+        *out = parse_timeline_scope(t);
+        return TRUE;
+    }
+    *out = prop == NS_CSS_VERTICAL_ALIGN ? parse_vertical_align_length(t) : NULL;
+    return *out != NULL;
+}
+
 static ns_css_value *
 parse_keyword_value(ns_css_prop prop, const char *t)
 {
-    ns_css_value *v = prop == NS_CSS_VERTICAL_ALIGN
-        ? parse_vertical_align_length(t) : NULL;
-    if (v) return v;
+    ns_css_value *v = NULL;
+    if (parse_keyword_special(prop, t, &v)) return v;
     v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_KEYWORD;
     v->u.keyword = ascii_lower(t, strlen(t));
@@ -15046,6 +15327,173 @@ emit_longhand(GArray *decls_out, ns_css_prop prop, const char *text,
     if (!v) return;
     ns_css_decl d = { .prop = prop, .value = v, .important = important };
     g_array_append_val(decls_out, d);
+}
+
+static void
+expand_animation_range(GArray *decls_out, const char *vtext, gboolean important)
+{
+    char *st = NULL, *en = NULL;
+    if (!anim_range_shorthand_expand(vtext, &st, &en)) return;
+    emit_longhand(decls_out, NS_CSS_ANIMATION_RANGE_START, st, important);
+    emit_longhand(decls_out, NS_CSS_ANIMATION_RANGE_END, en, important);
+    g_free(st);
+    g_free(en);
+}
+
+static gboolean
+scroll_timeline_item_split(const char *item, GString *names, GString *axes)
+{
+    char *toks[3] = { 0 };
+    int n = split_ws_limit(item, toks, 3);
+    ns_css_scroll_axis axis = NS_CSS_SCROLL_AXIS_BLOCK;
+    gboolean ok = (n == 1 || n == 2) && scroll_timeline_name_item_valid(toks[0]) &&
+                  (n == 1 || ns_css_scroll_axis_parse(toks[1], &axis));
+    if (ok && names->len) {
+        g_string_append(names, ", ");
+        g_string_append(axes, ", ");
+    }
+    if (ok) {
+        g_string_append(names, toks[0]);
+        g_string_append(axes, kScrollAxisNames[axis]);
+    }
+    for (int i = 0; i < n; i++) g_free(toks[i]);
+    return ok;
+}
+
+static gboolean
+scroll_timeline_split(const char *vtext, char **out_names, char **out_axes)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = anim_list_split(vtext, items, (int)G_N_ELEMENTS(items));
+    GString *names = g_string_new(NULL);
+    GString *axes = g_string_new(NULL);
+    gboolean ok = n > 0;
+    for (int i = 0; i < n; i++) {
+        if (ok) ok = scroll_timeline_item_split(items[i], names, axes);
+        g_free(items[i]);
+    }
+    *out_names = g_string_free(names, !ok);
+    *out_axes = g_string_free(axes, !ok);
+    return ok;
+}
+
+static void
+scroll_timeline_compose_item(GString *out, const char *name, const char *axis)
+{
+    if (out->len) g_string_append(out, ", ");
+    g_string_append(out, name);
+    if (g_ascii_strcasecmp(axis, "block") != 0) {
+        g_string_append_c(out, ' ');
+        g_string_append(out, axis);
+    }
+}
+
+char *
+ns_css_scroll_timeline_compose(const char *names, const char *axes)
+{
+    char *n[NS_CSS_ANIM_ENTRIES_MAX * 4], *a[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int nn = names ? anim_list_split(names, n, (int)G_N_ELEMENTS(n)) : 0;
+    int na = axes ? anim_list_split(axes, a, (int)G_N_ELEMENTS(a)) : 0;
+    GString *out = g_string_new(NULL);
+    for (int i = 0; nn == na && i < nn; i++)
+        scroll_timeline_compose_item(out, n[i], a[i]);
+    for (int i = 0; i < nn; i++) g_free(n[i]);
+    for (int i = 0; i < na; i++) g_free(a[i]);
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+view_timeline_inset_valid(const char *tok)
+{
+    char *lp = g_ascii_strcasecmp(tok, "auto") == 0 ? NULL
+                                                     : anim_range_lp_canonical(tok);
+    gboolean ok = g_ascii_strcasecmp(tok, "auto") == 0 || lp;
+    g_free(lp);
+    return ok;
+}
+
+static gboolean
+view_timeline_tail_valid(char **toks, int n)
+{
+    int axes = 0, insets = 0;
+    gboolean closed = FALSE;
+    for (int i = 1; i < n; i++) {
+        if (ns_css_scroll_axis_parse(toks[i], NULL)) {
+            axes++;
+            closed = insets > 0;
+        } else if (!closed && view_timeline_inset_valid(toks[i])) {
+            insets++;
+        } else {
+            return FALSE;
+        }
+    }
+    return axes <= 1 && insets <= 2;
+}
+
+static gboolean
+view_timeline_item_name(const char *item, GString *names)
+{
+    char *toks[6] = { 0 };
+    int n = split_ws_limit(item, toks, 6);
+    gboolean ok = n >= 1 && n <= 4 && scroll_timeline_name_item_valid(toks[0]) &&
+                  view_timeline_tail_valid(toks, n);
+    if (ok && names->len) g_string_append(names, ", ");
+    if (ok) g_string_append(names, toks[0]);
+    for (int i = 0; i < n; i++) g_free(toks[i]);
+    return ok;
+}
+
+static void
+expand_view_timeline(GArray *decls_out, const char *vtext, gboolean important)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    int n = wide ? 0 : anim_list_split(vtext, items, (int)G_N_ELEMENTS(items));
+    GString *names = g_string_new(NULL);
+    gboolean ok = wide || n > 0;
+    ns_css_value_free(wide);
+    for (int i = 0; i < n; i++) {
+        if (ok) ok = view_timeline_item_name(items[i], names);
+        g_free(items[i]);
+    }
+    if (ok)
+        emit_longhand(decls_out, NS_CSS_VIEW_TIMELINE_NAME,
+                      names->len ? names->str : vtext, important);
+    g_string_free(names, TRUE);
+}
+
+static void
+expand_scroll_timeline(GArray *decls_out, const char *vtext, gboolean important)
+{
+    char *names = NULL, *axes = NULL;
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    gboolean ok = wide || scroll_timeline_split(vtext, &names, &axes);
+    ns_css_value_free(wide);
+    if (ok) {
+        emit_longhand(decls_out, NS_CSS_SCROLL_TIMELINE_NAME, names ? names : vtext,
+                      important);
+        emit_longhand(decls_out, NS_CSS_SCROLL_TIMELINE_AXIS, axes ? axes : vtext,
+                      important);
+    }
+    g_free(names);
+    g_free(axes);
+}
+
+static gboolean
+timeline_shorthand_name(const char *pname)
+{
+    return strcmp(pname, "scroll-timeline") == 0 ||
+           strcmp(pname, "view-timeline") == 0;
+}
+
+static void
+expand_timeline_shorthand(GArray *decls_out, const char *pname,
+                          const char *vtext, gboolean important)
+{
+    if (strcmp(pname, "view-timeline") == 0)
+        expand_view_timeline(decls_out, vtext, important);
+    else
+        expand_scroll_timeline(decls_out, vtext, important);
 }
 
 static void
@@ -18026,23 +18474,9 @@ parse_declaration_block(const char **pp, const char *end,
                 g_free(type_part);
             }
         } else if (strcmp(pname, "animation-range") == 0) {
-            char *st = NULL, *en = NULL;
-            if (anim_range_shorthand_expand(vtext, &st, &en)) {
-                ns_css_value *sv = parse_value_for(NS_CSS_ANIMATION_RANGE_START, st);
-                ns_css_value *ev = parse_value_for(NS_CSS_ANIMATION_RANGE_END, en);
-                if (sv) {
-                    ns_css_decl d = { .prop = NS_CSS_ANIMATION_RANGE_START, .value = sv,
-                                      .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                if (ev) {
-                    ns_css_decl d = { .prop = NS_CSS_ANIMATION_RANGE_END, .value = ev,
-                                      .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                g_free(st);
-                g_free(en);
-            }
+            expand_animation_range(decls_out, vtext, important);
+        } else if (timeline_shorthand_name(pname)) {
+            expand_timeline_shorthand(decls_out, pname, vtext, important);
         } else {
             int pid = prop_id(pname);
             if (pid >= 0) {
@@ -23858,8 +24292,30 @@ place_shorthand_canonical(const char *prop, char *value)
 }
 
 static char *
+scroll_timeline_shorthand_canonical(const char *text)
+{
+    char *names = NULL, *axes = NULL;
+    if (!scroll_timeline_split(text, &names, &axes)) return NULL;
+    char *out = ns_css_scroll_timeline_compose(names, axes);
+    g_free(names);
+    g_free(axes);
+    return out;
+}
+
+typedef char *(*css_canonical_fn)(const char *text);
+
+static css_canonical_fn
+inline_shorthand_canonicalizer(const char *prop)
+{
+    if (strcmp(prop, "container") == 0) return ns_css_container_shorthand_canonical;
+    if (strcmp(prop, "scroll-timeline") == 0) return scroll_timeline_shorthand_canonical;
+    return NULL;
+}
+
+static char *
 css_inline_value_canonical(const char *prop, char *value)
 {
+    css_canonical_fn shorthand_canon = NULL;
     if (!value) return g_strdup("");
     switch (ns_css_prop_id(prop)) {
     case NS_CSS_BORDER_IMAGE_SLICE:
@@ -23970,8 +24426,8 @@ css_inline_value_canonical(const char *prop, char *value)
         } else {
             g_string_free(out, TRUE);
         }
-    } else if (strcmp(prop, "container") == 0) {
-        char *canon = ns_css_container_shorthand_canonical(value);
+    } else if ((shorthand_canon = inline_shorthand_canonicalizer(prop))) {
+        char *canon = shorthand_canon(value);
         if (canon) {
             g_free(value);
             value = canon;

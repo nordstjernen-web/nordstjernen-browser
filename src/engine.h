@@ -85,6 +85,10 @@ void ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
                               GHashTable *css_cache);
 
 void ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us);
+void ns_engine_anim_track_layout(ns_anim *anim, ns_box **layout);
+gboolean ns_engine_anim_scroll_sync(ns_anim *anim, const ns_box *layout,
+                                    double vw, double vh,
+                                    gboolean *out_layout);
 
 void ns_engine_fetch_images(ns_box *root, const char *base_url,
                             ns_image_cache *cache);
