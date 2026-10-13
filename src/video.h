@@ -52,6 +52,7 @@ typedef struct ns_video {
     double       mse_window_end;
     gint64       last_paint_us;
     guint        layout_note_gen;
+    guint        seen_gen;
     char        *token;
     gboolean     playing;
     gboolean     ended;
