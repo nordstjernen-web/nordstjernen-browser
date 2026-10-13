@@ -1,12 +1,13 @@
 # Media: video and audio
 
 How Nordstjernen plays `<video>` and `<audio>`. The engine ships a tiny,
-in-tree decoder set plus one FFmpeg-backed WebM extension; anything else
+in-tree decoder set plus one FFmpeg-backed WebM extension, and hands H.264
+video and AAC audio to the operating system's own decoders; anything else
 renders a poster and a play overlay.
 
-Three processes share the work: the sandboxed renderer parses and paints the
-page, the `nordstjernen-audio` helper plays sound, and (for MSE streams) the
-`nordstjernen-video` helper decodes video frames.
+Two processes share the work: the sandboxed renderer parses and paints the
+page and decodes every video frame, MSE streams included, and the
+`nordstjernen-audio` helper plays sound.
 
 ## Inline video
 
@@ -57,6 +58,49 @@ How libav is obtained differs by platform, to keep it redistributable:
 - **Android / iOS** do not cross-build FFmpeg, so the inline libav WebM path is
   unavailable there.
 
+### MP4 — H.264 and AAC through the operating system
+
+H.264 video and AAC audio, the codecs of most MP4 files, HLS streams and
+non-WebM MSE players, are decoded by the **operating system**, never by a
+decoder shipped in the browser. The vendor of the OS already licenses these
+codecs, so the browser carries no patent-encumbered decoder, pays no codec
+licence and stays small. libav still demuxes the MP4 container (the LGPL
+FFmpeg that `scripts/build-ffmpeg-lgpl.sh` builds for the macOS and Windows
+packages has the `mov` demuxer and the H.264/AAC parsers, but no H.264 or AAC
+decoder); the compressed frames then go through `src/media_os.h`:
+
+| Platform | Backend | File |
+|---|---|---|
+| Windows | Media Foundation transforms (`IMFTransform`, H.264 and AAC decoder MFTs) | `src/media_os_mf.c` |
+| macOS, iOS | VideoToolbox (`VTDecompressionSession`) and AudioToolbox (`AudioConverter`) | `src/media_os_vt.c` |
+| Android | NDK MediaCodec (`AMediaCodec`) | `src/media_os_android.c` |
+| Linux, BSDs | GStreamer (`decodebin`), which picks VA-API, V4L2 or an installed software decoder | `src/media_os_gst.c` |
+
+GStreamer is auto-detected (`-Dgstreamer=disabled` drops it); the other
+backends are always built on their platforms. A backend returns NV12 or I420
+frames; the renderer converts only the frame it is about to show to BGRA
+(through swscale), so frames skipped while seeking forward from a keyframe
+cost no conversion. Video decodes in the sandboxed renderer and AAC in the
+`nordstjernen-audio` helper. Media Foundation is loaded at runtime and
+initialised before the renderer applies its process mitigation policies, so
+Windows N editions without the Media Feature Pack still start (H.264 then
+reports unsupported); GStreamer and its decoder plugins are loaded before the
+Linux sandbox engages.
+
+`canPlayType()` and `MediaSource.isTypeSupported()` report `avc1`/`mp4a` as
+supported when the OS decoder is present. If an OS decoder cannot be created,
+or fails before its first frame, the stream falls back to libavcodec where
+that has an H.264 decoder (a distribution FFmpeg usually does). Two
+environment variables help compare the paths: `NS_MEDIA_NO_OS_DECODER=1`
+skips the OS decoders, and `NS_MEDIA_OS_CODECS_ONLY=1` makes
+`isTypeSupported()` reject the video codecs only libav decodes (VP8/VP9/AV1),
+so a site such as YouTube serves H.264.
+
+YouTube itself prefers VP9 or AV1 when the browser accepts them, so on Linux
+and Windows (where libav decodes those) it keeps using them; the OS H.264
+path is what plays MP4/HLS video elsewhere on the web, and YouTube on builds
+without libav's VP9/AV1. Encrypted media (EME/Widevine) is not supported.
+
 ## Audio
 
 The MPEG-1 stream's **MP2 audio track** plays too (unless the element is
@@ -64,7 +108,8 @@ The MPEG-1 stream's **MP2 audio track** plays too (unless the element is
 seccomp-sandboxed renderer can't open a sound device, so audio is handed to the
 unsandboxed `nordstjernen-audio` helper. The helper decodes to PCM — pl_mpeg for
 the MPEG-1/MP2 track, [minimp3](https://github.com/lieff/minimp3) (CC0, vendored)
-for standalone `.mp3` files, and libav for Opus/Vorbis (WebM/Ogg) — and plays it
+for standalone `.mp3` files, libav for Opus/Vorbis (WebM/Ogg), and the
+operating system's AAC decoder for MP4 audio — and plays it
 through [SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
 CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling the streams
 itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/
@@ -89,50 +134,45 @@ wired.
 
 The cue active at the video's current time is drawn by `paint_video_caption`
 (`src/paint.c`) as centred, white-on-translucent-black lines across the
-bottom of the video box. The captions are painted into the **html page
-surface**, after the video rectangle is punched out — and because the shell
-composites the page surface *last, over* the video-process frame (see the
-helper section below), the caption pixels land on top of the video in both
-decode paths: the in-process frame texture and the helper's shared-memory
-frames. Playback-time (`v->cur_time`) and the parsed cues are tracked
-renderer-side either way, so the same captions appear regardless of who
-decodes the picture.
+bottom of the video box, right after the frame itself, so the caption pixels
+land on top of the picture.
 
-## The video helper process (`nordstjernen-video`)
+## Media Source Extensions
 
-MSE streams (YouTube-style playback) decode in a **third process** that sits
-beside the renderer and the audio helper. The renderer appends the growing MSE
-byte stream to a file under `~/.cache/nordstjernen/msvideo/` (exactly as it
-materializes the audio track for `nordstjernen-audio`) and drives the helper
-over the same renderer→shell media channel with
-`video open`/`reload`/`play`/`pause`/`seek`/`stop` lines, plus a
-`video rect` line carrying the on-page rectangle of the `<video>` box captured
-at paint time. The helper decodes with libav on its own presentation clock and
-writes BGRA frames into a shared-memory ring (`/nsvid-<pid>-<n>`, eight slots);
-the UI shell maps the ring and **composites the newest frame over the page
-surface** on every widget frame tick.
+MSE streams (YouTube-style playback) decode in the renderer, like every other
+video. `SourceBuffer.appendBuffer()` hands each segment to `src/video.c`, which
+keeps the initialization segment and every media segment in memory together
+with the time range a demux probe finds in it. The decoder is never fed the raw
+append order. It gets a **window**: the initialization segment followed by the
+contiguous run of media segments, in time order, that holds the playhead.
+Segments that extend that run are appended to the live decoder as they arrive;
+segments elsewhere on the timeline wait until playback reaches them.
 
-This decouples video from page rendering: a page repaint is only needed when
-the page itself changes, while video advances at full rate in the compositor —
-so large players no longer force full-page repaints per frame, decode jank
-never blocks the renderer main loop, and attacker-controlled codec bytes are
-parsed in a small self-sandboxed process (Landlock + seccomp on Linux) that can reach
-only its shm ring and temp files. The helper is optional: it is built when
-libav is available — including on Windows, where the shared-memory ring is a
-named file mapping (`CreateFileMapping`/`MapViewOfFile`) rather than POSIX
-`shm_open` — and when the binary is missing, or in headless mode, the renderer
-decodes frames in-process exactly as before. The renderer always keeps the demuxer state that backs
-`buffered`/`duration`/`currentTime`, so page JS sees the same element state
-either way; audio stays in `nordstjernen-audio`, cued by the same
-play/pause/seek commands so both clocks anchor identically.
+That gives three properties:
 
-Each appended media segment is tracked with its byte offset and probed time
-range. When a player evicts an old prefix with `SourceBuffer.remove()`, the
-browser rebuilds the helper input from the initialization segment and retained
-media segments. This keeps long-running MSE playback within the byte quota used
-by adaptive players such as YouTube and Vimeo. The retained segment's first and
-last demux timestamps are returned through `SourceBuffer.buffered`, so player
-eviction and seek decisions no longer see a synthetic zero-based range.
+- **Fast start.** The decoder opens on the first media segment; there is no
+  byte threshold and no file to write first.
+- **Seeking.** A small step forward inside the window decodes on from where the
+  player is. Any other seek rebuilds the decoder at the segment holding the
+  target and decodes forward from that segment's keyframe — no demuxer seek
+  through a byte stream whose offsets do not match the original file. A seek
+  into a range that is not buffered yet leaves the element `waiting` at the
+  target time until the page appends that segment, then playback resumes
+  there.
+- **Accurate `buffered`.** `SourceBuffer.buffered` reports every disjoint
+  range, merging segments whose gap is under half a second, so a player that
+  seeks past its buffer sees the hole and fetches the right segment.
+  `SourceBuffer.remove()` drops the overlapping segments; the playing decoder
+  keeps its own copy of the window, so evicting behind the playhead never
+  interrupts playback.
+
+A new initialization segment (a quality switch) starts a new generation: the
+current window plays on until the playhead reaches the first segment of the new
+generation, and the decoder is rebuilt there.
+
+The audio track still plays in `nordstjernen-audio`: the renderer materializes
+the audio byte stream under `~/.cache/nordstjernen/msaudio/` and cues the
+helper with the same play/pause/seek commands that drive the video clock.
 
 ## Other media
 
@@ -147,7 +187,7 @@ their own. The GTK shell itself does not launch an external player; the
 `.deb` alternative) for opening such URLs by hand.
 
 Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
-with no plain file URL; those play inline through the video helper described
+with no plain file URL; those play inline through the MSE path described
 above when libav is present.
 
 ## Poster / source metadata (standards, not site scraping)

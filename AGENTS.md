@@ -32,12 +32,15 @@ nothing imported.
   Audio plays via the unsandboxed `nordstjernen-audio` helper
   (`src/audio/main.c`), which decodes MPEG-1/MP2 (pl_mpeg) and MP3
   (vendored minimp3, `src/audio/minimp3.h`) and outputs through SDL2.
-  MSE video frames decode in the `nordstjernen-video` helper
-  (`src/videoproc/main.c`, built when libav is present); the shell
-  composites its BGRA frames from a shm ring (see `docs/media.md`).
+  MSE video frames decode in the sandboxed renderer, which keeps the
+  appended segments in memory and plays the buffered range around the
+  playhead (see `docs/media.md`).
   When FFmpeg's libav\* system packages are present, the build also
   gains inline WebM (VP9/VP8 video + Opus/Vorbis audio) — never
-  vendored. Other `<audio>`/`<video>` codecs render a poster and
+  vendored. H.264 and AAC are decoded by the operating system (Media
+  Foundation, VideoToolbox/AudioToolbox, MediaCodec, or GStreamer on
+  Linux; `src/media_os*.c`), never by a bundled decoder.
+  Other `<audio>`/`<video>` codecs render a poster and
   play overlay; the renderer resolves the media URL under the
   pointer via `ns_browser_media_at`.
 - UI strings are English-source and translated to the operating-system
