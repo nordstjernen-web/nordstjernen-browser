@@ -385,8 +385,13 @@ ns_lav_seek_to(ns_lav *L, double seconds)
 }
 
 static ns_texture *
-ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame, int w, int h)
+ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame)
 {
+    int w = frame->width, h = frame->height;
+    AVRational sar = frame->sample_aspect_ratio;
+    if (sar.num > 0 && sar.den > 0 && sar.num != sar.den)
+        w = (int)((double)w * sar.num / sar.den + 0.5);
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384) return NULL;
     gsize stride = ((gsize)w * 4 + 63) & ~(gsize)63;
     gsize buf_len = stride * (gsize)h;
     guint8 *bgra = av_malloc(buf_len + 64);
@@ -585,8 +590,7 @@ ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
                 tex = ns_lav_os_frame_to_texture(L, &L->osframe);
                 ns_os_frame_clear(&L->osframe);
             } else {
-                tex = ns_lav_frame_to_texture(L, L->frame,
-                                              player->width, player->height);
+                tex = ns_lav_frame_to_texture(L, L->frame);
                 av_frame_unref(L->frame);
             }
             *out_tex = tex;

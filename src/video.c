@@ -2045,6 +2045,22 @@ ns_video_queue_emit(GArray *q, ns_video *v, const char *kind, double value)
     g_array_append_val(q, rec);
 }
 
+static void
+ns_video_track_frame_size(ns_video *v, GArray *emits)
+{
+    if (!v->frame_texture) return;
+    int w = ns_texture_get_width(v->frame_texture);
+    int h = ns_texture_get_height(v->frame_texture);
+    if (w <= 0 || h <= 0 ||
+        (w == v->natural_width && h == v->natural_height))
+        return;
+    v->natural_width = w;
+    v->natural_height = h;
+    if (!v->meta_sent) return;
+    ns_video_queue_emit(emits, v, "vwidth", (double)w);
+    ns_video_queue_emit(emits, v, "vheight", (double)h);
+}
+
 gboolean
 ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
 {
@@ -2110,6 +2126,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
                 ns_video_queue_emit(emits, v, "vheight", (double)v->natural_height);
             ns_video_queue_emit(emits, v, "meta", v->duration);
         }
+        ns_video_track_frame_size(v, emits);
         if (!v->buf_sent) {
             v->buf_sent = TRUE;
             double buffered_end = ns_video_buffered_end(cache, v);
