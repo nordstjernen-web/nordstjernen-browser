@@ -83,7 +83,8 @@ Update Changelog.md
   VideoToolbox/AudioToolbox on macOS and iOS (`media_os_vt.c`), MediaCodec on
   Android (`media_os_android.c`) and GStreamer on Linux/BSD
   (`media_os_gst.c`, auto-detected, `-Dgstreamer`). libav only demuxes MP4
-  for them; don't add an H.264/AAC decoder to the LGPL FFmpeg build. Encrypted
+  for them (builds without libav use the in-tree `src/mp4.c` +
+  `src/video_mp4.c` instead); don't add an H.264/AAC decoder to the LGPL FFmpeg build. Encrypted
   media (EME/Widevine) is out of scope. Other `<audio>` and other `<video>`
   codecs render a
   poster and play overlay; clicking resolves the media URL in the renderer

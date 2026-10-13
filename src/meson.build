@@ -142,6 +142,9 @@ if have_webgpu
 endif
 
 nordstjernen_engine_sources += media_os_sources
+if have_os_mp4
+  nordstjernen_engine_sources += files('mp4.c', 'video_mp4.c')
+endif
 
 nordstjernen_win_resources = []
 if host_machine.system() == 'windows'
