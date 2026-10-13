@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Media: a <video> removed from the document, or whose source is
+  replaced or cleared, stops its sound. The player record kept playing
+  - and the audio helper kept looping its track - whenever the page
+  took the element away without calling pause() first, as single-page
+  sites do when they swap content on an in-page navigation; the
+  cleanup for abandoned players only ran when two or more were open.
 * Media: a video's `videoWidth`/`videoHeight` follow the frames being
   shown and a `resize` event fires when they change. They used to be
   fixed by the first stream, so after an adaptive-quality switch to a
