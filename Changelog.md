@@ -3,6 +3,32 @@ Changelog:
 
 1.0.32:
 ======
+* Media: H.264 video and AAC audio are decoded by the operating
+  system's own codecs: Media Foundation on Windows, VideoToolbox and
+  AudioToolbox on macOS and iOS, MediaCodec on Android, and GStreamer
+  (VA-API, V4L2 or an installed software decoder) on Linux and the
+  BSDs. The browser ships no H.264 or AAC decoder, so it pays no codec
+  licence; the LGPL FFmpeg bundled with the macOS and Windows packages
+  gains only the MP4 demuxer and the H.264/AAC parsers. MP4 and HLS
+  video and H.264 MSE players now play there, and `avc1`/`mp4a`
+  report as supported. Media Foundation loads at runtime, so Windows N
+  editions without the Media Feature Pack still start. Frames are
+  converted to BGRA only when shown, so a seek no longer converts
+  every frame between the keyframe and the target.
+* Media: MSE video decodes in the renderer again, and the separate
+  `nordstjernen-video` process is gone. The renderer keeps each
+  appended segment with its time range and feeds the decoder only the
+  contiguous run that holds the playhead, so a stream starts on its
+  first media segment, a seek rebuilds the decoder at the segment
+  holding the target instead of seeking through a byte stream whose
+  offsets do not match the original file, and a seek past the buffer
+  waits at the target until the page appends it. `SourceBuffer.buffered`
+  now lists every disjoint range rather than one range from the first
+  to the last byte, so YouTube fetches the segment a seek lands in
+  instead of believing the gap is buffered. Evicting segments with
+  `remove()` no longer restarts the decoder. Headless runs now drive
+  `play()`, `pause()`, `currentTime`, `muted` and `volume` like the
+  shell does.
 * JS: Streams follow the WHATWG Streams standard. `ReadableStream`,
   `WritableStream` and `TransformStream` queue chunks by size, apply
   backpressure through `highWaterMark`, call `pull()` only when there

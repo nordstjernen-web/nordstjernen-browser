@@ -154,11 +154,8 @@ seccomp skipped. The mechanics live in `docs/tab-isolation.md`.
   (full repaint × ~15 ease-frames saturated CPU). Both need dirty rects.
 - **14 · YouTube watch-page playback** — baseline shipped: a streaming
   `<video>` (MSE/`blob:`, no file URL) plays *inline* — the renderer
-  materializes the growing stream and the `nordstjernen-video` helper
-  (`src/videoproc/main.c`, built when libav is present) decodes frames
-  into a shm ring the shell composites over the page (see
-  `docs/media.md`). Next: widen codec/site coverage and surface clearer
-  in-page feedback when the helper is unavailable.
+  keeps the appended segments and decodes the buffered range around the
+  playhead itself (see `docs/media.md`). Next: widen codec/site coverage.
 - **8 · Sign the Windows build** — biggest distribution-side ROI. Wire
   signtool + timestamp now; flip on once a cert is procured.
 

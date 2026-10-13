@@ -113,8 +113,6 @@ Build artifacts:
   sandboxed renderer the shell spawns per tab. Ship it next to
   `nordstjernen.exe` (the packaging scripts do).
 - `builddir/src/nordstjernen-audio.exe` — the SDL2 audio helper.
-- `builddir/src/nordstjernen-video.exe` — the MSE video helper (built
-  with libav).
 - `builddir/src/nordstjernen-launcher.exe` — the small Win32 launcher
   that `scripts/pack-windows.sh` installs as the bundle's
   `nordstjernen.exe`.

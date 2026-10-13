@@ -2063,16 +2063,6 @@ task_mgr_refresh(NsTaskMgr *tm)
                              astate, arss, v);
             g_free(aname);
         }
-        int vpid = ns_proc_view_video_pid(v);
-        if (vpid > 0) {
-            char vstate[32] = "";
-            long vrss = -1;
-            ns_rproc_http_proc_info(vpid, vstate, sizeof vstate, &vrss);
-            char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
-            task_mgr_add_row(tm, "video-x-generic-symbolic", vname, vpid,
-                             vstate, vrss, v);
-            g_free(vname);
-        }
     }
 
     if (selected_pid > 0) {
@@ -2107,9 +2097,7 @@ task_mgr_end_task(GtkButton *button, gpointer data)
     int pid = row ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "ns-pid"))
                   : 0;
     if (v) {
-        if (pid > 0 && pid == ns_proc_view_video_pid(v))
-            ns_proc_view_stop_video(v);
-        else if (pid > 0 && pid == ns_proc_view_audio_pid(v))
+        if (pid > 0 && pid == ns_proc_view_audio_pid(v))
             ns_proc_view_stop_audio(v);
         else
             ns_proc_view_end_task(v);
@@ -3011,8 +2999,6 @@ int
 ns_procapp_run(const char *startup_url, const char *session_path,
                gboolean recover, gboolean private_mode)
 {
-    if (ns_proc_video_helper_available())
-        g_setenv("NS_VIDEO_HELPER", "1", TRUE);
     procapp_clear_http_caches(FALSE);
     if (!private_mode)
         ns_history_init();

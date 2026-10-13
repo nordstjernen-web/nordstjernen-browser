@@ -21,7 +21,6 @@ typedef struct ns_vp_layer_info {
 
 void ns_browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
                               int height, double scale);
-void ns_browser_flush_video_rects(ns_browser *browser);
 int ns_browser_layers_prepare(ns_browser *browser, int scroll_x, int scroll_y,
                               int width, int height, double scale,
                               ns_paint_layer_plan *plan);

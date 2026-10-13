@@ -779,6 +779,37 @@ headless_video_event(const void *node, const char *kind, double value,
 }
 
 static gboolean
+headless_media_seek(const void *node, double seconds, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    return cache && ns_video_cache_seek_node(cache, node, seconds,
+                                             g_get_monotonic_time());
+}
+
+static void
+headless_media_play(const void *node, gboolean play, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache)
+        ns_video_cache_set_node_playing(cache, node, play,
+                                        g_get_monotonic_time());
+}
+
+static void
+headless_media_muted(const void *node, gboolean muted, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache) ns_video_cache_set_node_muted(cache, node, muted);
+}
+
+static void
+headless_media_volume(const void *node, double volume, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache) ns_video_cache_set_node_volume(cache, node, volume);
+}
+
+static gboolean
 headless_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
                   gboolean eos, gpointer ud)
 {
@@ -792,14 +823,15 @@ headless_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
 }
 
 static double
-headless_mse_buffered(guint stream_id, char kind, double *start, gpointer ud)
+headless_mse_buffered(guint stream_id, char kind, int index, double *start,
+                      gpointer ud)
 {
     ns_video_cache *cache = ud;
     if (!cache) {
         if (start) *start = 0.0;
         return 0.0;
     }
-    return ns_video_cache_mse_buffered(cache, stream_id, kind, start);
+    return ns_video_cache_mse_buffered(cache, stream_id, kind, index, start);
 }
 
 static gboolean
@@ -2291,6 +2323,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_mse_remove_cb(js, headless_mse_remove, video_cache);
         ns_js_set_mse_bytes_cb(js, headless_mse_bytes, video_cache);
         ns_js_set_media_frame_cb(js, headless_media_frame, video_cache);
+        ns_js_set_media_seek_cb(js, headless_media_seek, video_cache);
+        ns_js_set_media_play_cb(js, headless_media_play, video_cache);
+        ns_js_set_media_muted_cb(js, headless_media_muted, video_cache);
+        ns_js_set_media_volume_cb(js, headless_media_volume, video_cache);
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
