@@ -1826,6 +1826,8 @@ url_is_inline_video(const char *url)
         ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1",
 #ifdef NS_HAVE_LIBAV
         ".mp4", ".m4v", ".webm", ".ogv",
+#elif defined(NS_HAVE_OS_MP4)
+        ".mp4", ".m4v",
 #endif
         NULL,
     };

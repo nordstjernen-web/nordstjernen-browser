@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Media: builds without libav - Android, iOS, and macOS without
+  FFmpeg - play MP4 and H.264 MSE video through a small in-tree MP4
+  demuxer (sample tables, edit lists and fragmented MP4) feeding the
+  platform decoder (MediaCodec, VideoToolbox). Their audio has no MP4
+  path yet.
 * Media: H.264 video and AAC audio are decoded by the operating
   system's own codecs: Media Foundation on Windows, VideoToolbox and
   AudioToolbox on macOS and iOS, MediaCodec on Android, and GStreamer
