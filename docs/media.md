@@ -1,7 +1,8 @@
 # Media: video and audio
 
 How Nordstjernen plays `<video>` and `<audio>`. The engine ships a tiny,
-in-tree decoder set plus one FFmpeg-backed WebM extension; anything else
+in-tree decoder set plus one FFmpeg-backed WebM extension, and hands H.264
+video and AAC audio to the operating system's own decoders; anything else
 renders a poster and a play overlay.
 
 Two processes share the work: the sandboxed renderer parses and paints the
@@ -57,6 +58,49 @@ How libav is obtained differs by platform, to keep it redistributable:
 - **Android / iOS** do not cross-build FFmpeg, so the inline libav WebM path is
   unavailable there.
 
+### MP4 — H.264 and AAC through the operating system
+
+H.264 video and AAC audio, the codecs of most MP4 files, HLS streams and
+non-WebM MSE players, are decoded by the **operating system**, never by a
+decoder shipped in the browser. The vendor of the OS already licenses these
+codecs, so the browser carries no patent-encumbered decoder, pays no codec
+licence and stays small. libav still demuxes the MP4 container (the LGPL
+FFmpeg that `scripts/build-ffmpeg-lgpl.sh` builds for the macOS and Windows
+packages has the `mov` demuxer and the H.264/AAC parsers, but no H.264 or AAC
+decoder); the compressed frames then go through `src/media_os.h`:
+
+| Platform | Backend | File |
+|---|---|---|
+| Windows | Media Foundation transforms (`IMFTransform`, H.264 and AAC decoder MFTs) | `src/media_os_mf.c` |
+| macOS, iOS | VideoToolbox (`VTDecompressionSession`) and AudioToolbox (`AudioConverter`) | `src/media_os_vt.c` |
+| Android | NDK MediaCodec (`AMediaCodec`) | `src/media_os_android.c` |
+| Linux, BSDs | GStreamer (`decodebin`), which picks VA-API, V4L2 or an installed software decoder | `src/media_os_gst.c` |
+
+GStreamer is auto-detected (`-Dgstreamer=disabled` drops it); the other
+backends are always built on their platforms. A backend returns NV12 or I420
+frames; the renderer converts only the frame it is about to show to BGRA
+(through swscale), so frames skipped while seeking forward from a keyframe
+cost no conversion. Video decodes in the sandboxed renderer and AAC in the
+`nordstjernen-audio` helper. Media Foundation is loaded at runtime and
+initialised before the renderer applies its process mitigation policies, so
+Windows N editions without the Media Feature Pack still start (H.264 then
+reports unsupported); GStreamer and its decoder plugins are loaded before the
+Linux sandbox engages.
+
+`canPlayType()` and `MediaSource.isTypeSupported()` report `avc1`/`mp4a` as
+supported when the OS decoder is present. If an OS decoder cannot be created,
+or fails before its first frame, the stream falls back to libavcodec where
+that has an H.264 decoder (a distribution FFmpeg usually does). Two
+environment variables help compare the paths: `NS_MEDIA_NO_OS_DECODER=1`
+skips the OS decoders, and `NS_MEDIA_OS_CODECS_ONLY=1` makes
+`isTypeSupported()` reject the video codecs only libav decodes (VP8/VP9/AV1),
+so a site such as YouTube serves H.264.
+
+YouTube itself prefers VP9 or AV1 when the browser accepts them, so on Linux
+and Windows (where libav decodes those) it keeps using them; the OS H.264
+path is what plays MP4/HLS video elsewhere on the web, and YouTube on builds
+without libav's VP9/AV1. Encrypted media (EME/Widevine) is not supported.
+
 ## Audio
 
 The MPEG-1 stream's **MP2 audio track** plays too (unless the element is
@@ -64,7 +108,8 @@ The MPEG-1 stream's **MP2 audio track** plays too (unless the element is
 seccomp-sandboxed renderer can't open a sound device, so audio is handed to the
 unsandboxed `nordstjernen-audio` helper. The helper decodes to PCM — pl_mpeg for
 the MPEG-1/MP2 track, [minimp3](https://github.com/lieff/minimp3) (CC0, vendored)
-for standalone `.mp3` files, and libav for Opus/Vorbis (WebM/Ogg) — and plays it
+for standalone `.mp3` files, libav for Opus/Vorbis (WebM/Ogg), and the
+operating system's AAC decoder for MP4 audio — and plays it
 through [SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
 CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling the streams
 itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/
