@@ -141,6 +141,8 @@ if have_webgpu
   nordstjernen_engine_sources += files('webgpu.c')
 endif
 
+nordstjernen_engine_sources += media_os_sources
+
 nordstjernen_win_resources = []
 if host_machine.system() == 'windows'
   windows = import('windows')
@@ -240,6 +242,7 @@ if have_woff2
 endif
 
 nordstjernen_deps += [libpsl]
+nordstjernen_deps += media_os_deps
 
 if http_backend == 'nghttp2'
   nordstjernen_deps += http_backend_deps
@@ -413,10 +416,10 @@ if not is_mobile
 
     executable(
       'nordstjernen-audio',
-      files('audio/main.c') + audio_sandbox_sources,
+      files('audio/main.c') + audio_sandbox_sources + media_os_sources,
       include_directories: include_directories('audio', '.'),
       link_with: libminimp3,
-      dependencies: audio_deps + audio_lib_deps,
+      dependencies: audio_deps + audio_lib_deps + media_os_deps,
       link_args: nordstjernen_link_args,
       win_subsystem: 'windows',
       install: true,

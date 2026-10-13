@@ -4,6 +4,7 @@
  */
 
 #include "libnordstjernen.h"
+#include "media_os.h"
 #include "layers.h"
 
 #include <cairo.h>
@@ -1125,6 +1126,7 @@ ns_browser_init(void)
 void
 ns_browser_sandbox(const char *self_exe)
 {
+    ns_os_media_preinit();
     ns_security_win32_mitigations_init(FALSE);
     ns_security_sandbox_init(self_exe);
     if (ns_config_get()->webgl_enabled)
