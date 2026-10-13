@@ -176,6 +176,7 @@ struct ns_video_cache {
     guint             next_token;
     guint             next_seq;
     guint             layout_note_gen;
+    guint             discover_gen;
 };
 
 typedef struct ns_pending {
@@ -1867,6 +1868,7 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->volume = 1.0;
     v->cur_time = 0.0;
     v->seq = ++cache->next_seq;
+    v->seen_gen = cache->discover_gen;
     v->mse_id = mse_id;
     if (mse_id && previous && previous->mse_id != mse_id)
         ns_video_inherit_node_playback(v, previous);
@@ -1935,6 +1937,7 @@ ns_video_discover_element(ns_video_cache *cache, const ns_node *node)
                 ns_video *existing = g_hash_table_lookup(cache->by_url, skey);
                 g_free(skey);
                 if (existing) {
+                    existing->seen_gen = cache->discover_gen;
                     existing->dom_node = node;
                     ns_video_apply_node_state(cache, existing, node);
                     ns_video_discover_track(cache, existing, node);
@@ -1955,6 +1958,20 @@ ns_video_discover_element(ns_video_cache *cache, const ns_node *node)
 }
 
 static void
+ns_video_release_detached(ns_video_cache *cache)
+{
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (v->is_camera || v->seen_gen == cache->discover_gen) continue;
+        if (!v->playing && !v->audio_opened) continue;
+        ns_video_release_node(cache, v);
+    }
+}
+
+static void
 ns_video_discover_dom(ns_video_cache *cache, const ns_node *root)
 {
     for (const ns_node *node = root; node;
@@ -1968,6 +1985,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
 {
     (void)now_us;
     if (!cache || !root) return;
+    if (doc) cache->discover_gen++;
 
     GPtrArray *vids = g_ptr_array_new();
     ns_layout_collect_videos(root, vids);
@@ -2012,6 +2030,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
         ns_video *existing = g_hash_table_lookup(cache->by_url, skey);
         g_free(skey);
         if (existing) {
+            existing->seen_gen = cache->discover_gen;
             box->media->video = existing;
             if (box->dom) {
                 existing->dom_node = box->dom;
@@ -2026,8 +2045,10 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
         g_free(poster);
         g_free(abs);
     }
-    if (doc)
+    if (doc) {
         ns_video_discover_dom(cache, doc);
+        ns_video_release_detached(cache);
+    }
 
     g_ptr_array_free(vids, TRUE);
 }
