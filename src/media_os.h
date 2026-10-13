@@ -16,12 +16,22 @@ extern "C" {
 typedef struct ns_os_vdec ns_os_vdec;
 typedef struct ns_os_adec ns_os_adec;
 
+typedef enum {
+    NS_OS_PIX_NV12,
+    NS_OS_PIX_I420,
+    NS_OS_PIX_BGRA
+} ns_os_pix;
+
 typedef struct {
-    uint8_t *bgra;
-    int      stride;
-    int      width;
-    int      height;
-    int64_t  pts_us;
+    uint8_t  *data;
+    ns_os_pix format;
+    size_t    offset[3];
+    int       stride[3];
+    int       width;
+    int       height;
+    int       full_range;
+    int       colorspace;
+    int64_t   pts_us;
 } ns_os_frame;
 
 typedef enum {
@@ -54,13 +64,16 @@ void         ns_os_adec_flush(ns_os_adec *dec);
 void         ns_os_adec_free(ns_os_adec *dec);
 
 void ns_os_frame_clear(ns_os_frame *frame);
-int  ns_os_frame_from_nv12(ns_os_frame *out, const uint8_t *y, int y_stride,
+int  ns_os_frame_copy_nv12(ns_os_frame *out, const uint8_t *y, int y_stride,
                            const uint8_t *uv, int uv_stride, int width,
-                           int height, int full_range, int colorspace);
-int  ns_os_frame_from_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
+                           int height);
+int  ns_os_frame_copy_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
                            const uint8_t *u, int u_stride, const uint8_t *v,
-                           int v_stride, int width, int height,
-                           int full_range, int colorspace);
+                           int v_stride, int width, int height);
+int  ns_os_frame_copy_bgra(ns_os_frame *out, const uint8_t *src, int stride,
+                           int width, int height);
+int  ns_os_frame_to_bgra(const ns_os_frame *frame, uint8_t **out_bgra,
+                         int *out_stride);
 int  ns_os_avcc_parameter_sets(const uint8_t *avcc, size_t avcc_len,
                                uint8_t **out_annexb, size_t *out_len,
                                int *out_nal_len_size);

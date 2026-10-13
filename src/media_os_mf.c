@@ -25,10 +25,6 @@ typedef HRESULT (WINAPI *ns_mf_media_type_fn)(IMFMediaType **);
 typedef HRESULT (WINAPI *ns_mf_sample_fn)(IMFSample **);
 typedef HRESULT (WINAPI *ns_mf_buffer_fn)(DWORD, IMFMediaBuffer **);
 
-static const GUID ns_mf_low_latency = {
-    0x9c27891a, 0xed7a, 0x40e1, { 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee }
-};
-
 static struct {
     ns_mf_startup_fn    startup;
     ns_mf_enum_fn       enum_ex;
@@ -268,12 +264,6 @@ ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len, int width, int height)
     d->mft = mf_find_decoder(&MFT_CATEGORY_VIDEO_DECODER, &MFMediaType_Video,
                              &MFVideoFormat_H264);
     if (!d->mft) goto fail;
-    IMFAttributes *attrs = NULL;
-    if (SUCCEEDED(IMFTransform_GetAttributes(d->mft, &attrs)) && attrs) {
-        IMFAttributes_SetUINT32(attrs, &ns_mf_low_latency, TRUE);
-        IMFAttributes_Release(attrs);
-    }
-
     IMFMediaType *in = NULL;
     if (FAILED(g_mf.create_media_type(&in))) goto fail;
     IMFMediaType_SetGUID(in, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
@@ -373,10 +363,9 @@ vdec_convert(ns_os_vdec *d, IMFSample *s, ns_os_frame *out)
     if (SUCCEEDED(IMFMediaBuffer_QueryInterface(buf, &IID_IMF2DBuffer,
                                                 (void **)&b2)) &&
         SUCCEEDED(IMF2DBuffer_Lock2D(b2, &base, &pitch)) && pitch > 0) {
-        ok = ns_os_frame_from_nv12(out, base, (int)pitch,
+        ok = ns_os_frame_copy_nv12(out, base, (int)pitch,
                                    base + (size_t)pitch * (size_t)d->out_height,
-                                   (int)pitch, d->vis_width, d->vis_height,
-                                   d->full_range, d->colorspace);
+                                   (int)pitch, d->vis_width, d->vis_height);
         IMF2DBuffer_Unlock2D(b2);
     } else {
         DWORD cur = 0;
@@ -384,16 +373,17 @@ vdec_convert(ns_os_vdec *d, IMFSample *s, ns_os_frame *out)
             int stride = d->out_width;
             size_t need = (size_t)stride * (size_t)d->out_height * 3 / 2;
             if (cur >= need)
-                ok = ns_os_frame_from_nv12(out, base, stride,
+                ok = ns_os_frame_copy_nv12(out, base, stride,
                                            base + (size_t)stride * (size_t)d->out_height,
-                                           stride, d->vis_width, d->vis_height,
-                                           d->full_range, d->colorspace);
+                                           stride, d->vis_width, d->vis_height);
             IMFMediaBuffer_Unlock(buf);
         }
     }
     if (b2) IMF2DBuffer_Release(b2);
     IMFMediaBuffer_Release(buf);
     if (ok) {
+        out->full_range = d->full_range;
+        out->colorspace = d->colorspace;
         LONGLONG t = 0;
         out->pts_us = SUCCEEDED(IMFSample_GetSampleTime(s, &t)) ? t / 10 : 0;
     }
@@ -594,8 +584,11 @@ adec_append(ns_os_adec *d, IMFSample *s, float **pcm, size_t *frames,
             if (d->is_float) {
                 memcpy(dst, p, count * sizeof(float));
             } else {
-                const int16_t *src = (const int16_t *)p;
-                for (size_t i = 0; i < count; i++) dst[i] = (float)src[i] / 32768.0f;
+                for (size_t i = 0; i < count; i++) {
+                    int16_t v;
+                    memcpy(&v, p + i * 2, sizeof v);
+                    dst[i] = (float)v / 32768.0f;
+                }
             }
             *frames += n;
             ok = 1;

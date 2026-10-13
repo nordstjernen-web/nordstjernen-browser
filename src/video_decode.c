@@ -43,6 +43,9 @@ typedef struct {
     int64_t            resume_after_dts;
     double             last_out_pts;
     double             skip_until_pts;
+    double             skip_before_pts;
+    ns_os_frame        osframe;
+    gboolean           os_produced;
 } ns_lav;
 #endif
 
@@ -126,6 +129,7 @@ ns_lav_free(ns_lav *L)
     if (L->pkt) av_packet_free(&L->pkt);
     if (L->vdec) avcodec_free_context(&L->vdec);
     if (L->osdec) ns_os_vdec_free(L->osdec);
+    ns_os_frame_clear(&L->osframe);
     if (L->fmt) avformat_close_input(&L->fmt);
     if (L->avio) { av_freep(&L->avio->buffer); avio_context_free(&L->avio); }
     g_free(L->data);
@@ -176,6 +180,7 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     L->resume_after_dts = AV_NOPTS_VALUE;
     L->last_out_pts = -1.0;
     L->skip_until_pts = -1.0;
+    L->skip_before_pts = -1.0;
 
     size_t bufsz = 32768;
     unsigned char *iobuf = av_malloc(bufsz);
@@ -329,6 +334,7 @@ ns_lav_forget_position(ns_lav *L)
     L->resume_after_dts = AV_NOPTS_VALUE;
     L->last_out_pts = -1.0;
     L->skip_until_pts = -1.0;
+    L->skip_before_pts = -1.0;
 }
 
 static void
@@ -422,17 +428,60 @@ typedef enum {
 } ns_lav_result;
 
 static ns_texture *
-ns_lav_os_frame_to_texture(ns_os_frame *f)
+ns_lav_os_frame_to_texture(ns_lav *L, ns_os_frame *f)
 {
-    GBytes *gb = g_bytes_new_with_free_func(f->bgra,
-                                            (gsize)f->stride * (gsize)f->height,
-                                            free, f->bgra);
-    ns_texture *tex = ns_texture_new(f->width, f->height,
-                                     NS_TEXTURE_BGRA_PREMULTIPLIED, gb,
-                                     (gsize)f->stride);
+    int w = f->width, h = f->height;
+    enum AVPixelFormat src_fmt = f->format == NS_OS_PIX_NV12 ? AV_PIX_FMT_NV12
+                               : f->format == NS_OS_PIX_I420 ? AV_PIX_FMT_YUV420P
+                               : AV_PIX_FMT_BGRA;
+    gsize stride = ((gsize)w * 4 + 63) & ~(gsize)63;
+    gsize buf_len = stride * (gsize)h;
+    guint8 *bgra = av_malloc(buf_len + 64);
+    if (!bgra) return NULL;
+    L->sws = sws_getCachedContext(L->sws, w, h, src_fmt, w, h, AV_PIX_FMT_BGRA,
+                                  SWS_BILINEAR, NULL, NULL, NULL);
+    if (!L->sws) { av_free(bgra); return NULL; }
+    gboolean bt709 = f->colorspace ? f->colorspace == 709 : h >= 600;
+    const int *coef = sws_getCoefficients(bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
+    sws_setColorspaceDetails(L->sws, coef, f->full_range, coef, 1,
+                             0, 1 << 16, 1 << 16);
+    const uint8_t *src[4] = { f->data + f->offset[0], f->data + f->offset[1],
+                              f->data + f->offset[2], NULL };
+    int src_stride[4] = { f->stride[0], f->stride[1], f->stride[2], 0 };
+    uint8_t *dst[4] = { bgra, NULL, NULL, NULL };
+    int dst_stride[4] = { (int)stride, 0, 0, 0 };
+    sws_scale(L->sws, src, src_stride, 0, h, dst, dst_stride);
+
+    GBytes *gb = g_bytes_new_with_free_func(bgra, buf_len, av_free, bgra);
+    ns_texture *tex = ns_texture_new(w, h, NS_TEXTURE_BGRA_PREMULTIPLIED,
+                                     gb, stride);
     g_bytes_unref(gb);
-    f->bgra = NULL;
     return tex;
+}
+
+static gboolean
+ns_lav_os_fallback(ns_lav *L)
+{
+    const AVCodec *dec = avcodec_find_decoder(L->codec_id);
+    if (!dec) return FALSE;
+    AVCodecContext *ctx = avcodec_alloc_context3(dec);
+    if (!ctx) return FALSE;
+    if (avcodec_parameters_to_context(ctx, L->fmt->streams[L->vstream]->codecpar) < 0 ||
+        avcodec_open2(ctx, dec, NULL) < 0) {
+        avcodec_free_context(&ctx);
+        return FALSE;
+    }
+    ns_debug_log_emit(NS_DLOG_WARN, "media",
+                      "%s H.264 decoder failed; falling back to libavcodec",
+                      ns_os_media_backend());
+    ns_os_vdec_free(L->osdec);
+    L->osdec = NULL;
+    L->vdec = ctx;
+    double resume = L->skip_before_pts;
+    if (resume <= 0.0 || !ns_lav_seek_to(L, resume))
+        ns_lav_rewind(L);
+    L->skip_before_pts = resume;
+    return TRUE;
 }
 
 static ns_lav_result
@@ -440,13 +489,16 @@ ns_lav_receive(ns_video_player *player, ns_texture **out_tex, double *out_pts)
 {
     ns_lav *L = player->lav;
     if (L->osdec) {
-        ns_os_frame f;
-        ns_os_status st = ns_os_vdec_receive(L->osdec, &f);
+        ns_os_frame_clear(&L->osframe);
+        ns_os_status st = ns_os_vdec_receive(L->osdec, &L->osframe);
         if (st == NS_OS_FRAME) {
-            *out_pts = (double)f.pts_us / 1e6;
-            *out_tex = ns_lav_os_frame_to_texture(&f);
+            L->os_produced = TRUE;
+            *out_pts = (double)L->osframe.pts_us / 1e6;
+            *out_tex = NULL;
             return NS_LAV_FRAME;
         }
+        if (st == NS_OS_ERROR && !L->os_produced && ns_lav_os_fallback(L))
+            return NS_LAV_AGAIN;
         return (st == NS_OS_AGAIN && !L->draining) ? NS_LAV_AGAIN : NS_LAV_EOF;
     }
     int r = avcodec_receive_frame(L->vdec, L->frame);
@@ -481,18 +533,27 @@ static gboolean
 ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
 {
     ns_lav *L = player->lav;
+    int refused = 0;
     for (;;) {
         double t = 0.0;
         ns_texture *tex = NULL;
         ns_lav_result r = ns_lav_receive(player, &tex, &t);
         if (r == NS_LAV_FRAME) {
-            if (L->skip_until_pts >= 0.0 && t <= L->skip_until_pts + 1e-6) {
-                ns_texture_unref(tex);
+            gboolean seen = L->skip_until_pts >= 0.0 &&
+                            t <= L->skip_until_pts + 1e-6;
+            gboolean before_target = L->skip_before_pts >= 0.0 &&
+                                     t < L->skip_before_pts - 0.05;
+            if (seen || before_target) {
+                ns_os_frame_clear(&L->osframe);
                 if (!L->osdec) av_frame_unref(L->frame);
                 continue;
             }
             L->skip_until_pts = -1.0;
-            if (!L->osdec) {
+            L->skip_before_pts = -1.0;
+            if (L->osdec) {
+                tex = ns_lav_os_frame_to_texture(L, &L->osframe);
+                ns_os_frame_clear(&L->osframe);
+            } else {
                 tex = ns_lav_frame_to_texture(L, L->frame,
                                               player->width, player->height);
                 av_frame_unref(L->frame);
@@ -511,9 +572,11 @@ ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
             if (ns_lav_send(L, L->pkt)) {
                 av_packet_unref(L->pkt);
                 L->pkt_pending = FALSE;
+                refused = 0;
                 continue;
             }
-            return FALSE;
+            if (++refused > 64) return FALSE;
+            continue;
         }
 
         int rr;
@@ -843,6 +906,11 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
             player->pending_time = -1.0;
         }
     }
+#ifdef NS_HAVE_LIBAV
+    if (player->lav && player->cur_time < 0.0 && player->pending_time < 0.0 &&
+        seconds > 0.0)
+        player->lav->skip_before_pts = seconds;
+#endif
 
     gboolean changed = FALSE;
     for (;;) {

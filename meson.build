@@ -475,13 +475,15 @@ elif is_android
   media_os_backend = 'android'
   media_os_deps += [cc.find_library('mediandk')]
 else
-  gst_app = dependency('gstreamer-app-1.0', version: '>=1.16',
-                       required: get_option('gstreamer'))
-  gst_core = dependency('gstreamer-1.0', version: '>=1.16',
+  gst_core = dependency('gstreamer-1.0', version: '>=1.20',
                         required: get_option('gstreamer'))
-  if gst_app.found() and gst_core.found()
+  gst_app = dependency('gstreamer-app-1.0', version: '>=1.20',
+                       required: get_option('gstreamer'))
+  gst_video = dependency('gstreamer-video-1.0', version: '>=1.20',
+                         required: get_option('gstreamer'))
+  if gst_core.found() and gst_app.found() and gst_video.found()
     media_os_backend = 'gst'
-    media_os_deps += [gst_core, gst_app]
+    media_os_deps += [gst_core, gst_app, gst_video]
   endif
 endif
 if media_os_backend == 'none'

@@ -57,16 +57,43 @@ put_pixel(uint8_t *px, int y, int u, int v, const ns_yuv_coeffs *c)
 }
 
 static int
-frame_alloc(ns_os_frame *out, int width, int height)
+plane_copy(uint8_t *dst, int dst_stride, const uint8_t *src, int src_stride,
+           int row_bytes, int rows)
 {
+    if (!src) return 0;
+    for (int r = 0; r < rows; r++)
+        memcpy(dst + (size_t)r * (size_t)dst_stride,
+               src + (size_t)r * (size_t)src_stride, (size_t)row_bytes);
+    return 1;
+}
+
+static int
+frame_alloc(ns_os_frame *out, ns_os_pix format, int width, int height)
+{
+    memset(out, 0, sizeof *out);
     if (width <= 0 || height <= 0 || width > NS_OS_MAX_DIM ||
         height > NS_OS_MAX_DIM)
         return 0;
-    int stride = ((width * 4) + 63) & ~63;
-    uint8_t *buf = malloc((size_t)stride * (size_t)height);
-    if (!buf) return 0;
-    out->bgra = buf;
-    out->stride = stride;
+    int cw = (width + 1) / 2, ch = (height + 1) / 2;
+    size_t total;
+    if (format == NS_OS_PIX_BGRA) {
+        out->stride[0] = ((width * 4) + 63) & ~63;
+        total = (size_t)out->stride[0] * (size_t)height;
+    } else if (format == NS_OS_PIX_NV12) {
+        out->stride[0] = (width + 63) & ~63;
+        out->stride[1] = out->stride[0];
+        out->offset[1] = (size_t)out->stride[0] * (size_t)height;
+        total = out->offset[1] + (size_t)out->stride[1] * (size_t)ch;
+    } else {
+        out->stride[0] = (width + 63) & ~63;
+        out->stride[1] = out->stride[2] = (cw + 63) & ~63;
+        out->offset[1] = (size_t)out->stride[0] * (size_t)height;
+        out->offset[2] = out->offset[1] + (size_t)out->stride[1] * (size_t)ch;
+        total = out->offset[2] + (size_t)out->stride[2] * (size_t)ch;
+    }
+    out->data = malloc(total);
+    if (!out->data) return 0;
+    out->format = format;
     out->width = width;
     out->height = height;
     return 1;
@@ -76,47 +103,81 @@ void
 ns_os_frame_clear(ns_os_frame *frame)
 {
     if (!frame) return;
-    free(frame->bgra);
+    free(frame->data);
     memset(frame, 0, sizeof *frame);
 }
 
 int
-ns_os_frame_from_nv12(ns_os_frame *out, const uint8_t *y, int y_stride,
-                      const uint8_t *uv, int uv_stride, int width, int height,
-                      int full_range, int colorspace)
+ns_os_frame_copy_nv12(ns_os_frame *out, const uint8_t *y, int y_stride,
+                      const uint8_t *uv, int uv_stride, int width, int height)
 {
-    if (!y || !uv || !frame_alloc(out, width, height)) return 0;
-    ns_yuv_coeffs c;
-    yuv_coeffs(height, full_range, colorspace, &c);
-    for (int row = 0; row < height; row++) {
-        const uint8_t *ys = y + (size_t)row * (size_t)y_stride;
-        const uint8_t *cs = uv + (size_t)(row / 2) * (size_t)uv_stride;
-        uint8_t *dst = out->bgra + (size_t)row * (size_t)out->stride;
-        for (int col = 0; col < width; col++) {
-            int ci = (col / 2) * 2;
-            put_pixel(dst + col * 4, ys[col], cs[ci], cs[ci + 1], &c);
-        }
-    }
-    return 1;
+    if (!frame_alloc(out, NS_OS_PIX_NV12, width, height)) return 0;
+    int cw = (width + 1) / 2, ch = (height + 1) / 2;
+    if (plane_copy(out->data, out->stride[0], y, y_stride, width, height) &&
+        plane_copy(out->data + out->offset[1], out->stride[1], uv, uv_stride,
+                   cw * 2, ch))
+        return 1;
+    ns_os_frame_clear(out);
+    return 0;
 }
 
 int
-ns_os_frame_from_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
+ns_os_frame_copy_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
                       const uint8_t *u, int u_stride, const uint8_t *v,
-                      int v_stride, int width, int height, int full_range,
-                      int colorspace)
+                      int v_stride, int width, int height)
 {
-    if (!y || !u || !v || !frame_alloc(out, width, height)) return 0;
-    ns_yuv_coeffs c;
-    yuv_coeffs(height, full_range, colorspace, &c);
-    for (int row = 0; row < height; row++) {
-        const uint8_t *ys = y + (size_t)row * (size_t)y_stride;
-        const uint8_t *us = u + (size_t)(row / 2) * (size_t)u_stride;
-        const uint8_t *vs = v + (size_t)(row / 2) * (size_t)v_stride;
-        uint8_t *dst = out->bgra + (size_t)row * (size_t)out->stride;
-        for (int col = 0; col < width; col++)
-            put_pixel(dst + col * 4, ys[col], us[col / 2], vs[col / 2], &c);
+    if (!frame_alloc(out, NS_OS_PIX_I420, width, height)) return 0;
+    int cw = (width + 1) / 2, ch = (height + 1) / 2;
+    if (plane_copy(out->data, out->stride[0], y, y_stride, width, height) &&
+        plane_copy(out->data + out->offset[1], out->stride[1], u, u_stride,
+                   cw, ch) &&
+        plane_copy(out->data + out->offset[2], out->stride[2], v, v_stride,
+                   cw, ch))
+        return 1;
+    ns_os_frame_clear(out);
+    return 0;
+}
+
+int
+ns_os_frame_copy_bgra(ns_os_frame *out, const uint8_t *src, int stride,
+                      int width, int height)
+{
+    if (!frame_alloc(out, NS_OS_PIX_BGRA, width, height)) return 0;
+    if (plane_copy(out->data, out->stride[0], src, stride, width * 4, height))
+        return 1;
+    ns_os_frame_clear(out);
+    return 0;
+}
+
+int
+ns_os_frame_to_bgra(const ns_os_frame *f, uint8_t **out_bgra, int *out_stride)
+{
+    ns_os_frame dst;
+    if (!f || !f->data || !frame_alloc(&dst, NS_OS_PIX_BGRA, f->width, f->height))
+        return 0;
+    if (f->format == NS_OS_PIX_BGRA) {
+        plane_copy(dst.data, dst.stride[0], f->data, f->stride[0],
+                   f->width * 4, f->height);
+    } else {
+        ns_yuv_coeffs c;
+        yuv_coeffs(f->height, f->full_range, f->colorspace, &c);
+        int nv12 = f->format == NS_OS_PIX_NV12;
+        for (int row = 0; row < f->height; row++) {
+            const uint8_t *ys = f->data + (size_t)row * (size_t)f->stride[0];
+            const uint8_t *us = f->data + f->offset[1] +
+                                (size_t)(row / 2) * (size_t)f->stride[1];
+            const uint8_t *vs = nv12 ? us + 1
+                              : f->data + f->offset[2] +
+                                (size_t)(row / 2) * (size_t)f->stride[2];
+            uint8_t *px = dst.data + (size_t)row * (size_t)dst.stride[0];
+            for (int col = 0; col < f->width; col++) {
+                int ci = nv12 ? (col / 2) * 2 : col / 2;
+                put_pixel(px + col * 4, ys[col], us[ci], vs[ci], &c);
+            }
+        }
     }
+    *out_bgra = dst.data;
+    *out_stride = dst.stride[0];
     return 1;
 }
 
