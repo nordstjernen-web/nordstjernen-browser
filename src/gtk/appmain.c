@@ -31,6 +31,7 @@
 #include "config.h"
 #include "debuglog.h"
 #include "font.h"
+#include "media_os.h"
 #include "engine.h"
 #include "headless.h"
 #include "spellcheck.h"
@@ -602,6 +603,7 @@ main(int argc, char **argv)
         }
         ns_security_sandbox_init(g_self_exe);
     } else {
+        ns_os_media_preinit();
         ns_security_sandbox_init(g_self_exe);
         ns_security_seccomp_init();
     }

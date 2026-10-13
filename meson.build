@@ -453,6 +453,45 @@ if have_libav
   add_project_arguments('-DNS_HAVE_LIBAV=1', language: 'c')
 endif
 
+# H.264 video and AAC audio decode through the operating system's own codecs,
+# so the binary carries no patent-encumbered decoder and pays no codec licence:
+# Media Foundation on Windows, VideoToolbox/AudioToolbox on macOS and iOS,
+# MediaCodec on Android, and GStreamer elsewhere (which in turn picks VA-API,
+# V4L2 or a software decoder installed on the system). libav still demuxes the
+# MP4 container; see src/media_os.h and docs/media.md.
+media_os_backend = 'none'
+media_os_deps = []
+if host_machine.system() == 'windows'
+  media_os_backend = 'mf'
+  media_os_deps += [cc.find_library('mfuuid'),
+                    cc.find_library('ole32')]
+elif host_machine.system() == 'darwin'
+  media_os_backend = 'vt'
+  media_os_deps += [dependency('appleframeworks',
+                               modules: ['VideoToolbox', 'AudioToolbox',
+                                         'CoreMedia', 'CoreVideo',
+                                         'CoreFoundation'])]
+elif is_android
+  media_os_backend = 'android'
+  media_os_deps += [cc.find_library('mediandk')]
+else
+  gst_app = dependency('gstreamer-app-1.0', version: '>=1.16',
+                       required: get_option('gstreamer'))
+  gst_core = dependency('gstreamer-1.0', version: '>=1.16',
+                        required: get_option('gstreamer'))
+  if gst_app.found() and gst_core.found()
+    media_os_backend = 'gst'
+    media_os_deps += [gst_core, gst_app]
+  endif
+endif
+if media_os_backend == 'none'
+  add_project_arguments('-DNS_MEDIA_OS_NONE=1', language: 'c')
+endif
+media_os_sources = files('src/media_os.c')
+if media_os_backend != 'none'
+  media_os_sources += files('src/media_os_' + media_os_backend + '.c')
+endif
+
 # vorbisfile is the ov_* high-level decode API over libvorbis, used by the audio
 # helper (src/audio/main.c) to decode Ogg/Vorbis natively where FFmpeg is absent.
 libvorbisfile = dependency('vorbisfile', required: false)
@@ -648,6 +687,7 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 

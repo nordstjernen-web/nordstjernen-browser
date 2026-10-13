@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "debuglog.h"
+#include "media_os.h"
 #include "pl_mpeg.h"
 
 #ifdef NS_HAVE_LIBAV
@@ -22,6 +24,9 @@ typedef struct {
     AVFormatContext   *fmt;
     AVIOContext       *avio;
     AVCodecContext    *vdec;
+    ns_os_vdec        *osdec;
+    enum AVCodecID     codec_id;
+    gboolean           pkt_pending;
     struct SwsContext *sws;
     AVPacket          *pkt;
     AVFrame           *frame;
@@ -120,10 +125,37 @@ ns_lav_free(ns_lav *L)
     if (L->frame) av_frame_free(&L->frame);
     if (L->pkt) av_packet_free(&L->pkt);
     if (L->vdec) avcodec_free_context(&L->vdec);
+    if (L->osdec) ns_os_vdec_free(L->osdec);
     if (L->fmt) avformat_close_input(&L->fmt);
     if (L->avio) { av_freep(&L->avio->buffer); avio_context_free(&L->avio); }
     g_free(L->data);
     g_free(L);
+}
+
+static gboolean
+ns_lav_open_decoder(ns_lav *L, AVStream *vs)
+{
+    if (L->codec_id == AV_CODEC_ID_H264 && vs->codecpar->extradata &&
+        vs->codecpar->extradata_size > 6 && vs->codecpar->extradata[0] == 1 &&
+        !g_getenv("NS_MEDIA_NO_OS_DECODER")) {
+        L->osdec = ns_os_vdec_new_h264(vs->codecpar->extradata,
+                                       (size_t)vs->codecpar->extradata_size,
+                                       vs->codecpar->width,
+                                       vs->codecpar->height);
+        if (L->osdec) {
+            ns_debug_log_emit(NS_DLOG_INFO, "media",
+                              "H.264 %dx%d decoding through %s",
+                              vs->codecpar->width, vs->codecpar->height,
+                              ns_os_media_backend());
+            return TRUE;
+        }
+    }
+    const AVCodec *dec = avcodec_find_decoder(L->codec_id);
+    if (!dec) return FALSE;
+    L->vdec = avcodec_alloc_context3(dec);
+    if (!L->vdec) return FALSE;
+    return avcodec_parameters_to_context(L->vdec, vs->codecpar) >= 0 &&
+           avcodec_open2(L->vdec, dec, NULL) >= 0;
 }
 
 static ns_lav *
@@ -162,9 +194,8 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     }
     if (avformat_find_stream_info(L->fmt, NULL) < 0) { ns_lav_free(L); return NULL; }
 
-    const AVCodec *dec = NULL;
-    L->vstream = av_find_best_stream(L->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
-    if (L->vstream < 0 || !dec) { ns_lav_free(L); return NULL; }
+    L->vstream = av_find_best_stream(L->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (L->vstream < 0) { ns_lav_free(L); return NULL; }
 
     AVStream *vs = L->fmt->streams[L->vstream];
     enum AVCodecID id = vs->codecpar->codec_id;
@@ -175,17 +206,12 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
         ns_lav_free(L);
         return NULL;
     }
-
-    L->vdec = avcodec_alloc_context3(dec);
-    if (!L->vdec) { ns_lav_free(L); return NULL; }
-    if (avcodec_parameters_to_context(L->vdec, vs->codecpar) < 0 ||
-        avcodec_open2(L->vdec, dec, NULL) < 0) {
-        ns_lav_free(L);
-        return NULL;
-    }
+    L->codec_id = id;
 
     int w = vs->codecpar->width, h = vs->codecpar->height;
     if (w <= 0 || h <= 0 || w > 16384 || h > 16384) { ns_lav_free(L); return NULL; }
+
+    if (!ns_lav_open_decoder(L, vs)) { ns_lav_free(L); return NULL; }
 
     L->time_base = vs->time_base;
     L->pkt = av_packet_alloc();
@@ -284,9 +310,20 @@ ns_lav_probe_chunk_range(const guint8 *init, gsize init_len,
 }
 
 static void
+ns_lav_flush_decoder(ns_lav *L)
+{
+    if (L->osdec) ns_os_vdec_flush(L->osdec);
+    else avcodec_flush_buffers(L->vdec);
+    if (L->pkt_pending) {
+        av_packet_unref(L->pkt);
+        L->pkt_pending = FALSE;
+    }
+}
+
+static void
 ns_lav_forget_position(ns_lav *L)
 {
-    avcodec_flush_buffers(L->vdec);
+    ns_lav_flush_decoder(L);
     L->draining = FALSE;
     L->last_dts = AV_NOPTS_VALUE;
     L->resume_after_dts = AV_NOPTS_VALUE;
@@ -347,7 +384,7 @@ ns_lav_follow_growth(ns_lav *L)
     fmt->pb = L->avio;
     if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) return FALSE;
     if (L->vstream >= (int)fmt->nb_streams ||
-        fmt->streams[L->vstream]->codecpar->codec_id != L->vdec->codec_id) {
+        fmt->streams[L->vstream]->codecpar->codec_id != L->codec_id) {
         avformat_close_input(&fmt);
         return FALSE;
     }
@@ -356,7 +393,7 @@ ns_lav_follow_growth(ns_lav *L)
     if (L->last_dts != AV_NOPTS_VALUE)
         av_seek_frame(fmt, L->vstream, L->last_dts, AVSEEK_FLAG_BACKWARD);
     if (L->draining) {
-        avcodec_flush_buffers(L->vdec);
+        ns_lav_flush_decoder(L);
         L->draining = FALSE;
         L->skip_until_pts = L->last_out_pts;
         L->resume_after_dts = AV_NOPTS_VALUE;
@@ -378,34 +415,106 @@ ns_lav_packet_wanted(ns_lav *L, const AVPacket *pkt)
     return TRUE;
 }
 
+typedef enum {
+    NS_LAV_FRAME,
+    NS_LAV_AGAIN,
+    NS_LAV_EOF
+} ns_lav_result;
+
+static ns_texture *
+ns_lav_os_frame_to_texture(ns_os_frame *f)
+{
+    GBytes *gb = g_bytes_new_with_free_func(f->bgra,
+                                            (gsize)f->stride * (gsize)f->height,
+                                            free, f->bgra);
+    ns_texture *tex = ns_texture_new(f->width, f->height,
+                                     NS_TEXTURE_BGRA_PREMULTIPLIED, gb,
+                                     (gsize)f->stride);
+    g_bytes_unref(gb);
+    f->bgra = NULL;
+    return tex;
+}
+
+static ns_lav_result
+ns_lav_receive(ns_video_player *player, ns_texture **out_tex, double *out_pts)
+{
+    ns_lav *L = player->lav;
+    if (L->osdec) {
+        ns_os_frame f;
+        ns_os_status st = ns_os_vdec_receive(L->osdec, &f);
+        if (st == NS_OS_FRAME) {
+            *out_pts = (double)f.pts_us / 1e6;
+            *out_tex = ns_lav_os_frame_to_texture(&f);
+            return NS_LAV_FRAME;
+        }
+        return (st == NS_OS_AGAIN && !L->draining) ? NS_LAV_AGAIN : NS_LAV_EOF;
+    }
+    int r = avcodec_receive_frame(L->vdec, L->frame);
+    if (r == 0) {
+        *out_pts = (L->frame->pts == AV_NOPTS_VALUE)
+            ? player->pending_time
+            : (double)L->frame->pts * av_q2d(L->time_base);
+        *out_tex = NULL;
+        return NS_LAV_FRAME;
+    }
+    return r == AVERROR(EAGAIN) ? NS_LAV_AGAIN : NS_LAV_EOF;
+}
+
+static gboolean
+ns_lav_send(ns_lav *L, AVPacket *pkt)
+{
+    if (L->osdec) {
+        if (!pkt) {
+            ns_os_vdec_drain(L->osdec);
+            return TRUE;
+        }
+        double t = (pkt->pts != AV_NOPTS_VALUE ? (double)pkt->pts
+                                               : (double)pkt->dts) *
+                   av_q2d(L->time_base);
+        return ns_os_vdec_send(L->osdec, pkt->data, (size_t)pkt->size,
+                               (int64_t)(t * 1e6)) >= 0;
+    }
+    return avcodec_send_packet(L->vdec, pkt) != AVERROR(EAGAIN);
+}
+
 static gboolean
 ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
 {
     ns_lav *L = player->lav;
     for (;;) {
-        int r = avcodec_receive_frame(L->vdec, L->frame);
-        if (r == 0) {
-            double t = (L->frame->pts == AV_NOPTS_VALUE)
-                ? player->pending_time
-                : (double)L->frame->pts * av_q2d(L->time_base);
-            if (L->skip_until_pts >= 0.0) {
-                if (t <= L->skip_until_pts + 1e-6) {
-                    av_frame_unref(L->frame);
-                    continue;
-                }
-                L->skip_until_pts = -1.0;
+        double t = 0.0;
+        ns_texture *tex = NULL;
+        ns_lav_result r = ns_lav_receive(player, &tex, &t);
+        if (r == NS_LAV_FRAME) {
+            if (L->skip_until_pts >= 0.0 && t <= L->skip_until_pts + 1e-6) {
+                ns_texture_unref(tex);
+                if (!L->osdec) av_frame_unref(L->frame);
+                continue;
             }
-            *out_tex = ns_lav_frame_to_texture(L, L->frame,
-                                               player->width, player->height);
+            L->skip_until_pts = -1.0;
+            if (!L->osdec) {
+                tex = ns_lav_frame_to_texture(L, L->frame,
+                                              player->width, player->height);
+                av_frame_unref(L->frame);
+            }
+            *out_tex = tex;
             *out_pts = t;
             L->last_out_pts = t;
-            av_frame_unref(L->frame);
             return TRUE;
         }
-        if (r == AVERROR_EOF && ns_lav_follow_growth(L))
+        if (r == NS_LAV_EOF && ns_lav_follow_growth(L))
             continue;
-        if (r == AVERROR_EOF || (r < 0 && r != AVERROR(EAGAIN)))
+        if (r == NS_LAV_EOF)
             return FALSE;
+
+        if (L->pkt_pending) {
+            if (ns_lav_send(L, L->pkt)) {
+                av_packet_unref(L->pkt);
+                L->pkt_pending = FALSE;
+                continue;
+            }
+            return FALSE;
+        }
 
         int rr;
         while ((rr = av_read_frame(L->fmt, L->pkt)) >= 0 &&
@@ -416,10 +525,10 @@ ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
             continue;
         if (rr >= 0) {
             if (L->pkt->dts != AV_NOPTS_VALUE) L->last_dts = L->pkt->dts;
-            avcodec_send_packet(L->vdec, L->pkt);
-            av_packet_unref(L->pkt);
+            if (ns_lav_send(L, L->pkt)) av_packet_unref(L->pkt);
+            else L->pkt_pending = TRUE;
         } else if (!L->draining) {
-            avcodec_send_packet(L->vdec, NULL);
+            ns_lav_send(L, NULL);
             L->draining = TRUE;
         } else {
             return FALSE;
@@ -595,6 +704,12 @@ ns_video_codec_available(const char *codec)
     else if (strcmp(codec, "theora") == 0)
         id = AV_CODEC_ID_THEORA;
     if (id == AV_CODEC_ID_NONE) return FALSE;
+    if (id == AV_CODEC_ID_H264 && ns_os_h264_available()) return TRUE;
+    if (id == AV_CODEC_ID_AAC && ns_os_aac_available()) return TRUE;
+    if (g_getenv("NS_MEDIA_OS_CODECS_ONLY") &&
+        id != AV_CODEC_ID_OPUS && id != AV_CODEC_ID_VORBIS &&
+        id != AV_CODEC_ID_MP3)
+        return FALSE;
     return avcodec_find_decoder(id) != NULL;
 #else
     (void)codec;
@@ -632,7 +747,7 @@ ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
     L->avio->eof_reached = 0;
     L->avio->error = 0;
     if (L->draining && !L->reopen_on_growth) {
-        avcodec_flush_buffers(L->vdec);
+        ns_lav_flush_decoder(L);
         L->draining = FALSE;
     }
     return TRUE;
