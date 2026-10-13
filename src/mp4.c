@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NS_MP4_MAX_SAMPLES 20000000u
+#define NS_MP4_MAX_SAMPLES 2000000u
+#define NS_MP4_MAX_RUN_SAMPLES 65536u
 #define NS_MP4_MAX_TRACKS  16
 
 #define FOURCC(a, b, c, d) \
@@ -442,6 +443,8 @@ parse_trun(ns_mp4_track *t, ns_span b, uint64_t base, uint64_t *cursor,
     size_t per = (size_t)(!!(flags & 0x100) + !!(flags & 0x200) +
                           !!(flags & 0x400) + !!(flags & 0x800)) * 4;
     if (per && n > (b.len - pos) / per) n = (uint32_t)((b.len - pos) / per);
+    if (!(flags & 0x200) && def_size == 0) return;
+    if (!per && n > NS_MP4_MAX_RUN_SAMPLES) n = NS_MP4_MAX_RUN_SAMPLES;
     for (uint32_t i = 0; i < n; i++) {
         uint32_t dur = def_dur, size = def_size, sflags = def_flags;
         int have_flags = have_def_flags;

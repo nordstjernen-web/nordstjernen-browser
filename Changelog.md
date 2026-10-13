@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* Media: libavcodec decodes video with frame and slice threads again
+  (up to 8 per decoder), as the removed video helper did, and opening a
+  WebM/MP4 decoder no longer runs avformat_find_stream_info when the
+  container already describes the stream. A YouTube seek that rebuilds
+  the decoder now resumes in under a second. The in-tree MP4 demuxer
+  caps a fragment run without per-sample fields at 65536 samples and a
+  track at two million, so a malformed file cannot make it allocate
+  hundreds of megabytes.
 * Media: builds without libav - Android, iOS, and macOS without
   FFmpeg - play MP4 and H.264 MSE video through a small in-tree MP4
   demuxer (sample tables, edit lists and fragmented MP4) feeding the

@@ -23,6 +23,8 @@
 #endif
 
 #ifdef NS_HAVE_LIBAV
+#define NS_LAV_MAX_THREADS 8
+
 typedef struct {
     AVFormatContext   *fmt;
     AVIOContext       *avio;
@@ -142,6 +144,23 @@ ns_lav_free(ns_lav *L)
     g_free(L);
 }
 
+static void
+ns_lav_enable_threads(AVCodecContext *ctx)
+{
+    ctx->thread_count = MIN((int)g_get_num_processors(), NS_LAV_MAX_THREADS);
+    ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+}
+
+static gboolean
+ns_lav_container_described(AVFormatContext *fmt)
+{
+    int vi = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (vi < 0) return FALSE;
+    const AVCodecParameters *par = fmt->streams[vi]->codecpar;
+    return par->codec_id != AV_CODEC_ID_NONE && par->width > 0 &&
+           par->height > 0;
+}
+
 static gboolean
 ns_lav_open_decoder(ns_lav *L, AVStream *vs)
 {
@@ -164,8 +183,9 @@ ns_lav_open_decoder(ns_lav *L, AVStream *vs)
     if (!dec) return FALSE;
     L->vdec = avcodec_alloc_context3(dec);
     if (!L->vdec) return FALSE;
-    return avcodec_parameters_to_context(L->vdec, vs->codecpar) >= 0 &&
-           avcodec_open2(L->vdec, dec, NULL) >= 0;
+    if (avcodec_parameters_to_context(L->vdec, vs->codecpar) < 0) return FALSE;
+    ns_lav_enable_threads(L->vdec);
+    return avcodec_open2(L->vdec, dec, NULL) >= 0;
 }
 
 static ns_lav *
@@ -203,7 +223,11 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
         ns_lav_free(L);
         return NULL;
     }
-    if (avformat_find_stream_info(L->fmt, NULL) < 0) { ns_lav_free(L); return NULL; }
+    if (!ns_lav_container_described(L->fmt) &&
+        avformat_find_stream_info(L->fmt, NULL) < 0) {
+        ns_lav_free(L);
+        return NULL;
+    }
 
     L->vstream = av_find_best_stream(L->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     if (L->vstream < 0) { ns_lav_free(L); return NULL; }
@@ -472,6 +496,7 @@ ns_lav_os_fallback(ns_lav *L)
     if (!dec) return FALSE;
     AVCodecContext *ctx = avcodec_alloc_context3(dec);
     if (!ctx) return FALSE;
+    ns_lav_enable_threads(ctx);
     if (avcodec_parameters_to_context(ctx, L->fmt->streams[L->vstream]->codecpar) < 0 ||
         avcodec_open2(ctx, dec, NULL) < 0) {
         avcodec_free_context(&ctx);
