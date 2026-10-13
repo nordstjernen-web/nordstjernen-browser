@@ -76,13 +76,11 @@ GdkPaintable *ns_proc_view_favicon(NsProcView *view);
  * forceful "End task" that kills the renderer (the tab respawns on next use). */
 int         ns_proc_view_renderer_pid(NsProcView *view);
 int         ns_proc_view_audio_pid(NsProcView *view);
-int         ns_proc_view_video_pid(NsProcView *view);
 void        ns_proc_view_end_task(NsProcView *view);
 
 void   ns_proc_view_print(NsProcView *view);
 void   ns_proc_view_save_pdf(NsProcView *view);
 void   ns_proc_view_save_image(NsProcView *view);
-void        ns_proc_view_stop_video(NsProcView *view);
 void        ns_proc_view_stop_audio(NsProcView *view);
 
 void   ns_proc_view_zoom_in(NsProcView *view);
@@ -94,7 +92,6 @@ void   ns_proc_view_find_open(NsProcView *view);
 gboolean ns_proc_view_find_close(NsProcView *view);
 void   ns_proc_view_set_color_scheme(NsProcView *view, gboolean dark);
 
-gboolean ns_proc_video_helper_available(void);
 
 G_END_DECLS
 

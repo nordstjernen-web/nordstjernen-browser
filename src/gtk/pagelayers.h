@@ -34,13 +34,10 @@ gboolean ns_page_layers_scroller_at(const NsPageLayers *pl, double x,
 gboolean ns_page_layers_wheel_listener_at(const NsPageLayers *pl, double x,
                                           double y, double scroll_x,
                                           double scroll_y);
-typedef void (*NsPageLayersUnder)(GtkSnapshot *snapshot, double offset_x,
-                                  double offset_y, gpointer data);
 
 void ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
                              double width, double height, double raster,
-                             double scroll_x, double scroll_y,
-                             NsPageLayersUnder under, gpointer under_data);
+                             double scroll_x, double scroll_y);
 
 G_END_DECLS
 
