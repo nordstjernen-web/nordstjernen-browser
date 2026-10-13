@@ -13133,6 +13133,12 @@ ns_media_container_supported(const char *container)
         return TRUE;
     if (native_opus && strcmp(container, "audio/opus") == 0)
         return TRUE;
+#ifdef NS_HAVE_OS_MP4
+    if (strcmp(container, "video/mp4") == 0 ||
+        strcmp(container, "audio/mp4") == 0 ||
+        strcmp(container, "video/x-m4v") == 0)
+        return ns_video_codec_available("avc1");
+#endif
     if (!libav) return FALSE;
     if (strcmp(container, "video/ogg") == 0)
         return ns_video_codec_available("theora");

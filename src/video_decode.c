@@ -11,6 +11,9 @@
 #include "debuglog.h"
 #include "media_os.h"
 #include "pl_mpeg.h"
+#ifdef NS_HAVE_OS_MP4
+#include "video_mp4.h"
+#endif
 
 #ifdef NS_HAVE_LIBAV
 #include <libavformat/avformat.h>
@@ -53,6 +56,9 @@ struct ns_video_player {
     plm_t      *plm;
 #ifdef NS_HAVE_LIBAV
     ns_lav     *lav;
+#endif
+#ifdef NS_HAVE_OS_MP4
+    ns_mp4_player *mp4;
 #endif
     int         width;
     int         height;
@@ -656,6 +662,26 @@ ns_video_player_new(const guint8 *bytes, gsize len)
         return player;
     }
 #endif
+#ifdef NS_HAVE_OS_MP4
+    {
+        int w = 0, h = 0, has_audio = 0;
+        double dur = 0.0, demuxed_end = 0.0;
+        ns_mp4_player *mp = ns_mp4_player_new(bytes, len, &w, &h, &dur,
+                                              &demuxed_end, &has_audio);
+        if (mp) {
+            ns_video_player *player = g_new0(ns_video_player, 1);
+            player->mp4 = mp;
+            player->width = w;
+            player->height = h;
+            player->has_audio = has_audio;
+            player->duration = dur;
+            player->demuxed_end = demuxed_end;
+            player->cur_time = -1.0;
+            player->pending_time = -1.0;
+            return player;
+        }
+    }
+#endif
 
     return NULL;
 }
@@ -669,6 +695,9 @@ ns_video_player_free(ns_video_player *player)
     if (player->plm) plm_destroy(player->plm);
 #ifdef NS_HAVE_LIBAV
     if (player->lav) ns_lav_free(player->lav);
+#endif
+#ifdef NS_HAVE_OS_MP4
+    if (player->mp4) ns_mp4_player_free(player->mp4);
 #endif
     g_free(player);
 }
@@ -718,6 +747,9 @@ ns_video_probe_chunk_range(const guint8 *init, gsize init_len,
 {
 #ifdef NS_HAVE_LIBAV
     return ns_lav_probe_chunk_range(init, init_len, chunk, chunk_len,
+                                    out_start, out_end);
+#elif defined(NS_HAVE_OS_MP4)
+    return ns_mp4_probe_chunk_range(init, init_len, chunk, chunk_len,
                                     out_start, out_end);
 #else
     (void)init; (void)init_len; (void)chunk; (void)chunk_len;
@@ -774,6 +806,13 @@ ns_video_codec_available(const char *codec)
         id != AV_CODEC_ID_MP3)
         return FALSE;
     return avcodec_find_decoder(id) != NULL;
+#elif defined(NS_HAVE_OS_MP4)
+    if (!codec) return FALSE;
+    if (g_str_has_prefix(codec, "avc1") || g_str_has_prefix(codec, "avc3"))
+        return ns_os_h264_available();
+    if (g_str_has_prefix(codec, "mp4a.40"))
+        return ns_os_aac_available();
+    return FALSE;
 #else
     (void)codec;
     return FALSE;
@@ -814,6 +853,12 @@ ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
         L->draining = FALSE;
     }
     return TRUE;
+#elif defined(NS_HAVE_OS_MP4)
+    if (!player || !player->mp4 || !bytes) return FALSE;
+    double end = 0.0;
+    if (!ns_mp4_player_extend(player->mp4, bytes, len, &end)) return FALSE;
+    ns_video_player_note_end(player, end);
+    return TRUE;
 #else
     (void)player; (void)bytes; (void)len;
     return FALSE;
@@ -846,6 +891,9 @@ ns_video_backend_rewind(ns_video_player *player)
 #ifdef NS_HAVE_LIBAV
     else if (player->lav) ns_lav_rewind(player->lav);
 #endif
+#ifdef NS_HAVE_OS_MP4
+    else if (player->mp4) ns_mp4_player_seek(player->mp4, 0.0);
+#endif
 }
 
 static gboolean
@@ -870,6 +918,13 @@ ns_video_backend_next(ns_video_player *player, ns_texture **out_tex,
         return FALSE;
     }
 #endif
+#ifdef NS_HAVE_OS_MP4
+    if (player->mp4) {
+        if (ns_mp4_player_next(player->mp4, out_tex, out_pts)) return TRUE;
+        *out_eof = TRUE;
+        return FALSE;
+    }
+#endif
     *out_eof = TRUE;
     return FALSE;
 }
@@ -884,6 +939,9 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
 #ifdef NS_HAVE_LIBAV
         && !player->lav
 #endif
+#ifdef NS_HAVE_OS_MP4
+        && !player->mp4
+#endif
        ) return NULL;
     if (seconds < 0) seconds = 0;
 
@@ -895,6 +953,10 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
 #ifdef NS_HAVE_LIBAV
         if (player->lav)
             sought = ns_lav_seek_to(player->lav, seconds);
+#endif
+#ifdef NS_HAVE_OS_MP4
+        if (player->mp4)
+            sought = ns_mp4_player_seek(player->mp4, seconds);
 #endif
         if (!sought) {
             if (!backward) sought = TRUE;
@@ -910,6 +972,11 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
     if (player->lav && player->cur_time < 0.0 && player->pending_time < 0.0 &&
         seconds > 0.0)
         player->lav->skip_before_pts = seconds;
+#endif
+#ifdef NS_HAVE_OS_MP4
+    if (player->mp4 && player->cur_time < 0.0 && player->pending_time < 0.0 &&
+        seconds > 0.0)
+        ns_mp4_player_skip_before(player->mp4, seconds);
 #endif
 
     gboolean changed = FALSE;

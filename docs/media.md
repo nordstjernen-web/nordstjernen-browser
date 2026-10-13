@@ -56,7 +56,7 @@ How libav is obtained differs by platform, to keep it redistributable:
   the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
   libraries.
 - **Android / iOS** do not cross-build FFmpeg, so the inline libav WebM path is
-  unavailable there.
+  unavailable there; MP4/H.264 plays through the in-tree demuxer below.
 
 ### MP4 — H.264 and AAC through the operating system
 
@@ -75,6 +75,14 @@ decoder); the compressed frames then go through `src/media_os.h`:
 | macOS, iOS | VideoToolbox (`VTDecompressionSession`) and AudioToolbox (`AudioConverter`) | `src/media_os_vt.c` |
 | Android | NDK MediaCodec (`AMediaCodec`) | `src/media_os_android.c` |
 | Linux, BSDs | GStreamer (`decodebin`), which picks VA-API, V4L2 or an installed software decoder | `src/media_os_gst.c` |
+
+Builds without libav (Android, iOS, and macOS without FFmpeg) demux MP4 with
+a small in-tree parser instead (`src/mp4.c`: `moov` sample tables, edit
+lists, and `moof`/`traf`/`trun` fragments as MSE appends them) and play it
+through `src/video_mp4.c`, which feeds the same OS decoder, seeks to the
+keyframe before the target and converts frames to BGRA in plain C. Those
+builds play the video picture of MP4 and H.264 MSE streams; their audio has
+no MP4 path yet, since the audio helper's container support comes from libav.
 
 GStreamer is auto-detected (`-Dgstreamer=disabled` drops it); the other
 backends are always built on their platforms. A backend returns NV12 or I420

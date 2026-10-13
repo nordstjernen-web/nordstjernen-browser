@@ -493,6 +493,12 @@ media_os_sources = files('src/media_os.c')
 if media_os_backend != 'none'
   media_os_sources += files('src/media_os_' + media_os_backend + '.c')
 endif
+# Without libav there is no MP4 demuxer, so the in-tree one (src/mp4.c) feeds
+# the OS decoder instead: Android, iOS and macOS builds without FFmpeg.
+have_os_mp4 = media_os_backend != 'none' and not have_libav
+if have_os_mp4
+  add_project_arguments('-DNS_HAVE_OS_MP4=1', language: 'c')
+endif
 
 # vorbisfile is the ov_* high-level decode API over libvorbis, used by the audio
 # helper (src/audio/main.c) to decode Ogg/Vorbis natively where FFmpeg is absent.
