@@ -430,7 +430,6 @@ ns_tiles_render(ns_tiles *t, ns_browser *b, const char *body,
     }
     tiles_write_doc(t, b, view, &r, fresh, &o);
     if (t->state < 0) return -1;
-    ns_browser_flush_video_rects(b);
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] tiles %6.1fms gen=%d fresh=%d bytes=%zu\n",
                    (double)(g_get_monotonic_time() - t0) / 1000.0, t->gen,

@@ -27,10 +27,6 @@ typedef struct rgba {
     double r, g, b, a;
 } rgba;
 
-typedef struct paint_video_hole {
-    double x0, y0, x1, y1;
-} paint_video_hole;
-
 static gboolean       g_caret_visible = TRUE;
 static int            g_paint_no_cull;
 static GPtrArray     *g_paint_deferred_list;
@@ -61,7 +57,6 @@ typedef struct paint_layers_state {
     ns_paint_upper_fn upper;
     gpointer upper_data;
     int n_upper;
-    gboolean video_above;
 } paint_layers_state;
 
 static paint_layers_state g_layers;
@@ -72,59 +67,6 @@ ns_paint_set_caret_visible(gboolean visible)
 {
     g_caret_visible = visible;
 }
-static GArray        *g_paint_video_holes;
-
-static void
-paint_video_hole_record(cairo_t *cr, double x, double y, double w, double h)
-{
-    paint_video_hole hole = { x, y, x + w, y + h };
-    cairo_user_to_device(cr, &hole.x0, &hole.y0);
-    cairo_user_to_device(cr, &hole.x1, &hole.y1);
-    if (hole.x0 > hole.x1) {
-        double swap = hole.x0;
-        hole.x0 = hole.x1;
-        hole.x1 = swap;
-    }
-    if (hole.y0 > hole.y1) {
-        double swap = hole.y0;
-        hole.y0 = hole.y1;
-        hole.y1 = swap;
-    }
-    if (!g_paint_video_holes)
-        g_paint_video_holes = g_array_new(FALSE, FALSE,
-                                           sizeof(paint_video_hole));
-    g_array_append_val(g_paint_video_holes, hole);
-}
-
-static void
-paint_group_video_holes(cairo_t *cr, cairo_pattern_t *source,
-                        cairo_pattern_t *mask, double opacity,
-                        guint first_hole)
-{
-    if (!g_paint_video_holes || first_hole >= g_paint_video_holes->len)
-        return;
-    cairo_save(cr);
-    cairo_new_path(cr);
-    for (guint i = first_hole; i < g_paint_video_holes->len; i++) {
-        paint_video_hole hole =
-            g_array_index(g_paint_video_holes, paint_video_hole, i);
-        cairo_device_to_user(cr, &hole.x0, &hole.y0);
-        cairo_device_to_user(cr, &hole.x1, &hole.y1);
-        cairo_rectangle(cr, hole.x0, hole.y0,
-                        hole.x1 - hole.x0, hole.y1 - hole.y0);
-    }
-    cairo_clip(cr);
-    cairo_set_source(cr, source);
-    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    if (mask)
-        cairo_mask(cr, mask);
-    else if (opacity < 0.999)
-        cairo_paint_with_alpha(cr, opacity);
-    else
-        cairo_paint(cr);
-    cairo_restore(cr);
-}
-
 static cairo_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
 
@@ -6639,24 +6581,6 @@ paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
 }
 
 static void
-paint_video_note_rects(cairo_t *cr, const ns_box *b, ns_video *v,
-                       int fit_mode)
-{
-    double dx0 = b->x, dy0 = b->y;
-    double dx1 = b->x + b->content_width;
-    double dy1 = b->y + b->content_height;
-    cairo_user_to_device(cr, &dx0, &dy0);
-    cairo_user_to_device(cr, &dx1, &dy1);
-    ns_video_note_paint_rect(v, dx0, dy0, dx1 - dx0, dy1 - dy0, fit_mode);
-    double cx0, cy0, cx1, cy1;
-    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
-    cairo_user_to_device(cr, &cx0, &cy0);
-    cairo_user_to_device(cr, &cx1, &cy1);
-    ns_video_note_paint_clip(v, MIN(cx0, cx1), MIN(cy0, cy1),
-                             fabs(cx1 - cx0), fabs(cy1 - cy0));
-}
-
-static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
@@ -6732,19 +6656,8 @@ paint_video(cairo_t *cr, const ns_box *b)
     ns_texture *tex = v ? (v->frame_texture ? v->frame_texture
                                             : v->poster_texture)
                         : NULL;
-    if (v) {
-        const ns_css_value *fit_value = b->style
-            ? b->style->values[NS_CSS_OBJECT_FIT] : NULL;
-        const char *fit = fit_value && fit_value->kind == NS_CSS_V_KEYWORD
-            ? fit_value->u.keyword : "contain";
-        int fit_mode = 1;
-        if (fit && strcmp(fit, "fill") == 0) fit_mode = 0;
-        else if (fit && strcmp(fit, "cover") == 0) fit_mode = 2;
-        else if (fit && strcmp(fit, "none") == 0) fit_mode = 3;
-        else if (fit && strcmp(fit, "scale-down") == 0) fit_mode = 4;
-        if (g_layers.mode == PAINT_LAYERS_OFF)
-            paint_video_note_rects(cr, b, v, fit_mode);
-    }
+    if (v && g_layers.mode == PAINT_LAYERS_OFF)
+        ns_video_note_painted(v);
     ns_image *bgimg = b->media ? b->media->bg_image : NULL;
     gboolean bg_painted = bgimg && bgimg->loaded && bgimg->texture;
     if (!bg_painted && b->media && b->media->bg_layer_images) {
@@ -6756,27 +6669,8 @@ paint_video(cairo_t *cr, const ns_box *b)
             }
         }
     }
-    gboolean punched = ns_video_helper_composited(v);
-    if (v && g_getenv("NS_DBG_COMPOSITE")) {
-        static gint64 plast;
-        gint64 pn = g_get_monotonic_time();
-        if (pn - plast > 1000000) {
-            plast = pn;
-            g_printerr("[hole] punched=%d opened=%d tex=%d box=%.0f,%.0f %.0fx%.0f\n",
-                       punched, v->video_opened ? 1 : 0, tex ? 1 : 0,
-                       b->x, b->y, b->content_width, b->content_height);
-        }
-    }
     cairo_save(cr);
-    if (punched) {
-        if (g_layers.mode == PAINT_LAYERS_DOC && cr != g_layers.doc)
-            g_layers.video_above = TRUE;
-        paint_video_hole_record(cr, b->x, b->y,
-                                b->content_width, b->content_height);
-        cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-        cairo_rectangle(cr, b->x, b->y, b->content_width, b->content_height);
-        cairo_fill(cr);
-    } else if (tex) {
+    if (tex) {
         paint_texture(cr, b, tex);
     } else if (!bg_painted) {
         gboolean ambient = b->dom &&
@@ -8905,8 +8799,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (box_offscreen && g_paint_collect_stats) g_paint_stats.offscreen++;
 
-    guint first_group_hole = g_paint_video_holes
-        ? g_paint_video_holes->len : 0;
     if (grouped) {
         if (g_paint_collect_stats) g_paint_stats.grouped++;
         cairo_push_group(cr);
@@ -9330,7 +9222,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_paint_with_alpha(cr, op);
         }
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, saved_op);
-        paint_group_video_holes(cr, group_source, mp, op, first_group_hole);
         if (mp) cairo_pattern_destroy(mp);
         cairo_pattern_destroy(group_source);
     }
@@ -9446,7 +9337,6 @@ paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
                const struct ns_selection *sel)
 {
     ns_paint_list_ordinals_begin();
-    if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
     cairo_save(cr);
@@ -9462,7 +9352,6 @@ paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
     paint_top_layer(cr, root, highlight_query);
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
-    if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
     g_paint_have_viewport = FALSE;
     ns_paint_list_ordinals_end();
 }
@@ -9507,13 +9396,6 @@ layers_box_bg_fixed(const ns_box *b)
     return FALSE;
 }
 
-static gboolean
-layers_box_video_composited(const ns_box *b)
-{
-    return b->kind == NS_BOX_VIDEO && b->media && b->media->video &&
-           ns_video_helper_composited(b->media->video);
-}
-
 static int
 layers_vp_kind(const ns_box *b)
 {
@@ -9526,17 +9408,10 @@ layers_vp_kind(const ns_box *b)
     return 0;
 }
 
-static gboolean
-layers_box_needs_frames(const ns_box *b, int under)
-{
-    return (under && layers_box_video_composited(b)) ||
-           layers_box_bg_fixed(b);
-}
-
 static int
 layers_scan_kind(const ns_box *b, int under, gboolean in_atomic)
 {
-    if (layers_box_needs_frames(b, under)) return -1;
+    if (layers_box_bg_fixed(b)) return -1;
     int kind = layers_vp_kind(b);
     if (!kind) return 0;
     gboolean nested_sticky = under == NS_PAINT_VP_STICKY ||
@@ -9635,9 +9510,8 @@ ns_paint_doc_layers(cairo_t *cr, ns_paint_upper_fn upper, gpointer upper_data,
     g_layers.upper_data = upper_data;
     g_layers.n_upper = (int)plan->vp->len;
     paint_document(cr, root, highlight_query, sel);
-    gboolean ok = !g_layers.video_above;
     memset(&g_layers, 0, sizeof g_layers);
-    return ok;
+    return TRUE;
 }
 
 void
@@ -9647,7 +9521,6 @@ ns_paint_vp_layer(cairo_t *cr, const ns_box *root,
                   const struct ns_selection *sel)
 {
     ns_paint_list_ordinals_begin();
-    if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
     paint_cache_clip(cr);
     g_paint_vp_x0 = vp_x;
     g_paint_vp_y0 = vp_y;
@@ -9669,7 +9542,6 @@ ns_paint_vp_layer(cairo_t *cr, const ns_box *root,
     g_paint_sticky_static_box = NULL;
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
-    if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
     g_paint_have_viewport = FALSE;
     ns_paint_list_ordinals_end();
 }

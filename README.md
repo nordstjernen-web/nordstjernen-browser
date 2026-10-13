@@ -82,8 +82,7 @@ DirectComposition). Every other platform builds from source — see
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and **WebM** (VP9/VP8 +
   Opus/Vorbis) through FFmpeg's libav, which Linux and Windows builds require. MSE/`blob:`
-  streaming and HLS/DASH manifests play through the `nordstjernen-video`
-  helper, and a `<track default>` WebVTT file is drawn over the video. Other
+  streaming and HLS/DASH manifests decode in the renderer too, and a `<track default>` WebVTT file is drawn over the video. Other
   codecs render a poster and play overlay. See [docs/media.md](docs/media.md).
 - **WebGL / WebGPU / WebAssembly** — WebGL 1/2 mapped onto OpenGL ES, on by
   default ([docs/webgl.md](docs/webgl.md)); `navigator.gpu` over

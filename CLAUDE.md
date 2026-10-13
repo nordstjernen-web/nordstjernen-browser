@@ -55,13 +55,11 @@ Update Changelog.md
   renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
   commands that ride the render-response `X-Audio` side-channel to the
   shell, which spawns and pumps the helper (`src/gtk/procview.c`).
-  MSE video frames decode in a third process, `nordstjernen-video`
-  (`src/videoproc/main.c`, built when libav is present): the renderer
-  materializes the growing stream to `~/.cache/nordstjernen/msvideo/`
-  and drives it with `video …` lines on the same side-channel; the
-  helper writes BGRA frames into a shm ring that the shell composites
-  over the page surface each tick (see `docs/media.md`). Without the
-  helper (headless, Windows) the renderer decodes in-process as before. The
+  MSE video frames decode in the sandboxed renderer too (`src/video.c`):
+  it keeps the appended segments in memory with their time ranges and
+  feeds the decoder the contiguous buffered range around the playhead,
+  so playback starts on the first media segment and a seek rebuilds the
+  decoder at the segment holding the target (see `docs/media.md`). The
   in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
   vendor further single-file codecs. **WebM is the one FFmpeg-backed
   extension**, over `libav\*` (`libavformat`/`libavcodec`/`libavutil`/

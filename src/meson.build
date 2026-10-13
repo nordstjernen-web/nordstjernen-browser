@@ -393,11 +393,8 @@ if not is_mobile
     endif
     # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
     # the C runtime on macOS and Windows, where find_library('m') is a harmless
-    # no-op. librt carries shm_open/shm_unlink (the audio clock's POSIX shared
-    # memory) on the BSDs, where they live outside libc; it is a harmless no-op
-    # where absent, matching the renderer and video-helper link lines.
-    audio_lib_deps = [cc.find_library('m', required: false),
-                      cc.find_library('rt', required: false)]
+    # no-op.
+    audio_lib_deps = [cc.find_library('m', required: false)]
 
     # On Linux the helper confines itself with the same Landlock + seccomp
     # profile as the renderer once its audio device and network stack are up,
@@ -423,29 +420,6 @@ if not is_mobile
     )
   else
     message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
-  endif
-
-  if have_libav
-    videoproc_deps = [libavformat, libavcodec, libavutil, libswscale,
-                      dependency('threads')]
-    videoproc_sources = files('videoproc/main.c')
-    if host_machine.system() == 'linux'
-      videoproc_sources += files('security.c')
-      videoproc_deps += [glib]
-      if have_seccomp
-        videoproc_deps += [libseccomp]
-      endif
-      videoproc_deps += [cc.find_library('rt', required: false)]
-    endif
-    executable(
-      'nordstjernen-video',
-      videoproc_sources,
-      include_directories: include_directories('.'),
-      dependencies: videoproc_deps + [cc.find_library('m', required: false)],
-      link_args: nordstjernen_link_args,
-      win_subsystem: 'windows',
-      install: true,
-    )
   endif
 endif
 

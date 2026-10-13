@@ -66919,8 +66919,11 @@ ns_mse_buffered_query(JSContext *ctx, int argc, JSValueConst *argv,
     char kind = kind_s && kind_s[0] == 'a' ? 'a' : 'v';
     if (kind_s) JS_FreeCString(ctx, kind_s);
     if (!id) return 0.0;
+    int32_t index = -1;
+    if (argc >= 3 && !JS_IsUndefined(argv[2]))
+        JS_ToInt32(ctx, &index, argv[2]);
     double start = 0.0;
-    double end = js->mse_buffered_cb(id, kind, &start,
+    double end = js->mse_buffered_cb(id, kind, index, &start,
                                      js->mse_buffered_user_data);
     return want_start ? start : end;
 }
