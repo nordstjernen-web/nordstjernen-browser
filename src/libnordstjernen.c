@@ -138,9 +138,6 @@ struct ns_browser {
     int             page_size_w;
     int             page_size_h;
     guint           videos_noted_seq;
-    double          videos_noted_scroll_x;
-    double          videos_noted_scroll_y;
-    double          videos_noted_scale;
     gboolean        hover_restyle_pending;
     ns_box         *sb_box;
     const ns_node  *sb_node;
@@ -772,8 +769,7 @@ settle_tick_cb(gpointer user_data)
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->videos && b->layout) {
         ns_video_cache_discover(b->videos, b->layout, b->doc, now);
-        ns_video_cache_note_layout(b->videos, b->layout, b->cur_scroll_x,
-                                   b->cur_scroll_y, b->cur_scale);
+        ns_video_cache_note_layout(b->videos, b->layout);
         ns_video_cache_tick(b->videos, now);
     }
     browser_sync_scroll_timelines(b);
@@ -807,8 +803,7 @@ browser_settle(ns_browser *b, int settle_ms)
     if (settle_ms <= 0) return;
     if (b->videos && b->layout) {
         ns_video_cache_discover(b->videos, b->layout, b->doc, g_get_monotonic_time());
-        ns_video_cache_note_layout(b->videos, b->layout, b->cur_scroll_x,
-                                   b->cur_scroll_y, b->cur_scale);
+        ns_video_cache_note_layout(b->videos, b->layout);
     }
     if (browser_settle_quiet(b)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
@@ -1061,14 +1056,16 @@ browser_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
 }
 
 static double
-browser_mse_buffered(guint stream_id, char kind, double *start, gpointer ud)
+browser_mse_buffered(guint stream_id, char kind, int index, double *start,
+                     gpointer ud)
 {
     ns_browser *b = ud;
     if (!b || !b->videos) {
         if (start) *start = 0.0;
         return 0.0;
     }
-    return ns_video_cache_mse_buffered(b->videos, stream_id, kind, start);
+    return ns_video_cache_mse_buffered(b->videos, stream_id, kind, index,
+                                       start);
 }
 
 static gboolean
@@ -1097,14 +1094,6 @@ ns_browser_take_pending_audio(ns_browser *browser)
     char *out = g_strdup(browser->pending_audio->str);
     g_string_truncate(browser->pending_audio, 0);
     return out;
-}
-
-int
-ns_browser_video_helper_event(ns_browser *browser, const char *token,
-                              const char *kind)
-{
-    if (!browser || !browser->videos || !kind) return 0;
-    return ns_video_cache_helper_event(browser->videos, token, kind) ? 1 : 0;
 }
 
 int
@@ -1912,20 +1901,11 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             other_changed = TRUE;
         }
         if (browser->videos && browser->layout) {
-            if (browser->videos_noted_seq != browser->layout_seq ||
-                browser->videos_noted_scroll_x != browser->cur_scroll_x ||
-                browser->videos_noted_scroll_y != browser->cur_scroll_y ||
-                browser->videos_noted_scale != browser->cur_scale) {
+            if (browser->videos_noted_seq != browser->layout_seq) {
                 ns_video_cache_discover(browser->videos, browser->layout,
                                         browser->doc, now);
-                ns_video_cache_note_layout(browser->videos, browser->layout,
-                                           browser->cur_scroll_x,
-                                           browser->cur_scroll_y,
-                                           browser->cur_scale);
+                ns_video_cache_note_layout(browser->videos, browser->layout);
                 browser->videos_noted_seq = browser->layout_seq;
-                browser->videos_noted_scroll_x = browser->cur_scroll_x;
-                browser->videos_noted_scroll_y = browser->cur_scroll_y;
-                browser->videos_noted_scale = browser->cur_scale;
             }
             if (ns_video_cache_tick(browser->videos, now)) {
                 changed = TRUE;
@@ -1968,10 +1948,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             if (browser->videos && browser->layout) {
                 ns_video_cache_discover(browser->videos, browser->layout,
                                         browser->doc, g_get_monotonic_time());
-                ns_video_cache_note_layout(browser->videos, browser->layout,
-                                           browser->cur_scroll_x,
-                                           browser->cur_scroll_y,
-                                           browser->cur_scale);
+                ns_video_cache_note_layout(browser->videos, browser->layout);
             }
         }
     }
@@ -2108,10 +2085,7 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
         gint64 now = g_get_monotonic_time();
         ns_video_cache_discover(browser->videos, browser->layout,
                                 browser->doc, now);
-        ns_video_cache_note_layout(browser->videos, browser->layout,
-                                   browser->cur_scroll_x,
-                                   browser->cur_scroll_y,
-                                   browser->cur_scale);
+        ns_video_cache_note_layout(browser->videos, browser->layout);
     }
 
     cairo_surface_t *surf =
@@ -2138,7 +2112,6 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
                                 &browser->selection);
     else
         ns_paint(cr, browser->layout, highlight);
-    ns_video_cache_flush_composites(browser->videos, g_get_monotonic_time());
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
@@ -2222,10 +2195,7 @@ browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
         gint64 now = g_get_monotonic_time();
         ns_video_cache_discover(browser->videos, browser->layout,
                                 browser->doc, now);
-        ns_video_cache_note_layout(browser->videos, browser->layout,
-                                   browser->cur_scroll_x,
-                                   browser->cur_scroll_y,
-                                   browser->cur_scale);
+        ns_video_cache_note_layout(browser->videos, browser->layout);
     }
 }
 
@@ -2306,7 +2276,6 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
     if (!(scale > 0)) scale = 1.0;
 
-    ns_video_cache_set_page_coords(browser->videos, FALSE);
     browser_note_viewport(browser, scroll_x, scroll_y, height, scale);
     cairo_t *cr = browser_paint_context(out, width, height, stride, scale);
     if (!cr) return -1;
@@ -2321,7 +2290,6 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
                                 sel);
     else
         ns_paint(cr, browser->layout, browser->search_query);
-    ns_video_cache_flush_composites(browser->videos, g_get_monotonic_time());
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] paint %6.1fms %dx%d\n",
                    (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
@@ -2340,17 +2308,8 @@ ns_browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
                          int height, double scale)
 {
     if (!browser || !browser->layout) return;
-    ns_video_cache_set_page_coords(browser->videos, TRUE);
     browser_note_viewport(browser, scroll_x, scroll_y, height,
                           scale > 0 ? scale : 1.0);
-}
-
-void
-ns_browser_flush_video_rects(ns_browser *browser)
-{
-    if (browser && browser->videos)
-        ns_video_cache_flush_composites(browser->videos,
-                                        g_get_monotonic_time());
 }
 
 int
@@ -2361,7 +2320,6 @@ ns_browser_layers_prepare(ns_browser *browser, int scroll_x, int scroll_y,
     if (!browser || !browser->layout || !plan || width <= 0 || height <= 0)
         return -1;
     if (!(scale > 0)) scale = 1.0;
-    ns_video_cache_set_page_coords(browser->videos, TRUE);
     browser_note_viewport(browser, scroll_x, scroll_y, height, scale);
     unsigned char *row = g_malloc((size_t)width * 4u);
     cairo_t *cr = browser_paint_context(row, width, 1, width * 4, scale);

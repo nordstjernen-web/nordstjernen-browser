@@ -872,19 +872,26 @@
     }
 
     function ndTimeRanges(start, end) {
-        this.length = end > start ? 1 : 0;
-        this._start = start || 0;
-        this._end = end || 0;
+        this._ranges = end > start ? [[start || 0, end || 0]] : [];
+        this.length = this._ranges.length;
+    }
+    ndTimeRanges.fromList = function (list) {
+        var ranges = new ndTimeRanges(0, 0);
+        ranges._ranges = list;
+        ranges.length = list.length;
+        return ranges;
+    };
+    function ndTimeRangeAt(ranges, index, edge) {
+        index = Number(index);
+        if (!(index >= 0) || index >= ranges.length || index !== Math.floor(index))
+            throw ndDomError('IndexSizeError', 'TimeRanges index is out of bounds');
+        return ranges._ranges[index][edge];
     }
     ndTimeRanges.prototype.start = function (index) {
-        if (index !== 0 || this.length === 0)
-            throw ndDomError('IndexSizeError', 'TimeRanges index is out of bounds');
-        return this._start;
+        return ndTimeRangeAt(this, index, 0);
     };
     ndTimeRanges.prototype.end = function (index) {
-        if (index !== 0 || this.length === 0)
-            throw ndDomError('IndexSizeError', 'TimeRanges index is out of bounds');
-        return this._end;
+        return ndTimeRangeAt(this, index, 1);
     };
     if (typeof global.TimeRanges !== 'function') {
         var TimeRanges = function () {
@@ -1386,11 +1393,16 @@
             if (ndMseNative && ms && ms.mseId &&
                 typeof global.__ndMseBuffered === 'function') {
                 var kind = sourceBufferKind(s);
-                var end = global.__ndMseBuffered(ms.mseId, kind);
-                var start = typeof global.__ndMseBufferedStart === 'function' ?
-                    global.__ndMseBufferedStart(ms.mseId, kind) : 0;
-                return new ndTimeRanges(start >= 0 ? start : 0,
-                                        end > start ? end : 0);
+                var list = [];
+                for (var i = 0; i < 4096; i++) {
+                    var end = Number(global.__ndMseBuffered(ms.mseId, kind, i));
+                    if (!(end > 0)) break;
+                    var start = typeof global.__ndMseBufferedStart === 'function' ?
+                        Number(global.__ndMseBufferedStart(ms.mseId, kind, i)) : 0;
+                    if (!(start >= 0)) start = 0;
+                    if (end > start) list.push([start, end]);
+                }
+                return ndTimeRanges.fromList(list);
             }
             return s.buffered;
         }
