@@ -3,6 +3,20 @@ Changelog:
 
 1.0.32:
 ======
+* Media: MSE video decodes in the renderer again, and the separate
+  `nordstjernen-video` process is gone. The renderer keeps each
+  appended segment with its time range and feeds the decoder only the
+  contiguous run that holds the playhead, so a stream starts on its
+  first media segment, a seek rebuilds the decoder at the segment
+  holding the target instead of seeking through a byte stream whose
+  offsets do not match the original file, and a seek past the buffer
+  waits at the target until the page appends it. `SourceBuffer.buffered`
+  now lists every disjoint range rather than one range from the first
+  to the last byte, so YouTube fetches the segment a seek lands in
+  instead of believing the gap is buffered. Evicting segments with
+  `remove()` no longer restarts the decoder. Headless runs now drive
+  `play()`, `pause()`, `currentTime`, `muted` and `volume` like the
+  shell does.
 * JS: Streams follow the WHATWG Streams standard. `ReadableStream`,
   `WritableStream` and `TransformStream` queue chunks by size, apply
   backpressure through `highWaterMark`, call `pull()` only when there
