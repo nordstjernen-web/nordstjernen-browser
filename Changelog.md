@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* Media: a video's `videoWidth`/`videoHeight` follow the frames being
+  shown and a `resize` event fires when they change. They used to be
+  fixed by the first stream, so after an adaptive-quality switch to a
+  stream of another shape (YouTube serving a 4:3 video after a 16:9
+  start) the page kept sizing the player for the old aspect. libav
+  frames are also no longer stretched to the size the decoder opened
+  with when the stream's resolution changes, and anamorphic sample
+  aspect ratios are applied.
 * Media: libavcodec decodes video with frame and slice threads again
   (up to 8 per decoder), as the removed video helper did, and opening a
   WebM/MP4 decoder no longer runs avformat_find_stream_info when the
