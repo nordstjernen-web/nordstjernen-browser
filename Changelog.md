@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* HTML rendering: an `<iframe>` with no `width`/`height` attribute or
+  CSS size now takes the 300×150 default size of a replaced element,
+  as in other browsers. It used to stretch to its container's width
+  and grow to its document's height.
 * Forms: the `select` event of text controls now follows the HTML
   text-selection APIs. It is queued as a task instead of dispatched
   synchronously, fires only when the selection or direction actually
