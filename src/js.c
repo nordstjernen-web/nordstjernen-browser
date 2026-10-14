@@ -42027,6 +42027,8 @@ ns_text_selection_set_state(JSContext *ctx, JSValueConst this_val,
                       JS_NewString(ctx, direction ? direction : "none"));
 }
 
+static void ns_text_selection_commit(JSContext *ctx, JSValueConst this_val);
+
 static void
 ns_text_selection_value_changed(JSContext *ctx, JSValueConst this_val,
                                 JSValueConst old_value)
@@ -42039,6 +42041,7 @@ ns_text_selection_value_changed(JSContext *ctx, JSValueConst this_val,
             JS_ToUint32(ctx, &length, length_value);
         JS_FreeValue(ctx, length_value);
         ns_text_selection_set_state(ctx, this_val, length, length, "none");
+        ns_text_selection_commit(ctx, this_val);
     }
     JS_FreeValue(ctx, new_value);
 }
@@ -47920,15 +47923,63 @@ ns_text_selection_invalid_state(JSContext *ctx)
         "The element does not support text selection.");
 }
 
+static char *
+ns_text_selection_state_key(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue dir = JS_GetPropertyStr(ctx, this_val, "_selDir");
+    const char *d = JS_IsString(dir) ? JS_ToCString(ctx, dir) : NULL;
+    char *key = g_strdup_printf("%u:%u:%s",
+                                ns_text_selection_position(ctx, this_val, "_selStart"),
+                                ns_text_selection_position(ctx, this_val, "_selEnd"),
+                                d ? d : "none");
+    if (d) JS_FreeCString(ctx, d);
+    JS_FreeValue(ctx, dir);
+    return key;
+}
+
+static void
+ns_text_selection_commit(JSContext *ctx, JSValueConst this_val)
+{
+    char *key = ns_text_selection_state_key(ctx, this_val);
+    JS_SetPropertyStr(ctx, this_val, "_selCommitted", JS_NewString(ctx, key));
+    g_free(key);
+}
+
+static JSValue
+ns_text_selection_fire_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    JS_SetPropertyStr(ctx, argv[0], "_selEventQueued", JS_FALSE);
+    const ns_node *el = ns_unwrap_element(argv[0]);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js || js->halted) return JS_UNDEFINED;
+    JSValue event = ns_make_event(ctx, "select", el);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+    ns_js_dispatch_built_event(js, el, "select", event, NULL);
+    return JS_UNDEFINED;
+}
+
 static void
 ns_text_selection_dispatch(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
-    if (!el || !js || js->halted || js->in_pump) return;
-    JSValue event = ns_make_event(ctx, "select", el);
-    JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
-    ns_js_dispatch_built_event(js, el, "select", event, NULL);
+    if (!el || !js || js->halted) return;
+    char *key = ns_text_selection_state_key(ctx, this_val);
+    JSValue committed = JS_GetPropertyStr(ctx, this_val, "_selCommitted");
+    const char *prev = JS_IsString(committed) ? JS_ToCString(ctx, committed) : NULL;
+    gboolean changed = strcmp(key, prev ? prev : "0:0:none") != 0;
+    if (prev) JS_FreeCString(ctx, prev);
+    JS_FreeValue(ctx, committed);
+    if (changed) JS_SetPropertyStr(ctx, this_val, "_selCommitted", JS_NewString(ctx, key));
+    g_free(key);
+    if (!changed) return;
+    JSValue queued = JS_GetPropertyStr(ctx, this_val, "_selEventQueued");
+    gboolean pending = JS_ToBool(ctx, queued) > 0;
+    JS_FreeValue(ctx, queued);
+    if (pending) return;
+    JS_SetPropertyStr(ctx, this_val, "_selEventQueued", JS_TRUE);
+    ns_js_queue_message_task(ctx, ns_text_selection_fire_job, 1, &this_val);
 }
 
 static JSValue
