@@ -10444,6 +10444,8 @@ border_radius_canonical(const char *value)
     return r;
 }
 
+static void position_try_register(const char *name, const char *body,
+                                  const char *body_end);
 static gboolean prop_is_anchor_property(ns_css_prop prop);
 static char *anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified);
 static char *position_try_shorthand_canonical(const char *value, char **order_out,
@@ -21171,6 +21173,27 @@ parse_rules_until(const char **pp, const char *end,
                 g_free(at_name);
                 continue;
             }
+            if (g_ascii_strcasecmp(at_name, "position-try") == 0) {
+                char term = 0;
+                const char *nm_start = p;
+                const char *prelude_end = css_scan_segment(p, end, &term);
+                char *try_name = g_strstrip(g_strndup(nm_start,
+                                                      (gsize)(prelude_end - nm_start)));
+                p = prelude_end;
+                if (term == '{') {
+                    const char *block_end = css_skip_to_block_end(p, end);
+                    const char *body_start = p + 1;
+                    const char *body_end = css_block_body_end(body_start, block_end);
+                    if (try_name[0] == '-' && try_name[1] == '-' && !strchr(try_name, ' '))
+                        position_try_register(try_name, body_start, body_end);
+                    p = block_end;
+                } else if (term == ';') {
+                    p++;
+                }
+                g_free(try_name);
+                g_free(at_name);
+                continue;
+            }
             if (g_ascii_strcasecmp(at_name, "keyframes") == 0 ||
                 g_ascii_strcasecmp(at_name, "-webkit-keyframes") == 0) {
                 char term = 0;
@@ -26160,6 +26183,25 @@ ns_style_free(ns_style *s)
         g_style_pool[g_style_pool_n++] = s;
     else
         g_free(s);
+}
+
+static GHashTable *g_position_try_rules;
+
+static void
+position_try_register(const char *name, const char *body, const char *body_end)
+{
+    if (!g_position_try_rules)
+        g_position_try_rules = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, g_free);
+    g_hash_table_replace(g_position_try_rules, g_strdup(name),
+                         g_strndup(body, (gsize)(body_end - body)));
+}
+
+const char *
+ns_css_position_try_rule(const char *name)
+{
+    return g_position_try_rules && name
+        ? g_hash_table_lookup(g_position_try_rules, name) : NULL;
 }
 
 ns_style *

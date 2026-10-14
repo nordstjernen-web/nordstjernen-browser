@@ -17154,6 +17154,15 @@ px_value(double px)
 }
 
 static ns_css_value *
+keyword_value_take(char *kw)
+{
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = kw;
+    return v;
+}
+
+static ns_css_value *
 keyword_value(const char *kw)
 {
     ns_css_value *v = g_new0(ns_css_value, 1);
@@ -17299,6 +17308,304 @@ anchor_resolve_style(const ns_box *abox, GHashTable *box_map, double cb_x,
     return c;
 }
 
+static char *
+swap_words(const char *text, const char *const (*pairs)[2], gsize n_pairs)
+{
+    GString *out = g_string_new(NULL);
+    const char *p = text;
+    while (*p) {
+        gboolean word_start = (g_ascii_isalpha(*p)) &&
+            (p == text || !(g_ascii_isalnum(p[-1]) || p[-1] == '-' || p[-1] == '_'));
+        if (word_start) {
+            const char *e = p;
+            while (g_ascii_isalnum(*e) || *e == '-' || *e == '_') e++;
+            gsize len = (gsize)(e - p);
+            const char *repl = NULL;
+            for (gsize i = 0; i < n_pairs && !repl; i++) {
+                if (strlen(pairs[i][0]) == len && strncmp(p, pairs[i][0], len) == 0)
+                    repl = pairs[i][1];
+                else if (strlen(pairs[i][1]) == len && strncmp(p, pairs[i][1], len) == 0)
+                    repl = pairs[i][0];
+            }
+            if (repl) g_string_append(out, repl);
+            else g_string_append_len(out, p, (gssize)len);
+            p = e;
+            continue;
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static void
+style_swap_words(ns_style *c, ns_css_prop prop, const char *const (*pairs)[2],
+                 gsize n_pairs)
+{
+    const ns_css_value *v = c->values[prop];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    char *swapped = ns_css_text_has_anchor_fn(v->u.keyword)
+        ? ns_css_anchor_fn_flip(v->u.keyword, pairs, n_pairs, FALSE)
+        : swap_words(v->u.keyword, pairs, n_pairs);
+    if (!swapped) return;
+    ns_css_value *nv = g_new0(ns_css_value, 1);
+    nv->kind = NS_CSS_V_KEYWORD;
+    nv->u.keyword = swapped;
+    ns_css_value_free(c->values[prop]);
+    c->values[prop] = nv;
+}
+
+static void
+style_swap_props(ns_style *c, ns_css_prop a, ns_css_prop b)
+{
+    ns_css_value *t = c->values[a];
+    c->values[a] = c->values[b];
+    c->values[b] = t;
+}
+
+static void
+apply_try_tactic(ns_style *c, const char *tactic)
+{
+    static const char *const block_words[][2] = {
+        { "top", "bottom" }, { "span-top", "span-bottom" }, { "y-start", "y-end" },
+        { "span-y-start", "span-y-end" }, { "self-y-start", "self-y-end" },
+        { "span-self-y-start", "span-self-y-end" }, { "block-start", "block-end" },
+        { "span-block-start", "span-block-end" },
+        { "self-block-start", "self-block-end" },
+        { "span-self-block-start", "span-self-block-end" },
+        { "start", "end" }, { "self-start", "self-end" },
+        { "flex-start", "flex-end" },
+    };
+    static const char *const inline_words[][2] = {
+        { "left", "right" }, { "span-left", "span-right" }, { "x-start", "x-end" },
+        { "span-x-start", "span-x-end" }, { "self-x-start", "self-x-end" },
+        { "span-self-x-start", "span-self-x-end" }, { "inline-start", "inline-end" },
+        { "span-inline-start", "span-inline-end" },
+        { "self-inline-start", "self-inline-end" },
+        { "span-self-inline-start", "span-self-inline-end" },
+        { "start", "end" }, { "self-start", "self-end" },
+        { "flex-start", "flex-end" },
+    };
+    static const char *const start_words[][2] = {
+        { "top", "left" }, { "bottom", "right" }, { "span-top", "span-left" },
+        { "span-bottom", "span-right" }, { "y-start", "x-start" }, { "y-end", "x-end" },
+        { "block-start", "inline-start" }, { "block-end", "inline-end" },
+        { "width", "height" }, { "block", "inline" },
+        { "self-block", "self-inline" },
+    };
+    gboolean block = strcmp(tactic, "flip-block") == 0 || strcmp(tactic, "flip-y") == 0;
+    gboolean inl = strcmp(tactic, "flip-inline") == 0 || strcmp(tactic, "flip-x") == 0;
+    if (block || inl) {
+        ns_css_prop near = block ? NS_CSS_TOP : NS_CSS_LEFT;
+        ns_css_prop far = block ? NS_CSS_BOTTOM : NS_CSS_RIGHT;
+        ns_css_prop mnear = block ? NS_CSS_MARGIN_TOP : NS_CSS_MARGIN_LEFT;
+        ns_css_prop mfar = block ? NS_CSS_MARGIN_BOTTOM : NS_CSS_MARGIN_RIGHT;
+        ns_css_prop align = block ? NS_CSS_ALIGN_SELF : NS_CSS_JUSTIFY_SELF;
+        const char *const (*words)[2] = block ? block_words : inline_words;
+        gsize nw = block ? G_N_ELEMENTS(block_words) : G_N_ELEMENTS(inline_words);
+        style_swap_props(c, near, far);
+        style_swap_props(c, mnear, mfar);
+        ns_css_prop sides[2] = { near, far };
+        for (int k = 0; k < 2; k++) {
+            const ns_css_value *sv = c->values[sides[k]];
+            if (sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
+                ns_css_text_has_anchor_fn(sv->u.keyword)) {
+                char *flipped = ns_css_anchor_fn_flip(sv->u.keyword, words, nw, TRUE);
+                if (flipped) style_put(c, sides[k], keyword_value_take(flipped));
+            }
+        }
+        style_swap_words(c, align, words, nw);
+        style_swap_words(c, NS_CSS_POSITION_AREA, words, nw - 3);
+        return;
+    }
+    if (strcmp(tactic, "flip-start") == 0) {
+        static const ns_css_prop swaps[][2] = {
+            { NS_CSS_TOP, NS_CSS_LEFT }, { NS_CSS_BOTTOM, NS_CSS_RIGHT },
+            { NS_CSS_WIDTH, NS_CSS_HEIGHT }, { NS_CSS_MIN_WIDTH, NS_CSS_MIN_HEIGHT },
+            { NS_CSS_MAX_WIDTH, NS_CSS_MAX_HEIGHT },
+            { NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_LEFT },
+            { NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_RIGHT },
+            { NS_CSS_ALIGN_SELF, NS_CSS_JUSTIFY_SELF },
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(swaps); i++) {
+            style_swap_props(c, swaps[i][0], swaps[i][1]);
+            style_swap_words(c, swaps[i][0], start_words, G_N_ELEMENTS(start_words));
+            style_swap_words(c, swaps[i][1], start_words, G_N_ELEMENTS(start_words));
+        }
+        style_swap_words(c, NS_CSS_POSITION_AREA, start_words, G_N_ELEMENTS(start_words));
+    }
+}
+
+static gboolean
+value_is_wide_keyword(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "unset") == 0 || strcmp(v->u.keyword, "initial") == 0 ||
+            strcmp(v->u.keyword, "revert") == 0 || strcmp(v->u.keyword, "revert-layer") == 0 ||
+            strcmp(v->u.keyword, "inherit") == 0);
+}
+
+static gboolean
+try_rule_prop_allowed(int prop)
+{
+    switch (prop) {
+    case NS_CSS_TOP: case NS_CSS_RIGHT: case NS_CSS_BOTTOM: case NS_CSS_LEFT:
+    case NS_CSS_MARGIN_TOP: case NS_CSS_MARGIN_RIGHT: case NS_CSS_MARGIN_BOTTOM:
+    case NS_CSS_MARGIN_LEFT: case NS_CSS_WIDTH: case NS_CSS_HEIGHT:
+    case NS_CSS_MIN_WIDTH: case NS_CSS_MIN_HEIGHT: case NS_CSS_MAX_WIDTH:
+    case NS_CSS_MAX_HEIGHT: case NS_CSS_ALIGN_SELF: case NS_CSS_JUSTIFY_SELF:
+    case NS_CSS_POSITION_ANCHOR: case NS_CSS_POSITION_AREA:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void
+try_decls_free(GArray *d)
+{
+    for (guint i = 0; i < d->len; i++)
+        ns_css_value_free(g_array_index(d, ns_css_decl, i).value);
+    g_array_free(d, TRUE);
+}
+
+static ns_style *
+anchor_try_style(const ns_style *base, const char *option)
+{
+    ns_style *c = ns_style_clone(base);
+    char **words = g_strsplit(option, " ", -1);
+    gboolean ok = TRUE;
+    gboolean area = words[0] && !g_str_has_prefix(words[0], "flip-") &&
+                    !g_str_has_prefix(words[0], "--");
+    if (area) {
+        char *decl = g_strdup_printf("position-area: %s", option);
+        GArray *d = ns_css_parse_declarations(decl);
+        g_free(decl);
+        ok = d && d->len > 0;
+        for (guint i = 0; ok && i < d->len; i++) {
+            ns_css_decl *x = &g_array_index(d, ns_css_decl, i);
+            if (x->prop != NS_CSS_POSITION_AREA) continue;
+            ns_css_value_free(c->values[x->prop]);
+            c->values[x->prop] = ns_css_value_dup(x->value);
+        }
+        if (d) try_decls_free(d);
+    } else {
+        for (int i = 0; ok && words[i]; i++) {
+            if (g_str_has_prefix(words[i], "--")) {
+                const char *body = ns_css_position_try_rule(words[i]);
+                if (!body) {
+                    ok = FALSE;
+                    break;
+                }
+                GArray *d = ns_css_parse_declarations(body);
+                for (guint k = 0; d && k < d->len; k++) {
+                    ns_css_decl *x = &g_array_index(d, ns_css_decl, k);
+                    if (!try_rule_prop_allowed((int)x->prop)) continue;
+                    ns_css_value_free(c->values[x->prop]);
+                    c->values[x->prop] = value_is_wide_keyword(x->value)
+                        ? NULL : ns_css_value_dup(x->value);
+                }
+                if (d) try_decls_free(d);
+            } else {
+                apply_try_tactic(c, words[i]);
+            }
+        }
+    }
+    g_strfreev(words);
+    if (!ok) {
+        ns_style_free(c);
+        return NULL;
+    }
+    return c;
+}
+
+typedef struct {
+    char  *option;
+    double size;
+} try_option_rank;
+
+static gint
+try_option_rank_cmp(gconstpointer a, gconstpointer b)
+{
+    const try_option_rank *x = a, *y = b;
+    return x->size < y->size ? 1 : x->size > y->size ? -1 : 0;
+}
+
+static void
+anchor_try_order(char **options, ns_box *abox, GHashTable *box_map,
+                 const double cb[4])
+{
+    const ns_css_value *ov = abox->style->values[NS_CSS_POSITION_TRY_ORDER];
+    if (!ov || ov->kind != NS_CSS_V_KEYWORD || !ov->u.keyword ||
+        strcmp(ov->u.keyword, "normal") == 0)
+        return;
+    gboolean by_width = strcmp(ov->u.keyword, "most-width") == 0 ||
+                        strcmp(ov->u.keyword, "most-inline-size") == 0;
+    int n = (int)g_strv_length(options);
+    GArray *ranks = g_array_new(FALSE, FALSE, sizeof(try_option_rank));
+    const ns_style *base = abox->style;
+    for (int i = 0; i < n; i++) {
+        try_option_rank r = { options[i], -1 };
+        ns_style *opt = anchor_try_style(base, options[i]);
+        if (opt) {
+            abox->style = opt;
+            double imcb[4];
+            gboolean has = FALSE;
+            ns_style *res = anchor_resolve_style(abox, box_map, cb[0], cb[1], cb[2],
+                                                 cb[3], imcb, &has);
+            const ns_style *eff = res ? res : opt;
+            if (!has) memcpy(imcb, cb, sizeof imcb);
+            double near = 0, far = 0;
+            ns_css_prop pn = by_width ? NS_CSS_LEFT : NS_CSS_TOP;
+            ns_css_prop pf = by_width ? NS_CSS_RIGHT : NS_CSS_BOTTOM;
+            double basis = by_width ? imcb[2] : imcb[3];
+            if (eff->values[pn] && eff->values[pn]->kind == NS_CSS_V_LENGTH)
+                near = length_resolve(eff->values[pn], basis, 0);
+            if (eff->values[pf] && eff->values[pf]->kind == NS_CSS_V_LENGTH)
+                far = length_resolve(eff->values[pf], basis, 0);
+            r.size = basis - near - far;
+            abox->style = base;
+            if (res) ns_style_free(res);
+            ns_style_free(opt);
+        }
+        g_array_append_val(ranks, r);
+    }
+    g_array_sort(ranks, try_option_rank_cmp);
+    for (int i = 0; i < n; i++) options[i] = g_array_index(ranks, try_option_rank, i).option;
+    g_array_free(ranks, TRUE);
+}
+
+static char **
+anchor_try_options(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_POSITION_TRY_FALLBACKS] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
+        strcmp(v->u.keyword, "none") == 0)
+        return NULL;
+    char **items = g_strsplit(v->u.keyword, ", ", -1);
+    return items && items[0] ? items : (g_strfreev(items), NULL);
+}
+
+static gboolean
+abs_box_fits(const ns_box *abox, const double imcb[4])
+{
+    const ns_style *s = abox->style;
+    double l = imcb[0], t = imcb[1], r = imcb[0] + imcb[2], b = imcb[1] + imcb[3];
+    const ns_css_value *v;
+    if ((v = s->values[NS_CSS_LEFT]) && v->kind == NS_CSS_V_LENGTH) l += length_resolve(v, imcb[2], 0);
+    if ((v = s->values[NS_CSS_RIGHT]) && v->kind == NS_CSS_V_LENGTH) r -= length_resolve(v, imcb[2], 0);
+    if ((v = s->values[NS_CSS_TOP]) && v->kind == NS_CSS_V_LENGTH) t += length_resolve(v, imcb[3], 0);
+    if ((v = s->values[NS_CSS_BOTTOM]) && v->kind == NS_CSS_V_LENGTH) b -= length_resolve(v, imcb[3], 0);
+    double x0 = abox->x, y0 = abox->y;
+    double x1 = x0 + abox->margin.left + abox->border.left + abox->padding.left +
+                abox->content_width + abox->padding.right + abox->border.right +
+                abox->margin.right;
+    double y1 = y0 + abox->margin.top + abox->border.top + abox->padding.top +
+                abox->content_height + abox->padding.bottom + abox->border.bottom +
+                abox->margin.bottom;
+    const double eps = 0.5;
+    return x0 >= l - eps && y0 >= t - eps && x1 <= r + eps && y1 <= b + eps;
+}
+
 static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
@@ -17361,6 +17668,35 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
         gboolean cb_is_icb = (cb_dom == NULL);
+        const ns_style *anchor_base_style = abox->style;
+        char **try_options = anchor_try_options(anchor_base_style);
+        if (try_options) {
+            double ocb[4] = {
+                cb_is_icb ? 0 : cb->x + cb->margin.left + cb->border.left,
+                cb_is_icb ? 0 : cb->y + cb->margin.top + cb->border.top,
+                cb_is_icb ? ns_css_viewport_w()
+                          : cb->content_width + cb->padding.left + cb->padding.right,
+                cb_is_icb ? ns_css_viewport_h()
+                          : cb->content_height + cb->padding.top + cb->padding.bottom,
+            };
+            anchor_try_order(try_options, abox, box_map, ocb);
+        }
+        int try_index = -1;
+        gboolean try_settled = try_options == NULL;
+        double saved_cw = abox->content_width, saved_ch = abox->content_height;
+        double saved_dh = abox->definite_height;
+    anchor_retry:
+        if (abox->owned_style) {
+            ns_style_free(abox->owned_style);
+            abox->owned_style = NULL;
+        }
+        abox->style = anchor_base_style;
+        abox->content_width = saved_cw;
+        abox->content_height = saved_ch;
+        abox->definite_height = saved_dh;
+        ns_style *try_style = try_index >= 0
+            ? anchor_try_style(anchor_base_style, try_options[try_index]) : NULL;
+        if (try_style) abox->style = try_style;
         double anchor_imcb[4] = { 0 };
         gboolean anchor_has_imcb = FALSE;
         {
@@ -17376,6 +17712,15 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (resolved) {
                 abox->owned_style = resolved;
                 abox->style = resolved;
+                if (try_style) ns_style_free(try_style);
+            } else if (try_style) {
+                abox->owned_style = try_style;
+            }
+            if (!anchor_has_imcb) {
+                anchor_imcb[0] = acb_x;
+                anchor_imcb[1] = acb_y;
+                anchor_imcb[2] = acb_w;
+                anchor_imcb[3] = acb_h;
             }
         }
         double cb_pad_w = cb->content_width + cb->padding.left + cb->padding.right;
@@ -17565,6 +17910,17 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h);
         else
             position_absolute_box(abox, cb, cb_is_icb);
+        if (!try_settled && !abs_box_fits(abox, anchor_imcb)) {
+            if (try_options[try_index + 1]) {
+                try_index++;
+                goto anchor_retry;
+            }
+            try_settled = TRUE;
+            try_index = -1;
+            goto anchor_retry;
+        }
+        try_settled = TRUE;
+        g_strfreev(try_options);
     }
     g_free(batch_y);
     g_free(batch_resolved);

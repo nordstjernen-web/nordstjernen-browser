@@ -29,6 +29,8 @@ char    *ns_css_anchor_fn_canonical(const char *text, gboolean allow_anchor,
 gboolean ns_css_anchor_fn_eval(const char *canonical, const ns_anchor_eval_ctx *cx,
                                double *out_px);
 char    *ns_css_anchor_fn_fallback(const char *canonical);
+char    *ns_css_anchor_fn_flip(const char *canonical, const char *const (*pairs)[2],
+                               gsize n_pairs, gboolean invert_percent);
 
 char    *ns_css_dashed_ident_list_canonical(const char *text,
                                             const char *const *keywords);
