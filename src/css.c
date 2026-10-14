@@ -10556,6 +10556,11 @@ ns_css_specified_canonical(const char *prop, const char *value)
             char *c = shape_prop_canonical((ns_css_prop)apid, value);
             if (c) return c;
         }
+        if (apid == NS_CSS_CLIP_PATH) {
+            gboolean is_shape = FALSE;
+            char *c = ns_css_clip_path_canonical(value, NULL, &is_shape);
+            if (c) return c;
+        }
     }
     if (prop && strcmp(prop, "display") == 0) {
         char *d = ns_css_display_canonical(value);
@@ -12891,6 +12896,18 @@ parse_value_for(ns_css_prop prop, const char *text)
         v->kind = NS_CSS_V_KEYWORD;
         v->u.keyword = canon;
         return v;
+    }
+    if (prop == NS_CSS_CLIP_PATH) {
+        gboolean is_shape = FALSE;
+        char *canon = ns_css_clip_path_canonical(t, NULL, &is_shape);
+        if (is_shape) {
+            g_free(t);
+            if (!canon) return NULL;
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = canon;
+            return v;
+        }
     }
     if (prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_SHAPE_MARGIN ||
         prop == NS_CSS_SHAPE_IMAGE_THRESHOLD) {
@@ -28657,7 +28674,9 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
     if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
     if (prop == NS_CSS_SHAPE_IMAGE_THRESHOLD)
         return ns_css_shape_image_threshold_canonical(v->u.keyword, TRUE);
-    if (prop != NS_CSS_SHAPE_OUTSIDE && prop != NS_CSS_SHAPE_MARGIN) return NULL;
+    if (prop != NS_CSS_SHAPE_OUTSIDE && prop != NS_CSS_SHAPE_MARGIN &&
+        prop != NS_CSS_CLIP_PATH)
+        return NULL;
     ns_css_syntax_ctx sc;
     syntax_ctx_for_style(&sc, s, style_font_px(root ? root : s), TRUE);
     ns_shape_ctx cx = {
@@ -28665,6 +28684,10 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
         .ex_px = sc.ex_px, .ch_px = sc.ch_px,
         .vw = sc.viewport_w, .vh = sc.viewport_h,
     };
+    if (prop == NS_CSS_CLIP_PATH) {
+        gboolean is_shape = FALSE;
+        return ns_css_clip_path_canonical(v->u.keyword, &cx, &is_shape);
+    }
     return prop == NS_CSS_SHAPE_OUTSIDE ? ns_css_shape_outside_canonical(v->u.keyword, &cx)
                                         : ns_css_shape_margin_canonical(v->u.keyword, &cx);
 }
