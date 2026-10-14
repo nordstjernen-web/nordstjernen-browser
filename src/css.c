@@ -8,6 +8,7 @@
 #include "css_color.h"
 #include "css_anchor.h"
 #include "css_shape.h"
+#include "css_filter.h"
 
 #include "config.h"
 #include "image.h"
@@ -12963,6 +12964,19 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
                               double t)
 {
     if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
+    if ((prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) && a && b &&
+        a->kind == NS_CSS_V_KEYWORD && b->kind == NS_CSS_V_KEYWORD) {
+        ns_shape_ctx cx = {
+            .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+            .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h(),
+        };
+        char *mix = ns_css_filter_interpolate(a->u.keyword, b->u.keyword, t, &cx);
+        if (!mix) return NULL;
+        ns_css_value *out = g_new0(ns_css_value, 1);
+        out->kind = NS_CSS_V_KEYWORD;
+        out->u.keyword = mix;
+        return out;
+    }
     return ns_css_value_interpolate(a, b, t);
 }
 
@@ -27232,6 +27246,19 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
         double na, nb;
         gboolean ia, ib;
         if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(underlying, v, 1, 1);
+        if (prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) {
+            ns_shape_ctx cx = {
+                .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+                .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h(),
+            };
+            char *sum = ns_css_filter_composite(underlying->u.keyword, v->u.keyword,
+                                                accumulate, &cx);
+            if (!sum) return NULL;
+            out = g_new0(ns_css_value, 1);
+            out->kind = NS_CSS_V_KEYWORD;
+            out->u.keyword = sum;
+            return out;
+        }
         if ((prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_CLIP_PATH) && !accumulate) {
             ns_shape_ctx cx = {
                 .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
@@ -28829,7 +28856,7 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
     if (prop == NS_CSS_SHAPE_IMAGE_THRESHOLD)
         return ns_css_shape_image_threshold_canonical(v->u.keyword, TRUE);
     if (prop != NS_CSS_SHAPE_OUTSIDE && prop != NS_CSS_SHAPE_MARGIN &&
-        prop != NS_CSS_CLIP_PATH)
+        prop != NS_CSS_CLIP_PATH && prop != NS_CSS_FILTER && prop != NS_CSS_BACKDROP_FILTER)
         return NULL;
     ns_css_syntax_ctx sc;
     syntax_ctx_for_style(&sc, s, style_font_px(root ? root : s), TRUE);
@@ -28841,6 +28868,17 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
     if (prop == NS_CSS_CLIP_PATH) {
         gboolean is_shape = FALSE;
         return ns_css_clip_path_canonical(v->u.keyword, &cx, &is_shape);
+    }
+    if (prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) {
+        const ns_css_value *c = s->values[NS_CSS_COLOR];
+        guint8 current[4] = { 0, 0, 0, 255 };
+        if (c && c->kind == NS_CSS_V_COLOR) {
+            current[0] = c->u.color.r;
+            current[1] = c->u.color.g;
+            current[2] = c->u.color.b;
+            current[3] = c->u.color.a;
+        }
+        return ns_css_filter_computed(v->u.keyword, &cx, current);
     }
     return prop == NS_CSS_SHAPE_OUTSIDE ? ns_css_shape_outside_canonical(v->u.keyword, &cx)
                                         : ns_css_shape_margin_canonical(v->u.keyword, &cx);
