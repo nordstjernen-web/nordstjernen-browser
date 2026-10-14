@@ -10,6 +10,13 @@ Changelog:
   longhands. These declarations used to be dropped, so
   `CSS.supports('columns', 'initial')` was false and removing such a
   shorthand from an inline style left its longhands behind.
+* JavaScript: module scripts fetched over HTTP must be served with a
+  JavaScript MIME type, and `import ... with { type: "json" }` modules
+  with a JSON MIME type (`application/json`, `text/json` or `*/*+json`).
+  The Content-Type is parsed as the MIME Sniffing spec says, so a value
+  with control characters, separators or non-ASCII characters in its
+  type or subtype is rejected. Rejected and failed module fetches throw
+  `TypeError`, as in other browsers, instead of `ReferenceError`.
 * CSS: anchored boxes that overflow fall back through
   `position-try-fallbacks`. The flip tactics (`flip-block`,
   `flip-inline`, `flip-start`, `flip-x`, `flip-y`) mirror insets,
