@@ -3,6 +3,9 @@ Changelog:
 
 1.0.32:
 ======
+* README: the conformance table uses a full re-run with the corrected
+  test runner. The earlier HTML figure missed about 88,000 subtests
+  that the runner had wrongly recorded as crashes.
 * CSSOM: `@position-try` rules appear in `cssRules` as
   `CSSPositionTryRule`, with `name`, `cssText` and a `style` of type
   `CSSPositionTryDescriptors`. The descriptors expose only the
