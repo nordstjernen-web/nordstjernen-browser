@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* HTML: `<input type=color>` supports the `alpha` and `colorspace`
+  attributes and their `alpha`/`colorSpace` IDL reflections. Its value
+  now accepts any CSS color (named, `rgb()`, `oklch()`, `color()`, ...)
+  through the CSS Color module. Without `alpha` it serializes as `#rrggbb`
+  in `limited-srgb` and as `color(display-p3 ...)` in `display-p3`; with
+  `alpha` the alpha channel is kept. Values that do not parse become
+  opaque black. WPT `color.window.html` goes from 21 to 187 of 196.
 * HTML: `<script>` decides whether to run from its `type` and `language`
   attributes as the HTML spec says. Every JavaScript MIME type essence
   now runs: `application/ecmascript`, `application/x-javascript`,
