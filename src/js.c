@@ -265,6 +265,7 @@ static gboolean ns_script_type_is_module(const ns_node *n);
 enum { NS_SCRIPT_KIND_NONE, NS_SCRIPT_KIND_CLASSIC, NS_SCRIPT_KIND_MODULE,
        NS_SCRIPT_KIND_IMPORTMAP };
 static int ns_script_kind(const ns_node *n);
+static gboolean javascript_mime_essence_match(const char *s, gsize len);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
@@ -63697,6 +63698,58 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
     return func_val;
 }
 
+static gboolean
+http_token_char(guchar c)
+{
+    return g_ascii_isalnum(c) || (c && strchr("!#$%&'*+-.^_`|~", c));
+}
+
+static char *
+mime_essence(const char *ct)
+{
+    if (!ct) return NULL;
+    const char *p = ct;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    const char *type = p;
+    while (*p && *p != '/') {
+        if (!http_token_char((guchar)*p)) return NULL;
+        p++;
+    }
+    if (*p != '/' || p == type) return NULL;
+    gsize type_len = (gsize)(p - type);
+    const char *sub = ++p;
+    while (*p && *p != ';') p++;
+    const char *sub_end = p;
+    while (sub_end > sub && (sub_end[-1] == ' ' || sub_end[-1] == '\t' ||
+                             sub_end[-1] == '\n' || sub_end[-1] == '\r'))
+        sub_end--;
+    if (sub_end == sub) return NULL;
+    for (const char *q = sub; q < sub_end; q++)
+        if (!http_token_char((guchar)*q)) return NULL;
+    char *essence = g_strdup_printf("%.*s/%.*s", (int)type_len, type,
+                                    (int)(sub_end - sub), sub);
+    char *lower = g_ascii_strdown(essence, -1);
+    g_free(essence);
+    return lower;
+}
+
+static gboolean
+module_mime_acceptable(const char *content_type, gboolean json_module)
+{
+    char *essence = mime_essence(content_type);
+    if (!essence) return FALSE;
+    gboolean ok;
+    if (json_module) {
+        ok = strcmp(essence, "application/json") == 0 ||
+             strcmp(essence, "text/json") == 0 ||
+             g_str_has_suffix(essence, "+json");
+    } else {
+        ok = javascript_mime_essence_match(essence, strlen(essence));
+    }
+    g_free(essence);
+    return ok;
+}
+
 static JSModuleDef *
 ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                     JSValueConst attributes)
@@ -63801,7 +63854,14 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         }
         if (resp) ns_response_free(resp);
         g_clear_error(&err);
-        JS_ThrowReferenceError(ctx, "module fetch failed: %s", module_name);
+        JS_ThrowTypeError(ctx, "module fetch failed: %s", module_name);
+        return NULL;
+    }
+    if (!module_mime_acceptable(resp->content_type, json_module)) {
+        JS_ThrowTypeError(ctx, "%s module %s has disallowed MIME type %s",
+                          json_module ? "JSON" : "JavaScript", module_name,
+                          resp->content_type ? resp->content_type : "(none)");
+        ns_response_free(resp);
         return NULL;
     }
     if (js) js->module_load_bytes += resp->body->len;
