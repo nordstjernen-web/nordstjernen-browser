@@ -3,6 +3,9 @@ Changelog:
 
 1.0.32:
 ======
+* README: conformance numbers from the local web-platform-tests and
+  test262 runs, and the new CSS Color, anchor positioning, Shapes and
+  animation-composition coverage in the feature list.
 * DOM: `offsetTop`, `offsetLeft` and `offsetParent` of elements inside
   an `<iframe>` are measured within the frame's own document. They
   used to include the frame's position in the embedding page, which
