@@ -459,6 +459,8 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_SIZE_ADJUST]     = "font-size-adjust",
     [NS_CSS_TEXT_JUSTIFY]         = "text-justify",
     [NS_CSS_TEXT_ALIGN_LAST]      = "text-align-last",
+    [NS_CSS_CONTAIN_INTRINSIC_WIDTH] = "contain-intrinsic-width",
+    [NS_CSS_CONTAIN_INTRINSIC_HEIGHT] = "contain-intrinsic-height",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9459,6 +9461,11 @@ ns_css_initial_value_text(const char *name)
         { "font-size-adjust",           "none" },
         { "text-justify",               "auto" },
         { "text-align-last",            "auto" },
+        { "contain-intrinsic-width",    "none" },
+        { "contain-intrinsic-height",   "none" },
+        { "contain-intrinsic-block-size", "none" },
+        { "contain-intrinsic-inline-size", "none" },
+        { "contain-intrinsic-size",     "none" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10470,6 +10477,10 @@ static gboolean prop_is_anchor_property(ns_css_prop prop);
 static char *anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified);
 static char *shape_prop_canonical(ns_css_prop prop, const char *t);
 static char *font_size_adjust_canonical(const char *text);
+static char *contain_intrinsic_canonical(const char *t, char **height_out);
+static char *contain_intrinsic_shorthand_text(const char *w, const char *h);
+static ns_css_value *contain_intrinsic_mix(const ns_css_value *a, const ns_css_value *b,
+                                           double t);
 static char *position_try_shorthand_canonical(const char *value, char **order_out,
                                               char **fallbacks_out);
 
@@ -10575,6 +10586,20 @@ ns_css_specified_canonical(const char *prop, const char *value)
         if (apid == NS_CSS_FONT_SIZE_ADJUST) {
             char *c = font_size_adjust_canonical(value);
             if (c) return c;
+        }
+        if (apid == NS_CSS_CONTAIN_INTRINSIC_WIDTH || apid == NS_CSS_CONTAIN_INTRINSIC_HEIGHT) {
+            char *c = contain_intrinsic_canonical(value, NULL);
+            if (c) return c;
+        }
+        if (strcmp(prop, "contain-intrinsic-size") == 0) {
+            char *h = NULL;
+            char *w = contain_intrinsic_canonical(value, &h);
+            if (w) {
+                char *c = contain_intrinsic_shorthand_text(w, h);
+                g_free(w);
+                g_free(h);
+                return c;
+            }
         }
     }
     if (prop && strcmp(prop, "display") == 0) {
@@ -12976,6 +13001,8 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
                               double t)
 {
     if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
+    if (prop == NS_CSS_CONTAIN_INTRINSIC_WIDTH || prop == NS_CSS_CONTAIN_INTRINSIC_HEIGHT)
+        return contain_intrinsic_mix(a, b, t);
     if ((prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) && a && b &&
         a->kind == NS_CSS_V_KEYWORD && b->kind == NS_CSS_V_KEYWORD) {
         ns_shape_ctx cx = {
@@ -12990,6 +13017,133 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
         return out;
     }
     return ns_css_value_interpolate(a, b, t);
+}
+
+static gboolean
+contain_intrinsic_length(const char *tok, double *px)
+{
+    if (strcmp(tok, "0") == 0) {
+        *px = 0;
+        return TRUE;
+    }
+    ns_css_value *v = parse_value_for(NS_CSS_WIDTH, tok);
+    gboolean ok = v && ((v->kind == NS_CSS_V_LENGTH && v->u.length.unit != NS_CSS_UNIT_PERCENT &&
+                         v->u.length.unit != NS_CSS_UNIT_NUMBER && v->u.length.v >= 0) ||
+                        (v->kind == NS_CSS_V_CALC && v->u.calc.pct == 0));
+    if (ok) *px = ns_css_dimension_px(v, 16, 0);
+    ns_css_value_free(v);
+    return ok;
+}
+
+static char *
+contain_intrinsic_axis(char **tok, int n, int *used)
+{
+    *used = 0;
+    if (n < 1) return NULL;
+    double px;
+    if (g_ascii_strcasecmp(tok[0], "auto") == 0) {
+        if (n < 2) return NULL;
+        *used = 2;
+        if (g_ascii_strcasecmp(tok[1], "none") == 0) return g_strdup("auto none");
+        if (!contain_intrinsic_length(tok[1], &px)) return NULL;
+        return g_strdup_printf("auto %s", strcmp(tok[1], "0") == 0 ? "0px" : tok[1]);
+    }
+    *used = 1;
+    if (g_ascii_strcasecmp(tok[0], "none") == 0) return g_strdup("none");
+    if (!contain_intrinsic_length(tok[0], &px)) return NULL;
+    return g_strdup(strcmp(tok[0], "0") == 0 ? "0px" : tok[0]);
+}
+
+static int
+contain_intrinsic_tokens(const char *t, char **tok, int max)
+{
+    char *lower = g_ascii_strdown(t, -1);
+    char **parts = g_strsplit_set(lower, " \t\n", -1);
+    int n = 0;
+    for (int i = 0; parts[i]; i++) {
+        if (!*parts[i]) continue;
+        if (n == max) {
+            n = -1;
+            break;
+        }
+        tok[n++] = g_strdup(parts[i]);
+    }
+    g_strfreev(parts);
+    g_free(lower);
+    return n;
+}
+
+static char *
+contain_intrinsic_canonical(const char *t, char **height_out)
+{
+    char *tok[5] = { 0 };
+    int n = contain_intrinsic_tokens(t, tok, 4);
+    char *first = NULL, *second = NULL;
+    int used = 0;
+    if (n > 0) first = contain_intrinsic_axis(tok, n, &used);
+    if (first && used < n) {
+        int used2 = 0;
+        second = contain_intrinsic_axis(tok + used, n - used, &used2);
+        if (!second || used + used2 != n) {
+            g_free(first);
+            g_free(second);
+            first = second = NULL;
+        }
+    }
+    if (first && !height_out && second) {
+        g_free(first);
+        g_free(second);
+        first = second = NULL;
+    }
+    for (int i = 0; i < 5; i++) g_free(tok[i]);
+    if (!first) return NULL;
+    if (height_out) *height_out = second ? second : g_strdup(first);
+    else g_free(second);
+    return first;
+}
+
+static char *
+contain_intrinsic_shorthand_text(const char *w, const char *h)
+{
+    if (strcmp(w, h) == 0) return g_strdup(w);
+    return g_strdup_printf("%s %s", w, h);
+}
+
+static gboolean
+contain_intrinsic_parse(const char *text, gboolean *is_auto, gboolean *none, double *px,
+                        double font_px)
+{
+    char *tok[3] = { 0 };
+    int n = contain_intrinsic_tokens(text, tok, 2);
+    gboolean ok = n >= 1;
+    *is_auto = ok && strcmp(tok[0], "auto") == 0;
+    const char *len = ok ? tok[n - 1] : NULL;
+    *none = ok && strcmp(len, "none") == 0;
+    *px = 0;
+    if (ok && !*none) {
+        ns_css_value *v = strcmp(len, "0") == 0 ? NULL : parse_value_for(NS_CSS_WIDTH, len);
+        if (v) *px = ns_css_dimension_px(v, font_px, 0);
+        ns_css_value_free(v);
+    }
+    for (int i = 0; i < 3; i++) g_free(tok[i]);
+    return ok;
+}
+
+static ns_css_value *
+contain_intrinsic_mix(const ns_css_value *a, const ns_css_value *b, double t)
+{
+    gboolean aa, an, ba, bn;
+    double ap, bp;
+    if (!a || !b || a->kind != NS_CSS_V_KEYWORD || b->kind != NS_CSS_V_KEYWORD ||
+        !contain_intrinsic_parse(a->u.keyword, &aa, &an, &ap, 16) ||
+        !contain_intrinsic_parse(b->u.keyword, &ba, &bn, &bp, 16) ||
+        an || bn || aa != ba)
+        return NULL;
+    double px = MAX(ap + (bp - ap) * t, 0.0);
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    out->kind = NS_CSS_V_KEYWORD;
+    out->u.keyword = g_strdup_printf(aa ? "auto %gpx" : "%gpx", px);
+    return out;
 }
 
 static char *
@@ -13036,6 +13190,15 @@ parse_value_for(ns_css_prop prop, const char *text)
     int anchor_mode = anchor_fn_mode(prop);
     if (anchor_mode && ns_css_text_has_anchor_fn(t)) {
         char *canon = ns_css_anchor_fn_canonical(t, anchor_mode == 1, TRUE);
+        g_free(t);
+        if (!canon) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        return v;
+    }
+    if (prop == NS_CSS_CONTAIN_INTRINSIC_WIDTH || prop == NS_CSS_CONTAIN_INTRINSIC_HEIGHT) {
+        char *canon = contain_intrinsic_canonical(t, NULL);
         g_free(t);
         if (!canon) return NULL;
         v = g_new0(ns_css_value, 1);
@@ -14423,6 +14586,8 @@ static const struct { const char *logical; const char *physical; } kLogicalAlias
     { "min-inline-size",           "min-width" },
     { "max-block-size",            "max-height" },
     { "max-inline-size",           "max-width" },
+    { "contain-intrinsic-block-size", "contain-intrinsic-height" },
+    { "contain-intrinsic-inline-size", "contain-intrinsic-width" },
 };
 
 static const char *
@@ -17022,6 +17187,8 @@ parse_declaration_block(const char **pp, const char *end,
                                          NS_CSS_PROP_COUNT } },
             { "position-try", { NS_CSS_POSITION_TRY_ORDER, NS_CSS_POSITION_TRY_FALLBACKS,
                                 NS_CSS_PROP_COUNT } },
+            { "contain-intrinsic-size", { NS_CSS_CONTAIN_INTRINSIC_WIDTH,
+                                          NS_CSS_CONTAIN_INTRINSIC_HEIGHT, NS_CSS_PROP_COUNT } },
         };
         ns_css_value *shorthand_wide = NULL;
         for (gsize si = 0; si < G_N_ELEMENTS(wide_shorthands); si++) {
@@ -18325,6 +18492,26 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
+        if (strcmp(pname, "contain-intrinsic-size") == 0) {
+            char *h = NULL;
+            char *w = contain_intrinsic_canonical(vtext, &h);
+            if (w) {
+                ns_css_decl dw = { .prop = NS_CSS_CONTAIN_INTRINSIC_WIDTH,
+                                   .value = parse_value_for(NS_CSS_CONTAIN_INTRINSIC_WIDTH, w),
+                                   .important = important };
+                ns_css_decl dh = { .prop = NS_CSS_CONTAIN_INTRINSIC_HEIGHT,
+                                   .value = parse_value_for(NS_CSS_CONTAIN_INTRINSIC_HEIGHT, h),
+                                   .important = important };
+                if (dw.value) g_array_append_val(decls_out, dw);
+                if (dh.value) g_array_append_val(decls_out, dh);
+            }
+            g_free(w);
+            g_free(h);
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
+        }
         if (strcmp(pname, "position-try") == 0) {
             char *order = NULL, *fallbacks = NULL;
             char *canon = position_try_shorthand_canonical(vtext, &order, &fallbacks);
@@ -18691,7 +18878,7 @@ ns_css_named_property_supported(const char *name)
         "grid-template", "list-style", "outline", "page-break-after",
         "page-break-before", "page-break-inside", "place-content",
         "place-items", "place-self", "src", "unicode-range",
-        "animation-range", "position-try",
+        "animation-range", "position-try", "contain-intrinsic-size",
     };
     if (!name || !*name) return FALSE;
     if (name[0] == '-' && name[1] == '-' && name[2]) return TRUE;
@@ -28834,6 +29021,32 @@ ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
 
 static void syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s,
                                  double root_px, gboolean font_units);
+
+double
+ns_css_contain_intrinsic_px(const ns_style *s, gboolean height)
+{
+    const ns_css_value *v = s ? s->values[height ? NS_CSS_CONTAIN_INTRINSIC_HEIGHT
+                                                 : NS_CSS_CONTAIN_INTRINSIC_WIDTH] : NULL;
+    gboolean is_auto, none;
+    double px;
+    if (!v || v->kind != NS_CSS_V_KEYWORD ||
+        !contain_intrinsic_parse(v->u.keyword, &is_auto, &none, &px, style_font_px(s)))
+        return 0;
+    return none ? 0 : px;
+}
+
+char *
+ns_css_contain_intrinsic_computed(const ns_style *s, int prop)
+{
+    const ns_css_value *v = s ? s->values[prop] : NULL;
+    gboolean is_auto, none;
+    double px;
+    if (!v || v->kind != NS_CSS_V_KEYWORD ||
+        !contain_intrinsic_parse(v->u.keyword, &is_auto, &none, &px, style_font_px(s)))
+        return NULL;
+    if (none) return g_strdup(is_auto ? "auto none" : "none");
+    return g_strdup_printf(is_auto ? "auto %gpx" : "%gpx", px);
+}
 
 char *
 ns_css_font_size_adjust_computed(const ns_style *s)
