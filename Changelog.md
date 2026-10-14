@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Masking: `mask-border` and its longhands (`mask-border-source`,
+  `-slice`, `-width`, `-outset`, `-repeat`, `-mode`) parse, serialize,
+  inherit, interpolate and composite the way the matching
+  `border-image` properties do, with the mask-border initial values
+  (`slice: 0`, `width: auto`, `mode: alpha`). Painting with a mask
+  border is not implemented yet.
 * HTML rendering: an `<iframe>` with no `width`/`height` attribute or
   CSS size now takes the 300×150 default size of a replaced element,
   as in other browsers. It used to stretch to its container's width
