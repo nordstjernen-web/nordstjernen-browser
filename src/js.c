@@ -33400,6 +33400,8 @@ static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!ns_js_frame_may_run(js)) return FALSE;
+    if (js->focused_node && ns_node_is_disabled_form_control(js->focused_node))
+        ns_js_set_focus(js, NULL);
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* HTML focus: a focused form control that becomes disabled, for
+  example through a disabled ancestor `<fieldset>`, loses focus at the
+  next rendering update, as the HTML focus-fixup rule requires.
+  `document.activeElement` falls back to the body, and `blur` and
+  `focusout` fire.
 * Performance: a custom property whose `var()` expansion grows to the
   1 MB substitution limit no longer makes every restyle quadratic.
   The container-unit scan re-measured the remaining text at every
