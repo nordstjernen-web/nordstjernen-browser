@@ -9198,6 +9198,9 @@ const char *
 ns_css_initial_value_text(const char *name)
 {
     static const struct { const char *name; const char *value; } initials[] = {
+        { "translate",                  "none" },
+        { "scale",                      "none" },
+        { "rotate",                     "none" },
         { "padding-top",                "0px" },
         { "scroll-margin-top",          "0px" },
         { "scroll-margin-right",        "0px" },
@@ -26510,10 +26513,233 @@ transform_identity_like(const ns_css_value *src)
 }
 
 static gboolean
+transform_op_identity(const ns_css_transform_op *src, ns_css_transform_op *out)
+{
+    *out = *src;
+    switch (out->kind) {
+    case NS_CSS_TFN_TRANSLATE:
+        out->a = out->b = out->c = out->a_pct = out->b_pct = 0;
+        memset(out->em, 0, sizeof out->em);
+        memset(out->rem, 0, sizeof out->rem);
+        return TRUE;
+    case NS_CSS_TFN_ROTATE:   out->a = 0; return TRUE;
+    case NS_CSS_TFN_ROTATE3D: out->d = 0; return TRUE;
+    case NS_CSS_TFN_SCALE:    out->a = out->b = out->c = 1; return TRUE;
+    case NS_CSS_TFN_SKEW:     out->a = out->b = 0; return TRUE;
+    case NS_CSS_TFN_MATRIX:
+        out->a = 1; out->b = 0; out->c = 0; out->d = 1; out->e = 0; out->f = 0;
+        return TRUE;
+    case NS_CSS_TFN_MATRIX3D:
+        for (int k = 0; k < 16; k++) out->m3d[k] = (k % 5 == 0) ? 1 : 0;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+transform_ops_compatible(const ns_css_transform_op *x, const ns_css_transform_op *y)
+{
+    if (x->kind != y->kind) return FALSE;
+    if (x->kind == NS_CSS_TFN_ROTATE3D) {
+        double lx = sqrt(x->a * x->a + x->b * x->b + x->c * x->c);
+        double ly = sqrt(y->a * y->a + y->b * y->b + y->c * y->c);
+        if (lx == 0 || ly == 0) return FALSE;
+        return fabs(x->a / lx - y->a / ly) < 1e-9 && fabs(x->b / lx - y->b / ly) < 1e-9 &&
+               fabs(x->c / lx - y->c / ly) < 1e-9;
+    }
+    return TRUE;
+}
+
+typedef struct {
+    double tx, ty, sx, sy, angle, m11, m12, m21, m22;
+} mat2d_parts;
+
+static void
+mat2d_decompose(const double m[6], mat2d_parts *p)
+{
+    double r0x = m[0], r0y = m[1], r1x = m[2], r1y = m[3];
+    p->tx = m[4];
+    p->ty = m[5];
+    p->sx = sqrt(r0x * r0x + r0y * r0y);
+    p->sy = sqrt(r1x * r1x + r1y * r1y);
+    double det = r0x * r1y - r0y * r1x;
+    if (det < 0) {
+        if (r0x < r1y) p->sx = -p->sx;
+        else p->sy = -p->sy;
+    }
+    if (p->sx != 0) { r0x /= p->sx; r0y /= p->sx; }
+    if (p->sy != 0) { r1x /= p->sy; r1y /= p->sy; }
+    double angle = atan2(r0y, r0x);
+    if (angle != 0) {
+        double sn = -r0y, cs = r0x;
+        double m11 = r0x, m12 = r0y, m21 = r1x, m22 = r1y;
+        r0x = cs * m11 + sn * m21;
+        r0y = cs * m12 + sn * m22;
+        r1x = -sn * m11 + cs * m21;
+        r1y = -sn * m12 + cs * m22;
+    }
+    p->m11 = r0x;
+    p->m12 = r0y;
+    p->m21 = r1x;
+    p->m22 = r1y;
+    p->angle = angle * 180.0 / G_PI;
+}
+
+static void
+mat2d_recompose(const mat2d_parts *p, double out[6])
+{
+    double rad = p->angle * G_PI / 180.0;
+    double cs = cos(rad), sn = sin(rad);
+    double r0x = p->m11 * cs + p->m12 * -sn;
+    double r0y = p->m11 * sn + p->m12 * cs;
+    double r1x = p->m21 * cs + p->m22 * -sn;
+    double r1y = p->m21 * sn + p->m22 * cs;
+    out[0] = r0x * p->sx;
+    out[1] = r0y * p->sx;
+    out[2] = r1x * p->sy;
+    out[3] = r1y * p->sy;
+    out[4] = p->tx;
+    out[5] = p->ty;
+}
+
+static void
+mat2d_interpolate(const double a[6], const double b[6], double t, double out[6])
+{
+    mat2d_parts pa, pb, r;
+    mat2d_decompose(a, &pa);
+    mat2d_decompose(b, &pb);
+    if ((pa.sx < 0 && pb.sy < 0) || (pa.sy < 0 && pb.sx < 0)) {
+        pa.sx = -pa.sx;
+        pa.sy = -pa.sy;
+        pa.angle += pa.angle < 0 ? 180 : -180;
+    }
+    if (pa.angle == 0) pa.angle = 360;
+    if (pb.angle == 0) pb.angle = 360;
+    if (fabs(pa.angle - pb.angle) > 180) {
+        if (pa.angle > pb.angle) pa.angle -= 360;
+        else pb.angle -= 360;
+    }
+    r.tx = pa.tx + (pb.tx - pa.tx) * t;
+    r.ty = pa.ty + (pb.ty - pa.ty) * t;
+    r.sx = pa.sx + (pb.sx - pa.sx) * t;
+    r.sy = pa.sy + (pb.sy - pa.sy) * t;
+    r.angle = pa.angle + (pb.angle - pa.angle) * t;
+    r.m11 = pa.m11 + (pb.m11 - pa.m11) * t;
+    r.m12 = pa.m12 + (pb.m12 - pa.m12) * t;
+    r.m21 = pa.m21 + (pb.m21 - pa.m21) * t;
+    r.m22 = pa.m22 + (pb.m22 - pa.m22) * t;
+    mat2d_recompose(&r, out);
+}
+
+static gboolean
+transform_ops_matrix2d(const ns_css_transform_op *ops, int n, double out[6])
+{
+    for (int i = 0; i < n; i++) {
+        const ns_css_transform_op *op = &ops[i];
+        if (op->kind == NS_CSS_TFN_TRANSLATE &&
+            (op->a_is_percent || op->b_is_percent || op->a_pct != 0 || op->b_pct != 0 ||
+             op->em[0] != 0 || op->em[1] != 0 || op->rem[0] != 0 || op->rem[1] != 0))
+            return FALSE;
+    }
+    ns_css_transform sub = { .n_ops = n };
+    memcpy(sub.ops, ops, sizeof(ns_css_transform_op) * (gsize)n);
+    ns_mat4 m;
+    ns_css_transform_to_mat4(&sub, 0, 0, &m);
+    if (!ns_mat4_is_affine2d(&m) || m.m[10] != 1.0 || m.m[15] != 1.0 ||
+        m.m[2] != 0 || m.m[6] != 0 || m.m[8] != 0 || m.m[9] != 0 || m.m[11] != 0 ||
+        m.m[12] != 0 || m.m[13] != 0 || m.m[14] != 0)
+        return FALSE;
+    out[0] = m.m[0];
+    out[1] = m.m[4];
+    out[2] = m.m[1];
+    out[3] = m.m[5];
+    out[4] = m.m[3];
+    out[5] = m.m[7];
+    return TRUE;
+}
+
+static void
+transform_op_interpolate(const ns_css_transform_op *x, const ns_css_transform_op *y,
+                         double t, ns_css_transform_op *o);
+
+static gboolean
+transform_list_interpolate(const ns_css_transform *ta, const ns_css_transform *tb,
+                           double t, ns_css_transform *out)
+{
+    int n = MAX(ta->n_ops, tb->n_ops);
+    ns_css_transform pa = *ta, pb = *tb;
+    for (int i = ta->n_ops; i < n; i++)
+        if (!transform_op_identity(&tb->ops[i], &pa.ops[i])) return FALSE;
+    for (int i = tb->n_ops; i < n; i++)
+        if (!transform_op_identity(&ta->ops[i], &pb.ops[i])) return FALSE;
+    pa.n_ops = pb.n_ops = n;
+    int k = 0;
+    while (k < n && transform_ops_compatible(&pa.ops[k], &pb.ops[k])) k++;
+    out->n_ops = 0;
+    for (int i = 0; i < k; i++)
+        transform_op_interpolate(&pa.ops[i], &pb.ops[i], t, &out->ops[out->n_ops++]);
+    if (k < n) {
+        double ma[6], mb[6], mr[6];
+        if (!transform_ops_matrix2d(&pa.ops[k], n - k, ma) ||
+            !transform_ops_matrix2d(&pb.ops[k], n - k, mb))
+            return FALSE;
+        if (t == 0.0 || t == 1.0) {
+            *out = t == 0.0 ? *ta : *tb;
+            return TRUE;
+        }
+        mat2d_interpolate(ma, mb, t, mr);
+        ns_css_transform_op *o = &out->ops[out->n_ops++];
+        memset(o, 0, sizeof *o);
+        o->kind = NS_CSS_TFN_MATRIX;
+        o->a = mr[0]; o->b = mr[1]; o->c = mr[2]; o->d = mr[3]; o->e = mr[4]; o->f = mr[5];
+    }
+    return TRUE;
+}
+
+static gboolean
 value_is_none_keyword(const ns_css_value *v)
 {
     return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
            strcmp(v->u.keyword, "none") == 0;
+}
+
+static void
+transform_op_interpolate(const ns_css_transform_op *x, const ns_css_transform_op *y,
+                         double t, ns_css_transform_op *o)
+{
+    *o = t == 1.0 ? *y : *x;
+    if (t == 0.0 || t == 1.0) return;
+    if (x->kind == NS_CSS_TFN_MATRIX) {
+        double ma[6] = { x->a, x->b, x->c, x->d, x->e, x->f };
+        double mb[6] = { y->a, y->b, y->c, y->d, y->e, y->f };
+        double mr[6];
+        mat2d_interpolate(ma, mb, t, mr);
+        o->a = mr[0]; o->b = mr[1]; o->c = mr[2]; o->d = mr[3]; o->e = mr[4]; o->f = mr[5];
+        return;
+    }
+    if (x->kind == NS_CSS_TFN_PERSPECTIVE) {
+        double ia = x->a > 0 ? 1.0 / x->a : 0;
+        double ib = y->a > 0 ? 1.0 / y->a : 0;
+        double inv = ia + (ib - ia) * t;
+        o->a = inv > 0 ? 1.0 / inv : 0;
+        return;
+    }
+    o->a = x->a + (y->a - x->a) * t;
+    o->b = x->b + (y->b - x->b) * t;
+    o->c = x->c + (y->c - x->c) * t;
+    o->d = x->d + (y->d - x->d) * t;
+    o->e = x->e + (y->e - x->e) * t;
+    o->f = x->f + (y->f - x->f) * t;
+    for (int k = 0; k < 16; k++)
+        o->m3d[k] = x->m3d[k] + (y->m3d[k] - x->m3d[k]) * t;
+    if (x->kind != NS_CSS_TFN_TRANSLATE) return;
+    translate_axis_lerp(x, y, t, 0, o);
+    translate_axis_lerp(x, y, t, 1, o);
+    for (int k = 0; k < 3; k++) {
+        o->em[k] = x->em[k] + (y->em[k] - x->em[k]) * t;
+        o->rem[k] = x->rem[k] + (y->rem[k] - x->rem[k]) * t;
+    }
 }
 
 ns_css_value *
@@ -26587,35 +26813,12 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
         }
         return out;
     }
-    case NS_CSS_V_TRANSFORM: {
-        const ns_css_transform *ta = &a->u.transform, *tb = &b->u.transform;
-        if (ta->n_ops != tb->n_ops) break;
-        for (int i = 0; i < ta->n_ops; i++)
-            if (ta->ops[i].kind != tb->ops[i].kind) { g_free(out); return NULL; }
+    case NS_CSS_V_TRANSFORM:
+        if (!transform_list_interpolate(&a->u.transform, &b->u.transform, t,
+                                        &out->u.transform))
+            break;
         out->kind = NS_CSS_V_TRANSFORM;
-        out->u.transform.n_ops = ta->n_ops;
-        for (int i = 0; i < ta->n_ops; i++) {
-            const ns_css_transform_op *x = &ta->ops[i], *y = &tb->ops[i];
-            ns_css_transform_op *o = &out->u.transform.ops[i];
-            *o = *x;
-            o->a = x->a + (y->a - x->a) * t;
-            o->b = x->b + (y->b - x->b) * t;
-            o->c = x->c + (y->c - x->c) * t;
-            o->d = x->d + (y->d - x->d) * t;
-            o->e = x->e + (y->e - x->e) * t;
-            o->f = x->f + (y->f - x->f) * t;
-            for (int k = 0; k < 16; k++)
-                o->m3d[k] = x->m3d[k] + (y->m3d[k] - x->m3d[k]) * t;
-            if (x->kind != NS_CSS_TFN_TRANSLATE) continue;
-            translate_axis_lerp(x, y, t, 0, o);
-            translate_axis_lerp(x, y, t, 1, o);
-            for (int k = 0; k < 3; k++) {
-                o->em[k] = x->em[k] + (y->em[k] - x->em[k]) * t;
-                o->rem[k] = x->rem[k] + (y->rem[k] - x->rem[k]) * t;
-            }
-        }
         return out;
-    }
     default:
         break;
     }
@@ -26792,9 +26995,34 @@ value_composite_shadow(const ns_css_value *a, const ns_css_value *b,
 }
 
 ns_css_value *
-ns_css_value_composite(const ns_css_value *underlying, const ns_css_value *v,
+ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_value *v,
                        gboolean accumulate)
 {
+    if (prop == NS_CSS_TRANSLATE || prop == NS_CSS_ROTATE || prop == NS_CSS_SCALE ||
+        prop == NS_CSS_TRANSFORM_ORIGIN || prop == NS_CSS_PERSPECTIVE_ORIGIN) {
+        if (underlying && v && underlying->kind == NS_CSS_V_TRANSFORM &&
+            v->kind == NS_CSS_V_TRANSFORM && underlying->u.transform.n_ops == 1 &&
+            v->u.transform.n_ops == 1) {
+            ns_css_value *out = g_new0(ns_css_value, 1);
+            out->kind = NS_CSS_V_TRANSFORM;
+            out->u.transform.n_ops = 1;
+            ns_css_transform_op *o = &out->u.transform.ops[0];
+            const ns_css_transform_op *x = &underlying->u.transform.ops[0];
+            const ns_css_transform_op *y = &v->u.transform.ops[0];
+            if (x->kind == NS_CSS_TFN_SCALE && y->kind == NS_CSS_TFN_SCALE && !accumulate) {
+                *o = *y;
+                o->a = x->a * y->a;
+                o->b = x->b * y->b;
+                o->c = (x->c == 0 ? 1 : x->c) * (y->c == 0 ? 1 : y->c);
+                return out;
+            }
+            if (transform_op_accumulate(x, y, o)) return out;
+            g_free(out);
+        }
+        if (value_is_none_keyword(underlying)) return ns_css_value_dup((ns_css_value *)v);
+        if (value_is_none_keyword(v)) return ns_css_value_dup((ns_css_value *)underlying);
+        return NULL;
+    }
     if (!v || !underlying) return NULL;
     if (value_is_none_keyword(underlying) && v->kind == NS_CSS_V_TRANSFORM)
         return ns_css_value_dup(v);
