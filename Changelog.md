@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* Animations: basic shapes interpolate and add. `shape-outside` and
+  `clip-path` transitions and keyframes between `circle()`,
+  `ellipse()`, `inset()`/`rect()`/`xywh()` and `polygon()` values
+  blend radii, positions, insets, corner radii and points component
+  by component (mixed lengths and percentages become `calc()`), and
+  `composition: add` sums them. Shapes of different kinds, different
+  reference boxes or polygons with different point counts stay
+  discrete. `polygon()` accepts the CSS Shapes 2 `round <length>`
+  corner radius.
 * CSS Shapes: `shape-outside`, `shape-margin` and
   `shape-image-threshold` are real properties now. Basic shapes
   (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`,

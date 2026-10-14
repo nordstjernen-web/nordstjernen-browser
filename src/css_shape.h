@@ -17,6 +17,9 @@ typedef struct ns_shape_ctx {
 } ns_shape_ctx;
 
 char *ns_css_shape_outside_canonical(const char *text, const ns_shape_ctx *cx);
+char *ns_css_shape_interpolate(const char *from, const char *to, double t,
+                                const ns_shape_ctx *cx);
+char *ns_css_shape_add(const char *underlying, const char *v, const ns_shape_ctx *cx);
 char *ns_css_shape_margin_canonical(const char *text, const ns_shape_ctx *cx);
 char *ns_css_shape_image_threshold_canonical(const char *text, gboolean computed);
 
