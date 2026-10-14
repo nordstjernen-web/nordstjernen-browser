@@ -723,7 +723,7 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
                        (ch->active || a->active_count < NS_ANIM_MAX_ACTIVE);
     if (can_run) {
         const ns_css_value *from = ch->active ? ch->current : last_eff;
-        ns_css_value *probe = ns_css_value_interpolate(from, cur_eff, 0.0);
+        ns_css_value *probe = ns_css_value_interpolate_prop(prop, from, cur_eff, 0.0);
         gboolean interpolable = probe != NULL;
         ns_css_value_free(probe);
         if (interpolable && ancestor_transitions_to(a, s->node, prop, cur_eff)) {
@@ -1261,7 +1261,7 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
                         const ns_css_value *from = cfrom ? cfrom : under;
                         const ns_css_value *to = cto ? cto : under;
                         ns_css_value *out = from && to
-                            ? ns_css_value_interpolate(from, to, pa->t) : NULL;
+                            ? ns_css_value_interpolate_prop(prop, from, to, pa->t) : NULL;
                         ns_css_value_clamp_animated(prop, out);
                         if (!out && from && to)
                             out = ns_css_value_dup(pa->t < 0.5 ? from : to);
@@ -1342,7 +1342,7 @@ advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
     double eased = timing_apply(ch->timing, t);
     ns_css_value *next = ch->discrete
         ? ns_css_value_dup(eased < 0.5 ? ch->from : ch->to)
-        : ns_css_value_interpolate(ch->from, ch->to, eased);
+        : ns_css_value_interpolate_prop(ch->prop, ch->from, ch->to, eased);
     if (!next) next = ns_css_value_dup(eased < 0.5 ? ch->from : ch->to);
     gboolean moved = !ch->current || !ns_css_value_equal(ch->current, next);
     ns_css_value_free(ch->current);
@@ -1479,8 +1479,8 @@ run_sample_at(ns_anim_run *r, double progress)
                     g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
                     continue;
                 }
-                out = ns_css_value_interpolate(stop_value(prev, prop),
-                                               stop_value(next, prop), t);
+                out = ns_css_value_interpolate_prop(prop, stop_value(prev, prop),
+                                                    stop_value(next, prop), t);
                 ns_css_value_clamp_animated(prop, out);
                 if (!out)
                     out = ns_css_value_dup(t < 0.5 ? stop_value(prev, prop)

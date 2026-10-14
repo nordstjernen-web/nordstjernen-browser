@@ -276,6 +276,7 @@ typedef enum ns_css_prop {
     NS_CSS_SHAPE_OUTSIDE,
     NS_CSS_SHAPE_MARGIN,
     NS_CSS_SHAPE_IMAGE_THRESHOLD,
+    NS_CSS_FONT_SIZE_ADJUST,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -1278,6 +1279,8 @@ char *ns_css_background_shorthand_serialize(const char *image, const char *posit
                                             const char *color);
 char *ns_css_content_canonical(const char *text);
 ns_css_value *ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t);
+ns_css_value *ns_css_value_interpolate_prop(int prop, const ns_css_value *a,
+                                            const ns_css_value *b, double t);
 ns_css_value *ns_css_value_composite(int prop, const ns_css_value *underlying,
                                      const ns_css_value *v, gboolean accumulate);
 void          ns_css_value_clamp_animated(int prop, ns_css_value *v);
@@ -1302,6 +1305,7 @@ char *ns_css_value_serialize(const ns_css_value *v);
 char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
+char *ns_css_font_size_adjust_computed(const ns_style *s);
 char *ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int prop);
 char *ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
                                        int prop);
