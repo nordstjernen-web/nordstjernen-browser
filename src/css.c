@@ -26249,6 +26249,255 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
     return NULL;
 }
 
+static gboolean
+value_length_parts(const ns_css_value *v, double *px, double *pct, double *em)
+{
+    *px = *pct = *em = 0;
+    if (v->kind == NS_CSS_V_CALC) {
+        if (v->u.calc.fn) return FALSE;
+        *px = v->u.calc.px;
+        *pct = v->u.calc.pct;
+        *em = v->u.calc.em;
+        return TRUE;
+    }
+    if (v->kind != NS_CSS_V_LENGTH) return FALSE;
+    switch (v->u.length.unit) {
+    case NS_CSS_UNIT_PX:      *px = v->u.length.v; return TRUE;
+    case NS_CSS_UNIT_PERCENT: *pct = v->u.length.v; return TRUE;
+    case NS_CSS_UNIT_EM:      *em = v->u.length.v; return TRUE;
+    default:                  return FALSE;
+    }
+}
+
+static ns_css_value *
+value_add_lengths(const ns_css_value *a, const ns_css_value *b)
+{
+    if (a->kind == NS_CSS_V_LENGTH && b->kind == NS_CSS_V_LENGTH &&
+        a->u.length.unit == b->u.length.unit) {
+        ns_css_value *out = g_new0(ns_css_value, 1);
+        out->kind = NS_CSS_V_LENGTH;
+        out->u.length.unit = a->u.length.unit;
+        out->u.length.v = a->u.length.v + b->u.length.v;
+        return out;
+    }
+    double apx, apct, aem, bpx, bpct, bem;
+    if (!value_length_parts(a, &apx, &apct, &aem) ||
+        !value_length_parts(b, &bpx, &bpct, &bem))
+        return NULL;
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    double px = apx + bpx, pct = apct + bpct, em = aem + bem;
+    if (pct == 0 && em == 0) {
+        out->kind = NS_CSS_V_LENGTH;
+        out->u.length.unit = NS_CSS_UNIT_PX;
+        out->u.length.v = px;
+    } else if (px == 0 && em == 0) {
+        out->kind = NS_CSS_V_LENGTH;
+        out->u.length.unit = NS_CSS_UNIT_PERCENT;
+        out->u.length.v = pct;
+    } else {
+        out->kind = NS_CSS_V_CALC;
+        out->u.calc.px = px;
+        out->u.calc.pct = pct;
+        out->u.calc.em = em;
+    }
+    return out;
+}
+
+static guint8
+add_channel(guint8 a, guint8 b)
+{
+    int v = (int)a + (int)b;
+    return (guint8)(v > 255 ? 255 : v);
+}
+
+static gboolean
+transform_op_accumulate(const ns_css_transform_op *x, const ns_css_transform_op *y,
+                        ns_css_transform_op *o)
+{
+    if (x->kind != y->kind) return FALSE;
+    *o = *y;
+    switch (x->kind) {
+    case NS_CSS_TFN_TRANSLATE:
+        if (x->a_is_percent != y->a_is_percent || x->b_is_percent != y->b_is_percent)
+            return FALSE;
+        o->a = x->a + y->a;
+        o->b = x->b + y->b;
+        o->c = x->c + y->c;
+        o->a_pct = x->a_pct + y->a_pct;
+        o->b_pct = x->b_pct + y->b_pct;
+        for (int k = 0; k < 3; k++) {
+            o->em[k] = x->em[k] + y->em[k];
+            o->rem[k] = x->rem[k] + y->rem[k];
+        }
+        return TRUE;
+    case NS_CSS_TFN_ROTATE:
+    case NS_CSS_TFN_SKEW:
+        o->a = x->a + y->a;
+        o->b = x->b + y->b;
+        return TRUE;
+    case NS_CSS_TFN_SCALE:
+        o->a = x->a + y->a - 1.0;
+        o->b = x->b + y->b - 1.0;
+        o->c = x->c + y->c - 1.0;
+        return TRUE;
+    case NS_CSS_TFN_ROTATE3D:
+        if (x->a != y->a || x->b != y->b || x->c != y->c) return FALSE;
+        o->d = x->d + y->d;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static ns_css_value *
+value_composite_transform(const ns_css_value *a, const ns_css_value *b,
+                          gboolean accumulate)
+{
+    const ns_css_transform *ta = &a->u.transform, *tb = &b->u.transform;
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    out->kind = NS_CSS_V_TRANSFORM;
+    if (accumulate && ta->n_ops == tb->n_ops) {
+        gboolean ok = TRUE;
+        out->u.transform.n_ops = ta->n_ops;
+        for (int i = 0; ok && i < ta->n_ops; i++)
+            ok = transform_op_accumulate(&ta->ops[i], &tb->ops[i],
+                                         &out->u.transform.ops[i]);
+        if (ok) return out;
+    }
+    if (ta->n_ops + tb->n_ops > NS_CSS_TRANSFORM_OPS_MAX) {
+        g_free(out);
+        return NULL;
+    }
+    out->u.transform.n_ops = ta->n_ops + tb->n_ops;
+    for (int i = 0; i < ta->n_ops; i++) out->u.transform.ops[i] = ta->ops[i];
+    for (int i = 0; i < tb->n_ops; i++) out->u.transform.ops[ta->n_ops + i] = tb->ops[i];
+    return out;
+}
+
+static ns_css_value *
+value_composite_shadow(const ns_css_value *a, const ns_css_value *b,
+                       gboolean accumulate)
+{
+    const ns_css_shadow_list *sa = &a->u.shadow, *sb = &b->u.shadow;
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    out->kind = NS_CSS_V_SHADOW;
+    out->u.shadow.is_text = sb->is_text;
+    if (accumulate) {
+        if (sa->n != sb->n) {
+            g_free(out);
+            return NULL;
+        }
+        out->u.shadow.n = sa->n;
+        for (int i = 0; i < sa->n; i++) {
+            const ns_css_shadow *x = &sa->s[i], *y = &sb->s[i];
+            if (x->inset != y->inset) {
+                g_free(out);
+                return NULL;
+            }
+            ns_css_shadow *o = &out->u.shadow.s[i];
+            *o = *y;
+            o->x = x->x + y->x;
+            o->y = x->y + y->y;
+            o->blur = x->blur + y->blur;
+            o->spread = x->spread + y->spread;
+            o->r = add_channel(x->r, y->r);
+            o->g = add_channel(x->g, y->g);
+            o->b = add_channel(x->b, y->b);
+            o->a = add_channel(x->a, y->a);
+        }
+        return out;
+    }
+    if (sa->n + sb->n > NS_CSS_SHADOWS_MAX) {
+        g_free(out);
+        return NULL;
+    }
+    out->u.shadow.n = sa->n + sb->n;
+    for (int i = 0; i < sa->n; i++) out->u.shadow.s[i] = sa->s[i];
+    for (int i = 0; i < sb->n; i++) out->u.shadow.s[sa->n + i] = sb->s[i];
+    return out;
+}
+
+ns_css_value *
+ns_css_value_composite(const ns_css_value *underlying, const ns_css_value *v,
+                       gboolean accumulate)
+{
+    if (!v || !underlying) return NULL;
+    if (value_is_none_keyword(underlying) && v->kind == NS_CSS_V_TRANSFORM)
+        return ns_css_value_dup(v);
+    if (value_is_none_keyword(v) && underlying->kind == NS_CSS_V_TRANSFORM)
+        return ns_css_value_dup(underlying);
+    ns_css_value *out = value_add_lengths(underlying, v);
+    if (out) return out;
+    if (underlying->kind != v->kind) return NULL;
+    switch (v->kind) {
+    case NS_CSS_V_KEYWORD: {
+        double na, nb;
+        gboolean ia, ib;
+        if (!keyword_number(underlying->u.keyword, &na, &ia) ||
+            !keyword_number(v->u.keyword, &nb, &ib))
+            return NULL;
+        if (!g_ascii_isdigit((guchar)v->u.keyword[0]) && v->u.keyword[0] != '-' &&
+            v->u.keyword[0] != '.')
+            return NULL;
+        out = g_new0(ns_css_value, 1);
+        out->kind = NS_CSS_V_KEYWORD;
+        out->u.keyword = g_strdup_printf("%g", na + nb);
+        return out;
+    }
+    case NS_CSS_V_COLOR:
+        out = g_new0(ns_css_value, 1);
+        out->kind = NS_CSS_V_COLOR;
+        out->u.color.r = add_channel(underlying->u.color.r, v->u.color.r);
+        out->u.color.g = add_channel(underlying->u.color.g, v->u.color.g);
+        out->u.color.b = add_channel(underlying->u.color.b, v->u.color.b);
+        out->u.color.a = add_channel(underlying->u.color.a, v->u.color.a);
+        return out;
+    case NS_CSS_V_RECT:
+        out = g_new0(ns_css_value, 1);
+        out->kind = NS_CSS_V_RECT;
+        for (int i = 0; i < 4; i++) {
+            if (underlying->u.rect.is_auto[i] != v->u.rect.is_auto[i] ||
+                underlying->u.rect.unit[i] != v->u.rect.unit[i]) {
+                g_free(out);
+                return NULL;
+            }
+            out->u.rect.is_auto[i] = v->u.rect.is_auto[i];
+            out->u.rect.unit[i] = v->u.rect.unit[i];
+            out->u.rect.v[i] = underlying->u.rect.v[i] + v->u.rect.v[i];
+        }
+        return out;
+    case NS_CSS_V_SHADOW:
+        return value_composite_shadow(underlying, v, accumulate);
+    case NS_CSS_V_TRANSFORM:
+        return value_composite_transform(underlying, v, accumulate);
+    default:
+        return NULL;
+    }
+}
+
+void
+ns_css_value_clamp_animated(int prop, ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_LENGTH || v->u.length.unit != NS_CSS_UNIT_NUMBER)
+        return;
+    double r = floor(v->u.length.v + 0.5);
+    switch (prop) {
+    case NS_CSS_ORDER:
+    case NS_CSS_Z_INDEX:
+        v->u.length.v = r;
+        break;
+    case NS_CSS_COLUMN_COUNT:
+    case NS_CSS_ORPHANS:
+    case NS_CSS_WIDOWS:
+    case NS_CSS_MAX_LINES:
+    case NS_CSS_LINE_CLAMP:
+        v->u.length.v = MAX(r, 1.0);
+        break;
+    default:
+        break;
+    }
+}
+
 gboolean
 ns_css_value_equal(const ns_css_value *a, const ns_css_value *b)
 {

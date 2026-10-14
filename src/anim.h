@@ -69,6 +69,7 @@ typedef struct ns_anim_script_timing {
     const char *direction;
     const char *fill;
     const char *easing;
+    const char *composite;
 } ns_anim_script_timing;
 gboolean ns_anim_script_start(ns_anim *a, const ns_node *node,
                               const char *const *stop_css, const double *stop_pct,
