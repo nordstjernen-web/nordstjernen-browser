@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Security: a module graph where a dependency failed to load and other
+  modules imported the failed module through a cycle could crash the
+  renderer. The failed module was freed while the cycle still pointed
+  at it, and the next script that imported it ran into the freed
+  memory. Modules whose resolution failed now stay registered and
+  reject every later import with a fresh `TypeError`.
 * Images: `img.width` and `img.height` report the rendered content box
   instead of the border box. An SVG image without a `width`, `height`
   or `viewBox` takes the 300×150 default object size, and a missing
