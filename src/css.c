@@ -29960,6 +29960,7 @@ static const char *kUa =
     "iframe, frame, frameset, embed { display: none; }\n"
     "iframe[data-nd-frame-loaded], object[data-nd-frame-loaded] "
     "{ display: block; overflow: hidden; }\n"
+    "iframe[data-nd-frame-loaded] { width: 300px; height: 150px; }\n"
     "object[data-nd-frame-loaded] > * { display: none; }\n"
     "audio, param { display: none; }\n"
     "audio[controls] { display: inline-block; }\n"
