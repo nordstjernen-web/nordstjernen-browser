@@ -3,6 +3,17 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: selectors follow the Selectors 4 rules for what may come after a
+  pseudo-element. A class, attribute, type selector or combinator after
+  one makes the selector invalid (`::before.a`, `::before div`), and so
+  does a pseudo-element inside `:not()`, `:has()` or `:is()`. After a
+  pseudo-element only user-action pseudo-classes are allowed, or
+  `:only-child` on the view-transition tree. `::part()` and `::slotted()`
+  may be followed only by the pseudo-elements they allow. The
+  `::view-transition-*()` argument grammar is validated (`*`, a name, and
+  `.class` tags), and `CSS.supports(selector(…))` reports known
+  pseudo-elements that the engine never matches as supported. 1,136 more
+  WPT subtests pass in css-view-transitions, css-pseudo and selectors.
 * JavaScript: `Promise.try()` returns the callback's promise unchanged
   when it is already an instance of the receiver, as the current spec
   requires, instead of wrapping it in a new one. A unicode regular
