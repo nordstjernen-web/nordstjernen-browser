@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* HTML: `<script>` decides whether to run from its `type` and `language`
+  attributes as the HTML spec says. Every JavaScript MIME type essence
+  now runs: `application/ecmascript`, `application/x-javascript`,
+  `text/javascript1.0`–`1.5`, `text/jscript`, `text/livescript`,
+  `text/x-ecmascript` and the rest, case-insensitively and with
+  surrounding whitespace ignored. So does a `language` attribute naming
+  a JavaScript type. Before, only `text/javascript` and
+  `application/javascript` ran. `module` and `importmap` still have to
+  match exactly. 618 more WPT subtests pass in scripting-1.
 * CSS: anchor positioning. `anchor-name` and `position-anchor` tie an
   absolutely or fixed positioned box to an anchor element, the last one
   in tree order carrying the name. Its insets can use `anchor()`, its
