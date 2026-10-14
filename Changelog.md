@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* DOM Ranges: exceptions thrown by `Range` methods are created in the
+  range's own window. A range in an `<iframe>` document used to throw
+  the top window's `DOMException`, so `e instanceof
+  frame.contentWindow.DOMException` was false.
 * README: the conformance table uses a full re-run with the corrected
   test runner. The earlier HTML figure missed about 88,000 subtests
   that the runner had wrongly recorded as crashes.
