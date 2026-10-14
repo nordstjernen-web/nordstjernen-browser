@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* Animations: `filter` and `backdrop-filter` interpolate the way
+  Filter Effects specifies. Function lists interpolate per function,
+  the shorter list is padded with identity functions, and `none` acts
+  as the identity list. Results are clamped to each function's range.
+  `drop-shadow()` colors interpolate premultiplied. Composition `add`
+  appends the lists and `accumulate` sums matching functions. The
+  computed value is now canonical: amounts as numbers clamped to
+  their range, `hue-rotate()` in degrees, `blur()` in pixels,
+  `drop-shadow()` as color + three lengths with `currentcolor`
+  resolved, and quoted `url()`.
 * CSS Fonts: `font-size-adjust` is a known, inherited property. It
   accepts `none`, an optional metric (`ex-height`, `cap-height`,
   `ch-width`, `ic-width`, `ic-height`) followed by a number, `calc()`
