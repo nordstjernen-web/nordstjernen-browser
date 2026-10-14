@@ -461,6 +461,12 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_TEXT_ALIGN_LAST]      = "text-align-last",
     [NS_CSS_CONTAIN_INTRINSIC_WIDTH] = "contain-intrinsic-width",
     [NS_CSS_CONTAIN_INTRINSIC_HEIGHT] = "contain-intrinsic-height",
+    [NS_CSS_MASK_BORDER_SOURCE]   = "mask-border-source",
+    [NS_CSS_MASK_BORDER_SLICE]    = "mask-border-slice",
+    [NS_CSS_MASK_BORDER_WIDTH]    = "mask-border-width",
+    [NS_CSS_MASK_BORDER_OUTSET]   = "mask-border-outset",
+    [NS_CSS_MASK_BORDER_REPEAT]   = "mask-border-repeat",
+    [NS_CSS_MASK_BORDER_MODE]     = "mask-border-mode",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9466,6 +9472,12 @@ ns_css_initial_value_text(const char *name)
         { "contain-intrinsic-block-size", "none" },
         { "contain-intrinsic-inline-size", "none" },
         { "contain-intrinsic-size",     "none" },
+        { "mask-border-source",         "none" },
+        { "mask-border-slice",          "0" },
+        { "mask-border-width",          "auto" },
+        { "mask-border-outset",         "0" },
+        { "mask-border-repeat",         "stretch" },
+        { "mask-border-mode",           "alpha" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -12748,6 +12760,7 @@ stacking_keyword_valid(ns_css_prop prop, const char *t)
 {
     switch (prop) {
     case NS_CSS_ISOLATION:   return keyword_choice_valid(t, "auto isolate");
+    case NS_CSS_MASK_BORDER_MODE: return keyword_choice_valid(t, "alpha luminance");
     case NS_CSS_TEXT_JUSTIFY:
         return keyword_choice_valid(t, "auto none inter-word inter-character distribute");
     case NS_CSS_TEXT_ALIGN_LAST:
@@ -14043,7 +14056,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         v->u.keyword = g_strstrip(g_strdup(t));
         break;
     }
-    case NS_CSS_BORDER_IMAGE_SOURCE: {
+    case NS_CSS_BORDER_IMAGE_SOURCE:
+    case NS_CSS_MASK_BORDER_SOURCE: {
         v = parse_image_reference(t);
         if (!v) {
             char *kw = ascii_lower(t, strlen(t));
@@ -14058,15 +14072,19 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_BORDER_IMAGE_SLICE:
+    case NS_CSS_MASK_BORDER_SLICE:
         v = parse_border_image_slice(t);
         break;
     case NS_CSS_BORDER_IMAGE_WIDTH:
+    case NS_CSS_MASK_BORDER_WIDTH:
         v = parse_border_image_width(t);
         break;
     case NS_CSS_BORDER_IMAGE_OUTSET:
+    case NS_CSS_MASK_BORDER_OUTSET:
         v = parse_border_image_outset(t);
         break;
     case NS_CSS_BORDER_IMAGE_REPEAT:
+    case NS_CSS_MASK_BORDER_REPEAT:
         v = parse_border_image_repeat(t);
         break;
     case NS_CSS_MASK_IMAGE:
@@ -14701,8 +14719,26 @@ ns_css_declaration_valid(int prop, const char *text)
     return TRUE;
 }
 
+typedef struct {
+    ns_css_prop source, slice, width, outset, repeat, mode;
+    const char *slice_initial;
+    const char *width_initial;
+} border_image_props;
+
+static const border_image_props kBorderImageProps = {
+    NS_CSS_BORDER_IMAGE_SOURCE, NS_CSS_BORDER_IMAGE_SLICE, NS_CSS_BORDER_IMAGE_WIDTH,
+    NS_CSS_BORDER_IMAGE_OUTSET, NS_CSS_BORDER_IMAGE_REPEAT, NS_CSS_PROP_COUNT,
+    "100%", "1",
+};
+
+static const border_image_props kMaskBorderProps = {
+    NS_CSS_MASK_BORDER_SOURCE, NS_CSS_MASK_BORDER_SLICE, NS_CSS_MASK_BORDER_WIDTH,
+    NS_CSS_MASK_BORDER_OUTSET, NS_CSS_MASK_BORDER_REPEAT, NS_CSS_MASK_BORDER_MODE,
+    "0", "auto",
+};
+
 static void expand_border_image(GArray *decls_out, const char *vtext,
-                                gboolean important);
+                                gboolean important, const border_image_props *bp);
 
 gboolean
 ns_css_named_declaration_valid(const char *name, const char *text)
@@ -14712,10 +14748,13 @@ ns_css_named_declaration_valid(const char *name, const char *text)
     if (name[0] == '-' && name[1] == '-')
         return css_declaration_value_syntax_valid(text);
     if (g_ascii_strcasecmp(name, "border-image") == 0 ||
-        g_ascii_strcasecmp(name, "-webkit-border-image") == 0) {
+        g_ascii_strcasecmp(name, "-webkit-border-image") == 0 ||
+        g_ascii_strcasecmp(name, "mask-border") == 0) {
         if (strstr(text, "var(")) return TRUE;
         GArray *decls = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
-        expand_border_image(decls, text, FALSE);
+        expand_border_image(decls, text, FALSE,
+                            g_ascii_strcasecmp(name, "mask-border") == 0
+                                ? &kMaskBorderProps : &kBorderImageProps);
         gboolean valid = decls->len > 0;
         for (guint i = 0; i < decls->len; i++)
             ns_css_value_free(g_array_index(decls, ns_css_decl, i).value);
@@ -15636,16 +15675,16 @@ border_image_tokens(const char *text)
 }
 
 static void
-expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
+expand_border_image(GArray *decls_out, const char *vtext, gboolean important,
+                    const border_image_props *bp)
 {
     ns_css_value *wide = parse_css_wide_keyword(vtext);
     if (wide) {
-        static const ns_css_prop longhands[] = {
-            NS_CSS_BORDER_IMAGE_SOURCE, NS_CSS_BORDER_IMAGE_SLICE,
-            NS_CSS_BORDER_IMAGE_WIDTH, NS_CSS_BORDER_IMAGE_OUTSET,
-            NS_CSS_BORDER_IMAGE_REPEAT,
+        const ns_css_prop longhands[] = {
+            bp->source, bp->slice, bp->width, bp->outset, bp->repeat, bp->mode,
         };
         for (gsize i = 0; i < G_N_ELEMENTS(longhands); i++) {
+            if (longhands[i] == NS_CSS_PROP_COUNT) continue;
             ns_css_decl d = { .prop = longhands[i],
                               .value = ns_css_value_dup(wide),
                               .important = important };
@@ -15660,6 +15699,7 @@ expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
     GString *outset = g_string_new(NULL);
     GString *repeat = g_string_new(NULL);
     char *source = NULL;
+    const char *mode = NULL;
     int slash = 0, repeats = 0;
     gboolean slice_closed = FALSE;
     gboolean ok = toks->len > 0;
@@ -15691,6 +15731,13 @@ expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
             slice_closed = TRUE;
             slash = 0;
         }
+        if (bp->mode != NS_CSS_PROP_COUNT &&
+            (g_ascii_strcasecmp(tok, "alpha") == 0 ||
+             g_ascii_strcasecmp(tok, "luminance") == 0)) {
+            if (mode) { ok = FALSE; break; }
+            mode = g_ascii_strcasecmp(tok, "alpha") == 0 ? "alpha" : "luminance";
+            continue;
+        }
         if (border_image_tile_keyword(tok)) {
             if (repeats >= 2) { ok = FALSE; break; }
             if (repeat->len) g_string_append_c(repeat, ' ');
@@ -15704,7 +15751,7 @@ expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
             ok = FALSE;
             break;
         }
-        ns_css_value *img = parse_value_for(NS_CSS_BORDER_IMAGE_SOURCE, tok);
+        ns_css_value *img = parse_value_for(bp->source, tok);
         if (img) {
             ns_css_value_free(img);
             if (source) { ok = FALSE; break; }
@@ -15716,32 +15763,29 @@ expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
         g_string_append(slice, tok);
     }
     if (ok && slice->len) {
-        ns_css_value *sv = parse_value_for(NS_CSS_BORDER_IMAGE_SLICE,
-                                           slice->str);
+        ns_css_value *sv = parse_value_for(bp->slice, slice->str);
         if (sv) ns_css_value_free(sv);
         else ok = FALSE;
     }
     if (ok && (width->len || outset->len)) {
-        ns_css_value *wv = width->len
-            ? parse_value_for(NS_CSS_BORDER_IMAGE_WIDTH, width->str) : NULL;
-        ns_css_value *ov = outset->len
-            ? parse_value_for(NS_CSS_BORDER_IMAGE_OUTSET, outset->str) : NULL;
+        ns_css_value *wv = width->len ? parse_value_for(bp->width, width->str) : NULL;
+        ns_css_value *ov = outset->len ? parse_value_for(bp->outset, outset->str) : NULL;
         if (width->len && !wv) ok = FALSE;
         if (outset->len && !ov) ok = FALSE;
         ns_css_value_free(wv);
         ns_css_value_free(ov);
     }
     if (ok) {
-        emit_longhand(decls_out, NS_CSS_BORDER_IMAGE_SOURCE,
-                      source ? source : "none", important);
-        emit_longhand(decls_out, NS_CSS_BORDER_IMAGE_SLICE,
-                      slice->len ? slice->str : "100%", important);
-        emit_longhand(decls_out, NS_CSS_BORDER_IMAGE_WIDTH,
-                      width->len ? width->str : "1", important);
-        emit_longhand(decls_out, NS_CSS_BORDER_IMAGE_OUTSET,
-                      outset->len ? outset->str : "0", important);
-        emit_longhand(decls_out, NS_CSS_BORDER_IMAGE_REPEAT,
-                      repeat->len ? repeat->str : "stretch", important);
+        emit_longhand(decls_out, bp->source, source ? source : "none", important);
+        emit_longhand(decls_out, bp->slice, slice->len ? slice->str : bp->slice_initial,
+                      important);
+        emit_longhand(decls_out, bp->width, width->len ? width->str : bp->width_initial,
+                      important);
+        emit_longhand(decls_out, bp->outset, outset->len ? outset->str : "0", important);
+        emit_longhand(decls_out, bp->repeat, repeat->len ? repeat->str : "stretch",
+                      important);
+        if (bp->mode != NS_CSS_PROP_COUNT)
+            emit_longhand(decls_out, bp->mode, mode ? mode : "alpha", important);
     }
     g_free(source);
     g_string_free(slice, TRUE);
@@ -17213,8 +17257,11 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "border-image") == 0 ||
-            strcmp(pname, "-webkit-border-image") == 0) {
-            expand_border_image(decls_out, vtext, important);
+            strcmp(pname, "-webkit-border-image") == 0 ||
+            strcmp(pname, "mask-border") == 0) {
+            expand_border_image(decls_out, vtext, important,
+                                strcmp(pname, "mask-border") == 0 ? &kMaskBorderProps
+                                                                 : &kBorderImageProps);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -18879,7 +18926,7 @@ ns_css_named_property_supported(const char *name)
         "grid-template", "list-style", "outline", "page-break-after",
         "page-break-before", "page-break-inside", "place-content",
         "place-items", "place-self", "src", "unicode-range",
-        "animation-range", "position-try", "contain-intrinsic-size",
+        "animation-range", "position-try", "contain-intrinsic-size", "mask-border",
     };
     if (!name || !*name) return FALSE;
     if (name[0] == '-' && name[1] == '-' && name[2]) return TRUE;
@@ -24536,7 +24583,11 @@ css_inline_value_canonical(const char *prop, char *value)
     case NS_CSS_BORDER_IMAGE_SLICE:
     case NS_CSS_BORDER_IMAGE_WIDTH:
     case NS_CSS_BORDER_IMAGE_OUTSET:
-    case NS_CSS_BORDER_IMAGE_REPEAT: {
+    case NS_CSS_BORDER_IMAGE_REPEAT:
+    case NS_CSS_MASK_BORDER_SLICE:
+    case NS_CSS_MASK_BORDER_WIDTH:
+    case NS_CSS_MASK_BORDER_OUTSET:
+    case NS_CSS_MASK_BORDER_REPEAT: {
         ns_css_value *v = parse_value_for((ns_css_prop)ns_css_prop_id(prop),
                                           value);
         if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
