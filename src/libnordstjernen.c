@@ -421,11 +421,14 @@ browser_schedule_media_events(ns_browser *b)
             g_timeout_add(0, browser_fire_media_events, b);
 }
 
+static void browser_flush(gpointer user_data);
+
 static gboolean
 browser_load_waits_for_images(gpointer user_data)
 {
     ns_browser *b = user_data;
     if (g_get_monotonic_time() >= b->load_delay_deadline_us) return FALSE;
+    if (!b->relaying) browser_flush(b);
     return b->media_events_source != 0 || b->images_arrived_since_layout ||
            browser_images_outstanding(b) > 0;
 }
