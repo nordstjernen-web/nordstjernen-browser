@@ -15411,9 +15411,10 @@ css_value_has_container_unit(const char *text)
         "cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax",
     };
     if (!text) return FALSE;
+    const char *end = text + strlen(text);
     for (const char *p = text; *p; p++) {
         if (p == text || (!g_ascii_isdigit(p[-1]) && p[-1] != '.')) continue;
-        gsize remaining = strlen(p);
+        gsize remaining = (gsize)(end - p);
         for (gsize i = 0; i < G_N_ELEMENTS(units); i++) {
             gsize len = strlen(units[i]);
             if (remaining >= len &&
