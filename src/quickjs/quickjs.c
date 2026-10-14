@@ -1074,6 +1074,7 @@ struct JSModuleDef {
     JSModuleInitFunc *init_func; /* only used for C modules */
     bool has_tla; /* true if func_obj contains await */
     bool resolved;
+    bool resolve_failed;
     bool func_created;
     JSModuleStatus status : 8;
     /* temp use during js_module_link() & js_module_evaluate() */
@@ -32370,8 +32371,15 @@ static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
     int i;
     JSModuleDef *m1;
 
-    if (m->resolved)
+    if (m->resolved) {
+        if (m->resolve_failed) {
+            char buf1[ATOM_GET_STR_BUF_SIZE];
+            JS_ThrowTypeError(ctx, "could not load module '%s'",
+                              JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+            return -1;
+        }
         return 0;
+    }
 #ifdef ENABLE_DUMPS // JS_DUMP_MODULE_RESOLVE
     if (check_dump_flag(ctx->rt, JS_DUMP_MODULE_RESOLVE)) {
         char buf1[ATOM_GET_STR_BUF_SIZE];
@@ -32386,14 +32394,17 @@ static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
                                                   rme->module_name,
                                                   rme->attributes);
         if (!m1)
-            return -1;
+            goto fail;
         rme->module = m1;
         /* already done in js_host_resolve_imported_module() except if
            the module was loaded with JS_EvalBinary() */
         if (js_resolve_module(ctx, m1) < 0)
-            return -1;
+            goto fail;
     }
     return 0;
+ fail:
+    m->resolve_failed = true;
+    return -1;
 }
 
 static JSVarRef *js_create_module_var(JSContext *ctx, bool is_lexical)
@@ -32473,6 +32484,12 @@ static int js_create_module_function(JSContext *ctx, JSModuleDef *m)
     int i;
     JSVarRef *var_ref;
 
+    if (m->resolve_failed) {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        JS_ThrowTypeError(ctx, "could not load module '%s'",
+                          JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+        return -1;
+    }
     if (m->func_created)
         return 0;
 
@@ -39324,7 +39341,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     return ret_val;
  fail1:
     /* XXX: should free all the unresolved dependencies */
-    if (m)
+    if (m && !m->resolved)
         js_free_module_def(ctx, m);
     return JS_EXCEPTION;
 }
