@@ -18276,6 +18276,10 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         if (tracks) return tracks;
     }
     int tracks_id = ns_css_prop_id(name);
+    if (computed && tracks_id == NS_CSS_FONT_SIZE_ADJUST) {
+        char *adjust = ns_css_font_size_adjust_computed(computed);
+        if (adjust) return adjust;
+    }
     if (computed && (tracks_id == NS_CSS_SHAPE_OUTSIDE || tracks_id == NS_CSS_SHAPE_MARGIN ||
                      tracks_id == NS_CSS_CLIP_PATH ||
                      tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD)) {
@@ -18641,7 +18645,7 @@ static const char *const ns_css_computed_props[] = {
     "-webkit-text-fill-color", "accent-color", "border-collapse", "border-spacing", "caption-side", "caret-color",
     "clip-rule", "color", "color-interpolation", "color-interpolation-filters", "color-scheme", "cursor",
     "direction", "dominant-baseline", "empty-cells", "fill", "fill-opacity", "fill-rule",
-    "font-family", "font-feature-settings", "font-kerning", "font-language-override", "font-optical-sizing", "font-size",
+    "font-family", "font-feature-settings", "font-kerning", "font-language-override", "font-optical-sizing", "font-size", "font-size-adjust",
     "font-style", "font-variant-alternates", "font-variant-caps", "font-variant-east-asian", "font-variant-emoji", "font-variant-ligatures",
     "font-variant-numeric", "font-variant-position", "font-variation-settings", "font-weight", "font-width", "image-rendering",
     "letter-spacing", "line-height", "list-style-image", "list-style-position", "list-style-type", "math-depth",

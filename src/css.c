@@ -455,6 +455,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_SHAPE_OUTSIDE]        = "shape-outside",
     [NS_CSS_SHAPE_MARGIN]         = "shape-margin",
     [NS_CSS_SHAPE_IMAGE_THRESHOLD] = "shape-image-threshold",
+    [NS_CSS_FONT_SIZE_ADJUST]     = "font-size-adjust",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -537,6 +538,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_VARIANT_LIGATURES:
     case NS_CSS_FONT_FEATURE_SETTINGS:
     case NS_CSS_FONT_VARIATION_SETTINGS:
+    case NS_CSS_FONT_SIZE_ADJUST:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -9449,6 +9451,7 @@ ns_css_initial_value_text(const char *name)
         { "shape-outside",              "none" },
         { "shape-margin",               "0px" },
         { "shape-image-threshold",      "0" },
+        { "font-size-adjust",           "none" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10459,6 +10462,7 @@ static void position_try_register(const char *name, const char *body,
 static gboolean prop_is_anchor_property(ns_css_prop prop);
 static char *anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified);
 static char *shape_prop_canonical(ns_css_prop prop, const char *t);
+static char *font_size_adjust_canonical(const char *text);
 static char *position_try_shorthand_canonical(const char *value, char **order_out,
                                               char **fallbacks_out);
 
@@ -10559,6 +10563,10 @@ ns_css_specified_canonical(const char *prop, const char *value)
         if (apid == NS_CSS_CLIP_PATH) {
             gboolean is_shape = FALSE;
             char *c = ns_css_clip_path_canonical(value, NULL, &is_shape);
+            if (c) return c;
+        }
+        if (apid == NS_CSS_FONT_SIZE_ADJUST) {
+            char *c = font_size_adjust_canonical(value);
             if (c) return c;
         }
     }
@@ -12846,6 +12854,118 @@ anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified)
     }
 }
 
+static const char *const font_size_adjust_metrics[] = {
+    "ex-height", "cap-height", "ch-width", "ic-width", "ic-height",
+};
+
+typedef struct {
+    int metric;
+    gboolean none;
+    gboolean from_font;
+    gboolean is_calc;
+    double value;
+} font_size_adjust_value;
+
+static gboolean
+font_size_adjust_amount(const char *amount, font_size_adjust_value *out)
+{
+    if (g_ascii_strcasecmp(amount, "from-font") == 0) {
+        out->from_font = TRUE;
+        return TRUE;
+    }
+    if (g_ascii_strncasecmp(amount, "calc(", 5) == 0) {
+        ns_css_value *v = parse_calc(amount);
+        gboolean ok = v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_NUMBER;
+        if (ok) out->value = v->u.length.v;
+        out->is_calc = TRUE;
+        ns_css_value_free(v);
+        return ok;
+    }
+    if (!g_ascii_isdigit(amount[0]) && !(amount[0] == '.' && g_ascii_isdigit(amount[1])))
+        return FALSE;
+    char *end = NULL;
+    out->value = g_ascii_strtod(amount, &end);
+    return end != amount && *end == '\0';
+}
+
+static gboolean
+font_size_adjust_parse(const char *text, font_size_adjust_value *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!text) return FALSE;
+    char *t = g_strstrip(g_strdup(text));
+    gboolean ok;
+    if (g_ascii_strcasecmp(t, "none") == 0) {
+        out->none = TRUE;
+        ok = TRUE;
+    } else {
+        const char *amount = t;
+        for (gsize i = 0; i < G_N_ELEMENTS(font_size_adjust_metrics); i++) {
+            gsize len = strlen(font_size_adjust_metrics[i]);
+            if (g_ascii_strncasecmp(t, font_size_adjust_metrics[i], len) == 0 &&
+                g_ascii_isspace(t[len])) {
+                out->metric = (int)i;
+                amount = t + len;
+                while (g_ascii_isspace(*amount)) amount++;
+            }
+        }
+        ok = *amount && font_size_adjust_amount(amount, out);
+    }
+    g_free(t);
+    return ok;
+}
+
+static char *
+font_size_adjust_text(const font_size_adjust_value *v, gboolean computed)
+{
+    if (v->none) return g_strdup("none");
+    GString *s = g_string_new(NULL);
+    if (v->metric > 0) {
+        g_string_append(s, font_size_adjust_metrics[v->metric]);
+        g_string_append_c(s, ' ');
+    }
+    if (v->from_font) {
+        g_string_append(s, "from-font");
+    } else if (v->is_calc && !computed) {
+        g_string_append_printf(s, "calc(%g)", v->value);
+    } else {
+        g_string_append_printf(s, "%g", computed ? MAX(v->value, 0.0) : v->value);
+    }
+    return g_string_free(s, FALSE);
+}
+
+static char *
+font_size_adjust_canonical(const char *text)
+{
+    font_size_adjust_value v;
+    if (!font_size_adjust_parse(text, &v)) return NULL;
+    return font_size_adjust_text(&v, FALSE);
+}
+
+static ns_css_value *
+font_size_adjust_mix(const ns_css_value *a, const ns_css_value *b, double wa, double wb)
+{
+    font_size_adjust_value x, y;
+    if (!a || !b || a->kind != NS_CSS_V_KEYWORD || b->kind != NS_CSS_V_KEYWORD ||
+        !font_size_adjust_parse(a->u.keyword, &x) || !font_size_adjust_parse(b->u.keyword, &y) ||
+        x.none || y.none || x.from_font || y.from_font || x.metric != y.metric)
+        return NULL;
+    x.value = MAX(x.value * wa + y.value * wb, 0.0);
+    x.is_calc = FALSE;
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    out->kind = NS_CSS_V_KEYWORD;
+    out->u.keyword = font_size_adjust_text(&x, FALSE);
+    return out;
+}
+
+ns_css_value *
+ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_value *b,
+                              double t)
+{
+    if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
+    return ns_css_value_interpolate(a, b, t);
+}
+
 static char *
 shape_prop_canonical(ns_css_prop prop, const char *t)
 {
@@ -12890,6 +13010,15 @@ parse_value_for(ns_css_prop prop, const char *text)
     int anchor_mode = anchor_fn_mode(prop);
     if (anchor_mode && ns_css_text_has_anchor_fn(t)) {
         char *canon = ns_css_anchor_fn_canonical(t, anchor_mode == 1, TRUE);
+        g_free(t);
+        if (!canon) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        return v;
+    }
+    if (prop == NS_CSS_FONT_SIZE_ADJUST) {
+        char *canon = font_size_adjust_canonical(t);
         g_free(t);
         if (!canon) return NULL;
         v = g_new0(ns_css_value, 1);
@@ -27102,6 +27231,7 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
     case NS_CSS_V_KEYWORD: {
         double na, nb;
         gboolean ia, ib;
+        if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(underlying, v, 1, 1);
         if ((prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_CLIP_PATH) && !accumulate) {
             ns_shape_ctx cx = {
                 .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
@@ -28665,6 +28795,30 @@ ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
 
 static void syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s,
                                  double root_px, gboolean font_units);
+
+char *
+ns_css_font_size_adjust_computed(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_FONT_SIZE_ADJUST] : NULL;
+    font_size_adjust_value fv;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !font_size_adjust_parse(v->u.keyword, &fv))
+        return NULL;
+    if (fv.from_font) {
+        static const ns_css_unit units[] = {
+            NS_CSS_UNIT_EX, NS_CSS_UNIT_CAP, NS_CSS_UNIT_CH, NS_CSS_UNIT_IC, NS_CSS_UNIT_IC,
+        };
+        double font_px = style_font_px(s);
+        const char *family = s->values[NS_CSS_FONT_FAMILY] &&
+            s->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD
+            ? s->values[NS_CSS_FONT_FAMILY]->u.keyword : NULL;
+        double px = font_relative_unit_px(units[fv.metric], font_px, family,
+                                          ns_css_font_weight_number(s->values[NS_CSS_FONT_WEIGHT], 400),
+                                          FALSE);
+        fv.from_font = FALSE;
+        fv.value = font_px > 0 ? px / font_px : 0;
+    }
+    return font_size_adjust_text(&fv, TRUE);
+}
 
 char *
 ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int prop)
