@@ -26801,6 +26801,18 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
     if (a->kind != b->kind) { g_free(out); return NULL; }
     switch (a->kind) {
     case NS_CSS_V_KEYWORD: {
+        if (a->u.keyword && b->u.keyword && strchr(a->u.keyword, '(') &&
+            strchr(b->u.keyword, '(')) {
+            ns_shape_ctx cx = {
+                .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+                .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h(),
+            };
+            out->u.keyword = ns_css_shape_interpolate(a->u.keyword, b->u.keyword, t, &cx);
+            if (out->u.keyword) {
+                out->kind = NS_CSS_V_KEYWORD;
+                return out;
+            }
+        }
         if (keyword_lerp(a->u.keyword, b->u.keyword, t, &out->u.keyword)) {
             out->kind = NS_CSS_V_KEYWORD;
             return out;
@@ -27073,6 +27085,18 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
     case NS_CSS_V_KEYWORD: {
         double na, nb;
         gboolean ia, ib;
+        if ((prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_CLIP_PATH) && !accumulate) {
+            ns_shape_ctx cx = {
+                .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+                .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h(),
+            };
+            char *sum = ns_css_shape_add(underlying->u.keyword, v->u.keyword, &cx);
+            if (!sum) return NULL;
+            out = g_new0(ns_css_value, 1);
+            out->kind = NS_CSS_V_KEYWORD;
+            out->u.keyword = sum;
+            return out;
+        }
         if (!keyword_number(underlying->u.keyword, &na, &ia) ||
             !keyword_number(v->u.keyword, &nb, &ib))
             return NULL;
