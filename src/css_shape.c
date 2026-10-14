@@ -39,7 +39,7 @@ typedef struct {
 
 typedef enum {
     SHAPE_NONE, SHAPE_CIRCLE, SHAPE_ELLIPSE, SHAPE_INSET, SHAPE_RECT, SHAPE_XYWH, SHAPE_POLYGON,
-    SHAPE_PATH,
+    SHAPE_PATH, SHAPE_SHAPE,
 } sh_kind;
 
 typedef struct {
@@ -62,6 +62,8 @@ typedef struct {
     sh_len poly_radius;
     GArray *points;
     GArray *path;
+    sh_pos shape_from;
+    GArray *scmds;
 } sh_shape;
 
 typedef struct {
@@ -367,7 +369,12 @@ fmt_len(GString *s, const sh_len *l, const ns_shape_ctx *cx)
     if (cx) {
         double px, pct;
         len_to_px_pct(l, cx, &px, &pct);
-        fmt_px_pct(s, px, pct, FALSE);
+        if (px == 0 && (strcmp(l->unit, "%") == 0 || (l->calc && l->sum.pct != 0))) {
+            fmt_num(s, pct);
+            g_string_append_c(s, '%');
+        } else {
+            fmt_px_pct(s, px, pct, FALSE);
+        }
         return;
     }
     if (l->calc) {
@@ -493,7 +500,7 @@ fmt_axis_computed(GString *s, int kw, const sh_len *off, const ns_shape_ctx *cx)
     } else if (!off) {
         g_string_append(s, "0%");
     } else {
-        fmt_px_pct(s, px, pct, FALSE);
+        fmt_len(s, off, cx);
     }
 }
 
@@ -790,6 +797,291 @@ parse_path_fn(sh_cur *c, sh_shape *sh)
     return sh->path && peek(c) == NULL;
 }
 
+enum { SC_MOVE, SC_LINE, SC_HLINE, SC_VLINE, SC_CURVE, SC_SMOOTH, SC_ARC, SC_CLOSE };
+enum { AN_NONE, AN_START, AN_END, AN_ORIGIN };
+
+typedef struct {
+    gboolean is_pos;
+    sh_pos pos;
+    sh_len x, y;
+    int anchor;
+} sh_pt;
+
+typedef struct {
+    int kind;
+    gboolean by;
+    sh_pt end;
+    const char *hv_kw;
+    double hv_kw_pct;
+    sh_len hv;
+    int n_ctrl;
+    sh_pt ctrl[2];
+    int n_r;
+    sh_len r[2];
+    gboolean cw, large;
+    double rot_v;
+    char rot_unit[6];
+} sh_scmd;
+
+static const char *const sc_names[] = {
+    "move", "line", "hline", "vline", "curve", "smooth", "arc", "close",
+};
+
+static const char *const anchor_names[] = { "", "start", "end", "origin" };
+
+static gboolean
+comma_or_end(sh_cur *c)
+{
+    const ns_css_component *t = peek(c);
+    return !t || t->type == NS_CSS_COMPONENT_COMMA;
+}
+
+static gboolean
+parse_pair(sh_cur *c, sh_pt *p)
+{
+    memset(p, 0, sizeof *p);
+    return parse_len(c, &p->x, TRUE) && parse_len(c, &p->y, TRUE);
+}
+
+static gboolean
+parse_end_pos(sh_cur *c, sh_pt *p)
+{
+    memset(p, 0, sizeof *p);
+    p->is_pos = TRUE;
+    return parse_position(c, &p->pos) && p->pos.n > 0;
+}
+
+static gboolean
+parse_control(sh_cur *c, sh_pt *p)
+{
+    if (!parse_end_pos(c, p)) return FALSE;
+    const sh_tok *t = p->pos.t;
+    if (p->pos.n == 2 && !t[0].is_kw && !t[1].is_kw) {
+        sh_len x = t[0].len, y = t[1].len;
+        memset(p, 0, sizeof *p);
+        p->x = x;
+        p->y = y;
+        const ns_css_component *k = peek(c);
+        if (is_ident(k, "from")) {
+            c->pos++;
+            k = peek(c);
+            if (is_ident(k, "start")) p->anchor = AN_START;
+            else if (is_ident(k, "end")) p->anchor = AN_END;
+            else if (is_ident(k, "origin")) p->anchor = AN_ORIGIN;
+            else return FALSE;
+            c->pos++;
+        }
+    }
+    return TRUE;
+}
+
+static gboolean
+parse_angle_deg(const ns_css_component *t, double *deg)
+{
+    if (!t) return FALSE;
+    if (t->type == NS_CSS_COMPONENT_NUMBER && t->number == 0) {
+        *deg = 0;
+        return TRUE;
+    }
+    if (t->type != NS_CSS_COMPONENT_DIMENSION || !t->value) return FALSE;
+    const char *u = t->value;
+    if (g_ascii_strcasecmp(u, "deg") == 0) *deg = t->number;
+    else if (g_ascii_strcasecmp(u, "rad") == 0) *deg = t->number * 180.0 / G_PI;
+    else if (g_ascii_strcasecmp(u, "grad") == 0) *deg = t->number * 0.9;
+    else if (g_ascii_strcasecmp(u, "turn") == 0) *deg = t->number * 360.0;
+    else return FALSE;
+    return TRUE;
+}
+
+static gboolean
+parse_shape_command(sh_cur *c, sh_scmd *cmd)
+{
+    const ns_css_component *t = peek(c);
+    memset(cmd, 0, sizeof *cmd);
+    int kind = -1;
+    for (int i = 0; i < (int)G_N_ELEMENTS(sc_names); i++)
+        if (is_ident(t, sc_names[i])) kind = i;
+    if (kind < 0) return FALSE;
+    c->pos++;
+    cmd->kind = kind;
+    if (kind == SC_CLOSE) return comma_or_end(c);
+    t = peek(c);
+    if (is_ident(t, "by")) cmd->by = TRUE;
+    else if (!is_ident(t, "to")) return FALSE;
+    c->pos++;
+    if (kind == SC_HLINE || kind == SC_VLINE) {
+        t = peek(c);
+        if (!cmd->by && t && t->type == NS_CSS_COMPONENT_IDENT && t->value) {
+            static const struct { const char *kw; double pct; gboolean h; } kws[] = {
+                { "left", 0, TRUE }, { "center", 50, TRUE }, { "right", 100, TRUE },
+                { "x-start", 0, TRUE }, { "x-end", 100, TRUE },
+                { "top", 0, FALSE }, { "center", 50, FALSE }, { "bottom", 100, FALSE },
+                { "y-start", 0, FALSE }, { "y-end", 100, FALSE },
+            };
+            for (gsize i = 0; i < G_N_ELEMENTS(kws); i++) {
+                if (kws[i].h != (kind == SC_HLINE) || !is_ident(t, kws[i].kw)) continue;
+                cmd->hv_kw = kws[i].kw;
+                cmd->hv_kw_pct = kws[i].pct;
+            }
+            if (!cmd->hv_kw) return FALSE;
+            c->pos++;
+            return comma_or_end(c);
+        }
+        return parse_len(c, &cmd->hv, TRUE) && comma_or_end(c);
+    }
+    if (!(cmd->by ? parse_pair(c, &cmd->end) : parse_end_pos(c, &cmd->end))) return FALSE;
+    if (kind == SC_MOVE || kind == SC_LINE) return comma_or_end(c);
+    t = peek(c);
+    if (kind == SC_CURVE || kind == SC_SMOOTH) {
+        if (!is_ident(t, "with")) return kind == SC_SMOOTH && comma_or_end(c);
+        c->pos++;
+        if (!parse_control(c, &cmd->ctrl[0])) return FALSE;
+        cmd->n_ctrl = 1;
+        t = peek(c);
+        if (kind == SC_CURVE && t && t->type == NS_CSS_COMPONENT_DELIM && t->delimiter == '/') {
+            c->pos++;
+            if (!parse_control(c, &cmd->ctrl[1])) return FALSE;
+            cmd->n_ctrl = 2;
+        }
+        return comma_or_end(c);
+    }
+    if (!is_ident(t, "of")) return FALSE;
+    c->pos++;
+    cmd->n_r = parse_len_list(c, cmd->r, 2, TRUE);
+    if (cmd->n_r == 0) return FALSE;
+    gboolean seen_sweep = FALSE, seen_size = FALSE, seen_rot = FALSE;
+    while ((t = peek(c)) && t->type != NS_CSS_COMPONENT_COMMA) {
+        if (!seen_sweep && (is_ident(t, "cw") || is_ident(t, "ccw"))) {
+            cmd->cw = is_ident(t, "cw");
+            seen_sweep = TRUE;
+            c->pos++;
+        } else if (!seen_size && (is_ident(t, "large") || is_ident(t, "small"))) {
+            cmd->large = is_ident(t, "large");
+            seen_size = TRUE;
+            c->pos++;
+        } else if (!seen_rot && is_ident(t, "rotate")) {
+            c->pos++;
+            t = peek(c);
+            double deg;
+            if (!parse_angle_deg(t, &deg)) return FALSE;
+            c->pos++;
+            cmd->rot_v = t->number;
+            g_strlcpy(cmd->rot_unit, t->type == NS_CSS_COMPONENT_DIMENSION ? t->value : "deg",
+                      sizeof cmd->rot_unit);
+            for (char *u = cmd->rot_unit; *u; u++) *u = g_ascii_tolower(*u);
+            seen_rot = TRUE;
+        } else {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static gboolean
+parse_shape_shape(sh_cur *c, sh_shape *sh)
+{
+    const ns_css_component *t = peek(c);
+    if (is_ident(t, "nonzero") || is_ident(t, "evenodd")) {
+        sh->evenodd = is_ident(t, "evenodd");
+        c->pos++;
+        t = peek(c);
+    }
+    if (!is_ident(t, "from")) return FALSE;
+    c->pos++;
+    sh_pt from;
+    if (!parse_end_pos(c, &from)) return FALSE;
+    sh->shape_from = from.pos;
+    t = peek(c);
+    if (!t || t->type != NS_CSS_COMPONENT_COMMA) return FALSE;
+    sh->scmds = g_array_new(FALSE, FALSE, sizeof(sh_scmd));
+    while ((t = peek(c))) {
+        if (t->type != NS_CSS_COMPONENT_COMMA) return FALSE;
+        c->pos++;
+        sh_scmd cmd;
+        if (!parse_shape_command(c, &cmd)) return FALSE;
+        g_array_append_val(sh->scmds, cmd);
+    }
+    return sh->scmds->len > 0;
+}
+
+static void
+fmt_pt(GString *s, const sh_pt *p, gboolean by, const ns_shape_ctx *cx)
+{
+    if (p->is_pos) {
+        fmt_position(s, &p->pos, cx);
+        return;
+    }
+    fmt_len(s, &p->x, cx);
+    g_string_append_c(s, ' ');
+    fmt_len(s, &p->y, cx);
+    int def = by ? AN_START : AN_ORIGIN;
+    if (p->anchor != AN_NONE && p->anchor != def) {
+        g_string_append(s, " from ");
+        g_string_append(s, anchor_names[p->anchor]);
+    }
+}
+
+static void
+fmt_shape_shape(GString *s, const sh_shape *sh, const ns_shape_ctx *cx)
+{
+    g_string_append(s, "shape(");
+    if (sh->evenodd) g_string_append(s, "evenodd ");
+    g_string_append(s, "from ");
+    fmt_position(s, &sh->shape_from, cx);
+    for (guint i = 0; i < sh->scmds->len; i++) {
+        const sh_scmd *m = &g_array_index(sh->scmds, sh_scmd, i);
+        g_string_append(s, ", ");
+        g_string_append(s, sc_names[m->kind]);
+        if (m->kind == SC_CLOSE) continue;
+        g_string_append(s, m->by ? " by " : " to ");
+        if (m->kind == SC_HLINE || m->kind == SC_VLINE) {
+            if (m->hv_kw && !cx) {
+                g_string_append(s, m->hv_kw);
+            } else if (m->hv_kw) {
+                fmt_num(s, m->hv_kw_pct);
+                g_string_append_c(s, '%');
+            } else {
+                fmt_len(s, &m->hv, cx);
+            }
+            continue;
+        }
+        fmt_pt(s, &m->end, m->by, cx);
+        if (m->n_ctrl) {
+            g_string_append(s, " with ");
+            fmt_pt(s, &m->ctrl[0], m->by, cx);
+            if (m->n_ctrl == 2) {
+                g_string_append(s, " / ");
+                fmt_pt(s, &m->ctrl[1], m->by, cx);
+            }
+        }
+        if (m->kind == SC_ARC) {
+            g_string_append(s, " of ");
+            fmt_len(s, &m->r[0], cx);
+            if (m->n_r == 2) {
+                g_string_append_c(s, ' ');
+                fmt_len(s, &m->r[1], cx);
+            }
+            if (m->cw) g_string_append(s, " cw");
+            if (m->large) g_string_append(s, " large");
+            if (m->rot_v != 0) {
+                g_string_append(s, " rotate ");
+                if (cx) {
+                    double deg = 0;
+                    ns_css_component tmp = { .type = NS_CSS_COMPONENT_DIMENSION,
+                                             .number = m->rot_v, .value = (char *)m->rot_unit };
+                    parse_angle_deg(&tmp, &deg);
+                    fmt_num(s, deg);
+                    g_string_append(s, "deg");
+                } else {
+                    fmt_num(s, m->rot_v);
+                    g_string_append(s, m->rot_unit);
+                }
+            }
+        }
+    }
+    g_string_append_c(s, ')');
+}
+
 static gboolean
 parse_shape_fn(const ns_css_component *f, sh_shape *sh)
 {
@@ -831,6 +1123,10 @@ parse_shape_fn(const ns_css_component *f, sh_shape *sh)
     if (g_ascii_strcasecmp(f->value, "path") == 0) {
         sh->kind = SHAPE_PATH;
         return parse_path_fn(&c, sh);
+    }
+    if (g_ascii_strcasecmp(f->value, "shape") == 0) {
+        sh->kind = SHAPE_SHAPE;
+        return parse_shape_shape(&c, sh);
     }
     if (g_ascii_strcasecmp(f->value, "polygon") == 0) {
         sh->kind = SHAPE_POLYGON;
@@ -1054,6 +1350,9 @@ fmt_shape(GString *s, const sh_shape *sh, const ns_shape_ctx *cx)
         g_string_append_c(s, ')');
         break;
     }
+    case SHAPE_SHAPE:
+        fmt_shape_shape(s, sh, cx);
+        break;
     case SHAPE_PATH: {
         GArray *cmds = g_array_copy(sh->path);
         if (cx) path_absolutize(cmds);
@@ -1124,6 +1423,8 @@ value_clear(sh_value *v)
 {
     if (v->sh.points) g_array_free(v->sh.points, TRUE);
     if (v->sh.path) g_array_free(v->sh.path, TRUE);
+    if (v->sh.scmds) g_array_free(v->sh.scmds, TRUE);
+    v->sh.scmds = NULL;
     v->sh.points = NULL;
     v->sh.path = NULL;
 }
@@ -1149,6 +1450,7 @@ ns_css_shape_outside_canonical(const char *text, const ns_shape_ctx *cx)
 
 typedef struct {
     double px, pct;
+    gboolean is_pct;
 } sh_cv;
 
 typedef struct {
@@ -1169,6 +1471,8 @@ typedef struct {
     sh_cv poly_radius;
     GArray *pts;
     GArray *path;
+    GArray *ccmds;
+    sh_cv from[2];
 } sh_cshape;
 
 static sh_cv
@@ -1176,17 +1480,19 @@ len_cv(const sh_len *l, const ns_shape_ctx *cx)
 {
     sh_cv r;
     len_to_px_pct(l, cx, &r.px, &r.pct);
+    r.is_pct = r.px == 0 && (strcmp(l->unit, "%") == 0 || (l->calc && l->sum.pct != 0));
     return r;
 }
 
 static sh_cv
 axis_cv(int kw, const sh_len *off, const ns_shape_ctx *cx)
 {
-    sh_cv r = { 0, 0 };
+    sh_cv r = { 0, 0, TRUE };
     if (off) r = len_cv(off, cx);
     if (kw == SH_CENTER) {
         r.px = 0;
         r.pct = 50;
+        r.is_pct = TRUE;
     } else if (kw == SH_RIGHT || kw == SH_BOTTOM) {
         r.px = -r.px;
         r.pct = 100 - r.pct;
@@ -1218,10 +1524,128 @@ position_cv(const sh_pos *p, const ns_shape_ctx *cx, sh_cv *out)
 static void
 expand_cv(sh_cv *v, int n)
 {
-    if (n < 1) v[0] = (sh_cv){ 0, 0 };
+    if (n < 1) v[0] = (sh_cv){ 0, 0, FALSE };
     if (n < 2) v[1] = v[0];
     if (n < 3) v[2] = v[0];
     if (n < 4) v[3] = v[1];
+}
+
+typedef struct {
+    int kind;
+    gboolean by;
+    sh_cv end[2];
+    sh_cv hv;
+    int n_ctrl;
+    sh_cv ctrl[2][2];
+    int anchor[2];
+    int n_r;
+    sh_cv r[2];
+    double cw, large, rot;
+} sh_ccmd;
+
+static void
+pt_cv(const sh_pt *p, const ns_shape_ctx *cx, sh_cv *out)
+{
+    if (p->is_pos) {
+        position_cv(&p->pos, cx, out);
+        return;
+    }
+    out[0] = len_cv(&p->x, cx);
+    out[1] = len_cv(&p->y, cx);
+}
+
+static GArray *
+shape_ccmds(const sh_shape *sh, const ns_shape_ctx *cx, sh_cv *from)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(sh_ccmd));
+    position_cv(&sh->shape_from, cx, from);
+    for (guint i = 0; i < sh->scmds->len; i++) {
+        const sh_scmd *m = &g_array_index(sh->scmds, sh_scmd, i);
+        sh_ccmd o;
+        memset(&o, 0, sizeof o);
+        o.kind = m->kind;
+        o.by = m->by;
+        if (m->kind == SC_HLINE || m->kind == SC_VLINE) {
+            o.hv = m->hv_kw ? (sh_cv){ 0, m->hv_kw_pct, TRUE } : len_cv(&m->hv, cx);
+        } else if (m->kind != SC_CLOSE) {
+            pt_cv(&m->end, cx, o.end);
+        }
+        o.n_ctrl = m->n_ctrl;
+        for (int k = 0; k < m->n_ctrl; k++) {
+            pt_cv(&m->ctrl[k], cx, o.ctrl[k]);
+            o.anchor[k] = m->ctrl[k].anchor != AN_NONE ? m->ctrl[k].anchor
+                          : m->by ? AN_START : AN_ORIGIN;
+        }
+        o.n_r = m->n_r;
+        for (int k = 0; k < m->n_r; k++) o.r[k] = len_cv(&m->r[k], cx);
+        o.cw = m->cw;
+        o.large = m->large;
+        if (m->rot_v != 0) {
+            ns_css_component tmp = { .type = NS_CSS_COMPONENT_DIMENSION,
+                                     .number = m->rot_v, .value = (char *)m->rot_unit };
+            parse_angle_deg(&tmp, &o.rot);
+        }
+        g_array_append_val(out, o);
+    }
+    return out;
+}
+
+static GArray *
+path_ccmds(const GArray *path, sh_cv *from)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(sh_ccmd));
+    for (guint i = 0; i < path->len; i++) {
+        const sh_pcmd *p = &g_array_index(path, sh_pcmd, i);
+        char up = g_ascii_toupper(p->cmd);
+        gboolean by = g_ascii_islower(p->cmd) && up != 'Z';
+        if (i == 0) {
+            from[0] = (sh_cv){ p->v[0], 0, FALSE };
+            from[1] = (sh_cv){ p->v[1], 0, FALSE };
+            continue;
+        }
+        sh_ccmd o;
+        memset(&o, 0, sizeof o);
+        o.by = by;
+        int anchor = by ? AN_START : AN_ORIGIN;
+        switch (up) {
+        case 'M': case 'L':
+            o.kind = up == 'M' ? SC_MOVE : SC_LINE;
+            o.end[0] = (sh_cv){ p->v[0], 0, FALSE };
+            o.end[1] = (sh_cv){ p->v[1], 0, FALSE };
+            break;
+        case 'H': case 'V':
+            o.kind = up == 'H' ? SC_HLINE : SC_VLINE;
+            o.hv = (sh_cv){ p->v[0], 0, FALSE };
+            break;
+        case 'C': case 'S': case 'Q': case 'T': {
+            o.kind = up == 'C' || up == 'Q' ? SC_CURVE : SC_SMOOTH;
+            o.n_ctrl = up == 'C' ? 2 : up == 'T' ? 0 : 1;
+            for (int k = 0; k < o.n_ctrl; k++) {
+                o.ctrl[k][0] = (sh_cv){ p->v[2 * k], 0, FALSE };
+                o.ctrl[k][1] = (sh_cv){ p->v[2 * k + 1], 0, FALSE };
+                o.anchor[k] = anchor;
+            }
+            o.end[0] = (sh_cv){ p->v[p->n - 2], 0, FALSE };
+            o.end[1] = (sh_cv){ p->v[p->n - 1], 0, FALSE };
+            break;
+        }
+        case 'A':
+            o.kind = SC_ARC;
+            o.n_r = 2;
+            o.r[0] = (sh_cv){ p->v[0], 0, FALSE };
+            o.r[1] = (sh_cv){ p->v[1], 0, FALSE };
+            o.rot = p->v[2];
+            o.large = p->v[3];
+            o.cw = p->v[4];
+            o.end[0] = (sh_cv){ p->v[5], 0, FALSE };
+            o.end[1] = (sh_cv){ p->v[6], 0, FALSE };
+            break;
+        default:
+            o.kind = SC_CLOSE;
+        }
+        g_array_append_val(out, o);
+    }
+    return out;
 }
 
 static void
@@ -1243,7 +1667,7 @@ to_cshape(const sh_shape *sh, const ns_shape_ctx *cx, sh_cshape *o)
         }
         o->has_at = sh->at.present;
         if (o->has_at) position_cv(&sh->at, cx, o->at);
-        else o->at[0] = o->at[1] = (sh_cv){ 0, 50 };
+        else o->at[0] = o->at[1] = (sh_cv){ 0, 50, TRUE };
         break;
     case SHAPE_INSET:
         for (int i = 0; i < sh->n_inset; i++) o->inset[i] = len_cv(&sh->inset[i], cx);
@@ -1253,10 +1677,10 @@ to_cshape(const sh_shape *sh, const ns_shape_ctx *cx, sh_cshape *o)
         sh_cv e[4];
         for (int i = 0; i < 4; i++)
             e[i] = strcmp(sh->inset[i].unit, "auto") == 0
-                ? (sh_cv){ 0, i == 1 || i == 2 ? 100 : 0 } : len_cv(&sh->inset[i], cx);
+                ? (sh_cv){ 0, i == 1 || i == 2 ? 100 : 0, TRUE } : len_cv(&sh->inset[i], cx);
         o->inset[0] = e[0];
-        o->inset[1] = (sh_cv){ -e[1].px, 100 - e[1].pct };
-        o->inset[2] = (sh_cv){ -e[2].px, 100 - e[2].pct };
+        o->inset[1] = (sh_cv){ -e[1].px, 100 - e[1].pct, e[1].px == 0 };
+        o->inset[2] = (sh_cv){ -e[2].px, 100 - e[2].pct, e[2].px == 0 };
         o->inset[3] = e[3];
         break;
     }
@@ -1264,15 +1688,22 @@ to_cshape(const sh_shape *sh, const ns_shape_ctx *cx, sh_cshape *o)
         sh_cv e[4];
         for (int i = 0; i < 4; i++) e[i] = len_cv(&sh->inset[i], cx);
         o->inset[0] = e[1];
-        o->inset[1] = (sh_cv){ -e[0].px - e[2].px, 100 - e[0].pct - e[2].pct };
-        o->inset[2] = (sh_cv){ -e[1].px - e[3].px, 100 - e[1].pct - e[3].pct };
+        o->inset[1] = (sh_cv){ -e[0].px - e[2].px, 100 - e[0].pct - e[2].pct,
+                               e[0].px + e[2].px == 0 };
+        o->inset[2] = (sh_cv){ -e[1].px - e[3].px, 100 - e[1].pct - e[3].pct,
+                               e[1].px + e[3].px == 0 };
         o->inset[3] = e[0];
         break;
     }
     case SHAPE_PATH:
         o->evenodd = sh->evenodd;
+        o->ccmds = path_ccmds(sh->path, o->from);
         o->path = g_array_copy(sh->path);
         path_absolutize(o->path);
+        break;
+    case SHAPE_SHAPE:
+        o->evenodd = sh->evenodd;
+        o->ccmds = shape_ccmds(sh, cx, o->from);
         break;
     case SHAPE_POLYGON:
         o->evenodd = sh->evenodd;
@@ -1306,7 +1737,8 @@ typedef struct {
 static sh_cv
 cv_lerp(sh_cv a, sh_cv b, const sh_mix *m, gboolean nonneg)
 {
-    sh_cv r = { a.px * m->wa + b.px * m->wb, a.pct * m->wa + b.pct * m->wb };
+    sh_cv r = { a.px * m->wa + b.px * m->wb, a.pct * m->wa + b.pct * m->wb,
+                a.is_pct && b.is_pct };
     if (nonneg) {
         if (r.pct <= 0 && r.px < 0) r.px = 0;
         if (r.px <= 0 && r.pct < 0) r.pct = 0;
@@ -1318,13 +1750,23 @@ static char *
 cv_text(sh_cv v)
 {
     GString *s = g_string_new(NULL);
-    fmt_px_pct(s, v.px, v.pct, FALSE);
+    if (v.is_pct && v.px == 0) {
+        fmt_num(s, v.pct);
+        g_string_append_c(s, '%');
+    } else {
+        fmt_px_pct(s, v.px, v.pct, FALSE);
+    }
     return g_string_free(s, FALSE);
 }
 
 static void
 append_cv(GString *s, sh_cv v)
 {
+    if (v.is_pct && v.px == 0) {
+        fmt_num(s, v.pct);
+        g_string_append_c(s, '%');
+        return;
+    }
     fmt_px_pct(s, v.px, v.pct, FALSE);
 }
 
@@ -1357,9 +1799,87 @@ cv_sides_equal(const sh_cv *a, const sh_cv *b)
     return TRUE;
 }
 
+static void
+append_cv_pair(GString *s, const sh_cv *v)
+{
+    append_cv(s, v[0]);
+    g_string_append_c(s, ' ');
+    append_cv(s, v[1]);
+}
+
+static gboolean
+ccmds_mix(const sh_cv *fa, const GArray *a, const sh_cv *fb, const GArray *b,
+          gboolean evenodd, const sh_mix *t, GString *s)
+{
+    if (a->len != b->len) return FALSE;
+    for (guint i = 0; i < a->len; i++) {
+        const sh_ccmd *x = &g_array_index(a, sh_ccmd, i);
+        const sh_ccmd *y = &g_array_index(b, sh_ccmd, i);
+        if (x->kind != y->kind || x->by != y->by || x->n_ctrl != y->n_ctrl ||
+            x->n_r != y->n_r)
+            return FALSE;
+        for (int k = 0; k < x->n_ctrl; k++)
+            if (x->anchor[k] != y->anchor[k]) return FALSE;
+    }
+    g_string_append(s, "shape(");
+    if (evenodd) g_string_append(s, "evenodd ");
+    g_string_append(s, "from ");
+    sh_cv f[2] = { cv_lerp(fa[0], fb[0], t, FALSE), cv_lerp(fa[1], fb[1], t, FALSE) };
+    append_cv_pair(s, f);
+    for (guint i = 0; i < a->len; i++) {
+        const sh_ccmd *x = &g_array_index(a, sh_ccmd, i);
+        const sh_ccmd *y = &g_array_index(b, sh_ccmd, i);
+        g_string_append(s, ", ");
+        g_string_append(s, sc_names[x->kind]);
+        if (x->kind == SC_CLOSE) continue;
+        g_string_append(s, x->by ? " by " : " to ");
+        if (x->kind == SC_HLINE || x->kind == SC_VLINE) {
+            append_cv(s, cv_lerp(x->hv, y->hv, t, FALSE));
+            continue;
+        }
+        sh_cv e[2] = { cv_lerp(x->end[0], y->end[0], t, FALSE),
+                       cv_lerp(x->end[1], y->end[1], t, FALSE) };
+        append_cv_pair(s, e);
+        for (int k = 0; k < x->n_ctrl; k++) {
+            g_string_append(s, k ? " / " : " with ");
+            sh_cv cp[2] = { cv_lerp(x->ctrl[k][0], y->ctrl[k][0], t, FALSE),
+                            cv_lerp(x->ctrl[k][1], y->ctrl[k][1], t, FALSE) };
+            append_cv_pair(s, cp);
+            if (x->anchor[k] != (x->by ? AN_START : AN_ORIGIN)) {
+                g_string_append(s, " from ");
+                g_string_append(s, anchor_names[x->anchor[k]]);
+            }
+        }
+        if (x->kind == SC_ARC) {
+            g_string_append(s, " of ");
+            append_cv(s, cv_lerp(x->r[0], y->r[0], t, FALSE));
+            if (x->n_r == 2) {
+                g_string_append_c(s, ' ');
+                append_cv(s, cv_lerp(x->r[1], y->r[1], t, FALSE));
+            }
+            double rot = x->rot * t->wa + y->rot * t->wb;
+            if (rot != 0) {
+                g_string_append(s, " rotate ");
+                fmt_num(s, rot);
+                g_string_append(s, "deg");
+            }
+            double cw = x->cw * t->wa + y->cw * t->wb;
+            double large = x->large * t->wa + y->large * t->wb;
+            g_string_append(s, cw != 0 ? " cw" : " ccw");
+            g_string_append(s, large != 0 ? " large" : " small");
+        }
+    }
+    g_string_append_c(s, ')');
+    return TRUE;
+}
+
 static gboolean
 cshape_lerp(const sh_cshape *a, const sh_cshape *b, const sh_mix *t, GString *s)
 {
+    if ((a->kind == SHAPE_SHAPE || b->kind == SHAPE_SHAPE) && a->ccmds && b->ccmds) {
+        if (a->evenodd != b->evenodd) return FALSE;
+        return ccmds_mix(a->from, a->ccmds, b->from, b->ccmds, a->evenodd, t, s);
+    }
     if (a->kind != b->kind) return FALSE;
     switch (a->kind) {
     case SHAPE_CIRCLE:
@@ -1475,6 +1995,10 @@ shape_mix(const char *from, const char *to, const sh_mix *t, const ns_shape_ctx 
         to_cshape(&b.sh, cx, &cb);
         GString *s = g_string_new(NULL);
         if (cshape_lerp(&ca, &cb, t, s)) {
+            if (!t->add && t->wb == 0 && a.sh.kind == SHAPE_SHAPE) {
+                g_string_truncate(s, 0);
+                fmt_shape(s, &a.sh, cx);
+            }
             if (*box_a) {
                 g_string_append_c(s, ' ');
                 g_string_append(s, box_a);
@@ -1487,6 +2011,8 @@ shape_mix(const char *from, const char *to, const sh_mix *t, const ns_shape_ctx 
         if (cb.pts) g_array_free(cb.pts, TRUE);
         if (ca.path) g_array_free(ca.path, TRUE);
         if (cb.path) g_array_free(cb.path, TRUE);
+        if (ca.ccmds) g_array_free(ca.ccmds, TRUE);
+        if (cb.ccmds) g_array_free(cb.ccmds, TRUE);
     }
     value_clear(&a);
     value_clear(&b);
@@ -1561,5 +2087,39 @@ ns_css_shape_image_threshold_canonical(const char *text, gboolean computed)
         result = g_string_free(s, FALSE);
     }
     g_ptr_array_free(list, TRUE);
+    return result;
+}
+
+char *
+ns_css_clip_path_canonical(const char *text, const ns_shape_ctx *cx, gboolean *is_shape)
+{
+    static const char *const fns[] = {
+        "circle", "ellipse", "inset", "rect", "xywh", "polygon", "path", "shape",
+    };
+    *is_shape = FALSE;
+    if (!text) return NULL;
+    gboolean valid = TRUE;
+    GPtrArray *list = ns_css_component_values_parse(text, -1, &valid);
+    for (guint i = 0; i < list->len && !*is_shape; i++) {
+        const ns_css_component *t = g_ptr_array_index(list, i);
+        if (box_keyword(t, TRUE)) *is_shape = TRUE;
+        for (gsize k = 0; t->type == NS_CSS_COMPONENT_FUNCTION && t->value &&
+                          k < G_N_ELEMENTS(fns); k++)
+            if (g_ascii_strcasecmp(t->value, fns[k]) == 0) *is_shape = TRUE;
+    }
+    g_ptr_array_free(list, TRUE);
+    if (!*is_shape) return NULL;
+    sh_value v;
+    char *result = NULL;
+    if (parse_value(text, &v, TRUE) && !v.none) {
+        GString *s = g_string_new(NULL);
+        if (v.have_shape) fmt_shape(s, &v.sh, cx);
+        if (v.box && !(v.have_shape && strcmp(v.box, "border-box") == 0)) {
+            if (s->len) g_string_append_c(s, ' ');
+            g_string_append(s, v.box);
+        }
+        result = g_string_free(s, FALSE);
+    }
+    value_clear(&v);
     return result;
 }
