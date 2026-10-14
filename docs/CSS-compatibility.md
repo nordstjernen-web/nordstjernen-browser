@@ -227,8 +227,8 @@ the 1.0.31-dev source.
 | `opacity` | ✅ | |
 | `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur/drop-shadow) | ✅ | on images; `blur()` is a separable box blur; `drop-shadow()` uses the image alpha mask, CSS lengths, and parsed colors/currentColor |
 | `mix-blend-mode` | ✅ | |
-| `clip-path` (basic shapes) | ✅ | |
-| `shape-outside` / `shape-margin` / `shape-image-threshold` | 🟡 | parsed and serialized (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, shape boxes; interpolation and `add` composition; computed values resolve lengths and positions); floats do not wrap around the shape yet |
+| `clip-path` (basic shapes) | ✅ | `circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()` with geometry boxes; canonical specified and computed serialization; interpolation and `add` composition |
+| `shape-outside` / `shape-margin` / `shape-image-threshold` | 🟡 | parsed and serialized (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()`, shape boxes; interpolation and `add` composition; computed values resolve lengths and positions); floats do not wrap around the shape yet |
 | `mask-image` (`url()` + linear/radial gradient) | ✅ | gradient masks composite the whole element through the gradient's alpha (fade effects); `mask`/`-webkit-mask` aliased; conic masks skipped |
 | `image-rendering` (`pixelated`/`crisp-edges`) | ✅ | nearest-neighbour upscaling for raster `<img>` |
 | `-webkit-line-clamp` | ✅ | |

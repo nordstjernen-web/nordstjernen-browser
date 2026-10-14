@@ -18277,6 +18277,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     }
     int tracks_id = ns_css_prop_id(name);
     if (computed && (tracks_id == NS_CSS_SHAPE_OUTSIDE || tracks_id == NS_CSS_SHAPE_MARGIN ||
+                     tracks_id == NS_CSS_CLIP_PATH ||
                      tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD)) {
         const ns_node *root = n;
         while (root->parent && root->parent->kind == NS_NODE_ELEMENT)

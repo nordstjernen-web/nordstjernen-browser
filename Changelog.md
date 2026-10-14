@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Shapes: the `shape()` function (`from`, `move`/`line`/`hline`/
+  `vline`/`curve`/`smooth`/`arc` commands with `to` or `by` endpoints,
+  control-point anchors, arc sweep/size/rotation and `close`) parses
+  for `shape-outside` and `clip-path`. Its computed value resolves
+  positions and lengths, and it interpolates command by command,
+  also against a `path()` that has the same command list. `clip-path`
+  basic shapes now share the `shape-outside` parser, so invalid shapes
+  are rejected, positions and radii serialize canonically,
+  `border-box` drops out next to a shape, and `getComputedStyle`
+  resolves lengths and percentages.
 * CSS Shapes: `shape-outside` accepts `path()`, with an optional fill
   rule. Its path data keeps the commands as written in the specified
   value and becomes absolute in the computed value
