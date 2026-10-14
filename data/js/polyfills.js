@@ -9058,6 +9058,112 @@
         var CSSContainerRule = ctorFor('CSSContainerRule', CSSConditionRule.prototype);
         var CSSScopeRule = ctorFor('CSSScopeRule', CSSGroupingRule.prototype);
 
+        var CSSPositionTryRule = ctorFor('CSSPositionTryRule', CSSRule.prototype);
+        var CSSPositionTryDescriptors = ctorFor('CSSPositionTryDescriptors',
+                                                Object.prototype);
+        var positionTryNames = [
+            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+            'margin-block', 'margin-block-start', 'margin-block-end', 'margin-inline',
+            'margin-inline-start', 'margin-inline-end', 'inset', 'top', 'left', 'right',
+            'bottom', 'inset-block', 'inset-block-start', 'inset-block-end',
+            'inset-inline', 'inset-inline-start', 'inset-inline-end', 'width', 'height',
+            'min-width', 'max-width', 'min-height', 'max-height', 'block-size',
+            'min-block-size', 'max-block-size', 'inline-size', 'min-inline-size',
+            'max-inline-size', 'place-self', 'align-self', 'justify-self',
+            'position-anchor', 'position-area'
+        ];
+        var positionTryAllowed = {};
+        positionTryNames.forEach(function (n) { positionTryAllowed[n] = true; });
+        function positionTryCamel(n) {
+            return n.replace(/-([a-z])/g, function (m, c) { return c.toUpperCase(); });
+        }
+        function positionTryItems(d) {
+            var out = [];
+            var st = d.__decl;
+            for (var i = 0; i < st.length; i++) {
+                var n = st.item(i);
+                if (positionTryAllowed[n]) out.push(n);
+            }
+            return out;
+        }
+        function positionTryPurge(d) {
+            var st = d.__decl;
+            for (var i = st.length - 1; i >= 0; i--) {
+                var n = st.item(i);
+                if (!positionTryAllowed[n]) st.removeProperty(n);
+            }
+        }
+        function positionTryDescriptors(rule, block) {
+            var d = Object.create(CSSPositionTryDescriptors.prototype);
+            var holder = document.createElement('span');
+            d.__decl = holder.style;
+            d.__rule = rule;
+            try { d.__decl.cssText = block; } catch (e) {}
+            positionTryPurge(d);
+            return d;
+        }
+        getter(CSSPositionTryDescriptors.prototype, 'length', function () {
+            return positionTryItems(this).length;
+        });
+        method(CSSPositionTryDescriptors.prototype, 'item', function (i) {
+            var items = positionTryItems(this);
+            return i >= 0 && i < items.length ? items[i] : '';
+        });
+        method(CSSPositionTryDescriptors.prototype, 'getPropertyValue', function (n) {
+            n = String(n).toLowerCase();
+            return positionTryAllowed[n] ? this.__decl.getPropertyValue(n) : '';
+        });
+        method(CSSPositionTryDescriptors.prototype, 'getPropertyPriority', function (n) {
+            n = String(n).toLowerCase();
+            return positionTryAllowed[n] ? this.__decl.getPropertyPriority(n) : '';
+        });
+        method(CSSPositionTryDescriptors.prototype, 'setProperty', function (n, v, p) {
+            n = String(n).toLowerCase();
+            if (!positionTryAllowed[n]) return;
+            this.__decl.setProperty(n, v, p);
+            notify(this.__rule);
+        });
+        method(CSSPositionTryDescriptors.prototype, 'removeProperty', function (n) {
+            n = String(n).toLowerCase();
+            if (!positionTryAllowed[n]) return '';
+            var old = this.__decl.removeProperty(n);
+            notify(this.__rule);
+            return old;
+        });
+        accessor(CSSPositionTryDescriptors.prototype, 'cssText',
+            function () {
+                var self = this;
+                return positionTryItems(this).map(function (n) {
+                    var pr = self.__decl.getPropertyPriority(n);
+                    return n + ': ' + self.__decl.getPropertyValue(n) +
+                           (pr ? ' !' + pr : '') + ';';
+                }).join(' ');
+            },
+            function (v) {
+                try { this.__decl.cssText = v == null ? '' : String(v); } catch (e) {}
+                positionTryPurge(this);
+                notify(this.__rule);
+            });
+        getter(CSSPositionTryDescriptors.prototype, 'parentRule', function () {
+            return this.__rule;
+        });
+        positionTryNames.forEach(function (n) {
+            var get = function () { return this.__decl.getPropertyValue(n); };
+            var set = function (v) {
+                this.__decl.setProperty(n, v == null ? '' : String(v));
+                notify(this.__rule);
+            };
+            accessor(CSSPositionTryDescriptors.prototype, n, get, set);
+            var camel = positionTryCamel(n);
+            if (camel !== n) accessor(CSSPositionTryDescriptors.prototype, camel, get, set);
+        });
+        getter(CSSPositionTryRule.prototype, 'name', function () { return this.__name; });
+        getter(CSSPositionTryRule.prototype, 'style', function () { return this.__descriptors; });
+        method(CSSPositionTryRule.prototype, '__cssText', function () {
+            var d = this.__descriptors.cssText;
+            return '@position-try ' + this.__name + (d ? ' { ' + d + ' }' : ' { }');
+        });
+
         var CONSTANTS = {
             STYLE_RULE: 1, CHARSET_RULE: 2, IMPORT_RULE: 3, MEDIA_RULE: 4,
             FONT_FACE_RULE: 5, PAGE_RULE: 6, KEYFRAMES_RULE: 7,
@@ -9954,6 +10060,18 @@
                 var nraw = nhead + (nbody ? ' { ' + nbody + ' }' : ' { }');
                 nr.__cssText = function () { return nraw; };
                 return nr;
+            }
+            if (kw === 'position-try') {
+                var ptName = prelude.replace(/^@[\w-]+\s*/, '').replace(/^\s+|\s+$/g, '');
+                if (!/^--/.test(ptName) || /\s/.test(ptName)) return null;
+                var pt = Object.create(CSSPositionTryRule.prototype);
+                pt.__parentStyleSheet = sheet || null;
+                pt.__parentRule = parentRule || null;
+                pt.__at = kw;
+                pt.__type = 0;
+                pt.__name = ptName;
+                pt.__descriptors = positionTryDescriptors(pt, block);
+                return pt;
             }
             if (kw === 'keyframes' || kw === '-webkit-keyframes') {
                 var kfName = prelude.replace(/^@[\w-]+\s*/, '').replace(/^\s+|\s+$/g, '');

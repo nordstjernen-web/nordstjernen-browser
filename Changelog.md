@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* CSSOM: `@position-try` rules appear in `cssRules` as
+  `CSSPositionTryRule`, with `name`, `cssText` and a `style` of type
+  `CSSPositionTryDescriptors`. The descriptors expose only the
+  properties allowed in a position-try block (insets, margins, sizes,
+  self-alignment, `position-anchor`, `position-area`) and drop any
+  others. Editing them through `setProperty`, `cssText` or the
+  property accessors updates the fallback positions on the page.
 * CSS Masking: `mask-border` and its longhands (`mask-border-source`,
   `-slice`, `-width`, `-outset`, `-repeat`, `-mode`) parse, serialize,
   inherit, interpolate and composite the way the matching
