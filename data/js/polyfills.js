@@ -12372,6 +12372,9 @@
         function frameToCss(frame) {
             var out = [];
             for (var p in frame.__props) out.push(p + ': ' + frame.__props[p]);
+            if (frame.composite === 'add' || frame.composite === 'accumulate' ||
+                frame.composite === 'replace')
+                out.push('animation-composition: ' + frame.composite);
             return out.join('; ');
         }
         function KeyframeEffect(target, keyframes, options) {
@@ -12470,7 +12473,16 @@
             configurable: true
         });
         Object.defineProperty(KeyframeEffect.prototype, 'composite', {
-            get: function () { return 'replace'; }, set: function () {}, configurable: true
+            get: function () {
+                var c = this.__options && this.__options.composite;
+                return c === 'add' || c === 'accumulate' ? c : 'replace';
+            },
+            set: function (v) {
+                if (v !== 'replace' && v !== 'add' && v !== 'accumulate') return;
+                if (typeof this.__options !== 'object' || this.__options === null) this.__options = {};
+                this.__options.composite = v;
+            },
+            configurable: true
         });
         global.AnimationEffect = AnimationEffect;
         global.KeyframeEffect = KeyframeEffect;
@@ -12647,7 +12659,8 @@
                 iterations: o.iterations === undefined ? 1 : o.iterations,
                 direction: o.direction || 'normal',
                 fill: (o.fill && o.fill !== 'auto') ? o.fill : 'none',
-                easing: o.easing || 'linear'
+                easing: o.easing || 'linear',
+                composite: o.composite || 'replace'
             };
             var r = global.__ns_anim_animate(effect.__target, stops, timing);
             if (!r) return false;
