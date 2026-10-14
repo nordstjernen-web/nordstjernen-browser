@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Text: `text-align-last` and `text-justify` are supported, both
+  inherited. In justified text, `text-align-last: justify` stretches
+  the last line too, `center`/`right`/`end` place it accordingly, and
+  `text-justify: none` turns justification off. `distribute` is parsed
+  as its alias `inter-character`.
 * README: conformance numbers from the local web-platform-tests and
   test262 runs, and the new CSS Color, anchor positioning, Shapes and
   animation-composition coverage in the feature list.
