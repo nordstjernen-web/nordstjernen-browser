@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: `offsetTop`, `offsetLeft` and `offsetParent` of elements inside
+  an `<iframe>` are measured within the frame's own document. They
+  used to include the frame's position in the embedding page, which
+  sent scripts that pass those offsets to `elementFromPoint()` (image
+  maps, drag handles, tooltips) far outside the frame.
 * HTML rendering: the UA stylesheet now has the bidirectional-text
   rules from the HTML rendering section. Block containers, sectioning
   and heading elements, table parts, lists, `bdi` and `output` get

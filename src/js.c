@@ -39274,6 +39274,19 @@ ns_offset_parent_is_static_root(ns_js *js, const ns_node *p)
 }
 
 static void
+ns_frame_content_origin(ns_js *js, const ns_node *n, double *out_x, double *out_y)
+{
+    const ns_node *iframe = ns_node_owner_iframe(n);
+    const ns_box *fb = iframe && js->layout_root
+        ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
+    if (!fb) return;
+    double fx, fy, fw, fh;
+    ns_box_visual_border_box(fb, &fx, &fy, &fw, &fh);
+    *out_x = fx + fb->border.left + fb->padding.left;
+    *out_y = fy + fb->border.top + fb->padding.top;
+}
+
+static void
 ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
                         double *out_x, double *out_y)
 {
@@ -39283,11 +39296,13 @@ ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(this_val);
     if (!js || !n || n->kind != NS_NODE_ELEMENT) return;
     ns_js_flush_layout(js);
+    ns_frame_content_origin(js, n, out_x, out_y);
     const ns_style *own = js->style_table
                         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (own && ns_css_keyword_is(own->values[NS_CSS_POSITION], "fixed"))
         return;
     for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT) return;
         if (p->kind != NS_NODE_ELEMENT) continue;
         if (!ns_offset_parent_candidate(js, p)) continue;
         if (ns_offset_parent_is_static_root(js, p)) return;
@@ -39312,6 +39327,7 @@ ns_element_get_offsetParent(JSContext *ctx, JSValueConst this_val)
         return JS_NULL;
     const ns_node *fallback = NULL;
     for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT) break;
         if (p->kind != NS_NODE_ELEMENT) continue;
         if (!fallback) fallback = p;
         if (ns_offset_parent_candidate(js, p))
