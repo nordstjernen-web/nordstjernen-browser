@@ -3,6 +3,18 @@ Changelog:
 
 1.0.32:
 ======
+* Animations: keyframe composition is implemented. `composite: 'add'`
+  and `'accumulate'` on Web Animations keyframes and effects, and
+  `animation-composition` on CSS animations and their keyframes, combine
+  the keyframe value with the underlying value before interpolating:
+  lengths and calc() sums, numbers, colors, rects, shadow lists (added
+  as concatenation, accumulated pairwise) and transform lists
+  (concatenated, or accumulated function by function). Web Animations
+  also extrapolate when the effect's easing pushes progress outside
+  0..1, using the first or last keyframe interval as the specs require,
+  instead of clamping. Animated integer properties (`order`, `z-index`,
+  `column-count`, `orphans`, `widows`, ...) round and stay in range.
+  2,328 more WPT interpolation and composition subtests pass.
 * CSS: selectors follow the Selectors 4 rules for what may come after a
   pseudo-element. A class, attribute, type selector or combinator after
   one makes the selector invalid (`::before.a`, `::before div`), and so

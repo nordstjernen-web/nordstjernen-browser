@@ -64,6 +64,7 @@ typedef struct ns_anim_run {
     ns_css_anim_direction direction;
     ns_css_anim_fill      fill;
     ns_css_timing timing;
+    int      composite;
     guint    generation;
     GHashTable *values;
     GHashTable *partials;
@@ -77,10 +78,15 @@ typedef struct ns_anim_run {
     double         tl_progress;
 } ns_anim_run;
 
+enum { NS_ANIM_COMPOSITE_REPLACE, NS_ANIM_COMPOSITE_ADD,
+       NS_ANIM_COMPOSITE_ACCUMULATE };
+
 typedef struct ns_anim_partial {
     ns_css_value *from;
     ns_css_value *to;
     double        t;
+    int           from_composite;
+    int           to_composite;
 } ns_anim_partial;
 
 enum { NS_ANIM_PHASE_IDLE, NS_ANIM_PHASE_BEFORE, NS_ANIM_PHASE_ACTIVE,
@@ -941,6 +947,21 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     run_emit_progress(a, s, r, now_us);
 }
 
+static int composite_from_name(const char *name, int fallback);
+
+static int
+composition_for(const ns_style *style, int index)
+{
+    const ns_css_value *v = style ? style->values[NS_CSS_ANIMATION_COMPOSITION] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NS_ANIM_COMPOSITE_REPLACE;
+    char **items = g_strsplit(v->u.keyword, ",", -1);
+    int n = (int)g_strv_length(items);
+    int c = n > 0 ? composite_from_name(items[index % n], NS_ANIM_COMPOSITE_REPLACE)
+                  : NS_ANIM_COMPOSITE_REPLACE;
+    g_strfreev(items);
+    return c;
+}
+
 static void
 observe_animation(ns_anim *a, ns_anim_state *s, const ns_style *style,
                   const ns_css_anim_list *av, gint64 now_us)
@@ -970,6 +991,7 @@ observe_animation(ns_anim *a, ns_anim_state *s, const ns_style *style,
             g_free(r->cancelled_name);
             r->cancelled_name = NULL;
         }
+        r->composite = composition_for(style, i);
         if (run_matches_entry(r, e)) {
             run_configure(r, e);
             if (e->paused != r->css_paused && !r->api_override)
@@ -1158,6 +1180,16 @@ ns_anim_base_value(ns_anim *a, const ns_node *node, int prop)
     return v && v->kind == 0 && !v->u.keyword ? NULL : v;
 }
 
+static ns_css_value *
+composite_onto(const ns_css_value *under, const ns_css_value *v, int composite)
+{
+    if (!v) return NULL;
+    if (composite == NS_ANIM_COMPOSITE_REPLACE || !under) return ns_css_value_dup(v);
+    ns_css_value *out = ns_css_value_composite(under, v,
+                                               composite == NS_ANIM_COMPOSITE_ACCUMULATE);
+    return out ? out : ns_css_value_dup(v);
+}
+
 void
 ns_anim_apply(ns_anim *a, GHashTable *styles)
 {
@@ -1195,12 +1227,20 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
                         if (base && base->kind == 0 && !base->u.keyword) base = NULL;
                         if (!base) base = st->values[prop];
                         ns_css_value *init = base ? NULL : initial_value_for(prop);
-                        const ns_css_value *from = pa->from ? pa->from : (base ? base : init);
-                        const ns_css_value *to = pa->to ? pa->to : (base ? base : init);
+                        const ns_css_value *under = base ? base : init;
+                        ns_css_value *cfrom = composite_onto(under, pa->from,
+                                                             pa->from_composite);
+                        ns_css_value *cto = composite_onto(under, pa->to,
+                                                           pa->to_composite);
+                        const ns_css_value *from = cfrom ? cfrom : under;
+                        const ns_css_value *to = cto ? cto : under;
                         ns_css_value *out = from && to
                             ? ns_css_value_interpolate(from, to, pa->t) : NULL;
+                        ns_css_value_clamp_animated(prop, out);
                         if (!out && from && to)
                             out = ns_css_value_dup(pa->t < 0.5 ? from : to);
+                        ns_css_value_free(cfrom);
+                        ns_css_value_free(cto);
                         ns_css_value_free(init);
                         if (out) g_hash_table_insert(r->values, pk, out);
                     }
@@ -1296,6 +1336,27 @@ stop_value(const ns_anim_kf_stop *st, int prop)
     return found;
 }
 
+static int
+composite_from_name(const char *name, int fallback)
+{
+    if (!name) return fallback;
+    while (*name == ' ') name++;
+    if (g_ascii_strncasecmp(name, "add", 3) == 0) return NS_ANIM_COMPOSITE_ADD;
+    if (g_ascii_strncasecmp(name, "accumulate", 10) == 0)
+        return NS_ANIM_COMPOSITE_ACCUMULATE;
+    if (g_ascii_strncasecmp(name, "replace", 7) == 0)
+        return NS_ANIM_COMPOSITE_REPLACE;
+    return fallback;
+}
+
+static int
+stop_composite(const ns_anim_kf_stop *st, int fallback)
+{
+    const ns_css_value *v = stop_value(st, NS_CSS_ANIMATION_COMPOSITION);
+    if (!v || v->kind != NS_CSS_V_KEYWORD) return fallback;
+    return composite_from_name(v->u.keyword, fallback);
+}
+
 static gboolean
 stop_timing(const ns_anim_kf_stop *st, ns_css_timing *out)
 {
@@ -1337,11 +1398,26 @@ run_sample_at(ns_anim_run *r, double progress)
             seen[prop] = TRUE;
             if (!prop_animatable(prop)) continue;
             const ns_anim_kf_stop *prev = NULL, *next = NULL;
+            const ns_anim_kf_stop *first = NULL, *second = NULL;
+            const ns_anim_kf_stop *penult = NULL, *last = NULL;
             for (guint k = 0; k < r->stops->len; k++) {
                 const ns_anim_kf_stop *c = &g_array_index(r->stops, ns_anim_kf_stop, k);
                 if (!stop_value(c, prop)) continue;
                 if (c->pct <= pct) prev = c;
                 if (c->pct > pct && !next) next = c;
+                if (!first) first = c;
+                else if (!second) second = c;
+                penult = last;
+                last = c;
+            }
+            if (r->is_script && pct < 0 && first && second &&
+                first->pct <= 1e-9) {
+                prev = first;
+                next = second;
+            } else if (r->is_script && pct > 100.0 && last && penult &&
+                       last->pct >= 100.0 - 1e-9) {
+                prev = penult;
+                next = last;
             }
             ns_css_value *out = NULL;
             if (prev && next && prev != next) {
@@ -1352,11 +1428,41 @@ run_sample_at(ns_anim_run *r, double progress)
                     if (!stop_timing(prev, &tm)) tm = r->timing;
                     t = timing_apply(tm, t);
                 }
+                int from_comp = stop_composite(prev, r->composite);
+                int to_comp = stop_composite(next, r->composite);
+                if (from_comp != NS_ANIM_COMPOSITE_REPLACE ||
+                    to_comp != NS_ANIM_COMPOSITE_REPLACE) {
+                    ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
+                    pa->from = ns_css_value_dup(stop_value(prev, prop));
+                    pa->to = ns_css_value_dup(stop_value(next, prop));
+                    pa->t = t;
+                    pa->from_composite = from_comp;
+                    pa->to_composite = to_comp;
+                    g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
+                    continue;
+                }
                 out = ns_css_value_interpolate(stop_value(prev, prop),
                                                stop_value(next, prop), t);
+                ns_css_value_clamp_animated(prop, out);
                 if (!out)
                     out = ns_css_value_dup(t < 0.5 ? stop_value(prev, prop)
                                                    : stop_value(next, prop));
+            } else if (prev && prev->pct >= 100.0 - 1e-9 &&
+                       stop_composite(prev, r->composite) != NS_ANIM_COMPOSITE_REPLACE) {
+                ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
+                pa->from = ns_css_value_dup(stop_value(prev, prop));
+                pa->to = ns_css_value_dup(stop_value(prev, prop));
+                pa->from_composite = pa->to_composite =
+                    stop_composite(prev, r->composite);
+                g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
+            } else if (next && next->pct <= 1e-9 && !prev &&
+                       stop_composite(next, r->composite) != NS_ANIM_COMPOSITE_REPLACE) {
+                ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
+                pa->from = ns_css_value_dup(stop_value(next, prop));
+                pa->to = ns_css_value_dup(stop_value(next, prop));
+                pa->from_composite = pa->to_composite =
+                    stop_composite(next, r->composite);
+                g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
             } else if (prev && prev->pct >= 100.0 - 1e-9) {
                 out = ns_css_value_dup(stop_value(prev, prop));
             } else if (next && next->pct <= 1e-9) {
@@ -1376,6 +1482,10 @@ run_sample_at(ns_anim_run *r, double progress)
                 pa->from = prev ? ns_css_value_dup(stop_value(prev, prop)) : NULL;
                 pa->to = next ? ns_css_value_dup(stop_value(next, prop)) : NULL;
                 pa->t = t;
+                pa->from_composite = prev ? stop_composite(prev, r->composite)
+                                          : NS_ANIM_COMPOSITE_REPLACE;
+                pa->to_composite = next ? stop_composite(next, r->composite)
+                                        : NS_ANIM_COMPOSITE_REPLACE;
                 g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
             }
             if (out) g_hash_table_insert(r->values, GINT_TO_POINTER(prop), out);
@@ -2407,6 +2517,7 @@ ns_anim_script_start(ns_anim *a, const ns_node *node,
     r->fill = fill_from_name(t->fill);
     r->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_LINEAR };
     if (t->easing) ns_css_timing_parse(t->easing, &r->timing);
+    r->composite = composite_from_name(t->composite, NS_ANIM_COMPOSITE_REPLACE);
     r->active = TRUE;
     r->paused = FALSE;
     r->pending = TRUE;
