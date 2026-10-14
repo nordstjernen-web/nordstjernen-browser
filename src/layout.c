@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "css.h"
+#include "css_anchor.h"
 #include "html.h"
 #include "image.h"
 #include "svg.h"
@@ -890,6 +891,7 @@ ns_box_free(ns_box *box)
             c = next;
         }
         if (cur->paint_layout) ns_paint_drop_box_cache(cur);
+        if (cur->owned_style) ns_style_free(cur->owned_style);
         g_clear_pointer(&cur->negative_layers, g_ptr_array_unref);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
@@ -17048,6 +17050,255 @@ box_mark_abs_pseudo(ns_box *abox, GHashTable *styles, const ns_abs_entry *e)
     abox->pseudo_after = hs && hs->after == e->pseudo;
 }
 
+typedef struct {
+    GHashTable    *box_map;
+    const ns_node *abs_dom;
+    const char    *default_name;
+} anchor_lookup_ud;
+
+static gboolean
+anchor_name_listed(const ns_style *s, const char *want)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_ANCHOR_NAME] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return FALSE;
+    gsize wl = strlen(want);
+    for (const char *p = v->u.keyword; (p = strstr(p, want)); p += wl) {
+        gboolean start_ok = p == v->u.keyword || p[-1] == ' ' || p[-1] == ',';
+        gboolean end_ok = p[wl] == '\0' || p[wl] == ',' || p[wl] == ' ';
+        if (start_ok && end_ok) return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+anchor_box_rect(const ns_box *b, double r[4])
+{
+    r[0] = b->x + b->margin.left;
+    r[1] = b->y + b->margin.top;
+    r[2] = b->border.left + b->padding.left + b->content_width +
+           b->padding.right + b->border.right;
+    r[3] = b->border.top + b->padding.top + b->content_height +
+           b->padding.bottom + b->border.bottom;
+}
+
+static gboolean
+anchor_lookup_cb(void *user, const char *name, double rect[4])
+{
+    anchor_lookup_ud *u = user;
+    const char *want = name ? name : u->default_name;
+    if (!want || want[0] != '-') return FALSE;
+    GHashTableIter it;
+    gpointer k, val;
+    const ns_box *best = NULL;
+    guint best_rank = 0;
+    g_hash_table_iter_init(&it, u->box_map);
+    while (g_hash_table_iter_next(&it, &k, &val)) {
+        const ns_node *dom = k;
+        const ns_box *b = val;
+        if (dom == u->abs_dom || node_is_ancestor_of(u->abs_dom, dom)) continue;
+        if (!anchor_name_listed(b->style, want)) continue;
+        guint rank = g_node_order
+            ? GPOINTER_TO_UINT(g_hash_table_lookup(g_node_order, dom)) : 0;
+        if (!best || rank >= best_rank) {
+            best = b;
+            best_rank = rank;
+        }
+    }
+    if (!best) return FALSE;
+    anchor_box_rect(best, rect);
+    return TRUE;
+}
+
+static gboolean
+value_has_anchor(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           ns_css_text_has_anchor_fn(v->u.keyword);
+}
+
+static gboolean
+style_uses_anchors(const ns_style *s)
+{
+    static const ns_css_prop props[] = {
+        NS_CSS_TOP, NS_CSS_RIGHT, NS_CSS_BOTTOM, NS_CSS_LEFT, NS_CSS_WIDTH,
+        NS_CSS_HEIGHT, NS_CSS_MIN_WIDTH, NS_CSS_MIN_HEIGHT, NS_CSS_MAX_WIDTH,
+        NS_CSS_MAX_HEIGHT, NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_RIGHT,
+        NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_LEFT,
+    };
+    if (!s) return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++)
+        if (value_has_anchor(s->values[props[i]])) return TRUE;
+    const ns_css_value *pa = s->values[NS_CSS_POSITION_AREA];
+    if (pa && pa->kind == NS_CSS_V_KEYWORD && pa->u.keyword &&
+        strcmp(pa->u.keyword, "none") != 0)
+        return TRUE;
+    return keyword_is(s->values[NS_CSS_JUSTIFY_SELF], "anchor-center") ||
+           keyword_is(s->values[NS_CSS_ALIGN_SELF], "anchor-center");
+}
+
+static void
+style_put(ns_style *s, ns_css_prop prop, ns_css_value *v)
+{
+    ns_css_value_free(s->values[prop]);
+    s->values[prop] = v;
+}
+
+static ns_css_value *
+px_value(double px)
+{
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_LENGTH;
+    v->u.length.unit = NS_CSS_UNIT_PX;
+    v->u.length.v = px;
+    return v;
+}
+
+static ns_css_value *
+keyword_value(const char *kw)
+{
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = g_strdup(kw);
+    return v;
+}
+
+static const char *
+anchor_default_name(const ns_style *s)
+{
+    const ns_css_value *v = s->values[NS_CSS_POSITION_ANCHOR];
+    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+        g_str_has_prefix(v->u.keyword, "--"))
+        return v->u.keyword;
+    return NULL;
+}
+
+static gboolean
+self_alignment_is_normal(const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = s->values[prop];
+    return !v || keyword_is(v, "normal") || keyword_is(v, "auto");
+}
+
+static gboolean
+anchor_place_axis(ns_style *c, gboolean vertical, int lo, int hi,
+                  const double ar[4], gboolean area, double imcb[4])
+{
+    double cb_start = vertical ? imcb[1] : imcb[0];
+    double cb_size = vertical ? imcb[3] : imcb[2];
+    double a_start = vertical ? ar[1] : ar[0];
+    double a_size = vertical ? ar[3] : ar[2];
+    double edges[4] = { cb_start, a_start, a_start + a_size, cb_start + cb_size };
+    ns_css_prop near = vertical ? NS_CSS_TOP : NS_CSS_LEFT;
+    ns_css_prop far = vertical ? NS_CSS_BOTTOM : NS_CSS_RIGHT;
+    ns_css_prop align = vertical ? NS_CSS_ALIGN_SELF : NS_CSS_JUSTIFY_SELF;
+    gboolean normal = self_alignment_is_normal(c, align);
+    gboolean centered_area = (lo == 1 && hi == 1) || (lo == 0 && hi == 2);
+    gboolean anchor_center = keyword_is(c->values[align], "anchor-center") ||
+                             (area && normal && centered_area);
+    gboolean near_auto = !c->values[near] || length_is_auto(c->values[near]);
+    gboolean far_auto = !c->values[far] || length_is_auto(c->values[far]);
+    double x0, x1;
+    if (anchor_center && (area || (near_auto && far_auto))) {
+        double mid = a_start + a_size / 2;
+        double half = MIN(mid - cb_start, cb_start + cb_size - mid);
+        if (half < 0) half = 0;
+        x0 = mid - half;
+        x1 = mid + half;
+    } else if (area) {
+        x0 = edges[lo];
+        x1 = edges[hi + 1];
+    } else {
+        return FALSE;
+    }
+    if (x1 < x0) x1 = x0;
+    if (near_auto) style_put(c, near, px_value(0));
+    if (far_auto) style_put(c, far, px_value(0));
+    if (anchor_center)
+        style_put(c, align, keyword_value("center"));
+    else if (normal)
+        style_put(c, align, keyword_value(lo == 0 && hi <= 1 ? "end"
+                                          : hi == 2 && lo >= 1 ? "start" : "center"));
+    if (vertical) {
+        imcb[1] = x0;
+        imcb[3] = x1 - x0;
+    } else {
+        imcb[0] = x0;
+        imcb[2] = x1 - x0;
+    }
+    return TRUE;
+}
+
+static ns_style *
+anchor_resolve_style(const ns_box *abox, GHashTable *box_map, double cb_x,
+                     double cb_y, double cb_w, double cb_h, double imcb[4],
+                     gboolean *has_imcb)
+{
+    *has_imcb = FALSE;
+    const ns_style *s = abox->style;
+    if (!style_uses_anchors(s)) return NULL;
+    ns_style *c = ns_style_clone(s);
+    anchor_lookup_ud ud = { box_map, abox->dom, anchor_default_name(s) };
+    ns_anchor_eval_ctx cx = {
+        .cb_x = cb_x, .cb_y = cb_y, .cb_w = cb_w, .cb_h = cb_h,
+        .font_px = 16, .root_font_px = 16,
+        .viewport_w = ns_css_viewport_w(), .viewport_h = ns_css_viewport_h(),
+        .lookup = anchor_lookup_cb, .user = &ud, .allow_anchor = TRUE,
+    };
+    const ns_css_value *fs = s->values[NS_CSS_FONT_SIZE];
+    if (fs && fs->kind == NS_CSS_V_LENGTH && fs->u.length.unit == NS_CSS_UNIT_PX)
+        cx.font_px = fs->u.length.v;
+    static const struct { ns_css_prop prop; gboolean vertical, far, inset; const char *initial; }
+        props[] = {
+        { NS_CSS_TOP, TRUE, FALSE, TRUE, "auto" },
+        { NS_CSS_BOTTOM, TRUE, TRUE, TRUE, "auto" },
+        { NS_CSS_LEFT, FALSE, FALSE, TRUE, "auto" },
+        { NS_CSS_RIGHT, FALSE, TRUE, TRUE, "auto" },
+        { NS_CSS_WIDTH, FALSE, FALSE, FALSE, "auto" },
+        { NS_CSS_MIN_WIDTH, FALSE, FALSE, FALSE, "auto" },
+        { NS_CSS_MAX_WIDTH, FALSE, FALSE, FALSE, "none" },
+        { NS_CSS_HEIGHT, TRUE, FALSE, FALSE, "auto" },
+        { NS_CSS_MIN_HEIGHT, TRUE, FALSE, FALSE, "auto" },
+        { NS_CSS_MAX_HEIGHT, TRUE, FALSE, FALSE, "none" },
+        { NS_CSS_MARGIN_TOP, TRUE, FALSE, FALSE, NULL },
+        { NS_CSS_MARGIN_BOTTOM, TRUE, FALSE, FALSE, NULL },
+        { NS_CSS_MARGIN_LEFT, FALSE, FALSE, FALSE, NULL },
+        { NS_CSS_MARGIN_RIGHT, FALSE, FALSE, FALSE, NULL },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++) {
+        const ns_css_value *v = c->values[props[i].prop];
+        if (!value_has_anchor(v)) continue;
+        cx.vertical_axis = props[i].vertical;
+        cx.far_edge = props[i].far;
+        cx.allow_anchor = props[i].inset;
+        cx.basis = props[i].vertical && props[i].inset ? cb_h : cb_w;
+        double px = 0;
+        if (ns_css_anchor_fn_eval(v->u.keyword, &cx, &px))
+            style_put(c, props[i].prop, px_value(px));
+        else
+            style_put(c, props[i].prop, props[i].initial ? keyword_value(props[i].initial)
+                                                         : px_value(0));
+    }
+    double ar[4];
+    imcb[0] = cb_x;
+    imcb[1] = cb_y;
+    imcb[2] = cb_w;
+    imcb[3] = cb_h;
+    gboolean have_anchor = ud.default_name && anchor_lookup_cb(&ud, NULL, ar);
+    const ns_css_value *pa = c->values[NS_CSS_POSITION_AREA];
+    int col_lo, col_hi, row_lo, row_hi;
+    if (have_anchor && pa && pa->kind == NS_CSS_V_KEYWORD &&
+        ns_css_position_area_resolve(pa->u.keyword, &col_lo, &col_hi, &row_lo, &row_hi)) {
+        *has_imcb |= anchor_place_axis(c, FALSE, col_lo, col_hi, ar, TRUE, imcb);
+        *has_imcb |= anchor_place_axis(c, TRUE, row_lo, row_hi, ar, TRUE, imcb);
+    } else if (have_anchor) {
+        if (keyword_is(c->values[NS_CSS_JUSTIFY_SELF], "anchor-center"))
+            *has_imcb |= anchor_place_axis(c, FALSE, 1, 1, ar, FALSE, imcb);
+        if (keyword_is(c->values[NS_CSS_ALIGN_SELF], "anchor-center"))
+            *has_imcb |= anchor_place_axis(c, TRUE, 1, 1, ar, FALSE, imcb);
+    }
+    return c;
+}
+
 static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
@@ -17110,6 +17361,23 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
         gboolean cb_is_icb = (cb_dom == NULL);
+        double anchor_imcb[4] = { 0 };
+        gboolean anchor_has_imcb = FALSE;
+        {
+            double acb_x = cb_is_icb ? 0 : cb->x + cb->margin.left + cb->border.left;
+            double acb_y = cb_is_icb ? 0 : cb->y + cb->margin.top + cb->border.top;
+            double acb_w = cb_is_icb ? ns_css_viewport_w()
+                : cb->content_width + cb->padding.left + cb->padding.right;
+            double acb_h = cb_is_icb ? ns_css_viewport_h()
+                : cb->content_height + cb->padding.top + cb->padding.bottom;
+            ns_style *resolved = anchor_resolve_style(abox, box_map, acb_x, acb_y,
+                                                      acb_w, acb_h, anchor_imcb,
+                                                      &anchor_has_imcb);
+            if (resolved) {
+                abox->owned_style = resolved;
+                abox->style = resolved;
+            }
+        }
         double cb_pad_w = cb->content_width + cb->padding.left + cb->padding.right;
         double cb_pad_h = cb->content_height + cb->padding.top + cb->padding.bottom;
         double avail = cb_is_icb ? viewport_width
@@ -17120,6 +17388,13 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean grid_cb = !cb_is_icb && !e.pseudo &&
             grid_abs_containing_block(cb, abox->style,
                                       &grid_x, &grid_y, &grid_w, &grid_h);
+        if (anchor_has_imcb) {
+            grid_cb = TRUE;
+            grid_x = anchor_imcb[0];
+            grid_y = anchor_imcb[1];
+            grid_w = anchor_imcb[2];
+            grid_h = anchor_imcb[3];
+        }
         if (grid_cb) {
             avail = grid_w;
             cb_h = grid_h;

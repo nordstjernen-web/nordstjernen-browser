@@ -6,6 +6,7 @@
 #include "css.h"
 #include "css_syntax.h"
 #include "css_color.h"
+#include "css_anchor.h"
 
 #include "config.h"
 #include "image.h"
@@ -443,6 +444,13 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_SCROLL_TIMELINE_AXIS] = "scroll-timeline-axis",
     [NS_CSS_VIEW_TIMELINE_NAME]   = "view-timeline-name",
     [NS_CSS_TIMELINE_SCOPE]       = "timeline-scope",
+    [NS_CSS_ANCHOR_NAME]          = "anchor-name",
+    [NS_CSS_ANCHOR_SCOPE]         = "anchor-scope",
+    [NS_CSS_POSITION_ANCHOR]      = "position-anchor",
+    [NS_CSS_POSITION_AREA]        = "position-area",
+    [NS_CSS_POSITION_TRY_FALLBACKS] = "position-try-fallbacks",
+    [NS_CSS_POSITION_TRY_ORDER]   = "position-try-order",
+    [NS_CSS_POSITION_VISIBILITY]  = "position-visibility",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9424,6 +9432,13 @@ ns_css_initial_value_text(const char *name)
         { "scroll-timeline-axis",       "block" },
         { "view-timeline-name",         "none" },
         { "timeline-scope",             "none" },
+        { "anchor-name",                "none" },
+        { "anchor-scope",               "none" },
+        { "position-anchor",            "normal" },
+        { "position-area",              "none" },
+        { "position-try-fallbacks",     "none" },
+        { "position-try-order",         "normal" },
+        { "position-visibility",        "anchors-visible" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10429,9 +10444,101 @@ border_radius_canonical(const char *value)
     return r;
 }
 
+static gboolean prop_is_anchor_property(ns_css_prop prop);
+static char *anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified);
+static char *position_try_shorthand_canonical(const char *value, char **order_out,
+                                              char **fallbacks_out);
+
+static gboolean
+anchor_fn_prop_name(const char *prop, gboolean *allow_anchor)
+{
+    static const char *const insets[] = {
+        "top", "right", "bottom", "left", "inset", "inset-block", "inset-inline",
+        "inset-block-start", "inset-block-end", "inset-inline-start", "inset-inline-end",
+    };
+    static const char *const sized[] = {
+        "width", "height", "min-width", "min-height", "max-width", "max-height",
+        "block-size", "inline-size", "min-block-size", "min-inline-size",
+        "max-block-size", "max-inline-size", "margin", "margin-top", "margin-right",
+        "margin-bottom", "margin-left", "margin-block", "margin-inline",
+        "margin-block-start", "margin-block-end", "margin-inline-start",
+        "margin-inline-end",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(insets); i++)
+        if (strcmp(prop, insets[i]) == 0) {
+            *allow_anchor = TRUE;
+            return TRUE;
+        }
+    for (gsize i = 0; i < G_N_ELEMENTS(sized); i++)
+        if (strcmp(prop, sized[i]) == 0) {
+            *allow_anchor = FALSE;
+            return TRUE;
+        }
+    return FALSE;
+}
+
+static char *
+anchor_fn_list_canonical(const char *value, gboolean allow_anchor)
+{
+    char *tokens[4] = {0};
+    int n = split_ws_limit(value, tokens, 4);
+    GString *out = g_string_new(NULL);
+    gboolean ok = n > 0;
+    for (int i = 0; ok && i < n; i++) {
+        char *c = ns_css_text_has_anchor_fn(tokens[i])
+            ? ns_css_anchor_fn_canonical(tokens[i], allow_anchor, TRUE)
+            : g_strdup(tokens[i]);
+        if (!c) ok = FALSE;
+        else {
+            if (i) g_string_append_c(out, ' ');
+            g_string_append(out, c);
+        }
+        g_free(c);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    if (!ok) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    if (n > 1) {
+        char *parts[4] = {0};
+        int m = split_ws_limit(out->str, parts, 4);
+        gboolean same = TRUE;
+        for (int i = 1; i < m; i++)
+            if (strcmp(parts[i], parts[0]) != 0) same = FALSE;
+        if (same) {
+            g_string_assign(out, parts[0]);
+        }
+        for (int i = 0; i < m; i++) g_free(parts[i]);
+    }
+    return g_string_free(out, FALSE);
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
+    gboolean allow_anchor = FALSE;
+    if (prop && value && ns_css_text_has_anchor_fn(value) &&
+        anchor_fn_prop_name(prop, &allow_anchor)) {
+        char *c = anchor_fn_list_canonical(value, allow_anchor);
+        if (c) return c;
+    }
+    if (prop) {
+        int apid = prop_id(prop);
+        if (apid >= 0 && prop_is_anchor_property((ns_css_prop)apid)) {
+            char *specified = NULL;
+            char *canon = anchor_prop_canonical((ns_css_prop)apid, value, &specified);
+            if (specified) {
+                g_free(canon);
+                return specified;
+            }
+            if (canon) return canon;
+        }
+        if (strcmp(prop, "position-try") == 0) {
+            char *c = position_try_shorthand_canonical(value, NULL, NULL);
+            if (c) return c;
+        }
+    }
     if (prop && strcmp(prop, "display") == 0) {
         char *d = ns_css_display_canonical(value);
         if (d) return d;
@@ -12627,6 +12734,104 @@ parse_valid_keyword_value(ns_css_prop prop, const char *t)
     return parse_keyword_value(prop, t);
 }
 
+static char *
+position_try_shorthand_canonical(const char *value, char **order_out,
+                                 char **fallbacks_out)
+{
+    char *t = g_strstrip(g_strdup(value));
+    char *rest = t;
+    char *order = NULL;
+    char *sp = t;
+    while (*sp && !g_ascii_isspace(*sp) && *sp != ',') sp++;
+    char saved = *sp;
+    *sp = '\0';
+    char *first = ns_css_position_try_order_canonical(t);
+    *sp = saved;
+    if (first && saved && saved != ',') {
+        order = first;
+        rest = sp;
+        while (*rest && g_ascii_isspace(*rest)) rest++;
+    } else {
+        g_free(first);
+        order = g_strdup("normal");
+    }
+    char *fallbacks = *rest ? ns_css_position_try_fallbacks_canonical(rest) : NULL;
+    char *result = NULL;
+    if (fallbacks) {
+        result = strcmp(order, "normal") == 0 ? g_strdup(fallbacks)
+                                              : g_strdup_printf("%s %s", order, fallbacks);
+    }
+    if (result && order_out) *order_out = g_strdup(order);
+    if (result && fallbacks_out) *fallbacks_out = g_strdup(fallbacks);
+    g_free(order);
+    g_free(fallbacks);
+    g_free(t);
+    return result;
+}
+
+static int
+anchor_fn_mode(ns_css_prop prop)
+{
+    switch (prop) {
+    case NS_CSS_TOP:
+    case NS_CSS_RIGHT:
+    case NS_CSS_BOTTOM:
+    case NS_CSS_LEFT:
+        return 1;
+    case NS_CSS_WIDTH:
+    case NS_CSS_HEIGHT:
+    case NS_CSS_MIN_WIDTH:
+    case NS_CSS_MIN_HEIGHT:
+    case NS_CSS_MAX_WIDTH:
+    case NS_CSS_MAX_HEIGHT:
+    case NS_CSS_MARGIN_TOP:
+    case NS_CSS_MARGIN_RIGHT:
+    case NS_CSS_MARGIN_BOTTOM:
+    case NS_CSS_MARGIN_LEFT:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+static char *
+anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified)
+{
+    static const char *const none_kw[] = { "none", NULL };
+    static const char *const scope_kw[] = { "none", "all", NULL };
+    *specified = NULL;
+    switch (prop) {
+    case NS_CSS_ANCHOR_NAME:
+        return ns_css_dashed_ident_list_canonical(t, none_kw);
+    case NS_CSS_ANCHOR_SCOPE:
+        return ns_css_dashed_ident_list_canonical(t, scope_kw);
+    case NS_CSS_POSITION_ANCHOR:
+        return ns_css_position_anchor_canonical(t);
+    case NS_CSS_POSITION_AREA: {
+        char *computed = ns_css_position_area_canonical(t, TRUE);
+        if (computed) *specified = ns_css_position_area_canonical(t, FALSE);
+        return computed;
+    }
+    case NS_CSS_POSITION_TRY_FALLBACKS:
+        return ns_css_position_try_fallbacks_canonical(t);
+    case NS_CSS_POSITION_TRY_ORDER:
+        return ns_css_position_try_order_canonical(t);
+    case NS_CSS_POSITION_VISIBILITY:
+        return ns_css_position_visibility_canonical(t);
+    default:
+        return NULL;
+    }
+}
+
+static gboolean
+prop_is_anchor_property(ns_css_prop prop)
+{
+    return prop == NS_CSS_ANCHOR_NAME || prop == NS_CSS_ANCHOR_SCOPE ||
+           prop == NS_CSS_POSITION_ANCHOR || prop == NS_CSS_POSITION_AREA ||
+           prop == NS_CSS_POSITION_TRY_FALLBACKS ||
+           prop == NS_CSS_POSITION_TRY_ORDER || prop == NS_CSS_POSITION_VISIBILITY;
+}
+
 static ns_css_value *
 parse_value_for(ns_css_prop prop, const char *text)
 {
@@ -12641,6 +12846,29 @@ parse_value_for(ns_css_prop prop, const char *text)
     v = parse_css_wide_keyword(t);
     if (v) {
         g_free(t);
+        return v;
+    }
+
+    int anchor_mode = anchor_fn_mode(prop);
+    if (anchor_mode && ns_css_text_has_anchor_fn(t)) {
+        char *canon = ns_css_anchor_fn_canonical(t, anchor_mode == 1, TRUE);
+        g_free(t);
+        if (!canon) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        return v;
+    }
+    if (prop_is_anchor_property(prop)) {
+        char *specified = NULL;
+        char *canon = anchor_prop_canonical(prop, t, &specified);
+        g_free(t);
+        if (!canon) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        if (specified && strcmp(specified, canon) != 0) v->specified = specified;
+        else g_free(specified);
         return v;
     }
 
@@ -12869,7 +13097,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_ALIGN_SELF:
         v = parse_alignment_keyword(t,
             "auto normal stretch center start end self-start self-end "
-            "flex-start flex-end baseline");
+            "flex-start flex-end baseline anchor-center");
         break;
     case NS_CSS_ALIGN_CONTENT:
         v = parse_alignment_keyword(t,
@@ -12884,7 +13112,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_JUSTIFY_SELF:
         v = parse_alignment_keyword(t,
             "auto normal stretch center start end self-start self-end "
-            "flex-start flex-end left right baseline");
+            "flex-start flex-end left right baseline anchor-center");
         break;
     case NS_CSS_MIX_BLEND_MODE:
         v = parse_keyword_choice(t,
@@ -17843,6 +18071,32 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
+        if (strcmp(pname, "position-try") == 0) {
+            char *order = NULL, *fallbacks = NULL;
+            char *canon = position_try_shorthand_canonical(vtext, &order, &fallbacks);
+            if (canon) {
+                ns_css_value *vo = parse_value_for(NS_CSS_POSITION_TRY_ORDER, order);
+                ns_css_value *vf = parse_value_for(NS_CSS_POSITION_TRY_FALLBACKS, fallbacks);
+                if (vo) {
+                    ns_css_decl d = { .prop = NS_CSS_POSITION_TRY_ORDER, .value = vo,
+                                      .important = important };
+                    g_array_append_val(decls_out, d);
+                }
+                if (vf) {
+                    ns_css_decl d = { .prop = NS_CSS_POSITION_TRY_FALLBACKS, .value = vf,
+                                      .important = important };
+                    g_array_append_val(decls_out, d);
+                }
+            }
+            g_free(canon);
+            g_free(order);
+            g_free(fallbacks);
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
+        }
+
         if (strcmp(pname, "inset") == 0) {
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
@@ -18183,7 +18437,7 @@ ns_css_named_property_supported(const char *name)
         "grid-template", "list-style", "outline", "page-break-after",
         "page-break-before", "page-break-inside", "place-content",
         "place-items", "place-self", "src", "unicode-range",
-        "animation-range",
+        "animation-range", "position-try",
     };
     if (!name || !*name) return FALSE;
     if (name[0] == '-' && name[1] == '-' && name[2]) return TRUE;
@@ -25906,6 +26160,26 @@ ns_style_free(ns_style *s)
         g_style_pool[g_style_pool_n++] = s;
     else
         g_free(s);
+}
+
+ns_style *
+ns_style_clone(const ns_style *src)
+{
+    ns_style *c = g_new0(ns_style, 1);
+    *c = *src;
+    c->ref = 0;
+    c->share_id = 0;
+    for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
+        if (c->values[i]) ns_css_value_dup(c->values[i]);
+    ns_style **pseudos[] = {
+        &c->before, &c->after, &c->first_letter, &c->first_line, &c->placeholder,
+        &c->selection, &c->marker, &c->backdrop, &c->file_selector_button,
+        &c->hidden_before, &c->hidden_after,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(pseudos); i++)
+        if (*pseudos[i]) (*pseudos[i])->ref++;
+    if (c->vars) ns_var_map_ref(c->vars);
+    return c;
 }
 
 const char *

@@ -266,6 +266,13 @@ typedef enum ns_css_prop {
     NS_CSS_SCROLL_TIMELINE_AXIS,
     NS_CSS_VIEW_TIMELINE_NAME,
     NS_CSS_TIMELINE_SCOPE,
+    NS_CSS_ANCHOR_NAME,
+    NS_CSS_ANCHOR_SCOPE,
+    NS_CSS_POSITION_ANCHOR,
+    NS_CSS_POSITION_AREA,
+    NS_CSS_POSITION_TRY_FALLBACKS,
+    NS_CSS_POSITION_TRY_ORDER,
+    NS_CSS_POSITION_VISIBILITY,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -1071,6 +1078,7 @@ typedef struct ns_style {
 gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
 
 void   ns_style_free(ns_style *s);
+ns_style *ns_style_clone(const ns_style *src);
 double ns_css_dimension_px(const ns_css_value *v, double font_size,
                            double basis);
 const ns_style *ns_css_style_before_change(const void *node);
