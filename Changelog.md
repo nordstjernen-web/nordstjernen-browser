@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: gradient color stops keep their color space in computed values.
+  `linear-gradient(in oklch, color(srgb 1 0 0), blue)` used to compute
+  to `rgb(255, 0, 0)` for the first stop. It now serializes
+  `color(srgb 1 0 0)`, and specified stops use the canonical CSS Color 4
+  form. All 932 `gradient-interpolation-method-computed` subtests pass.
 * Animations: keyframe composition is implemented. `composite: 'add'`
   and `'accumulate'` on Web Animations keyframes and effects, and
   `animation-composition` on CSS animations and their keyframes, combine

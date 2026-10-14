@@ -5659,6 +5659,7 @@ typedef struct ns_gradient_parse {
     gboolean interp_explicit;
     gboolean all_legacy;
     GPtrArray *stop_texts;
+    GPtrArray *stop_colors;
 } ns_gradient_parse;
 
 static void
@@ -5668,6 +5669,7 @@ gradient_parse_clear(ns_gradient_parse *gp)
     g_free(gp->size_text);
     g_free(gp->position_text);
     if (gp->stop_texts) g_ptr_array_free(gp->stop_texts, TRUE);
+    if (gp->stop_colors) g_ptr_array_free(gp->stop_colors, TRUE);
     memset(gp, 0, sizeof *gp);
 }
 
@@ -5723,6 +5725,8 @@ token_is_angle(const char *t)
 static char *
 gradient_stop_color_specified(const char *tok)
 {
+    char *canon = ns_css_color_specified(tok);
+    if (canon) return canon;
     guint8 r, g, b, a;
     gboolean legacy_syntax = tok[0] == '#' ||
         g_ascii_strncasecmp(tok, "rgb(", 4) == 0 ||
@@ -6143,11 +6147,14 @@ gradient_stop_parse(ns_gradient_parse *gp, const char *seg, gboolean *is_hint)
         if (n >= 2 && !gradient_stop_pos_parse(tok[1], conic, &first)) goto done;
         if (n == 3 && !gradient_stop_pos_parse(tok[2], conic, &second)) goto done;
         if (!color_text_is_legacy(tok[0])) gp->all_legacy = FALSE;
-        if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX)
+        if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX) {
             gr->stops[gr->n_stops++] = first;
+            if (gp->stop_colors) g_ptr_array_add(gp->stop_colors, g_strdup(tok[0]));
+        }
         if (n == 3 && gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX) {
             second.pair_with_prev = TRUE;
             gr->stops[gr->n_stops++] = second;
+            if (gp->stop_colors) g_ptr_array_add(gp->stop_colors, NULL);
         }
         if (gp->stop_texts) {
             GString *s = g_string_new(NULL);
@@ -6168,8 +6175,10 @@ gradient_stop_parse(ns_gradient_parse *gp, const char *seg, gboolean *is_hint)
     if (n != 1) goto done;
     ns_css_gradient_stop hint = { .is_hint = TRUE };
     if (!gradient_stop_pos_parse(tok[0], conic, &hint)) goto done;
-    if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX)
+    if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX) {
         gr->stops[gr->n_stops++] = hint;
+        if (gp->stop_colors) g_ptr_array_add(gp->stop_colors, NULL);
+    }
     if (gp->stop_texts)
         g_ptr_array_add(gp->stop_texts,
                         conic ? conic_calc_canonical(tok[0]) : g_strdup(tok[0]));
@@ -6257,7 +6266,10 @@ gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
     gp->gr.center_x = 0.5;
     gp->gr.center_y = 0.5;
     gp->all_legacy = TRUE;
-    if (keep_texts) gp->stop_texts = g_ptr_array_new_with_free_func(g_free);
+    if (keep_texts) {
+        gp->stop_texts = g_ptr_array_new_with_free_func(g_free);
+        gp->stop_colors = g_ptr_array_new_with_free_func(g_free);
+    }
 
     GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
     const char *seg = body_start;
@@ -6367,7 +6379,8 @@ gradient_append_prelude_part(GString *prelude, const char *part)
 }
 
 static void
-gradient_serialize_computed(GString *s, const ns_css_gradient *gr)
+gradient_serialize_computed(GString *s, const ns_css_gradient *gr,
+                            const GPtrArray *stop_colors)
 {
     gradient_append_name(s, gr);
     GString *pre = g_string_new(NULL);
@@ -6435,7 +6448,12 @@ gradient_serialize_computed(GString *s, const ns_css_gradient *gr)
             gradient_append_stop_pos(s, st);
             continue;
         }
-        ns_css_append_color(s, st->r, st->g, st->b, st->a);
+        const char *color_text = stop_colors && (guint)i < stop_colors->len
+            ? g_ptr_array_index(stop_colors, i) : NULL;
+        char *computed = color_text ? ns_css_color_computed(color_text, NULL) : NULL;
+        if (computed) g_string_append(s, computed);
+        else ns_css_append_color(s, st->r, st->g, st->b, st->a);
+        g_free(computed);
         if (st->has_pos) {
             g_string_append_c(s, ' ');
             gradient_append_stop_pos(s, st);
@@ -7418,6 +7436,7 @@ parse_gradient_text(const char *t, gboolean allow_trailing)
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_GRADIENT;
     v->u.gradient = gp.gr;
+    if (!gp.all_legacy && !allow_trailing) v->specified = g_strdup(t);
     gradient_parse_clear(&gp);
     return v;
 }
@@ -26651,7 +26670,12 @@ value_serialize_one(const ns_css_value *v)
     }
     case NS_CSS_V_GRADIENT: {
         GString *s = g_string_new(NULL);
-        gradient_serialize_computed(s, &v->u.gradient);
+        ns_gradient_parse gp;
+        gboolean reparsed = v->specified &&
+                            gradient_parse(v->specified, &gp, NULL, TRUE) &&
+                            gp.gr.n_stops == v->u.gradient.n_stops;
+        gradient_serialize_computed(s, &v->u.gradient, reparsed ? gp.stop_colors : NULL);
+        if (v->specified) gradient_parse_clear(&gp);
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_TRACKS: {
@@ -26802,6 +26826,17 @@ value_serialize_layers(const ns_css_value *v, gboolean specified)
     GString *s = g_string_new(NULL);
     for (const ns_css_value *l = v; l; l = l->next_layer) {
         if (s->len) g_string_append(s, ", ");
+        if (specified && l->specified && l->kind == NS_CSS_V_GRADIENT) {
+            ns_gradient_parse gp;
+            if (gradient_parse(l->specified, &gp, NULL, TRUE)) {
+                char *canon = gradient_serialize_specified(&gp);
+                g_string_append(s, canon);
+                g_free(canon);
+                gradient_parse_clear(&gp);
+                continue;
+            }
+            gradient_parse_clear(&gp);
+        }
         if (specified && l->specified) {
             char *color = l->kind == NS_CSS_V_COLOR && strchr(l->specified, '(')
                 ? ns_css_color_specified(l->specified) : NULL;
