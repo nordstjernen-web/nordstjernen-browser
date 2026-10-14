@@ -1297,6 +1297,7 @@ char *ns_css_time_computed(const char *value);
 
 gboolean ns_css_parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b,
                             guint8 *a);
+gboolean ns_css_named_color(const char *name, guint8 *r, guint8 *g, guint8 *b);
 
 G_END_DECLS
 
