@@ -3,6 +3,17 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Shapes: `shape-outside`, `shape-margin` and
+  `shape-image-threshold` are real properties now. Basic shapes
+  (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`,
+  `polygon()`) and shape boxes parse with the specification's
+  validity rules and serialize in canonical form: positions reorder to
+  horizontal-first, default radii and `margin-box` drop out, inset and
+  corner-radius lists collapse like the `margin` shorthand, and
+  `calc()` keeps relative units. Computed values resolve lengths
+  against the element's font and the viewport, positions to
+  percentages, and `rect()`/`xywh()` to `inset()`. Floats do not yet
+  wrap around the shape.
 * Animations: transform lists interpolate as CSS Transforms specifies.
   Lists of different lengths are padded with identity functions, so
   `translateX(0)` → `translateX(100px) rotate(90deg)` animates both

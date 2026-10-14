@@ -18276,6 +18276,16 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         if (tracks) return tracks;
     }
     int tracks_id = ns_css_prop_id(name);
+    if (computed && (tracks_id == NS_CSS_SHAPE_OUTSIDE || tracks_id == NS_CSS_SHAPE_MARGIN ||
+                     tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD)) {
+        const ns_node *root = n;
+        while (root->parent && root->parent->kind == NS_NODE_ELEMENT)
+            root = root->parent;
+        const ns_style *root_style = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, root) : NULL;
+        char *shape = ns_css_shape_computed_serialize(computed, root_style, tracks_id);
+        if (shape) return shape;
+    }
     if (computed && (tracks_id == NS_CSS_GRID_TEMPLATE_COLUMNS ||
                      tracks_id == NS_CSS_GRID_TEMPLATE_ROWS ||
                      tracks_id == NS_CSS_GRID_AUTO_COLUMNS ||
