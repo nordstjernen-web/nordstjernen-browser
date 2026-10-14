@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: `Promise.try()` returns the callback's promise unchanged
+  when it is already an instance of the receiver, as the current spec
+  requires, instead of wrapping it in a new one. A unicode regular
+  expression no longer finds a match that starts on the second half of
+  a surrogate pair (`/\udf06/u.exec('𝌆')` is `null`), which
+  the search prefilter allowed. `TypedArray.prototype.with()` reads
+  elements past a buffer shrunk during argument coercion as
+  `undefined`: `NaN` in float arrays and a `TypeError` in BigInt
+  arrays. Nine more test262 tests pass.
 * Media: a <video> removed from the document, or whose source is
   replaced or cleared, stops its sound. The player record kept playing
   - and the audio helper kept looping its track - whenever the page
