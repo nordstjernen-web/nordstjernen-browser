@@ -18653,7 +18653,7 @@ static const char *const ns_css_computed_props[] = {
     "math-shift", "math-style", "orphans", "overflow-wrap", "paint-order", "pointer-events",
     "quotes", "scrollbar-color", "shape-rendering", "stroke", "stroke-dasharray", "stroke-dashoffset",
     "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width", "tab-size",
-    "text-align", "text-anchor", "text-decoration-line", "text-decoration-skip-ink", "text-indent", "text-justify",
+    "text-align", "text-align-last", "text-anchor", "text-decoration-line", "text-decoration-skip-ink", "text-indent", "text-justify",
     "text-rendering", "text-shadow", "text-transform", "text-underline-offset", "text-underline-position", "text-wrap-mode",
     "text-wrap-style", "visibility", "white-space-collapse", "widows", "word-break", "word-spacing",
     "writing-mode", "align-content", "align-items", "align-self", "anchor-name", "anchor-scope",

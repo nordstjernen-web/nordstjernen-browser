@@ -277,6 +277,8 @@ typedef enum ns_css_prop {
     NS_CSS_SHAPE_MARGIN,
     NS_CSS_SHAPE_IMAGE_THRESHOLD,
     NS_CSS_FONT_SIZE_ADJUST,
+    NS_CSS_TEXT_JUSTIFY,
+    NS_CSS_TEXT_ALIGN_LAST,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 

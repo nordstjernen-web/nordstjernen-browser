@@ -3496,6 +3496,23 @@ ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *s)
     }
 }
 
+static void
+ns_paint_apply_justify(NsPangoLayout *layout, const ns_style *s, gboolean rtl)
+{
+    const ns_css_value *last = s->values[NS_CSS_TEXT_ALIGN_LAST];
+    ns_pango_layout_set_justify(layout, TRUE);
+    if (keyword_is(last, "justify"))
+        ns_pango_layout_set_justify_last_line(layout, TRUE);
+    else if (keyword_is(last, "center"))
+        ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_CENTER);
+    else if (keyword_is(last, "right") || (keyword_is(last, "end") && !rtl) ||
+             (keyword_is(last, "start") && rtl) ||
+             ((!last || keyword_is(last, "auto")) && rtl))
+        ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_RIGHT);
+    else
+        ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
+}
+
 void
 ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s)
 {
@@ -3509,8 +3526,9 @@ ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s)
              (keyword_is(ta, "start") && rtl) ||
              (!ta && rtl))
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_RIGHT);
-    else if (keyword_is(ta, "justify"))
-        ns_pango_layout_set_justify(layout, TRUE);
+    else if (keyword_is(ta, "justify") &&
+             !keyword_is(s->values[NS_CSS_TEXT_JUSTIFY], "none"))
+        ns_paint_apply_justify(layout, s, rtl);
     else
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
 }
@@ -4229,9 +4247,6 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     ns_paint_apply_text_align(layout, s);
     apply_nowrap_align_width(layout, b);
     ns_paint_start_align_overflow(layout);
-    const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
-    if (keyword_is(ta, "justify"))
-        ns_pango_layout_set_justify(layout, TRUE);
     return layout;
 }
 
