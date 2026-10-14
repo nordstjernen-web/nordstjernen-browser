@@ -3,6 +3,19 @@ Changelog:
 
 1.0.32:
 ======
+* Animations: transform lists interpolate as CSS Transforms specifies.
+  Lists of different lengths are padded with identity functions, so
+  `translateX(0)` → `translateX(100px) rotate(90deg)` animates both
+  functions instead of jumping. Functions that do not match, and
+  `matrix()` values, interpolate through the 2D matrix decomposition
+  (translate, scale, rotation, skew) instead of component by component.
+  `perspective()` interpolates through 1/d. Singular 3D matrices stay
+  discrete. Keyframes written as `initial`, `inherit`, `unset` or
+  `revert` resolve to the matching computed value before interpolation.
+  The individual `translate`, `scale` and `rotate` properties, and
+  `transform-origin`/`perspective-origin`, compose by combining values
+  rather than concatenating function lists. 2,376 more interpolation
+  and composition subtests pass.
 * CSS: the `columns`, `flex-flow`, `list-style`, `animation-range`,
   `scroll-margin-block`/`-inline`, `scroll-padding-block`/`-inline` and
   `position-try` shorthands accept CSS-wide keywords (`initial`,
