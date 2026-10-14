@@ -49,6 +49,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "mic.h"
 #include "config.h"
 #include "css.h"
+#include "css_anchor.h"
 #include "datetime.h"
 #include "debuglog.h"
 #include "engine.h"
@@ -18182,6 +18183,16 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(y);
         return out;
     }
+    if (strcmp(name, "position-try") == 0) {
+        char *order = ns_computed_lookup(ctx, n, "position-try-order");
+        char *fallbacks = ns_computed_lookup(ctx, n, "position-try-fallbacks");
+        const char *o = order && *order ? order : "normal";
+        const char *f = fallbacks && *fallbacks ? fallbacks : "none";
+        char *out = strcmp(o, "normal") == 0 ? g_strdup(f) : g_strdup_printf("%s %s", o, f);
+        g_free(order);
+        g_free(fallbacks);
+        return out;
+    }
     if (strcmp(name, "gap") == 0 || strcmp(name, "grid-gap") == 0) {
         char *row = ns_computed_lookup(ctx, n, "row-gap");
         char *col = ns_computed_lookup(ctx, n, "column-gap");
@@ -18459,8 +18470,23 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     const char *canonical = pid >= 0 ? ns_css_prop_name(pid) : name;
     if (pid >= 0 && js && js->style_table) {
         const ns_style *s = g_hash_table_lookup(js->style_table, n);
-        if (s && s->values[pid])
-            return ns_css_value_serialize(s->values[pid]);
+        const ns_css_value *sv = s ? s->values[pid] : NULL;
+        if (sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
+            ns_css_text_has_anchor_fn(sv->u.keyword)) {
+            ns_js_flush_layout(js);
+            const struct ns_box *ab = js->layout_root
+                ? ns_box_find_by_dom(js->layout_root, n) : NULL;
+            const ns_css_value *rv = ab && ab->owned_style ? ab->owned_style->values[pid] : NULL;
+            if (rv && !(rv->kind == NS_CSS_V_KEYWORD && rv->u.keyword &&
+                        ns_css_text_has_anchor_fn(rv->u.keyword)))
+                return ns_css_value_serialize(rv);
+            char *fallback = ns_css_anchor_fn_fallback(sv->u.keyword);
+            if (fallback) return fallback;
+            const char *initial = ns_computed_initial_value(canonical);
+            return g_strdup(initial ? initial : "auto");
+        }
+        if (sv)
+            return ns_css_value_serialize(sv);
         const char *initial = ns_computed_initial_value(canonical);
         if (s && initial) return g_strdup(initial);
     }
@@ -18826,7 +18852,7 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
         "gap", "grid", "grid-area", "grid-column", "grid-row",
         "grid-template", "inset", "list-style", "margin", "outline",
         "overflow", "padding", "place-content", "place-items", "place-self",
-        "scroll-timeline", "text-decoration", "transition",
+        "position-try", "scroll-timeline", "text-decoration", "transition",
     };
     gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
     for (gsize i = 0; !ok && i < G_N_ELEMENTS(shorthands); i++)
