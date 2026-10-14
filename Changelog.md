@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Images: `img.width` and `img.height` report the rendered content box
+  instead of the border box. An SVG image without a `width`, `height`
+  or `viewBox` takes the 300×150 default object size, and a missing
+  dimension falls back to that default, instead of a 512-pixel square.
+  The window `load` event now also waits for images that scripts
+  inserted before it fired.
 * CSS Sizing / Containment: size containment now affects layout. The
   block size is contained by `contain: size`/`strict`,
   `container-type: size` or `content-visibility: hidden`, the inline
