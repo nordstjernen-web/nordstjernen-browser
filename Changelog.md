@@ -3,6 +3,20 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: anchor positioning. `anchor-name` and `position-anchor` tie an
+  absolutely or fixed positioned box to an anchor element, the last one
+  in tree order carrying the name. Its insets can use `anchor()`, its
+  sizes, insets and margins can use `anchor-size()`, and both can appear
+  inside calc(), min()/max()/clamp() and each other's fallbacks.
+  `position-area` places the box in one cell or span of the 3x3 grid
+  around the anchor. Auto insets resolve to 0 and normal alignment
+  points toward the anchor. `justify-self`/`align-self: anchor-center`
+  centers the box on the anchor. A function that cannot resolve falls
+  back as the spec says, including in getComputedStyle. `anchor-scope`,
+  `position-try-fallbacks`, `position-try-order`, `position-try` and
+  `position-visibility` parse and serialize; fallback positions are not
+  applied yet. css-anchor-position goes from 445 to 11,564 passing WPT
+  subtests.
 * CSS: gradient color stops keep their color space in computed values.
   `linear-gradient(in oklch, color(srgb 1 0 0), blue)` used to compute
   to `rgb(255, 0, 0)` for the first stop. It now serializes

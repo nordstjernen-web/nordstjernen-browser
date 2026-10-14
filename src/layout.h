@@ -138,6 +138,7 @@ typedef struct ns_box {
     ns_box_kind kind;
     const ns_node  *dom;
     const ns_style *style;
+    ns_style       *owned_style;
 
     double x, y;
     /* offset of a relatively positioned inline-level atomic box (an image,
