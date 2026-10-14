@@ -13,5 +13,6 @@ gboolean ns_css_color_valid(const char *s);
 char    *ns_css_color_specified(const char *s);
 char    *ns_css_color_computed(const char *s, const guint8 *current);
 gboolean ns_css_color_is_legacy_srgb(const char *s);
+char    *ns_css_color_input_value(const char *s, gboolean alpha, gboolean display_p3);
 
 #endif
