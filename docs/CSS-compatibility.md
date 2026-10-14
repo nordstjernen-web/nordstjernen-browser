@@ -203,8 +203,10 @@ the 1.0.31-dev source.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | Named, `#hex`, `rgb()`/`rgba()`, `hsl()`/`hsla()` | ✅ | modern space/slash syntax |
-| `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()` | ✅ | converted to sRGB |
-| `color-mix()` | 🟡 | `in srgb` and `in oklab`/`in oklch` interpolate in that space; `srgb-linear`, `hsl`, `hwb`, `lab`, `lch` and `xyz` are accepted but mixed in sRGB |
+| `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()`, `color()` | ✅ | every predefined space; values keep their color space and `none` components through specified and computed serialization (`src/css_color.c`); painted after conversion to sRGB |
+| Relative colors (`rgb(from …)`, `oklch(from …)`, `color(from …)`), `alpha()` | ✅ | channel keywords and math functions |
+| `color-mix()` | ✅ | any number of colors, every interpolation space and hue method, missing-component carry-forward and powerless hues |
+| `contrast-color()`, `color-layers()`, `light-dark()` | 🟡 | `color-layers()` accepts every blend mode but composites them all as `normal` |
 | `currentColor`, `transparent` | ✅ | |
 | `accent-color` / `caret-color` | ✅ | |
 
