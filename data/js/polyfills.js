@@ -10688,8 +10688,15 @@
         var doc = global.document;
         if (!doc || typeof doc.createElement !== 'function') return;
 
-        function domEx(name) {
-            try { return new DOMException(name, name); }
+        function domEx(name, ctxNode) {
+            var Ctor = DOMException;
+            try {
+                var d = ctxNode && (ctxNode.nodeType === 9 ? ctxNode
+                                                         : ctxNode.ownerDocument);
+                var w = d && d.defaultView;
+                if (w && typeof w.DOMException === 'function') Ctor = w.DOMException;
+            } catch (e) {}
+            try { return new Ctor(name, name); }
             catch (e) {
                 var err = new Error(name);
                 err.name = name;
@@ -10776,9 +10783,9 @@
         function checkBoundary(node, offset) {
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
-            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError', node);
             offset = Number(offset) >>> 0;
-            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError', node);
             return offset;
         }
 
@@ -10881,7 +10888,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw domEx('InvalidNodeTypeError');
+            if (!parent) throw domEx('InvalidNodeTypeError', this._sc);
             this.setStart(parent, indexOfNode(node));
         };
 
@@ -10889,7 +10896,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw domEx('InvalidNodeTypeError');
+            if (!parent) throw domEx('InvalidNodeTypeError', this._sc);
             this.setStart(parent, indexOfNode(node) + 1);
         };
 
@@ -10897,7 +10904,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw domEx('InvalidNodeTypeError');
+            if (!parent) throw domEx('InvalidNodeTypeError', this._sc);
             this.setEnd(parent, indexOfNode(node));
         };
 
@@ -10905,7 +10912,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw domEx('InvalidNodeTypeError');
+            if (!parent) throw domEx('InvalidNodeTypeError', this._sc);
             this.setEnd(parent, indexOfNode(node) + 1);
         };
 
@@ -10918,7 +10925,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw domEx('InvalidNodeTypeError');
+            if (!parent) throw domEx('InvalidNodeTypeError', this._sc);
             var i = indexOfNode(node);
             this._sc = parent; this._so = i;
             this._ec = parent; this._eo = i + 1;
@@ -10927,7 +10934,7 @@
         NdRange.prototype.selectNodeContents = function (node) {
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
-            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError', this._sc);
             this._sc = node; this._so = 0;
             this._ec = node; this._eo = nodeLength(node);
         };
@@ -10942,10 +10949,10 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             if (rootOf(node) !== rootOf(this._sc))
-                throw domEx('WrongDocumentError');
-            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+                throw domEx('WrongDocumentError', this._sc);
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError', this._sc);
             offset = Number(offset) >>> 0;
-            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError', this._sc);
             if (bpCompare(node, offset, this._sc, this._so) < 0) return -1;
             if (bpCompare(node, offset, this._ec, this._eo) > 0) return 1;
             return 0;
@@ -10955,9 +10962,9 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             if (rootOf(node) !== rootOf(this._sc)) return false;
-            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError', this._sc);
             offset = Number(offset) >>> 0;
-            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError', this._sc);
             return bpCompare(node, offset, this._sc, this._so) >= 0 &&
                    bpCompare(node, offset, this._ec, this._eo) <= 0;
         };
@@ -10977,9 +10984,9 @@
             how = (how >>> 0) & 0xffff;
             if (!sourceRange || !(sourceRange instanceof NdRange))
                 throw new TypeError('parameter 2 is not of type Range');
-            if (how > 3) throw domEx('NotSupportedError');
+            if (how > 3) throw domEx('NotSupportedError', this._sc);
             if (rootOf(this._sc) !== rootOf(sourceRange._sc))
-                throw domEx('WrongDocumentError');
+                throw domEx('WrongDocumentError', this._sc);
             var tn, to, on, oo;
             if (how === 0) { tn = this._sc; to = this._so; on = sourceRange._sc; oo = sourceRange._so; }
             else if (how === 1) { tn = this._ec; to = this._eo; on = sourceRange._sc; oo = sourceRange._so; }
@@ -11056,7 +11063,7 @@
             var contained = [];
             for (var ch = commonAncestor.firstChild; ch; ch = ch.nextSibling)
                 if (containedIn(ch, r)) {
-                    if (ch.nodeType === 10) throw domEx('HierarchyRequestError');
+                    if (ch.nodeType === 10) throw domEx('HierarchyRequestError', r._sc);
                     contained.push(ch);
                 }
             var newNode = null, newOffset = 0;
@@ -11165,38 +11172,38 @@
         function ensurePreInsertion(node, parent, child) {
             var pt = parent.nodeType;
             if (pt !== 1 && pt !== 9 && pt !== 11)
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', parent);
             if (isInclusiveAncestor(node, parent))
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', parent);
             if (child && child.parentNode !== parent)
-                throw domEx('NotFoundError');
+                throw domEx('NotFoundError', parent);
             var nt = node.nodeType;
             if (nt !== 1 && nt !== 3 && nt !== 4 && nt !== 7 && nt !== 8 &&
                 nt !== 10 && nt !== 11)
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', parent);
             if ((nt === 3 || nt === 4) && pt === 9)
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', parent);
             if (nt === 10 && pt !== 9)
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', parent);
             if (pt !== 9) return;
             if (nt === 11) {
                 var elems = countElementChildren(node);
                 if (elems > 1 || hasChildOfType(node, 3))
-                    throw domEx('HierarchyRequestError');
+                    throw domEx('HierarchyRequestError', parent);
                 if (elems === 1 && (countElementChildren(parent) > 0 ||
                     (child && child.nodeType === 10) ||
                     (child && doctypeFollowing(child))))
-                    throw domEx('HierarchyRequestError');
+                    throw domEx('HierarchyRequestError', parent);
             } else if (nt === 1) {
                 if (countElementChildren(parent) > 0 ||
                     (child && child.nodeType === 10) ||
                     (child && doctypeFollowing(child)))
-                    throw domEx('HierarchyRequestError');
+                    throw domEx('HierarchyRequestError', parent);
             } else if (nt === 10) {
                 if (hasChildOfType(parent, 10) ||
                     (child && elementPreceding(child)) ||
                     (!child && countElementChildren(parent) > 0))
-                    throw domEx('HierarchyRequestError');
+                    throw domEx('HierarchyRequestError', parent);
             }
         }
 
@@ -11207,7 +11214,7 @@
             var sct = sc.nodeType;
             if (sct === 7 || sct === 8 ||
                 (isTextNode(sc) && !sc.parentNode) || node === sc)
-                throw domEx('HierarchyRequestError');
+                throw domEx('HierarchyRequestError', this._sc);
             var referenceNode;
             if (isTextNode(sc)) referenceNode = sc;
             else referenceNode = (sct !== 2 && sc.childNodes &&
@@ -11230,13 +11237,13 @@
                 throw new TypeError('parameter 1 is not of type Node');
             for (var a = this._sc; a && !isInclusiveAncestor(a, this._ec);
                  a = a.parentNode)
-                if (!isTextNode(a)) throw domEx('InvalidStateError');
+                if (!isTextNode(a)) throw domEx('InvalidStateError', this._sc);
             for (var b = this._ec; b && !isInclusiveAncestor(b, this._sc);
                  b = b.parentNode)
-                if (!isTextNode(b)) throw domEx('InvalidStateError');
+                if (!isTextNode(b)) throw domEx('InvalidStateError', this._sc);
             var nt = newParent.nodeType;
             if (nt === 9 || nt === 10 || nt === 11)
-                throw domEx('InvalidNodeTypeError');
+                throw domEx('InvalidNodeTypeError', this._sc);
             var fragment = this.extractContents();
             while (newParent.firstChild)
                 newParent.removeChild(newParent.firstChild);
