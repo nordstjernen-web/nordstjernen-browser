@@ -18276,6 +18276,20 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         if (tracks) return tracks;
     }
     int tracks_id = ns_css_prop_id(name);
+    if (computed && (tracks_id == NS_CSS_CONTAIN_INTRINSIC_WIDTH ||
+                     tracks_id == NS_CSS_CONTAIN_INTRINSIC_HEIGHT)) {
+        char *cis = ns_css_contain_intrinsic_computed(computed, tracks_id);
+        if (cis) return cis;
+    }
+    if (computed && strcmp(name, "contain-intrinsic-size") == 0) {
+        char *w = ns_css_contain_intrinsic_computed(computed, NS_CSS_CONTAIN_INTRINSIC_WIDTH);
+        char *h = ns_css_contain_intrinsic_computed(computed, NS_CSS_CONTAIN_INTRINSIC_HEIGHT);
+        char *out = w && h ? (strcmp(w, h) == 0 ? g_strdup(w) : g_strdup_printf("%s %s", w, h))
+                           : NULL;
+        g_free(w);
+        g_free(h);
+        if (out) return out;
+    }
     if (computed && tracks_id == NS_CSS_FONT_SIZE_ADJUST) {
         char *adjust = ns_css_font_size_adjust_computed(computed);
         if (adjust) return adjust;
@@ -18670,7 +18684,7 @@ static const char *const ns_css_computed_props[] = {
     "border-top-width", "bottom", "box-shadow", "box-sizing", "break-after", "break-before",
     "break-inside", "clear", "clip",
     "clip-path", "column-count", "column-gap", "column-height", "column-span", "column-width",
-    "contain", "container-name", "container-type", "content", "content-visibility", "corner-bottom-left-shape",
+    "contain", "contain-intrinsic-height", "contain-intrinsic-width", "container-name", "container-type", "content", "content-visibility", "corner-bottom-left-shape",
     "corner-bottom-right-shape", "corner-end-end-shape", "corner-end-start-shape", "corner-start-end-shape", "corner-start-start-shape", "corner-top-left-shape",
     "corner-top-right-shape", "counter-increment", "counter-reset", "counter-set", "cx", "cy",
     "display", "filter", "flex-basis", "flex-direction", "flex-grow", "flex-shrink",

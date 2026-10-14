@@ -8060,6 +8060,31 @@ style_has_containment_layer(const ns_style *s)
 }
 
 static gboolean
+style_inline_size_contained(const ns_style *s, double *intrinsic)
+{
+    static const char *const contain[] = { "size", "inline-size", "strict" };
+    if (!s) return FALSE;
+    if (!style_contains_inline_size(s) && !style_content_visibility_hidden(s) &&
+        !keyword_list_has(s->values[NS_CSS_CONTAIN], contain, G_N_ELEMENTS(contain)))
+        return FALSE;
+    *intrinsic = ns_css_contain_intrinsic_px(s, FALSE);
+    return TRUE;
+}
+
+static gboolean
+style_block_size_contained(const ns_style *s, double *intrinsic)
+{
+    static const char *const contain[] = { "size", "strict" };
+    if (!s) return FALSE;
+    const ns_css_value *ct = s->values[NS_CSS_CONTAINER_TYPE];
+    if (!keyword_is(ct, "size") && !style_content_visibility_hidden(s) &&
+        !keyword_list_has(s->values[NS_CSS_CONTAIN], contain, G_N_ELEMENTS(contain)))
+        return FALSE;
+    *intrinsic = ns_css_contain_intrinsic_px(s, TRUE);
+    return TRUE;
+}
+
+static gboolean
 style_has_positioned_layer(const ns_style *s)
 {
     const ns_css_value *p = s->values[NS_CSS_POSITION];
@@ -9523,7 +9548,8 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
         box->kind == NS_BOX_VIDEO || box->kind == NS_BOX_SVG ||
         box->kind == NS_BOX_TEXT)
         return measure_natural_width(box, parent_style);
-    if (style_contains_inline_size(box->style)) return 0;
+    double contained_w;
+    if (style_inline_size_contained(box->style, &contained_w)) return contained_w;
     const ns_style *child_style = box->style ? box->style : parent_style;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(box, child_style, FALSE);
@@ -9653,7 +9679,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     }
     if (box->kind == NS_BOX_TEXT)
         return box->content_width > 0 ? box->content_width : 0;
-    if (style_contains_inline_size(box->style)) return 0;
+    double contained_w;
+    if (style_inline_size_contained(box->style, &contained_w)) return contained_w;
     if (box->style) {
         const ns_css_value *wv = box->style->values[NS_CSS_WIDTH];
         if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
@@ -9743,7 +9770,8 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         box->kind == NS_BOX_VIDEO || box->kind == NS_BOX_SVG ||
         box->kind == NS_BOX_TEXT)
         return min_width_of(box, parent_style);
-    if (style_contains_inline_size(box->style)) return 0;
+    double contained_w;
+    if (style_inline_size_contained(box->style, &contained_w)) return contained_w;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
@@ -10675,7 +10703,8 @@ estimate_natural_width(const ns_box *b, double cap)
             return sw > cap ? cap : sw;
         }
     }
-    if (style_contains_inline_size(b->style)) return 0;
+    double contained_w;
+    if (style_inline_size_contained(b->style, &contained_w)) return contained_w;
     double w = 0;
     if (b->kind == NS_BOX_INLINE && b->text) {
         double chars = 0;
@@ -15264,6 +15293,8 @@ flex_done: ;
     if (legend) box_prepend_child(box, legend);
     double measured = cursor_y - inner_y + legend_extra;
     box->measured_content_height = measured;
+    double contained_h;
+    if (style_block_size_contained(box->style, &contained_h)) measured = contained_h;
     double explicit_h = -1;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         explicit_h = resolve_used_height(box, hv, parent_content_width, -1);
@@ -15355,8 +15386,8 @@ flex_done: ;
     }
     if (overflow_scrolls) {
         box->scrolls = TRUE;
-        if (measured > box->content_height)
-            box->scroll_max_y = measured - box->content_height;
+        if (box->measured_content_height > box->content_height)
+            box->scroll_max_y = box->measured_content_height - box->content_height;
     }
     if (overflow_scrolls_x) {
         double content_right = inner_x + box->content_width;
