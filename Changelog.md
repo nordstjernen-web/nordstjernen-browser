@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: the `columns`, `flex-flow`, `list-style`, `animation-range`,
+  `scroll-margin-block`/`-inline`, `scroll-padding-block`/`-inline` and
+  `position-try` shorthands accept CSS-wide keywords (`initial`,
+  `inherit`, `unset`, `revert`, `revert-layer`) and expand them to their
+  longhands. These declarations used to be dropped, so
+  `CSS.supports('columns', 'initial')` was false and removing such a
+  shorthand from an inline style left its longhands behind.
 * CSS: anchored boxes that overflow fall back through
   `position-try-fallbacks`. The flip tactics (`flip-block`,
   `flip-inline`, `flip-start`, `flip-x`, `flip-y`) mirror insets,
