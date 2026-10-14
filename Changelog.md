@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Performance: a custom property whose `var()` expansion grows to the
+  1 MB substitution limit no longer makes every restyle quadratic.
+  The container-unit scan re-measured the remaining text at every
+  digit, and the exponential-blowup test page took 19 s to style. It
+  now takes 3.5 s, most of it the capped substitution itself.
 * Security: `HTMLSelectElement.add()` did not check its argument.
   Adding an `<option>` that contains the select made the option its own
   ancestor, and the renderer then looped forever. `add()` now follows
