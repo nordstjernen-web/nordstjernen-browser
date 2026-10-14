@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Forms: the `select` event of text controls now follows the HTML
+  text-selection APIs. It is queued as a task instead of dispatched
+  synchronously, fires only when the selection or direction actually
+  changed, and several changes before it runs produce one event. This
+  also applies to disconnected elements.
 * HTML focus: a focused form control that becomes disabled, for
   example through a disabled ancestor `<fieldset>`, loses focus at the
   next rendering update, as the HTML focus-fixup rule requires.
