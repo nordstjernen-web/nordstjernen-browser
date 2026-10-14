@@ -793,6 +793,7 @@ typedef struct ns_css_simple {
     GPtrArray *matches_none;
     GPtrArray *has_groups;
     gboolean   never_match;
+    gboolean   known_unmatched;
     gboolean   ns_none;
 } ns_css_simple;
 
