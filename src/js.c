@@ -50,6 +50,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "config.h"
 #include "css.h"
 #include "css_anchor.h"
+#include "css_color.h"
 #include "datetime.h"
 #include "debuglog.h"
 #include "engine.h"
@@ -42049,15 +42050,6 @@ ns_sanitize_email_value(const ns_node *el, const char *value)
     return g_string_free(out, FALSE);
 }
 
-static gboolean
-ns_is_simple_color(const char *s)
-{
-    if (!s || s[0] != '#') return FALSE;
-    for (int i = 1; i <= 6; i++)
-        if (!g_ascii_isxdigit(s[i])) return FALSE;
-    return s[7] == '\0';
-}
-
 static char *
 ns_input_sanitize_value(const ns_node *el, const char *value)
 {
@@ -42089,18 +42081,10 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
         else if (v > hi) v = hi;
         out = g_strdup_printf("%g", v);
     } else if (!strcmp(type, "color")) {
-        char *trimmed = g_strstrip(g_strdup(value));
-        if (ns_is_simple_color(trimmed)) {
-            out = g_ascii_strdown(trimmed, -1);
-        } else {
-            guint8 r = 0, g = 0, b = 0, a = 0;
-            out = *trimmed &&
-                  g_ascii_strcasecmp(trimmed, "currentcolor") != 0 &&
-                  ns_css_parse_color(trimmed, &r, &g, &b, &a) && a == 255
-                      ? g_strdup_printf("#%02x%02x%02x", r, g, b)
-                      : g_strdup("#000000");
-        }
-        g_free(trimmed);
+        const char *space = ns_element_get_attr(el, "colorspace");
+        gboolean p3 = space && g_ascii_strcasecmp(space, "display-p3") == 0;
+        gboolean alpha = ns_element_get_attr(el, "alpha") != NULL;
+        out = ns_css_color_input_value(value, alpha, p3);
     } else if (!strcmp(type, "date") || !strcmp(type, "month") ||
                !strcmp(type, "week") || !strcmp(type, "time") ||
                !strcmp(type, "datetime-local")) {
