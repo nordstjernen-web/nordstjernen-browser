@@ -7009,9 +7009,16 @@ static double flex_gap_of(const ns_style *s, double basis);
 static double flex_grow_of(const ns_box *c);
 static double flex_shrink_of(const ns_box *c);
 static gboolean flex_wraps(const ns_style *s);
+typedef enum {
+    NS_MEASURED_NONE,
+    NS_MEASURED_MIN_CONTENT,
+    NS_MEASURED_MAX_CONTENT,
+} ns_measured_kind;
+
 static double width_contribution_keyword_limits(ns_box *box, double w,
                                                 const ns_style *parent_style,
-                                                gboolean max_content);
+                                                gboolean max_content,
+                                                ns_measured_kind measured);
 static gboolean flex_box_is_border_box(const ns_box *c);
 static void legacy_align_block_child(ns_box *c, double avail_x, double avail_w,
                                      const ns_style *inherited);
@@ -9483,15 +9490,16 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 if (w < 0) w = 0;
             }
             return width_contribution_keyword_limits(box, w, parent_style,
-                                                     TRUE);
+                                                     TRUE, NS_MEASURED_NONE);
         }
         if (keyword_is(wv, "min-content"))
             return width_contribution_keyword_limits(
                 box, min_content_width_of(box, parent_style),
-                parent_style, TRUE);
+                parent_style, TRUE, NS_MEASURED_MIN_CONTENT);
     }
     return width_contribution_keyword_limits(
-        box, measure_max_content_width(box, parent_style), parent_style, TRUE);
+        box, measure_max_content_width(box, parent_style), parent_style, TRUE,
+        NS_MEASURED_MAX_CONTENT);
 }
 
 static double
@@ -9514,10 +9522,11 @@ definite_width_limit(const ns_box *box, const ns_css_value *v)
 static double
 width_contribution_keyword_limits(ns_box *box, double w,
                                   const ns_style *parent_style,
-                                  gboolean max_content)
+                                  gboolean max_content, ns_measured_kind measured)
 {
     if (!box->style || (box->kind != NS_BOX_BLOCK && box->kind != NS_BOX_TABLE))
         return w;
+    double content = w;
     const ns_css_value *mxw = box->style->values[NS_CSS_MAX_WIDTH];
     const ns_css_value *mnw = box->style->values[NS_CSS_MIN_WIDTH];
     double max_limit = definite_width_limit(box, mxw);
@@ -9527,14 +9536,18 @@ width_contribution_keyword_limits(ns_box *box, double w,
     if (size_keyword_is_intrinsic(mxw)) {
         gboolean use_max = keyword_is(mxw, "max-content") ||
                            (max_content && keyword_is(mxw, "fit-content"));
-        double m = use_max ? measure_max_content_width(box, parent_style)
+        ns_measured_kind need = use_max ? NS_MEASURED_MAX_CONTENT : NS_MEASURED_MIN_CONTENT;
+        double m = need == measured ? content
+                 : use_max ? measure_max_content_width(box, parent_style)
                            : min_content_width_of(box, parent_style);
         if (m >= 0 && w > m) w = m;
     }
     if (size_keyword_is_intrinsic(mnw)) {
         gboolean use_max = keyword_is(mnw, "max-content") ||
                            (max_content && keyword_is(mnw, "fit-content"));
-        double m = use_max ? measure_max_content_width(box, parent_style)
+        ns_measured_kind need = use_max ? NS_MEASURED_MAX_CONTENT : NS_MEASURED_MIN_CONTENT;
+        double m = need == measured ? content
+                 : use_max ? measure_max_content_width(box, parent_style)
                            : min_content_width_of(box, parent_style);
         if (m >= 0 && w < m) w = m;
     }
@@ -9706,17 +9719,17 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
                     if (m >= 0 && w < m) w = m;
                 }
                 return width_contribution_keyword_limits(box, w, parent_style,
-                                                         FALSE);
+                                                         FALSE, NS_MEASURED_NONE);
             }
         }
         if (keyword_is(wv, "max-content"))
             return width_contribution_keyword_limits(
                 box, measure_max_content_width(box, parent_style),
-                parent_style, FALSE);
+                parent_style, FALSE, NS_MEASURED_MAX_CONTENT);
     }
     return width_contribution_keyword_limits(
         box, min_content_width_of(box, parent_style), parent_style,
-        FALSE);
+        FALSE, NS_MEASURED_MIN_CONTENT);
 }
 
 static double
