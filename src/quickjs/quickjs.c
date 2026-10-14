@@ -57412,29 +57412,19 @@ exception:
 static JSValue js_promise_try(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    JSValue result_promise, resolving_funcs[2], ret, ret2;
-    bool is_reject = 0;
+    JSValue ret, result;
+    bool is_reject = false;
 
     if (!JS_IsObject(this_val))
         return JS_ThrowTypeErrorNotAnObject(ctx);
-    result_promise = js_new_promise_capability(ctx, resolving_funcs, this_val);
-    if (JS_IsException(result_promise))
-        return result_promise;
-    ret = JS_Call(ctx, argv[0], JS_UNDEFINED, argc - 1, argv + 1);
+    ret = JS_Call(ctx, argv[0], JS_UNDEFINED, max_int(argc - 1, 0), argv + 1);
     if (JS_IsException(ret)) {
-        is_reject = 1;
+        is_reject = true;
         ret = JS_GetException(ctx);
     }
-    ret2 = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, vc(&ret));
-    JS_FreeValue(ctx, resolving_funcs[0]);
-    JS_FreeValue(ctx, resolving_funcs[1]);
+    result = js_promise_resolve(ctx, this_val, 1, vc(&ret), is_reject);
     JS_FreeValue(ctx, ret);
-    if (JS_IsException(ret2)) {
-        JS_FreeValue(ctx, result_promise);
-        return ret2;
-    }
-    JS_FreeValue(ctx, ret2);
-    return result_promise;
+    return result;
 }
 
 static __exception int remainingElementsCount_add(JSContext *ctx,
@@ -61621,6 +61611,25 @@ static JSValue js_typed_array_with(JSContext *ctx, JSValueConst this_val,
         src_abuf = ta->buffer->u.array_buffer;
         memcpy(abuf->data, src_abuf->data + ta->offset,
                (size_t)copy_len << size_log2);
+    }
+    for (uint32_t k = copy_len; k < len; k++) {
+        if (k == idx)
+            continue;
+        if (p->class_id == JS_CLASS_BIG_INT64_ARRAY ||
+            p->class_id == JS_CLASS_BIG_UINT64_ARRAY) {
+            JS_FreeValue(ctx, val);
+            JS_FreeValue(ctx, arr);
+            return JS_ThrowTypeError(ctx, "cannot convert undefined to a BigInt");
+        }
+        if (p->class_id == JS_CLASS_FLOAT16_ARRAY ||
+            p->class_id == JS_CLASS_FLOAT32_ARRAY ||
+            p->class_id == JS_CLASS_FLOAT64_ARRAY) {
+            if (JS_SetPropertyInt64(ctx, arr, k, js_float64(NAN)) < 0) {
+                JS_FreeValue(ctx, val);
+                JS_FreeValue(ctx, arr);
+                return JS_EXCEPTION;
+            }
+        }
     }
 
     if (JS_SetPropertyInt64(ctx, arr, idx, val) < 0) {
