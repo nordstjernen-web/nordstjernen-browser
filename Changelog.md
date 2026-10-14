@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Sizing / Containment: size containment now affects layout. The
+  block size is contained by `contain: size`/`strict`,
+  `container-type: size` or `content-visibility: hidden`, the inline
+  size also by `contain: inline-size` and `container-type: inline-size`.
+  A contained box is sized as if empty, or from the new
+  `contain-intrinsic-width`/`-height` (logical
+  `-block-size`/`-inline-size`, shorthand `contain-intrinsic-size`),
+  which accept `none`, a length, or `auto` with either. Their lengths
+  interpolate. Content that overflows a contained box still scrolls.
 * CSS Text: `text-align-last` and `text-justify` are supported, both
   inherited. In justified text, `text-align-last: justify` stretches
   the last line too, `center`/`right`/`end` place it accordingly, and
