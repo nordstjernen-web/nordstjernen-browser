@@ -16792,6 +16792,45 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
+        static const struct { const char *name; ns_css_prop props[3]; } wide_shorthands[] = {
+            { "columns", { NS_CSS_COLUMN_WIDTH, NS_CSS_COLUMN_COUNT, NS_CSS_PROP_COUNT } },
+            { "flex-flow", { NS_CSS_FLEX_DIRECTION, NS_CSS_FLEX_WRAP, NS_CSS_PROP_COUNT } },
+            { "list-style", { NS_CSS_LIST_STYLE_TYPE, NS_CSS_LIST_STYLE_POSITION,
+                              NS_CSS_LIST_STYLE_IMAGE } },
+            { "animation-range", { NS_CSS_ANIMATION_RANGE_START, NS_CSS_ANIMATION_RANGE_END,
+                                   NS_CSS_PROP_COUNT } },
+            { "scroll-margin-block", { NS_CSS_SCROLL_MARGIN_TOP, NS_CSS_SCROLL_MARGIN_BOTTOM,
+                                       NS_CSS_PROP_COUNT } },
+            { "scroll-margin-inline", { NS_CSS_SCROLL_MARGIN_LEFT, NS_CSS_SCROLL_MARGIN_RIGHT,
+                                        NS_CSS_PROP_COUNT } },
+            { "scroll-padding-block", { NS_CSS_SCROLL_PADDING_TOP, NS_CSS_SCROLL_PADDING_BOTTOM,
+                                        NS_CSS_PROP_COUNT } },
+            { "scroll-padding-inline", { NS_CSS_SCROLL_PADDING_LEFT, NS_CSS_SCROLL_PADDING_RIGHT,
+                                         NS_CSS_PROP_COUNT } },
+            { "position-try", { NS_CSS_POSITION_TRY_ORDER, NS_CSS_POSITION_TRY_FALLBACKS,
+                                NS_CSS_PROP_COUNT } },
+        };
+        ns_css_value *shorthand_wide = NULL;
+        for (gsize si = 0; si < G_N_ELEMENTS(wide_shorthands); si++) {
+            if (strcmp(pname, wide_shorthands[si].name) != 0) continue;
+            shorthand_wide = parse_css_wide_keyword(vtext);
+            for (int k = 0; shorthand_wide && k < 3; k++) {
+                if (wide_shorthands[si].props[k] == NS_CSS_PROP_COUNT) continue;
+                ns_css_decl d = { .prop = wide_shorthands[si].props[k],
+                                  .value = ns_css_value_dup(shorthand_wide),
+                                  .important = important };
+                g_array_append_val(decls_out, d);
+            }
+            break;
+        }
+        if (shorthand_wide) {
+            ns_css_value_free(shorthand_wide);
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
+        }
+
         if (strcmp(pname, "border-image") == 0 ||
             strcmp(pname, "-webkit-border-image") == 0) {
             expand_border_image(decls_out, vtext, important);
