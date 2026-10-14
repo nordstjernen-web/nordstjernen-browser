@@ -18,11 +18,25 @@ Changelog:
   when it is already an instance of the receiver, as the current spec
   requires, instead of wrapping it in a new one. A unicode regular
   expression no longer finds a match that starts on the second half of
-  a surrogate pair (`/\udf06/u.exec('𝌆')` is `null`), which
+  a surrogate pair (`/\udf06/u.exec('\ud834\udf06')` is `null`), which
   the search prefilter allowed. `TypedArray.prototype.with()` reads
   elements past a buffer shrunk during argument coercion as
   `undefined`: `NaN` in float arrays and a `TypeError` in BigInt
   arrays. Nine more test262 tests pass.
+* CSS: colors are parsed and serialized according to CSS Color 4 and 5
+  by a new module, `src/css_color.c`. `lab()`, `lch()`, `oklab()` and
+  `oklch()` used to be flattened to 8-bit sRGB. They keep their color
+  space now, along with `color()` in every predefined space
+  (`srgb-linear`, `display-p3`, `a98-rgb`, `prophoto-rgb`, `rec2020`,
+  `xyz-d50`/`xyz-d65`) and `none` components. Relative color syntax
+  (`rgb(from …)`, `oklch(from …)`, `color(from …)`) is supported, as are
+  `color-mix()` with any number of colors in every interpolation space
+  and hue method, missing-component carry-forward, powerless hues,
+  `alpha()`, `contrast-color()` and `color-layers()`. Specified and
+  computed values serialize the way the specs describe, for example
+  `color-mix(in srgb, red, blue)` computes to
+  `color(srgb 0.5 0 0.5)`. WPT `css/css-color/parsing` passes 11,914
+  of 12,154 subtests, up from about 5,200.
 * Media: a <video> removed from the document, or whose source is
   replaced or cleared, stops its sound. The player record kept playing
   - and the audio helper kept looping its track - whenever the page
