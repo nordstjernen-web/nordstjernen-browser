@@ -13787,4 +13787,25 @@
         defineCtor('XPathEvaluator', XPathEvaluator);
     })();
 
+    (function () {
+        var proto = global.HTMLInputElement && global.HTMLInputElement.prototype;
+        if (!proto || 'colorSpace' in proto) return;
+        Object.defineProperty(proto, 'alpha', {
+            get: function () { return this.hasAttribute('alpha'); },
+            set: function (v) {
+                if (v) this.setAttribute('alpha', '');
+                else this.removeAttribute('alpha');
+            },
+            configurable: true, enumerable: true
+        });
+        Object.defineProperty(proto, 'colorSpace', {
+            get: function () {
+                var v = this.getAttribute('colorspace');
+                return v !== null && v.toLowerCase() === 'display-p3' ? 'display-p3' : 'limited-srgb';
+            },
+            set: function (v) { this.setAttribute('colorspace', String(v)); },
+            configurable: true, enumerable: true
+        });
+    })();
+
 })(typeof globalThis !== 'undefined' ? globalThis : this);

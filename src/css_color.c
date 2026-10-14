@@ -593,6 +593,12 @@ ident_char(unsigned char c)
 }
 
 static gboolean
+css_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+static gboolean
 starts_number(const char *p)
 {
     if (g_ascii_isdigit(p[0])) return TRUE;
@@ -617,8 +623,8 @@ tokenize(const char *s, GArray *out)
     const char *p = s;
     while (*p) {
         tk t = { .start = p };
-        if (g_ascii_isspace(*p)) {
-            while (*p && g_ascii_isspace(*p)) p++;
+        if (css_ws(*p)) {
+            while (*p && css_ws(*p)) p++;
             t.type = TK_WS;
         } else if (starts_number(p)) {
             const char *q = p;
@@ -2261,6 +2267,49 @@ ns_css_color_computed(const char *s, const guint8 *current)
     }
     g_string_free(r.spec, TRUE);
     return out;
+}
+
+char *
+ns_css_color_input_value(const char *s, gboolean alpha, gboolean display_p3)
+{
+    cres r;
+    ns_color c = { .space = CS_SRGB, .alpha = 1.0 };
+    gboolean parsed = s && parse_top(s, NULL, &r);
+    if (parsed) {
+        if (r.resolved) c = r.c;
+        g_string_free(r.spec, TRUE);
+    }
+    ns_color t = color_convert(&c, display_p3 ? CS_DISPLAY_P3 : CS_SRGB);
+    double a = (c.none & NONE_ALPHA) ? 0.0 : CLAMP(c.alpha, 0.0, 1.0);
+    a = floor(a * 255.0 + 0.5) / 255.0;
+    GString *out = g_string_new(NULL);
+    if (!display_p3) {
+        int v[3];
+        for (int i = 0; i < 3; i++)
+            v[i] = round_channel((t.none & (1u << i)) ? 0.0 : t.c[i]);
+        if (!alpha) {
+            g_string_append_printf(out, "#%02x%02x%02x", v[0], v[1], v[2]);
+            return g_string_free(out, FALSE);
+        }
+        g_string_append(out, "color(srgb");
+        for (int i = 0; i < 3; i++) {
+            g_string_append_c(out, ' ');
+            fmt_num(out, v[i] / 255.0);
+        }
+    } else {
+        g_string_append(out, "color(display-p3");
+        for (int i = 0; i < 3; i++) {
+            double x = (t.none & (1u << i)) ? 0.0 : t.c[i];
+            g_string_append_c(out, ' ');
+            fmt_num(out, CLAMP(x, 0.0, 1.0));
+        }
+    }
+    if (alpha && a < 1.0) {
+        g_string_append(out, " / ");
+        fmt_num(out, a);
+    }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
 }
 
 gboolean
