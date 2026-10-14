@@ -7,6 +7,7 @@
 #include "css_syntax.h"
 #include "css_color.h"
 #include "css_anchor.h"
+#include "css_shape.h"
 
 #include "config.h"
 #include "image.h"
@@ -451,6 +452,9 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_POSITION_TRY_FALLBACKS] = "position-try-fallbacks",
     [NS_CSS_POSITION_TRY_ORDER]   = "position-try-order",
     [NS_CSS_POSITION_VISIBILITY]  = "position-visibility",
+    [NS_CSS_SHAPE_OUTSIDE]        = "shape-outside",
+    [NS_CSS_SHAPE_MARGIN]         = "shape-margin",
+    [NS_CSS_SHAPE_IMAGE_THRESHOLD] = "shape-image-threshold",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -9442,6 +9446,9 @@ ns_css_initial_value_text(const char *name)
         { "position-try-fallbacks",     "none" },
         { "position-try-order",         "normal" },
         { "position-visibility",        "anchors-visible" },
+        { "shape-outside",              "none" },
+        { "shape-margin",               "0px" },
+        { "shape-image-threshold",      "0" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -10451,6 +10458,7 @@ static void position_try_register(const char *name, const char *body,
                                   const char *body_end);
 static gboolean prop_is_anchor_property(ns_css_prop prop);
 static char *anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified);
+static char *shape_prop_canonical(ns_css_prop prop, const char *t);
 static char *position_try_shorthand_canonical(const char *value, char **order_out,
                                               char **fallbacks_out);
 
@@ -10541,6 +10549,11 @@ ns_css_specified_canonical(const char *prop, const char *value)
         }
         if (strcmp(prop, "position-try") == 0) {
             char *c = position_try_shorthand_canonical(value, NULL, NULL);
+            if (c) return c;
+        }
+        if (apid == NS_CSS_SHAPE_OUTSIDE || apid == NS_CSS_SHAPE_MARGIN ||
+            apid == NS_CSS_SHAPE_IMAGE_THRESHOLD) {
+            char *c = shape_prop_canonical((ns_css_prop)apid, value);
             if (c) return c;
         }
     }
@@ -12828,6 +12841,21 @@ anchor_prop_canonical(ns_css_prop prop, const char *t, char **specified)
     }
 }
 
+static char *
+shape_prop_canonical(ns_css_prop prop, const char *t)
+{
+    switch (prop) {
+    case NS_CSS_SHAPE_OUTSIDE:
+        return ns_css_shape_outside_canonical(t, NULL);
+    case NS_CSS_SHAPE_MARGIN:
+        return ns_css_shape_margin_canonical(t, NULL);
+    case NS_CSS_SHAPE_IMAGE_THRESHOLD:
+        return ns_css_shape_image_threshold_canonical(t, FALSE);
+    default:
+        return NULL;
+    }
+}
+
 static gboolean
 prop_is_anchor_property(ns_css_prop prop)
 {
@@ -12857,6 +12885,16 @@ parse_value_for(ns_css_prop prop, const char *text)
     int anchor_mode = anchor_fn_mode(prop);
     if (anchor_mode && ns_css_text_has_anchor_fn(t)) {
         char *canon = ns_css_anchor_fn_canonical(t, anchor_mode == 1, TRUE);
+        g_free(t);
+        if (!canon) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        return v;
+    }
+    if (prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_SHAPE_MARGIN ||
+        prop == NS_CSS_SHAPE_IMAGE_THRESHOLD) {
+        char *canon = shape_prop_canonical(prop, t);
         g_free(t);
         if (!canon) return NULL;
         v = g_new0(ns_css_value, 1);
@@ -28582,6 +28620,29 @@ ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
         return NULL;
     return tracks_computed_text(v->specified, style_font_px(s),
                                 style_font_px(root ? root : s));
+}
+
+static void syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s,
+                                 double root_px, gboolean font_units);
+
+char *
+ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int prop)
+{
+    const ns_css_value *v = s && prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? s->values[prop] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
+    if (prop == NS_CSS_SHAPE_IMAGE_THRESHOLD)
+        return ns_css_shape_image_threshold_canonical(v->u.keyword, TRUE);
+    if (prop != NS_CSS_SHAPE_OUTSIDE && prop != NS_CSS_SHAPE_MARGIN) return NULL;
+    ns_css_syntax_ctx sc;
+    syntax_ctx_for_style(&sc, s, style_font_px(root ? root : s), TRUE);
+    ns_shape_ctx cx = {
+        .font_px = sc.font_size, .root_px = sc.root_font_size,
+        .ex_px = sc.ex_px, .ch_px = sc.ch_px,
+        .vw = sc.viewport_w, .vh = sc.viewport_h,
+    };
+    return prop == NS_CSS_SHAPE_OUTSIDE ? ns_css_shape_outside_canonical(v->u.keyword, &cx)
+                                        : ns_css_shape_margin_canonical(v->u.keyword, &cx);
 }
 
 static void

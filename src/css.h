@@ -273,6 +273,9 @@ typedef enum ns_css_prop {
     NS_CSS_POSITION_TRY_FALLBACKS,
     NS_CSS_POSITION_TRY_ORDER,
     NS_CSS_POSITION_VISIBILITY,
+    NS_CSS_SHAPE_OUTSIDE,
+    NS_CSS_SHAPE_MARGIN,
+    NS_CSS_SHAPE_IMAGE_THRESHOLD,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -1299,6 +1302,7 @@ char *ns_css_value_serialize(const ns_css_value *v);
 char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
+char *ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int prop);
 char *ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
                                        int prop);
 char *ns_css_transform_canonical(const char *value);
