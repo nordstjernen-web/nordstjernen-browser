@@ -6199,7 +6199,9 @@ ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
         if (b) {
             double x, y, w, h;
             ns_box_border_box(b, &x, &y, &w, &h);
-            return JS_NewInt32(ctx, (int)((magic == 8 ? w : h) + 0.5));
+            w -= b->border.left + b->border.right + b->padding.left + b->padding.right;
+            h -= b->border.top + b->border.bottom + b->padding.top + b->padding.bottom;
+            return JS_NewInt32(ctx, (int)(MAX(magic == 8 ? w : h, 0) + 0.5));
         }
         const char *attr = ns_element_get_attr(n, magic == 8 ? "width"
                                                              : "height");

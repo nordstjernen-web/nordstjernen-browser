@@ -2537,8 +2537,8 @@ ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 
     ns_svg_size size;
     ns_svg_intrinsic_size(root, &size);
-    double w = size.has_width  ? size.width  : NS_SVG_DEFAULT_DIM_PX;
-    double h = size.has_height ? size.height : NS_SVG_DEFAULT_DIM_PX;
+    double w = size.has_width  ? size.width  : NS_SVG_DEFAULT_OBJECT_W;
+    double h = size.has_height ? size.height : NS_SVG_DEFAULT_OBJECT_H;
     if (!size.has_width && !size.has_height &&
         size.has_ratio && size.ratio > 0) {
         double k = MIN(NS_SVG_DEFAULT_OBJECT_W / size.ratio,
