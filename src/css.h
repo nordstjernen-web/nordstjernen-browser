@@ -1266,6 +1266,9 @@ char *ns_css_background_shorthand_serialize(const char *image, const char *posit
                                             const char *color);
 char *ns_css_content_canonical(const char *text);
 ns_css_value *ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t);
+ns_css_value *ns_css_value_composite(const ns_css_value *underlying,
+                                     const ns_css_value *v, gboolean accumulate);
+void          ns_css_value_clamp_animated(int prop, ns_css_value *v);
 gboolean ns_css_value_equal(const ns_css_value *a, const ns_css_value *b);
 ns_css_value *ns_css_value_dup(const ns_css_value *v);
 void ns_css_value_free(ns_css_value *v);
