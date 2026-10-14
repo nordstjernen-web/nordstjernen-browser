@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Fonts: `font-size-adjust` is a known, inherited property. It
+  accepts `none`, an optional metric (`ex-height`, `cap-height`,
+  `ch-width`, `ic-width`, `ic-height`) followed by a number, `calc()`
+  or `from-font`, and leaves the default `ex-height` out when
+  serializing. `from-font` computes to the primary font's aspect value.
+  Values with the same metric interpolate and add as numbers without
+  going negative. Glyph sizing does not use it yet.
 * CSS Shapes: the `shape()` function (`from`, `move`/`line`/`hline`/
   `vline`/`curve`/`smooth`/`arc` commands with `to` or `by` endpoints,
   control-point anchors, arc sweep/size/rotation and `close`) parses

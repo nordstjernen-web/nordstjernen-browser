@@ -184,6 +184,7 @@ the 1.0.31-dev source.
 | `white-space` (`normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line`/`break-spaces`) | ✅ | |
 | `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
 | `font-variant: small-caps`, `font-variant-ligatures`, `font-feature-settings`, `font-variation-settings` | ✅ | common/discretionary/historical/contextual ligature keywords, quoted four-character feature tags, and variable-font axes map to Pango OpenType settings |
+| `font-size-adjust` | 🟡 | parsed with metric keywords, `from-font` and `calc()`; inherited, computed (from-font resolves through font metrics), interpolated and composited as a number; not yet applied when sizing glyphs |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | 🟡 | vertical inline runs are measured and painted in right-to-left or left-to-right columns; `text-orientation:upright` stacks glyphs and `mixed`/`sideways` rotate the run. Orthogonal-flow box layout and full vertical line breaking remain limited; invalid values are rejected |
 | Ruby (`display:ruby`) | 🟡 | parsed; no ruby positioning |
