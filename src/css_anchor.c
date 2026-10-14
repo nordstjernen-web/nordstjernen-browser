@@ -935,6 +935,49 @@ strip_anchors(an_node *n)
     return n;
 }
 
+static const char *
+flip_word(const char *w, const char *const (*pairs)[2], gsize n)
+{
+    for (gsize i = 0; w && i < n; i++) {
+        if (strcmp(w, pairs[i][0]) == 0) return pairs[i][1];
+        if (strcmp(w, pairs[i][1]) == 0) return pairs[i][0];
+    }
+    return NULL;
+}
+
+static void
+flip_node(an_node *n, const char *const (*pairs)[2], gsize n_pairs, gboolean invert)
+{
+    if (!n) return;
+    if (n->kind == AN_ANCHOR || n->kind == AN_SIZE) {
+        char **slot = n->kind == AN_ANCHOR ? &n->side : &n->size;
+        const char *repl = flip_word(*slot, pairs, n_pairs);
+        if (repl) {
+            g_free(*slot);
+            *slot = g_strdup(repl);
+        }
+        if (invert && n->side_pct && n->side_pct->kind == AN_NUM)
+            n->side_pct->v = 100.0 - n->side_pct->v;
+        flip_node(n->fallback, pairs, n_pairs, invert);
+        return;
+    }
+    for (guint i = 0; n->kids && i < n->kids->len; i++)
+        flip_node(n->kids->pdata[i], pairs, n_pairs, invert);
+}
+
+char *
+ns_css_anchor_fn_flip(const char *canonical, const char *const (*pairs)[2],
+                      gsize n_pairs, gboolean invert_percent)
+{
+    an_node *n = parse_top(canonical, TRUE, TRUE);
+    if (!n) return NULL;
+    flip_node(n, pairs, n_pairs, invert_percent);
+    GString *s = g_string_new(NULL);
+    serialize(s, n, TRUE);
+    an_free(n);
+    return g_string_free(s, FALSE);
+}
+
 char *
 ns_css_anchor_fn_fallback(const char *canonical)
 {

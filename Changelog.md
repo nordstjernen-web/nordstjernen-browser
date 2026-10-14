@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: anchored boxes that overflow fall back through
+  `position-try-fallbacks`. The flip tactics (`flip-block`,
+  `flip-inline`, `flip-start`, `flip-x`, `flip-y`) mirror insets,
+  margins, self-alignment, `anchor()` sides (percentages included) and
+  `position-area`. `@position-try` rules supply replacement declarations,
+  and `position-area` values can be options themselves. The first option
+  whose box fits its inset-modified containing block wins; if none fits,
+  the base position is used. `position-try-order` sorts the options by
+  available width or height. 286 more css-anchor-position subtests pass.
 * HTML: `<input type=color>` supports the `alpha` and `colorspace`
   attributes and their `alpha`/`colorSpace` IDL reflections. Its value
   now accepts any CSS color (named, `rgb()`, `oklch()`, `color()`, ...)
