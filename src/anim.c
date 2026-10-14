@@ -1180,12 +1180,33 @@ ns_anim_base_value(ns_anim *a, const ns_node *node, int prop)
     return v && v->kind == 0 && !v->u.keyword ? NULL : v;
 }
 
+static gboolean value_is_wide_keyword(const ns_css_value *v);
+
 static ns_css_value *
-composite_onto(const ns_css_value *under, const ns_css_value *v, int composite)
+resolve_wide_keyword(const ns_css_value *v, int prop, GHashTable *styles,
+                     const ns_node *node, const ns_css_value *under)
+{
+    if (!value_is_wide_keyword(v)) return ns_css_value_dup((ns_css_value *)v);
+    const char *k = v->u.keyword;
+    gboolean unset = strcmp(k, "unset") == 0;
+    if (strcmp(k, "inherit") == 0 || (unset && ns_css_prop_inherits(prop))) {
+        const ns_style *ps = node && node->parent
+            ? g_hash_table_lookup(styles, node->parent) : NULL;
+        if (ps && ps->values[prop]) return ns_css_value_dup(ps->values[prop]);
+    }
+    if (strcmp(k, "inherit") == 0 || strcmp(k, "initial") == 0 || unset) {
+        ns_css_value *init = initial_value_for(prop);
+        return init ? init : ns_css_value_dup((ns_css_value *)v);
+    }
+    return under ? ns_css_value_dup((ns_css_value *)under) : NULL;
+}
+
+static ns_css_value *
+composite_onto(int prop, const ns_css_value *under, const ns_css_value *v, int composite)
 {
     if (!v) return NULL;
     if (composite == NS_ANIM_COMPOSITE_REPLACE || !under) return ns_css_value_dup(v);
-    ns_css_value *out = ns_css_value_composite(under, v,
+    ns_css_value *out = ns_css_value_composite(prop, under, v,
                                                composite == NS_ANIM_COMPOSITE_ACCUMULATE);
     return out ? out : ns_css_value_dup(v);
 }
@@ -1228,10 +1249,15 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
                         if (!base) base = st->values[prop];
                         ns_css_value *init = base ? NULL : initial_value_for(prop);
                         const ns_css_value *under = base ? base : init;
-                        ns_css_value *cfrom = composite_onto(under, pa->from,
+                        ns_css_value *rfrom = pa->from
+                            ? resolve_wide_keyword(pa->from, prop, styles, s->node, under) : NULL;
+                        ns_css_value *rto = pa->to
+                            ? resolve_wide_keyword(pa->to, prop, styles, s->node, under) : NULL;
+                        ns_css_value *cfrom = composite_onto(prop, under, rfrom,
                                                              pa->from_composite);
-                        ns_css_value *cto = composite_onto(under, pa->to,
-                                                           pa->to_composite);
+                        ns_css_value *cto = composite_onto(prop, under, rto, pa->to_composite);
+                        ns_css_value_free(rfrom);
+                        ns_css_value_free(rto);
                         const ns_css_value *from = cfrom ? cfrom : under;
                         const ns_css_value *to = cto ? cto : under;
                         ns_css_value *out = from && to
@@ -1349,6 +1375,16 @@ composite_from_name(const char *name, int fallback)
     return fallback;
 }
 
+static gboolean
+value_is_wide_keyword(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return FALSE;
+    const char *k = v->u.keyword;
+    return strcmp(k, "initial") == 0 || strcmp(k, "inherit") == 0 ||
+           strcmp(k, "unset") == 0 || strcmp(k, "revert") == 0 ||
+           strcmp(k, "revert-layer") == 0;
+}
+
 static int
 stop_composite(const ns_anim_kf_stop *st, int fallback)
 {
@@ -1431,7 +1467,9 @@ run_sample_at(ns_anim_run *r, double progress)
                 int from_comp = stop_composite(prev, r->composite);
                 int to_comp = stop_composite(next, r->composite);
                 if (from_comp != NS_ANIM_COMPOSITE_REPLACE ||
-                    to_comp != NS_ANIM_COMPOSITE_REPLACE) {
+                    to_comp != NS_ANIM_COMPOSITE_REPLACE ||
+                    value_is_wide_keyword(stop_value(prev, prop)) ||
+                    value_is_wide_keyword(stop_value(next, prop))) {
                     ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
                     pa->from = ns_css_value_dup(stop_value(prev, prop));
                     pa->to = ns_css_value_dup(stop_value(next, prop));
@@ -1448,7 +1486,8 @@ run_sample_at(ns_anim_run *r, double progress)
                     out = ns_css_value_dup(t < 0.5 ? stop_value(prev, prop)
                                                    : stop_value(next, prop));
             } else if (prev && prev->pct >= 100.0 - 1e-9 &&
-                       stop_composite(prev, r->composite) != NS_ANIM_COMPOSITE_REPLACE) {
+                       (stop_composite(prev, r->composite) != NS_ANIM_COMPOSITE_REPLACE ||
+                        value_is_wide_keyword(stop_value(prev, prop)))) {
                 ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
                 pa->from = ns_css_value_dup(stop_value(prev, prop));
                 pa->to = ns_css_value_dup(stop_value(prev, prop));
@@ -1456,7 +1495,8 @@ run_sample_at(ns_anim_run *r, double progress)
                     stop_composite(prev, r->composite);
                 g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
             } else if (next && next->pct <= 1e-9 && !prev &&
-                       stop_composite(next, r->composite) != NS_ANIM_COMPOSITE_REPLACE) {
+                       (stop_composite(next, r->composite) != NS_ANIM_COMPOSITE_REPLACE ||
+                        value_is_wide_keyword(stop_value(next, prop)))) {
                 ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
                 pa->from = ns_css_value_dup(stop_value(next, prop));
                 pa->to = ns_css_value_dup(stop_value(next, prop));
