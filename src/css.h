@@ -1079,6 +1079,7 @@ gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
 
 void   ns_style_free(ns_style *s);
 ns_style *ns_style_clone(const ns_style *src);
+const char *ns_css_position_try_rule(const char *name);
 double ns_css_dimension_px(const ns_css_value *v, double font_size,
                            double basis);
 const ns_style *ns_css_style_before_change(const void *node);
