@@ -89,7 +89,7 @@ the 1.0.31-dev source.
 |-------|:--:|------|
 | `position: static / relative / absolute / fixed` | ✅ | |
 | `position: sticky` | ✅ | verified: header pins within its scroll container |
-| Anchor positioning (`anchor-name`, `position-anchor`, `anchor()`, `anchor-size()`, `position-area`, `anchor-center`) | 🟡 | absolutely and fixed positioned boxes resolve against the last matching anchor in tree order (`src/css_anchor.c`); `position-try-fallbacks`, `@position-try` and vertical writing modes are parsed but not applied yet |
+| Anchor positioning (`anchor-name`, `position-anchor`, `anchor()`, `anchor-size()`, `position-area`, `anchor-center`) | 🟡 | absolutely and fixed positioned boxes resolve against the last matching anchor in tree order (`src/css_anchor.c`); `position-try-fallbacks` (flip tactics, `@position-try` rules, `position-area` options) and `position-try-order` pick the first option that fits; `position-visibility`, implicit anchors and vertical writing modes are not applied yet |
 | `top`/`right`/`bottom`/`left`, `inset` shorthand | ✅ | |
 | `z-index` & stacking contexts | ✅ | opacity/transform/filter establish contexts |
 | Top layer (`dialog` modal, `::backdrop`) | 🟡 | modal `<dialog>` painted in the top layer; popover top-layer limited |
