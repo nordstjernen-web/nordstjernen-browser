@@ -2644,6 +2644,128 @@ css_pseudo_element_is_standard(const char *name, gsize n)
     return FALSE;
 }
 
+typedef enum {
+    PEK_NONE, PEK_GENERIC, PEK_BEFORE_AFTER, PEK_PART, PEK_SLOTTED,
+    PEK_VT_ROOT, PEK_VT_CHILD, PEK_VENDOR
+} css_pe_kind;
+
+static gboolean
+css_name_is(const char *name, gsize n, const char *want)
+{
+    return strlen(want) == n && g_ascii_strncasecmp(name, want, n) == 0;
+}
+
+static css_pe_kind
+css_pseudo_element_kind(const char *name, gsize n)
+{
+    if (n > 0 && name[0] == '-') return PEK_VENDOR;
+    if (css_name_is(name, n, "before") || css_name_is(name, n, "after"))
+        return PEK_BEFORE_AFTER;
+    if (css_name_is(name, n, "part")) return PEK_PART;
+    if (css_name_is(name, n, "slotted")) return PEK_SLOTTED;
+    if (css_name_is(name, n, "view-transition")) return PEK_VT_ROOT;
+    if (css_name_is(name, n, "view-transition-group") ||
+        css_name_is(name, n, "view-transition-image-pair") ||
+        css_name_is(name, n, "view-transition-old") ||
+        css_name_is(name, n, "view-transition-new"))
+        return PEK_VT_CHILD;
+    return PEK_GENERIC;
+}
+
+static gboolean
+css_pseudo_element_may_follow(css_pe_kind prev, const char *name, gsize n)
+{
+    css_pe_kind next = css_pseudo_element_kind(name, n);
+    if (prev == PEK_VENDOR || next == PEK_VENDOR) return TRUE;
+    switch (prev) {
+    case PEK_BEFORE_AFTER:
+        return css_name_is(name, n, "marker");
+    case PEK_PART:
+        return next != PEK_PART && next != PEK_SLOTTED &&
+               next != PEK_VT_ROOT && next != PEK_VT_CHILD;
+    case PEK_SLOTTED:
+        return next == PEK_BEFORE_AFTER || css_name_is(name, n, "marker") ||
+               css_name_is(name, n, "placeholder") ||
+               css_name_is(name, n, "file-selector-button") ||
+               css_name_is(name, n, "details-content");
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+css_pseudo_class_may_follow(css_pe_kind prev, const char *pe_name, gsize pe_n,
+                            const char *name, gsize n)
+{
+    static const char *const structural[] = {
+        "first-child", "last-child", "only-child", "nth-child",
+        "nth-last-child", "first-of-type", "last-of-type", "only-of-type",
+        "nth-of-type", "nth-last-of-type", "empty", "root",
+    };
+    static const char *const user_action[] = {
+        "hover", "active", "focus", "focus-visible", "focus-within",
+        "not", "is", "where",
+    };
+    switch (prev) {
+    case PEK_VENDOR:
+        return TRUE;
+    case PEK_PART:
+        for (gsize i = 0; i < G_N_ELEMENTS(structural); i++)
+            if (css_name_is(name, n, structural[i])) return FALSE;
+        return TRUE;
+    case PEK_VT_CHILD:
+        return css_name_is(name, n, "only-child");
+    case PEK_GENERIC:
+    case PEK_BEFORE_AFTER:
+        if (css_name_is(pe_name, pe_n, "selection") &&
+            css_name_is(name, n, "window-inactive"))
+            return TRUE;
+        for (gsize i = 0; i < G_N_ELEMENTS(user_action); i++)
+            if (css_name_is(name, n, user_action[i])) return TRUE;
+        return FALSE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+css_vt_ident_char(unsigned char c)
+{
+    return g_ascii_isalnum(c) || c == '-' || c == '_' || c >= 0x80;
+}
+
+static gboolean
+css_vt_arg_valid(const char *s, gsize n)
+{
+    const char *p = s, *end = s + n;
+    while (p < end && g_ascii_isspace(*p)) p++;
+    while (end > p && g_ascii_isspace(end[-1])) end--;
+    if (p >= end) return FALSE;
+    if (*p == '*') {
+        p++;
+    } else if (*p != '.') {
+        const char *start = p;
+        while (p < end && (css_vt_ident_char((unsigned char)*p) || *p == '\\')) {
+            if (*p == '\\' && p + 1 < end) p++;
+            p++;
+        }
+        if (p == start) return FALSE;
+        if ((gsize)(p - start) == 4 && g_ascii_strncasecmp(start, "none", 4) == 0)
+            return FALSE;
+    }
+    while (p < end) {
+        if (*p != '.') return FALSE;
+        p++;
+        const char *start = p;
+        while (p < end && (css_vt_ident_char((unsigned char)*p) || *p == '\\')) {
+            if (*p == '\\' && p + 1 < end) p++;
+            p++;
+        }
+        if (p == start) return FALSE;
+    }
+    return TRUE;
+}
+
 static gboolean
 parse_pseudo_keyword(const char *name, gsize n,
                      const char *arg, gsize alen,
@@ -2898,6 +3020,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
     ns_css_comb pending = NS_CSS_COMB_NONE;
     gboolean expect_compound = TRUE;
     gboolean leading_comb_used = FALSE;
+    css_pe_kind pe_kind = PEK_NONE;
+    const char *pe_name = "";
+    gsize pe_name_n = 0;
+    char *pe_name_buf = NULL;
     const char *p = *pp;
 
     while (p < end) {
@@ -2927,11 +3053,17 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
         if (had_ws && !expect_compound)
             pending = NS_CSS_COMB_DESCENDANT;
 
+        if (pe_kind != PEK_NONE && pe_kind != PEK_VENDOR)
+            g_sel_parse_error = TRUE;
         ns_css_simple *cmp = ns_css_simple_new();
         gboolean any = FALSE;
         while (p < end) {
             const char *tok_start = p;
             char cc = *p;
+            if (pe_kind != PEK_NONE && pe_kind != PEK_VENDOR && cc != ':' &&
+                (cc == '*' || cc == '|' || cc == '#' || cc == '.' || cc == '[' ||
+                 is_ident_start(cc) || cc == '\\'))
+                g_sel_parse_error = TRUE;
             if (cc == '*' || (cc == '|' && !(p + 1 < end && p[1] == '='))) {
                 if (any) {
                     g_sel_parse_error = TRUE;
@@ -3062,6 +3194,33 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                     arg_n = (gsize)(arg_end - arg_s);
                     p = term == ')' ? arg_end + 1 : arg_end;
                 }
+                gboolean names_element = is_element ||
+                    css_name_is(name_s, name_n, "before") ||
+                    css_name_is(name_s, name_n, "after") ||
+                    css_name_is(name_s, name_n, "first-line") ||
+                    css_name_is(name_s, name_n, "first-letter");
+                if (names_element) {
+                    css_pe_kind kind = css_pseudo_element_kind(name_s, name_n);
+                    if (depth > 0 && kind != PEK_VENDOR)
+                        g_sel_parse_error = TRUE;
+                    if (pe_kind != PEK_NONE &&
+                        !css_pseudo_element_may_follow(pe_kind, name_s, name_n))
+                        g_sel_parse_error = TRUE;
+                    if (kind == PEK_VT_ROOT && arg_s)
+                        g_sel_parse_error = TRUE;
+                    if (kind == PEK_VT_CHILD &&
+                        (!arg_s || !css_vt_arg_valid(arg_s, arg_n)))
+                        g_sel_parse_error = TRUE;
+                    pe_kind = kind;
+                    g_free(pe_name_buf);
+                    pe_name_buf = g_strndup(name_s, name_n);
+                    pe_name = pe_name_buf;
+                    pe_name_n = name_n;
+                } else if (pe_kind != PEK_NONE &&
+                           !css_pseudo_class_may_follow(pe_kind, pe_name, pe_name_n,
+                                                        name_s, name_n)) {
+                    g_sel_parse_error = TRUE;
+                }
                 if (is_element ||
                     (name_n == 6 && g_ascii_strncasecmp(name_s, "before", 6) == 0) ||
                     (name_n == 5 && g_ascii_strncasecmp(name_s, "after",  5) == 0) ||
@@ -3109,6 +3268,8 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                         if (name_s[0] != '-'
                             && !css_pseudo_element_is_standard(name_s, name_n))
                             g_sel_parse_error = TRUE;
+                        else if (name_s[0] != '-')
+                            cmp->known_unmatched = TRUE;
                     }
                 } else if (name_n == 3 && arg_s &&
                            g_ascii_strncasecmp(name_s, "has", 3) == 0 &&
@@ -3323,6 +3484,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
         expect_compound = FALSE;
     }
     *pp = p;
+    g_free(pe_name_buf);
     if (pending != NS_CSS_COMB_NONE)
         g_sel_parse_error = TRUE;
     if (sel->compounds->len == 0) {
@@ -19268,7 +19430,7 @@ static gboolean supports_selector_supported(const ns_css_selector *sel);
 static gboolean
 supports_simple_supported(const ns_css_simple *c)
 {
-    if (c->never_match) return FALSE;
+    if (c->never_match && !c->known_unmatched) return FALSE;
     GPtrArray *groups[3] = { c->matches_any, c->matches_none, c->has_groups };
     for (int g = 0; g < 3; g++) {
         if (!groups[g]) continue;
