@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* Security: `HTMLSelectElement.add()` did not check its argument.
+  Adding an `<option>` that contains the select made the option its own
+  ancestor, and the renderer then looped forever. `add()` now follows
+  the HTML algorithm: it accepts only `option`/`optgroup`, throws
+  `HierarchyRequestError` for an ancestor and `NotFoundError` for a
+  `before` element outside the select, counts options inside
+  optgroups for a numeric `before`, and inserts next to the reference
+  even when it is in an optgroup.
 * Security: deeply nested elements whose `min-width` or `max-width` is
   an intrinsic keyword (every `<fieldset>` has
   `min-inline-size: min-content` in the UA stylesheet) took exponential

@@ -48562,7 +48562,13 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
     ns_node *sel = ns_unwrap_element_mut(this_val);
     if (!sel) return JS_UNDEFINED;
     ns_node *opt = ns_unwrap_element_mut(argv[0]);
-    if (!opt) return JS_UNDEFINED;
+    if (!opt || !(ns_node_is_element_named(opt, "option") ||
+                  ns_node_is_element_named(opt, "optgroup")))
+        return JS_ThrowTypeError(ctx, "add: argument 1 is not an option or optgroup element");
+    for (const ns_node *a = sel; a; a = a->parent)
+        if (a == opt)
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                                          "The element is an ancestor of the select");
     ns_js *_j = js_from_ctx(ctx);
     ns_node *before = NULL;
     if (argc >= 2 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
@@ -48570,20 +48576,32 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
             int32_t idx = 0;
             JS_ToInt32(ctx, &idx, argv[1]);
             int32_t i = 0;
-            for (ns_node *c = sel->first_child; c; c = c->next_sibling) {
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    g_ascii_strcasecmp(c->name, "option") == 0) {
-                    if (i == idx) { before = c; break; }
-                    i++;
+            for (ns_node *c = sel->first_child; c && !before; c = c->next_sibling) {
+                if (ns_node_is_element_named(c, "option")) {
+                    if (i++ == idx) before = c;
+                } else if (ns_node_is_element_named(c, "optgroup")) {
+                    for (ns_node *g = c->first_child; g; g = g->next_sibling)
+                        if (ns_node_is_element_named(g, "option") && i++ == idx) {
+                            before = g;
+                            break;
+                        }
                 }
             }
         } else {
             before = ns_unwrap_element_mut(argv[1]);
+            gboolean inside = FALSE;
+            for (const ns_node *a = before ? before->parent : NULL; a; a = a->parent)
+                if (a == sel) inside = TRUE;
+            if (!inside)
+                return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+                                              "The reference element is not in the select");
         }
     }
+    if (before == opt) return JS_UNDEFINED;
+    ns_node *parent = before ? before->parent : sel;
     if (opt->parent) ns_node_remove(opt);
-    if (before && before->parent == sel)
-        ns_element_insert_before_single(_j, sel, opt, before);
+    if (before)
+        ns_element_insert_before_single(_j, parent, opt, before);
     else
         ns_node_append_child(sel, opt);
     if (_j) _j->mutated = TRUE;
