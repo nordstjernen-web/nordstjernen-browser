@@ -43161,6 +43161,10 @@ ns_element_template_content(JSContext *ctx, JSValueConst this_val)
         JS_DefinePropertyValueStr(ctx, this_val, "__nd_template_content",
                                   JS_DupValue(ctx, wrapped),
                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        if (JS_IsObject(wrapped))
+            JS_DefinePropertyValueStr(ctx, wrapped, "__nd_template_host",
+                                      JS_DupValue(ctx, this_val),
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
         return wrapped;
     }
     return ns_element_reflect_str_get(ctx, this_val, "content", FALSE);
@@ -56045,7 +56049,9 @@ static const char ns_node_shapes_src[] =
         "lookupNamespaceURI lookupPrefix nextSibling nodeName nodeType "
         "nodeValue normalize ownerDocument parentElement parentNode "
         "previousSibling removeChild replaceChild textContent',"
-        "  CharacterData: 'after appendData before data deleteData insertData length "
+        "  CharacterData: 'after afterHTML afterHTMLUnsafe appendData before beforeHTML "
+        "beforeHTMLUnsafe data deleteData insertData length replaceWithHTML "
+        "replaceWithHTMLUnsafe "
         "nextElementSibling previousElementSibling remove replaceData "
         "replaceWith substringData',"
         "  Text: 'assignedSlot splitText wholeText',"
@@ -56117,7 +56123,8 @@ static const char ns_node_shapes_src[] =
         "  DocumentFragment: 'append childElementCount children firstElementChild getElementById "
         "lastElementChild moveBefore prepend querySelector querySelectorAll "
         "replaceChildren',"
-        "  ShadowRoot: 'activeElement adoptedStyleSheets clonable customElementRegistry "
+        "  ShadowRoot: 'activeElement adoptedStyleSheets appendHTML appendHTMLUnsafe "
+        "clonable customElementRegistry prependHTML prependHTMLUnsafe "
         "delegatesFocus elementFromPoint elementsFromPoint "
         "fullscreenElement getAnimations getHTML getSelection host "
         "innerHTML mode onslotchange pictureInPictureElement "
@@ -56204,7 +56211,9 @@ ns_install_node_shapes(JSContext *ctx)
 static const char ns_element_shapes_src[] =
     "(function(G){"
     "  var W = {"
-        "  Element: 'activeViewTransition after animate append ariaActionsElements "
+        "  Element: 'activeViewTransition after afterHTML afterHTMLUnsafe animate append "
+        "appendHTML appendHTMLUnsafe beforeHTML beforeHTMLUnsafe prependHTML "
+        "prependHTMLUnsafe replaceWithHTML replaceWithHTMLUnsafe ariaActionsElements "
         "ariaActiveDescendantElement ariaAtomic ariaAutoComplete "
         "ariaBrailleLabel ariaBrailleRoleDescription ariaBusy ariaChecked "
         "ariaColCount ariaColIndex ariaColIndexText ariaColSpan "

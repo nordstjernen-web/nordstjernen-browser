@@ -3,6 +3,17 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: the HTML insertion methods `appendHTML`, `prependHTML`,
+  `beforeHTML`, `afterHTML` and `replaceWithHTML`, with their
+  `…Unsafe` variants, are available on elements, shadow roots and
+  character data. They parse with the right context element (the
+  parent, the shadow host or the owning `<template>`) and support
+  declarative shadow roots. The `Unsafe` variants run scripts when
+  `runScripts: true` is given. The safe variants strip scripts,
+  embedding elements, event-handler attributes and `javascript:` URLs,
+  and do nothing on `<script>` elements. Both kinds honour a
+  `sanitizer` option's `removeElements`/`elements` lists. They throw
+  `HierarchyRequestError` where the specification requires it.
 * DOM Ranges: exceptions thrown by `Range` methods are created in the
   range's own window. A range in an `<iframe>` document used to throw
   the top window's `DOMException`, so `e instanceof

@@ -13933,4 +13933,211 @@
         });
     })();
 
+    (function () {
+        if (typeof global.Element !== 'function') return;
+        var HTML_NS = 'http://www.w3.org/1999/xhtml';
+        var unsafeElements = {
+            script: 1, frame: 1, iframe: 1, object: 1, embed: 1, noscript: 1,
+            noembed: 1, noframes: 1, xmp: 1, plaintext: 1, base: 1
+        };
+        var scratchDoc = null;
+        function hierarchyError() {
+            var Ctor = global.DOMException;
+            try { return new Ctor('The operation would yield an incorrect node tree.',
+                                  'HierarchyRequestError'); }
+            catch (e) { var err = new Error('HierarchyRequestError');
+                        err.name = 'HierarchyRequestError'; return err; }
+        }
+
+        function isScriptElement(node) {
+            return node && node.nodeType === 1 && node.localName === 'script' &&
+                   (node.namespaceURI === HTML_NS ||
+                    node.namespaceURI === 'http://www.w3.org/2000/svg');
+        }
+
+        function isHtmlElement(node) {
+            return node && node.nodeType === 1 && node.localName === 'html' &&
+                   (node.namespaceURI === HTML_NS || node.namespaceURI === null);
+        }
+
+        function parseHost(context) {
+            var owner = context.ownerDocument || global.document;
+            var htmlDoc = owner;
+            if (!owner.createElement || owner.contentType &&
+                owner.contentType !== 'text/html') {
+                if (!scratchDoc)
+                    scratchDoc = global.document.implementation.createHTMLDocument('');
+                htmlDoc = scratchDoc;
+            }
+            var name = context.nodeType === 1 ? context.localName : 'div';
+            var host;
+            try { host = htmlDoc.createElement(name); }
+            catch (e) { host = htmlDoc.createElement('div'); }
+            return { host: host, owner: owner, foreign: htmlDoc !== owner };
+        }
+
+        function sanitize(root, options, safe) {
+            var config = options && options.sanitizer;
+            var remove = {};
+            if (config && Array.isArray(config.removeElements))
+                config.removeElements.forEach(function (n) {
+                    remove[String(n && n.name !== undefined ? n.name : n).toLowerCase()] = 1;
+                });
+            var keepOnly = null;
+            if (config && Array.isArray(config.elements)) {
+                keepOnly = {};
+                config.elements.forEach(function (n) {
+                    keepOnly[String(n && n.name !== undefined ? n.name : n).toLowerCase()] = 1;
+                });
+            }
+            (function walk(node) {
+                var child = node.firstChild;
+                while (child) {
+                    var next = child.nextSibling;
+                    if (child.nodeType === 1) {
+                        var ln = String(child.localName).toLowerCase();
+                        if ((safe && unsafeElements[ln]) || remove[ln] ||
+                            (keepOnly && !keepOnly[ln])) {
+                            node.removeChild(child);
+                        } else {
+                            for (var i = child.attributes.length - 1; safe && i >= 0; i--) {
+                                var an = child.attributes[i].name.toLowerCase();
+                                var av = String(child.attributes[i].value).replace(/[\s\u0000-\u001f]/g, '');
+                                if (an.indexOf('on') === 0 ||
+                                    ((an === 'href' || an === 'src' || an === 'action' ||
+                                      an === 'formaction' || an === 'xlink:href') &&
+                                     /^javascript:/i.test(av)))
+                                    child.removeAttribute(child.attributes[i].name);
+                            }
+                            walk(child);
+                            if (child.shadowRoot) walk(child.shadowRoot);
+                            if (ln === 'template' && child.content) walk(child.content);
+                        }
+                    }
+                    child = next;
+                }
+            })(root);
+        }
+
+        function reviveScripts(root) {
+            var scripts = root.querySelectorAll ? root.querySelectorAll('script') : [];
+            Array.prototype.forEach.call(scripts, function (old) {
+                var fresh = old.ownerDocument.createElement('script');
+                for (var i = 0; i < old.attributes.length; i++)
+                    fresh.setAttribute(old.attributes[i].name, old.attributes[i].value);
+                fresh.text = old.text;
+                old.parentNode.replaceChild(fresh, old);
+            });
+        }
+
+        function buildFragment(context, html, options, safe) {
+            var p = parseHost(context);
+            p.host.setHTMLUnsafe(html);
+            var source = p.host.localName === 'template' && p.host.content
+                ? p.host.content : p.host;
+            if (safe || (options && options.sanitizer)) sanitize(source, options, safe);
+            var frag = p.owner.createDocumentFragment();
+            while (source.firstChild) {
+                var n = source.firstChild;
+                if (p.foreign) {
+                    source.removeChild(n);
+                    n = p.owner.adoptNode ? p.owner.adoptNode(n) : p.owner.importNode(n, true);
+                }
+                frag.appendChild(n);
+            }
+            return frag;
+        }
+
+        function wantsScripts(options, safe) {
+            return !safe && options && options.runScripts === true;
+        }
+
+        function childContext(node) {
+            var parent = node.parentNode;
+            if (!parent) return null;
+            if (parent.nodeType === 9 || isHtmlElement(parent)) throw hierarchyError();
+            if (parent.nodeType === 11) {
+                if (typeof global.ShadowRoot === 'function' &&
+                    parent instanceof global.ShadowRoot) return parent.host;
+                if (parent.__nd_template_host) return parent.__nd_template_host;
+                throw hierarchyError();
+            }
+            return parent;
+        }
+
+        function makeChildMethod(insert, safe) {
+            return function (html, options) {
+                var context = childContext(this);
+                if (!context || (safe && isScriptElement(context))) return undefined;
+                var frag = buildFragment(context, String(html), options, safe);
+                var connected = this.isConnected;
+                var parent = this.parentNode;
+                insert(this, frag);
+                if (wantsScripts(options, safe) && connected) reviveScripts(parent);
+                return undefined;
+            };
+        }
+
+        function makeParentMethod(atStart, safe) {
+            return function (html, options) {
+                if (isHtmlElement(this)) throw hierarchyError();
+                if (safe && isScriptElement(this)) return undefined;
+                var isShadow = typeof global.ShadowRoot === 'function' &&
+                               this instanceof global.ShadowRoot;
+                var context = isShadow ? this.host : this;
+                var target = !isShadow && this.localName === 'template' && this.content
+                    ? this.content : this;
+                var frag = buildFragment(context, String(html), options, safe);
+                var nodes = Array.prototype.slice.call(frag.childNodes);
+                if (atStart) target.insertBefore(frag, target.firstChild);
+                else target.appendChild(frag);
+                if (wantsScripts(options, safe) && target.isConnected)
+                    nodes.forEach(function (n) {
+                        if (n.nodeType !== 1) return;
+                        if (n.localName === 'script') reviveScripts({
+                            querySelectorAll: function () { return [n]; }
+                        });
+                        else reviveScripts(n);
+                    });
+                return undefined;
+            };
+        }
+
+        function define(proto, name, fn) {
+            if (!proto || Object.prototype.hasOwnProperty.call(proto, name)) return;
+            Object.defineProperty(proto, name, {
+                configurable: true, writable: true, enumerable: true, value: fn
+            });
+        }
+
+        var childProtos = [global.Element.prototype,
+                           global.CharacterData && global.CharacterData.prototype];
+        [true, false].forEach(function (safe) {
+            var suffix = safe ? 'HTML' : 'HTMLUnsafe';
+            childProtos.forEach(function (proto) {
+                define(proto, 'before' + suffix, makeChildMethod(function (n, f) { n.before(f); }, safe));
+                define(proto, 'after' + suffix, makeChildMethod(function (n, f) { n.after(f); }, safe));
+                define(proto, 'replaceWith' + suffix,
+                       makeChildMethod(function (n, f) { n.replaceWith(f); }, safe));
+            });
+            [global.Element.prototype, global.ShadowRoot && global.ShadowRoot.prototype]
+                .forEach(function (proto) {
+                    define(proto, 'append' + suffix, makeParentMethod(false, safe));
+                    define(proto, 'prepend' + suffix, makeParentMethod(true, safe));
+                });
+        });
+
+        [global.Element.prototype, global.ShadowRoot && global.ShadowRoot.prototype]
+            .forEach(function (proto) {
+                define(proto, 'setHTML', function (html, options) {
+                    if (isScriptElement(this)) return undefined;
+                    if (typeof this.setHTMLUnsafe === 'function') this.setHTMLUnsafe(String(html));
+                    else this.innerHTML = String(html);
+                    var root = this.localName === 'template' && this.content
+                        ? this.content : this;
+                    sanitize(root, options, true);
+                    return undefined;
+                });
+            });
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
