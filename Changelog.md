@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Security: deeply nested elements whose `min-width` or `max-width` is
+  an intrinsic keyword (every `<fieldset>` has
+  `min-inline-size: min-content` in the UA stylesheet) took exponential
+  time to lay out. Each level measured its subtree twice, so 100
+  nested fieldsets hung the renderer. The measurement is now reused,
+  and that page lays out in under a second.
 * Security: a module graph where a dependency failed to load and other
   modules imported the failed module through a cycle could crash the
   renderer. The failed module was freed while the cycle still pointed
