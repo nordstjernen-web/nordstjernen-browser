@@ -30,8 +30,8 @@ checkout (October 2026). These are the subtests that pass:
 
 | Suite | Passing |
 |-------|---------|
-| WPT `css/` (6,991 test files) | 106,160 of 148,360 subtests (71.6 %) |
-| WPT `html/`, `dom/`, `url/` and related (4,899 test files) | 66,326 of 77,935 subtests (85.1 %) |
+| WPT `css/` (6,991 test files) | 110,540 of 151,048 subtests (73.2 %) |
+| WPT `html/`, `dom/`, `url/` and related (4,899 test files) | 151,974 of 166,164 subtests (91.5 %) |
 | [test262](https://github.com/tc39/test262) on the QuickJS engine | 82,243 of 82,248 tests run (5 failures) |
 
 The HTML run leaves out the `canvas`, `browsers` and cross-origin
