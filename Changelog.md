@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* HTML rendering: the UA stylesheet now has the bidirectional-text
+  rules from the HTML rendering section. Block containers, sectioning
+  and heading elements, table parts, lists, `bdi` and `output` get
+  `unicode-bidi: isolate`. So does any element with `dir=ltr`, `rtl`
+  or `auto` (matched case-insensitively). `bdo` is `isolate-override`,
+  and `dir=auto` search/tel/url/email inputs, textareas and `pre` use
+  `plaintext`. Inline elements with a `dir` attribute are now isolated
+  from the surrounding text, as in other browsers.
 * Animations: `filter` and `backdrop-filter` interpolate the way
   Filter Effects specifies. Function lists interpolate per function,
   the shorter list is padded with identity functions, and `none` acts
