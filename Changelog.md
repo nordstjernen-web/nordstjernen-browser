@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* CSS Shapes: `shape-outside` accepts `path()`, with an optional fill
+  rule. Its path data keeps the commands as written in the specified
+  value and becomes absolute in the computed value
+  (`m 10 10 h 80` → `M 10 10 H 90`). Paths with the same command
+  sequence interpolate segment by segment; any other pair animates
+  discretely.
 * Animations: basic shapes interpolate and add. `shape-outside` and
   `clip-path` transitions and keyframes between `circle()`,
   `ellipse()`, `inset()`/`rect()`/`xywh()` and `polygon()` values
