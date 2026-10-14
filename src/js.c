@@ -261,6 +261,9 @@ static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
 static void ns_js_element_perf_info(ns_js *js, const ns_node *el,
                                     ns_perf_resource_info *info);
 static gboolean ns_script_type_is_module(const ns_node *n);
+enum { NS_SCRIPT_KIND_NONE, NS_SCRIPT_KIND_CLASSIC, NS_SCRIPT_KIND_MODULE,
+       NS_SCRIPT_KIND_IMPORTMAP };
+static int ns_script_kind(const ns_node *n);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
@@ -63211,8 +63214,7 @@ ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
     if (!js || !root || depth >= 512 ||
         (depth > 0 && ns_dom_hidden_child(root))) return;
     if (ns_node_is_element_named(root, "script")) {
-        const char *type = ns_element_get_attr(root, "type");
-        if (type && g_ascii_strcasecmp(type, "importmap") == 0 &&
+        if (ns_script_kind(root) == NS_SCRIPT_KIND_IMPORTMAP &&
             !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
             ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
             char *base = ns_js_node_document_base_url(js, root);
@@ -63921,20 +63923,62 @@ typedef struct ns_script_task {
 } ns_script_task;
 
 static gboolean
-ns_script_type_is_module(const ns_node *n)
+javascript_mime_essence_match(const char *s, gsize len)
+{
+    static const char *const types[] = {
+        "application/ecmascript", "application/javascript", "application/x-ecmascript",
+        "application/x-javascript", "text/ecmascript", "text/javascript",
+        "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
+        "text/javascript1.3", "text/javascript1.4", "text/javascript1.5",
+        "text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(types); i++)
+        if (strlen(types[i]) == len && g_ascii_strncasecmp(s, types[i], len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ascii_whitespace_char(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+}
+
+static int
+ns_script_kind(const ns_node *n)
 {
     const char *type = ns_element_get_attr(n, "type");
-    return type && g_ascii_strcasecmp(type, "module") == 0;
+    const char *language = ns_element_get_attr(n, "language");
+    if ((type && !*type) || (!type && (!language || !*language)))
+        return NS_SCRIPT_KIND_CLASSIC;
+    if (!type) {
+        char *full = g_strconcat("text/", language, NULL);
+        gboolean js = javascript_mime_essence_match(full, strlen(full));
+        g_free(full);
+        return js ? NS_SCRIPT_KIND_CLASSIC : NS_SCRIPT_KIND_NONE;
+    }
+    const char *start = type;
+    const char *end = type + strlen(type);
+    while (start < end && ascii_whitespace_char(*start)) start++;
+    while (end > start && ascii_whitespace_char(end[-1])) end--;
+    gsize len = (gsize)(end - start);
+    if (javascript_mime_essence_match(start, len)) return NS_SCRIPT_KIND_CLASSIC;
+    if (g_ascii_strcasecmp(type, "module") == 0) return NS_SCRIPT_KIND_MODULE;
+    if (g_ascii_strcasecmp(type, "importmap") == 0) return NS_SCRIPT_KIND_IMPORTMAP;
+    return NS_SCRIPT_KIND_NONE;
+}
+
+static gboolean
+ns_script_type_is_module(const ns_node *n)
+{
+    return ns_script_kind(n) == NS_SCRIPT_KIND_MODULE;
 }
 
 static gboolean
 ns_script_type_supported(const ns_node *n)
 {
-    const char *type = ns_element_get_attr(n, "type");
-    return !type || !*type ||
-           g_ascii_strcasecmp(type, "text/javascript") == 0 ||
-           g_ascii_strcasecmp(type, "application/javascript") == 0 ||
-           g_ascii_strcasecmp(type, "module") == 0;
+    int kind = ns_script_kind(n);
+    return kind == NS_SCRIPT_KIND_CLASSIC || kind == NS_SCRIPT_KIND_MODULE;
 }
 
 static gboolean
