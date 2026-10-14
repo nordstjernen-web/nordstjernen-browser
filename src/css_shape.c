@@ -2123,3 +2123,23 @@ ns_css_clip_path_canonical(const char *text, const ns_shape_ctx *cx, gboolean *i
     value_clear(&v);
     return result;
 }
+
+gboolean
+ns_css_shape_eval_math(const ns_css_component *t, const ns_shape_ctx *cx, double *num,
+                       double *pct, double *px, gboolean *dim)
+{
+    GPtrArray *one = g_ptr_array_new();
+    g_ptr_array_add(one, (gpointer)t);
+    sh_cur c = { one, 0, 1 };
+    sh_sum sum;
+    gboolean ok = calc_value(&c, &sum, 0) && !peek(&c);
+    g_ptr_array_free(one, TRUE);
+    if (!ok) return FALSE;
+    *num = sum.num;
+    *pct = sum.pct;
+    *px = sum.px;
+    for (int i = 0; i < SH_REL; i++)
+        if (sum.rel[i] != 0) *px += sum.rel[i] * rel_factor(i, cx);
+    *dim = sum.dim;
+    return TRUE;
+}

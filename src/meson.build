@@ -54,6 +54,7 @@ nordstjernen_engine_sources = files(
   'css_color.c',
   'css_anchor.c',
   'css_shape.c',
+  'css_filter.c',
   'css_media.c',
   'css_prop_syntax.c',
   'css_syntax.c',
