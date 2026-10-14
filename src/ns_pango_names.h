@@ -151,6 +151,7 @@
 #define ns_pango_layout_set_height                        pango_layout_set_height
 #define ns_pango_layout_set_indent                        pango_layout_set_indent
 #define ns_pango_layout_set_justify                       pango_layout_set_justify
+#define ns_pango_layout_set_justify_last_line             pango_layout_set_justify_last_line
 #define ns_pango_layout_set_tabs                          pango_layout_set_tabs
 #define ns_pango_layout_set_text                          pango_layout_set_text
 #define ns_pango_layout_set_width                         pango_layout_set_width

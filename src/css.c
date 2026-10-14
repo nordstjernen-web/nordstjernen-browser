@@ -457,6 +457,8 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_SHAPE_MARGIN]         = "shape-margin",
     [NS_CSS_SHAPE_IMAGE_THRESHOLD] = "shape-image-threshold",
     [NS_CSS_FONT_SIZE_ADJUST]     = "font-size-adjust",
+    [NS_CSS_TEXT_JUSTIFY]         = "text-justify",
+    [NS_CSS_TEXT_ALIGN_LAST]      = "text-align-last",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -540,6 +542,8 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_FEATURE_SETTINGS:
     case NS_CSS_FONT_VARIATION_SETTINGS:
     case NS_CSS_FONT_SIZE_ADJUST:
+    case NS_CSS_TEXT_JUSTIFY:
+    case NS_CSS_TEXT_ALIGN_LAST:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -9453,6 +9457,8 @@ ns_css_initial_value_text(const char *name)
         { "shape-margin",               "0px" },
         { "shape-image-threshold",      "0" },
         { "font-size-adjust",           "none" },
+        { "text-justify",               "auto" },
+        { "text-align-last",            "auto" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
@@ -12717,6 +12723,10 @@ stacking_keyword_valid(ns_css_prop prop, const char *t)
 {
     switch (prop) {
     case NS_CSS_ISOLATION:   return keyword_choice_valid(t, "auto isolate");
+    case NS_CSS_TEXT_JUSTIFY:
+        return keyword_choice_valid(t, "auto none inter-word inter-character distribute");
+    case NS_CSS_TEXT_ALIGN_LAST:
+        return keyword_choice_valid(t, "auto start end left right center justify match-parent");
     case NS_CSS_CONTAIN:     return contain_value_valid(t);
     case NS_CSS_WILL_CHANGE: return will_change_value_valid(t);
     case NS_CSS_BACKDROP_FILTER: return ns_css_filter_list_valid(t);
@@ -12763,6 +12773,8 @@ parse_valid_keyword_value(ns_css_prop prop, const char *t)
 {
     if (!stacking_keyword_valid(prop, t)) return NULL;
     if (prop == NS_CSS_WILL_CHANGE) return will_change_value_new(t);
+    if (prop == NS_CSS_TEXT_JUSTIFY && g_ascii_strcasecmp(t, "distribute") == 0)
+        return parse_keyword_value(prop, "inter-character");
     return parse_keyword_value(prop, t);
 }
 
