@@ -39,6 +39,7 @@ typedef struct {
 
 typedef enum {
     SHAPE_NONE, SHAPE_CIRCLE, SHAPE_ELLIPSE, SHAPE_INSET, SHAPE_RECT, SHAPE_XYWH, SHAPE_POLYGON,
+    SHAPE_PATH,
 } sh_kind;
 
 typedef struct {
@@ -60,6 +61,7 @@ typedef struct {
     gboolean poly_round;
     sh_len poly_radius;
     GArray *points;
+    GArray *path;
 } sh_shape;
 
 typedef struct {
@@ -607,6 +609,187 @@ parse_rect_edge(sh_cur *c, sh_len *out)
     return parse_len(c, out, TRUE);
 }
 
+typedef struct {
+    char cmd;
+    int n;
+    double v[7];
+} sh_pcmd;
+
+static int
+path_arg_count(char up)
+{
+    switch (up) {
+    case 'M': case 'L': case 'T': return 2;
+    case 'H': case 'V': return 1;
+    case 'C': return 6;
+    case 'S': case 'Q': return 4;
+    case 'A': return 7;
+    default: return 0;
+    }
+}
+
+static const char *
+path_skip_sep(const char *p, gboolean comma)
+{
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f') p++;
+    if (comma && *p == ',') {
+        p++;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f') p++;
+    }
+    return p;
+}
+
+static gboolean
+path_number(const char **pp, double *out)
+{
+    const char *p = *pp;
+    const char *start = p;
+    if (*p == '+' || *p == '-') p++;
+    gboolean digits = FALSE;
+    while (g_ascii_isdigit(*p)) { p++; digits = TRUE; }
+    if (*p == '.') {
+        p++;
+        while (g_ascii_isdigit(*p)) { p++; digits = TRUE; }
+    }
+    if (!digits) return FALSE;
+    if (*p == 'e' || *p == 'E') {
+        const char *e = p + 1;
+        if (*e == '+' || *e == '-') e++;
+        if (g_ascii_isdigit(*e)) {
+            while (g_ascii_isdigit(*e)) e++;
+            p = e;
+        }
+    }
+    char *tmp = g_strndup(start, p - start);
+    *out = g_ascii_strtod(tmp, NULL);
+    g_free(tmp);
+    *pp = p;
+    return TRUE;
+}
+
+static gboolean
+path_flag(const char **pp, double *out)
+{
+    if (**pp != '0' && **pp != '1') return FALSE;
+    *out = **pp - '0';
+    (*pp)++;
+    return TRUE;
+}
+
+static GArray *
+path_parse(const char *d)
+{
+    GArray *cmds = g_array_new(FALSE, FALSE, sizeof(sh_pcmd));
+    const char *p = path_skip_sep(d, FALSE);
+    char prev = 0;
+    while (*p) {
+        char c = *p;
+        if (g_ascii_isalpha(c)) {
+            char up = g_ascii_toupper(c);
+            if (!strchr("MLHVCSQTAZ", up)) goto fail;
+            p++;
+        } else {
+            if (!prev || g_ascii_toupper(prev) == 'Z') goto fail;
+            c = prev;
+            if (c == 'M') c = 'L';
+            else if (c == 'm') c = 'l';
+        }
+        if (cmds->len == 0 && g_ascii_toupper(c) != 'M') goto fail;
+        sh_pcmd pc = { c, path_arg_count(g_ascii_toupper(c)), { 0 } };
+        p = path_skip_sep(p, FALSE);
+        for (int i = 0; i < pc.n; i++) {
+            gboolean ok = g_ascii_toupper(c) == 'A' && (i == 3 || i == 4)
+                ? path_flag(&p, &pc.v[i]) : path_number(&p, &pc.v[i]);
+            if (!ok) goto fail;
+            p = path_skip_sep(p, i + 1 < pc.n);
+        }
+        if (g_ascii_toupper(c) == 'Z') pc.cmd = c == 'z' ? 'z' : 'Z';
+        g_array_append_val(cmds, pc);
+        prev = c;
+        if (pc.n && *p == ',') {
+            p = path_skip_sep(p, TRUE);
+            if (!*p || g_ascii_isalpha(*p)) goto fail;
+        }
+    }
+    if (cmds->len == 0) goto fail;
+    return cmds;
+fail:
+    g_array_free(cmds, TRUE);
+    return NULL;
+}
+
+static void
+path_absolutize(GArray *cmds)
+{
+    double cx = 0, cy = 0, sx = 0, sy = 0;
+    for (guint i = 0; i < cmds->len; i++) {
+        sh_pcmd *c = &g_array_index(cmds, sh_pcmd, i);
+        gboolean rel = g_ascii_islower(c->cmd);
+        char up = g_ascii_toupper(c->cmd);
+        if (rel) {
+            switch (up) {
+            case 'H': c->v[0] += cx; break;
+            case 'V': c->v[0] += cy; break;
+            case 'A': c->v[5] += cx; c->v[6] += cy; break;
+            default:
+                for (int k = 0; k + 1 < c->n; k += 2) {
+                    c->v[k] += cx;
+                    c->v[k + 1] += cy;
+                }
+            }
+        }
+        c->cmd = up;
+        switch (up) {
+        case 'Z': cx = sx; cy = sy; break;
+        case 'H': cx = c->v[0]; break;
+        case 'V': cy = c->v[0]; break;
+        default:
+            cx = c->v[c->n - 2];
+            cy = c->v[c->n - 1];
+        }
+        if (up == 'M') {
+            sx = cx;
+            sy = cy;
+        }
+    }
+}
+
+static void
+fmt_path(GString *s, const GArray *cmds, gboolean evenodd)
+{
+    g_string_append(s, "path(");
+    if (evenodd) g_string_append(s, "evenodd, ");
+    g_string_append_c(s, '"');
+    for (guint i = 0; i < cmds->len; i++) {
+        const sh_pcmd *c = &g_array_index(cmds, sh_pcmd, i);
+        if (i) g_string_append_c(s, ' ');
+        g_string_append_c(s, g_ascii_toupper(c->cmd) == 'Z' ? 'Z' : c->cmd);
+        for (int k = 0; k < c->n; k++) {
+            g_string_append_c(s, ' ');
+            fmt_num(s, c->v[k]);
+        }
+    }
+    g_string_append(s, "\")");
+}
+
+static gboolean
+parse_path_fn(sh_cur *c, sh_shape *sh)
+{
+    const ns_css_component *t = peek(c);
+    if (is_ident(t, "nonzero") || is_ident(t, "evenodd")) {
+        sh->evenodd = is_ident(t, "evenodd");
+        c->pos++;
+        t = peek(c);
+        if (!t || t->type != NS_CSS_COMPONENT_COMMA) return FALSE;
+        c->pos++;
+        t = peek(c);
+    }
+    if (!t || t->type != NS_CSS_COMPONENT_STRING || !t->value) return FALSE;
+    c->pos++;
+    sh->path = path_parse(t->value);
+    return sh->path && peek(c) == NULL;
+}
+
 static gboolean
 parse_shape_fn(const ns_css_component *f, sh_shape *sh)
 {
@@ -644,6 +827,10 @@ parse_shape_fn(const ns_css_component *f, sh_shape *sh)
             if (!parse_len(&c, &sh->inset[i], i < 2)) return FALSE;
         sh->n_inset = 4;
         return parse_round(&c, sh) && peek(&c) == NULL;
+    }
+    if (g_ascii_strcasecmp(f->value, "path") == 0) {
+        sh->kind = SHAPE_PATH;
+        return parse_path_fn(&c, sh);
     }
     if (g_ascii_strcasecmp(f->value, "polygon") == 0) {
         sh->kind = SHAPE_POLYGON;
@@ -867,6 +1054,13 @@ fmt_shape(GString *s, const sh_shape *sh, const ns_shape_ctx *cx)
         g_string_append_c(s, ')');
         break;
     }
+    case SHAPE_PATH: {
+        GArray *cmds = g_array_copy(sh->path);
+        if (cx) path_absolutize(cmds);
+        fmt_path(s, cmds, sh->evenodd);
+        g_array_free(cmds, TRUE);
+        break;
+    }
     default:
         break;
     }
@@ -929,7 +1123,9 @@ static void
 value_clear(sh_value *v)
 {
     if (v->sh.points) g_array_free(v->sh.points, TRUE);
+    if (v->sh.path) g_array_free(v->sh.path, TRUE);
     v->sh.points = NULL;
+    v->sh.path = NULL;
 }
 
 char *
@@ -972,6 +1168,7 @@ typedef struct {
     gboolean evenodd;
     sh_cv poly_radius;
     GArray *pts;
+    GArray *path;
 } sh_cshape;
 
 static sh_cv
@@ -1072,6 +1269,11 @@ to_cshape(const sh_shape *sh, const ns_shape_ctx *cx, sh_cshape *o)
         o->inset[3] = e[0];
         break;
     }
+    case SHAPE_PATH:
+        o->evenodd = sh->evenodd;
+        o->path = g_array_copy(sh->path);
+        path_absolutize(o->path);
+        break;
     case SHAPE_POLYGON:
         o->evenodd = sh->evenodd;
         if (sh->poly_round) o->poly_radius = len_cv(&sh->poly_radius, cx);
@@ -1233,6 +1435,26 @@ cshape_lerp(const sh_cshape *a, const sh_cshape *b, const sh_mix *t, GString *s)
         g_string_append_c(s, ')');
         return TRUE;
     }
+    case SHAPE_PATH: {
+        if (a->evenodd != b->evenodd || a->path->len != b->path->len) return FALSE;
+        GArray *mix = g_array_copy(a->path);
+        for (guint i = 0; i < mix->len; i++) {
+            sh_pcmd *m = &g_array_index(mix, sh_pcmd, i);
+            const sh_pcmd *y = &g_array_index(b->path, sh_pcmd, i);
+            if (m->cmd != y->cmd ||
+                (m->cmd == 'A' && (m->v[3] != y->v[3] || m->v[4] != y->v[4]))) {
+                g_array_free(mix, TRUE);
+                return FALSE;
+            }
+            for (int k = 0; k < m->n; k++) {
+                if (m->cmd == 'A' && (k == 3 || k == 4)) continue;
+                m->v[k] = m->v[k] * t->wa + y->v[k] * t->wb;
+            }
+        }
+        fmt_path(s, mix, a->evenodd);
+        g_array_free(mix, TRUE);
+        return TRUE;
+    }
     default:
         return FALSE;
     }
@@ -1263,6 +1485,8 @@ shape_mix(const char *from, const char *to, const sh_mix *t, const ns_shape_ctx 
         }
         if (ca.pts) g_array_free(ca.pts, TRUE);
         if (cb.pts) g_array_free(cb.pts, TRUE);
+        if (ca.path) g_array_free(ca.path, TRUE);
+        if (cb.path) g_array_free(cb.path, TRUE);
     }
     value_clear(&a);
     value_clear(&b);
