@@ -4308,6 +4308,8 @@ JSClassID JS_NewClassID(JSRuntime *rt, JSClassID *pclass_id)
     if (class_id == 0) {
         class_id = rt->js_class_id_alloc++;
         *pclass_id = class_id;
+    } else if (class_id >= rt->js_class_id_alloc) {
+        rt->js_class_id_alloc = class_id + 1;
     }
     return class_id;
 }
