@@ -36,6 +36,19 @@ Changelog:
   `%AbstractModuleSource%` is available to hosts. JavaScript modules have
   no source form, so importing one in the source phase throws a
   `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: `Intl` moves into the QuickJS engine, generated from
+  Unicode CLDR 48 without ICU. Language tags are canonicalized per UTS #35
+  (aliases, likely subtags, extension values) and `Intl.Locale` has the
+  full API including `maximize`, `minimize`, `getWeekInfo`,
+  `getTextInfo` and the other info methods. `Intl.NumberFormat` supports
+  every v3 option: exact decimal strings, nine rounding modes, rounding
+  increments and priorities, compact, scientific and engineering notation,
+  units, currencies with accounting signs, `formatRange` and
+  `formatToParts`, in about 100 languages and their numbering systems.
+  `Intl.PluralRules` covers every CLDR language, and `Intl.Collator`,
+  `localeCompare` and Turkish/Lithuanian `toLocaleUpperCase`/
+  `toLocaleLowerCase` are locale-aware. The browser still installs its
+  own `Intl` for date formatting until the engine has it.
 * JavaScript: an assignment resolves its target before evaluating the
   right-hand side. A strict-mode assignment to an undeclared global throws
   even when the right-hand side creates it, and a `var` introduced by a

@@ -285,6 +285,12 @@ set(qjs_sources
     quickjs-temporal-tz.c
     quickjs-temporal-tzdb.c
     quickjs-temporal-zoned.c
+    quickjs-intl.c
+    quickjs-intl-locale.c
+    quickjs-intl-data.c
+    quickjs-intl-decimal.c
+    quickjs-intl-number.c
+    quickjs-intl-collator.c
 )
 
 if(QJS_BUILD_LIBC)
