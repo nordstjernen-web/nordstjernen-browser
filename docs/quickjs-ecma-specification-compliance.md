@@ -1229,3 +1229,56 @@ installed by `quickjs-intl-datetime.c` over the Temporal prototypes and
 format through `Intl.DateTimeFormat`, which accepts Temporal objects in
 `format`, `formatToParts` and the range methods (`HandleDateTimeValue`). The
 `Intl.Era-monthcode` and `canonical-tz` features are enabled.
+
+All `intl402/Temporal` tests pass except the `toLocaleString` ones, which
+need `Intl.DateTimeFormat`. `intl402/Temporal` runs in `test262.conf` with
+only the `*/prototype/toLocaleString/` directories excluded, and the
+`Intl.Era-monthcode` and `canonical-tz` features are enabled. Note for the Intl implementation: `Intl.DateTimeFormat`
+must accept Temporal objects in `format`, `formatToParts` and the range
+methods (ECMA-402 `HandleDateTimeValue`), and the Temporal
+`toLocaleString` methods should construct a `DateTimeFormat` and call it;
+`tp_calendar_iso_to_date` gives the calendar fields, and the
+`TPObject.cal` of an object must match the formatter's calendar except for
+`iso8601`.
+
+### 35. SpiderMonkey staging fixes (Array, Date, Function, Iterator, JSON, Map, Math, Reflect, RegExp)
+
+Fixes for `test/staging/sm` failures, each following the specification:
+
+- Proxy `[[DefineOwnProperty]]`: the non-configurable writable check
+  (step 16.c) only applies when the descriptor has a `[[Writable]]` field, so
+  `proxy.length = 0` on an array proxy no longer throws.
+- `Array.prototype.sort` writes every element back (observable through
+  setters, and a TypeError on frozen arrays). `Array.from` calls the
+  `@@iterator` method it read once, treats `null` as absent, and does not
+  close the iterator when `next()` itself throws or returns a non-object;
+  the Map/Set/WeakMap/WeakSet constructors likewise.
+- `Object.groupBy` converts the key with ToPropertyKey once; both `groupBy`s
+  call the callback with an undefined receiver and close the iterator when it
+  throws.
+- `Date` and `Date.UTC` convert every argument before giving up on a
+  non-finite one. Legacy date strings keep a `-07`/`-0700` offset after the
+  time instead of reading it as a year, reject a second year-like number,
+  and the ISO format requires `HH:mm` offsets.
+- `new Function(...)` checks that the parameters and the body each parse
+  on their own (the parser verifies the parameter list and body end at the
+  inserted `)` and `}`), and the function does not bind its own name
+  `anonymous`.
+- Annex B `for (var x = function(){} in o)` names the function `x`.
+- Legacy `fn.caller` skips direct-eval frames and is `null` for native,
+  strict, async, generator and top-level callers.
+- A function called through an `eval`-created variable object gets an
+  undefined `this`; with parameter expressions, a body `var arguments` is a
+  separate binding from the parameter scope's `arguments`.
+- `%WrapForValidIteratorPrototype%` `next`/`return` call the wrapped methods
+  with no arguments and return their results unchanged.
+- `JSON.parse` with a reviver reports the source of the last occurrence of a
+  duplicated key.
+- `Reflect.apply`/`construct` read `argumentsList.length` with ToLength.
+- `RegExp` reads the pattern's slots, then allocates (prototype lookup), then
+  stringifies; `source`/`toString` escape line terminators, including
+  escaped ones; `RegExp.escape` keeps surrogate pairs and non-whitespace
+  Latin-1 characters.
+- `Math.acosh`/`Math.asinh` use fdlibm-style formulas (MinGW's libm is off by
+  tens of ulps near 1).
+

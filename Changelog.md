@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: fixes from the SpiderMonkey test suite: `new Function`
+  rejects parameter lists that only parse together with the body, legacy
+  `fn.caller` is `null` for strict, native and top-level callers, legacy
+  date strings with `-07` offsets parse, `Array.from`/`Map`/`Set` close
+  iterators only when the specification says so, `RegExp.prototype.source`
+  escapes line terminators, and `Math.acosh`/`asinh` are accurate.
 * JavaScript: decorators (`@dec` on classes, methods, getters, setters,
   fields and `accessor` elements, with `context.access`,
   `addInitializer` and `Symbol.metadata`) and auto-accessors
