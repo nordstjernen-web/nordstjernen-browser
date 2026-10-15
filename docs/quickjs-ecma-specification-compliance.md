@@ -82,7 +82,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Decorators and auto-accessors | 31 | high | **done** (`decorators` enabled, `staging/decorators` included; see #33) |
 | Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
 | Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
-| Temporal non-ISO calendars, eras and month codes (`intl402/Temporal`, `Intl.Era-monthcode`) | ~2000 | high | **done** except `toLocaleString`, which needs `Intl.DateTimeFormat` (see #34) |
+| Temporal non-ISO calendars, eras and month codes (`intl402/Temporal`, `Intl.Era-monthcode`) | ~2000 | high | **done** (see #34) |
 
 ## Changes
 
@@ -1111,6 +1111,8 @@ ICU dependency.
 | `quickjs-intl-decimal.c` | exact decimal values (`ToIntlMathematicalValue`), `ToRawPrecision`/`ToRawFixed` rounding with every rounding mode and increment, CLDR plural-rule evaluation |
 | `quickjs-intl-number.c` | `Intl.NumberFormat` (all v3 options, compact/scientific/engineering notation, units, currencies, ranges), `Intl.PluralRules`, `Number`/`BigInt` `toLocaleString` |
 | `quickjs-intl-collator.c` | `Intl.Collator`, `String.prototype.localeCompare`, `toLocaleLowerCase`/`toLocaleUpperCase` (Turkish, Azeri, Lithuanian special casing) |
+| `quickjs-intl-datetime.c` | `Intl.DateTimeFormat` (skeleton matching, styles, time-zone names, intervals, Temporal values), `Date` and Temporal `toLocaleString` |
+| `quickjs-intl-calendar.c` | dates in each supported calendar; the non-Gregorian arithmetic comes from Temporal's calendar code so both APIs agree |
 | `quickjs-intl-data.c` | lookup in the generated CLDR tables with locale inheritance |
 
 The locale data is generated from Unicode CLDR **48.2.3** (cldr-json) by
@@ -1121,7 +1123,13 @@ script directions) and `quickjs-intl-cldr-data.h` (per-locale strings, stored
 as differences from the parent locale). Number formatting covers the ~100
 languages with CLDR "modern" coverage; unit names and currency names are kept
 for the 30 most widely used languages and fall back to the root data
-elsewhere. Plural rules cover every language CLDR has rules for. To
+elsewhere. Date patterns are kept for the same languages in every calendar
+whose patterns differ from the generic ones; the other languages carry
+Gregorian patterns and fall back to them. Metazone names (`Pacific Standard
+Time`) are kept for 13 languages, others use localized GMT offsets. The
+generator writes date patterns with an ASCII space where CLDR has U+202F
+before the day period, matching what test262 and other engines produce.
+Plural rules cover every language CLDR has rules for. To
 regenerate, unpack `cldr-<version>-json-full.zip` from the
 [cldr-json releases](https://github.com/unicode-org/cldr-json/releases)
 outside the tree and run
@@ -1136,9 +1144,14 @@ handling.
 
 | Area (test262 `intl402/`) | Status |
 | --- | --- |
-| `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `String`, `Number`, `BigInt`, `Array`, `TypedArray` | enabled in `test262.conf` |
-| `DateTimeFormat`, `Date`, `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
-| `Temporal` | enabled except the `toLocaleString` directories (see #34) |
+| `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `DateTimeFormat`, `Date`, `FallbackSymbol`, `String`, `Number`, `BigInt`, `Array`, `TypedArray`, `Temporal` | enabled in `test262.conf`, all pass |
+| `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
+
+Time zones: `Intl.DateTimeFormat` resolves offsets through Temporal's tz
+database reader. On Windows without a tz database it maps the IANA name to a
+Windows zone (CLDR `windowsZones`) and computes the offset from the
+registry's `GetTimeZoneInformationForYear` rules, so current rules are right
+and historical ones are approximate.
 
 ### 33. Decorators and auto-accessors
 
@@ -1211,13 +1224,8 @@ Named time zones no longer apply `CheckISODaysRange` in
 zones, and differences against the minimum instant in a zone west of UTC
 need the day before the limit.
 
-All `intl402/Temporal` tests pass except the `toLocaleString` ones, which
-need `Intl.DateTimeFormat`. `intl402/Temporal` runs in `test262.conf` with
-only the `*/prototype/toLocaleString/` directories excluded, and the
-`Intl.Era-monthcode` and `canonical-tz` features are enabled. Note for the Intl implementation: `Intl.DateTimeFormat`
-must accept Temporal objects in `format`, `formatToParts` and the range
-methods (ECMA-402 `HandleDateTimeValue`), and the Temporal
-`toLocaleString` methods should construct a `DateTimeFormat` and call it;
-`tp_calendar_iso_to_date` gives the calendar fields, and the
-`TPObject.cal` of an object must match the formatter's calendar except for
-`iso8601`.
+All `intl402/Temporal` tests pass; the `toLocaleString` methods are
+installed by `quickjs-intl-datetime.c` over the Temporal prototypes and
+format through `Intl.DateTimeFormat`, which accepts Temporal objects in
+`format`, `formatToParts` and the range methods (`HandleDateTimeValue`). The
+`Intl.Era-monthcode` and `canonical-tz` features are enabled.

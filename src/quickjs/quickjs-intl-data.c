@@ -98,8 +98,11 @@ const char *intl_data_get(int node, const char *key)
         while (lo <= hi) {
             int mid = (lo + hi) / 2;
             int c = (int)intl_data_entry_keys[mid] - k;
-            if (c == 0)
-                return intl_data_pool + intl_data_entry_vals[mid];
+            if (c == 0) {
+                const uint8_t *v = intl_data_entry_vals[mid];
+                const char *s = intl_data_pool + (v[0] | (v[1] << 8) | ((uint32_t)v[2] << 16));
+                return s[0] == '\x7f' ? NULL : s;
+            }
             if (c < 0)
                 lo = mid + 1;
             else
