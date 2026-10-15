@@ -198,6 +198,14 @@ enum {
     JS_CLASS_SHADOW_REALM,
     JS_CLASS_DEFERRED_MODULE_NS, /* u.opaque: JSModuleDef */
     JS_CLASS_MODULE_SOURCE,     /* u.object_data */
+    JS_CLASS_TEMPORAL_INSTANT,
+    JS_CLASS_TEMPORAL_ZONED,
+    JS_CLASS_TEMPORAL_DATE,
+    JS_CLASS_TEMPORAL_DATETIME,
+    JS_CLASS_TEMPORAL_TIME,
+    JS_CLASS_TEMPORAL_YEAR_MONTH,
+    JS_CLASS_TEMPORAL_MONTH_DAY,
+    JS_CLASS_TEMPORAL_DURATION,
 
     JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
 };
@@ -67936,6 +67944,16 @@ uintptr_t js_std_cmd(int cmd, ...) {
     va_end(ap);
 
     return rv;
+}
+
+JSClassID js_temporal_class_id(int kind)
+{
+    return JS_CLASS_TEMPORAL_INSTANT + kind;
+}
+
+void js_temporal_set_opaque(JSValueConst obj, void *opaque)
+{
+    JS_VALUE_GET_OBJ(obj)->u.opaque = opaque;
 }
 
 JSValue js_temporal_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id)

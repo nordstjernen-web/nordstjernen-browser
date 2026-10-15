@@ -270,6 +270,8 @@ extern JSClassID tp_class_id[TP_KIND_COUNT];
 extern const char *const tp_unit_singular[TP_UNIT_COUNT];
 extern const int64_t tp_unit_ns[TP_UNIT_COUNT];
 
+JSClassID js_temporal_class_id(int kind);
+void js_temporal_set_opaque(JSValueConst obj, void *opaque);
 JSValue js_temporal_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id);
 int js_temporal_this_time_value(JSContext *ctx, double *pres, JSValueConst this_val);
 JSValue js_temporal_date_prototype(JSContext *ctx);
@@ -429,6 +431,15 @@ void tp_format_offset_rounded(TPBuf *b, int64_t offset_ns);
 void tp_format_offset_minutes(TPBuf *b, int64_t minutes);
 TPTimeZone tp_system_time_zone(void);
 tp_i128 tp_system_epoch_ns(void);
+
+int tp_tzdb_lookup(const char *s, size_t len);
+const char *tp_tzdb_identifier(int id);
+int tp_tzdb_primary(int id);
+int64_t tp_tzdb_offset_ns(int id, tp_i128 ns);
+int tp_tzdb_possible(int id, const TPDateTime *dt, tp_i128 out[2]);
+bool tp_tzdb_next_transition(int id, tp_i128 ns, tp_i128 *out);
+bool tp_tzdb_previous_transition(int id, tp_i128 ns, tp_i128 *out);
+int tp_tzdb_system(void);
 
 void tp_put_iso_year(TPBuf *b, int64_t year);
 void tp_put_iso_date(TPBuf *b, TPISODate d);

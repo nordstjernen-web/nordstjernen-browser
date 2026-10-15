@@ -22,8 +22,12 @@ Changelog:
   `Instant`, `Duration` and `Temporal.Now`, with `round()`, `total()`,
   `relativeTo`, every rounding mode, the RFC 9557 string formats and
   `Date.prototype.toTemporalInstant`. Arithmetic is exact to the
-  nanosecond. Time zones are UTC and fixed offsets. test262's Temporal
-  tests all pass.
+  nanosecond. test262's Temporal tests all pass.
+* JavaScript: Temporal uses the system time zone database, so
+  `ZonedDateTime` accepts IANA names such as `Europe/Oslo` and follows
+  their daylight-saving rules, and `Temporal.Now.timeZoneId()` reports the
+  system zone. On Windows the database is read from `TZDIR` or a
+  `share/zoneinfo` folder next to the browser.
 * JavaScript: deferred module imports. `import defer * as ns from "m"`
   and `import.defer("m")` load and link a module but evaluate it only
   when a property of its namespace is first read. Its top-level-await
