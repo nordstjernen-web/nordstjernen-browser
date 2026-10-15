@@ -275,6 +275,15 @@ set(qjs_sources
     libregexp.c
     libunicode.c
     quickjs.c
+    quickjs-temporal.c
+    quickjs-temporal-calendar.c
+    quickjs-temporal-duration.c
+    quickjs-temporal-instant.c
+    quickjs-temporal-parse.c
+    quickjs-temporal-partial.c
+    quickjs-temporal-plain.c
+    quickjs-temporal-tz.c
+    quickjs-temporal-zoned.c
 )
 
 if(QJS_BUILD_LIBC)

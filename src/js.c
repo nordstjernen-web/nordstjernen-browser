@@ -58,7 +58,6 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "html.h"
 #include "idb.h"
 #include "image.h"
-#include "js_date.h"
 #include "js_intl.h"
 #include "js_brand.h"
 #include "js_realm.h"
@@ -28214,7 +28213,6 @@ ns_worker_js_new(ns_worker_host *host)
 
     ns_wasm_install(ctx, global);
     ns_js_intl_install(ctx, global);
-    ns_js_temporal_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
@@ -55589,7 +55587,6 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     ns_hide_shared_array_buffer(ctx, global);
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
     ns_js_intl_install(ctx, global);
-    ns_js_temporal_install(ctx, global);
     ns_js_realm_install(ctx, global);
 
     ns_bind_fn_if_missing(ctx, global, "captureEvents", ns_event_noop, 0);
