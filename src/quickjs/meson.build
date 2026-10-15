@@ -13,6 +13,16 @@ endif
 if qjs_host_system == 'windows'
   qjs_extra_args += ['-DWIN32_LEAN_AND_MEAN', '-D_WIN32_WINNT=0x0601']
 endif
+if qjs_host_system == 'windows'
+  qjs_fs = import('fs')
+  qjs_cc_prog = find_program(cc.cmd_array()[0], required: false)
+  if qjs_cc_prog.found()
+    qjs_tzdir = qjs_fs.parent(qjs_fs.parent(qjs_cc_prog.full_path())).replace('\\', '/') + '/share/zoneinfo'
+    if qjs_fs.is_file(qjs_tzdir + '/tzdata.zi')
+      qjs_extra_args += '-DTP_DEFAULT_TZDIR="' + qjs_tzdir + '"'
+    endif
+  endif
+endif
 
 qjs_c_args = cc.get_supported_arguments(qjs_warning_args) + qjs_extra_args
 

@@ -38,7 +38,9 @@ Changelog:
   `islamic-umalqura`, `japanese`, `persian` and `roc`, with `era`,
   `eraYear`, leap-month codes such as `M05L`, and date arithmetic in each
   calendar. On Windows, `Temporal.Now.timeZoneId()` maps the system zone
-  to its IANA name.
+  to its IANA name, and the Windows package ships the time zone database.
+  Zones in different countries, such as `Europe/Oslo` and `Europe/Berlin`,
+  are never treated as the same zone.
 * JavaScript: deferred module imports. `import defer * as ns from "m"`
   and `import.defer("m")` load and link a module but evaluate it only
   when a property of its namespace is first read. Its top-level-await

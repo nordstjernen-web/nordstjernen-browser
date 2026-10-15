@@ -1138,7 +1138,7 @@ handling.
 | --- | --- |
 | `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `String`, `Number`, `BigInt`, `Array`, `TypedArray` | enabled in `test262.conf` |
 | `DateTimeFormat`, `Date`, `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
-| `Temporal` | owned by the Temporal work, excluded |
+| `Temporal` | enabled except the `toLocaleString` directories (see #34) |
 
 ### 33. Decorators and auto-accessors
 
@@ -1197,14 +1197,24 @@ On Windows the system zone comes from `GetDynamicTimeZoneInformation`,
 mapped to IANA through `quickjs-temporal-winzones.h`, generated from CLDR
 `windowsZones.xml` by `scripts/gen-temporal-windows-zones.py`.
 
+A Link in the tz database is its own primary identifier when `zone.tab`
+puts it in a different country than its target (`Europe/Oslo`,
+`Africa/Accra`); a country-less alias that CLDR maps onto such a zone
+(`Atlantic/Jan_Mayen`) resolves there. `Intl.supportedValuesOf("timeZone")`
+leaves out names the tz database treats as links, so the two APIs agree. On
+Windows the CMake and meson builds also look in the toolchain's
+`share/zoneinfo`, and `scripts/pack-windows.sh` ships `share/zoneinfo` with
+the browser.
+
 Named time zones no longer apply `CheckISODaysRange` in
 `GetPossibleEpochNanoseconds`; the specification applies it only to offset
 zones, and differences against the minimum instant in a zone west of UTC
 need the day before the limit.
 
-All `intl402/Temporal` tests pass except the `toLocaleString` ones and two
-that call `Intl.supportedValuesOf`. `Intl.Era-monthcode` is enabled in
-`test262.conf`. Note for the Intl implementation: `Intl.DateTimeFormat`
+All `intl402/Temporal` tests pass except the `toLocaleString` ones, which
+need `Intl.DateTimeFormat`. `intl402/Temporal` runs in `test262.conf` with
+only the `*/prototype/toLocaleString/` directories excluded, and the
+`Intl.Era-monthcode` and `canonical-tz` features are enabled. Note for the Intl implementation: `Intl.DateTimeFormat`
 must accept Temporal objects in `format`, `formatToParts` and the range
 methods (ECMA-402 `HandleDateTimeValue`), and the Temporal
 `toLocaleString` methods should construct a `DateTimeFormat` and call it;
