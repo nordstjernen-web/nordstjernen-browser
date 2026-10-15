@@ -45031,8 +45031,6 @@ static JSValue js_object_seal(JSContext *ctx, JSValueConst this_val,
 {
     JSValueConst obj = argv[0];
     JSObject *p;
-    JSTypedArray *ta;
-    JSArrayBuffer *abuf;
     JSPropertyEnum *props;
     uint32_t len, i;
     int flags, desc_flags, res;
@@ -45051,13 +45049,6 @@ static JSValue js_object_seal(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     if (!res) {
         return JS_ThrowTypeError(ctx, "proxy preventExtensions handler returned false");
-    }
-
-    if (freeze_flag && is_typed_array(p->class_id)) {
-        ta = p->u.typed_array;
-        abuf = ta->buffer->u.array_buffer;
-        if (array_buffer_is_resizable(abuf) || typed_array_is_oob(p))
-            return JS_ThrowTypeError(ctx, "cannot freeze resizable typed array");
     }
 
     flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK;
@@ -53635,7 +53626,7 @@ static JSValue js_regexp_Symbol_match(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(matchStr))
                 goto exception;
             isEmpty = JS_IsEmptyString(matchStr);
-            if (JS_SetPropertyInt64(ctx, A, n++, matchStr) < 0)
+            if (JS_DefinePropertyValueInt64(ctx, A, n++, matchStr, JS_PROP_C_W_E | JS_PROP_THROW) < 0)
                 goto exception;
             if (isEmpty) {
                 int64_t thisIndex, nextIndex;
@@ -57645,38 +57636,37 @@ static int js_setlike_get_props(JSContext *ctx, JSValueConst setlike,
                                 uint64_t *psize, JSValue *phas, JSValue *pkeys)
 {
     JSValue has, keys, v;
-    JSMapState *s;
     uint64_t size;
     double d;
 
     keys = JS_UNDEFINED;
     has = JS_UNDEFINED;
-    s = JS_GetOpaque(setlike, JS_CLASS_SET);
-    if (s) {
-        size = s->record_count;
+    if (!JS_IsObject(setlike)) {
+        JS_ThrowTypeError(ctx, "not an object");
+        return -1;
+    }
+    v = JS_GetProperty(ctx, setlike, JS_ATOM_size);
+    if (JS_IsException(v))
+        return -1;
+    if (JS_IsUndefined(v)) {
+        JS_ThrowTypeError(ctx, ".size is undefined");
+        return -1;
+    }
+    if (JS_ToFloat64Free(ctx, &d, v) < 0)
+        return -1;
+    if (isnan(d)) {
+        JS_ThrowTypeError(ctx, ".size is not a legal size");
+        return -1;
+    }
+    d = trunc(d);
+    if (d < 0) {
+        JS_ThrowRangeError(ctx, ".size is not a legal size");
+        return -1;
+    }
+    if (isinf(d) || d > (double)MAX_SAFE_INTEGER) {
+        size = UINT64_MAX;
     } else {
-        v = JS_GetProperty(ctx, setlike, JS_ATOM_size);
-        if (JS_IsException(v))
-            return -1;
-        if (JS_IsUndefined(v)) {
-            JS_ThrowTypeError(ctx, ".size is undefined");
-            return -1;
-        }
-        if (JS_ToFloat64Free(ctx, &d, v) < 0)
-            return -1;
-        if (d < 0) {
-            JS_ThrowRangeError(ctx, ".size is not a legal size");
-            return -1;
-        }
-        if (isnan(d)) {
-            JS_ThrowTypeError(ctx, ".size is not a legal size");
-            return -1;
-        }
-        if (isinf(d) || d > (double)MAX_SAFE_INTEGER) {
-            size = UINT64_MAX;
-        } else {
-            size = (uint64_t)d; // cast for expository reasons
-        }
+        size = (uint64_t)d; // cast for expository reasons
     }
     has = JS_GetProperty(ctx, setlike, JS_ATOM_has);
     if (JS_IsException(has))
@@ -57971,14 +57961,41 @@ fini:
     return newset;
 }
 
+static JSValue js_set_clone_records(JSContext *ctx, JSMapState *s)
+{
+    struct list_head *el;
+    JSMapRecord *mr;
+    JSMapState *t;
+    JSValue newset;
+
+    newset = js_map_constructor(ctx, JS_UNDEFINED, 0, NULL, MAGIC_SET);
+    if (JS_IsException(newset))
+        return newset;
+    t = JS_GetOpaque(newset, JS_CLASS_SET);
+    list_for_each(el, &s->records) {
+        mr = list_entry(el, JSMapRecord, link);
+        if (mr->empty)
+            continue;
+        mr = map_add_record(ctx, t, mr->key);
+        if (!mr) {
+            JS_FreeValue(ctx, newset);
+            return JS_EXCEPTION;
+        }
+        mr->value = JS_UNDEFINED;
+    }
+    return newset;
+}
+
 static JSValue js_set_difference(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
     JSValue has, item, iter, keys, newset, next, rv;
     JSValueConst setlike;
+    struct list_head *el, *el_next;
     JSMapState *s, *t;
     JSMapRecord *mr;
     uint64_t size;
+    uint32_t this_size, index;
     int done;
     int ok;
 
@@ -57990,62 +58007,44 @@ static JSValue js_set_difference(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     iter = JS_UNDEFINED;
     next = JS_UNDEFINED;
-    newset = JS_UNDEFINED;
-    if (s->record_count > size) {
+    newset = js_set_clone_records(ctx, s);
+    if (JS_IsException(newset))
+        goto exception;
+    t = JS_GetOpaque(newset, JS_CLASS_SET);
+    if (s->record_count <= size) {
+        this_size = t->record_count;
+        index = 0;
+        for (el = t->records.next; el != &t->records && index < this_size;
+             el = el_next, index++) {
+            mr = list_entry(el, JSMapRecord, link);
+            item = js_dup(mr->key);
+            rv = JS_Call(ctx, has, setlike, 1, vc(&item));
+            JS_FreeValue(ctx, item);
+            ok = JS_ToBoolFree(ctx, rv);
+            if (ok < 0)
+                goto exception;
+            el_next = el->next;
+            if (ok)
+                map_delete_record(ctx->rt, t, mr);
+        }
+    } else {
         iter = JS_Call(ctx, keys, setlike, 0, NULL);
         if (JS_IsException(iter))
             goto exception;
         next = JS_GetProperty(ctx, iter, JS_ATOM_next);
         if (JS_IsException(next))
             goto exception;
-        newset = js_map_constructor(ctx, JS_UNDEFINED, 1, &this_val, MAGIC_SET);
-        if (JS_IsException(newset))
-            goto exception;
-        t = JS_GetOpaque(newset, JS_CLASS_SET);
         for (;;) {
             item = JS_IteratorNext(ctx, iter, next, 0, NULL, &done);
             if (JS_IsException(item))
                 goto exception;
-            if (done) // item is JS_UNDEFINED
+            if (done)
                 break;
             item = map_normalize_key(ctx, item);
             mr = map_find_record(ctx, t, item);
             if (mr)
                 map_delete_record(ctx->rt, t, mr);
             JS_FreeValue(ctx, item);
-        }
-    } else {
-        iter = js_create_map_iterator(ctx, this_val, 0, NULL, MAGIC_SET);
-        if (JS_IsException(iter))
-            goto exception;
-        newset = js_map_constructor(ctx, JS_UNDEFINED, 0, NULL, MAGIC_SET);
-        if (JS_IsException(newset))
-            goto exception;
-        t = JS_GetOpaque(newset, JS_CLASS_SET);
-        for (;;) {
-            item = js_map_iterator_next(ctx, iter, 0, NULL, &done, MAGIC_SET);
-            if (JS_IsException(item))
-                goto exception;
-            if (done) // item is JS_UNDEFINED
-                break;
-            rv = JS_Call(ctx, has, setlike, 1, vc(&item));
-            ok = JS_ToBoolFree(ctx, rv); // returns -1 if rv is JS_EXCEPTION
-            if (ok == 0) {
-                item = map_normalize_key(ctx, item);
-                if (map_find_record(ctx, t, item)) {
-                    JS_FreeValue(ctx, item); // no duplicates
-                } else if ((mr = map_add_record(ctx, t, item))) {
-                    JS_FreeValue(ctx, item);
-                    mr->value = JS_UNDEFINED;
-                } else {
-                    JS_FreeValue(ctx, item);
-                    goto exception;
-                }
-            } else {
-                JS_FreeValue(ctx, item);
-                if (ok < 0)
-                    goto exception;
-            }
         }
     }
     goto fini;
@@ -58065,7 +58064,6 @@ static JSValue js_set_symmetricDifference(JSContext *ctx, JSValueConst this_val,
 {
     JSValue has, item, iter, keys, newset, next;
     JSValueConst setlike;
-    struct list_head *el;
     JSMapState *s, *t;
     JSMapRecord *mr;
     uint64_t size;
@@ -58081,27 +58079,17 @@ static JSValue js_set_symmetricDifference(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, has);
     iter = JS_UNDEFINED;
     next = JS_UNDEFINED;
-    newset = js_map_constructor(ctx, JS_UNDEFINED, 0, NULL, MAGIC_SET);
-    if (JS_IsException(newset))
-        goto exception;
-    t = JS_GetOpaque(newset, JS_CLASS_SET);
-    // can't clone this_val using js_map_constructor(),
-    // test262 mandates we don't call the .add method
-    list_for_each(el, &s->records) {
-        mr = list_entry(el, JSMapRecord, link);
-        if (mr->empty)
-            continue;
-        mr = map_add_record(ctx, t, mr->key);
-        if (!mr)
-            goto exception;
-        mr->value = JS_UNDEFINED;
-    }
+    newset = JS_UNDEFINED;
     iter = JS_Call(ctx, keys, setlike, 0, NULL);
     if (JS_IsException(iter))
         goto exception;
     next = JS_GetProperty(ctx, iter, JS_ATOM_next);
     if (JS_IsException(next))
         goto exception;
+    newset = js_set_clone_records(ctx, s);
+    if (JS_IsException(newset))
+        goto exception;
+    t = JS_GetOpaque(newset, JS_CLASS_SET);
     for (;;) {
         item = JS_IteratorNext(ctx, iter, next, 0, NULL, &done);
         if (JS_IsException(item))
@@ -58149,9 +58137,7 @@ static JSValue js_set_union(JSContext *ctx, JSValueConst this_val,
 {
     JSValue has, item, iter, keys, newset, next, rv;
     JSValueConst setlike;
-    struct list_head *el;
-    JSMapState *s, *t;
-    JSMapRecord *mr;
+    JSMapState *s;
     uint64_t size;
     int done;
 
@@ -58165,24 +58151,15 @@ static JSValue js_set_union(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, has);
     iter = JS_UNDEFINED;
     next = JS_UNDEFINED;
-    newset = js_map_constructor(ctx, JS_UNDEFINED, 0, NULL, MAGIC_SET);
-    if (JS_IsException(newset))
-        goto exception;
-    t = JS_GetOpaque(newset, JS_CLASS_SET);
-    list_for_each(el, &s->records) {
-        mr = list_entry(el, JSMapRecord, link);
-        if (mr->empty)
-            continue;
-        mr = map_add_record(ctx, t, mr->key);
-        if (!mr)
-            goto exception;
-        mr->value = JS_UNDEFINED;
-    }
+    newset = JS_UNDEFINED;
     iter = JS_Call(ctx, keys, setlike, 0, NULL);
     if (JS_IsException(iter))
         goto exception;
     next = JS_GetProperty(ctx, iter, JS_ATOM_next);
     if (JS_IsException(next))
+        goto exception;
+    newset = js_set_clone_records(ctx, s);
+    if (JS_IsException(newset))
         goto exception;
     for (;;) {
         item = JS_IteratorNext(ctx, iter, next, 0, NULL, &done);
@@ -63957,7 +63934,16 @@ static JSValue js_typed_array_set_internal(JSContext *ctx,
         // not throw an exception. Because iteration over the source array is
         // observable, we cannot bail out early when the TA is first detached.
         if (typed_array_is_oob(p)) {
-            JS_FreeValue(ctx, val);
+            if (p->class_id == JS_CLASS_BIG_INT64_ARRAY ||
+                p->class_id == JS_CLASS_BIG_UINT64_ARRAY) {
+                int64_t ignored_bigint;
+                if (JS_ToBigInt64Free(ctx, &ignored_bigint, val))
+                    goto fail;
+            } else {
+                double ignored_number;
+                if (JS_ToFloat64Free(ctx, &ignored_number, val))
+                    goto fail;
+            }
         } else if (JS_SetPropertyUint32(ctx, dst, offset + i, val) < 0) {
             goto fail;
         }
@@ -64037,6 +64023,8 @@ static JSValue js_typed_array_with(JSContext *ctx, JSValueConst this_val,
     p = get_typed_array(ctx, this_val);
     if (!p)
         return JS_EXCEPTION;
+    if (typed_array_is_oob(p))
+        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
 
     len = p->u.array.count;
     if (JS_ToInt64Sat(ctx, &idx, argv[0]))
@@ -64052,12 +64040,7 @@ static JSValue js_typed_array_with(JSContext *ctx, JSValueConst this_val,
     }
     if (JS_IsException(val))
         return JS_EXCEPTION;
-    /* re-validate after user code (spec step 9: IsValidIntegerIndex) */
-    if (typed_array_is_oob(p)) {
-        JS_FreeValue(ctx, val);
-        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
-    }
-    newlen = p->u.array.count;
+    newlen = typed_array_is_oob(p) ? 0 : p->u.array.count;
     if (idx < 0 || idx >= newlen) {
         JS_FreeValue(ctx, val);
         return JS_ThrowRangeError(ctx, "invalid typed array index");
@@ -65254,6 +65237,7 @@ struct TA_sort_context {
     JSValueConst cmp;
     JSValue (*getfun)(JSContext *ctx, const void *a);
     int elt_size;
+    const uint8_t *snapshot;
 };
 
 static int js_TA_cmp_generic(const void *a, const void *b, void *opaque) {
@@ -65262,23 +65246,16 @@ static int js_TA_cmp_generic(const void *a, const void *b, void *opaque) {
     uint32_t a_idx, b_idx;
     JSValue argv[2];
     JSValue res;
-    JSObject *p;
     int cmp;
-
-    p = JS_VALUE_GET_OBJ(psc->arr);
-    if (typed_array_is_oob(p))
-        return 0;
 
     cmp = 0;
     if (!psc->exception) {
         a_idx = *(uint32_t *)a;
         b_idx = *(uint32_t *)b;
-        if (a_idx >= p->u.array.count || b_idx >= p->u.array.count)
-            return 0;
-        argv[0] = psc->getfun(ctx, (char *)p->u.array.u.ptr +
+        argv[0] = psc->getfun(ctx, psc->snapshot +
                               a_idx * (size_t)psc->elt_size);
-        argv[1] = psc->getfun(ctx, (char *)p->u.array.u.ptr +
-                              b_idx * (size_t)(psc->elt_size));
+        argv[1] = psc->getfun(ctx, psc->snapshot +
+                              b_idx * (size_t)psc->elt_size);
         res = JS_Call(ctx, psc->cmp, JS_UNDEFINED, 2, vc(argv));
         if (JS_IsException(res)) {
             psc->exception = 1;
@@ -65395,58 +65372,54 @@ static JSValue js_typed_array_sort(JSContext *ctx, JSValueConst this_val,
                 return JS_EXCEPTION;
             for(i = 0; i < len; i++)
                 array_idx[i] = i;
-            tsc.elt_size = elt_size;
-            rqsort(array_idx, len, sizeof(array_idx[0]),
-                   js_TA_cmp_generic, &tsc);
-            if (tsc.exception)
-                goto fail;
-            // per spec: typed array can be detached mid-iteration
-            if (typed_array_is_oob(p))
-                goto done;
-            len = min_int(len, p->u.array.count);
-            if (len == 0)
-                goto done;
             array_tmp = js_malloc(ctx, len * elt_size);
             if (!array_tmp) {
-            fail:
                 js_free(ctx, array_idx);
                 return JS_EXCEPTION;
             }
             memcpy(array_tmp, p->u.array.u.ptr, len * elt_size);
+            tsc.elt_size = elt_size;
+            tsc.snapshot = array_tmp;
+            rqsort(array_idx, len, sizeof(array_idx[0]),
+                   js_TA_cmp_generic, &tsc);
+            if (tsc.exception) {
+                js_free(ctx, array_tmp);
+                js_free(ctx, array_idx);
+                return JS_EXCEPTION;
+            }
+            if (typed_array_is_oob(p))
+                goto done;
+            len = min_int(len, p->u.array.count);
             switch(elt_size) {
             case 1:
                 for(i = 0; i < len; i++) {
                     j = array_idx[i];
-                    if (j < len)
-                        p->u.array.u.uint8_ptr[i] = ((uint8_t *)array_tmp)[j];
+                    p->u.array.u.uint8_ptr[i] = ((uint8_t *)array_tmp)[j];
                 }
                 break;
             case 2:
                 for(i = 0; i < len; i++) {
                     j = array_idx[i];
-                    if (j < len)
-                        p->u.array.u.uint16_ptr[i] = ((uint16_t *)array_tmp)[j];
+                    p->u.array.u.uint16_ptr[i] = ((uint16_t *)array_tmp)[j];
                 }
                 break;
             case 4:
                 for(i = 0; i < len; i++) {
                     j = array_idx[i];
-                    if (j < len)
-                        p->u.array.u.uint32_ptr[i] = ((uint32_t *)array_tmp)[j];
+                    p->u.array.u.uint32_ptr[i] = ((uint32_t *)array_tmp)[j];
                 }
                 break;
             case 8:
                 for(i = 0; i < len; i++) {
                     j = array_idx[i];
-                    if (j < len)
-                        p->u.array.u.uint64_ptr[i] = ((uint64_t *)array_tmp)[j];
+                    p->u.array.u.uint64_ptr[i] = ((uint64_t *)array_tmp)[j];
                 }
                 break;
             default:
                 abort();
             }
-            js_free(ctx, array_tmp);
         done:
+            js_free(ctx, array_tmp);
             js_free(ctx, array_idx);
         } else {
             rqsort(p->u.array.u.ptr, len, elt_size, cmpfun, &tsc);
@@ -65743,42 +65716,19 @@ static JSValue js_typed_array_constructor(JSContext *ctx,
     if (JS_VALUE_GET_TAG(argv[0]) != JS_TAG_OBJECT) {
         if (JS_ToIndex(ctx, &len, argv[0]))
             return JS_EXCEPTION;
+        obj = js_create_from_ctor(ctx, new_target, classid);
+        if (JS_IsException(obj))
+            return JS_EXCEPTION;
         buffer = js_array_buffer_constructor1(ctx, JS_UNDEFINED,
                                               len << size_log2,
                                               NULL);
         if (JS_IsException(buffer))
-            return JS_EXCEPTION;
+            goto fail;
         offset = 0;
     } else {
         JSObject *p = JS_VALUE_GET_OBJ(argv[0]);
-        if (p->class_id == JS_CLASS_ARRAY_BUFFER ||
-            p->class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
-            abuf = p->u.array_buffer;
-            if (JS_ToIndex(ctx, &offset, argv[1]))
-                return JS_EXCEPTION;
-            if (abuf->detached)
-                return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
-            if ((offset & ((1 << size_log2) - 1)) != 0 ||
-                offset > abuf->byte_length)
-                return JS_ThrowRangeError(ctx, "invalid offset");
-            if (JS_IsUndefined(argv[2])) {
-                track_rab = array_buffer_is_resizable(abuf);
-                if (!track_rab)
-                    if ((abuf->byte_length & ((1 << size_log2) - 1)) != 0)
-                        goto invalid_length;
-                len = (abuf->byte_length - offset) >> size_log2;
-            } else {
-                if (JS_ToIndex(ctx, &len, argv[2]))
-                    return JS_EXCEPTION;
-                if (abuf->detached)
-                    return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
-                if ((offset + (len << size_log2)) > abuf->byte_length) {
-                invalid_length:
-                    return JS_ThrowRangeError(ctx, "invalid length");
-                }
-            }
-            buffer = js_dup(argv[0]);
-        } else {
+        if (p->class_id != JS_CLASS_ARRAY_BUFFER &&
+            p->class_id != JS_CLASS_SHARED_ARRAY_BUFFER) {
             if (is_typed_array(p->class_id)) {
                 return js_typed_array_constructor_ta(ctx, new_target, argv[0],
                                                      classid, p->u.array.count);
@@ -65786,39 +65736,49 @@ static JSValue js_typed_array_constructor(JSContext *ctx,
                 return js_typed_array_constructor_obj(ctx, new_target, argv[0], classid);
             }
         }
+        obj = js_create_from_ctor(ctx, new_target, classid);
+        if (JS_IsException(obj))
+            return JS_EXCEPTION;
+        abuf = p->u.array_buffer;
+        if (JS_ToIndex(ctx, &offset, argv[1]))
+            goto fail;
+        if ((offset & ((1 << size_log2) - 1)) != 0) {
+            JS_ThrowRangeError(ctx, "invalid offset");
+            goto fail;
+        }
+        len = 0;
+        if (!JS_IsUndefined(argv[2])) {
+            if (JS_ToIndex(ctx, &len, argv[2]))
+                goto fail;
+        }
+        if (abuf->detached) {
+            JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+            goto fail;
+        }
+        if (JS_IsUndefined(argv[2])) {
+            track_rab = array_buffer_is_resizable(abuf);
+            if (offset > abuf->byte_length) {
+                JS_ThrowRangeError(ctx, "invalid offset");
+                goto fail;
+            }
+            if (!track_rab &&
+                (abuf->byte_length & ((1 << size_log2) - 1)) != 0) {
+                JS_ThrowRangeError(ctx, "invalid length");
+                goto fail;
+            }
+            len = (abuf->byte_length - offset) >> size_log2;
+        } else if ((offset + (len << size_log2)) > abuf->byte_length) {
+            JS_ThrowRangeError(ctx, "invalid length");
+            goto fail;
+        }
+        buffer = js_dup(argv[0]);
     }
-
-    obj = js_create_from_ctor(ctx, new_target, classid);
-    if (JS_IsException(obj)) {
-        JS_FreeValue(ctx, buffer);
-        return JS_EXCEPTION;
-    }
-    // Re-validate buffer after js_create_from_ctor which may have run JS code
-    // that resized or detached the ArrayBuffer
-    abuf = JS_VALUE_GET_OBJ(buffer)->u.array_buffer;
-    if (abuf->detached) {
-        JS_FreeValue(ctx, buffer);
-        JS_FreeValue(ctx, obj);
-        return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
-    }
-    if (offset > abuf->byte_length) {
-        JS_FreeValue(ctx, buffer);
-        JS_FreeValue(ctx, obj);
-        return JS_ThrowRangeError(ctx, "invalid offset");
-    }
-    if (track_rab) {
-        // Recalculate length for RAB-backed view
-        len = (abuf->byte_length - offset) >> size_log2;
-    } else if ((offset + (len << size_log2)) > abuf->byte_length) {
-        JS_FreeValue(ctx, buffer);
-        JS_FreeValue(ctx, obj);
-        return JS_ThrowRangeError(ctx, "invalid length");
-    }
-    if (typed_array_init(ctx, obj, buffer, offset, len, track_rab)) {
-        JS_FreeValue(ctx, obj);
-        return JS_EXCEPTION;
-    }
+    if (typed_array_init(ctx, obj, buffer, offset, len, track_rab))
+        goto fail;
     return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
 }
 
 static void js_typed_array_finalizer(JSRuntime *rt, JSValueConst val)
