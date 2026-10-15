@@ -11,6 +11,8 @@
 #include "cutils.h"
 
 JSValue js_intl_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id);
+int js_intl_string_list_from_iterable(JSContext *ctx, JSValueConst iterable, JSValue **plist, uint32_t *pcount);
+void js_intl_free_value_list(JSContext *ctx, JSValue *list, uint32_t count);
 int js_intl_this_time_value(JSContext *ctx, double *valp, JSValueConst this_val);
 JSValue js_intl_this_number_value(JSContext *ctx, JSValueConst this_val);
 JSValue js_intl_this_bigint_value(JSContext *ctx, JSValueConst this_val);
@@ -174,7 +176,6 @@ int intl_currency_digits(const char *code);
 const char *intl_numbering_system_digits(const char *name);
 bool intl_is_numbering_system(const char *name);
 bool intl_is_calendar(const char *name);
-const char *intl_canonical_calendar(const char *name);
 int intl_find_time_zone(const char *name, const char **identifier, const char **primary);
 bool tp_tzdb_is_link(const char *name);
 int intl_parse_offset_time_zone(const char *s, int *minutes);
@@ -278,6 +279,13 @@ JSValue intl_parts_to_string(JSContext *ctx, const IntlParts *p);
 char *intl_parts_join(const IntlParts *p);
 
 typedef struct IntlNumberFormat IntlNumberFormat;
+extern const IntlResolverOps intl_nu_resolver;
+int intl_nf_format_double(JSContext *ctx, JSValueConst nf_obj, double x, IntlParts *parts);
+int intl_pr_select_double(JSContext *ctx, JSValueConst pr_obj, double x);
+int intl_nf_format_decimal(JSContext *ctx, JSValueConst nf_obj, const char *s, IntlParts *parts);
+int intl_lf_partition_strings(JSContext *ctx, JSValueConst lf_obj, const char *const *strs, uint32_t n,
+                              IntlParts *parts);
+JSValue intl_construct_intrinsic(JSContext *ctx, int intrinsic, JSValueConst locale, JSValueConst options);
 typedef struct IntlPluralRules IntlPluralRules;
 typedef struct IntlDateTimeFormat IntlDateTimeFormat;
 

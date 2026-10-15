@@ -55,6 +55,14 @@ Changelog:
   `%AbstractModuleSource%` is available to hosts. JavaScript modules have
   no source form, so importing one in the source phase throws a
   `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: `Intl.ListFormat`, `Intl.RelativeTimeFormat`,
+  `Intl.DisplayNames` and `Intl.DurationFormat` join the engine's `Intl`.
+  Lists and relative times use CLDR patterns (with the Spanish `y`/`e`,
+  `o`/`u` and Hebrew `ו` rules), display names cover languages with
+  dialect names, regions, scripts, currencies, calendars and date-time
+  fields, and `DurationFormat` handles every style including `digital` and
+  fractional seconds. `Temporal.Duration.prototype.toLocaleString` formats
+  through it.
 * JavaScript: the engine's `Intl.DateTimeFormat` formats dates in the
   Gregorian, Buddhist, Japanese, ROC, Chinese, Dangi, Hebrew, Islamic,
   Persian, Indian, Coptic and Ethiopic calendars with CLDR patterns, the

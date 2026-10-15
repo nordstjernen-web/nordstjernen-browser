@@ -69242,6 +69242,65 @@ JSValue js_intl_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID cl
     return js_create_from_ctor(ctx, ctor, class_id);
 }
 
+void js_intl_free_value_list(JSContext *ctx, JSValue *list, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; i++)
+        JS_FreeValue(ctx, list[i]);
+    js_free(ctx, list);
+}
+
+int js_intl_string_list_from_iterable(JSContext *ctx, JSValueConst iterable, JSValue **plist, uint32_t *pcount)
+{
+    JSValue iter, next = JS_UNDEFINED, v, *list = NULL;
+    uint32_t count = 0, size = 0;
+    int done;
+    *plist = NULL;
+    *pcount = 0;
+    if (JS_IsUndefined(iterable))
+        return 0;
+    iter = JS_GetIterator(ctx, iterable, false);
+    if (JS_IsException(iter))
+        return -1;
+    next = JS_GetProperty(ctx, iter, JS_ATOM_next);
+    if (JS_IsException(next))
+        goto fail;
+    for (;;) {
+        v = JS_IteratorNext(ctx, iter, next, 0, NULL, &done);
+        if (JS_IsException(v))
+            goto fail;
+        if (done)
+            break;
+        if (!JS_IsString(v)) {
+            JS_FreeValue(ctx, v);
+            JS_ThrowTypeError(ctx, "iterable element is not a string");
+            JS_IteratorClose(ctx, iter, true);
+            goto fail;
+        }
+        if (count >= size) {
+            uint32_t nsize = size ? size * 2 : 8;
+            JSValue *nlist = js_realloc(ctx, list, sizeof(*list) * nsize);
+            if (!nlist) {
+                JS_FreeValue(ctx, v);
+                JS_IteratorClose(ctx, iter, true);
+                goto fail;
+            }
+            list = nlist;
+            size = nsize;
+        }
+        list[count++] = v;
+    }
+    JS_FreeValue(ctx, next);
+    JS_FreeValue(ctx, iter);
+    *plist = list;
+    *pcount = count;
+    return 0;
+fail:
+    JS_FreeValue(ctx, next);
+    JS_FreeValue(ctx, iter);
+    js_intl_free_value_list(ctx, list, count);
+    return -1;
+}
+
 int js_temporal_this_time_value(JSContext *ctx, double *pres, JSValueConst this_val)
 {
     return JS_ThisTimeValue(ctx, pres, this_val);
