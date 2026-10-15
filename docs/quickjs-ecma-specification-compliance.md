@@ -1092,3 +1092,48 @@ The `import-defer`, `source-phase-imports` and
 `source-phase-imports-module-source` features are enabled in
 `test262.conf`, and `staging/source-phase-imports` is included. Every
 test with these features passes.
+
+## ECMA-402 (Intl) in the engine
+
+`Intl` is part of the engine rather than the browser shell, so `qjs`,
+`run-test262` and every browser realm share one implementation. It is
+installed by `JS_AddIntrinsicIntl()` from `JS_NewContext()`; embedders pass
+the host locale and time zone in with `JS_SetDefaultLocale()` and
+`JS_SetDefaultTimeZone()` (without them `Intl` reports `en-US`). There is no
+ICU dependency.
+
+| File | Contents |
+| --- | --- |
+| `quickjs-intl.c` | `Intl` object, locale negotiation (`CanonicalizeLocaleList`, `ResolveLocale`), option readers, `getCanonicalLocales`, `supportedValuesOf` |
+| `quickjs-intl-locale.c` | BCP 47 parsing, UTS #35 canonicalization (alias rules, likely subtags, `u`/`t` extension values), `Intl.Locale` |
+| `quickjs-intl-decimal.c` | exact decimal values (`ToIntlMathematicalValue`), `ToRawPrecision`/`ToRawFixed` rounding with every rounding mode and increment, CLDR plural-rule evaluation |
+| `quickjs-intl-number.c` | `Intl.NumberFormat` (all v3 options, compact/scientific/engineering notation, units, currencies, ranges), `Intl.PluralRules`, `Number`/`BigInt` `toLocaleString` |
+| `quickjs-intl-collator.c` | `Intl.Collator`, `String.prototype.localeCompare`, `toLocaleLowerCase`/`toLocaleUpperCase` (Turkish, Azeri, Lithuanian special casing) |
+| `quickjs-intl-data.c` | lookup in the generated CLDR tables with locale inheritance |
+
+The locale data is generated from Unicode CLDR **48.2.3** (cldr-json) by
+`scripts/gen-intl-data.py`, which writes `quickjs-intl-locale-data.h`
+(alias rules, likely subtags, `u`/`t` value aliases, region week/hour-cycle/
+calendar data, time-zone identifiers, numbering systems, currency digits,
+script directions) and `quickjs-intl-cldr-data.h` (per-locale strings, stored
+as differences from the parent locale). Number formatting covers the ~100
+languages with CLDR "modern" coverage; unit names and currency names are kept
+for the 30 most widely used languages and fall back to the root data
+elsewhere. Plural rules cover every language CLDR has rules for. To
+regenerate, unpack `cldr-<version>-json-full.zip` from the
+[cldr-json releases](https://github.com/unicode-org/cldr-json/releases)
+outside the tree and run
+`python scripts/gen-intl-data.py <unpacked dir> src/quickjs`.
+
+Collation is a compact multi-level comparison rather than the full UCA:
+NFD-normalized input, letters ordered by base letter with per-language
+tailorings (Nordic, German phonebook, Spanish, Turkish, Polish, Czech,
+Baltic, Romanian, Croatian), accents at the secondary level, case at the
+tertiary level, numeric collation and punctuation-ignoring alternate
+handling.
+
+| Area (test262 `intl402/`) | Status |
+| --- | --- |
+| `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `String`, `Number`, `BigInt`, `Array`, `TypedArray` | enabled in `test262.conf` |
+| `DateTimeFormat`, `Date`, `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
+| `Temporal` | owned by the Temporal work, excluded |
