@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: `ShadowRealm` is available: `evaluate` runs code in a
+  separate realm and `importValue` loads a module there, with only
+  primitives and wrapped functions crossing the boundary.
+  `Promise.allKeyed` and `Promise.allSettledKeyed` await the values of an
+  object's own enumerable properties. The legacy `RegExp.$1`…`$9`,
+  `lastMatch` and related statics are read-only (except `input`), throw for
+  a receiver other than `RegExp`, and are cleared by a match of a `RegExp`
+  subclass or another realm's regexp; a `String.prototype.replace` that
+  deletes matches updates them too.
 * JavaScript: an assignment resolves its target before evaluating the
   right-hand side. A strict-mode assignment to an undeclared global throws
   even when the right-hand side creates it, and a `var` introduced by a
