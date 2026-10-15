@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Images created by script inside a frame resolve their relative `src`
+  against the frame's document even before they are inserted, and image
+  loads belonging to a removed frame's document are dropped instead of
+  being refetched against the parent page (Speedometer's NewsSite suites
+  no longer request hundreds of 404ing placeholders).
 * JavaScript: `Atomics.waitAsync` is available, `Atomics` operations check
   detached and immutable buffers in the order the specification gives, and
   `Atomics.wait` no longer returns `"timed-out"` early on Windows. Exporting a

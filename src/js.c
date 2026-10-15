@@ -47253,15 +47253,59 @@ ns_js_image_loads_pending(const ns_js *js)
 }
 
 static const char *
-ns_js_node_doc_base(ns_js *js, const ns_node *el)
+ns_js_frame_url_above(const ns_node *n, const ns_node **root)
 {
-    for (const ns_node *p = el ? el->parent : NULL; p; p = p->parent) {
+    for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
         if (ns_node_is_element_named(p, "iframe") ||
             ns_node_is_element_named(p, "frame") ||
             ns_node_is_element_named(p, "object")) {
             const char *fu = ns_element_get_attr(p, "data-nd-frame-url");
             if (fu && *fu) return fu;
         }
+        if (root) *root = p;
+    }
+    return NULL;
+}
+
+static const ns_node *
+ns_js_tagged_owner_doc(ns_js *js, const ns_node *n)
+{
+    if (!js || !js->ctx || !n || !n->js_wrapper) return NULL;
+    JSValue w = JS_MKPTR(JS_TAG_OBJECT, n->js_wrapper);
+    JSValue d = JS_GetPropertyStr(js->ctx, w, "__ndOwnerDoc");
+    const ns_node *doc = JS_IsObject(d) ? ns_unwrap_element(d) : NULL;
+    JS_FreeValue(js->ctx, d);
+    return doc;
+}
+
+static const char *
+ns_js_detached_owner_base(ns_js *js, const ns_node *n)
+{
+    const ns_node *doc = ns_js_tagged_owner_doc(js, n);
+    return doc ? ns_js_frame_url_above(doc, NULL) : NULL;
+}
+
+static gboolean
+ns_js_node_in_dead_document(ns_js *js, const ns_node *el)
+{
+    const ns_node *live = ns_node_root(js->current_doc);
+    const ns_node *root = ns_node_root(el);
+    if (root->kind == NS_NODE_DOCUMENT) return root != live;
+    const ns_node *owner = ns_js_tagged_owner_doc(js, el);
+    if (!owner && root != el) owner = ns_js_tagged_owner_doc(js, root);
+    return owner && ns_node_root(owner) != live;
+}
+
+static const char *
+ns_js_node_doc_base(ns_js *js, const ns_node *el)
+{
+    const ns_node *root = el;
+    const char *fu = ns_js_frame_url_above(el, &root);
+    if (fu) return fu;
+    if (root && root->kind != NS_NODE_DOCUMENT) {
+        fu = ns_js_detached_owner_base(js, el);
+        if (!fu && root != el) fu = ns_js_detached_owner_base(js, root);
+        if (fu) return fu;
     }
     return js ? js->current_url : NULL;
 }
@@ -47466,6 +47510,10 @@ ns_js_image_ready_idle(gpointer data)
     if (!js || js->halted) return G_SOURCE_REMOVE;
     if (g_hash_table_lookup(js->js_image_loads, r->el) != r)
         return G_SOURCE_REMOVE;
+    if (ns_js_node_in_dead_document(js, r->el)) {
+        g_hash_table_remove(js->js_image_loads, r->el);
+        return G_SOURCE_REMOVE;
+    }
     const char *cur_src = ns_element_get_attr(r->el, "src");
     const char *cur_base = ns_js_node_doc_base(js, r->el);
     char *abs_url = NULL;
@@ -58973,7 +59021,7 @@ ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
     if (d) {
         if (d->kind != NS_NODE_DOCUMENT || (d->flags & NS_NODE_FRAGMENT))
             return;
-        if (js && d == js->current_doc) return;
+        if (js && d == js->current_doc && !d->parent) return;
     } else {
         JSValue nt = JS_GetPropertyStr(ctx, doc_val, "nodeType");
         int32_t t = 0;
