@@ -18833,6 +18833,20 @@ static bool needs_backtrace(JSValue exc)
 }
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
+static inline bool js_tail_call_reuses_frame(JSFunctionBytecode *b,
+                                             JSStackFrame *sf,
+                                             JSValueConst func_obj)
+{
+    JSObject *p;
+
+    if (!b->is_strict_mode || b->func_kind != JS_FUNC_NORMAL ||
+        sf->is_constructor || JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    return p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
+        p->u.func.function_bytecode->func_kind == JS_FUNC_NORMAL;
+}
+
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
                                int argc, JSValueConst *argv, int flags)
@@ -18846,7 +18860,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     int opcode, arg_allocated_size, i;
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
-    size_t alloca_size;
+    size_t alloca_size = 0;
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
 #define DUMP_BYTECODE_OR_DONT(pc) \
@@ -19329,6 +19343,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             {
                 call_argc = get_u16(pc);
                 pc += 2;
+                call_argv = sp - call_argc;
+                if (opcode == OP_tail_call &&
+                    js_tail_call_reuses_frame(b, sf, call_argv[-1]))
+                    goto tail_call;
                 goto has_call_argc;
             has_call_argc:
                 call_argv = sp - call_argc;
@@ -19369,6 +19387,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 call_argc = get_u16(pc);
                 pc += 2;
                 call_argv = sp - call_argc;
+                if (opcode == OP_tail_call_method &&
+                    js_tail_call_reuses_frame(b, sf, call_argv[-1]))
+                    goto tail_call;
+            has_call_method:
                 sf->cur_pc = pc;
                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
                                           JS_UNDEFINED, call_argc,
@@ -19381,6 +19403,77 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     JS_FreeValue(ctx, call_argv[i]);
                 sp -= call_argc + 2;
                 *sp++ = ret_val;
+            }
+            BREAK;
+        tail_call:
+            {
+                JSValue new_this, new_func, *items, *dst;
+                JSFunctionBytecode *b1;
+                int arg_slots;
+                size_t need;
+
+                new_func = call_argv[-1];
+                if (opcode == OP_tail_call_method) {
+                    new_this = call_argv[-2];
+                    items = call_argv - 2;
+                } else {
+                    new_this = JS_UNDEFINED;
+                    items = call_argv - 1;
+                }
+                b1 = JS_VALUE_GET_OBJ(new_func)->u.func.function_bytecode;
+                arg_slots = max_int(call_argc, b1->arg_count);
+                need = sizeof(JSValue) * (2 + arg_slots + b1->var_count +
+                                          b1->stack_size) +
+                    sizeof(JSVarRef *) * b1->var_ref_count;
+                if (need > alloca_size && js_check_stack_overflow(rt, need)) {
+                    if (opcode == OP_tail_call_method)
+                        goto has_call_method;
+                    goto has_call_argc;
+                }
+                p = JS_VALUE_GET_OBJ(new_func);
+                b = b1;
+                if (unlikely(sf->var_ref_count != 0))
+                    close_var_refs(rt, sf);
+                for(pval = local_buf; pval < items; pval++)
+                    JS_FreeValue(ctx, *pval);
+                if (need > alloca_size) {
+                    dst = alloca(need);
+                    alloca_size = need;
+                } else {
+                    dst = local_buf;
+                }
+                memmove(dst + 2, call_argv, sizeof(JSValue) * call_argc);
+                dst[0] = new_this;
+                dst[1] = new_func;
+                for(i = call_argc; i < arg_slots; i++)
+                    dst[2 + i] = JS_UNDEFINED;
+                local_buf = dst;
+                this_obj = dst[0];
+                func_obj = dst[1];
+                new_target = JS_UNDEFINED;
+                argc = call_argc;
+                argv = arg_buf = dst + 2;
+                var_buf = arg_buf + arg_slots;
+                for(i = 0; i < b->var_count; i++)
+                    var_buf[i] = JS_UNDEFINED;
+                stack_buf = var_buf + b->var_count;
+                sf->is_strict_mode = b->is_strict_mode;
+                sf->is_constructor = false;
+                sf->arg_count = arg_slots;
+                sf->cur_func = unsafe_unconst(func_obj);
+                sf->arg_buf = arg_buf;
+                sf->var_buf = var_buf;
+                sf->var_refs = (JSVarRef **)(stack_buf + b->stack_size);
+                sf->var_ref_count = b->var_ref_count;
+                for(i = 0; i < b->var_ref_count; i++)
+                    sf->var_refs[i] = NULL;
+                sf->cur_pc = NULL;
+                var_refs = p->u.func.var_refs;
+                ctx = b->realm;
+                sp = stack_buf;
+                pc = b->byte_code_buf;
+                if (js_poll_interrupts(ctx))
+                    goto exception;
             }
             BREAK;
         CASE(OP_array_from):
@@ -19530,6 +19623,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                         obj = JS_UNDEFINED;
                     ret_val = JS_EvalObject(ctx, JS_UNDEFINED, obj,
                                             JS_EVAL_TYPE_DIRECT, scope_idx);
+                } else if (*pc == OP_return &&
+                           js_tail_call_reuses_frame(b, sf, call_argv[-1])) {
+                    goto tail_call;
                 } else {
                     ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                               JS_UNDEFINED, call_argc,
@@ -23162,6 +23258,7 @@ typedef struct LabelSlot {
     int pos;    /* phase 1 address, -1 means not resolved yet */
     int pos2;   /* phase 2 address, -1 means not resolved yet */
     int addr;   /* phase 3 address, -1 means not resolved yet */
+    bool empty_catch_finally; /* `ret` of a catch clause without finally */
     RelocEntry *first_reloc;
 } LabelSlot;
 
@@ -25018,6 +25115,7 @@ static int new_label_fd(JSFunctionDef *fd)
     ls->pos = -1;
     ls->pos2 = -1;
     ls->addr = -1;
+    ls->empty_catch_finally = false;
     ls->first_reloc = NULL;
     return label;
 }
@@ -31007,6 +31105,7 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
     case TOK_TRY:
         {
             int label_catch, label_catch2, label_finally, label_end;
+            int label_catch_finally = -1;
             JSAtom name;
             BlockEnv block_env;
 
@@ -31083,7 +31182,8 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
                 push_scope(s);  /* catch block */
                 push_break_entry(s->cur_func, &block_env, JS_ATOM_NULL,
                                  -1, -1, 1);
-                block_env.label_finally = label_finally;
+                label_catch_finally = new_label(s);
+                block_env.label_finally = label_catch_finally;
 
                 if (js_parse_block(s))
                     goto fail;
@@ -31119,6 +31219,15 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             } else {
                 js_parse_error(s, "expecting catch or finally");
                 goto fail;
+            }
+            if (label_catch_finally >= 0) {
+                emit_label(s, label_catch_finally);
+                if (s->token.val == TOK_FINALLY) {
+                    emit_goto(s, OP_goto, label_finally);
+                } else {
+                    s->cur_func->label_slots[label_catch_finally].empty_catch_finally = true;
+                    emit_op(s, OP_ret);
+                }
             }
             emit_label(s, label_finally);
             if (s->token.val == TOK_FINALLY) {
@@ -36735,6 +36844,27 @@ static bool code_has_label(CodeContext *s, int pos, int label)
 /* return the target label, following the OP_goto jumps
    the first opcode at destination is stored in *pop
  */
+static bool js_code_reaches_return(JSFunctionDef *s, int pos)
+{
+    const uint8_t *buf = s->byte_code.buf;
+    int op, jumps = 0;
+
+    while (pos < s->byte_code.size) {
+        op = buf[pos];
+        if (op == OP_source_loc || op == OP_label || op == OP_nip_catch) {
+            pos += opcode_info[op].size;
+        } else if (op == OP_gosub &&
+                   s->label_slots[get_u32(buf + pos + 1)].empty_catch_finally) {
+            pos += opcode_info[op].size;
+        } else if (op == OP_goto && jumps++ < 16) {
+            pos = s->label_slots[get_u32(buf + pos + 1)].pos2;
+        } else {
+            return op == OP_return;
+        }
+    }
+    return false;
+}
+
 static int find_jump_target(JSFunctionDef *s, int label, int *pop)
 {
     int i, pos, op;
@@ -37005,6 +37135,11 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
                     put_short_code(&bc_out, op + 1, argc);
                     pos_next = skip_dead_code(s, bc_buf, bc_len, cc.pos,
                                               &line_num, &col_num);
+                    break;
+                }
+                if (s->is_strict_mode && js_code_reaches_return(s, pos_next)) {
+                    add_pc2line_info(s, bc_out.size, line_num, col_num);
+                    put_short_code(&bc_out, op + 1, argc);
                     break;
                 }
                 add_pc2line_info(s, bc_out.size, line_num, col_num);

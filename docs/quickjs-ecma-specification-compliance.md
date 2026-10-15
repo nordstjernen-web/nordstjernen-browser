@@ -78,6 +78,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | `Promise.allKeyed` / `Promise.allSettledKeyed` (await-dictionary) | 72 | low | **done** (feature enabled in `test262.conf`) |
 | Legacy RegExp statics: receiver check, getter-only accessors, subclass/cross-realm invalidation, `compile` restriction | 50 | low | **done** (`legacy-regexp` enabled) |
 | `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
+| Proper tail calls in strict mode | 35 | medium | **done** (`tail-call-optimization` enabled; see #30) |
 
 ## Changes
 
@@ -989,4 +990,30 @@ arguments and `this` into the target's realm and the result back), and other
 objects throw. `importValue` enqueues the dynamic-import job in the shadow
 realm, resolved against the calling script's name, and chains realm-bound
 native handlers that read the export or turn a failure into a `TypeError`.
+
+### 30. Proper tail calls
+
+**Spec:** [PrepareForTailCall](https://tc39.es/ecma262/#sec-preparefortailcall)
+and the HasCallInTailPosition rules: a call in tail position of strict-mode
+code must not grow the stack.
+
+**Fix:** `OP_tail_call`/`OP_tail_call_method` (and an `OP_eval` that is not a
+direct eval, followed by `return`) reuse the running interpreter frame when
+the caller is a strict, ordinary (not generator/async, not constructing)
+bytecode function and the callee is an ordinary bytecode function: the
+caller's variable references are closed, its locals freed, the callee,
+`this` and arguments moved to the start of the frame buffer (which then owns
+them), and execution restarts at the callee's first instruction. The buffer
+is reused when the callee fits and grown with `alloca` only when it needs
+more room, so self- and mutual recursion run in constant C stack. Calls to C
+functions, generators and async functions keep the previous call-and-return
+behaviour.
+
+Tail position is recognised in more places: `resolve_labels` turns a call
+into a tail call when only labels, jumps and `return` follow it in strict
+code (conditional, `&&`, `||`, `??` operands), and a `return` inside a catch
+clause of a `try` without `finally` now goes through a dedicated label that
+is a bare `ret`, so the call before it is in tail position as the
+specification says. The interpreter is faster on tail calls than before
+because no new frame is set up.
 
