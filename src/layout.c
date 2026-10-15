@@ -6434,26 +6434,66 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
     return TRUE;
 }
 
+typedef struct text_measure_entry {
+    ns_text_measure m;
+    int            *line_heights;
+} text_measure_entry;
+
 static void
-text_measure(NsPangoLayout *layout, ns_text_measure *m)
+text_measure_entry_free(gpointer p)
+{
+    text_measure_entry *e = p;
+    g_free(e->line_heights);
+    g_free(e);
+}
+
+static int *
+text_measure_compute_line_heights(NsPangoLayout *layout, int lines)
+{
+    int *heights = g_new0(int, MAX(lines, 1));
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    int j = 0;
+    do {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        if (j < MAX(lines, 1)) heights[j] = logical.height;
+        j++;
+    } while (ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    return heights;
+}
+
+static int *g_text_measure_uncached_heights;
+
+static const int *
+text_measure_lines(NsPangoLayout *layout, ns_text_measure *m,
+                   gboolean want_line_heights)
 {
     text_measure_key probe;
     gboolean keyed = text_measure_key_build(layout, &probe);
-    if (keyed && g_text_measure_cache) {
-        const ns_text_measure *hit = g_hash_table_lookup(g_text_measure_cache, &probe);
-        if (hit) {
-            *m = *hit;
-            return;
-        }
+    text_measure_entry *hit = keyed && g_text_measure_cache
+        ? g_hash_table_lookup(g_text_measure_cache, &probe) : NULL;
+    if (hit) {
+        *m = hit->m;
+        if (!want_line_heights) return NULL;
+        if (!hit->line_heights)
+            hit->line_heights = text_measure_compute_line_heights(layout, m->lines);
+        return hit->line_heights;
     }
     ns_pango_layout_get_extents(layout, NULL, &m->logical);
     m->lines = ns_pango_layout_get_line_count(layout);
     m->baseline = ns_pango_layout_get_baseline(layout);
-    if (!keyed) return;
+    int *heights = want_line_heights
+        ? text_measure_compute_line_heights(layout, m->lines) : NULL;
+    if (!keyed) {
+        g_free(g_text_measure_uncached_heights);
+        g_text_measure_uncached_heights = heights;
+        return heights;
+    }
     if (!g_text_measure_cache)
         g_text_measure_cache = g_hash_table_new_full(
             text_measure_key_hash, text_measure_key_equal,
-            text_measure_key_free, g_free);
+            text_measure_key_free, text_measure_entry_free);
     if (g_hash_table_size(g_text_measure_cache) >= NS_TEXT_MEASURE_CACHE_MAX)
         g_hash_table_remove_all(g_text_measure_cache);
     text_measure_key *key = g_new(text_measure_key, 1);
@@ -6461,7 +6501,17 @@ text_measure(NsPangoLayout *layout, ns_text_measure *m)
     key->len = probe.len;
     key->data = g_memdup2(probe.data, probe.len);
     key->font = probe.font ? ns_pango_font_description_copy(probe.font) : NULL;
-    g_hash_table_insert(g_text_measure_cache, key, g_memdup2(m, sizeof *m));
+    text_measure_entry *entry = g_new(text_measure_entry, 1);
+    entry->m = *m;
+    entry->line_heights = heights;
+    g_hash_table_insert(g_text_measure_cache, key, entry);
+    return heights;
+}
+
+static void
+text_measure(NsPangoLayout *layout, ns_text_measure *m)
+{
+    text_measure_lines(layout, m, FALSE);
 }
 
 static void
@@ -7289,8 +7339,11 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 
     ns_paint_layout_set_inline_text(layout, box->text);
     ns_paint_start_align_overflow(layout);
+    gboolean want_line_heights =
+        g_object_get_data(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY) != NULL;
     ns_text_measure measured;
-    text_measure(layout, &measured);
+    const int *measured_line_heights =
+        text_measure_lines(layout, &measured, want_line_heights);
     NsPangoRectangle measured_px = measured.logical;
     ns_pango_extents_to_pixels(&measured_px, NULL);
     int measured_h = measured_px.height;
@@ -7324,18 +7377,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     double lh_control = inline_control_line_height(box, lh_default);
     double *line_heights = g_new(double, line_count);
     for (int i = 0; i < line_count; i++) line_heights[i] = lh_control;
-    if (g_object_get_data(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY) &&
-        lh_control <= lh_default + 0.01) {
-        NsPangoLayoutIter *line_iter = ns_pango_layout_get_iter(layout);
-        int j = 0;
-        do {
-            NsPangoRectangle logical;
-            ns_pango_layout_iter_get_line_extents(line_iter, NULL, &logical);
-            if (j < line_count)
-                line_heights[j] = (double)logical.height / NS_PANGO_SCALE;
-            j++;
-        } while (ns_pango_layout_iter_next_line(line_iter));
-        ns_pango_layout_iter_free(line_iter);
+    if (measured_line_heights && lh_control <= lh_default + 0.01) {
+        for (int j = 0; j < line_count; j++)
+            line_heights[j] = (double)measured_line_heights[j] / NS_PANGO_SCALE;
     }
     if (box->inline_atomics) {
         for (guint i = 0; i < box->inline_atomics->len; i++) {
