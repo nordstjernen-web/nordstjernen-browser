@@ -119,7 +119,25 @@ enum {
                     TP_FB(TP_F_MILLISECOND) | TP_FB(TP_F_MICROSECOND) | TP_FB(TP_F_NANOSECOND))
 
 typedef int TPCalendar;
-#define TP_CAL_ISO8601 0
+enum {
+    TP_CAL_ISO8601,
+    TP_CAL_BUDDHIST,
+    TP_CAL_CHINESE,
+    TP_CAL_COPTIC,
+    TP_CAL_DANGI,
+    TP_CAL_ETHIOAA,
+    TP_CAL_ETHIOPIC,
+    TP_CAL_GREGORY,
+    TP_CAL_HEBREW,
+    TP_CAL_INDIAN,
+    TP_CAL_ISLAMIC_CIVIL,
+    TP_CAL_ISLAMIC_TBLA,
+    TP_CAL_ISLAMIC_UMALQURA,
+    TP_CAL_JAPANESE,
+    TP_CAL_PERSIAN,
+    TP_CAL_ROC,
+    TP_CAL_COUNT
+};
 
 typedef struct TPISODate {
     int64_t year;
@@ -373,6 +391,15 @@ int tp_iso_day_of_year(TPISODate d);
 void tp_iso_week_of_year(TPISODate d, int *week, int64_t *year);
 TPTime tp_midnight(void);
 
+bool tp_ncal_supports_era(TPCalendar cal);
+void tp_ncal_iso_to_date(TPCalendar cal, TPISODate d, TPCalendarDate *out);
+uint32_t tp_ncal_field_keys_to_ignore(TPCalendar cal, uint32_t keys);
+int tp_ncal_resolve_fields(JSContext *ctx, TPCalendar cal, TPFields *f, int type);
+int tp_ncal_date_to_iso(JSContext *ctx, TPCalendar cal, TPFields *f, int overflow, TPISODate *out);
+int tp_ncal_month_day_to_iso(JSContext *ctx, TPCalendar cal, TPFields *f, int overflow, TPISODate *out);
+void tp_ncal_date_until(TPCalendar cal, TPISODate one, TPISODate two, int largest_unit, TPDateDuration *out);
+int tp_ncal_date_add(JSContext *ctx, TPCalendar cal, TPISODate d, const TPDateDuration *dur, int overflow,
+                     TPISODate *out);
 int tp_canonicalize_calendar(JSContext *ctx, const char *s, size_t len, TPCalendar *out);
 const char *tp_calendar_id(TPCalendar cal);
 int tp_to_calendar_identifier(JSContext *ctx, JSValueConst v, TPCalendar *out);

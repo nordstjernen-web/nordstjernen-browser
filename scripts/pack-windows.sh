@@ -110,6 +110,16 @@ validate_launcher_imports() {
 
 validate_launcher_imports
 
+# IANA time zone database for Temporal's named zones (the posix/ and right/
+# duplicates are left out).
+mkdir -p "$APP/share/zoneinfo"
+if [ -f "$MINGW_PREFIX/share/zoneinfo/tzdata.zi" ]; then
+    (cd "$MINGW_PREFIX/share/zoneinfo" && tar cf - --exclude=./posix --exclude=./right .) |
+        (cd "$APP/share/zoneinfo" && tar xf -)
+else
+    echo "pack-windows: warning: no zoneinfo in $MINGW_PREFIX/share; Temporal will know only UTC" >&2
+fi
+
 # GLib settings schemas (compiled). Apps that GSettings-look-up a key crash without these.
 mkdir -p "$APP/share/glib-2.0/schemas"
 if [ -f "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" ]; then
