@@ -9728,6 +9728,8 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
 
 static JSValue js_function_caller_get(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
+static JSValue js_function_arguments_get(JSContext *ctx, JSValueConst func);
+static JSValue js_build_arguments(JSContext *ctx, int argc, JSValueConst *argv);
 
 static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                                       JSAtom prop, JSValueConst this_obj,
@@ -9799,6 +9801,13 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
         JSFunctionBytecode *b = JS_GetFunctionBytecode(obj);
         if (b && !b->is_strict_mode && b->has_prototype)
             return js_function_caller_get(ctx, obj, 0, NULL);
+    }
+    if (unlikely(prop == JS_ATOM_arguments) && tag == JS_TAG_OBJECT &&
+        p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
+        !find_own_property1(p, JS_ATOM_arguments)) {
+        JSFunctionBytecode *b = JS_GetFunctionBytecode(obj);
+        if (b && !b->is_strict_mode && b->has_prototype)
+            return js_function_arguments_get(ctx, obj);
     }
 
     for(;;) {
@@ -17339,6 +17348,20 @@ static JSValue js_throw_type_error(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "invalid property access");
     }
     return JS_UNDEFINED;
+}
+
+static JSValue js_function_arguments_get(JSContext *ctx, JSValueConst func)
+{
+    JSObject *target = JS_VALUE_GET_OBJ(func);
+    JSStackFrame *sf;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        if (JS_IsObject(sf->cur_func) &&
+            JS_VALUE_GET_OBJ(sf->cur_func) == target)
+            return js_build_arguments(ctx, sf->arg_count,
+                                      vc(sf->arg_buf));
+    }
+    return JS_NULL;
 }
 
 static JSValue js_function_caller_get(JSContext *ctx, JSValueConst this_val,
