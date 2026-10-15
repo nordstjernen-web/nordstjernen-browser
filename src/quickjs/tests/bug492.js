@@ -23,7 +23,7 @@ function test_resize_shrink() {
     assert(result[1023] === 0);
 }
 
-// Test 2: detach during valueOf — must throw TypeError
+// Test 2: detach during valueOf — must throw RangeError
 function test_detach() {
     var ab = new ArrayBuffer(16);
     var ta = new Int32Array(ab);
@@ -38,7 +38,7 @@ function test_detach() {
         });
     } catch(e) {
         caught = true;
-        assert(e instanceof TypeError);
+        assert(e instanceof RangeError);
     }
     assert(caught);
 }
