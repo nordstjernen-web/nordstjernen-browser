@@ -357,17 +357,17 @@ def gen_timezones(w):
                 and not code.startswith("utc"):
             region = code[:2].upper()
         for n in names:
-            ids[n] = (primary, region, code)
-        ids.setdefault(primary, (primary, region, code))
-    ids["UTC"] = ("UTC", "", "utc")
+            ids[n] = (primary, region, code, names[0])
+        ids.setdefault(primary, (primary, region, code, names[0]))
+    ids["UTC"] = ("UTC", "", "utc", "Etc/UTC")
     names = sorted(ids)
     pool = Pool("intl_tz_pool")
     rows = []
     for n in names:
-        primary, region, code = ids[n]
-        rows.append("{ %d, %d, %s }" % (pool.add(n), pool.add(primary), c_string(region)))
+        primary, region, code, cldr = ids[n]
+        rows.append("{ %d, %d, %d, %s }" % (pool.add(n), pool.add(primary), pool.add(cldr), c_string(region)))
     pool.emit(w)
-    w.append("typedef struct { uint16_t name, primary; char region[3]; } IntlTimeZoneId;")
+    w.append("typedef struct { uint16_t name, primary, cldr; char region[3]; } IntlTimeZoneId;")
     w.append("static const IntlTimeZoneId intl_time_zones[%d] = {" % len(rows))
     for i in range(0, len(rows), 4):
         w.append("    " + " ".join(r + "," for r in rows[i:i + 4]))
@@ -440,6 +440,7 @@ def available_locales():
     langs = {k.split("-")[0] for k, v in coverage.items() if v == "modern"}
     sel = {x for x in full + default_content if x.split("-")[0] in langs}
     sel.discard("root")
+    sel = {x for x in sel if not x.startswith("zh-Latn")}
     extra = set()
     for x in sel:
         p = x.split("-")
@@ -461,7 +462,7 @@ def gen_available(w):
 
 
 FULL_LANGS = set("""en de fr es it pt nl sv da no nb fi pl cs ru uk tr ar he hi ja ko zh th vi
-    id el hu ro""".split())
+    id el hu ro fa""".split())
 
 COUNTS = ["zero", "one", "two", "few", "many", "other"]
 
@@ -475,6 +476,8 @@ class DataStore:
         return self.nodes.setdefault(name, {})
 
     def put(self, locale, key, value):
+        if isinstance(value, dict):
+            value = value.get("_value")
         if value is None:
             return
         self.node(locale)[key] = value
@@ -653,6 +656,7 @@ def put_plurals(store, loc, lang_key, plurals, ordinals, ranges):
 
 CALENDAR_CODES = [
     ("gregorian", "g", "cldr-dates-full"),
+    ("generic", "x", "cldr-dates-full"),
     ("buddhist", "b", "cldr-cal-buddhist-full"),
     ("chinese", "c", "cldr-cal-chinese-full"),
     ("coptic", "k", "cldr-cal-coptic-full"),
@@ -667,64 +671,89 @@ CALENDAR_CODES = [
     ("roc", "r", "cldr-cal-roc-full"),
 ]
 
+PATTERN_CALENDARS = {"g", "x", "c", "d", "b", "p", "l", "j", "r", "h"}
+TZ_LANGS = set("en de fr es it pt ja zh ko ru nl sv pl".split())
+
 CTX = {"format": "f", "stand-alone": "s"}
 WIDTH = {"abbreviated": "a", "wide": "w", "narrow": "n", "short": "s"}
 DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 
 
+def ascii_spaces(v):
+    if isinstance(v, str):
+        return v.replace("\u202f", " ")
+    return v
+
+
 def put_calendar(store, loc, code, cal, full):
     p = code
-    for ctx, widths in cal.get("months", {}).items():
-        for w, months in widths.items():
-            if w not in WIDTH:
+    orig_put = store.put
+
+    def put(l, k, v):
+        if k.startswith(p + "af.") or k.startswith(p + "if") or k.startswith(p + "tf.") or \
+                k.startswith(p + "df.") or k.startswith(p + "dt"):
+            v = ascii_spaces(v)
+        orig_put(l, k, v)
+    store = type("S", (), {"put": staticmethod(put)})
+    if code != "x":
+        for ctx, widths in cal.get("months", {}).items():
+            for w, months in widths.items():
+                if w not in WIDTH:
+                    continue
+                for n, v in months.items():
+                    n = n.replace("-yeartype-leap", "L")
+                    store.put(loc, "%sM%s%s.%s" % (p, CTX[ctx], WIDTH[w], n), v)
+        eras = cal.get("eras", {})
+        for k, w in (("eraAbbr", "a"), ("eraNames", "w"), ("eraNarrow", "n")):
+            for n, v in eras.get(k, {}).items():
+                if "alt" in n:
+                    continue
+                if code == "j" and n.isdigit() and int(n) < 232:
+                    continue
+                store.put(loc, "%sE%s.%s" % (p, w, n), v)
+    if code == "g":
+        for ctx, widths in cal.get("days", {}).items():
+            for w, days in widths.items():
+                if w not in WIDTH:
+                    continue
+                for d, v in days.items():
+                    store.put(loc, "%sD%s%s.%d" % (p, CTX[ctx], WIDTH[w], DAYS.index(d)), v)
+        for ctx, widths in cal.get("dayPeriods", {}).items():
+            for w, periods in widths.items():
+                if w not in WIDTH:
+                    continue
+                for k, v in periods.items():
+                    if "alt" in k:
+                        continue
+                    store.put(loc, "%sP%s%s.%s" % (p, CTX[ctx], WIDTH[w], k), v)
+    if code in PATTERN_CALENDARS:
+        for k in ("full", "long", "medium", "short"):
+            store.put(loc, "%sdf.%s" % (p, k), cal.get("dateFormats", {}).get(k))
+            store.put(loc, "%stf.%s" % (p, k), cal.get("timeFormats", {}).get(k))
+            store.put(loc, "%sdt.%s" % (p, k), cal.get("dateTimeFormats", {}).get(k))
+            at = cal.get("dateTimeFormats-atTime", {}).get("standard", {}).get(k)
+            if at is not None:
+                store.put(loc, "%sdta.%s" % (p, k), at)
+        dtf = cal.get("dateTimeFormats", {})
+        for k, v in dtf.get("availableFormats", {}).items():
+            if "alt" in k or "count" in k or "W" in k or "w" in k or "Q" in k:
                 continue
-            for n, v in months.items():
-                n = n.replace("-yeartype-leap", "L")
-                store.put(loc, "%sM%s%s.%s" % (p, CTX[ctx], WIDTH[w], n), v)
-    for ctx, widths in cal.get("days", {}).items():
-        for w, days in widths.items():
-            if w not in WIDTH:
-                continue
-            for d, v in days.items():
-                store.put(loc, "%sD%s%s.%d" % (p, CTX[ctx], WIDTH[w], DAYS.index(d)), v)
-    eras = cal.get("eras", {})
-    for k, w in (("eraAbbr", "a"), ("eraNames", "w"), ("eraNarrow", "n")):
-        for n, v in eras.get(k, {}).items():
-            if "alt" in n:
-                continue
-            store.put(loc, "%sE%s.%s" % (p, w, n), v)
-    for ctx, widths in cal.get("dayPeriods", {}).items():
-        for w, periods in widths.items():
-            if w not in WIDTH:
-                continue
-            for k, v in periods.items():
+            store.put(loc, "%saf.%s" % (p, k), v)
+        if full:
+            for k, v in dtf.get("intervalFormats", {}).items():
+                if k == "intervalFormatFallback":
+                    store.put(loc, "%sif" % p, v)
+                    continue
                 if "alt" in k:
                     continue
-                store.put(loc, "%sP%s%s.%s" % (p, CTX[ctx], WIDTH[w], k), v)
-    for k in ("full", "long", "medium", "short"):
-        store.put(loc, "%sdf.%s" % (p, k), cal.get("dateFormats", {}).get(k))
-        store.put(loc, "%stf.%s" % (p, k), cal.get("timeFormats", {}).get(k))
-        store.put(loc, "%sdt.%s" % (p, k), cal.get("dateTimeFormats", {}).get(k))
-        at = cal.get("dateTimeFormats-atTime", {}).get("standard", {}).get(k)
-        if at is not None:
-            store.put(loc, "%sdta.%s" % (p, k), at)
-    dtf = cal.get("dateTimeFormats", {})
-    for k, v in dtf.get("availableFormats", {}).items():
-        if "alt" in k or "count" in k or "W" in k or "w" in k or "Q" in k:
-            continue
-        store.put(loc, "%saf.%s" % (p, k), v)
-    for k, v in dtf.get("intervalFormats", {}).items():
-        if k == "intervalFormatFallback":
-            store.put(loc, "%sif" % p, v)
-            continue
-        if "alt" in k:
-            continue
-        for f, pat in v.items():
-            if "alt" in f:
-                continue
-            store.put(loc, "%sif.%s.%s" % (p, k, f), pat)
-    for k, v in dtf.get("appendItems", {}).items():
-        store.put(loc, "%sai.%s" % (p, k), v)
+                for f, pat in v.items():
+                    if "alt" in f:
+                        continue
+                    store.put(loc, "%sif.%s.%s" % (p, k, f), pat)
+        else:
+            store.put(loc, "%sif" % p, dtf.get("intervalFormats", {}).get("intervalFormatFallback"))
+        for k, v in dtf.get("appendItems", {}).items():
+            store.put(loc, "%sai.%s" % (p, k), v)
     if "monthPatterns" in cal:
         for ctx, widths in cal["monthPatterns"].items():
             for w, pats in widths.items():
@@ -748,9 +777,14 @@ def put_dates(store, loc, full):
         if not data:
             continue
         put_calendar(store, loc, code, data["dates"]["calendars"][name], full)
+    node = store.nodes.get(loc, {})
+    for k in list(node):
+        if k[0] in "bpljrh" and len(k) > 2 and (k[1:3] in ("af", "if", "tf", "df", "dt", "ai") or k[1:] == "if"):
+            if node.get("x" + k[1:]) == node[k]:
+                del node[k]
 
 
-def put_time_zone_names(store, loc):
+def put_time_zone_names(store, loc, names_too):
     data = cldr_main("cldr-dates-full", loc, "timeZoneNames.json")
     if not data:
         return
@@ -759,6 +793,8 @@ def put_time_zone_names(store, loc):
                    ("regionFormat", "zr"), ("regionFormat-type-daylight", "zrd"),
                    ("regionFormat-type-standard", "zrs"), ("fallbackFormat", "zf")):
         store.put(loc, key, tz.get(k))
+    if not names_too:
+        return
     for mz, names in tz.get("metazone", {}).items():
         for length, kinds in names.items():
             for kind, v in kinds.items():
@@ -773,8 +809,6 @@ def put_time_zone_names(store, loc):
                 for length in ("long", "short"):
                     for kind, s in v.get(length, {}).items():
                         store.put(loc, "zz.%s.%s%s" % (name, length[0], kind[0]), s)
-                if "exemplarCity" in v:
-                    store.put(loc, "zc.%s" % name, v["exemplarCity"])
             else:
                 walk(name, v)
     walk("", tz.get("zone", {}))
@@ -799,10 +833,23 @@ def build_store():
     plurals = load(*supp, "plurals.json")["supplemental"]["plurals-type-cardinal"]
     ordinals = load(*supp, "ordinals.json")["supplemental"]["plurals-type-ordinal"]
     ranges = load(*supp, "pluralRanges.json")["supplemental"]["plurals"]
+    day_periods = load(*supp, "dayPeriods.json")["supplemental"]["dayPeriodRuleSet"]
+    root_systems = {}
+    for rep in ["ar", "fa", "hi", "bn", "mr", "ne", "my", "th", "ps", "ur-IN", "as", "dz", "sat", "mni", "ks",
+                "sd", "km", "lo", "ckb", "pa-Arab"] + list(locs):
+        rnums = cldr_main("cldr-numbers-full", rep, "numbers.json")
+        if not rnums:
+            continue
+        for k, v in rnums["numbers"].items():
+            if k.startswith("symbols-numberSystem-") and k not in root_systems:
+                root_systems[k] = v
     for loc in locs:
         lang = loc.split("-")[0]
         full = lang in FULL_LANGS or loc == "und"
         nums = cldr_main("cldr-numbers-full", loc, "numbers.json")
+        if nums and loc == "und":
+            for k, v in root_systems.items():
+                nums["numbers"].setdefault(k, v)
         if nums:
             put_numbers(store, loc, nums["numbers"], full)
         curs = cldr_main("cldr-numbers-full", loc, "currencies.json")
@@ -812,6 +859,9 @@ def build_store():
             units = cldr_main("cldr-units-full", loc, "units.json")
             if units:
                 put_units(store, loc, units["units"])
+        put_dates(store, loc, full)
+        put_time_zone_names(store, loc, lang in TZ_LANGS or loc == "und")
+        put_day_period_rules(store, loc, "root" if loc == "und" else loc, day_periods)
         pk = "root" if loc == "und" else loc
         if pk in plurals or pk in ordinals or pk in ranges:
             put_plurals(store, loc, pk, plurals, ordinals, ranges)
@@ -843,6 +893,10 @@ def gen_data_store(w):
         full = resolved(store, loc, cache)
         parent = {} if loc == "und" else resolved(store, store.parents[loc], cache)
         diffs[loc] = {k: v for k, v in full.items() if parent.get(k) != v}
+        if loc != "und" and store.parents[loc] != "und":
+            for k in parent:
+                if k not in store.nodes.get(loc, {}) and (k.startswith("zm.") or k.startswith("zz.")):
+                    diffs[loc][k] = "\x7f"
     keys = sorted({k for d in diffs.values() for k in d})
     kidx = {k: i for i, k in enumerate(keys)}
     kpool = Pool("intl_data_key_pool")
@@ -875,12 +929,79 @@ def gen_data_store(w):
     for i in range(0, len(entries_k), 16):
         w.append("    " + " ".join("%d," % o for o in entries_k[i:i + 16]))
     w.append("};")
-    w.append("static const uint32_t intl_data_entry_vals[%d] = {" % len(entries_v))
-    for i in range(0, len(entries_v), 12):
-        w.append("    " + " ".join("%d," % o for o in entries_v[i:i + 12]))
+    assert len(vpool.data) < (1 << 24)
+    w.append("static const uint8_t intl_data_entry_vals[%d][3] = {" % len(entries_v))
+    for i in range(0, len(entries_v), 10):
+        w.append("    " + " ".join("{%d,%d,%d}," % (o & 255, (o >> 8) & 255, o >> 16)
+                                   for o in entries_v[i:i + 10]))
     w.append("};")
     print("data store: %d nodes, %d keys, %d entries, %d key bytes, %d value bytes"
           % (len(nodes), len(keys), len(entries_k), len(kpool.data), len(vpool.data)))
+
+
+def parse_cldr_time(t):
+    import datetime
+    d = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M")
+    return int((d - datetime.datetime(1970, 1, 1)).total_seconds() // 60)
+
+
+def gen_tz_meta(w):
+    tz = load("cldr-bcp47", "bcp47", "timezone.json")["keyword"]["u"]["tz"]
+    names = set()
+    for code, info in tz.items():
+        if code.startswith("_") or not isinstance(info, dict):
+            continue
+        for n in info.get("_alias", "").split():
+            names.add(n)
+    meta = load("cldr-core", "supplemental", "metaZones.json")["supplemental"]["metaZones"]["metazoneInfo"]["timezone"]
+
+    def walk(prefix, node):
+        for k, v in node.items():
+            name = prefix + "/" + k if prefix else k
+            if isinstance(v, list):
+                yield name, v
+            else:
+                yield from walk(name, v)
+    rows = []
+    mzs = set()
+    for zone, uses in walk("", meta):
+        for u in uses:
+            m = u["usesMetazone"]
+            mzs.add(m["_mzone"])
+            frm = parse_cldr_time(m["_from"]) if "_from" in m else -2147483647
+            to = parse_cldr_time(m["_to"]) if "_to" in m else 2147483647
+            rows.append((zone, m["_mzone"], frm, to))
+    rows.sort()
+    pool = Pool("intl_metazone_pool")
+    out = []
+    for zone, mz, frm, to in rows:
+        out.append("{ %d, %d, %d, %d }" % (pool.add(zone), pool.add(mz), frm, to))
+    pool.emit(w)
+    w.append("typedef struct { uint16_t zone, metazone; int32_t from, to; } IntlZoneMetazone;")
+    w.append("static const IntlZoneMetazone intl_zone_metazones[%d] = {" % len(out))
+    for i in range(0, len(out), 3):
+        w.append("    " + " ".join(r + "," for r in out[i:i + 3]))
+    w.append("};")
+    win = load("cldr-core", "supplemental", "windowsZones.json")["supplemental"]["windowsZones"]["mapTimezones"]
+    wrows = sorted({(e["mapZone"]["_other"], e["mapZone"]["_type"].split()[0])
+                    for e in win if e["mapZone"]["_territory"] == "001"})
+    wpool = Pool("intl_windows_zone_pool")
+    wout = ["{ %d, %d }" % (wpool.add(a), wpool.add(b)) for a, b in wrows]
+    rmap = {}
+    for e in win:
+        for z in e["mapZone"]["_type"].split():
+            rmap.setdefault(z, e["mapZone"]["_other"])
+    rrows = sorted(rmap.items())
+    rout = ["{ %d, %d }" % (wpool.add(a), wpool.add(b)) for a, b in rrows]
+    wpool.emit(w)
+    w.append("static const uint16_t intl_windows_zones[%d][2] = {" % len(wout))
+    for i in range(0, len(wout), 6):
+        w.append("    " + " ".join(r + "," for r in wout[i:i + 6]))
+    w.append("};")
+    w.append("static const uint16_t intl_iana_windows_zones[%d][2] = {" % len(rout))
+    for i in range(0, len(rout), 6):
+        w.append("    " + " ".join(r + "," for r in rout[i:i + 6]))
+    w.append("};")
 
 
 def write_header(name, desc, body):
@@ -911,6 +1032,7 @@ def main():
     gen_currencies(w)
     gen_scripts(w)
     gen_available(w)
+    gen_tz_meta(w)
     write_header("quickjs-intl-locale-data.h", "Unicode locale identifier data", w)
     w = []
     gen_data_store(w)

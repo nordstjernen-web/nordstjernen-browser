@@ -300,6 +300,8 @@ set(qjs_sources
     quickjs-intl-decimal.c
     quickjs-intl-number.c
     quickjs-intl-collator.c
+    quickjs-intl-calendar.c
+    quickjs-intl-datetime.c
 )
 
 if(QJS_BUILD_LIBC)

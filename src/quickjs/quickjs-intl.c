@@ -212,6 +212,8 @@ static const char *find_keyword(const IntlExtension *ext, const char *key)
     return NULL;
 }
 
+const char intl_option_null[] = "";
+
 int intl_resolve_locale(JSContext *ctx, int service, const IntlLocaleList *requested, bool lookup,
                         const IntlResolverOps *ops, char *const *options, IntlResolved *res)
 {
@@ -263,7 +265,11 @@ int intl_resolve_locale(JSContext *ctx, int service, const IntlLocaleList *reque
             }
         }
         opt = options ? options[k] : NULL;
-        if (opt) {
+        if (opt == intl_option_null) {
+            value = NULL;
+            keep = false;
+            res->values[k][0] = '\0';
+        } else if (opt) {
             char *canon = intl_canonicalize_uvalue(ctx, key, opt);
             const char *ov;
             if (!canon)
@@ -630,7 +636,8 @@ int JS_AddIntrinsicIntl(JSContext *ctx)
     if (js_intl_init_locale(ctx, intl) < 0 ||
         js_intl_init_number_format(ctx, intl) < 0 ||
         js_intl_init_plural_rules(ctx, intl) < 0 ||
-        js_intl_init_collator(ctx, intl) < 0)
+        js_intl_init_collator(ctx, intl) < 0 ||
+        js_intl_init_date_time_format(ctx, intl) < 0)
         goto done;
     global = JS_GetGlobalObject(ctx);
     r = JS_DefinePropertyValueStr(ctx, global, "Intl", JS_DupValue(ctx, intl),

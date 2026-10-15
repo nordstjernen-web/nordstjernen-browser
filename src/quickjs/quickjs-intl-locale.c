@@ -2346,3 +2346,118 @@ bool intl_locale_available(const char *tag, size_t len)
     }
     return false;
 }
+
+const char *intl_metazone_for(const char *zone, int64_t epoch_minutes)
+{
+    int lo = 0, hi = countof(intl_zone_metazones) - 1, first = -1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        int c = strcmp(intl_metazone_pool + intl_zone_metazones[mid].zone, zone);
+        if (c == 0) {
+            first = mid;
+            hi = mid - 1;
+        } else if (c < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if (first < 0)
+        return NULL;
+    for (int i = first; i < (int)countof(intl_zone_metazones) &&
+                        !strcmp(intl_metazone_pool + intl_zone_metazones[i].zone, zone); i++) {
+        if (epoch_minutes >= intl_zone_metazones[i].from && epoch_minutes < intl_zone_metazones[i].to)
+            return intl_metazone_pool + intl_zone_metazones[i].metazone;
+    }
+    return NULL;
+}
+
+const char *intl_windows_zone_to_iana(const char *windows_name)
+{
+    for (size_t i = 0; i < countof(intl_windows_zones); i++)
+        if (!strcmp(intl_windows_zone_pool + intl_windows_zones[i][0], windows_name))
+            return intl_windows_zone_pool + intl_windows_zones[i][1];
+    return NULL;
+}
+
+const char *intl_time_zone_cldr_id(const char *name)
+{
+    const char *id, *primary;
+    int k = intl_find_time_zone(name, &id, &primary);
+    if (k < 0)
+        return NULL;
+    return intl_tz_pool + intl_time_zones[k].cldr;
+}
+
+int intl_region_default_calendar(const char *region)
+{
+    static const char *const supported[] = {
+        "buddhist", "chinese", "coptic", "dangi", "ethioaa", "ethiopic", "gregory", "hebrew", "indian",
+        "islamic-civil", "islamic-tbla", "islamic-umalqura", "iso8601", "japanese", "persian", "roc",
+    };
+    const IntlRegionInfo *info = intl_region_info(region);
+    if (!info || !info->ncal)
+        info = intl_region_info("001");
+    for (int i = 0; info && i < info->ncal; i++) {
+        const char *c = intl_region_calendar_names[info->cals[i]];
+        for (size_t k = 0; k < countof(supported); k++)
+            if (!strcmp(supported[k], c))
+                return (int)k;
+    }
+    return 6;
+}
+
+void intl_region_hour_cycle_prefs(const char *locale, const char *region, int *hc12, int *hc24)
+{
+    char key[16];
+    int count = 0, bits = 0;
+    const IntlRegionInfo *info;
+    *hc12 = 1;
+    *hc24 = 2;
+    snprintf(key, sizeof(key), "%.*s-%s", (int)strcspn(locale, "-"), locale, region);
+    for (size_t i = 0; i < countof(intl_locale_hour_cycles); i++) {
+        if (!strcmp(intl_locale_hour_cycles[i].locale, key)) {
+            count = intl_locale_hour_cycles[i].hc_count;
+            bits = intl_locale_hour_cycles[i].hc_list;
+        }
+    }
+    if (!count) {
+        info = intl_region_info(region);
+        if (!info || !info->hc_count)
+            info = intl_region_info("001");
+        if (info) {
+            count = info->hc_count;
+            bits = info->hc_list;
+        }
+    }
+    {
+        bool got12 = false, got24 = false;
+        for (int i = 0; i < count; i++) {
+            int hc = (bits >> (2 * i)) & 3;
+            if ((hc == 0 || hc == 1) && !got12) {
+                *hc12 = hc;
+                got12 = true;
+            }
+            if ((hc == 2 || hc == 3) && !got24) {
+                *hc24 = hc;
+                got24 = true;
+            }
+        }
+    }
+}
+
+const char *intl_iana_to_windows_zone(const char *iana)
+{
+    int lo = 0, hi = countof(intl_iana_windows_zones) - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        int c = strcmp(intl_windows_zone_pool + intl_iana_windows_zones[mid][0], iana);
+        if (c == 0)
+            return intl_windows_zone_pool + intl_iana_windows_zones[mid][1];
+        if (c < 0)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return NULL;
+}
