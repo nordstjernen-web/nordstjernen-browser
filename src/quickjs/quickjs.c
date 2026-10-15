@@ -196,6 +196,8 @@ enum {
     JS_CLASS_RAWJSON,
     JS_CLASS_WRAPPED_FUNCTION,
     JS_CLASS_SHADOW_REALM,
+    JS_CLASS_DEFERRED_MODULE_NS, /* u.opaque: JSModuleDef */
+    JS_CLASS_MODULE_SOURCE,     /* u.object_data */
 
     JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
 };
@@ -613,6 +615,7 @@ struct JSContext {
     int32_t regexp_legacy_last_paren[2]; /* start, end of the last group */
     bool regexp_legacy_invalid; /* a subclass or cross-realm match ran */
     JSValue promise_ctor;
+    JSValue abstract_module_source_ctor;
     JSValue native_error_proto[JS_NATIVE_ERROR_COUNT];
     JSValue error_ctor;
     JSValue error_back_trace;
@@ -1012,10 +1015,17 @@ typedef struct JSAsyncFunctionData {
     JSAsyncFunctionState func_state;
 } JSAsyncFunctionData;
 
+typedef enum JSModulePhaseEnum {
+    JS_MODULE_PHASE_EVALUATION,
+    JS_MODULE_PHASE_DEFER,
+    JS_MODULE_PHASE_SOURCE,
+} JSModulePhaseEnum;
+
 typedef struct JSReqModuleEntry {
     JSAtom module_name;
     JSModuleDef *module; /* used using resolution */
     JSValue attributes; /* JS_UNDEFINED or an object containing the attributes as key/value */
+    JSModulePhaseEnum phase;
 } JSReqModuleEntry;
 
 typedef enum JSExportTypeEnum {
@@ -1082,6 +1092,8 @@ struct JSModuleDef {
     JSValue attributes;
 
     JSValue module_ns;
+    JSValue deferred_module_ns;
+    JSValue module_source;
     JSValue func_obj; /* only used for JS modules */
     JSModuleInitFunc *init_func; /* only used for C modules */
     bool has_tla; /* true if func_obj contains await */
@@ -1523,7 +1535,7 @@ static void js_mark_module_def(JSRuntime *rt, JSModuleDef *m,
                                JS_MarkFunc *mark_func);
 static JSValue js_import_meta(JSContext *ctx);
 static JSValue js_dynamic_import(JSContext *ctx, JSValueConst specifier,
-                                 JSValueConst options);
+                                 JSValueConst options, int phase);
 static void free_var_ref(JSRuntime *rt, JSVarRef *var_ref);
 static void js_async_function_free(JSRuntime *rt, JSAsyncFunctionData *s);
 static void js_release_coro(JSRuntime *rt, JSGCObjectHeader *coro);
@@ -1616,6 +1628,7 @@ static const JSClassExoticMethods js_arguments_exotic_methods;
 static const JSClassExoticMethods js_string_exotic_methods;
 static const JSClassExoticMethods js_proxy_exotic_methods;
 static const JSClassExoticMethods js_module_ns_exotic_methods;
+static const JSClassExoticMethods js_deferred_module_ns_exotic_methods;
 
 static inline bool double_is_int32(double d)
 {
@@ -2314,6 +2327,11 @@ static JSClassShortDef const js_std_class_def[] = {
     { JS_ATOM_DisposableStack, js_disposable_stack_finalizer, js_disposable_stack_mark }, /* JS_CLASS_DISPOSABLE_STACK */
 };
 
+static JSClassShortDef const js_module_phase_class_def[] = {
+    { JS_ATOM_Object, NULL, NULL }, /* JS_CLASS_DEFERRED_MODULE_NS */
+    { JS_ATOM_Object, js_object_data_finalizer, js_object_data_mark }, /* JS_CLASS_MODULE_SOURCE */
+};
+
 static int init_class_range(JSRuntime *rt, JSClassShortDef const *tab,
                             int start, int count)
 {
@@ -2402,6 +2420,10 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     rt->class_array[JS_CLASS_MAPPED_ARGUMENTS].exotic = &js_arguments_exotic_methods;
     rt->class_array[JS_CLASS_STRING].exotic = &js_string_exotic_methods;
     rt->class_array[JS_CLASS_MODULE_NS].exotic = &js_module_ns_exotic_methods;
+    if (init_class_range(rt, js_module_phase_class_def, JS_CLASS_DEFERRED_MODULE_NS,
+                         countof(js_module_phase_class_def)) < 0)
+        goto fail;
+    rt->class_array[JS_CLASS_DEFERRED_MODULE_NS].exotic = &js_deferred_module_ns_exotic_methods;
 
     rt->class_array[JS_CLASS_C_FUNCTION].call = js_call_c_function;
     rt->class_array[JS_CLASS_C_FUNCTION_DATA].call = js_call_c_function_data;
@@ -2944,6 +2966,7 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->regexp_legacy_subject = JS_NULL;
     ctx->regexp_legacy_count = 0;
     ctx->promise_ctor = JS_NULL;
+    ctx->abstract_module_source_ctor = JS_NULL;
     ctx->error_ctor = JS_NULL;
     ctx->error_back_trace = JS_UNDEFINED;
     ctx->error_prepare_stack = JS_UNDEFINED;
@@ -3091,6 +3114,7 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->iterator_ctor_getset, mark_func);
     JS_MarkValue(rt, ctx->async_iterator_proto, mark_func);
     JS_MarkValue(rt, ctx->promise_ctor, mark_func);
+    JS_MarkValue(rt, ctx->abstract_module_source_ctor, mark_func);
     JS_MarkValue(rt, ctx->array_ctor, mark_func);
     JS_MarkValue(rt, ctx->regexp_ctor, mark_func);
     JS_MarkValue(rt, ctx->regexp_legacy_input, mark_func);
@@ -3176,6 +3200,7 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->iterator_ctor_getset);
     JS_FreeValue(ctx, ctx->async_iterator_proto);
     JS_FreeValue(ctx, ctx->promise_ctor);
+    JS_FreeValue(ctx, ctx->abstract_module_source_ctor);
     JS_FreeValue(ctx, ctx->array_ctor);
     JS_FreeValue(ctx, ctx->regexp_ctor);
     JS_FreeValue(ctx, ctx->regexp_legacy_input);
@@ -6317,6 +6342,7 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
     case JS_CLASS_SYMBOL:
     case JS_CLASS_DATE:
     case JS_CLASS_BIG_INT:
+    case JS_CLASS_MODULE_SOURCE:
         p->u.object_data = JS_UNDEFINED;
         goto set_exotic;
     case JS_CLASS_REGEXP:
@@ -19699,8 +19725,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_import):
             {
                 JSValue val;
+                int phase = *pc++;
                 sf->cur_pc = pc;
-                val = js_dynamic_import(ctx, sp[-2], sp[-1]);
+                val = js_dynamic_import(ctx, sp[-2], sp[-1], phase);
                 if (JS_IsException(val))
                     goto exception;
                 JS_FreeValue(ctx, sp[-2]);
@@ -23885,6 +23912,16 @@ static __exception int js_parse_string(JSParseState *s, int sep,
 static inline bool token_is_pseudo_keyword(JSParseState *s, JSAtom atom) {
     return s->token.val == TOK_IDENT && s->token.u.ident.atom == atom &&
         !s->token.u.ident.has_escape;
+}
+
+static bool token_is_contextual_name(JSParseState *s, const char *name)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+
+    if (s->token.val != TOK_IDENT || s->token.u.ident.has_escape)
+        return false;
+    return !strcmp(JS_AtomGetStr(s->ctx, buf, sizeof(buf),
+                                 s->token.u.ident.atom), name);
 }
 
 static __exception int js_parse_regexp(JSParseState *s)
@@ -28196,7 +28233,7 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
     FuncCallType call_type;
     int optional_chaining_label;
     int new_src_line = 0, new_src_col = 0;
-    int import_line_num, import_col_num;
+    int import_line_num, import_col_num, import_phase;
     bool accept_lparen = (parse_flags & PF_POSTFIX_CALL) != 0;
 
     call_type = FUNC_CALL_NORMAL;
@@ -28444,25 +28481,39 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
         import_col_num = s->token.col_num;
         if (next_token(s))
             return -1;
+        import_phase = JS_MODULE_PHASE_EVALUATION;
         if (s->token.val == '.') {
             if (next_token(s))
                 return -1;
-            if (!token_is_pseudo_keyword(s, JS_ATOM_meta))
+            if (token_is_contextual_name(s, "defer")) {
+                import_phase = JS_MODULE_PHASE_DEFER;
+            } else if (token_is_pseudo_keyword(s, JS_ATOM_source)) {
+                import_phase = JS_MODULE_PHASE_SOURCE;
+            } else if (!token_is_pseudo_keyword(s, JS_ATOM_meta)) {
                 return js_parse_error(s, "meta expected");
-            if (!s->is_module)
+            }
+            if (import_phase == JS_MODULE_PHASE_EVALUATION && !s->is_module)
                 return js_parse_error(s, "import.meta only valid in module code");
             if (next_token(s))
                 return -1;
-            emit_op(s, OP_special_object);
-            emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
-        } else {
+            if (import_phase == JS_MODULE_PHASE_EVALUATION) {
+                emit_op(s, OP_special_object);
+                emit_u8(s, OP_SPECIAL_OBJECT_IMPORT_META);
+                break;
+            }
+        }
+        {
             if (js_parse_expect(s, '('))
                 return -1;
             if (!accept_lparen)
                 return js_parse_error(s, "invalid use of 'import()'");
             if (js_parse_assign_expr(s))
                 return -1;
-            if (s->token.val == ',') {
+            if (s->token.val == ',' && import_phase == JS_MODULE_PHASE_SOURCE) {
+                if (next_token(s))
+                    return -1;
+                emit_op(s, OP_undefined);
+            } else if (s->token.val == ',') {
                 if (next_token(s))
                     return -1;
                 if (s->token.val != ')') {
@@ -28483,6 +28534,7 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
                 return -1;
             emit_source_loc_at(s, import_line_num, import_col_num);
             emit_op(s, OP_import);
+            emit_u8(s, import_phase);
         }
         break;
     default:
@@ -31434,6 +31486,8 @@ static JSModuleDef *js_new_module_def(JSContext *ctx, JSAtom name)
     JS_REF_COUNT(m) = 1;
     m->module_name = name;
     m->module_ns = JS_UNDEFINED;
+    m->deferred_module_ns = JS_UNDEFINED;
+    m->module_source = JS_UNDEFINED;
     m->func_obj = JS_UNDEFINED;
     m->eval_exception = JS_UNDEFINED;
     m->meta_obj = JS_UNDEFINED;
@@ -31465,6 +31519,8 @@ static void js_mark_module_def(JSRuntime *rt, JSModuleDef *m,
     }
 
     JS_MarkValue(rt, m->module_ns, mark_func);
+    JS_MarkValue(rt, m->deferred_module_ns, mark_func);
+    JS_MarkValue(rt, m->module_source, mark_func);
     JS_MarkValue(rt, m->func_obj, mark_func);
     JS_MarkValue(rt, m->eval_exception, mark_func);
     JS_MarkValue(rt, m->meta_obj, mark_func);
@@ -31507,6 +31563,8 @@ static void js_free_module_def(JSContext *ctx, JSModuleDef *m)
     js_free(ctx, m->async_parent_modules);
 
     JS_FreeValue(ctx, m->module_ns);
+    JS_FreeValue(ctx, m->deferred_module_ns);
+    JS_FreeValue(ctx, m->module_source);
     JS_FreeValue(ctx, m->func_obj);
     JS_FreeValue(ctx, m->eval_exception);
     JS_FreeValue(ctx, m->meta_obj);
@@ -31522,7 +31580,8 @@ static void js_free_module_def(JSContext *ctx, JSModuleDef *m)
 #ifndef QJS_DISABLE_PARSER
 
 static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
-                                JSAtom module_name, JSValueConst attributes)
+                                JSAtom module_name, JSValueConst attributes,
+                                JSModulePhaseEnum phase)
 {
     JSReqModuleEntry *rme;
     int i, eq;
@@ -31531,7 +31590,7 @@ static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
        specifier and same import attributes) is already present */
     for(i = 0; i < m->req_module_entries_count; i++) {
         rme = &m->req_module_entries[i];
-        if (rme->module_name == module_name) {
+        if (rme->module_name == module_name && rme->phase == phase) {
             eq = js_module_attributes_equal(ctx, rme->attributes, attributes);
             if (eq < 0)
                 return -1;
@@ -31549,6 +31608,7 @@ static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
     rme->module_name = JS_DupAtom(ctx, module_name);
     rme->module = NULL;
     rme->attributes = js_dup(attributes);
+    rme->phase = phase;
     return i;
 }
 
@@ -32059,14 +32119,18 @@ typedef enum JSResolveResultEnum {
    the same namespace re-exported through different modules compares equal. */
 static void js_resolved_export_binding(JSModuleDef *m, JSExportEntry *me,
                                        JSModuleDef **pbinding_m,
-                                       JSAtom *pbinding_name)
+                                       JSAtom *pbinding_name,
+                                       JSModulePhaseEnum *pbinding_phase)
 {
     if (me->local_name == JS_ATOM__star_) {
-        *pbinding_m = m->req_module_entries[me->u.req_module_idx].module;
+        JSReqModuleEntry *rme = &m->req_module_entries[me->u.req_module_idx];
+        *pbinding_m = rme->module;
         *pbinding_name = JS_ATOM__star_;
+        *pbinding_phase = rme->phase;
     } else {
         *pbinding_m = m;
         *pbinding_name = me->local_name;
+        *pbinding_phase = JS_MODULE_PHASE_EVALUATION;
     }
 }
 
@@ -32127,11 +32191,13 @@ static JSResolveResultEnum js_resolve_export1(JSContext *ctx,
                     if (*pme != NULL) {
                         JSModuleDef *cur_m, *new_m;
                         JSAtom cur_name, new_name;
+                        JSModulePhaseEnum cur_phase, new_phase;
                         js_resolved_export_binding(*pmodule, *pme,
-                                                   &cur_m, &cur_name);
+                                                   &cur_m, &cur_name, &cur_phase);
                         js_resolved_export_binding(res_m, res_me,
-                                                   &new_m, &new_name);
-                        if (cur_m != new_m || cur_name != new_name) {
+                                                   &new_m, &new_name, &new_phase);
+                        if (cur_m != new_m || cur_name != new_name ||
+                            cur_phase != new_phase) {
                             *pmodule = NULL;
                             *pme = NULL;
                             return JS_RESOLVE_RES_AMBIGUOUS;
@@ -32274,6 +32340,7 @@ typedef struct ExportedNameEntry {
         JSVarRef *var_ref; /* EXPORTED_NAME_NORMAL */
         JSModuleDef *module; /* for EXPORTED_NAME_NS */
     } u;
+    JSModulePhaseEnum phase; /* for EXPORTED_NAME_NS */
 } ExportedNameEntry;
 
 typedef struct GetExportNamesState {
@@ -32378,11 +32445,15 @@ static int exported_names_cmp(const void *p1, const void *p2, void *opaque)
     return ret;
 }
 
+static JSValue js_get_module_phase_value(JSContext *ctx, JSModuleDef *m,
+                                         JSModulePhaseEnum phase);
+
 static JSValue js_module_ns_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
                                      void *opaque)
 {
-    JSModuleDef *m = opaque;
-    return JS_GetModuleNamespace(ctx, m);
+    uintptr_t v = (uintptr_t)opaque;
+    JSModuleDef *m = (JSModuleDef *)(v & ~(uintptr_t)3);
+    return js_get_module_phase_value(ctx, m, (JSModulePhaseEnum)(v & 3));
 }
 
 static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
@@ -32437,8 +32508,11 @@ static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
             en->export_type = EXPORTED_NAME_AMBIGUOUS;
         } else {
             if (res_me->local_name == JS_ATOM__star_) {
+                JSReqModuleEntry *rme =
+                    &res_m->req_module_entries[res_me->u.req_module_idx];
                 en->export_type = EXPORTED_NAME_NS;
-                en->u.module = res_m->req_module_entries[res_me->u.req_module_idx].module;
+                en->u.module = rme->module;
+                en->phase = rme->phase;
             } else {
                 en->export_type = EXPORTED_NAME_NORMAL;
                 /* follow the import alias when the slot is NULL (cyclic
@@ -32477,7 +32551,8 @@ static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
             if (JS_DefineAutoInitProperty(ctx, obj,
                                           en->export_name,
                                           JS_AUTOINIT_ID_MODULE_NS,
-                                          en->u.module, JS_PROP_ENUMERABLE | JS_PROP_WRITABLE) < 0)
+                                          (void *)((uintptr_t)en->u.module | en->phase),
+                                          JS_PROP_ENUMERABLE | JS_PROP_WRITABLE) < 0)
                 goto fail;
             break;
         default:
@@ -32722,6 +32797,8 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
 
     for(i = 0; i < m->req_module_entries_count; i++) {
         JSReqModuleEntry *rme = &m->req_module_entries[i];
+        if (rme->phase == JS_MODULE_PHASE_SOURCE)
+            continue;
         m1 = rme->module;
         index = js_inner_module_linking(ctx, m1, pstack_top, index);
         if (index < 0)
@@ -32793,7 +32870,8 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
             if (mi->import_name == JS_ATOM__star_) {
                 JSValue val;
                 /* name space import */
-                val = JS_GetModuleNamespace(ctx, m1);
+                val = js_get_module_phase_value(ctx, m1,
+                    m->req_module_entries[mi->req_module_idx].phase);
                 if (JS_IsException(val))
                     goto fail;
                 set_value(ctx, &var_refs[mi->var_idx]->value, val);
@@ -32813,10 +32891,10 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
                 }
                 if (res_me->local_name == JS_ATOM__star_) {
                     JSValue val;
-                    JSModuleDef *m2;
+                    JSReqModuleEntry *rme2;
                     /* name space import from */
-                    m2 = res_m->req_module_entries[res_me->u.req_module_idx].module;
-                    val = JS_GetModuleNamespace(ctx, m2);
+                    rme2 = &res_m->req_module_entries[res_me->u.req_module_idx];
+                    val = js_get_module_phase_value(ctx, rme2->module, rme2->phase);
                     if (JS_IsException(val))
                         goto fail;
                     var_ref = js_create_module_var(ctx, true);
@@ -32996,6 +33074,20 @@ static JSValue JS_NewModuleValue(JSContext *ctx, JSModuleDef *m)
     return js_dup(JS_MKPTR(JS_TAG_MODULE, m));
 }
 
+typedef struct {
+    JSModuleDef **tab;
+    int count;
+    int size;
+} ExecModuleList;
+
+static int exec_module_list_add(JSContext *ctx, ExecModuleList *list,
+                                JSModuleDef *m);
+static int js_module_async_dependencies(JSContext *ctx, JSModuleDef *m,
+                                        ExecModuleList *result);
+static JSValue js_evaluate_module(JSContext *ctx, JSModuleDef *m);
+static JSValue js_get_deferred_module_ns(JSContext *ctx, JSModuleDef *m);
+static JSValue js_get_module_source(JSContext *ctx, JSModuleDef *m);
+
 static JSValue js_load_module_rejected(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv, int magic,
                                        JSValueConst *func_data)
@@ -33022,8 +33114,18 @@ static JSValue js_load_module_fulfilled(JSContext *ctx, JSValueConst this_val,
     JSModuleDef *m = JS_VALUE_GET_PTR(func_data[2]);
     JSValue ret, ns;
 
-    /* return the module namespace */
-    ns = JS_GetModuleNamespace(ctx, m);
+    if (magic == JS_MODULE_PHASE_DEFER) {
+        int32_t remaining;
+        JSValue v = JS_GetPropertyUint32(ctx, func_data[3], 0);
+        if (JS_ToInt32Free(ctx, &remaining, v))
+            return JS_EXCEPTION;
+        remaining--;
+        if (JS_SetPropertyUint32(ctx, func_data[3], 0, js_int32(remaining)) < 0)
+            return JS_EXCEPTION;
+        if (remaining != 0)
+            return JS_UNDEFINED;
+    }
+    ns = js_get_module_phase_value(ctx, m, magic);
     if (JS_IsException(ns)) {
         JSValue err = JS_GetException(ctx);
         js_load_module_rejected(ctx, JS_UNDEFINED, 1, vc(&err), 0, func_data);
@@ -33035,23 +33137,108 @@ static JSValue js_load_module_fulfilled(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static int js_load_module_then(JSContext *ctx, JSValueConst promise,
+                               JSModuleDef *m, JSValueConst *resolving_funcs,
+                               JSModulePhaseEnum phase, JSValueConst counter)
+{
+    JSValue ret, func_obj, evaluate_resolving_funcs[2];
+    JSValueConst func_data[4];
+
+    func_obj = JS_NewModuleValue(ctx, m);
+    func_data[0] = resolving_funcs[0];
+    func_data[1] = resolving_funcs[1];
+    func_data[2] = func_obj;
+    func_data[3] = counter;
+    evaluate_resolving_funcs[0] = JS_NewCFunctionData(ctx, js_load_module_fulfilled, 0, phase, 4, func_data);
+    evaluate_resolving_funcs[1] = JS_NewCFunctionData(ctx, js_load_module_rejected, 0, 0, 4, func_data);
+    JS_FreeValue(ctx, func_obj);
+    ret = js_promise_then(ctx, promise, 2, vc(evaluate_resolving_funcs));
+    JS_FreeValue(ctx, evaluate_resolving_funcs[0]);
+    JS_FreeValue(ctx, evaluate_resolving_funcs[1]);
+    if (JS_IsException(ret))
+        return -1;
+    JS_FreeValue(ctx, ret);
+    return 0;
+}
+
+static int js_load_module_deferred(JSContext *ctx, JSModuleDef *m,
+                                   JSValueConst *resolving_funcs)
+{
+    ExecModuleList list = { NULL, 0, 0 };
+    JSValue promise, counter = JS_UNDEFINED, ret;
+    int i;
+
+    if (js_create_module_function(ctx, m) < 0 || js_link_module(ctx, m) < 0)
+        return -1;
+    if (js_module_async_dependencies(ctx, m, &list) < 0)
+        goto fail;
+    if (list.count == 0) {
+        promise = js_get_deferred_module_ns(ctx, m);
+        if (JS_IsException(promise))
+            goto fail;
+        ret = JS_Call(ctx, resolving_funcs[0], JS_UNDEFINED, 1, vc(&promise));
+        JS_FreeValue(ctx, promise);
+        JS_FreeValue(ctx, ret);
+        js_free(ctx, list.tab);
+        return 0;
+    }
+    counter = JS_NewObjectProto(ctx, JS_NULL);
+    if (JS_IsException(counter) ||
+        JS_SetPropertyUint32(ctx, counter, 0, js_int32(list.count)) < 0)
+        goto fail;
+    for(i = 0; i < list.count; i++) {
+        promise = js_evaluate_module(ctx, list.tab[i]);
+        if (JS_IsException(promise))
+            goto fail;
+        if (js_load_module_then(ctx, promise, m, resolving_funcs,
+                                JS_MODULE_PHASE_DEFER, counter) < 0) {
+            JS_FreeValue(ctx, promise);
+            goto fail;
+        }
+        JS_FreeValue(ctx, promise);
+    }
+    JS_FreeValue(ctx, counter);
+    js_free(ctx, list.tab);
+    return 0;
+ fail:
+    JS_FreeValue(ctx, counter);
+    js_free(ctx, list.tab);
+    return -1;
+}
+
 static void JS_LoadModuleInternal(JSContext *ctx, const char *basename,
                                   const char *filename,
                                   JSValueConst *resolving_funcs,
-                                  JSValueConst attributes)
+                                  JSValueConst attributes,
+                                  JSModulePhaseEnum phase)
 {
     JSValue evaluate_promise;
     JSModuleDef *m;
-    JSValue ret, err, func_obj, evaluate_resolving_funcs[2];
-    JSValueConst func_data[3];
+    JSValue ret, err, func_obj;
 
     m = js_host_resolve_imported_module(ctx, basename, filename, attributes);
     if (!m)
         goto fail;
 
+    if (phase == JS_MODULE_PHASE_SOURCE) {
+        JSValue source = js_get_module_source(ctx, m);
+        if (JS_IsException(source))
+            goto fail;
+        ret = JS_Call(ctx, resolving_funcs[0], JS_UNDEFINED, 1, vc(&source));
+        JS_FreeValue(ctx, source);
+        JS_FreeValue(ctx, ret);
+        return;
+    }
+
     if (js_resolve_module(ctx, m) < 0) {
         js_free_modules(ctx, JS_FREE_MODULE_NOT_RESOLVED);
         goto fail;
+    }
+
+    if (phase == JS_MODULE_PHASE_DEFER) {
+        if (js_load_module_deferred(ctx, m, resolving_funcs) < 0)
+            goto fail;
+        return;
     }
 
     /* Evaluate the module code */
@@ -33065,18 +33252,8 @@ static void JS_LoadModuleInternal(JSContext *ctx, const char *basename,
         JS_FreeValue(ctx, err);
         return;
     }
-
-    func_obj = JS_NewModuleValue(ctx, m);
-    func_data[0] = resolving_funcs[0];
-    func_data[1] = resolving_funcs[1];
-    func_data[2] = func_obj;
-    evaluate_resolving_funcs[0] = JS_NewCFunctionData(ctx, js_load_module_fulfilled, 0, 0, 3, func_data);
-    evaluate_resolving_funcs[1] = JS_NewCFunctionData(ctx, js_load_module_rejected, 0, 0, 3, func_data);
-    JS_FreeValue(ctx, func_obj);
-    ret = js_promise_then(ctx, evaluate_promise, 2, vc(evaluate_resolving_funcs));
-    JS_FreeValue(ctx, ret);
-    JS_FreeValue(ctx, evaluate_resolving_funcs[0]);
-    JS_FreeValue(ctx, evaluate_resolving_funcs[1]);
+    js_load_module_then(ctx, evaluate_promise, m, resolving_funcs,
+                        JS_MODULE_PHASE_EVALUATION, JS_UNDEFINED);
     JS_FreeValue(ctx, evaluate_promise);
 }
 
@@ -33090,7 +33267,8 @@ JSValue JS_LoadModule(JSContext *ctx, const char *basename,
     promise = JS_NewPromiseCapability(ctx, resolving_funcs);
     if (JS_IsException(promise))
         return JS_EXCEPTION;
-    JS_LoadModuleInternal(ctx, basename, filename, vc(resolving_funcs), JS_UNDEFINED);
+    JS_LoadModuleInternal(ctx, basename, filename, vc(resolving_funcs), JS_UNDEFINED,
+                          JS_MODULE_PHASE_EVALUATION);
     JS_FreeValue(ctx, resolving_funcs[0]);
     JS_FreeValue(ctx, resolving_funcs[1]);
     return promise;
@@ -33103,6 +33281,7 @@ static JSValue js_dynamic_import_job(JSContext *ctx,
     JSValueConst basename_val = argv[2];
     JSValueConst specifier = argv[3];
     JSValueConst attributes = argv[4];
+    JSModulePhaseEnum phase = JS_VALUE_GET_INT(argv[5]);
     const char *basename = NULL, *filename;
     JSValue ret, err;
 
@@ -33118,7 +33297,8 @@ static JSValue js_dynamic_import_job(JSContext *ctx,
     if (!filename)
         goto exception;
 
-    JS_LoadModuleInternal(ctx, basename, filename, resolving_funcs, attributes);
+    JS_LoadModuleInternal(ctx, basename, filename, resolving_funcs, attributes,
+                          phase);
     JS_FreeCString(ctx, filename);
     JS_FreeCString(ctx, basename);
     return JS_UNDEFINED;
@@ -33132,13 +33312,13 @@ static JSValue js_dynamic_import_job(JSContext *ctx,
 }
 
 static JSValue js_dynamic_import(JSContext *ctx, JSValueConst specifier,
-                                 JSValueConst options)
+                                 JSValueConst options, int phase)
 {
     JSAtom basename;
     JSValue promise, resolving_funcs[2], basename_val, err, ret;
     JSValue specifier_str = JS_UNDEFINED, attributes = JS_UNDEFINED;
     JSValue attributes_obj = JS_UNDEFINED;
-    JSValue args[5];
+    JSValue args[6];
 
     basename = JS_GetScriptOrModuleName(ctx, 0);
     if (basename == JS_ATOM_NULL)
@@ -33215,10 +33395,11 @@ static JSValue js_dynamic_import(JSContext *ctx, JSValueConst specifier,
     args[2] = basename_val;
     args[3] = specifier_str;
     args[4] = attributes;
+    args[5] = js_int32(phase);
 
     /* cannot run JS_LoadModuleInternal synchronously because it would
        cause an unexpected recursion in js_evaluate_module() */
-    JS_EnqueueJob(ctx, js_dynamic_import_job, 5, vc(args));
+    JS_EnqueueJob(ctx, js_dynamic_import_job, 6, vc(args));
 done:
     JS_FreeValue(ctx, basename_val);
     JS_FreeValue(ctx, resolving_funcs[0]);
@@ -33247,12 +33428,6 @@ static void js_set_module_evaluated(JSContext *ctx, JSModuleDef *m)
         JS_FreeValue(ctx, ret_val);
     }
 }
-
-typedef struct {
-    JSModuleDef **tab;
-    int count;
-    int size;
-} ExecModuleList;
 
 /* XXX: slow. Could use a linked list instead of ExecModuleList */
 static bool find_in_exec_module_list(ExecModuleList *exec_list, JSModuleDef *m)
@@ -33471,6 +33646,7 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
                                       int index, JSModuleDef **pstack_top,
                                       JSValue *pvalue)
 {
+    ExecModuleList evaluation_list;
     JSModuleDef *m1;
     int i;
 
@@ -33512,12 +33688,32 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
     m->stack_prev = *pstack_top;
     *pstack_top = m;
 
+    evaluation_list.tab = NULL;
+    evaluation_list.count = 0;
+    evaluation_list.size = 0;
     for(i = 0; i < m->req_module_entries_count; i++) {
         JSReqModuleEntry *rme = &m->req_module_entries[i];
-        m1 = rme->module;
-        index = js_inner_module_evaluation(ctx, m1, index, pstack_top, pvalue);
-        if (index < 0)
+        int ret;
+        if (rme->phase == JS_MODULE_PHASE_SOURCE)
+            continue;
+        if (rme->phase == JS_MODULE_PHASE_DEFER)
+            ret = js_module_async_dependencies(ctx, rme->module, &evaluation_list);
+        else
+            ret = exec_module_list_add(ctx, &evaluation_list, rme->module);
+        if (ret < 0) {
+            js_free(ctx, evaluation_list.tab);
+            *pvalue = JS_GetException(ctx);
             return -1;
+        }
+    }
+
+    for(i = 0; i < evaluation_list.count; i++) {
+        m1 = evaluation_list.tab[i];
+        index = js_inner_module_evaluation(ctx, m1, index, pstack_top, pvalue);
+        if (index < 0) {
+            js_free(ctx, evaluation_list.tab);
+            return -1;
+        }
         assert(m1->status == JS_MODULE_STATUS_EVALUATING ||
                m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
                m1->status == JS_MODULE_STATUS_EVALUATED);
@@ -33529,6 +33725,7 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
             assert(m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
                    m1->status == JS_MODULE_STATUS_EVALUATED);
             if (m1->eval_has_exception) {
+                js_free(ctx, evaluation_list.tab);
                 *pvalue = js_dup(m1->eval_exception);
                 return -1;
             }
@@ -33536,12 +33733,14 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
         if (m1->async_evaluation) {
             m->pending_async_dependencies++;
             if (js_resize_array(ctx, (void **)&m1->async_parent_modules, sizeof(m1->async_parent_modules[0]), &m1->async_parent_modules_size, m1->async_parent_modules_count + 1)) {
+                js_free(ctx, evaluation_list.tab);
                 *pvalue = JS_GetException(ctx);
                 return -1;
             }
             m1->async_parent_modules[m1->async_parent_modules_count++] = m;
         }
     }
+    js_free(ctx, evaluation_list.tab);
 
     if (m->pending_async_dependencies > 0) {
         assert(!m->async_evaluation);
@@ -33634,6 +33833,336 @@ static JSValue js_evaluate_module(JSContext *ctx, JSModuleDef *m)
     return js_dup(m->promise);
 }
 
+static int exec_module_list_add(JSContext *ctx, ExecModuleList *list,
+                                JSModuleDef *m)
+{
+    if (find_in_exec_module_list(list, m))
+        return 0;
+    if (js_resize_array(ctx, (void **)&list->tab, sizeof(list->tab[0]),
+                        &list->size, list->count + 1))
+        return -1;
+    list->tab[list->count++] = m;
+    return 0;
+}
+
+static bool js_module_scc_evaluated(JSModuleDef *m)
+{
+    if (m->cycle_root)
+        return m->cycle_root->status == JS_MODULE_STATUS_EVALUATED;
+    return m->status == JS_MODULE_STATUS_EVALUATED;
+}
+
+static int js_ready_for_sync_execution(JSContext *ctx, JSModuleDef *m,
+                                       ExecModuleList *seen)
+{
+    int i, ret;
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        return -1;
+    }
+    if (find_in_exec_module_list(seen, m))
+        return 1;
+    if (exec_module_list_add(ctx, seen, m))
+        return -1;
+    if (js_module_scc_evaluated(m))
+        return 1;
+    if (m->status == JS_MODULE_STATUS_EVALUATING ||
+        m->status == JS_MODULE_STATUS_EVALUATING_ASYNC)
+        return 0;
+    if (m->has_tla)
+        return 0;
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        if (rme->phase == JS_MODULE_PHASE_SOURCE)
+            continue;
+        ret = js_ready_for_sync_execution(ctx, rme->module, seen);
+        if (ret <= 0)
+            return ret;
+    }
+    return 1;
+}
+
+static int js_gather_async_transitive_dependencies(JSContext *ctx,
+                                                   JSModuleDef *m,
+                                                   ExecModuleList *seen,
+                                                   ExecModuleList *result)
+{
+    int i;
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        return -1;
+    }
+    if (find_in_exec_module_list(seen, m))
+        return 0;
+    if (exec_module_list_add(ctx, seen, m))
+        return -1;
+    if (m->status == JS_MODULE_STATUS_EVALUATING || js_module_scc_evaluated(m))
+        return 0;
+    if (m->has_tla)
+        return exec_module_list_add(ctx, result, m);
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        if (rme->phase == JS_MODULE_PHASE_SOURCE)
+            continue;
+        if (js_gather_async_transitive_dependencies(ctx, rme->module,
+                                                    seen, result))
+            return -1;
+    }
+    return 0;
+}
+
+static int js_module_async_dependencies(JSContext *ctx, JSModuleDef *m,
+                                        ExecModuleList *result)
+{
+    ExecModuleList seen = { NULL, 0, 0 };
+    int ret;
+
+    ret = js_gather_async_transitive_dependencies(ctx, m, &seen, result);
+    js_free(ctx, seen.tab);
+    return ret;
+}
+
+static int js_evaluate_module_sync(JSContext *ctx, JSModuleDef *m)
+{
+    ExecModuleList seen = { NULL, 0, 0 };
+    JSValue promise;
+    int ret;
+
+    if (m->status == JS_MODULE_STATUS_EVALUATED && !m->eval_has_exception &&
+        (!m->cycle_root || !m->cycle_root->eval_has_exception))
+        return 0;
+    ret = js_ready_for_sync_execution(ctx, m, &seen);
+    js_free(ctx, seen.tab);
+    if (ret < 0)
+        return -1;
+    if (!ret) {
+        char buf[ATOM_GET_STR_BUF_SIZE];
+        JS_ThrowTypeError(ctx, "deferred module '%s' cannot be evaluated synchronously",
+                          JS_AtomGetStr(ctx, buf, sizeof(buf), m->module_name));
+        return -1;
+    }
+    promise = js_evaluate_module(ctx, m);
+    if (JS_IsException(promise))
+        return -1;
+    if (JS_PromiseState(ctx, promise) == JS_PROMISE_REJECTED) {
+        JSValue reason = JS_PromiseResult(ctx, promise);
+        js_promise_set_handled(ctx, promise);
+        JS_FreeValue(ctx, promise);
+        JS_Throw(ctx, reason);
+        return -1;
+    }
+    JS_FreeValue(ctx, promise);
+    return 0;
+}
+
+static bool js_deferred_ns_is_symbol_like(JSContext *ctx, JSAtom prop)
+{
+    return prop == JS_ATOM_then ||
+        JS_AtomGetKind(ctx, prop) != JS_ATOM_KIND_STRING;
+}
+
+static JSValue js_deferred_ns_exports(JSContext *ctx, JSValueConst obj)
+{
+    JSModuleDef *m = JS_VALUE_GET_OBJ(obj)->u.opaque;
+
+    if (js_evaluate_module_sync(ctx, m) < 0)
+        return JS_EXCEPTION;
+    return JS_GetModuleNamespace(ctx, m);
+}
+
+static int js_deferred_ns_get_own_property(JSContext *ctx,
+                                           JSPropertyDescriptor *desc,
+                                           JSValueConst obj, JSAtom prop)
+{
+    JSValue ns;
+    int ret;
+
+    if (prop == JS_ATOM_Symbol_toStringTag) {
+        if (desc) {
+            desc->flags = 0;
+            desc->getter = JS_UNDEFINED;
+            desc->setter = JS_UNDEFINED;
+            desc->value = JS_NewString(ctx, "Deferred Module");
+            if (JS_IsException(desc->value))
+                return -1;
+        }
+        return true;
+    }
+    if (js_deferred_ns_is_symbol_like(ctx, prop))
+        return false;
+    ns = js_deferred_ns_exports(ctx, obj);
+    if (JS_IsException(ns))
+        return -1;
+    ret = JS_GetOwnPropertyInternal(ctx, desc, JS_VALUE_GET_OBJ(ns), prop);
+    JS_FreeValue(ctx, ns);
+    return ret;
+}
+
+static int js_deferred_ns_get_own_property_names(JSContext *ctx,
+                                                 JSPropertyEnum **ptab,
+                                                 uint32_t *plen,
+                                                 JSValueConst obj)
+{
+    JSPropertyEnum *tab;
+    uint32_t len, i, j;
+    JSValue ns;
+    int ret;
+
+    ns = js_deferred_ns_exports(ctx, obj);
+    if (JS_IsException(ns))
+        return -1;
+    ret = JS_GetOwnPropertyNamesInternal(ctx, &tab, &len, JS_VALUE_GET_OBJ(ns),
+                                         JS_GPN_STRING_MASK);
+    JS_FreeValue(ctx, ns);
+    if (ret)
+        return -1;
+    for(i = j = 0; i < len; i++) {
+        if (tab[i].atom == JS_ATOM_then) {
+            JS_FreeAtom(ctx, tab[i].atom);
+            continue;
+        }
+        tab[j++] = tab[i];
+    }
+    if (j == len) {
+        JSPropertyEnum *new_tab = js_realloc(ctx, tab, sizeof(tab[0]) * (len + 1));
+        if (!new_tab) {
+            js_free_prop_enum(ctx, tab, j);
+            return -1;
+        }
+        tab = new_tab;
+    }
+    tab[j].atom = JS_DupAtom(ctx, JS_ATOM_Symbol_toStringTag);
+    tab[j].is_enumerable = false;
+    *ptab = tab;
+    *plen = j + 1;
+    return 0;
+}
+
+static int js_deferred_ns_has(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    JSValue ns;
+    int ret;
+
+    if (js_deferred_ns_is_symbol_like(ctx, prop))
+        return prop == JS_ATOM_Symbol_toStringTag;
+    ns = js_deferred_ns_exports(ctx, obj);
+    if (JS_IsException(ns))
+        return -1;
+    ret = find_own_property1(JS_VALUE_GET_OBJ(ns), prop) != NULL;
+    JS_FreeValue(ctx, ns);
+    return ret;
+}
+
+static int js_deferred_ns_delete(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    JSValue ns;
+    int ret;
+
+    if (js_deferred_ns_is_symbol_like(ctx, prop))
+        return prop != JS_ATOM_Symbol_toStringTag;
+    ns = js_deferred_ns_exports(ctx, obj);
+    if (JS_IsException(ns))
+        return -1;
+    ret = find_own_property1(JS_VALUE_GET_OBJ(ns), prop) == NULL;
+    JS_FreeValue(ctx, ns);
+    return ret;
+}
+
+static int js_deferred_ns_define_own_property(JSContext *ctx,
+                                              JSValueConst this_obj,
+                                              JSAtom prop, JSValueConst val,
+                                              JSValueConst getter,
+                                              JSValueConst setter, int flags)
+{
+    JSValue ns;
+    int ret;
+
+    if (prop == JS_ATOM_Symbol_toStringTag) {
+        JSValue tag;
+        bool same;
+        if ((flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) ||
+            ((flags & JS_PROP_HAS_CONFIGURABLE) && (flags & JS_PROP_CONFIGURABLE)) ||
+            ((flags & JS_PROP_HAS_ENUMERABLE) && (flags & JS_PROP_ENUMERABLE)) ||
+            ((flags & JS_PROP_HAS_WRITABLE) && (flags & JS_PROP_WRITABLE)))
+            return JS_ThrowTypeErrorOrFalse(ctx, flags, "property is not configurable");
+        if (!(flags & JS_PROP_HAS_VALUE))
+            return true;
+        tag = JS_NewString(ctx, "Deferred Module");
+        if (JS_IsException(tag))
+            return -1;
+        same = js_same_value(ctx, val, tag);
+        JS_FreeValue(ctx, tag);
+        if (!same)
+            return JS_ThrowTypeErrorOrFalse(ctx, flags, "property is not configurable");
+        return true;
+    }
+    if (js_deferred_ns_is_symbol_like(ctx, prop))
+        return JS_ThrowTypeErrorOrFalse(ctx, flags, "object is not extensible");
+    ns = js_deferred_ns_exports(ctx, this_obj);
+    if (JS_IsException(ns))
+        return -1;
+    ret = JS_DefineProperty(ctx, ns, prop, val, getter, setter, flags);
+    JS_FreeValue(ctx, ns);
+    return ret;
+}
+
+static int js_deferred_ns_set(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                              JSValueConst value, JSValueConst receiver,
+                              int flags)
+{
+    return JS_ThrowTypeErrorReadOnly(ctx, flags, prop);
+}
+
+static const JSClassExoticMethods js_deferred_module_ns_exotic_methods = {
+    .get_own_property = js_deferred_ns_get_own_property,
+    .get_own_property_names = js_deferred_ns_get_own_property_names,
+    .delete_property = js_deferred_ns_delete,
+    .define_own_property = js_deferred_ns_define_own_property,
+    .has_property = js_deferred_ns_has,
+    .set_property = js_deferred_ns_set,
+};
+
+static JSValue js_get_deferred_module_ns(JSContext *ctx, JSModuleDef *m)
+{
+    JSValue obj;
+
+    if (JS_IsUndefined(m->deferred_module_ns)) {
+        obj = JS_NewObjectProtoClass(ctx, JS_NULL, JS_CLASS_DEFERRED_MODULE_NS);
+        if (JS_IsException(obj))
+            return obj;
+        JS_VALUE_GET_OBJ(obj)->u.opaque = m;
+        JS_VALUE_GET_OBJ(obj)->extensible = false;
+        m->deferred_module_ns = obj;
+    }
+    return js_dup(m->deferred_module_ns);
+}
+
+static JSValue js_get_module_source(JSContext *ctx, JSModuleDef *m)
+{
+    if (JS_IsUndefined(m->module_source)) {
+        char buf[ATOM_GET_STR_BUF_SIZE];
+        return JS_ThrowSyntaxError(ctx, "module '%s' has no source phase representation",
+                                   JS_AtomGetStr(ctx, buf, sizeof(buf), m->module_name));
+    }
+    return js_dup(m->module_source);
+}
+
+static JSValue js_get_module_phase_value(JSContext *ctx, JSModuleDef *m,
+                                         JSModulePhaseEnum phase)
+{
+    switch(phase) {
+    case JS_MODULE_PHASE_DEFER:
+        return js_get_deferred_module_ns(ctx, m);
+    case JS_MODULE_PHASE_SOURCE:
+        return js_get_module_source(ctx, m);
+    default:
+        return JS_GetModuleNamespace(ctx, m);
+    }
+}
+
+
 #ifndef QJS_DISABLE_PARSER
 
 /* Parse 'with { key: "value", ... }' clause for import attributes.
@@ -33722,7 +34251,8 @@ static __exception int js_parse_with_clause(JSParseState *s, JSValue *pattribute
 }
 
 /* return the module index in m->req_module_entries[] or < 0 if error */
-static __exception int js_parse_from_clause(JSParseState *s, JSModuleDef *m)
+static __exception int js_parse_from_clause(JSParseState *s, JSModuleDef *m,
+                                            JSModulePhaseEnum phase)
 {
     JSAtom module_name;
     JSValue attributes;
@@ -33751,7 +34281,7 @@ static __exception int js_parse_from_clause(JSParseState *s, JSModuleDef *m)
         JS_FreeAtom(s->ctx, module_name);
         return -1;
     }
-    idx = add_req_module_entry(s->ctx, m, module_name, attributes);
+    idx = add_req_module_entry(s->ctx, m, module_name, attributes, phase);
     JS_FreeValue(s->ctx, attributes);
     JS_FreeAtom(s->ctx, module_name);
     return idx;
@@ -33863,7 +34393,7 @@ static __exception int js_parse_export(JSParseState *s)
         if (js_parse_expect(s, '}'))
             return -1;
         if (token_is_pseudo_keyword(s, JS_ATOM_from)) {
-            idx = js_parse_from_clause(s, m);
+            idx = js_parse_from_clause(s, m, JS_MODULE_PHASE_EVALUATION);
             if (idx < 0)
                 return -1;
             for(i = first_export; i < m->export_entries_count; i++) {
@@ -33893,7 +34423,7 @@ static __exception int js_parse_export(JSParseState *s)
             }
             if (next_token(s))
                 goto fail1;
-            idx = js_parse_from_clause(s, m);
+            idx = js_parse_from_clause(s, m, JS_MODULE_PHASE_EVALUATION);
             if (idx < 0)
                 goto fail1;
             me = add_export_entry(s, m, JS_ATOM__star_, export_name,
@@ -33903,7 +34433,7 @@ static __exception int js_parse_export(JSParseState *s)
                 return -1;
             me->u.req_module_idx = idx;
         } else {
-            idx = js_parse_from_clause(s, m);
+            idx = js_parse_from_clause(s, m, JS_MODULE_PHASE_EVALUATION);
             if (idx < 0)
                 return -1;
             if (add_star_export_entry(ctx, m, idx) < 0)
@@ -33997,11 +34527,34 @@ static int add_import(JSParseState *s, JSModuleDef *m,
     return 0;
 }
 
+static int js_parse_is_source_import(JSParseState *s)
+{
+    JSParsePos pos;
+    int is_source = 0;
+
+    js_parse_get_pos(s, &pos);
+    if (next_token(s))
+        return -1;
+    if (s->token.val == TOK_IDENT) {
+        if (!token_is_pseudo_keyword(s, JS_ATOM_from)) {
+            is_source = 1;
+        } else {
+            if (next_token(s))
+                return -1;
+            is_source = token_is_pseudo_keyword(s, JS_ATOM_from);
+        }
+    }
+    if (js_parse_seek_token(s, &pos))
+        return -1;
+    return is_source;
+}
+
 static __exception int js_parse_import(JSParseState *s)
 {
     JSContext *ctx = s->ctx;
     JSModuleDef *m = s->cur_func->module;
     JSAtom local_name, import_name, module_name;
+    JSModulePhaseEnum phase;
     int first_import, i, idx;
 
     if (next_token(s))
@@ -34023,13 +34576,39 @@ static __exception int js_parse_import(JSParseState *s)
             JS_FreeAtom(ctx, module_name);
             return -1;
         }
-        idx = add_req_module_entry(ctx, m, module_name, attributes);
+        idx = add_req_module_entry(ctx, m, module_name, attributes,
+                                   JS_MODULE_PHASE_EVALUATION);
         JS_FreeValue(ctx, attributes);
         JS_FreeAtom(ctx, module_name);
         if (idx < 0)
             return -1;
     } else {
-        if (s->token.val == TOK_IDENT) {
+        phase = JS_MODULE_PHASE_EVALUATION;
+        if (token_is_contextual_name(s, "defer") && peek_token(s, false) == '*') {
+            phase = JS_MODULE_PHASE_DEFER;
+            if (next_token(s))
+                return -1;
+        } else if (token_is_pseudo_keyword(s, JS_ATOM_source)) {
+            int ret = js_parse_is_source_import(s);
+            if (ret < 0)
+                return -1;
+            if (ret) {
+                if (next_token(s))
+                    return -1;
+                if (s->token.val != TOK_IDENT || s->token.u.ident.is_reserved)
+                    return js_parse_error_reserved_identifier(s);
+                local_name = JS_DupAtom(ctx, s->token.u.ident.atom);
+                import_name = JS_ATOM__star_;
+                if (next_token(s))
+                    goto fail;
+                if (add_import(s, m, local_name, import_name))
+                    goto fail;
+                JS_FreeAtom(ctx, local_name);
+                phase = JS_MODULE_PHASE_SOURCE;
+                goto end_import_clause;
+            }
+        }
+        if (phase == JS_MODULE_PHASE_EVALUATION && s->token.val == TOK_IDENT) {
             if (s->token.u.ident.is_reserved) {
                 return js_parse_error_reserved_identifier(s);
             }
@@ -34114,7 +34693,7 @@ static __exception int js_parse_import(JSParseState *s)
                 return -1;
         }
     end_import_clause:
-        idx = js_parse_from_clause(s, m);
+        idx = js_parse_from_clause(s, m, phase);
         if (idx < 0)
             return -1;
     }
@@ -39770,11 +40349,12 @@ typedef enum BCTagEnum {
     BC_TAG_SYMBOL,
 } BCTagEnum;
 
-#define BC_VERSION 29
+#define BC_VERSION 30
 /* stored data (IndexedDB) written before atoms were run-length encoded */
 #define BC_VERSION_U32_ATOMS 27
 /* stored data written while the predefined atom table still held "concat" */
 #define BC_VERSION_CONCAT_ATOM 28
+#define BC_VERSION_NO_MODULE_PHASE 29
 
 typedef struct BCWriterState {
     JSContext *ctx;
@@ -40162,6 +40742,7 @@ static int JS_WriteModule(BCWriterState *s, JSValueConst obj)
     for(i = 0; i < m->req_module_entries_count; i++) {
         JSReqModuleEntry *rme = &m->req_module_entries[i];
         bc_put_atom(s, rme->module_name);
+        bc_put_u8(s, rme->phase);
     }
 
     bc_put_leb128(s, m->export_entries_count);
@@ -41253,8 +41834,16 @@ static JSValue JS_ReadModule(BCReaderState *s)
             JSReqModuleEntry *rme = &m->req_module_entries[i];
             JSModuleDef **pm = &rme->module;
             rme->attributes = JS_UNDEFINED;
+            uint8_t phase;
             if (bc_get_atom(s, &rme->module_name))
                 goto fail;
+            if (bc_get_u8(s, &phase))
+                goto fail;
+            if (phase > JS_MODULE_PHASE_SOURCE) {
+                JS_ThrowSyntaxError(ctx, "invalid module import phase");
+                goto fail;
+            }
+            rme->phase = phase;
             // Resolves a module either from the cache or by requesting
             // it from the module loader. From cache is not ideal because
             // the module may not be the one it was a time of serialization
@@ -41791,7 +42380,12 @@ static int JS_ReadObjectAtoms(BCReaderState *s)
                             v8, BC_VERSION);
         return -1;
     }
-    if (v8 != BC_VERSION && !concat_atom) {
+    if (v8 == BC_VERSION_NO_MODULE_PHASE && s->allow_bytecode) {
+        JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
+                            v8, BC_VERSION);
+        return -1;
+    }
+    if (v8 != BC_VERSION && v8 != BC_VERSION_NO_MODULE_PHASE && !concat_atom) {
         JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
                             v8, BC_VERSION);
         return -1;
@@ -42314,6 +42908,75 @@ static JSValue JS_NewCConstructor(JSContext *ctx, int class_id, const char *name
     JS_FreeValue(ctx, parent_proto);
     JS_FreeValue(ctx, ctor);
     return JS_EXCEPTION;
+}
+
+static JSValue js_abstract_module_source_constructor(JSContext *ctx,
+                                                     JSValueConst new_target,
+                                                     int argc, JSValueConst *argv)
+{
+    return JS_ThrowTypeError(ctx, "AbstractModuleSource is an abstract class");
+}
+
+static JSValue js_abstract_module_source_get_toStringTag(JSContext *ctx,
+                                                         JSValueConst this_val)
+{
+    JSObject *p;
+
+    if (!JS_IsObject(this_val))
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(this_val);
+    if (p->class_id != JS_CLASS_MODULE_SOURCE)
+        return JS_UNDEFINED;
+    return js_dup(p->u.object_data);
+}
+
+static const JSCFunctionListEntry js_abstract_module_source_proto_funcs[] = {
+    JS_CGETSET_DEF("[Symbol.toStringTag]", js_abstract_module_source_get_toStringTag, NULL ),
+};
+
+JSValue JS_GetAbstractModuleSource(JSContext *ctx)
+{
+    JSValue ctor;
+
+    if (JS_IsNull(ctx->abstract_module_source_ctor)) {
+        ctor = JS_NewCConstructor(ctx, JS_CLASS_MODULE_SOURCE, "AbstractModuleSource",
+                                  js_abstract_module_source_constructor, 0,
+                                  JS_CFUNC_constructor_or_func, 0, JS_UNDEFINED,
+                                  NULL, 0,
+                                  js_abstract_module_source_proto_funcs,
+                                  countof(js_abstract_module_source_proto_funcs),
+                                  JS_NEW_CTOR_NO_GLOBAL);
+        if (JS_IsException(ctor))
+            return ctor;
+        ctx->abstract_module_source_ctor = ctor;
+    }
+    return js_dup(ctx->abstract_module_source_ctor);
+}
+
+JSValue JS_NewModuleSource(JSContext *ctx, JSValueConst proto, const char *kind)
+{
+    JSValue ctor, obj, kind_str;
+
+    ctor = JS_GetAbstractModuleSource(ctx);
+    if (JS_IsException(ctor))
+        return ctor;
+    JS_FreeValue(ctx, ctor);
+    kind_str = JS_NewString(ctx, kind);
+    if (JS_IsException(kind_str))
+        return kind_str;
+    obj = JS_NewObjectProtoClass(ctx, proto, JS_CLASS_MODULE_SOURCE);
+    if (JS_IsException(obj)) {
+        JS_FreeValue(ctx, kind_str);
+        return obj;
+    }
+    JS_VALUE_GET_OBJ(obj)->u.object_data = kind_str;
+    return obj;
+}
+
+int JS_SetModuleSource(JSContext *ctx, JSModuleDef *m, JSValue source)
+{
+    set_value(ctx, &m->module_source, source);
+    return 0;
 }
 
 static JSValue js_global_eval(JSContext *ctx, JSValueConst this_val,
@@ -65549,7 +66212,7 @@ static JSValue js_shadow_realm_import_value(JSContext *ctx, JSValueConst this_va
                                             int argc, JSValueConst *argv)
 {
     JSContext *realm = js_shadow_realm_get(ctx, this_val);
-    JSValue specifier, inner_funcs[2], inner, basename_val, args[5];
+    JSValue specifier, inner_funcs[2], inner, basename_val, args[6];
     JSValue handlers[2], cap_funcs[2], getter, promise = JS_EXCEPTION;
     JSValueConst bind_args[2];
     JSAtom basename;
@@ -65578,7 +66241,8 @@ static JSValue js_shadow_realm_import_value(JSContext *ctx, JSValueConst this_va
     args[2] = basename_val;
     args[3] = specifier;
     args[4] = JS_UNDEFINED;
-    JS_EnqueueJob(realm, js_dynamic_import_job, 5, vc(args));
+    args[5] = js_int32(JS_MODULE_PHASE_EVALUATION);
+    JS_EnqueueJob(realm, js_dynamic_import_job, 6, vc(args));
     getter = JS_NewCFunction2(ctx, js_shadow_realm_export_getter, "", 2,
                               JS_CFUNC_generic, 0);
     bind_args[0] = JS_UNDEFINED;
