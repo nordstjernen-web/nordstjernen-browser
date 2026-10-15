@@ -8,6 +8,7 @@
 #include <unistd.h>
 #else
 #include <windows.h>
+#include "quickjs-temporal-winzones.h"
 #endif
 
 typedef struct TZRule {
@@ -766,6 +767,29 @@ static int tzdb_id_from_path(const char *path)
     return tp_tzdb_lookup(path, strlen(path));
 }
 
+#if defined(_WIN32)
+static int tzdb_windows_system(void)
+{
+    DYNAMIC_TIME_ZONE_INFORMATION info;
+    char name[128];
+    size_t i;
+
+    if (GetDynamicTimeZoneInformation(&info) == TIME_ZONE_ID_INVALID)
+        return -1;
+    for (i = 0; i + 1 < sizeof(name) && info.TimeZoneKeyName[i]; i++) {
+        if (info.TimeZoneKeyName[i] > 0x7f)
+            return -1;
+        name[i] = (char)info.TimeZoneKeyName[i];
+    }
+    name[i] = '\0';
+    for (i = 0; i < countof(tp_windows_zones); i++) {
+        if (strcmp(tp_windows_zones[i][0], name) == 0)
+            return tp_tzdb_lookup(tp_windows_zones[i][1], strlen(tp_windows_zones[i][1]));
+    }
+    return -1;
+}
+#endif
+
 int tp_tzdb_system(void)
 {
     const char *tz = getenv("TZ");
@@ -778,7 +802,11 @@ int tp_tzdb_system(void)
         if (id >= 0)
             return id;
     }
-#if !defined(_WIN32)
+#if defined(_WIN32)
+    id = tzdb_windows_system();
+    if (id >= 0)
+        return id;
+#else
     {
         char buf[1024];
         ssize_t n = readlink("/etc/localtime", buf, sizeof(buf) - 1);

@@ -29,6 +29,7 @@ qjs_srcs = files(
   'quickjs.c',
   'quickjs-temporal.c',
   'quickjs-temporal-calendar.c',
+  'quickjs-temporal-calendars.c',
   'quickjs-temporal-duration.c',
   'quickjs-temporal-instant.c',
   'quickjs-temporal-parse.c',
