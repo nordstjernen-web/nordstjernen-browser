@@ -229,14 +229,12 @@ static JSValue tp_instant_equals(JSContext *ctx, JSValueConst this_val, int argc
 
 static JSValue tp_instant_string(JSContext *ctx, tp_i128 ns, const TPTimeZone *tz, int precision)
 {
-    TPTimeZone output = tz ? *tz : tp_system_time_zone();
+    TPTimeZone output = { TP_TZ_UTC_ID, 0 };
     TPDateTime dt;
     TPBuf b;
 
-    if (!tz) {
-        output.id = TP_TZ_UTC_ID;
-        output.offset_minutes = 0;
-    }
+    if (tz)
+        output = *tz;
     tp_iso_datetime_for(output, ns, &dt);
     tp_buf_init(&b);
     tp_put_iso_datetime(&b, &dt, TP_CAL_ISO8601, precision, TP_SHOW_CAL_NEVER);

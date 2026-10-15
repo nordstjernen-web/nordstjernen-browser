@@ -3,59 +3,39 @@
 #include "cutils.h"
 #include "quickjs-temporal.h"
 
-static bool tz_ascii_ieq(const char *a, size_t alen, const char *b)
-{
-    size_t i;
-    if (strlen(b) != alen)
-        return false;
-    for (i = 0; i < alen; i++) {
-        char x = a[i], y = b[i];
-        if (x >= 'A' && x <= 'Z')
-            x = (char)(x + 32);
-        if (y >= 'A' && y <= 'Z')
-            y = (char)(y + 32);
-        if (x != y)
-            return false;
-    }
-    return true;
-}
-
 static int tz_named_lookup(const char *s, size_t len)
 {
-    if (tz_ascii_ieq(s, len, "UTC"))
-        return TP_TZ_UTC_ID;
-    return -1;
+    return tp_tzdb_lookup(s, len);
 }
 
 static const char *tz_named_identifier(int id)
 {
-    return "UTC";
+    return tp_tzdb_identifier(id);
 }
 
 static int tz_named_primary(int id)
 {
-    return TP_TZ_UTC_ID;
+    return tp_tzdb_primary(id);
 }
 
 static int64_t tz_named_offset_ns(int id, tp_i128 ns)
 {
-    return 0;
+    return tp_tzdb_offset_ns(id, ns);
 }
 
 static int tz_named_possible(int id, const TPDateTime *dt, tp_i128 out[2])
 {
-    out[0] = tp_utc_epoch_ns(dt);
-    return 1;
+    return tp_tzdb_possible(id, dt, out);
 }
 
 static bool tz_named_next_transition(int id, tp_i128 ns, tp_i128 *out)
 {
-    return false;
+    return tp_tzdb_next_transition(id, ns, out);
 }
 
 static bool tz_named_previous_transition(int id, tp_i128 ns, tp_i128 *out)
 {
-    return false;
+    return tp_tzdb_previous_transition(id, ns, out);
 }
 
 static TPTimeZone tz_offset(int32_t minutes)
@@ -394,7 +374,7 @@ void tp_format_offset_rounded(TPBuf *b, int64_t offset_ns)
 
 TPTimeZone tp_system_time_zone(void)
 {
-    return tz_named(TP_TZ_UTC_ID);
+    return tz_named(tp_tzdb_system());
 }
 
 tp_i128 tp_system_epoch_ns(void)
