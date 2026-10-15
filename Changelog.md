@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: decorators (`@dec` on classes, methods, getters, setters,
+  fields and `accessor` elements, with `context.access`,
+  `addInitializer` and `Symbol.metadata`) and auto-accessors
+  (`accessor x = 1`) are supported.
 * JavaScript: calls in tail position of strict-mode code reuse the
   caller's frame, so deep recursion written in tail form (including
   through `?:`, `&&`, `||`, `??` and catch clauses) no longer overflows the
