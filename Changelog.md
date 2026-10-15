@@ -3,6 +3,8 @@ Changelog:
 
 1.0.32:
 ======
+* Headless runs look for `<video>` elements once per layout instead of on
+  every settle tick, matching the interactive renderer.
 * Style: elements whose style reads an attribute through `attr()` are
   restyled when one of their attributes changes instead of on every
   relayout, so forced layouts on image-heavy pages skip most of the tree.
