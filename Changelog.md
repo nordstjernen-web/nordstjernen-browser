@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: calls in tail position of strict-mode code reuse the
+  caller's frame, so deep recursion written in tail form (including
+  through `?:`, `&&`, `||`, `??` and catch clauses) no longer overflows the
+  stack, and such calls are faster.
 * JavaScript: `ShadowRealm` is available: `evaluate` runs code in a
   separate realm and `importValue` loads a module there, with only
   primitives and wrapped functions crossing the boundary.
