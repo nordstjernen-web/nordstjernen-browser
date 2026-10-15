@@ -306,6 +306,7 @@ set(qjs_sources
     quickjs-intl-relative.c
     quickjs-intl-displaynames.c
     quickjs-intl-duration.c
+    quickjs-intl-segmenter.c
 )
 
 if(QJS_BUILD_LIBC)
