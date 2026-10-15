@@ -19428,9 +19428,9 @@ ns_window_getRandomValues(JSContext *ctx, JSValueConst this_val,
     uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
     JS_FreeValue(ctx, buf);
     if (!base || byte_offset + aligned > total)
-        return JS_ThrowInternalError(ctx, "getRandomValues: backing buffer unavailable");
+        return JS_ThrowTypeError(ctx, "getRandomValues: backing buffer unavailable");
     if (!ns_security_csprng_fill(base + byte_offset, aligned))
-        return JS_ThrowInternalError(ctx, "CSPRNG unavailable");
+        return JS_ThrowTypeError(ctx, "CSPRNG unavailable");
     return JS_DupValue(ctx, arr);
 }
 
@@ -19441,7 +19441,7 @@ ns_window_randomUUID(JSContext *ctx, JSValueConst this_val,
     (void)this_val; (void)argc; (void)argv;
     guint32 r[4];
     if (!ns_security_csprng_fill(r, sizeof(r)))
-        return JS_ThrowInternalError(ctx, "CSPRNG unavailable");
+        return JS_ThrowTypeError(ctx, "CSPRNG unavailable");
     r[1] = (r[1] & 0xffff0fff) | 0x00004000;
     r[2] = (r[2] & 0x3fffffff) | 0x80000000;
     char buf[37];
@@ -55671,7 +55671,7 @@ ns_zlib_create(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
                        window_bits, 8, Z_DEFAULT_STRATEGY);
     if (rc != Z_OK) {
         g_free(c);
-        return JS_ThrowInternalError(ctx, "zlib initialization failed");
+        return JS_ThrowTypeError(ctx, "zlib initialization failed");
     }
     c->inited = TRUE;
 
@@ -55758,7 +55758,7 @@ ns_zlib_push(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
     JS_FreeValue(ctx, buf);
     if (!base || off + len > total)
-        return JS_ThrowInternalError(ctx, "zlib push: backing buffer unavailable");
+        return JS_ThrowTypeError(ctx, "zlib push: backing buffer unavailable");
     return ns_zlib_run(ctx, c, base + off, len, FALSE);
 }
 

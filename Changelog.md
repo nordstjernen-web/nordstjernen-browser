@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: QuickJS is updated to quickjs-ng 9b06171. Template
+  literals convert each substitution to a string as soon as it is
+  evaluated, and engine-internal errors can no longer be caught by page
+  scripts. Failures in WebGPU, WebAssembly, `getRandomValues` and the
+  compression streams throw catchable `TypeError`/`RangeError` instead.
+* JavaScript: a module's top-level `using` and `await using` bindings can
+  be exported, and functions declared in the module see them.
+  `Function.prototype.toString` of a built-in whose name is not an
+  identifier, such as the `RegExp.$&` getter, prints the name as a
+  computed key. test262 reports no failures on the enabled tests.
 * DOM: the HTML insertion methods `appendHTML`, `prependHTML`,
   `beforeHTML`, `afterHTML` and `replaceWithHTML`, with their
   `…Unsafe` variants, are available on elements, shadow roots and
