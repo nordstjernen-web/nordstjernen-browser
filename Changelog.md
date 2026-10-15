@@ -62,6 +62,9 @@ Changelog:
   `%AbstractModuleSource%` is available to hosts. JavaScript modules have
   no source form, so importing one in the source phase throws a
   `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: the browser's own `Intl` (`src/js_intl.c`) is gone; every
+  page, worker and test262 run uses the engine's CLDR-generated `Intl`,
+  whose default locale is now the page's `navigator.language`.
 * JavaScript: `Intl.Segmenter` splits text into graphemes, words and
   sentences with the Unicode 17 UAX #29 rules (extended grapheme clusters,
   emoji ZWJ sequences, Indic conjuncts), runs of Thai, Lao, Khmer and
@@ -95,8 +98,7 @@ Changelog:
   `formatToParts`, in about 100 languages and their numbering systems.
   `Intl.PluralRules` covers every CLDR language, and `Intl.Collator`,
   `localeCompare` and Turkish/Lithuanian `toLocaleUpperCase`/
-  `toLocaleLowerCase` are locale-aware. The browser still installs its
-  own `Intl` for date formatting until the engine has it.
+  `toLocaleLowerCase` are locale-aware.
 * JavaScript: an assignment resolves its target before evaluating the
   right-hand side. A strict-mode assignment to an undeclared global throws
   even when the right-hand side creates it, and a `var` introduced by a
