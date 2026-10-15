@@ -240,7 +240,6 @@ L.append(node("js_realm", "js_realm.c", "native ShadowRealm"))
 L.append(node("js_canvas", "js_canvas.c",
               "Canvas 2D, Path2D, ImageBitmap, DOMMatrix", "Cairo, Pango"))
 L.append(node("js_intl", "js_intl.c", "ECMA-402 Intl, ICU-free"))
-L.append(node("js_date", "js_date.c", "Temporal API, ICU-free"))
 L.append(node("js_perf", "js_perf.c", "performance.* + PerformanceObserver"))
 L.append(node("bytecode_cache", "bytecode_cache.c",
               "compiled-bytecode cache keyed by SHA-256;\n"
@@ -434,7 +433,7 @@ for a, b in [
     ("mic", "lexbor"), ("mic", "quickjs"), ("camera", "wamr"),
     ("camera", "wuffs"), ("webgpu", "plmpeg"),
     ("config", "debuglog"), ("history", "datetime"),
-    ("js", "js_realm"), ("js", "js_intl"), ("js", "js_date"),
+    ("js", "js_realm"), ("js", "js_intl"),
     ("js", "js_perf"),
     ("image_dec", "pdf"), ("texture", "spellcheck"),
     ("net", "netutil"), ("cache", "safebrowsing"), ("net_http2", "csp"),

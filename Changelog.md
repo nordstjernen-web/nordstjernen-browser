@@ -16,6 +16,14 @@ Changelog:
   a receiver other than `RegExp`, and are cleared by a match of a `RegExp`
   subclass or another realm's regexp; a `String.prototype.replace` that
   deletes matches updates them too.
+* JavaScript: Temporal is built into the engine and follows the current
+  specification for the ISO 8601 calendar: `PlainDate`, `PlainTime`,
+  `PlainDateTime`, `PlainYearMonth`, `PlainMonthDay`, `ZonedDateTime`,
+  `Instant`, `Duration` and `Temporal.Now`, with `round()`, `total()`,
+  `relativeTo`, every rounding mode, the RFC 9557 string formats and
+  `Date.prototype.toTemporalInstant`. Arithmetic is exact to the
+  nanosecond. Time zones are UTC and fixed offsets. test262's Temporal
+  tests all pass.
 * JavaScript: an assignment resolves its target before evaluating the
   right-hand side. A strict-mode assignment to an undeclared global throws
   even when the right-hand side creates it, and a `var` introduced by a
