@@ -58,7 +58,6 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "html.h"
 #include "idb.h"
 #include "image.h"
-#include "js_intl.h"
 #include "js_brand.h"
 #include "js_realm.h"
 #include "layout.h"
@@ -11478,6 +11477,15 @@ static gboolean
 ns_compat_has_client_hints(const char *nav_ua)
 {
     return ns_user_agent_has_client_hints(nav_ua);
+}
+
+static void
+ns_js_set_intl_locale(JSRuntime *rt)
+{
+    char **language_names = ns_net_navigator_languages();
+    if (language_names && language_names[0])
+        JS_SetDefaultLocale(rt, language_names[0]);
+    g_strfreev(language_names);
 }
 
 static void
@@ -28116,6 +28124,7 @@ ns_worker_js_new(ns_worker_host *host)
         ns_worker_js_abandon(js);
         return NULL;
     }
+    ns_js_set_intl_locale(js->rt);
     const ns_config *c = ns_config_get();
     int mb = c ? c->js_memory_cap_mb : 256;
     if (mb <= 0) mb = 256;
@@ -28212,7 +28221,6 @@ ns_worker_js_new(ns_worker_host *host)
     ns_url_install_interface(ctx);
 
     ns_wasm_install(ctx, global);
-    ns_js_intl_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
@@ -55586,7 +55594,6 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     ns_set_if_missing(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
-    ns_js_intl_install(ctx, global);
     ns_js_realm_install(ctx, global);
 
     ns_bind_fn_if_missing(ctx, global, "captureEvents", ns_event_noop, 0);
@@ -57317,6 +57324,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     if (js->rt) {
         const ns_config *c = ns_config_get();
         int mb = c ? c->js_memory_cap_mb : 2048;
+        ns_js_set_intl_locale(js->rt);
         if (mb <= 0) mb = 2048;
         JS_SetInterruptHandler(js->rt, ns_js_interrupt_cb, js);
         JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);

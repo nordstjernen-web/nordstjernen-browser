@@ -85,8 +85,8 @@ need('TransformStream ctor',  function () { return typeof TransformStream === 'f
 need('TextEncoderStream ctor', function () { return typeof TextEncoderStream === 'function'; });
 need('TextDecoderStream ctor', function () { return typeof TextDecoderStream === 'function'; });
 
-// Intl (ECMA-402) is provided natively by src/js_intl.c, not by polyfills.js,
-// so it is intentionally absent when this script runs polyfills.js in bare qjs.
+// Intl (ECMA-402) is part of the QuickJS engine (src/quickjs/quickjs-intl*.c),
+// not of polyfills.js.
 
 need('CompressionStream ctor',   function () { return typeof CompressionStream === 'function'; });
 need('DecompressionStream ctor', function () { return typeof DecompressionStream === 'function'; });

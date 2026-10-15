@@ -4016,7 +4016,7 @@
     TextDecoderStream.__ndRealmProto = true;
     defineCtor('TextDecoderStream', TextDecoderStream);
 
-    // Intl (ECMA-402) is implemented natively in C; see src/js_intl.c.
+    // Intl (ECMA-402) is part of the QuickJS engine; see src/quickjs/quickjs-intl*.c.
 
     var zlibCreate = global.__ns_zlib_create;
     var zlibPush   = global.__ns_zlib_push;
