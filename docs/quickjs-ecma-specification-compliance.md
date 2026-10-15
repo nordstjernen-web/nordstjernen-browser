@@ -79,6 +79,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Legacy RegExp statics: receiver check, getter-only accessors, subclass/cross-realm invalidation, `compile` restriction | 50 | low | **done** (`legacy-regexp` enabled) |
 | `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
 | Proper tail calls in strict mode | 35 | medium | **done** (`tail-call-optimization` enabled; see #30) |
+| Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
 
 ## Changes
 
@@ -1017,3 +1018,35 @@ is a bare `ret`, so the call before it is in tail position as the
 specification says. The interpreter is faster on tail calls than before
 because no new frame is set up.
 
+### 31. Temporal is an engine intrinsic
+
+**Spec:** [Temporal](https://tc39.es/proposal-temporal/) (now merged into
+the ECMA-262 draft) and `Date.prototype.toTemporalInstant`.
+
+**Gap:** the engine had no Temporal at all; `test262.conf` skipped the
+feature and the browser installed a small partial shim (`src/js_date.c`)
+on its own contexts only.
+
+**Implementation:** `JS_AddIntrinsicTemporal`, called from
+`JS_NewContext`, registers the namespace from
+`src/quickjs/quickjs-temporal*.c`: the class plumbing and option readers
+(`quickjs-temporal.c`), ISO 8601 date arithmetic and the calendar
+interface (`-calendar.c`), the RFC 9557 grammar as a hand-written parser
+(`-parse.c`), time zones (`-tz.c`), Duration with the
+difference/rounding/total engine (`-duration.c`), and the types
+(`-instant.c`, `-zoned.c`, `-plain.c`, `-partial.c`). Epoch nanoseconds
+and time durations are `__int128`, so every mathematical-value step of
+the specification is exact; `total()` divides exactly and rounds once.
+Five engine hooks at the end of `quickjs.c` give the module
+`OrdinaryCreateFromConstructor`, `thisTimeValue`, `ToPrimitive`,
+`ToBigInt` and 128-bit BigInt conversion. Calendars other than `iso8601`
+and IANA time zones other than `UTC` plug in behind
+`tp_calendar_*`/`tz_named_*` without changing the types. The browser shim
+is gone.
+
+All 4603 `built-ins/Temporal` and `toTemporalInstant` tests pass in both
+modes, and `Temporal` is enabled in `test262.conf`. Two places follow the
+reference implementation rather than the literal spec text:
+`ComputeNudgeWindow` uses the origin as the window start only when the
+start duration is zero, and the ISO `CalendarDateUntil` jumps straight to
+the candidate year/month instead of stepping one unit at a time.

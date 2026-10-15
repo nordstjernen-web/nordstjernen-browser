@@ -47,6 +47,7 @@
 #include "quickjs.h"
 #include "libregexp.h"
 #include "dtoa.h"
+#include "quickjs-temporal.h"
 
 #if defined(EMSCRIPTEN) || defined(_MSC_VER)
 #define DIRECT_DISPATCH  0
@@ -2983,6 +2984,7 @@ JSContext *JS_NewContext(JSRuntime *rt)
         JS_AddIntrinsicWeakRef(ctx) ||
         JS_AddIntrinsicShadowRealm(ctx) ||
         JS_AddIntrinsicAToB(ctx) ||
+        JS_AddIntrinsicTemporal(ctx) ||
         JS_AddPerformance(ctx)) {
         JS_FreeContext(ctx);
         return NULL;
@@ -67270,6 +67272,69 @@ uintptr_t js_std_cmd(int cmd, ...) {
     va_end(ap);
 
     return rv;
+}
+
+JSValue js_temporal_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id)
+{
+    return js_create_from_ctor(ctx, ctor, class_id);
+}
+
+int js_temporal_this_time_value(JSContext *ctx, double *pres, JSValueConst this_val)
+{
+    return JS_ThisTimeValue(ctx, pres, this_val);
+}
+
+JSValue js_temporal_date_prototype(JSContext *ctx)
+{
+    return js_dup(ctx->class_proto[JS_CLASS_DATE]);
+}
+
+JSValue js_temporal_to_primitive(JSContext *ctx, JSValueConst val, bool hint_string)
+{
+    return JS_ToPrimitive(ctx, val, hint_string ? HINT_STRING : HINT_NUMBER);
+}
+
+JSValue js_temporal_to_bigint(JSContext *ctx, JSValueConst val)
+{
+    return JS_ToBigInt(ctx, val);
+}
+
+JSValue js_temporal_new_bigint128(JSContext *ctx, __int128 v)
+{
+    JSBigInt *r;
+    unsigned __int128 u = (unsigned __int128)v;
+    int i;
+
+    if (v >= JS_SHORT_BIG_INT_MIN && v <= JS_SHORT_BIG_INT_MAX)
+        return __JS_NewShortBigInt(ctx, (int64_t)v);
+    r = js_bigint_new(ctx, 128 / JS_LIMB_BITS);
+    if (!r)
+        return JS_EXCEPTION;
+    for (i = 0; i < 128 / JS_LIMB_BITS; i++)
+        r->tab[i] = (js_limb_t)(u >> (i * JS_LIMB_BITS));
+    r = js_bigint_normalize(ctx, r);
+    return JS_CompactBigInt(ctx, r);
+}
+
+int js_temporal_bigint_to_i128(JSContext *ctx, __int128 *pres, JSValueConst val)
+{
+    JSBigInt *p;
+    unsigned __int128 u = 0;
+    int i;
+
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
+        *pres = JS_VALUE_GET_SHORT_BIG_INT(val);
+        return 0;
+    }
+    p = JS_VALUE_GET_PTR(val);
+    if (p->len * JS_LIMB_BITS > 128)
+        return -1;
+    for (i = 0; i < (int)p->len; i++)
+        u |= (unsigned __int128)p->tab[i] << (i * JS_LIMB_BITS);
+    if (p->len * JS_LIMB_BITS < 128 && js_bigint_sign(p))
+        u |= ~(unsigned __int128)0 << (p->len * JS_LIMB_BITS);
+    *pres = (__int128)u;
+    return 0;
 }
 
 #undef malloc
