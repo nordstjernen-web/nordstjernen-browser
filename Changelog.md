@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: an assignment resolves its target before evaluating the
+  right-hand side. A strict-mode assignment to an undeclared global throws
+  even when the right-hand side creates it, and a `var` introduced by a
+  direct `eval` in the right-hand side no longer captures the store.
 * JavaScript: QuickJS is updated to quickjs-ng 9b06171. Template
   literals convert each substitution to a string as soon as it is
   evaluated, and engine-internal errors can no longer be caught by page
