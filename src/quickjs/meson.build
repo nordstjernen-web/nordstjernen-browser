@@ -35,6 +35,7 @@ qjs_srcs = files(
   'quickjs-temporal-partial.c',
   'quickjs-temporal-plain.c',
   'quickjs-temporal-tz.c',
+  'quickjs-temporal-tzdb.c',
   'quickjs-temporal-zoned.c',
 )
 qjs_libc_srcs = files('quickjs-libc.c')

@@ -436,7 +436,7 @@ static JSValue tp_zoned_round(JSContext *ctx, JSValueConst this_val, int argc, J
         if (tp_start_of_day(ctx, o->tz, dt.date, &start) ||
             tp_start_of_day(ctx, o->tz, tp_add_days(dt.date, 1), &end))
             goto done;
-        ns = tp_round_to_increment(o->ns - start, end - start, mode) + start;
+        ns = tp_round_to_increment((o->ns >= end ? end - 1 : o->ns) - start, end - start, mode) + start;
     } else {
         TPDateTime rounded = tp_round_iso_datetime(&dt, increment, smallest, mode);
         if (tp_interpret_iso_datetime_offset(ctx, rounded.date, &rounded.time, TP_OFFSET_BEHAVIOUR_OPTION,
