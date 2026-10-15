@@ -175,6 +175,7 @@ bool intl_is_numbering_system(const char *name);
 bool intl_is_calendar(const char *name);
 const char *intl_canonical_calendar(const char *name);
 int intl_find_time_zone(const char *name, const char **identifier, const char **primary);
+bool tp_tzdb_is_link(const char *name);
 int intl_parse_offset_time_zone(const char *s, int *minutes);
 const char *intl_script_direction(const char *script);
 

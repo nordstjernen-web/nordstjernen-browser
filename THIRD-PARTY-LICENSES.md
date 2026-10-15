@@ -113,6 +113,24 @@ license including the LLVM exceptions is reproduced in
 
 ---
 
+### ICU4X calendar data and CLDR time zone names — Unicode License v3
+
+> Chinese, Korean and Umm al-Qura year tables
+> (`src/quickjs/quickjs-temporal-caldata.h`, packed from ICU4X by
+> `scripts/gen-temporal-calendar-data.py`) and the Windows-to-IANA time
+> zone table (`src/quickjs/quickjs-temporal-winzones.h`, from CLDR
+> `windowsZones.xml` by `scripts/gen-temporal-windows-zones.py`).
+> <https://github.com/unicode-org/icu4x>, <https://github.com/unicode-org/cldr>
+>
+> Copyright © 2016-2025 Unicode, Inc.
+
+Licensed under the Unicode License v3,
+<https://www.unicode.org/license.txt>. Permission is granted to use, copy,
+modify and distribute the data provided the copyright and permission
+notice appear with all copies.
+
+---
+
 ### ns-pango — GNU LGPL 2.1 or later (modified Pango, statically linked)
 
 > Text itemization, shaping and line breaking, with a cache of shaped runs

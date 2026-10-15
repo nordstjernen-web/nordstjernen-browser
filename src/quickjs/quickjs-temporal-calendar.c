@@ -14,7 +14,18 @@ static const int tp_sorted_fields[TP_F_COUNT] = {
     TP_F_MONTH, TP_F_MONTH_CODE, TP_F_NANOSECOND, TP_F_OFFSET, TP_F_SECOND, TP_F_TIME_ZONE, TP_F_YEAR
 };
 
-static const char *const tp_calendar_ids[] = { "iso8601" };
+static const char *const tp_calendar_ids[TP_CAL_COUNT] = {
+    "iso8601", "buddhist", "chinese", "coptic", "dangi", "ethioaa", "ethiopic", "gregory", "hebrew", "indian",
+    "islamic-civil", "islamic-tbla", "islamic-umalqura", "japanese", "persian", "roc"
+};
+
+static const struct {
+    const char *alias;
+    TPCalendar cal;
+} tp_calendar_aliases[] = {
+    { "ethiopic-amete-alem", TP_CAL_ETHIOAA },
+    { "islamicc", TP_CAL_ISLAMIC_CIVIL },
+};
 
 bool tp_is_leap_year(int64_t year)
 {
@@ -366,6 +377,12 @@ int tp_canonicalize_calendar(JSContext *ctx, const char *s, size_t len, TPCalend
             return 0;
         }
     }
+    for (i = 0; i < (int)countof(tp_calendar_aliases); i++) {
+        if (tp_ascii_lower_equals(s, len, tp_calendar_aliases[i].alias)) {
+            *out = tp_calendar_aliases[i].cal;
+            return 0;
+        }
+    }
     JS_ThrowRangeError(ctx, "unsupported calendar: %.*s", (int)(len > 64 ? 64 : len), s);
     return -1;
 }
@@ -459,6 +476,10 @@ void tp_calendar_iso_to_date(TPCalendar cal, TPISODate d, TPCalendarDate *out)
     int week;
     int64_t week_year;
 
+    if (cal != TP_CAL_ISO8601) {
+        tp_ncal_iso_to_date(cal, d, out);
+        return;
+    }
     memset(out, 0, sizeof(*out));
     out->has_era = false;
     out->year = d.year;
@@ -485,6 +506,8 @@ int tp_calendar_date_add(JSContext *ctx, TPCalendar cal, TPISODate d, const TPDa
     TPISODate intermediate = tp_balance_year_month(d.year + dur->years, (int64_t)d.month + dur->months);
     TPISODate regulated;
 
+    if (cal != TP_CAL_ISO8601)
+        return tp_ncal_date_add(ctx, cal, d, dur, overflow, out);
     if (tp_regulate_iso_date(ctx, intermediate.year, intermediate.month, d.day, overflow, &regulated))
         return -1;
     *out = tp_add_days(regulated, dur->days + 7 * dur->weeks);
@@ -525,6 +548,10 @@ void tp_calendar_date_until(TPCalendar cal, TPISODate one, TPISODate two, int la
     int64_t years = 0, months = 0, days, candidate;
     TPISODate intermediate;
 
+    if (cal != TP_CAL_ISO8601) {
+        tp_ncal_date_until(cal, one, two, largest_unit, out);
+        return;
+    }
     memset(out, 0, sizeof(*out));
     if (sign == 0)
         return;
@@ -605,6 +632,8 @@ int tp_reject_temporal_like_object(JSContext *ctx, JSValueConst v)
 
 static uint32_t tp_calendar_extra_fields(TPCalendar cal, uint32_t fields)
 {
+    if ((fields & TP_FB(TP_F_YEAR)) && tp_ncal_supports_era(cal))
+        return TP_FB(TP_F_ERA) | TP_FB(TP_F_ERA_YEAR);
     return 0;
 }
 
@@ -702,6 +731,8 @@ int tp_prepare_calendar_fields(JSContext *ctx, TPCalendar cal, JSValueConst obj,
 static uint32_t tp_calendar_field_keys_to_ignore(TPCalendar cal, uint32_t keys)
 {
     uint32_t ignored = keys;
+    if (cal != TP_CAL_ISO8601)
+        return tp_ncal_field_keys_to_ignore(cal, keys);
     if (keys & TP_FB(TP_F_MONTH))
         ignored |= TP_FB(TP_F_MONTH_CODE);
     if (keys & TP_FB(TP_F_MONTH_CODE))
@@ -773,6 +804,8 @@ static int tp_calendar_resolve_fields(JSContext *ctx, TPCalendar cal, TPFields *
     bool needs_year = type == TP_FIELDS_DATE || type == TP_FIELDS_YEAR_MONTH;
     bool needs_day = type == TP_FIELDS_DATE || type == TP_FIELDS_MONTH_DAY;
 
+    if (cal != TP_CAL_ISO8601)
+        return tp_ncal_resolve_fields(ctx, cal, f, type);
     if (needs_year && !(f->has & TP_FB(TP_F_YEAR))) {
         JS_ThrowTypeError(ctx, "year is required");
         return -1;
@@ -805,7 +838,10 @@ int tp_calendar_date_from_fields(JSContext *ctx, TPCalendar cal, TPFields *field
 {
     if (tp_calendar_resolve_fields(ctx, cal, fields, TP_FIELDS_DATE))
         return -1;
-    if (tp_regulate_iso_date(ctx, fields->v[TP_F_YEAR], fields->v[TP_F_MONTH], fields->v[TP_F_DAY], overflow, out))
+    if (cal != TP_CAL_ISO8601) {
+        if (tp_ncal_date_to_iso(ctx, cal, fields, overflow, out))
+            return -1;
+    } else if (tp_regulate_iso_date(ctx, fields->v[TP_F_YEAR], fields->v[TP_F_MONTH], fields->v[TP_F_DAY], overflow, out))
         return -1;
     if (!tp_iso_date_within_limits(*out)) {
         JS_ThrowRangeError(ctx, "date is outside the supported range");
@@ -821,7 +857,10 @@ int tp_calendar_year_month_from_fields(JSContext *ctx, TPCalendar cal, TPFields 
     fields->v[TP_F_DAY] = 1;
     if (tp_calendar_resolve_fields(ctx, cal, fields, TP_FIELDS_YEAR_MONTH))
         return -1;
-    if (tp_regulate_iso_date(ctx, fields->v[TP_F_YEAR], fields->v[TP_F_MONTH], fields->v[TP_F_DAY], overflow, out))
+    if (cal != TP_CAL_ISO8601) {
+        if (tp_ncal_date_to_iso(ctx, cal, fields, overflow, out))
+            return -1;
+    } else if (tp_regulate_iso_date(ctx, fields->v[TP_F_YEAR], fields->v[TP_F_MONTH], fields->v[TP_F_DAY], overflow, out))
         return -1;
     if (!tp_iso_year_month_within_limits(*out)) {
         JS_ThrowRangeError(ctx, "year-month is outside the supported range");
@@ -838,6 +877,8 @@ int tp_calendar_month_day_from_fields(JSContext *ctx, TPCalendar cal, TPFields *
 
     if (tp_calendar_resolve_fields(ctx, cal, fields, TP_FIELDS_MONTH_DAY))
         return -1;
+    if (cal != TP_CAL_ISO8601)
+        return tp_ncal_month_day_to_iso(ctx, cal, fields, overflow, out);
     year = (fields->has & TP_FB(TP_F_YEAR)) ? fields->v[TP_F_YEAR] : 1972;
     if (tp_regulate_iso_date(ctx, year, fields->v[TP_F_MONTH], fields->v[TP_F_DAY], overflow, &r))
         return -1;
