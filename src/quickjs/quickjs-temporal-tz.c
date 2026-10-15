@@ -196,8 +196,6 @@ int tp_possible_epoch_ns(JSContext *ctx, TPTimeZone tz, const TPDateTime *dt, tp
         out[0] = tp_utc_epoch_ns(&balanced);
         *count = 1;
     } else {
-        if (tp_check_iso_days_range(ctx, dt->date))
-            return -1;
         *count = tz_named_possible(tz.id, dt, out);
     }
     for (i = 0; i < *count; i++) {

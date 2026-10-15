@@ -82,6 +82,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Decorators and auto-accessors | 31 | high | **done** (`decorators` enabled, `staging/decorators` included; see #33) |
 | Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
 | Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
+| Temporal non-ISO calendars, eras and month codes (`intl402/Temporal`, `Intl.Era-monthcode`) | ~2000 | high | **done** except `toLocaleString`, which needs `Intl.DateTimeFormat` (see #34) |
 
 ## Changes
 
@@ -1172,4 +1173,41 @@ forwards to the decorator's result, since QuickJS derives the private brand
 from the method's home object. `Symbol.metadata` is a runtime-created symbol
 shared by all realms (adding a predefined atom would renumber the bytecode
 atom table).
+### 34. Temporal calendars other than ISO 8601
 
+**Spec:** ECMA-402's Temporal calendar operations and the
+[Intl era and monthCode](https://tc39.es/proposal-intl-era-monthcode/)
+proposal.
+
+**Implementation:** `src/quickjs/quickjs-temporal-calendars.c` models each
+calendar as a sequence of years, each with a start day, its month lengths
+and the ordinal of its leap month. The arithmetic calendars (Gregorian
+family, Coptic/Ethiopic, Indian, Persian with the 33-year rule and its
+correction list, Hebrew from the molad, tabular Hijri) are computed
+directly. Chinese and Korean years 1900-2102 and Umm al-Qura years
+1300-1600 come from `quickjs-temporal-caldata.h`, packed from ICU4X data
+by `scripts/gen-temporal-calendar-data.py`; outside those ranges the
+lunisolar calendars use ICU4X's mean-motion approximation and Umm al-Qura
+falls back to the civil calendar. `NonISODateUntil` binary-searches the
+year and month counts instead of stepping one unit at a time, and Chinese
+and Korean month addition counts mean synodic months between new years,
+so differences across the whole Temporal range stay fast.
+
+On Windows the system zone comes from `GetDynamicTimeZoneInformation`,
+mapped to IANA through `quickjs-temporal-winzones.h`, generated from CLDR
+`windowsZones.xml` by `scripts/gen-temporal-windows-zones.py`.
+
+Named time zones no longer apply `CheckISODaysRange` in
+`GetPossibleEpochNanoseconds`; the specification applies it only to offset
+zones, and differences against the minimum instant in a zone west of UTC
+need the day before the limit.
+
+All `intl402/Temporal` tests pass except the `toLocaleString` ones and two
+that call `Intl.supportedValuesOf`. `Intl.Era-monthcode` is enabled in
+`test262.conf`. Note for the Intl implementation: `Intl.DateTimeFormat`
+must accept Temporal objects in `format`, `formatToParts` and the range
+methods (ECMA-402 `HandleDateTimeValue`), and the Temporal
+`toLocaleString` methods should construct a `DateTimeFormat` and call it;
+`tp_calendar_iso_to_date` gives the calendar fields, and the
+`TPObject.cal` of an object must match the formatter's calendar except for
+`iso8601`.
