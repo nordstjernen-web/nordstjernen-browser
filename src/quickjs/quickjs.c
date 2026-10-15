@@ -370,6 +370,7 @@ typedef struct JSClass {
 } JSClass;
 
 struct JSRuntime {
+    JSValue symbol_metadata;
     JSMallocFunctions mf;
     char *intl_default_locale;
     char *intl_default_time_zone;
@@ -629,6 +630,7 @@ struct JSContext {
     JSValue function_ctor;
     JSValue array_ctor;
     JSValue regexp_ctor;
+    JSValue decorator_runtime;
     /* the legacy RegExp statics (RegExp.$1, lastMatch, ...): RegExp.input
        and the subject and capture positions of the realm's last match */
     JSValue regexp_legacy_input;
@@ -2459,6 +2461,7 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
         goto fail;
 
     rt->js_class_id_alloc = JS_CLASS_INIT_COUNT;
+    rt->symbol_metadata = JS_UNDEFINED;
 
     rt->stack_size = JS_DEFAULT_STACK_SIZE;
 
@@ -2762,6 +2765,7 @@ void JS_FreeRuntime(JSRuntime *rt)
     JS_FreeValueRT(rt, rt->current_exception);
     js_free_rt(rt, rt->intl_default_locale);
     js_free_rt(rt, rt->intl_default_time_zone);
+    JS_FreeValueRT(rt, rt->symbol_metadata);
     js_free_engine_private_names(rt);
 
     list_for_each_safe(el, el1, &rt->job_list) {
@@ -2992,6 +2996,7 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->iterator_ctor = JS_NULL;
     ctx->iterator_ctor_getset = JS_NULL;
     ctx->regexp_ctor = JS_NULL;
+    ctx->decorator_runtime = JS_UNDEFINED;
     ctx->regexp_legacy_input = JS_NULL;
     ctx->regexp_legacy_subject = JS_NULL;
     ctx->regexp_legacy_count = 0;
@@ -3151,6 +3156,7 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->abstract_module_source_ctor, mark_func);
     JS_MarkValue(rt, ctx->array_ctor, mark_func);
     JS_MarkValue(rt, ctx->regexp_ctor, mark_func);
+    JS_MarkValue(rt, ctx->decorator_runtime, mark_func);
     JS_MarkValue(rt, ctx->regexp_legacy_input, mark_func);
     JS_MarkValue(rt, ctx->regexp_legacy_subject, mark_func);
     JS_MarkValue(rt, ctx->function_ctor, mark_func);
@@ -3240,6 +3246,7 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->abstract_module_source_ctor);
     JS_FreeValue(ctx, ctx->array_ctor);
     JS_FreeValue(ctx, ctx->regexp_ctor);
+    JS_FreeValue(ctx, ctx->decorator_runtime);
     JS_FreeValue(ctx, ctx->regexp_legacy_input);
     JS_FreeValue(ctx, ctx->regexp_legacy_subject);
     JS_FreeValue(ctx, ctx->function_ctor);
@@ -9490,6 +9497,7 @@ int JS_IsInstanceOf(JSContext *ctx, JSValueConst val, JSValueConst obj)
 }
 
 #include "builtin-array-fromasync.h"
+#include "builtin-decorators.h"
 #include "builtin-iterator-zip-keyed.h"
 #include "builtin-iterator-zip.h"
 
@@ -9554,6 +9562,59 @@ static JSValue js_bytecode_eval(JSContext *ctx, const uint8_t *bytecode,
         return JS_EXCEPTION;
     }
     return result;
+}
+
+static JSValue js_object_create(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv);
+static JSValue js_object_getPrototypeOf(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv, int magic);
+static JSValue js_object_getOwnPropertyDescriptor(JSContext *ctx, JSValueConst this_val,
+                                                  int argc, JSValueConst *argv, int magic);
+static JSValue js_reflect_apply(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv);
+
+static JSValue js_symbol_metadata(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+
+    if (JS_IsUndefined(rt->symbol_metadata)) {
+        rt->symbol_metadata = JS_NewSymbol(ctx, "Symbol.metadata", false);
+        if (JS_IsException(rt->symbol_metadata)) {
+            rt->symbol_metadata = JS_UNDEFINED;
+            return JS_EXCEPTION;
+        }
+    }
+    return js_dup(rt->symbol_metadata);
+}
+
+static JSValue js_get_decorator_runtime(JSContext *ctx)
+{
+    if (JS_IsUndefined(ctx->decorator_runtime)) {
+        JSValue argv[] = {
+            JS_NewCFunctionMagic(ctx, js_error_constructor, "TypeError",
+                                 1, JS_CFUNC_constructor_or_func_magic,
+                                 JS_TYPE_ERROR),
+            JS_NewCFunctionMagic(ctx, js_object_defineProperty,
+                                 "defineProperty", 3,
+                                 JS_CFUNC_generic_magic, 0),
+            JS_NewCFunctionMagic(ctx, js_object_getOwnPropertyDescriptor,
+                                 "getOwnPropertyDescriptor", 2,
+                                 JS_CFUNC_generic_magic, 0),
+            JS_NewCFunction(ctx, js_object_create, "create", 2),
+            JS_NewCFunctionMagic(ctx, js_object_getPrototypeOf,
+                                 "getPrototypeOf", 1,
+                                 JS_CFUNC_generic_magic, 0),
+            js_symbol_metadata(ctx),
+            JS_NewCFunction(ctx, js_reflect_apply, "apply", 3),
+        };
+        JSValue fn = js_bytecode_eval(ctx, qjsc_builtin_decorators,
+                                      sizeof(qjsc_builtin_decorators),
+                                      countof(argv), argv);
+        if (JS_IsException(fn))
+            return fn;
+        ctx->decorator_runtime = fn;
+    }
+    return js_dup(ctx->decorator_runtime);
 }
 
 static JSValue js_bytecode_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
@@ -18886,6 +18947,7 @@ typedef enum {
     OP_SPECIAL_OBJECT_VAR_OBJECT,
     OP_SPECIAL_OBJECT_IMPORT_META,
     OP_SPECIAL_OBJECT_NULL_PROTO,
+    OP_SPECIAL_OBJECT_DECORATOR_RUNTIME,
 } OPSpecialObjectEnum;
 
 #define FUNC_RET_AWAIT      0
@@ -19232,6 +19294,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     break;
                 case OP_SPECIAL_OBJECT_NULL_PROTO:
                     *sp++ = JS_NewObjectProtoClass(ctx, JS_NULL, JS_CLASS_OBJECT);
+                    if (unlikely(JS_IsException(sp[-1])))
+                        goto exception;
+                    break;
+                case OP_SPECIAL_OBJECT_DECORATOR_RUNTIME:
+                    *sp++ = js_get_decorator_runtime(ctx);
                     if (unlikely(JS_IsException(sp[-1])))
                         goto exception;
                     break;
@@ -23508,6 +23575,7 @@ typedef struct JSToken {
 } JSToken;
 
 typedef struct JSParseState {
+    bool class_decorators_pending;
     JSContext *ctx;
     int last_line_num;  /* line number of last token */
     int last_col_num;   /* column number of last token */
@@ -26539,6 +26607,7 @@ static __exception int js_parse_object_literal(JSParseState *s)
 /* an object/array literal may start a destructuring assignment: only set
    at the leftmost position of an AssignmentExpression */
 #define PF_PATTERN       (1 << 5)
+#define PF_DECORATOR     (1 << 6)
 
 static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags);
 
@@ -26602,8 +26671,12 @@ typedef struct {
     int computed_fields_count;
     bool need_brand;
     int brand_push_pos;
+    int decorator_push_pos;
     bool is_static;
 } ClassFieldsDef;
+
+static int emit_class_decorator_instance_hook(JSParseState *s,
+                                              ClassFieldsDef *cf);
 
 static __exception int emit_class_init_start(JSParseState *s,
                                              ClassFieldsDef *cf)
@@ -26635,6 +26708,8 @@ static __exception int emit_class_init_start(JSParseState *s,
         emit_op(s, OP_add_brand);
 
         emit_label(s, label_add_brand);
+        if (emit_class_decorator_instance_hook(s, cf))
+            return -1;
     }
     s->cur_func = s->cur_func->parent;
     return 0;
@@ -26722,6 +26797,780 @@ static __exception int js_parse_class_default_ctor(JSParseState *s,
 }
 
 
+static void js_free_function_def(JSContext *ctx, JSFunctionDef *fd);
+
+static JSAtom js_new_class_hidden_name(JSParseState *s, const char *prefix,
+                                       int n)
+{
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "%s %d", prefix, n);
+    return JS_NewAtom(s->ctx, buf);
+}
+
+enum {
+    JS_DECORATOR_RT_BEGIN,
+    JS_DECORATOR_RT_ELEMENT,
+    JS_DECORATOR_RT_INIT_FIELD,
+    JS_DECORATOR_RT_AFTER_FIELD,
+    JS_DECORATOR_RT_RUN_INSTANCE,
+    JS_DECORATOR_RT_RUN_STATIC,
+    JS_DECORATOR_RT_APPLY_CLASS,
+    JS_DECORATOR_RT_SET_METADATA,
+    JS_DECORATOR_RT_FINISH,
+};
+
+enum {
+    JS_DECORATED_METHOD = 1,
+    JS_DECORATED_GETTER,
+    JS_DECORATED_SETTER,
+    JS_DECORATED_FIELD,
+    JS_DECORATED_ACCESSOR,
+};
+
+typedef struct JSDecoratedElement {
+    int kind;
+    bool is_static;
+    bool is_private;
+    JSAtom name;
+    JSAtom key_var;
+    JSAtom dec_var;
+    JSAtom value_var;
+    JSAtom value_var2;
+} JSDecoratedElement;
+
+typedef struct JSClassDecorators {
+    JSDecoratedElement *elems;
+    int count;
+    int size;
+    int next_id;
+    JSAtom state_var;
+    JSAtom class_dec_var;
+    JSAtom class_var;
+    JSAtom new_class_var;
+} JSClassDecorators;
+
+static void emit_decorator_runtime_fn(JSParseState *s, int index)
+{
+    emit_op(s, OP_special_object);
+    emit_u8(s, OP_SPECIAL_OBJECT_DECORATOR_RUNTIME);
+    emit_op(s, OP_push_i32);
+    emit_u32(s, index);
+    emit_op(s, OP_get_array_el);
+}
+
+static void emit_get_hidden_var(JSParseState *s, JSAtom name)
+{
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, name);
+    emit_u16(s, s->cur_func->scope_level);
+}
+
+static void emit_init_hidden_var(JSParseState *s, JSAtom name)
+{
+    emit_op(s, OP_scope_put_var_init);
+    emit_atom(s, name);
+    emit_u16(s, s->cur_func->scope_level);
+}
+
+static JSAtom js_define_hidden_class_var(JSParseState *s, JSClassDecorators *cd,
+                                         const char *prefix)
+{
+    JSAtom name = js_new_class_hidden_name(s, prefix, cd->next_id++);
+
+    if (name == JS_ATOM_NULL)
+        return JS_ATOM_NULL;
+    if (define_var(s, s->cur_func, name, JS_VAR_DEF_CONST) < 0) {
+        JS_FreeAtom(s->ctx, name);
+        return JS_ATOM_NULL;
+    }
+    return name;
+}
+
+static int js_class_decorators_state(JSParseState *s, JSClassDecorators *cd)
+{
+    if (cd->state_var != JS_ATOM_NULL)
+        return 0;
+    cd->state_var = JS_NewAtom(s->ctx, "<decorator state>");
+    if (cd->state_var == JS_ATOM_NULL)
+        return -1;
+    return define_var(s, s->cur_func, cd->state_var, JS_VAR_DEF_CONST) < 0 ? -1 : 0;
+}
+
+static JSDecoratedElement *js_class_decorators_add(JSParseState *s,
+                                                   JSClassDecorators *cd,
+                                                   JSAtom dec_var, int kind,
+                                                   bool is_static,
+                                                   bool is_private, JSAtom name)
+{
+    JSDecoratedElement *de;
+
+    if (js_resize_array(s->ctx, (void **)&cd->elems, sizeof(cd->elems[0]),
+                        &cd->size, cd->count + 1))
+        return NULL;
+    de = &cd->elems[cd->count++];
+    memset(de, 0, sizeof(*de));
+    de->kind = kind;
+    de->is_static = is_static;
+    de->is_private = is_private;
+    de->name = JS_DupAtom(s->ctx, name);
+    de->dec_var = JS_DupAtom(s->ctx, dec_var);
+    return de;
+}
+
+static void js_class_decorators_free(JSContext *ctx, JSClassDecorators *cd)
+{
+    int i;
+
+    for (i = 0; i < cd->count; i++) {
+        JSDecoratedElement *de = &cd->elems[i];
+        JS_FreeAtom(ctx, de->name);
+        JS_FreeAtom(ctx, de->key_var);
+        JS_FreeAtom(ctx, de->dec_var);
+        JS_FreeAtom(ctx, de->value_var);
+        JS_FreeAtom(ctx, de->value_var2);
+    }
+    js_free(ctx, cd->elems);
+    JS_FreeAtom(ctx, cd->state_var);
+    JS_FreeAtom(ctx, cd->class_dec_var);
+    JS_FreeAtom(ctx, cd->class_var);
+    JS_FreeAtom(ctx, cd->new_class_var);
+}
+
+static int js_parse_decorator_list(JSParseState *s)
+{
+    int count = 0;
+
+    while (s->token.val == '@') {
+        if (next_token(s))
+            return -1;
+        if (s->token.val == '(') {
+            if (next_token(s) || js_parse_expr(s) || js_parse_expect(s, ')'))
+                return -1;
+        } else if (s->token.val == TOK_IDENT || s->token.val == TOK_AWAIT ||
+                   s->token.val == TOK_YIELD) {
+            if (s->token.val == TOK_IDENT && s->token.u.ident.is_reserved)
+                return js_parse_error_reserved_identifier(s);
+            if (js_parse_postfix_expr(s, PF_POSTFIX_CALL | PF_DECORATOR))
+                return -1;
+        } else {
+            return js_parse_error(s, "invalid decorator");
+        }
+        count++;
+    }
+    emit_op(s, OP_array_from);
+    emit_u16(s, count);
+    return 0;
+}
+
+static void emit_decorated_field_init(JSParseState *s, JSClassDecorators *cd,
+                                      int slot)
+{
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_INIT_FIELD);
+    emit_op(s, OP_swap);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_op(s, OP_push_i32);
+    emit_u32(s, slot);
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    emit_op(s, OP_call);
+    emit_u16(s, 4);
+}
+
+static void emit_decorated_field_after(JSParseState *s, JSClassDecorators *cd,
+                                       int slot)
+{
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_AFTER_FIELD);
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_op(s, OP_push_i32);
+    emit_u32(s, slot);
+    emit_op(s, OP_call);
+    emit_u16(s, 3);
+    emit_op(s, OP_drop);
+}
+
+static int js_emit_private_access_fn(JSParseState *s, JSAtom name, int op)
+{
+    JSFunctionDef *fd;
+    int idx, n_args = op == OP_scope_put_private_field ? 2 : 1;
+
+    fd = js_new_function_def(s->ctx, s->cur_func, false, true, s->filename,
+                             s->token.line_num, s->token.col_num);
+    if (!fd)
+        return -1;
+    s->cur_func = fd;
+    fd->func_kind = JS_FUNC_NORMAL;
+    fd->func_type = JS_PARSE_FUNC_METHOD;
+    fd->has_this_binding = true;
+    fd->has_arguments_binding = true;
+    fd->arguments_allowed = true;
+    fd->new_target_allowed = true;
+    fd->has_simple_parameter_list = true;
+    if (add_arg(s->ctx, fd, JS_ATOM_object) < 0 ||
+        (n_args == 2 && add_arg(s->ctx, fd, JS_ATOM_value) < 0)) {
+        s->cur_func = fd->parent;
+        js_free_function_def(s->ctx, fd);
+        return -1;
+    }
+    fd->defined_arg_count = n_args;
+    push_scope(s);
+    fd->body_scope = fd->scope_level;
+    emit_op(s, OP_get_arg);
+    emit_u16(s, 0);
+    if (n_args == 2) {
+        emit_op(s, OP_get_arg);
+        emit_u16(s, 1);
+    }
+    emit_op(s, op);
+    emit_atom(s, name);
+    emit_u16(s, s->cur_func->scope_level);
+    emit_op(s, n_args == 2 ? OP_return_undef : OP_return);
+    s->cur_func = fd->parent;
+    idx = cpool_add(s, JS_NULL);
+    fd->parent_cpool_idx = idx;
+    emit_op(s, OP_fclosure);
+    emit_u32(s, idx);
+    emit_op(s, OP_set_name);
+    emit_atom(s, op == OP_scope_get_private_field ? JS_ATOM_get :
+              op == OP_scope_put_private_field ? JS_ATOM_set : JS_ATOM_has);
+    return 0;
+}
+
+static int js_emit_private_trampoline(JSParseState *s, JSAtom target_var,
+                                      bool is_static)
+{
+    JSFunctionDef *fd;
+    int idx;
+
+    fd = js_new_function_def(s->ctx, s->cur_func, false, true, s->filename,
+                             s->token.line_num, s->token.col_num);
+    if (!fd)
+        return -1;
+    s->cur_func = fd;
+    fd->has_home_object = true;
+    fd->need_home_object = true;
+    fd->has_arguments_binding = true;
+    fd->has_this_binding = true;
+    fd->new_target_allowed = true;
+    fd->super_allowed = true;
+    fd->arguments_allowed = true;
+    fd->func_kind = JS_FUNC_NORMAL;
+    fd->func_type = JS_PARSE_FUNC_METHOD;
+    fd->has_simple_parameter_list = true;
+    push_scope(s);
+    fd->body_scope = fd->scope_level;
+    emit_get_hidden_var(s, target_var);
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    emit_op(s, OP_special_object);
+    emit_u8(s, OP_SPECIAL_OBJECT_ARGUMENTS);
+    emit_op(s, OP_apply);
+    emit_u16(s, 0);
+    emit_op(s, OP_return);
+    s->cur_func = fd->parent;
+    idx = cpool_add(s, JS_NULL);
+    fd->parent_cpool_idx = idx;
+    if (is_static)
+        emit_op(s, OP_swap);
+    emit_op(s, OP_fclosure);
+    emit_u32(s, idx);
+    emit_op(s, OP_set_home_object);
+    return 0;
+}
+
+static JSAtom js_emit_store_result(JSParseState *s, JSClassDecorators *cd)
+{
+    JSAtom result = js_define_hidden_class_var(s, cd, "<decorated result>");
+
+    if (result != JS_ATOM_NULL)
+        emit_init_hidden_var(s, result);
+    return result;
+}
+
+static int js_emit_private_install_from(JSParseState *s, JSAtom result,
+                                        JSAtom private_name, bool is_static)
+{
+    int ret = js_emit_private_trampoline(s, result, is_static);
+
+    if (ret == 0) {
+        emit_init_hidden_var(s, private_name);
+        if (is_static)
+            emit_op(s, OP_swap);
+    }
+    JS_FreeAtom(s->ctx, result);
+    return ret;
+}
+
+static int js_emit_private_install(JSParseState *s, JSClassDecorators *cd,
+                                   JSAtom private_name, bool is_static)
+{
+    JSAtom result = js_emit_store_result(s, cd);
+
+    if (result == JS_ATOM_NULL)
+        return -1;
+    return js_emit_private_install_from(s, result, private_name, is_static);
+}
+
+static int js_emit_decorate_element(JSParseState *s, JSClassDecorators *cd,
+                                    JSDecoratedElement *de, int slot,
+                                    JSAtom class_var, JSAtom proto_var)
+{
+    JSAtom setter_name = JS_ATOM_NULL;
+    int ret = -1;
+
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_ELEMENT);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_get_hidden_var(s, de->is_static ? class_var : proto_var);
+    emit_op(s, OP_push_i32);
+    emit_u32(s, de->kind);
+    if (de->key_var != JS_ATOM_NULL) {
+        emit_get_hidden_var(s, de->key_var);
+    } else {
+        JSValue key = JS_AtomToValue(s->ctx, de->name);
+        int err = emit_push_const(s, key, 0);
+        JS_FreeValue(s->ctx, key);
+        if (err)
+            return -1;
+    }
+    emit_op(s, de->is_static ? OP_push_true : OP_push_false);
+    emit_op(s, de->is_private ? OP_push_true : OP_push_false);
+    emit_get_hidden_var(s, de->dec_var);
+    if (de->value_var2 != JS_ATOM_NULL) {
+        emit_get_hidden_var(s, de->value_var);
+        emit_get_hidden_var(s, de->value_var2);
+        emit_op(s, OP_array_from);
+        emit_u16(s, 2);
+    } else if (de->value_var != JS_ATOM_NULL) {
+        emit_get_hidden_var(s, de->value_var);
+    } else {
+        emit_op(s, OP_undefined);
+    }
+    if (de->is_private) {
+        if (js_emit_private_access_fn(s, de->name, OP_scope_get_private_field) ||
+            js_emit_private_access_fn(s, de->name, OP_scope_put_private_field) ||
+            js_emit_private_access_fn(s, de->name, OP_scope_in_private_field))
+            return -1;
+    } else {
+        emit_op(s, OP_undefined);
+        emit_op(s, OP_undefined);
+        emit_op(s, OP_undefined);
+    }
+    emit_op(s, OP_push_i32);
+    emit_u32(s, slot);
+    emit_op(s, OP_call);
+    emit_u16(s, 12);
+
+    if (!de->is_private ||
+        de->kind == JS_DECORATED_FIELD) {
+        emit_op(s, OP_drop);
+        return 0;
+    }
+    if (de->kind == JS_DECORATED_SETTER || de->kind == JS_DECORATED_ACCESSOR) {
+        setter_name = get_private_setter_name(s->ctx, de->name);
+        if (setter_name == JS_ATOM_NULL)
+            return -1;
+    }
+    switch (de->kind) {
+    case JS_DECORATED_METHOD:
+    case JS_DECORATED_GETTER:
+        ret = js_emit_private_install(s, cd, de->name, de->is_static);
+        break;
+    case JS_DECORATED_SETTER:
+        ret = js_emit_private_install(s, cd, setter_name, de->is_static);
+        break;
+    case JS_DECORATED_ACCESSOR:
+        {
+            JSAtom get_result, set_result;
+            emit_op(s, OP_dup);
+            emit_op(s, OP_push_i32);
+            emit_u32(s, 0);
+            emit_op(s, OP_get_array_el);
+            get_result = js_emit_store_result(s, cd);
+            emit_op(s, OP_push_i32);
+            emit_u32(s, 1);
+            emit_op(s, OP_get_array_el);
+            set_result = js_emit_store_result(s, cd);
+            if (get_result == JS_ATOM_NULL || set_result == JS_ATOM_NULL) {
+                JS_FreeAtom(s->ctx, get_result);
+                JS_FreeAtom(s->ctx, set_result);
+                break;
+            }
+            ret = js_emit_private_install_from(s, get_result, de->name,
+                                               de->is_static);
+            if (ret == 0)
+                ret = js_emit_private_install_from(s, set_result, setter_name,
+                                                   de->is_static);
+            else
+                JS_FreeAtom(s->ctx, set_result);
+        }
+        break;
+    }
+    JS_FreeAtom(s->ctx, setter_name);
+    return ret;
+}
+
+static int js_emit_class_decorators_apply(JSParseState *s, JSClassDecorators *cd)
+{
+    JSAtom class_var, proto_var;
+    int i;
+
+    class_var = js_define_hidden_class_var(s, cd, "<decorated class>");
+    proto_var = js_define_hidden_class_var(s, cd, "<decorated prototype>");
+    if (class_var == JS_ATOM_NULL || proto_var == JS_ATOM_NULL)
+        goto fail;
+    emit_op(s, OP_dup);
+    emit_init_hidden_var(s, proto_var);
+    emit_op(s, OP_swap);
+    emit_op(s, OP_dup);
+    emit_init_hidden_var(s, class_var);
+    emit_op(s, OP_swap);
+
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_BEGIN);
+    emit_get_hidden_var(s, class_var);
+    emit_op(s, OP_call);
+    emit_u16(s, 1);
+    emit_init_hidden_var(s, cd->state_var);
+
+    for (i = 0; i < cd->count; i++) {
+        if (js_emit_decorate_element(s, cd, &cd->elems[i], i, class_var,
+                                     proto_var))
+            goto fail;
+    }
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_SET_METADATA);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_op(s, OP_call);
+    emit_u16(s, 1);
+    emit_op(s, OP_drop);
+    cd->class_var = class_var;
+    JS_FreeAtom(s->ctx, proto_var);
+    return 0;
+ fail:
+    JS_FreeAtom(s->ctx, class_var);
+    JS_FreeAtom(s->ctx, proto_var);
+    return -1;
+}
+
+static int js_emit_class_decorators_before_static(JSParseState *s,
+                                                  JSClassDecorators *cd,
+                                                  JSAtom class_name)
+{
+    if (cd->class_dec_var != JS_ATOM_NULL) {
+        cd->new_class_var = js_define_hidden_class_var(s, cd, "<decorated result>");
+        if (cd->new_class_var == JS_ATOM_NULL)
+            return -1;
+        emit_decorator_runtime_fn(s, JS_DECORATOR_RT_APPLY_CLASS);
+        emit_get_hidden_var(s, cd->state_var);
+        emit_get_hidden_var(s, cd->class_var);
+        emit_get_hidden_var(s, cd->class_dec_var);
+        if (class_name != JS_ATOM_NULL) {
+            JSValue name = JS_AtomToString(s->ctx, class_name);
+            int err = emit_push_const(s, name, 0);
+            JS_FreeValue(s->ctx, name);
+            if (err)
+                return -1;
+        } else {
+            emit_op(s, OP_undefined);
+        }
+        emit_op(s, OP_call);
+        emit_u16(s, 4);
+        emit_init_hidden_var(s, cd->new_class_var);
+    }
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_RUN_STATIC);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_get_hidden_var(s, cd->class_var);
+    emit_op(s, OP_call);
+    emit_u16(s, 2);
+    emit_op(s, OP_drop);
+    return 0;
+}
+
+static void js_emit_class_decorators_finish(JSParseState *s,
+                                            JSClassDecorators *cd)
+{
+    if (cd->new_class_var != JS_ATOM_NULL) {
+        emit_op(s, OP_drop);
+        emit_get_hidden_var(s, cd->new_class_var);
+    }
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_FINISH);
+    emit_op(s, OP_swap);
+    emit_get_hidden_var(s, cd->state_var);
+    emit_op(s, OP_call);
+    emit_u16(s, 2);
+}
+
+static int emit_class_decorator_instance_hook(JSParseState *s,
+                                              ClassFieldsDef *cf)
+{
+    JSAtom state;
+    int label;
+
+    state = JS_NewAtom(s->ctx, "<decorator state>");
+    if (state == JS_ATOM_NULL)
+        return -1;
+    emit_op(s, OP_push_false);
+    cf->decorator_push_pos = cf->fields_init_fd->last_opcode_pos;
+    label = emit_goto(s, OP_if_false, -1);
+    emit_decorator_runtime_fn(s, JS_DECORATOR_RT_RUN_INSTANCE);
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    emit_get_hidden_var(s, state);
+    emit_op(s, OP_call);
+    emit_u16(s, 2);
+    emit_op(s, OP_drop);
+    emit_label(s, label);
+    JS_FreeAtom(s->ctx, state);
+    return 0;
+}
+
+static bool token_is_accessor_keyword(JSParseState *s)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    int next;
+
+    if (s->token.val != TOK_IDENT || s->token.u.ident.has_escape ||
+        strcmp(JS_AtomGetStr(s->ctx, buf, sizeof(buf), s->token.u.ident.atom),
+               "accessor"))
+        return false;
+    next = peek_token(s, true);
+    return !(next == '\n' || next == '(' || next == '=' || next == ';' ||
+             next == '}' || next == '*');
+}
+
+static int js_emit_auto_accessor_method(JSParseState *s, JSAtom storage,
+                                        bool is_setter, JSFunctionDef **pfd)
+{
+    JSFunctionDef *fd;
+    int idx;
+
+    fd = js_new_function_def(s->ctx, s->cur_func, false, true, s->filename,
+                             s->token.line_num, s->token.col_num);
+    if (!fd)
+        return -1;
+    s->cur_func = fd;
+    fd->has_home_object = true;
+    fd->need_home_object = true;
+    fd->has_arguments_binding = true;
+    fd->has_this_binding = true;
+    fd->new_target_allowed = true;
+    fd->super_allowed = true;
+    fd->arguments_allowed = true;
+    fd->func_kind = JS_FUNC_NORMAL;
+    fd->func_type = is_setter ? JS_PARSE_FUNC_SETTER : JS_PARSE_FUNC_GETTER;
+    fd->has_simple_parameter_list = true;
+    if (is_setter) {
+        if (add_arg(s->ctx, fd, JS_ATOM_value) < 0)
+            goto fail;
+        fd->defined_arg_count = 1;
+    }
+    push_scope(s);
+    fd->body_scope = fd->scope_level;
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    if (is_setter) {
+        emit_op(s, OP_get_arg);
+        emit_u16(s, 0);
+        emit_op(s, OP_scope_put_private_field);
+        emit_atom(s, storage);
+        emit_u16(s, s->cur_func->scope_level);
+        emit_op(s, OP_return_undef);
+    } else {
+        emit_op(s, OP_scope_get_private_field);
+        emit_atom(s, storage);
+        emit_u16(s, s->cur_func->scope_level);
+        emit_op(s, OP_return);
+    }
+    s->cur_func = fd->parent;
+    idx = cpool_add(s, JS_NULL);
+    fd->parent_cpool_idx = idx;
+    emit_op(s, OP_fclosure);
+    emit_u32(s, idx);
+    if (pfd)
+        *pfd = fd;
+    return 0;
+ fail:
+    s->cur_func = fd->parent;
+    js_free_function_def(s->ctx, fd);
+    return -1;
+}
+
+static int js_define_private_accessor_pair(JSParseState *s, JSFunctionDef *fd,
+                                           JSAtom name, JSAtom storage,
+                                           bool is_static,
+                                           JSDecoratedElement *de)
+{
+    JSAtom setter_name;
+    int ret, idx;
+
+    if (find_private_class_field(s->ctx, fd, name, fd->scope_level) >= 0)
+        return js_parse_error(s, "private class field is already defined");
+    idx = add_private_class_field(s, fd, name, JS_VAR_PRIVATE_GETTER,
+                                  is_static);
+    if (idx < 0)
+        return -1;
+    fd->vars[idx].var_kind = JS_VAR_PRIVATE_GETTER_SETTER;
+    if (js_emit_auto_accessor_method(s, storage, false, NULL))
+        return -1;
+    emit_op(s, OP_set_home_object);
+    emit_op(s, OP_scope_put_var_init);
+    emit_atom(s, de ? de->value_var : name);
+    emit_u16(s, s->cur_func->scope_level);
+    setter_name = get_private_setter_name(s->ctx, name);
+    if (setter_name == JS_ATOM_NULL)
+        return -1;
+    ret = add_private_class_field(s, fd, setter_name, JS_VAR_PRIVATE_SETTER,
+                                  is_static);
+    if (ret >= 0)
+        ret = js_emit_auto_accessor_method(s, storage, true, NULL);
+    if (ret >= 0) {
+        emit_op(s, OP_set_home_object);
+        emit_op(s, OP_scope_put_var_init);
+        emit_atom(s, de ? de->value_var2 : setter_name);
+        emit_u16(s, s->cur_func->scope_level);
+    }
+    JS_FreeAtom(s->ctx, setter_name);
+    return ret < 0 ? -1 : 0;
+}
+
+static int js_define_public_accessor_pair(JSParseState *s, JSAtom name,
+                                          JSAtom key_var, JSAtom storage)
+{
+    int is_set;
+
+    for (is_set = 0; is_set < 2; is_set++) {
+        if (name == JS_ATOM_NULL) {
+            emit_op(s, OP_scope_get_var);
+            emit_atom(s, key_var);
+            emit_u16(s, s->cur_func->scope_level);
+        }
+        if (js_emit_auto_accessor_method(s, storage, is_set, NULL))
+            return -1;
+        if (name == JS_ATOM_NULL) {
+            emit_op(s, OP_define_method_computed);
+        } else {
+            emit_op(s, OP_define_method);
+            emit_atom(s, name);
+        }
+        emit_u8(s, OP_DEFINE_METHOD_GETTER + is_set);
+    }
+    return 0;
+}
+
+static int js_parse_class_auto_accessor(JSParseState *s, ClassFieldsDef *cf,
+                                        JSAtom class_name, int accessor_index,
+                                        JSClassDecorators *cd, JSAtom dec_var)
+{
+    JSContext *ctx = s->ctx;
+    JSFunctionDef *fd = s->cur_func;
+    JSAtom name = JS_ATOM_NULL, storage = JS_ATOM_NULL, key_var = JS_ATOM_NULL;
+    JSDecoratedElement *de = NULL;
+    bool is_static = cf->is_static, is_private;
+    int prop_type, ret = -1, slot = -1;
+
+    if (next_token(s))
+        return -1;
+    prop_type = js_parse_property_name(s, &name, false, false, true);
+    if (prop_type < 0)
+        return -1;
+    is_private = prop_type & PROP_TYPE_PRIVATE;
+    if (name == JS_ATOM_constructor || name == JS_ATOM_hash_constructor ||
+        (is_static && name == JS_ATOM_prototype)) {
+        js_parse_error(s, "invalid field name");
+        goto done;
+    }
+    storage = js_new_class_hidden_name(s, "#accessor storage", accessor_index);
+    if (storage == JS_ATOM_NULL)
+        goto done;
+    if (dec_var != JS_ATOM_NULL) {
+        de = js_class_decorators_add(s, cd, dec_var, JS_DECORATED_ACCESSOR,
+                                     is_static, is_private, name);
+        if (!de)
+            goto done;
+        slot = cd->count - 1;
+        if (is_private) {
+            de->value_var = js_define_hidden_class_var(s, cd, "<decorated getter>");
+            de->value_var2 = js_define_hidden_class_var(s, cd, "<decorated setter>");
+            if (de->value_var == JS_ATOM_NULL || de->value_var2 == JS_ATOM_NULL)
+                goto done;
+        }
+    }
+    if (name == JS_ATOM_NULL) {
+        key_var = js_new_class_hidden_name(s, "<accessor key>", accessor_index);
+        if (key_var == JS_ATOM_NULL ||
+            define_var(s, fd, key_var, JS_VAR_DEF_CONST) < 0)
+            goto done;
+        emit_op(s, OP_to_propkey);
+        emit_op(s, OP_scope_put_var_init);
+        emit_atom(s, key_var);
+        emit_u16(s, s->cur_func->scope_level);
+        if (de)
+            de->key_var = JS_DupAtom(ctx, key_var);
+    }
+    if (add_private_class_field(s, fd, storage, JS_VAR_PRIVATE_FIELD,
+                                is_static) < 0)
+        goto done;
+    emit_op(s, OP_private_symbol);
+    emit_atom(s, storage);
+    emit_op(s, OP_scope_put_var_init);
+    emit_atom(s, storage);
+    emit_u16(s, s->cur_func->scope_level);
+
+    if (!cf->fields_init_fd && emit_class_init_start(s, cf))
+        goto done;
+    s->cur_func = cf->fields_init_fd;
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, JS_ATOM_this);
+    emit_u16(s, 0);
+    if (is_static && class_name != JS_ATOM_NULL) {
+        emit_op(s, OP_dup);
+        emit_op(s, OP_scope_put_var_init);
+        emit_atom(s, class_name);
+        emit_u16(s, s->cur_func->scope_level);
+    }
+    emit_op(s, OP_scope_get_var);
+    emit_atom(s, storage);
+    emit_u16(s, s->cur_func->scope_level);
+    if (s->token.val == '=') {
+        if (next_token(s) || js_parse_assign_expr(s)) {
+            s->cur_func = s->cur_func->parent;
+            goto done;
+        }
+        if (name != JS_ATOM_NULL)
+            set_object_name(s, name);
+    } else {
+        emit_op(s, OP_undefined);
+    }
+    if (de)
+        emit_decorated_field_init(s, cd, slot);
+    emit_op(s, OP_define_private_field);
+    if (de)
+        emit_decorated_field_after(s, cd, slot);
+    s->cur_func = s->cur_func->parent;
+
+    if (is_private) {
+        cf->need_brand = true;
+        if (js_define_private_accessor_pair(s, fd, name, storage, is_static, de))
+            goto done;
+    } else {
+        if (js_define_public_accessor_pair(s, name, key_var, storage))
+            goto done;
+    }
+    if (js_parse_expect_semi(s))
+        goto done;
+    ret = 0;
+ done:
+    JS_FreeAtom(ctx, name);
+    JS_FreeAtom(ctx, storage);
+    JS_FreeAtom(ctx, key_var);
+    return ret;
+}
+
 static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                                       JSParseExportEnum export_flag)
 {
@@ -26731,13 +27580,19 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
     JSAtom class_var_name = JS_ATOM_NULL;
     JSFunctionDef *method_fd, *ctor_fd;
     int class_name_var_idx, prop_type, ctor_cpool_offset;
-    int class_flags = 0, i, define_class_offset;
+    int class_flags = 0, i, define_class_offset, accessor_count = 0;
     bool is_static, is_private, is_strict_mode;
+    bool has_class_decorators = s->class_decorators_pending;
+    JSClassDecorators cd;
+    JSAtom dec_var = JS_ATOM_NULL;
+    JSDecoratedElement *de;
     const uint8_t *class_start_ptr = s->token.ptr;
     const uint8_t *start_ptr;
     ClassFieldsDef class_fields[2];
 
     /* classes are parsed and executed in strict mode */
+    s->class_decorators_pending = false;
+    memset(&cd, 0, sizeof(cd));
     is_strict_mode = fd->is_strict_mode;
     fd->is_strict_mode = true;
     if (next_token(s))
@@ -26763,6 +27618,13 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
     }
 
     push_scope(s);
+
+    if (has_class_decorators) {
+        cd.class_dec_var = js_define_hidden_class_var(s, &cd, "<class decorators>");
+        if (cd.class_dec_var == JS_ATOM_NULL || js_class_decorators_state(s, &cd))
+            goto fail;
+        emit_init_hidden_var(s, cd.class_dec_var);
+    }
 
     if (s->token.val == TOK_EXTENDS) {
         class_flags = JS_DEFINE_CLASS_HAS_HERITAGE;
@@ -26820,6 +27682,20 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                 goto fail;
             continue;
         }
+        JS_FreeAtom(ctx, dec_var);
+        dec_var = JS_ATOM_NULL;
+        if (s->token.val == '@') {
+            if (js_parse_decorator_list(s))
+                goto fail;
+            dec_var = js_define_hidden_class_var(s, &cd, "<decorators>");
+            if (dec_var == JS_ATOM_NULL || js_class_decorators_state(s, &cd))
+                goto fail;
+            emit_init_hidden_var(s, dec_var);
+            if (s->token.val == '}' || s->token.val == ';') {
+                js_parse_error(s, "decorators must be followed by a class element");
+                goto fail;
+            }
+        }
         is_static = false;
         if (s->token.val == TOK_STATIC) {
             int next = peek_token(s, true);
@@ -26832,6 +27708,10 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                 goto fail;
             if (s->token.val == '{') {
                 ClassFieldsDef *cf = &class_fields[is_static];
+                if (dec_var != JS_ATOM_NULL) {
+                    js_parse_error(s, "decorators are not valid here");
+                    goto fail;
+                }
                 if (!cf->fields_init_fd)
                     if (emit_class_init_start(s, cf))
                         goto fail;
@@ -26877,6 +27757,17 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                 prop_type = PROP_TYPE_IDENT;
             }
         }
+        if (prop_type < 0 && token_is_accessor_keyword(s)) {
+            if (is_static)
+                emit_op(s, OP_swap);
+            if (js_parse_class_auto_accessor(s, &class_fields[is_static],
+                                             class_name, accessor_count++,
+                                             &cd, dec_var))
+                goto fail;
+            if (is_static)
+                emit_op(s, OP_swap);
+            continue;
+        }
         if (is_static)
             emit_op(s, OP_swap);
         start_ptr = s->token.ptr;
@@ -26887,6 +27778,39 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
         }
         is_private = prop_type & PROP_TYPE_PRIVATE;
         prop_type &= ~PROP_TYPE_PRIVATE;
+        de = NULL;
+        if (dec_var != JS_ATOM_NULL) {
+            int kind;
+            if (prop_type == PROP_TYPE_GET || prop_type == PROP_TYPE_SET)
+                kind = prop_type == PROP_TYPE_GET ? JS_DECORATED_GETTER :
+                    JS_DECORATED_SETTER;
+            else if (prop_type == PROP_TYPE_IDENT && s->token.val != '(')
+                kind = JS_DECORATED_FIELD;
+            else
+                kind = JS_DECORATED_METHOD;
+            if (kind == JS_DECORATED_METHOD && name == JS_ATOM_constructor &&
+                !is_static && prop_type == PROP_TYPE_IDENT) {
+                js_parse_error(s, "decorators are not valid here");
+                goto fail;
+            }
+            de = js_class_decorators_add(s, &cd, dec_var, kind, is_static,
+                                         is_private, name);
+            if (!de)
+                goto fail;
+            if (is_private && kind != JS_DECORATED_FIELD) {
+                de->value_var = js_define_hidden_class_var(s, &cd, "<decorated value>");
+                if (de->value_var == JS_ATOM_NULL)
+                    goto fail;
+            }
+            if (name == JS_ATOM_NULL && kind != JS_DECORATED_FIELD) {
+                de->key_var = js_define_hidden_class_var(s, &cd, "<decorated key>");
+                if (de->key_var == JS_ATOM_NULL)
+                    goto fail;
+                emit_op(s, OP_to_propkey);
+                emit_op(s, OP_dup);
+                emit_init_hidden_var(s, de->key_var);
+            }
+        }
 
         if ((name == JS_ATOM_constructor && !is_static &&
              prop_type != PROP_TYPE_IDENT) ||
@@ -26929,7 +27853,22 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                                         s->token.col_num,
                                         JS_PARSE_EXPORT_NONE, &method_fd))
                 goto fail;
-            if (is_private) {
+            if (is_private && de) {
+                method_fd->need_home_object = true;
+                emit_op(s, OP_set_home_object);
+                emit_init_hidden_var(s, de->value_var);
+                if (is_set) {
+                    JSAtom setter_name = get_private_setter_name(ctx, name);
+                    int ret;
+                    if (setter_name == JS_ATOM_NULL)
+                        goto fail;
+                    ret = add_private_class_field(s, fd, setter_name,
+                                                  JS_VAR_PRIVATE_SETTER, is_static);
+                    JS_FreeAtom(ctx, setter_name);
+                    if (ret < 0)
+                        goto fail;
+                }
+            } else if (is_private) {
                 method_fd->need_home_object = true; /* needed for brand check */
                 emit_op(s, OP_set_home_object);
                 /* XXX: missing function name */
@@ -27000,6 +27939,8 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                     JS_FreeAtom(ctx, field_var_name);
                     goto fail;
                 }
+                if (de)
+                    de->key_var = JS_DupAtom(ctx, field_var_name);
                 emit_op(s, OP_to_propkey);
                 emit_op(s, OP_scope_put_var_init);
                 emit_atom(s, field_var_name);
@@ -27040,16 +27981,24 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
             }
             if (is_private) {
                 set_object_name_computed(s);
+                if (de)
+                    emit_decorated_field_init(s, &cd, cd.count - 1);
                 emit_op(s, OP_define_private_field);
             } else if (name == JS_ATOM_NULL) {
                 set_object_name_computed(s);
+                if (de)
+                    emit_decorated_field_init(s, &cd, cd.count - 1);
                 emit_op(s, OP_define_array_el);
                 emit_op(s, OP_drop);
             } else {
                 set_object_name(s, name);
+                if (de)
+                    emit_decorated_field_init(s, &cd, cd.count - 1);
                 emit_op(s, OP_define_field);
                 emit_atom(s, name);
             }
+            if (de)
+                emit_decorated_field_after(s, &cd, cd.count - 1);
             s->cur_func = s->cur_func->parent;
             if (js_parse_expect_semi(s))
                 goto fail;
@@ -27102,7 +28051,7 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
                 emit_op(s, OP_set_name);
                 emit_atom(s, name);
                 emit_op(s, OP_scope_put_var_init);
-                emit_atom(s, name);
+                emit_atom(s, de ? de->value_var : name);
                 emit_u16(s, s->cur_func->scope_level);
             } else {
                 if (name == JS_ATOM_NULL) {
@@ -27146,6 +28095,15 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
     /* consume the '}' */
     if (next_token(s))
         goto fail;
+
+    if (cd.state_var != JS_ATOM_NULL) {
+        ClassFieldsDef *cf = &class_fields[0];
+        if (!cf->fields_init_fd && emit_class_init_start(s, cf))
+            goto fail;
+        cf->fields_init_fd->byte_code.buf[cf->decorator_push_pos] = OP_push_true;
+        if (js_emit_class_decorators_apply(s, &cd))
+            goto fail;
+    }
 
     {
         ClassFieldsDef *cf = &class_fields[0];
@@ -27194,6 +28152,10 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
         emit_op(s, OP_add_brand);
     }
 
+    if (cd.state_var != JS_ATOM_NULL &&
+        js_emit_class_decorators_before_static(s, &cd, class_name))
+        goto fail;
+
     /* initialize the static fields */
     if (class_fields[1].fields_init_fd != NULL) {
         ClassFieldsDef *cf = &class_fields[1];
@@ -27203,6 +28165,9 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
         emit_u16(s, 0);
         emit_op(s, OP_drop);
     }
+
+    if (cd.state_var != JS_ATOM_NULL)
+        js_emit_class_decorators_finish(s, &cd);
 
     if (class_name != JS_ATOM_NULL) {
         /* store the class name in the scoped class name variable (it
@@ -27243,12 +28208,15 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
 
     JS_FreeAtom(ctx, class_name);
     JS_FreeAtom(ctx, class_var_name);
+    js_class_decorators_free(ctx, &cd);
     fd->is_strict_mode = is_strict_mode;
     return 0;
  fail:
     JS_FreeAtom(ctx, name);
     JS_FreeAtom(ctx, class_name);
     JS_FreeAtom(ctx, class_var_name);
+    JS_FreeAtom(ctx, dec_var);
+    js_class_decorators_free(ctx, &cd);
     fd->is_strict_mode = is_strict_mode;
     return -1;
 }
@@ -28278,6 +29246,7 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
     int new_src_line = 0, new_src_col = 0;
     int import_line_num, import_col_num, import_phase;
     bool accept_lparen = (parse_flags & PF_POSTFIX_CALL) != 0;
+    bool decorator_called = false;
 
     call_type = FUNC_CALL_NORMAL;
     switch(s->token.val) {
@@ -28372,6 +29341,15 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
             return -1;
         break;
     case TOK_CLASS:
+        if (js_parse_class(s, true, JS_PARSE_EXPORT_NONE))
+            return -1;
+        break;
+    case '@':
+        if (js_parse_decorator_list(s))
+            return -1;
+        if (s->token.val != TOK_CLASS)
+            return js_parse_error(s, "decorators must be followed by a class");
+        s->class_decorators_pending = true;
         if (js_parse_class(s, true, JS_PARSE_EXPORT_NONE))
             return -1;
         break;
@@ -28590,6 +29568,12 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
         JSFunctionDef *fd = s->cur_func;
         bool has_optional_chain = false;
 
+        if (parse_flags & PF_DECORATOR) {
+            if (decorator_called ||
+                (s->token.val != '.' && s->token.val != '('))
+                break;
+            decorator_called = s->token.val == '(';
+        }
         if (s->token.val == TOK_QUESTION_MARK_DOT) {
             /* optional chaining */
             if (next_token(s))
@@ -31476,6 +32460,22 @@ static __exception int js_parse_statement_or_decl(JSParseState *s,
             return -1;
         break;
 
+    case '@':
+        if (!(decl_mask & DECL_MASK_OTHER)) {
+            js_parse_error(s, "class declarations can't appear in single-statement context");
+            goto fail;
+        }
+        if (js_parse_decorator_list(s))
+            goto fail;
+        if (s->token.val != TOK_CLASS) {
+            js_parse_error(s, "decorators must be followed by a class");
+            goto fail;
+        }
+        s->class_decorators_pending = true;
+        if (js_parse_class(s, false, JS_PARSE_EXPORT_NONE))
+            return -1;
+        break;
+
     case TOK_DEBUGGER:
         /* currently no debugger, so just skip the keyword */
         if (next_token(s))
@@ -34358,7 +35358,14 @@ static __exception int js_parse_export(JSParseState *s)
     if (next_token(s))
         return -1;
 
+    if (s->token.val == '@' && !s->class_decorators_pending) {
+        if (js_parse_decorator_list(s))
+            return -1;
+        s->class_decorators_pending = true;
+    }
     tok = s->token.val;
+    if (s->class_decorators_pending && tok != TOK_CLASS && tok != TOK_DEFAULT)
+        return js_parse_error(s, "decorators must be followed by a class");
     if (tok == TOK_CLASS) {
         return js_parse_class(s, false, JS_PARSE_EXPORT_NAMED);
     } else if (tok == TOK_FUNCTION ||
@@ -34484,6 +35491,13 @@ static __exception int js_parse_export(JSParseState *s)
         }
         break;
     case TOK_DEFAULT:
+        if (s->token.val == '@' && !s->class_decorators_pending) {
+            if (js_parse_decorator_list(s))
+                return -1;
+            s->class_decorators_pending = true;
+        }
+        if (s->class_decorators_pending && s->token.val != TOK_CLASS)
+            return js_parse_error(s, "decorators must be followed by a class");
         if (s->token.val == TOK_CLASS) {
             return js_parse_class(s, false, JS_PARSE_EXPORT_DEFAULT);
         } else if (s->token.val == TOK_FUNCTION ||
@@ -34763,6 +35777,19 @@ static __exception int js_parse_source_element(JSParseState *s)
     } else if (s->token.val == TOK_EXPORT && fd->module) {
         if (js_parse_export(s))
             return -1;
+    } else if (s->token.val == '@' && fd->module) {
+        if (js_parse_decorator_list(s))
+            return -1;
+        s->class_decorators_pending = true;
+        if (s->token.val == TOK_EXPORT) {
+            if (js_parse_export(s))
+                return -1;
+        } else if (s->token.val == TOK_CLASS) {
+            if (js_parse_class(s, false, JS_PARSE_EXPORT_NONE))
+                return -1;
+        } else {
+            return js_parse_error(s, "decorators must be followed by a class");
+        }
     } else if (s->token.val == TOK_IMPORT && fd->module &&
                ((tok = peek_token(s, false)) != '(' && tok != '.'))  {
         /* the peek_token is needed to avoid confusion with ImportCall
@@ -61613,6 +62640,11 @@ int JS_AddIntrinsicBaseObjects(JSContext *ctx)
                               0);
     if (JS_IsException(obj1))
         return -1;
+    if (JS_DefinePropertyValueStr(ctx, obj1, "metadata",
+                                  js_symbol_metadata(ctx), 0) < 0) {
+        JS_FreeValue(ctx, obj1);
+        return -1;
+    }
     JS_FreeValue(ctx, obj1);
 
     /* ES6 Generator */

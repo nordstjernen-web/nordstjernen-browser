@@ -79,6 +79,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Legacy RegExp statics: receiver check, getter-only accessors, subclass/cross-realm invalidation, `compile` restriction | 50 | low | **done** (`legacy-regexp` enabled) |
 | `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
 | Proper tail calls in strict mode | 35 | medium | **done** (`tail-call-optimization` enabled; see #30) |
+| Decorators and auto-accessors | 31 | high | **done** (`decorators` enabled, `staging/decorators` included; see #33) |
 | Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
 | Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
 
@@ -1137,3 +1138,38 @@ handling.
 | `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `String`, `Number`, `BigInt`, `Array`, `TypedArray` | enabled in `test262.conf` |
 | `DateTimeFormat`, `Date`, `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
 | `Temporal` | owned by the Temporal work, excluded |
+
+### 33. Decorators and auto-accessors
+
+**Spec:** [proposal-decorators](https://github.com/tc39/proposal-decorators)
+(with decorator metadata).
+
+`accessor` class elements (public, private, static, computed) store their
+value in a hidden private field and get a synthesized getter/setter pair,
+built as bytecode functions the way the default constructor is.
+
+Decorators (`@x`, `@x.y.#z`, `@x(...)`, `@(expr)`) are parsed on class
+declarations, class expressions, `export` forms and class elements; the
+postfix-expression parser takes a `PF_DECORATOR` flag that limits it to the
+decorator grammar. Each decorator list is evaluated in source order, with the
+computed keys, into a hidden class-scope variable. At the end of the class
+body the compiler emits calls into a small runtime written in JS
+(`builtin-decorators.js`, compiled to `builtin-decorators.h` with `qjsc` like
+the other builtin blobs, receiving the intrinsics it needs as parameters so a
+page cannot tamper with them; reached through a new `OP_special_object`
+operand). The runtime calls element decorators innermost first with the
+`kind`/`name`/`static`/`private`/`access`/`addInitializer`/`metadata`
+context, validates and installs replacements, sets `Symbol.metadata`, applies
+class decorators, and runs the extra initializers at the specified times:
+static method initializers before static fields, field and accessor
+initializers right after their element, instance method initializers at
+construction after private methods are branded and before fields (a hook in
+the instance field initializer that constant-folds away in classes without
+decorators), class initializers last. `#private` elements get access
+functions synthesized in the class scope; a decorated private method,
+getter, setter or accessor is installed through a branded trampoline that
+forwards to the decorator's result, since QuickJS derives the private brand
+from the method's home object. `Symbol.metadata` is a runtime-created symbol
+shared by all realms (adding a predefined atom would renumber the bytecode
+atom table).
+
