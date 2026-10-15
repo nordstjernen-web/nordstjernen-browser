@@ -633,6 +633,10 @@ static void agent_start(void *arg)
             js_std_dump_error(ctx);
             break;
         } else if (ret == 0) {
+            if (JS_HasAtomicsWaiters(rt)) {
+                JS_RunAtomicsWaiters(rt, true);
+                continue;
+            }
             if (JS_IsUndefined(agent->broadcast_func)) {
                 break;
             } else {
@@ -803,13 +807,7 @@ static JSValue js_agent_sleep(JSContext *ctx, JSValueConst this_val,
 
 static int64_t get_clock_ms(void)
 {
-#ifdef _WIN32
-    return GetTickCount64();
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
-#endif
+    return js__hrtime_ns() / 1000000;
 }
 
 static JSValue js_agent_monotonicNow(JSContext *ctx, JSValueConst this_val,
@@ -1396,6 +1394,9 @@ static int eval_buf(JSContext *ctx, const char *buf, size_t buf_len,
             if (ret < 0) {
                 res_val = JS_EXCEPTION;
                 break;
+            } else if (ret == 0 && JS_HasAtomicsWaiters(JS_GetRuntime(ctx))) {
+                JS_RunAtomicsWaiters(JS_GetRuntime(ctx), true);
+                continue;
             } else if (ret == 0) {
                 if (is_async) {
                     /* test if the test called $DONE() once */
