@@ -131,9 +131,8 @@ static IntlRelativeTimeFormat *get_rtf(JSContext *ctx, JSValueConst this_val, co
     return rtf;
 }
 
-static int singular_unit(const char *s)
+static int singular_unit(const char *s, size_t len)
 {
-    size_t len = strlen(s);
     for (int i = 0; i < (int)countof(rtf_units); i++) {
         size_t ul = strlen(rtf_units[i]);
         if ((len == ul && !memcmp(s, rtf_units[i], ul)) ||
@@ -232,6 +231,7 @@ static JSValue js_intl_rtf_format(JSContext *ctx, JSValueConst this_val, int arg
     IntlRelativeTimeFormat *rtf = get_rtf(ctx, this_val, to_parts ? "formatToParts" : "format");
     double value;
     const char *unit_str;
+    size_t unit_len;
     int unit;
     IntlParts parts;
     JSValue r;
@@ -239,10 +239,10 @@ static JSValue js_intl_rtf_format(JSContext *ctx, JSValueConst this_val, int arg
         return JS_EXCEPTION;
     if (JS_ToFloat64(ctx, &value, argc > 0 ? argv[0] : JS_UNDEFINED) < 0)
         return JS_EXCEPTION;
-    unit_str = JS_ToCString(ctx, argc > 1 ? argv[1] : JS_UNDEFINED);
+    unit_str = JS_ToCStringLen(ctx, &unit_len, argc > 1 ? argv[1] : JS_UNDEFINED);
     if (!unit_str)
         return JS_EXCEPTION;
-    unit = singular_unit(unit_str);
+    unit = singular_unit(unit_str, unit_len);
     if (unit < 0) {
         JS_ThrowRangeError(ctx, "invalid unit: %s", unit_str);
         JS_FreeCString(ctx, unit_str);
