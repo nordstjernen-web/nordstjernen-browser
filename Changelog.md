@@ -49,6 +49,15 @@ Changelog:
   `%AbstractModuleSource%` is available to hosts. JavaScript modules have
   no source form, so importing one in the source phase throws a
   `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: the engine's `Intl.DateTimeFormat` formats dates in the
+  Gregorian, Buddhist, Japanese, ROC, Chinese, Dangi, Hebrew, Islamic,
+  Persian, Indian, Coptic and Ethiopic calendars with CLDR patterns, the
+  skeleton matcher, `dateStyle`/`timeStyle`, day periods, fractional
+  seconds, every `timeZoneName` style (metazone names for 13 languages),
+  `formatRange` with CLDR interval patterns, and Temporal values;
+  `Date.prototype.toLocaleString` and the Temporal `toLocaleString`
+  methods use it. Named time zones come from the system tz database, and
+  on Windows from the registry when no tz database is installed.
 * JavaScript: `Intl` moves into the QuickJS engine, generated from
   Unicode CLDR 48 without ICU. Language tags are canonicalized per UTS #35
   (aliases, likely subtags, extension values) and `Intl.Locale` has the

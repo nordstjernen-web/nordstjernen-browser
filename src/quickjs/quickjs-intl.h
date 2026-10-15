@@ -125,6 +125,7 @@ typedef struct IntlResolved {
     char values[8][64];
 } IntlResolved;
 
+extern const char intl_option_null[];
 int intl_resolve_locale(JSContext *ctx, int service, const IntlLocaleList *requested, bool lookup,
                         const IntlResolverOps *ops, char *const *options, IntlResolved *res);
 const char *intl_lookup_available(int service, const char *tag, char *buf, size_t size);
@@ -284,6 +285,53 @@ int intl_define_service(JSContext *ctx, JSValueConst intl, const char *name, int
                         JSCFunction *ctor_fn, int length, JSCFunctionEnum cproto,
                         const JSCFunctionListEntry *proto_funcs, int nfuncs,
                         JSClassFinalizer *finalizer, JSClassGCMark *mark);
+enum {
+    INTL_CAL_BUDDHIST,
+    INTL_CAL_CHINESE,
+    INTL_CAL_COPTIC,
+    INTL_CAL_DANGI,
+    INTL_CAL_ETHIOAA,
+    INTL_CAL_ETHIOPIC,
+    INTL_CAL_GREGORY,
+    INTL_CAL_HEBREW,
+    INTL_CAL_INDIAN,
+    INTL_CAL_ISLAMIC_CIVIL,
+    INTL_CAL_ISLAMIC_TBLA,
+    INTL_CAL_ISLAMIC_UMALQURA,
+    INTL_CAL_ISO8601,
+    INTL_CAL_JAPANESE,
+    INTL_CAL_PERSIAN,
+    INTL_CAL_ROC,
+    INTL_CAL_COUNT,
+};
+
+typedef struct IntlCalendarDate {
+    int64_t year;
+    int64_t era_year;
+    int64_t related_year;
+    int64_t iso_year;
+    int era;
+    bool era_gregorian;
+    int month;
+    int month_key;
+    int ordinal_month;
+    bool leap_month;
+    bool leap_key;
+    int day;
+    int weekday;
+    int cyclic_year;
+} IntlCalendarDate;
+
+int intl_calendar_compute(int cal, int64_t date, IntlCalendarDate *out);
+int64_t intl_fixed_from_gregorian(int64_t y, int m, int d);
+void intl_gregorian_from_fixed(int64_t date, int64_t *py, int *pm, int *pd);
+const char *intl_metazone_for(const char *zone, int64_t epoch_minutes);
+const char *intl_windows_zone_to_iana(const char *windows_name);
+const char *intl_time_zone_cldr_id(const char *name);
+const char *intl_iana_to_windows_zone(const char *iana);
+int intl_region_default_calendar(const char *region);
+void intl_region_hour_cycle_prefs(const char *locale, const char *region, int *hc12, int *hc24);
+const char *intl_default_numbering_system(const char *locale);
 int js_intl_init_locale(JSContext *ctx, JSValueConst intl);
 int js_intl_init_collator(JSContext *ctx, JSValueConst intl);
 int js_intl_init_number_format(JSContext *ctx, JSValueConst intl);
