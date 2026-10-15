@@ -80,6 +80,7 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
 | Proper tail calls in strict mode | 35 | medium | **done** (`tail-call-optimization` enabled; see #30) |
 | Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
+| Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
 
 ## Changes
 
@@ -1050,3 +1051,44 @@ reference implementation rather than the literal spec text:
 `ComputeNudgeWindow` uses the origin as the window start only when the
 start duration is zero, and the ISO `CalendarDateUntil` jumps straight to
 the candidate year/month instead of stepping one unit at a time.
+### 32. Module import phases: `import defer` and `import source`
+
+**Spec:** the Stage 3 proposals
+[Deferred Imports Evaluation](https://tc39.es/proposal-defer-import-eval/)
+and [Source Phase Imports](https://tc39.es/proposal-source-phase-imports/).
+Both add a `[[Phase]]` to every ModuleRequest: `evaluation` (an ordinary
+import), `defer` or `source`.
+
+**Implementation:** each requested-module entry carries its phase, and two
+requests for the same specifier and attributes in different phases are
+separate entries. The phase is written into module bytecode, so
+`BC_VERSION` is 30. Stored data written as version 29 stays readable, and
+the browser's bytecode cache format version is bumped.
+
+- `import defer * as ns from "m"` and `import.defer("m")` give a deferred
+  namespace (`JS_CLASS_DEFERRED_MODULE_NS`). It is created when the module
+  is linked. Any string-keyed operation other than `"then"` first evaluates
+  the module synchronously (`EvaluateModuleSync`), then forwards to the
+  ordinary namespace. If the module or one of its dependencies is still
+  evaluating or uses top-level await, that operation throws a `TypeError`.
+  `[[Set]]`, symbol keys and `"then"` never evaluate the module. Its
+  `@@toStringTag` is `"Deferred Module"`. During evaluation, a deferred
+  request contributes only the asynchronous transitive dependencies found
+  by `GatherAsynchronousTransitiveDependencies`, and `import.defer()` waits
+  only for those before resolving.
+- `import source x from "m"` and `import.source("m")` read the module's
+  source object (`JS_SetModuleSource`). A source-phase request is not
+  linked or evaluated. A JavaScript module has no source representation,
+  so both forms throw a `SyntaxError`, at link time for the static form.
+  `%AbstractModuleSource%` is reachable through
+  `JS_GetAbstractModuleSource()`, and hosts create module source objects
+  with `JS_NewModuleSource()`. `run-test262` uses these for
+  `$262.AbstractModuleSource` and for the `<module source>` specifier.
+- A namespace or source binding re-exported through `export { x }`
+  resolves to the module and the phase together. Two star exports of the
+  same source binding are therefore unambiguous.
+
+The `import-defer`, `source-phase-imports` and
+`source-phase-imports-module-source` features are enabled in
+`test262.conf`, and `staging/source-phase-imports` is included. Every
+test with these features passes.
