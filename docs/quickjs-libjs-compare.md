@@ -137,24 +137,19 @@ proposal under `Libraries/LibJS/Runtime/Temporal/`:
 plus the supporting calendar, time-zone, and ISO-8601 parsing
 machinery.
 
-**Nordstjernen status: implemented natively in `src/js_date.c`.** All
-nine types above are provided, sharing the civil-date math in
-`src/datetime.c`: `from()` (ISO-string and property-bag forms),
-`toString()`/`toJSON()`, the full getter surface (`year`, `monthCode`,
-`dayOfWeek`, `daysInMonth`, `inLeapYear`, `weekOfYear`, …),
-`add`/`subtract` (with ISO calendar month-overflow constrain and
-time/day carry), `with`, `until`/`since`, `equals`/`compare`, the
-`toPlainDate`/`toPlainTime`/`toPlainDateTime`/`toInstant` conversions,
-and `Temporal.Now`. This replaces the former empty `Temporal` stub.
+**Nordstjernen status: implemented in the engine** (`src/quickjs/quickjs-temporal*.c`,
+registered by `JS_AddIntrinsicTemporal`), so it is available to every QuickJS
+context, including workers and `run-test262`. All nine types are complete
+against the current specification, including `round()`, `total()`,
+`relativeTo`, every rounding mode and the RFC 9557 string grammar, with
+exact 128-bit nanosecond arithmetic. `Date.prototype.toTemporalInstant` is
+provided too. test262's `built-ins/Temporal` passes in full.
 
-Deliberate limitations versus LibJS: the calendar is **ISO-8601 only**
-(no Hebrew/Islamic/Japanese/… calendars); time zones are limited to
-**UTC and fixed offsets** (no IANA tz database, so `Now.*ISO()` and
-`ZonedDateTime` are UTC-based); `Instant`/`ZonedDateTime` carry
-nanosecond precision in a signed 64-bit nanosecond field (≈ years
-1678–2262); and `round()`/`total()`/`largestUnit`-style `since`/`until`
-balancing are not implemented. The common date arithmetic and
-formatting paths are correct.
+Current limitations: the calendar is **ISO-8601 only** and the available
+named time zone is **`UTC`** (plus fixed offsets), so `Temporal.Now`
+reports UTC. Calendar and time-zone handling sit behind small internal
+interfaces (`quickjs-temporal-calendar.c`, `quickjs-temporal-tz.c`) so
+IANA zones and further calendars can be added without touching the types.
 
 ### 3. JSON modules
 
@@ -250,7 +245,7 @@ set is already present in the bundled QuickJS.
 ## Implications for Nordstjernen
 
 - **Intl** and **Temporal** are now provided natively in C
-  (`src/js_intl.c`, `src/js_date.c`) and verified through the headless
+  (`src/js_intl.c`, and the engine's `src/quickjs/quickjs-temporal*.c`) and verified through the headless
   `--eval` harness. Sites calling `new Intl.NumberFormat(...)`,
   `Intl.DateTimeFormat`, `Temporal.Now.plainDateISO()`, etc. work. The
   ICU-free trade-off is reduced locale/calendar/time-zone fidelity, not
