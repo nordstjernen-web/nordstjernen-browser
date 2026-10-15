@@ -72,6 +72,9 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | `for await` loop must not close the iterator when `next()` itself rejects | 2 | medium | **done** |
 | `Function.prototype.caller`/`.arguments` as %ThrowTypeError% poison pills | 4 | medium | **done** (see #26 — matches modern V8: poison pair on the prototype, legacy magic on sloppy instances) |
 | Top-level-await rejection settles promises root-first instead of leaf-first | 1 | low | **done** (see #27) |
+| Module-level `using` binding exported from the module | 3 | medium | **done** (module variable + hidden disposal local) |
+| Native `toString` of a built-in with a non-identifier name (`RegExp.$&`) | 2 | low | **done** (computed-key form) |
+| Assignment resolves its Reference before the right-hand side (strict unresolvable global, `eval`-introduced `var`) | 14 | medium | **done** (previously excluded in `test262.conf`; see #28) |
 
 ## Changes
 
@@ -946,3 +949,26 @@ lookup intercept (`JS_GetPropertyInternal` in `src/quickjs/quickjs.c`),
 not as a prototype accessor, so the property-descriptor surface test262
 checks stays exactly per spec. No test262 test observes the extension —
 the suite runs at zero failures with it in place.
+
+### 28. Assignment resolves its Reference before evaluating the right-hand side
+
+**Spec:** [AssignmentExpression evaluation](https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation)
+evaluates the LeftHandSideExpression to a Reference first, then the
+right-hand side, then `PutValue`. A strict-mode assignment to a name that
+was unresolvable when the Reference was made throws a `ReferenceError` even
+if the right-hand side creates the global (`undeclared = (this.undeclared =
+5)`), and a sloppy-mode assignment keeps writing to the binding it resolved
+even when a direct `eval` in the right-hand side declares a closer `var`.
+
+**Bug:** a plain identifier target was stored with `put_var`/`put_loc`
+after the right-hand side, resolving the name only then. Only targets inside
+`with` produced a Reference first.
+
+**Fix:** `get_lvalue` emits `OP_scope_make_ref` for every identifier target.
+Variable resolution still folds it back into a plain local, argument or
+closure store, and into `put_var` for sloppy-mode globals, so only
+references that pass through an `eval` variable object, and strict-mode
+global stores, keep the `make_var_ref`/`put_ref_value` pair. The 14 tests
+were removed from the `test262.conf` exclude list, along with the three
+`caller`-feature exclusions, which pass (two of them no longer exist).
+

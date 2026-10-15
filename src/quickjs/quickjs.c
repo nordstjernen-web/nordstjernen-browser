@@ -27201,11 +27201,7 @@ static __exception int get_lvalue(JSParseState *s, int *popcode, int *pscope,
         }
         if (name == JS_ATOM_this || name == JS_ATOM_new_target)
             goto invalid_lvalue;
-        if (has_with_scope(fd, scope)) {
-            depth = 2;  /* will generate OP_get_ref_value */
-        } else {
-            depth = 0;
-        }
+        depth = 2;  /* will generate OP_get_ref_value */
         break;
     case OP_get_field:
         name = get_u32(fd->byte_code.buf + fd->last_opcode_pos + 1);
@@ -35360,7 +35356,8 @@ static int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
 
     switch (op) {
     case OP_scope_make_ref:
-        if (label_done == -1 && can_opt_put_global_ref_value(bc_buf, ls->pos)) {
+        if (label_done == -1 && !s->is_strict_mode &&
+            can_opt_put_global_ref_value(bc_buf, ls->pos)) {
             pos_next = optimize_scope_make_global_ref(ctx, s, bc, bc_buf, ls,
                                                       pos_next, var_name);
         } else {
