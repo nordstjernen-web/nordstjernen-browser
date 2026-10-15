@@ -1413,7 +1413,8 @@ JSValue intl_primary_time_zones(JSContext *ctx, const char *region)
         return arr;
     for (size_t i = 0; i < countof(intl_time_zones); i++) {
         const IntlTimeZoneId *z = &intl_time_zones[i];
-        if (z->name != z->primary)
+        if (z->name != z->primary || !strcmp(intl_tz_pool + z->name, "Etc/Unknown") ||
+            tp_tzdb_is_link(intl_tz_pool + z->name))
             continue;
         if (region && strcmp(z->region, region))
             continue;

@@ -161,6 +161,14 @@ if(WIN32)
     endif()
 endif()
 
+if(WIN32)
+    get_filename_component(QJS_COMPILER_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(QJS_TZDIR "${QJS_COMPILER_DIR}/../share/zoneinfo" ABSOLUTE)
+    if(EXISTS "${QJS_TZDIR}/tzdata.zi")
+        add_compile_definitions(TP_DEFAULT_TZDIR="${QJS_TZDIR}")
+    endif()
+endif()
+
 # MacOS and GCC 11 or later need -Wno-maybe-uninitialized
 # https://github.com/quickjs-ng/quickjs/issues/453
 if(APPLE AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 11)

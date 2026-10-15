@@ -4,6 +4,7 @@
 #include <string.h>
 #include "cutils.h"
 #include "quickjs-temporal.h"
+#include "quickjs-intl.h"
 #if !defined(_WIN32)
 #include <unistd.h>
 #else
@@ -37,6 +38,8 @@ typedef struct TZData {
 typedef struct TZEntry {
     char *id;
     int primary;
+    int canonical;
+    char country[2];
     TZData *data;
     bool failed;
 } TZEntry;
@@ -113,6 +116,8 @@ static int tzdb_add(const char *id, size_t len, int primary)
     memcpy(e->id, id, len);
     e->id[len] = '\0';
     e->primary = primary < 0 ? tzdb_count : primary;
+    e->canonical = e->primary;
+    e->country[0] = e->country[1] = '\0';
     e->data = NULL;
     e->failed = false;
     return tzdb_count++;
@@ -172,6 +177,10 @@ static bool tzdb_find_dir(void)
                 return true;
         }
     }
+#endif
+#if defined(TP_DEFAULT_TZDIR)
+    if (tzdb_dir_usable(TP_DEFAULT_TZDIR))
+        return true;
 #endif
     for (i = 0; i < countof(candidates); i++) {
         if (tzdb_dir_usable(candidates[i]))
@@ -260,14 +269,68 @@ static void tzdb_load_names(void)
     free(buf);
 }
 
+static void tzdb_split_country_links(void)
+{
+    char path[1100];
+    char *buf, *line, *end;
+    size_t len;
+    int i;
+
+    if (!tzdb_join(path, sizeof(path), tzdb_dir, "zone.tab"))
+        return;
+    buf = tzdb_read_file(path, &len);
+    if (!buf)
+        return;
+    end = buf + len;
+    for (line = buf; line < end;) {
+        char *next = memchr(line, '\n', (size_t)(end - line));
+        const char *cc, *coord, *name;
+        size_t cclen, coordlen, namelen;
+        if (!next)
+            next = end;
+        if (line[0] != '#') {
+            cclen = tzdb_token(line, next, &cc);
+            coordlen = tzdb_token(cc + cclen, next, &coord);
+            namelen = tzdb_token(coord + coordlen, next, &name);
+            if (cclen == 2 && coordlen && namelen) {
+                int id = tzdb_find(name, namelen);
+                if (id >= 0)
+                    memcpy(tzdb_entries[id].country, cc, 2);
+            }
+        }
+        line = next + 1;
+    }
+    free(buf);
+    for (i = 0; i < tzdb_count; i++) {
+        TZEntry *e = &tzdb_entries[i];
+        if (e->primary != i && e->primary != TP_TZ_UTC_ID && e->country[0] &&
+            memcmp(e->country, tzdb_entries[e->primary].country, 2) != 0)
+            e->canonical = i;
+    }
+    for (i = 0; i < tzdb_count; i++) {
+        TZEntry *e = &tzdb_entries[i];
+        const char *identifier, *cldr_primary;
+        int target;
+        if (e->canonical == i || e->primary == TP_TZ_UTC_ID ||
+            intl_find_time_zone(e->id, &identifier, &cldr_primary) < 0)
+            continue;
+        target = tzdb_find(cldr_primary, strlen(cldr_primary));
+        if (target >= 0 && target != i && tzdb_entries[target].canonical == target &&
+            tzdb_entries[target].primary == e->primary)
+            e->canonical = target;
+    }
+}
+
 static void tzdb_init(void)
 {
 #if JS_HAVE_THREADS
     js_mutex_init(&tzdb_mutex);
 #endif
     tzdb_add("UTC", 3, -1);
-    if (tzdb_find_dir())
+    if (tzdb_find_dir()) {
         tzdb_load_names();
+        tzdb_split_country_links();
+    }
 }
 
 static void tzdb_ensure(void)
@@ -601,12 +664,22 @@ const char *tp_tzdb_identifier(int id)
 int tp_tzdb_primary(int id)
 {
     tzdb_ensure();
-    return tzdb_entries[id].primary;
+    return tzdb_entries[id].canonical;
+}
+
+bool tp_tzdb_is_link(const char *name)
+{
+    int id;
+    tzdb_ensure();
+    id = tzdb_find(name, strlen(name));
+    return id >= 0 && tzdb_entries[id].canonical != id;
 }
 
 static const TZData *tzdb_data(int id)
 {
-    int primary = tp_tzdb_primary(id);
+    int primary;
+    tzdb_ensure();
+    primary = tzdb_entries[id].primary;
     return primary == TP_TZ_UTC_ID ? NULL : tzdb_entries[primary].data;
 }
 
