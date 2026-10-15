@@ -1274,6 +1274,10 @@ JS_EXTERN void JS_SetModuleNormalizeFunc2(JSRuntime *rt,
 JS_EXTERN JSValue JS_GetImportMeta(JSContext *ctx, JSModuleDef *m);
 JS_EXTERN JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m);
 JS_EXTERN JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m);
+JS_EXTERN JSValue JS_GetAbstractModuleSource(JSContext *ctx);
+JS_EXTERN JSValue JS_NewModuleSource(JSContext *ctx, JSValueConst proto,
+                                     const char *kind);
+JS_EXTERN int JS_SetModuleSource(JSContext *ctx, JSModuleDef *m, JSValue source);
 
 /* associate a JSValue to a C module */
 JS_EXTERN int JS_SetModulePrivateValue(JSContext *ctx, JSModuleDef *m, JSValue val);
