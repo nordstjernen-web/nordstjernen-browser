@@ -75,6 +75,9 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Module-level `using` binding exported from the module | 3 | medium | **done** (module variable + hidden disposal local) |
 | Native `toString` of a built-in with a non-identifier name (`RegExp.$&`) | 2 | low | **done** (computed-key form) |
 | Assignment resolves its Reference before the right-hand side (strict unresolvable global, `eval`-introduced `var`) | 14 | medium | **done** (previously excluded in `test262.conf`; see #28) |
+| `Promise.allKeyed` / `Promise.allSettledKeyed` (await-dictionary) | 72 | low | **done** (feature enabled in `test262.conf`) |
+| Legacy RegExp statics: receiver check, getter-only accessors, subclass/cross-realm invalidation, `compile` restriction | 50 | low | **done** (`legacy-regexp` enabled) |
+| `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
 
 ## Changes
 
@@ -971,4 +974,19 @@ references that pass through an `eval` variable object, and strict-mode
 global stores, keep the `make_var_ref`/`put_ref_value` pair. The 14 tests
 were removed from the `test262.conf` exclude list, along with the three
 `caller`-feature exclusions, which pass (two of them no longer exist).
+
+### 29. ShadowRealm
+
+**Spec:** [proposal-shadowrealm](https://tc39.es/proposal-shadowrealm/).
+`new ShadowRealm()` creates a fresh realm (`JS_NewContext` on the same
+runtime, sharing the embedder's context opaque). `evaluate` compiles the
+source as an indirect eval in that realm; a parse error becomes a
+`SyntaxError` of the caller's realm and any other abrupt completion a
+`TypeError` of the caller's realm. Values cross the boundary through
+`GetWrappedValue`: primitives pass, callables become wrapped function
+exotic objects (`JS_CLASS_WRAPPED_FUNCTION`, whose `[[Call]]` wraps the
+arguments and `this` into the target's realm and the result back), and other
+objects throw. `importValue` enqueues the dynamic-import job in the shadow
+realm, resolved against the calling script's name, and chains realm-bound
+native handlers that read the export or turn a failure into a `TypeError`.
 

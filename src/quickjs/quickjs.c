@@ -193,6 +193,8 @@ enum {
     JS_CLASS_DOM_EXCEPTION,
     JS_CLASS_CALL_SITE,
     JS_CLASS_RAWJSON,
+    JS_CLASS_WRAPPED_FUNCTION,
+    JS_CLASS_SHADOW_REALM,
 
     JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
 };
@@ -607,6 +609,8 @@ struct JSContext {
     JSValue regexp_legacy_subject;
     int regexp_legacy_count; /* groups + 1, at most 10 */
     int32_t regexp_legacy_pos[20]; /* start, end per group; -1 unmatched */
+    int32_t regexp_legacy_last_paren[2]; /* start, end of the last group */
+    bool regexp_legacy_invalid; /* a subclass or cross-realm match ran */
     JSValue promise_ctor;
     JSValue native_error_proto[JS_NATIVE_ERROR_COUNT];
     JSValue error_ctor;
@@ -917,6 +921,11 @@ typedef struct JSFunctionBytecode {
     char *source;
 } JSFunctionBytecode;
 
+typedef struct JSWrappedFunction {
+    JSValue target;
+    JSContext *realm;
+} JSWrappedFunction;
+
 typedef struct JSBoundFunction {
     JSValue func_obj;
     JSValue this_val;
@@ -954,6 +963,8 @@ typedef struct JSForInIterator {
 typedef struct JSRegExp {
     JSString *pattern;
     JSString *bytecode; /* also contains the flags */
+    JSContext *realm; /* compared, never dereferenced */
+    bool legacy_features;
 } JSRegExp;
 
 typedef struct JSProxyData {
@@ -2951,6 +2962,8 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     return ctx;
 }
 
+static int JS_AddIntrinsicShadowRealm(JSContext *ctx);
+
 JSContext *JS_NewContext(JSRuntime *rt)
 {
     JSContext *ctx;
@@ -2968,6 +2981,7 @@ JSContext *JS_NewContext(JSRuntime *rt)
         JS_AddIntrinsicTypedArrays(ctx) ||
         JS_AddIntrinsicPromise(ctx) ||
         JS_AddIntrinsicWeakRef(ctx) ||
+        JS_AddIntrinsicShadowRealm(ctx) ||
         JS_AddIntrinsicAToB(ctx) ||
         JS_AddPerformance(ctx)) {
         JS_FreeContext(ctx);
@@ -21930,6 +21944,9 @@ JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
             JSBoundFunction *bf = p->u.bound_function;
             realm = JS_GetFunctionRealm(ctx, bf->func_obj);
         }
+        break;
+    case JS_CLASS_WRAPPED_FUNCTION:
+        realm = ((JSWrappedFunction *)p->u.opaque)->realm;
         break;
     case JS_CLASS_ASYNC_FUNCTION_RESOLVE:
     case JS_CLASS_ASYNC_FUNCTION_REJECT:
@@ -50569,6 +50586,9 @@ static JSValue js_regexp_constructor_internal(JSContext *ctx, JSValueConst ctor,
     re = &p->u.regexp;
     re->pattern = JS_VALUE_GET_STRING(pattern);
     re->bytecode = JS_VALUE_GET_STRING(bc);
+    re->realm = ctx;
+    re->legacy_features = JS_IsUndefined(ctor) ||
+        js_same_value(ctx, ctor, ctx->regexp_ctor);
     return obj;
 fail:
     JS_FreeValue(ctx, bc);
@@ -50693,6 +50713,8 @@ static JSValue js_regexp_compile(JSContext *ctx, JSValueConst this_val,
     re = js_get_regexp(ctx, this_val, true);
     if (!re)
         return JS_EXCEPTION;
+    if (re->realm != ctx || !re->legacy_features)
+        return JS_ThrowTypeError(ctx, "compile is not available for this RegExp");
     pattern1 = argv[0];
     flags1 = argv[1];
     re1 = js_get_regexp(ctx, pattern1, false);
@@ -50981,20 +51003,22 @@ enum {
     JS_RE_LEGACY_LEFT, JS_RE_LEGACY_RIGHT, JS_RE_LEGACY_PAREN1,
 };
 
-static JSValue js_regexp_legacy_group(JSContext *ctx, int group)
+static JSValue js_regexp_legacy_range(JSContext *ctx, const int32_t *pos)
 {
     JSString *p;
-    int start, end;
 
-    if (!JS_IsString(ctx->regexp_legacy_subject) || group < 0 ||
-        group >= ctx->regexp_legacy_count)
+    if (!JS_IsString(ctx->regexp_legacy_subject) || pos[0] < 0 ||
+        pos[1] < pos[0])
         return JS_AtomToString(ctx, JS_ATOM_empty_string);
     p = JS_VALUE_GET_STRING(ctx->regexp_legacy_subject);
-    start = ctx->regexp_legacy_pos[2 * group];
-    end = ctx->regexp_legacy_pos[2 * group + 1];
-    if (start < 0 || end < start)
+    return js_sub_string(ctx, p, pos[0], pos[1]);
+}
+
+static JSValue js_regexp_legacy_group(JSContext *ctx, int group)
+{
+    if (group >= ctx->regexp_legacy_count)
         return JS_AtomToString(ctx, JS_ATOM_empty_string);
-    return js_sub_string(ctx, p, start, end);
+    return js_regexp_legacy_range(ctx, ctx->regexp_legacy_pos + 2 * group);
 }
 
 static JSValue js_regexp_legacy_context(JSContext *ctx, bool right)
@@ -51012,17 +51036,22 @@ static JSValue js_regexp_legacy_context(JSContext *ctx, bool right)
 static JSValue js_regexp_legacy_get(JSContext *ctx, JSValueConst this_val,
                                     int magic)
 {
-    (void)this_val;
-    switch (magic) {
-    case JS_RE_LEGACY_INPUT:
+    if (!js_same_value(ctx, this_val, ctx->regexp_ctor))
+        return JS_ThrowTypeError(ctx, "receiver is not the RegExp constructor");
+    if (magic == JS_RE_LEGACY_INPUT) {
+        if (JS_IsUndefined(ctx->regexp_legacy_input))
+            return JS_ThrowTypeError(ctx, "RegExp statics are not available");
         if (JS_IsString(ctx->regexp_legacy_input))
             return js_dup(ctx->regexp_legacy_input);
         return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    if (ctx->regexp_legacy_invalid)
+        return JS_ThrowTypeError(ctx, "RegExp statics are not available");
+    switch (magic) {
     case JS_RE_LEGACY_LAST_MATCH:
         return js_regexp_legacy_group(ctx, 0);
     case JS_RE_LEGACY_LAST_PAREN:
-        return js_regexp_legacy_group(ctx, ctx->regexp_legacy_count > 1 ?
-                                      ctx->regexp_legacy_count - 1 : -1);
+        return js_regexp_legacy_range(ctx, ctx->regexp_legacy_last_paren);
     case JS_RE_LEGACY_LEFT:
         return js_regexp_legacy_context(ctx, false);
     case JS_RE_LEGACY_RIGHT:
@@ -51037,9 +51066,8 @@ static JSValue js_regexp_legacy_set(JSContext *ctx, JSValueConst this_val,
 {
     JSValue s;
 
-    (void)this_val;
-    if (magic != JS_RE_LEGACY_INPUT)
-        return JS_UNDEFINED;
+    if (!js_same_value(ctx, this_val, ctx->regexp_ctor))
+        return JS_ThrowTypeError(ctx, "receiver is not the RegExp constructor");
     s = JS_ToString(ctx, val);
     if (JS_IsException(s))
         return s;
@@ -51049,11 +51077,13 @@ static JSValue js_regexp_legacy_set(JSContext *ctx, JSValueConst this_val,
 }
 
 #define JS_RE_LEGACY_DEF(name, magic) \
-    JS_CGETSET_MAGIC_DEF(name, js_regexp_legacy_get, js_regexp_legacy_set, magic)
+    JS_CGETSET_MAGIC_DEF(name, js_regexp_legacy_get, NULL, magic)
 
 static const JSCFunctionListEntry js_regexp_legacy_funcs[] = {
-    JS_RE_LEGACY_DEF("input", JS_RE_LEGACY_INPUT),
-    JS_RE_LEGACY_DEF("$_", JS_RE_LEGACY_INPUT),
+    JS_CGETSET_MAGIC_DEF("input", js_regexp_legacy_get, js_regexp_legacy_set,
+                         JS_RE_LEGACY_INPUT),
+    JS_CGETSET_MAGIC_DEF("$_", js_regexp_legacy_get, js_regexp_legacy_set,
+                         JS_RE_LEGACY_INPUT),
     JS_RE_LEGACY_DEF("lastMatch", JS_RE_LEGACY_LAST_MATCH),
     JS_RE_LEGACY_DEF("$&", JS_RE_LEGACY_LAST_MATCH),
     JS_RE_LEGACY_DEF("lastParen", JS_RE_LEGACY_LAST_PAREN),
@@ -51073,13 +51103,22 @@ static const JSCFunctionListEntry js_regexp_legacy_funcs[] = {
     JS_RE_LEGACY_DEF("$9", JS_RE_LEGACY_PAREN1 + 8),
 };
 
-static int js_regexp_update_static_captures(JSContext *ctx, JSString *str,
+static void js_regexp_update_static_captures(JSContext *ctx, JSString *str,
                                             uint8_t **capture,
                                             int capture_count,
                                             uint8_t *str_buf, int shift)
 {
     int n = capture_count < 10 ? capture_count : 10;
+    int last = capture_count - 1;
 
+    ctx->regexp_legacy_last_paren[0] = -1;
+    ctx->regexp_legacy_last_paren[1] = -1;
+    if (last > 0 && capture[2 * last] && capture[2 * last + 1]) {
+        ctx->regexp_legacy_last_paren[0] = (capture[2 * last] - str_buf) >> shift;
+        ctx->regexp_legacy_last_paren[1] =
+            (capture[2 * last + 1] - str_buf) >> shift;
+    }
+    ctx->regexp_legacy_invalid = false;
     for (int i = 0; i < n; i++) {
         if (capture[2 * i] && capture[2 * i + 1]) {
             ctx->regexp_legacy_pos[2 * i] = (capture[2 * i] - str_buf) >> shift;
@@ -51095,7 +51134,23 @@ static int js_regexp_update_static_captures(JSContext *ctx, JSString *str,
     ctx->regexp_legacy_subject = js_dup(JS_MKPTR(JS_TAG_STRING, str));
     JS_FreeValue(ctx, ctx->regexp_legacy_input);
     ctx->regexp_legacy_input = js_dup(JS_MKPTR(JS_TAG_STRING, str));
-    return 0;
+}
+
+static void js_regexp_record_match(JSContext *ctx, JSRegExp *re,
+                                   JSString *str, uint8_t **capture,
+                                   int capture_count, uint8_t *str_buf,
+                                   int shift)
+{
+    if (JS_IsHostAccess(ctx))
+        return;
+    if (re->realm == ctx && re->legacy_features) {
+        js_regexp_update_static_captures(ctx, str, capture, capture_count,
+                                         str_buf, shift);
+    } else {
+        ctx->regexp_legacy_invalid = true;
+        JS_FreeValue(ctx, ctx->regexp_legacy_input);
+        ctx->regexp_legacy_input = JS_UNDEFINED;
+    }
 }
 
 static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
@@ -51302,10 +51357,8 @@ static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
         }
 
         /* the embedder's own matches stay out of the page's RegExp.$1 */
-        if (!JS_IsHostAccess(ctx) &&
-            js_regexp_update_static_captures(ctx, str, capture, capture_count,
-                                             str_buf, shift) < 0)
-            goto fail;
+        js_regexp_record_match(ctx, re, str, capture, capture_count,
+                               str_buf, shift);
 
         if (!JS_IsUndefined(indices)) {
             t = indices_groups, indices_groups = JS_UNDEFINED;
@@ -51408,6 +51461,9 @@ static JSValue JS_RegExpDelete(JSContext *ctx, JSValueConst this_val, JSValue ar
             }
             break;
         }
+        js_regexp_record_match(ctx, re, str, capture,
+                               lre_get_capture_count(re_bytecode),
+                               str_buf, shift);
         start = (capture[0] - str_buf) >> shift;
         end = (capture[1] - str_buf) >> shift;
         last_index = end;
@@ -57578,6 +57634,46 @@ static __exception int remainingElementsCount_add(JSContext *ctx,
 #define PROMISE_MAGIC_all        0
 #define PROMISE_MAGIC_allSettled 1
 #define PROMISE_MAGIC_any        2
+#define PROMISE_MAGIC_keyed      8
+
+static JSValue js_promise_keyed_result(JSContext *ctx, JSValueConst keys,
+                                       JSValueConst values)
+{
+    JSValue obj, key, val;
+    int64_t i, len;
+    JSAtom atom;
+    int ret;
+
+    if (js_get_length64(ctx, &len, keys))
+        return JS_EXCEPTION;
+    obj = JS_NewObjectProto(ctx, JS_NULL);
+    if (JS_IsException(obj))
+        return obj;
+    for (i = 0; i < len; i++) {
+        key = JS_GetPropertyInt64(ctx, keys, i);
+        if (JS_IsException(key))
+            goto fail;
+        val = JS_GetPropertyInt64(ctx, values, i);
+        if (JS_IsException(val)) {
+            JS_FreeValue(ctx, key);
+            goto fail;
+        }
+        atom = JS_ValueToAtom(ctx, key);
+        JS_FreeValue(ctx, key);
+        if (atom == JS_ATOM_NULL) {
+            JS_FreeValue(ctx, val);
+            goto fail;
+        }
+        ret = JS_DefinePropertyValue(ctx, obj, atom, val, JS_PROP_C_W_E);
+        JS_FreeAtom(ctx, atom);
+        if (ret < 0)
+            goto fail;
+    }
+    return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
 
 static JSValue js_promise_all_resolve_element(JSContext *ctx,
                                               JSValueConst this_val,
@@ -57587,7 +57683,8 @@ static JSValue js_promise_all_resolve_element(JSContext *ctx,
 {
     int resolve_type = magic & 3;
     int is_reject = magic & 4;
-    bool alreadyCalled = JS_ToBool(ctx, func_data[0]);
+    int is_keyed = magic & PROMISE_MAGIC_keyed;
+    bool alreadyCalled;
     JSValueConst values = func_data[2];
     JSValueConst resolve = func_data[3];
     JSValueConst resolve_element_env = func_data[4];
@@ -57597,9 +57694,20 @@ static JSValue js_promise_all_resolve_element(JSContext *ctx,
 
     if (JS_ToInt32(ctx, &index, func_data[1]))
         return JS_EXCEPTION;
+    if (is_keyed) {
+        JSValue flag = JS_GetPropertyUint32(ctx, func_data[0], 0);
+        if (JS_IsException(flag))
+            return JS_EXCEPTION;
+        alreadyCalled = JS_ToBoolFree(ctx, flag);
+        if (!alreadyCalled &&
+            JS_SetPropertyUint32(ctx, func_data[0], 0, JS_TRUE) < 0)
+            return JS_EXCEPTION;
+    } else {
+        alreadyCalled = JS_ToBool(ctx, func_data[0]);
+        func_data[0] = JS_TRUE;
+    }
     if (alreadyCalled)
         return JS_UNDEFINED;
-    func_data[0] = JS_TRUE;
 
     if (resolve_type == PROMISE_MAGIC_allSettled) {
         JSValue str;
@@ -57640,6 +57748,12 @@ static JSValue js_promise_all_resolve_element(JSContext *ctx,
                 return JS_EXCEPTION;
             ret = JS_Call(ctx, resolve, JS_UNDEFINED, 1, vc(&error));
             JS_FreeValue(ctx, error);
+        } else if (is_keyed) {
+            JSValue result = js_promise_keyed_result(ctx, func_data[5], values);
+            if (JS_IsException(result))
+                return JS_EXCEPTION;
+            ret = JS_Call(ctx, resolve, JS_UNDEFINED, 1, vc(&result));
+            JS_FreeValue(ctx, result);
         } else {
             ret = JS_Call(ctx, resolve, JS_UNDEFINED, 1, &values);
         }
@@ -57792,6 +57906,165 @@ static JSValue js_promise_all(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, result_promise);
     result_promise = JS_EXCEPTION;
     goto done;
+}
+
+static int js_promise_all_keyed_loop(JSContext *ctx, JSValueConst this_val,
+                                     JSValueConst promises,
+                                     JSValueConst promise_resolve,
+                                     JSValueConst *resolving_funcs, int magic)
+{
+    JSValue keys, values, resolve_element_env, value, next_promise, ret;
+    JSValue resolve_element, reject_element, key_val, already_called;
+    JSValueConst then_args[2], resolve_element_data[6];
+    JSPropertyEnum *tab = NULL;
+    JSPropertyDescriptor desc;
+    uint32_t i, len = 0;
+    int index = 0, is_zero, res = -1, has;
+
+    keys = JS_NewArray(ctx);
+    values = JS_NewArray(ctx);
+    resolve_element_env = JS_NewArray(ctx);
+    if (JS_IsException(keys) || JS_IsException(values) ||
+        JS_IsException(resolve_element_env))
+        goto done;
+    if (JS_DefinePropertyValueUint32(ctx, resolve_element_env, 0, js_int32(1),
+                                     JS_PROP_C_W_E) < 0)
+        goto done;
+    if (JS_GetOwnPropertyNamesInternal(ctx, &tab, &len,
+                                       JS_VALUE_GET_OBJ(promises),
+                                       JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK))
+        goto done;
+    for (i = 0; i < len; i++) {
+        has = JS_GetOwnPropertyInternal(ctx, &desc, JS_VALUE_GET_OBJ(promises),
+                                        tab[i].atom);
+        if (has < 0)
+            goto done;
+        if (!has)
+            continue;
+        js_free_desc(ctx, &desc);
+        if (!(desc.flags & JS_PROP_ENUMERABLE))
+            continue;
+        value = JS_GetProperty(ctx, promises, tab[i].atom);
+        if (JS_IsException(value))
+            goto done;
+        key_val = JS_AtomToValue(ctx, tab[i].atom);
+        if (JS_DefinePropertyValueUint32(ctx, keys, index, key_val,
+                                         JS_PROP_C_W_E) < 0 ||
+            JS_DefinePropertyValueUint32(ctx, values, index, JS_UNDEFINED,
+                                         JS_PROP_C_W_E) < 0) {
+            JS_FreeValue(ctx, value);
+            goto done;
+        }
+        next_promise = JS_Call(ctx, promise_resolve, this_val, 1, vc(&value));
+        JS_FreeValue(ctx, value);
+        if (JS_IsException(next_promise))
+            goto done;
+        already_called = JS_NewArray(ctx);
+        if (JS_IsException(already_called)) {
+            JS_FreeValue(ctx, next_promise);
+            goto done;
+        }
+        resolve_element_data[0] = already_called;
+        resolve_element_data[1] = js_int32(index);
+        resolve_element_data[2] = values;
+        resolve_element_data[3] = resolving_funcs[0];
+        resolve_element_data[4] = resolve_element_env;
+        resolve_element_data[5] = keys;
+        resolve_element = JS_NewCFunctionData(ctx, js_promise_all_resolve_element,
+                                              1, magic, 6, resolve_element_data);
+        if (JS_IsException(resolve_element)) {
+            JS_FreeValue(ctx, already_called);
+            JS_FreeValue(ctx, next_promise);
+            goto done;
+        }
+        if ((magic & 3) == PROMISE_MAGIC_allSettled) {
+            reject_element = JS_NewCFunctionData(ctx, js_promise_all_resolve_element,
+                                                 1, magic | 4, 6,
+                                                 resolve_element_data);
+            JS_FreeValue(ctx, already_called);
+            if (JS_IsException(reject_element)) {
+                JS_FreeValue(ctx, next_promise);
+                JS_FreeValue(ctx, resolve_element);
+                goto done;
+            }
+        } else {
+            JS_FreeValue(ctx, already_called);
+            reject_element = js_dup(resolving_funcs[1]);
+        }
+        if (remainingElementsCount_add(ctx, resolve_element_env, 1) < 0) {
+            JS_FreeValue(ctx, next_promise);
+            JS_FreeValue(ctx, resolve_element);
+            JS_FreeValue(ctx, reject_element);
+            goto done;
+        }
+        then_args[0] = resolve_element;
+        then_args[1] = reject_element;
+        ret = JS_InvokeFree(ctx, next_promise, JS_ATOM_then, 2, then_args);
+        JS_FreeValue(ctx, resolve_element);
+        JS_FreeValue(ctx, reject_element);
+        if (check_exception_free(ctx, ret))
+            goto done;
+        index++;
+    }
+    is_zero = remainingElementsCount_add(ctx, resolve_element_env, -1);
+    if (is_zero < 0)
+        goto done;
+    if (is_zero) {
+        JSValue result = js_promise_keyed_result(ctx, keys, values);
+        if (JS_IsException(result))
+            goto done;
+        ret = JS_Call(ctx, resolving_funcs[0], JS_UNDEFINED, 1, vc(&result));
+        JS_FreeValue(ctx, result);
+        if (check_exception_free(ctx, ret))
+            goto done;
+    }
+    res = 0;
+ done:
+    if (tab)
+        js_free_prop_enum(ctx, tab, len);
+    JS_FreeValue(ctx, keys);
+    JS_FreeValue(ctx, values);
+    JS_FreeValue(ctx, resolve_element_env);
+    return res;
+}
+
+static JSValue js_promise_all_keyed(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv, int magic)
+{
+    JSValue result_promise, resolving_funcs[2], promise_resolve, error, ret;
+
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+    result_promise = js_new_promise_capability(ctx, resolving_funcs, this_val);
+    if (JS_IsException(result_promise))
+        return result_promise;
+    promise_resolve = JS_GetProperty(ctx, this_val, JS_ATOM_resolve);
+    if (JS_IsException(promise_resolve) ||
+        check_function(ctx, promise_resolve))
+        goto fail_reject;
+    if (!JS_IsObject(argv[0])) {
+        JS_ThrowTypeErrorNotAnObject(ctx);
+        goto fail_reject;
+    }
+    if (js_promise_all_keyed_loop(ctx, this_val, argv[0], promise_resolve,
+                                  vc(resolving_funcs), magic) < 0)
+        goto fail_reject;
+    goto done;
+ fail_reject:
+    error = JS_GetException(ctx);
+    ret = JS_Call(ctx, resolving_funcs[1], JS_UNDEFINED, 1, vc(&error));
+    JS_FreeValue(ctx, error);
+    if (JS_IsException(ret)) {
+        JS_FreeValue(ctx, result_promise);
+        result_promise = JS_EXCEPTION;
+    } else {
+        JS_FreeValue(ctx, ret);
+    }
+ done:
+    JS_FreeValue(ctx, promise_resolve);
+    JS_FreeValue(ctx, resolving_funcs[0]);
+    JS_FreeValue(ctx, resolving_funcs[1]);
+    return result_promise;
 }
 
 static JSValue js_promise_race(JSContext *ctx, JSValueConst this_val,
@@ -58046,6 +58319,8 @@ static const JSCFunctionListEntry js_promise_funcs[] = {
     JS_CFUNC_MAGIC_DEF("all", 1, js_promise_all, PROMISE_MAGIC_all ),
     JS_CFUNC_MAGIC_DEF("allSettled", 1, js_promise_all, PROMISE_MAGIC_allSettled ),
     JS_CFUNC_MAGIC_DEF("any", 1, js_promise_all, PROMISE_MAGIC_any ),
+    JS_CFUNC_MAGIC_DEF("allKeyed", 1, js_promise_all_keyed, PROMISE_MAGIC_all | PROMISE_MAGIC_keyed ),
+    JS_CFUNC_MAGIC_DEF("allSettledKeyed", 1, js_promise_all_keyed, PROMISE_MAGIC_allSettled | PROMISE_MAGIC_keyed ),
     JS_CFUNC_DEF("try", 1, js_promise_try ),
     JS_CFUNC_DEF("race", 1, js_promise_race ),
     JS_CFUNC_DEF("withResolvers", 0, js_promise_withResolvers ),
@@ -64842,6 +65117,394 @@ static const JSClassShortDef js_finrec_class_def[] = {
 static JSValue js_finrec_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
     return JS_Call(ctx, argv[0], JS_UNDEFINED, 1, &argv[1]);
+}
+
+/* ShadowRealm */
+
+static JSValue js_wrapped_function_create(JSContext *ctx, JSContext *realm,
+                                          JSValueConst target);
+
+static void js_wrapped_function_finalizer(JSRuntime *rt, JSValueConst val)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(val);
+    JSWrappedFunction *wf = p->u.opaque;
+
+    if (!wf)
+        return;
+    JS_FreeValueRT(rt, wf->target);
+    JS_FreeContext(wf->realm);
+    js_free_rt(rt, wf);
+}
+
+static void js_wrapped_function_mark(JSRuntime *rt, JSValueConst val,
+                                     JS_MarkFunc *mark_func)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(val);
+    JSWrappedFunction *wf = p->u.opaque;
+
+    if (!wf)
+        return;
+    JS_MarkValue(rt, wf->target, mark_func);
+    mark_func(rt, &wf->realm->header);
+}
+
+static void js_shadow_realm_finalizer(JSRuntime *rt, JSValueConst val)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(val);
+    JSContext *realm = p->u.opaque;
+
+    if (realm)
+        JS_FreeContext(realm);
+}
+
+static void js_shadow_realm_mark(JSRuntime *rt, JSValueConst val,
+                                 JS_MarkFunc *mark_func)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(val);
+    JSContext *realm = p->u.opaque;
+
+    if (realm)
+        mark_func(rt, &realm->header);
+}
+
+static JSValue js_shadow_realm_type_error(JSContext *realm)
+{
+    if (JS_IsUncatchableError(realm->rt->current_exception))
+        return JS_EXCEPTION;
+    JS_FreeValue(realm, JS_GetException(realm));
+    return JS_ThrowTypeError(realm, "error thrown across a ShadowRealm boundary");
+}
+
+static JSValue js_get_wrapped_value(JSContext *ctx, JSContext *realm,
+                                    JSValue value)
+{
+    JSValue wrapped;
+
+    if (!JS_IsObject(value))
+        return value;
+    if (!JS_IsFunction(ctx, value)) {
+        JS_FreeValue(ctx, value);
+        return JS_ThrowTypeError(ctx, "a ShadowRealm boundary only passes primitives and callables");
+    }
+    wrapped = js_wrapped_function_create(ctx, realm, value);
+    JS_FreeValue(ctx, value);
+    return wrapped;
+}
+
+static JSValue js_call_wrapped_function(JSContext *ctx, JSValueConst func_obj,
+                                        JSValueConst this_obj,
+                                        int argc, JSValueConst *argv, int flags)
+{
+    JSWrappedFunction *wf = JS_VALUE_GET_OBJ(func_obj)->u.opaque;
+    JSContext *caller_realm = wf->realm;
+    JSContext *target_realm;
+    JSValue *args, this_arg, ret;
+    int i;
+
+    target_realm = JS_GetFunctionRealm(caller_realm, wf->target);
+    if (!target_realm)
+        return JS_EXCEPTION;
+    if (js_check_stack_overflow(ctx->rt, sizeof(JSValue) * argc))
+        return JS_ThrowStackOverflow(caller_realm);
+    args = alloca(sizeof(JSValue) * max_int(argc, 1));
+    for (i = 0; i < argc; i++) {
+        args[i] = js_get_wrapped_value(caller_realm, target_realm,
+                                       js_dup(argv[i]));
+        if (JS_IsException(args[i]))
+            goto fail;
+    }
+    this_arg = js_get_wrapped_value(caller_realm, target_realm,
+                                    js_dup(this_obj));
+    if (JS_IsException(this_arg))
+        goto fail;
+    ret = JS_Call(target_realm, wf->target, this_arg, argc, vc(args));
+    JS_FreeValue(caller_realm, this_arg);
+    while (--i >= 0)
+        JS_FreeValue(caller_realm, args[i]);
+    if (JS_IsException(ret))
+        return js_shadow_realm_type_error(caller_realm);
+    return js_get_wrapped_value(caller_realm, caller_realm, ret);
+ fail:
+    while (--i >= 0)
+        JS_FreeValue(caller_realm, args[i]);
+    return JS_EXCEPTION;
+}
+
+static int js_wrapped_copy_name_and_length(JSContext *ctx, JSValueConst wrapped,
+                                           JSValueConst target)
+{
+    JSValue len_val, name;
+    double len = 0, d;
+    int has;
+
+    has = JS_GetOwnPropertyInternal(ctx, NULL, JS_VALUE_GET_OBJ(target),
+                                    JS_ATOM_length);
+    if (has < 0)
+        return -1;
+    if (has) {
+        len_val = JS_GetProperty(ctx, target, JS_ATOM_length);
+        if (JS_IsException(len_val))
+            return -1;
+        if (JS_IsNumber(len_val)) {
+            JS_ToFloat64(ctx, &d, len_val);
+            if (isinf(d))
+                len = d > 0 ? d : 0;
+            else if (!isnan(d))
+                len = fmax(trunc(d), 0);
+        }
+        JS_FreeValue(ctx, len_val);
+    }
+    if (JS_DefinePropertyValue(ctx, wrapped, JS_ATOM_length,
+                               js_number(len), JS_PROP_CONFIGURABLE) < 0)
+        return -1;
+    name = JS_GetProperty(ctx, target, JS_ATOM_name);
+    if (JS_IsException(name))
+        return -1;
+    if (!JS_IsString(name)) {
+        JS_FreeValue(ctx, name);
+        name = js_empty_string(ctx->rt);
+    }
+    return JS_DefinePropertyValue(ctx, wrapped, JS_ATOM_name, name,
+                                  JS_PROP_CONFIGURABLE);
+}
+
+static JSValue js_wrapped_function_create(JSContext *ctx, JSContext *realm,
+                                          JSValueConst target)
+{
+    JSWrappedFunction *wf;
+    JSValue obj;
+
+    obj = JS_NewObjectProtoClass(realm, realm->function_proto,
+                                 JS_CLASS_WRAPPED_FUNCTION);
+    if (JS_IsException(obj))
+        return obj;
+    wf = js_malloc(realm, sizeof(*wf));
+    if (!wf) {
+        JS_FreeValue(realm, obj);
+        return JS_EXCEPTION;
+    }
+    wf->target = js_dup(target);
+    wf->realm = JS_DupContext(realm);
+    JS_VALUE_GET_OBJ(obj)->u.opaque = wf;
+    if (js_wrapped_copy_name_and_length(ctx, obj, target) < 0) {
+        JS_FreeValue(realm, obj);
+        return js_shadow_realm_type_error(ctx);
+    }
+    return obj;
+}
+
+static JSContext *js_shadow_realm_get(JSContext *ctx, JSValueConst this_val)
+{
+    JSContext *realm = JS_GetOpaque(this_val, JS_CLASS_SHADOW_REALM);
+
+    if (!realm)
+        JS_ThrowTypeError(ctx, "not a ShadowRealm");
+    return realm;
+}
+
+static JSValue js_shadow_realm_constructor(JSContext *ctx, JSValueConst new_target,
+                                           int argc, JSValueConst *argv)
+{
+    JSContext *realm;
+    JSValue obj;
+
+    obj = js_create_from_ctor(ctx, new_target, JS_CLASS_SHADOW_REALM);
+    if (JS_IsException(obj))
+        return obj;
+    realm = JS_NewContext(ctx->rt);
+    if (!realm) {
+        JS_FreeValue(ctx, obj);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    realm->user_opaque = ctx->user_opaque;
+    JS_VALUE_GET_OBJ(obj)->u.opaque = realm;
+    return obj;
+}
+
+static JSValue js_shadow_realm_evaluate(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv)
+{
+    JSContext *realm = js_shadow_realm_get(ctx, this_val);
+    JSValue func, ret, err, msg;
+    const char *src;
+    size_t len;
+
+    if (!realm)
+        return JS_EXCEPTION;
+    if (!JS_IsString(argv[0]))
+        return JS_ThrowTypeError(ctx, "evaluate expects a string");
+    src = JS_ToCStringLen(ctx, &len, argv[0]);
+    if (!src)
+        return JS_EXCEPTION;
+    func = JS_EvalInternal(realm, realm->global_obj, src, len, "<ShadowRealm>",
+                           1, 1, JS_EVAL_TYPE_INDIRECT | JS_EVAL_FLAG_COMPILE_ONLY,
+                           -1);
+    JS_FreeCString(ctx, src);
+    if (JS_IsException(func)) {
+        if (JS_IsUncatchableError(realm->rt->current_exception))
+            return JS_EXCEPTION;
+        err = JS_GetException(realm);
+        msg = JS_GetProperty(realm, err, JS_ATOM_message);
+        JS_FreeValue(realm, err);
+        if (JS_IsException(msg))
+            return JS_EXCEPTION;
+        src = JS_ToCString(ctx, msg);
+        JS_FreeValue(realm, msg);
+        if (!src)
+            return JS_EXCEPTION;
+        JS_ThrowSyntaxError(ctx, "%s", src);
+        JS_FreeCString(ctx, src);
+        return JS_EXCEPTION;
+    }
+    ret = JS_EvalFunction(realm, func);
+    if (JS_IsException(ret))
+        return js_shadow_realm_type_error(ctx);
+    return js_get_wrapped_value(ctx, ctx, ret);
+}
+
+static JSValue js_shadow_realm_export_getter(JSContext *ctx, JSValueConst this_val,
+                                             int argc, JSValueConst *argv)
+{
+    JSValueConst exports = argv[1];
+    JSAtom name;
+    JSValue value;
+    int has;
+
+    name = JS_ValueToAtom(ctx, argv[0]);
+    if (name == JS_ATOM_NULL)
+        return JS_EXCEPTION;
+    has = JS_GetOwnPropertyInternal(ctx, NULL, JS_VALUE_GET_OBJ(exports), name);
+    if (has <= 0) {
+        JS_FreeAtom(ctx, name);
+        if (has < 0)
+            return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "the module has no such export");
+    }
+    value = JS_GetProperty(ctx, exports, name);
+    JS_FreeAtom(ctx, name);
+    if (JS_IsException(value))
+        return value;
+    return js_get_wrapped_value(ctx, ctx, value);
+}
+
+static JSValue js_shadow_realm_import_error(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv)
+{
+    return JS_ThrowTypeError(ctx, "ShadowRealm module import failed");
+}
+
+static JSAtom js_caller_script_name(JSContext *ctx)
+{
+    JSStackFrame *sf;
+    JSObject *p;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(p->class_id))
+            return JS_DupAtom(ctx, p->u.func.function_bytecode->filename);
+    }
+    return JS_ATOM_NULL;
+}
+
+static JSValue js_shadow_realm_import_value(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv)
+{
+    JSContext *realm = js_shadow_realm_get(ctx, this_val);
+    JSValue specifier, inner_funcs[2], inner, basename_val, args[5];
+    JSValue handlers[2], cap_funcs[2], getter, promise = JS_EXCEPTION;
+    JSValueConst bind_args[2];
+    JSAtom basename;
+
+    if (!realm)
+        return JS_EXCEPTION;
+    specifier = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(specifier))
+        return specifier;
+    if (!JS_IsString(argv[1])) {
+        JS_FreeValue(ctx, specifier);
+        return JS_ThrowTypeError(ctx, "importValue expects a string export name");
+    }
+    basename = js_caller_script_name(ctx);
+    basename_val = basename == JS_ATOM_NULL ? JS_NULL :
+        JS_AtomToValue(ctx, basename);
+    JS_FreeAtom(ctx, basename);
+    inner = JS_NewPromiseCapability(realm, inner_funcs);
+    if (JS_IsException(inner)) {
+        JS_FreeValue(ctx, specifier);
+        JS_FreeValue(ctx, basename_val);
+        return inner;
+    }
+    args[0] = inner_funcs[0];
+    args[1] = inner_funcs[1];
+    args[2] = basename_val;
+    args[3] = specifier;
+    args[4] = JS_UNDEFINED;
+    JS_EnqueueJob(realm, js_dynamic_import_job, 5, vc(args));
+    getter = JS_NewCFunction2(ctx, js_shadow_realm_export_getter, "", 2,
+                              JS_CFUNC_generic, 0);
+    bind_args[0] = JS_UNDEFINED;
+    bind_args[1] = argv[1];
+    handlers[0] = JS_IsException(getter) ? JS_EXCEPTION :
+        js_function_bind(ctx, getter, 2, bind_args);
+    JS_FreeValue(ctx, getter);
+    handlers[1] = JS_NewCFunction2(ctx, js_shadow_realm_import_error, "", 1,
+                                   JS_CFUNC_generic, 0);
+    if (JS_IsException(handlers[0]) || JS_IsException(handlers[1]))
+        goto done;
+    promise = JS_NewPromiseCapability(ctx, cap_funcs);
+    if (JS_IsException(promise))
+        goto done;
+    if (perform_promise_then(ctx, inner, vc(handlers), vc(cap_funcs)) < 0) {
+        JS_FreeValue(ctx, promise);
+        promise = JS_EXCEPTION;
+    }
+    JS_FreeValue(ctx, cap_funcs[0]);
+    JS_FreeValue(ctx, cap_funcs[1]);
+ done:
+    JS_FreeValue(ctx, handlers[0]);
+    JS_FreeValue(ctx, handlers[1]);
+    JS_FreeValue(ctx, inner);
+    JS_FreeValue(realm, inner_funcs[0]);
+    JS_FreeValue(realm, inner_funcs[1]);
+    JS_FreeValue(ctx, specifier);
+    JS_FreeValue(ctx, basename_val);
+    return promise;
+}
+
+static const JSCFunctionListEntry js_shadow_realm_proto_funcs[] = {
+    JS_CFUNC_DEF("evaluate", 1, js_shadow_realm_evaluate ),
+    JS_CFUNC_DEF("importValue", 2, js_shadow_realm_import_value ),
+    JS_PROP_STRING_DEF("[Symbol.toStringTag]", "ShadowRealm", JS_PROP_CONFIGURABLE ),
+};
+
+static const JSClassShortDef js_shadow_realm_class_def[] = {
+    { JS_ATOM_Function, js_wrapped_function_finalizer, js_wrapped_function_mark }, /* JS_CLASS_WRAPPED_FUNCTION */
+    { JS_ATOM_Object, js_shadow_realm_finalizer, js_shadow_realm_mark }, /* JS_CLASS_SHADOW_REALM */
+};
+
+static int JS_AddIntrinsicShadowRealm(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue obj;
+
+    if (!JS_IsRegisteredClass(rt, JS_CLASS_WRAPPED_FUNCTION)) {
+        if (init_class_range(rt, js_shadow_realm_class_def,
+                             JS_CLASS_WRAPPED_FUNCTION,
+                             countof(js_shadow_realm_class_def)))
+            return -1;
+        rt->class_array[JS_CLASS_WRAPPED_FUNCTION].call = js_call_wrapped_function;
+    }
+    obj = JS_NewCConstructor(ctx, JS_CLASS_SHADOW_REALM, "ShadowRealm",
+                             js_shadow_realm_constructor, 0,
+                             JS_CFUNC_constructor, 0, JS_UNDEFINED, NULL, 0,
+                             js_shadow_realm_proto_funcs,
+                             countof(js_shadow_realm_proto_funcs), 0);
+    if (JS_IsException(obj))
+        return -1;
+    JS_FreeValue(ctx, obj);
+    return 0;
 }
 
 int JS_AddIntrinsicWeakRef(JSContext *ctx)
