@@ -33250,6 +33250,8 @@ ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
     if (name && old_value &&
         g_strcmp0(ns_element_get_attr(target, name), old_value) == 0)
         return;
+    if (target->flags & NS_NODE_STYLE_USES_ATTR)
+        ns_css_mark_restyle_dirty(target);
     if (!ns_css_attr_may_affect_style(target, name)) return;
     if (incr_name_change_unused(target, name, old_value)) return;
     gboolean gated = incr_has_mut_begin_attr(target, name, old_value);
@@ -34535,7 +34537,7 @@ cascade_walk(ns_node *node,
             if (uses_attr) {
                 have_key = FALSE;
                 shared = NULL;
-                ns_css_incremental_exclude(node, TRUE);
+                node->flags |= NS_NODE_STYLE_USES_ATTR;
             }
         }
         if (shared) {
