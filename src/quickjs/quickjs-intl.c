@@ -637,7 +637,11 @@ int JS_AddIntrinsicIntl(JSContext *ctx)
         js_intl_init_number_format(ctx, intl) < 0 ||
         js_intl_init_plural_rules(ctx, intl) < 0 ||
         js_intl_init_collator(ctx, intl) < 0 ||
-        js_intl_init_date_time_format(ctx, intl) < 0)
+        js_intl_init_date_time_format(ctx, intl) < 0 ||
+        js_intl_init_list_format(ctx, intl) < 0 ||
+        js_intl_init_relative_time_format(ctx, intl) < 0 ||
+        js_intl_init_display_names(ctx, intl) < 0 ||
+        js_intl_init_duration_format(ctx, intl) < 0)
         goto done;
     global = JS_GetGlobalObject(ctx);
     r = JS_DefinePropertyValueStr(ctx, global, "Intl", JS_DupValue(ctx, intl),
