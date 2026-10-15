@@ -1112,6 +1112,10 @@ ICU dependency.
 | `quickjs-intl-number.c` | `Intl.NumberFormat` (all v3 options, compact/scientific/engineering notation, units, currencies, ranges), `Intl.PluralRules`, `Number`/`BigInt` `toLocaleString` |
 | `quickjs-intl-collator.c` | `Intl.Collator`, `String.prototype.localeCompare`, `toLocaleLowerCase`/`toLocaleUpperCase` (Turkish, Azeri, Lithuanian special casing) |
 | `quickjs-intl-datetime.c` | `Intl.DateTimeFormat` (skeleton matching, styles, time-zone names, intervals, Temporal values), `Date` and Temporal `toLocaleString` |
+| `quickjs-intl-list.c` | `Intl.ListFormat` |
+| `quickjs-intl-relative.c` | `Intl.RelativeTimeFormat` |
+| `quickjs-intl-displaynames.c` | `Intl.DisplayNames` |
+| `quickjs-intl-duration.c` | `Intl.DurationFormat`, `Temporal.Duration.prototype.toLocaleString` |
 | `quickjs-intl-calendar.c` | dates in each supported calendar; the non-Gregorian arithmetic comes from Temporal's calendar code so both APIs agree |
 | `quickjs-intl-data.c` | lookup in the generated CLDR tables with locale inheritance |
 
@@ -1129,7 +1133,12 @@ Gregorian patterns and fall back to them. Metazone names (`Pacific Standard
 Time`) are kept for 13 languages, others use localized GMT offsets. The
 generator writes date patterns with an ASCII space where CLDR has U+202F
 before the day period, matching what test262 and other engines produce.
-Plural rules cover every language CLDR has rules for. To
+List patterns and the `h:mm:ss` duration pattern are kept for every
+language, relative-time patterns for the 30 languages that carry unit
+names, and display names (languages, regions, scripts, calendars, date-time
+fields) for the 13 languages that carry metazone names; English has every
+language, script, variant and currency name, the others the languages and
+scripts of the available locales. Plural rules cover every language CLDR has rules for. To
 regenerate, unpack `cldr-<version>-json-full.zip` from the
 [cldr-json releases](https://github.com/unicode-org/cldr-json/releases)
 outside the tree and run
@@ -1144,8 +1153,8 @@ handling.
 
 | Area (test262 `intl402/`) | Status |
 | --- | --- |
-| `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `DateTimeFormat`, `Date`, `FallbackSymbol`, `String`, `Number`, `BigInt`, `Array`, `TypedArray`, `Temporal` | enabled in `test262.conf`, all pass |
-| `DisplayNames`, `DurationFormat`, `ListFormat`, `RelativeTimeFormat`, `Segmenter` | not implemented yet, excluded |
+| `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `DateTimeFormat`, `Date`, `FallbackSymbol`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `DurationFormat`, `String`, `Number`, `BigInt`, `Array`, `TypedArray`, `Temporal` | enabled in `test262.conf`, all pass |
+| `Segmenter` | not implemented yet, excluded |
 
 Time zones: `Intl.DateTimeFormat` resolves offsets through Temporal's tz
 database reader. On Windows without a tz database it maps the IANA name to a

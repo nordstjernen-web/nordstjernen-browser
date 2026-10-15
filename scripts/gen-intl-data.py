@@ -588,7 +588,7 @@ def put_numbers(store, loc, nums, full):
         store.put(loc, p + "range", misc.get("range"))
 
 
-def put_currencies(store, loc, curs, full):
+def put_currencies(store, loc, curs, full, all_names=False):
     major = set("""USD EUR JPY GBP CNY INR CHF CAD AUD KRW BRL RUB MXN SEK NOK DKK PLN CZK HUF TRY
         ILS SAR AED EGP ZAR NZD SGD HKD TWD THB IDR MYR PHP VND PKR BDT NGN KES UAH RON BGN ISK""".split())
     for code, c in curs.items():
@@ -600,6 +600,8 @@ def put_currencies(store, loc, curs, full):
         nar = c.get("symbol-alt-narrow")
         if nar is not None and nar != (sym if sym is not None else code):
             store.put(loc, "c." + code + ".n", nar)
+        if full and all_names and code not in major:
+            store.put(loc, "c." + code + ".d", c.get("displayName"))
         if full and code in major:
             store.put(loc, "c." + code + ".d", c.get("displayName"))
             for k, v in c.items():
@@ -814,6 +816,111 @@ def put_time_zone_names(store, loc, names_too):
     walk("", tz.get("zone", {}))
 
 
+LIST_TYPES = {"standard": "c", "or": "o", "unit": "u"}
+WIDTH_SUFFIX = {"": "l", "short": "s", "narrow": "n"}
+RT_UNITS = {"year": "y", "quarter": "q", "month": "m", "week": "w", "day": "d", "hour": "h", "minute": "n",
+            "second": "s"}
+
+
+def put_lists(store, loc):
+    data = cldr_main("cldr-misc-full", loc, "listPatterns.json")
+    if not data:
+        return
+    for k, pats in data["listPatterns"].items():
+        base, _, width = k[len("listPattern-type-"):].partition("-")
+        if base not in LIST_TYPES or width not in WIDTH_SUFFIX:
+            continue
+        for part, v in pats.items():
+            store.put(loc, "l.%s%s.%s" % (LIST_TYPES[base], WIDTH_SUFFIX[width], part[0]), v)
+
+
+def put_relative(store, loc):
+    data = cldr_main("cldr-dates-full", loc, "dateFields.json")
+    if not data:
+        return
+    for k, v in data["dates"]["fields"].items():
+        base, _, width = k.partition("-")
+        if base not in RT_UNITS or width not in WIDTH_SUFFIX:
+            continue
+        p = "r.%s%s." % (RT_UNITS[base], WIDTH_SUFFIX[width])
+        for rk, rv in v.items():
+            if rk.startswith("relative-type-"):
+                store.put(loc, p + rk[len("relative-type-"):], rv)
+            elif rk.startswith("relativeTime-type-"):
+                tense = "f" if rk.endswith("future") else "p"
+                for ck, cv in rv.items():
+                    store.put(loc, p + tense + "." + ck[len("relativeTimePattern-count-"):], cv)
+
+
+DN_CALENDARS = {"gregorian": "gregory", "ethiopic-amete-alem": "ethioaa", "buddhist": "buddhist",
+                "chinese": "chinese", "coptic": "coptic", "dangi": "dangi", "ethiopic": "ethiopic",
+                "hebrew": "hebrew", "indian": "indian", "islamic": "islamic", "islamic-civil": "islamic-civil",
+                "islamic-rgsa": "islamic-rgsa", "islamic-tbla": "islamic-tbla",
+                "islamic-umalqura": "islamic-umalqura", "iso8601": "iso8601", "japanese": "japanese",
+                "persian": "persian", "roc": "roc"}
+DN_FIELDS = {"era": "era", "year": "year", "quarter": "quarter", "month": "month", "week": "weekOfYear",
+             "weekday": "weekday", "day": "day", "dayperiod": "dayPeriod", "hour": "hour", "minute": "minute",
+             "second": "second", "zone": "timeZoneName"}
+DN_COMMON = None
+
+
+def dn_common_codes():
+    global DN_COMMON
+    if DN_COMMON is None:
+        langs, scripts = set(), set()
+        likely = load("cldr-core", "supplemental", "likelySubtags.json")["supplemental"]["likelySubtags"]
+        for x in available_locales():
+            langs.add(x.split("-")[0])
+            m = likely.get(x.split("-")[0])
+            if m:
+                scripts.add(m.split("-")[1])
+        DN_COMMON = (langs, scripts)
+    return DN_COMMON
+
+
+def put_display_names(store, loc, everything):
+    names = cldr_main("cldr-localenames-full", loc, "languages.json")
+    if not names:
+        return
+    langs, scripts = dn_common_codes()
+
+    def put_names(prefix, table, keep):
+        for k, v in table.items():
+            code, _, alt = k.partition("-alt-")
+            if alt not in ("", "short") or "-menu" in code:
+                continue
+            if not everything and not keep(code):
+                continue
+            store.put(loc, "dn.%s.%s" % (prefix.upper() if alt else prefix, code), v)
+
+    put_names("l", names["localeDisplayNames"]["languages"], lambda c: c.split("-")[0] in langs)
+    terr = cldr_main("cldr-localenames-full", loc, "territories.json")
+    if terr:
+        put_names("r", terr["localeDisplayNames"]["territories"], lambda c: True)
+    scr = cldr_main("cldr-localenames-full", loc, "scripts.json")
+    if scr:
+        put_names("s", scr["localeDisplayNames"]["scripts"], lambda c: c in scripts)
+    if everything:
+        var = cldr_main("cldr-localenames-full", loc, "variants.json")
+        if var:
+            put_names("v", var["localeDisplayNames"]["variants"], lambda c: True)
+    ldn = cldr_main("cldr-localenames-full", loc, "localeDisplayNames.json")
+    if ldn:
+        d = ldn["localeDisplayNames"]
+        pat = d.get("localeDisplayPattern", {})
+        store.put(loc, "dn.lp", pat.get("localePattern"))
+        store.put(loc, "dn.ls", pat.get("localeSeparator"))
+        for k, v in d.get("types", {}).get("calendar", {}).items():
+            if k in DN_CALENDARS:
+                store.put(loc, "dn.c.%s" % DN_CALENDARS[k], v)
+    fields = cldr_main("cldr-dates-full", loc, "dateFields.json")
+    if fields:
+        for k, v in fields["dates"]["fields"].items():
+            fbase, _, width = k.partition("-")
+            if fbase in DN_FIELDS and width in WIDTH_SUFFIX and "displayName" in v:
+                store.put(loc, "dn.f.%s.%s" % (DN_FIELDS[fbase], WIDTH_SUFFIX[width]), v["displayName"])
+
+
 def put_day_period_rules(store, loc, lang_key, rules):
     r = rules.get(lang_key)
     if not r:
@@ -854,12 +961,20 @@ def build_store():
             put_numbers(store, loc, nums["numbers"], full)
         curs = cldr_main("cldr-numbers-full", loc, "currencies.json")
         if curs:
-            put_currencies(store, loc, curs["numbers"]["currencies"], full)
+            put_currencies(store, loc, curs["numbers"]["currencies"], full, lang == "en")
         if full:
             units = cldr_main("cldr-units-full", loc, "units.json")
             if units:
                 put_units(store, loc, units["units"])
         put_dates(store, loc, full)
+        put_lists(store, loc)
+        dunits = cldr_main("cldr-units-full", loc, "units.json")
+        if dunits:
+            store.put(loc, "du", dunits["units"].get("durationUnit-type-hms", {}).get("durationUnitPattern"))
+        if lang in TZ_LANGS or loc == "und":
+            put_display_names(store, loc, lang == "en" or loc == "und")
+        if full:
+            put_relative(store, loc)
         put_time_zone_names(store, loc, lang in TZ_LANGS or loc == "und")
         put_day_period_rules(store, loc, "root" if loc == "und" else loc, day_periods)
         pk = "root" if loc == "und" else loc

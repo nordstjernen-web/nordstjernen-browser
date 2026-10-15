@@ -302,6 +302,10 @@ set(qjs_sources
     quickjs-intl-collator.c
     quickjs-intl-calendar.c
     quickjs-intl-datetime.c
+    quickjs-intl-list.c
+    quickjs-intl-relative.c
+    quickjs-intl-displaynames.c
+    quickjs-intl-duration.c
 )
 
 if(QJS_BUILD_LIBC)

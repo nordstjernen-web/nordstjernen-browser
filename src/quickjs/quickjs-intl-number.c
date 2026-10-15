@@ -1530,6 +1530,43 @@ static void nf_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
         JS_MarkValue(rt, nf->bound_format, mark_func);
 }
 
+int intl_nf_format_double(JSContext *ctx, JSValueConst nf_obj, double x, IntlParts *parts)
+{
+    IntlNumberFormat *nf = JS_GetOpaque(nf_obj, js_intl_class_id(INTL_CLASS_NUMBER_FORMAT));
+    IntlDecimal d;
+    int r;
+    if (intl_decimal_from_double(x, &d) < 0) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
+    r = intl_nf_partition(ctx, nf, &d, parts);
+    intl_decimal_free(&d);
+    return r;
+}
+
+int intl_nf_format_decimal(JSContext *ctx, JSValueConst nf_obj, const char *s, IntlParts *parts)
+{
+    IntlNumberFormat *nf = JS_GetOpaque(nf_obj, js_intl_class_id(INTL_CLASS_NUMBER_FORMAT));
+    IntlDecimal d;
+    int r;
+    if (intl_decimal_from_string(s, strlen(s), &d) < 0) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
+    r = intl_nf_partition(ctx, nf, &d, parts);
+    intl_decimal_free(&d);
+    return r;
+}
+
+JSValue intl_construct_intrinsic(JSContext *ctx, int intrinsic, JSValueConst locale, JSValueConst options)
+{
+    JSValue ctor = js_intl_get_intrinsic(ctx, intrinsic);
+    JSValueConst args[2] = { locale, options };
+    JSValue r = JS_CallConstructor(ctx, ctor, 2, args);
+    JS_FreeValue(ctx, ctor);
+    return r;
+}
+
 IntlNumberFormat *intl_nf_get(JSValueConst obj)
 {
     return JS_GetOpaque(obj, js_intl_class_id(INTL_CLASS_NUMBER_FORMAT));
@@ -1994,6 +2031,22 @@ static int pr_resolve(JSContext *ctx, const IntlPluralRules *pr, const IntlDecim
     *formatted = res.str;
     res.str = NULL;
     intl_raw_result_free(&res);
+    return cat;
+}
+
+int intl_pr_select_double(JSContext *ctx, JSValueConst pr_obj, double x)
+{
+    IntlPluralRules *pr = JS_GetOpaque(pr_obj, js_intl_class_id(INTL_CLASS_PLURAL_RULES));
+    IntlDecimal d;
+    char *formatted;
+    int cat;
+    if (intl_decimal_from_double(x, &d) < 0) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
+    cat = pr_resolve(ctx, pr, &d, &formatted);
+    intl_decimal_free(&d);
+    free(formatted);
     return cat;
 }
 
