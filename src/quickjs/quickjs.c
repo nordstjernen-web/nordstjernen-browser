@@ -48,6 +48,7 @@
 #include "libregexp.h"
 #include "dtoa.h"
 #include "quickjs-temporal.h"
+#include "quickjs-intl.h"
 
 #if defined(EMSCRIPTEN) || defined(_MSC_VER)
 #define DIRECT_DISPATCH  0
@@ -206,6 +207,18 @@ enum {
     JS_CLASS_TEMPORAL_YEAR_MONTH,
     JS_CLASS_TEMPORAL_MONTH_DAY,
     JS_CLASS_TEMPORAL_DURATION,
+    JS_CLASS_INTL_LOCALE,
+    JS_CLASS_INTL_COLLATOR,
+    JS_CLASS_INTL_NUMBER_FORMAT,
+    JS_CLASS_INTL_DATE_TIME_FORMAT,
+    JS_CLASS_INTL_PLURAL_RULES,
+    JS_CLASS_INTL_LIST_FORMAT,
+    JS_CLASS_INTL_RELATIVE_TIME_FORMAT,
+    JS_CLASS_INTL_DISPLAY_NAMES,
+    JS_CLASS_INTL_DURATION_FORMAT,
+    JS_CLASS_INTL_SEGMENTER,
+    JS_CLASS_INTL_SEGMENTS,
+    JS_CLASS_INTL_SEGMENT_ITERATOR,
 
     JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
 };
@@ -358,6 +371,8 @@ typedef struct JSClass {
 
 struct JSRuntime {
     JSMallocFunctions mf;
+    char *intl_default_locale;
+    char *intl_default_time_zone;
     JSMallocState malloc_state;
     /* names the embedder keeps for itself (JS_AddEnginePrivateName) */
     JSEnginePrivateName *engine_private;
@@ -634,6 +649,8 @@ struct JSContext {
     JSValue iterator_proto;
     JSValue async_iterator_proto;
     JSValue array_proto_values;
+    JSValue intl_intrinsics[INTL_INTRINSIC_COUNT];
+    JSValue intl_fallback_symbol;
     JSValue throw_type_error;
     JSValue eval_obj;
 
@@ -2743,6 +2760,8 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     rt->in_free = true;
     JS_FreeValueRT(rt, rt->current_exception);
+    js_free_rt(rt, rt->intl_default_locale);
+    js_free_rt(rt, rt->intl_default_time_zone);
     js_free_engine_private_names(rt);
 
     list_for_each_safe(el, el1, &rt->job_list) {
@@ -2967,6 +2986,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     for(i = 0; i < rt->class_count; i++)
         ctx->class_proto[i] = JS_NULL;
     ctx->array_ctor = JS_NULL;
+    for(i = 0; i < INTL_INTRINSIC_COUNT; i++)
+        ctx->intl_intrinsics[i] = JS_UNDEFINED;
+    ctx->intl_fallback_symbol = JS_UNDEFINED;
     ctx->iterator_ctor = JS_NULL;
     ctx->iterator_ctor_getset = JS_NULL;
     ctx->regexp_ctor = JS_NULL;
@@ -3016,7 +3038,8 @@ JSContext *JS_NewContext(JSRuntime *rt)
         JS_AddIntrinsicShadowRealm(ctx) ||
         JS_AddIntrinsicAToB(ctx) ||
         JS_AddIntrinsicTemporal(ctx) ||
-        JS_AddPerformance(ctx)) {
+        JS_AddPerformance(ctx) ||
+        JS_AddIntrinsicIntl(ctx)) {
         JS_FreeContext(ctx);
         return NULL;
     }
@@ -3108,6 +3131,9 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->eval_obj, mark_func);
 
     JS_MarkValue(rt, ctx->array_proto_values, mark_func);
+    for(i = 0; i < INTL_INTRINSIC_COUNT; i++)
+        JS_MarkValue(rt, ctx->intl_intrinsics[i], mark_func);
+    JS_MarkValue(rt, ctx->intl_fallback_symbol, mark_func);
     for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
         JS_MarkValue(rt, ctx->native_error_proto[i], mark_func);
     }
@@ -3193,6 +3219,9 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->eval_obj);
 
     JS_FreeValue(ctx, ctx->array_proto_values);
+    for(i = 0; i < INTL_INTRINSIC_COUNT; i++)
+        JS_FreeValue(ctx, ctx->intl_intrinsics[i]);
+    JS_FreeValue(ctx, ctx->intl_fallback_symbol);
     for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
         JS_FreeValue(ctx, ctx->native_error_proto[i]);
     }
@@ -15310,11 +15339,15 @@ static JSValue JS_ToStringFree(JSContext *ctx, JSValue val)
     return ret;
 }
 
-static JSValue JS_ToLocaleStringFree(JSContext *ctx, JSValue val)
+static JSValue JS_ToLocaleStringFree(JSContext *ctx, JSValue val,
+                                     int argc, JSValueConst *argv)
 {
+    JSValueConst args[2];
     if (JS_IsUndefined(val) || JS_IsNull(val))
         return JS_ToStringFree(ctx, val);
-    return JS_InvokeFree(ctx, val, JS_ATOM_toLocaleString, 0, NULL);
+    args[0] = argc > 0 ? argv[0] : JS_UNDEFINED;
+    args[1] = argc > 1 ? argv[1] : JS_UNDEFINED;
+    return JS_InvokeFree(ctx, val, JS_ATOM_toLocaleString, 2, args);
 }
 
 static JSValue JS_ToPropertyKeyInternal(JSContext *ctx, JSValueConst val,
@@ -46175,7 +46208,7 @@ static JSValue js_array_join(JSContext *ctx, JSValueConst this_val,
             goto fail;
         if (!JS_IsNull(el) && !JS_IsUndefined(el)) {
             if (toLocaleString) {
-                el = JS_ToLocaleStringFree(ctx, el);
+                el = JS_ToLocaleStringFree(ctx, el, argc, argv);
             }
             if (string_buffer_concat_value_free(b, el))
                 goto fail;
@@ -63621,7 +63654,7 @@ static JSValue js_typed_array_join(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(el))
                 goto fail;
             if (toLocaleString) {
-                el = JS_ToLocaleStringFree(ctx, el);
+                el = JS_ToLocaleStringFree(ctx, el, argc, argv);
             }
             if (string_buffer_concat_value_free(b, el))
                 goto fail;
@@ -67961,6 +67994,11 @@ JSValue js_temporal_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassI
     return js_create_from_ctor(ctx, ctor, class_id);
 }
 
+JSValue js_intl_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id)
+{
+    return js_create_from_ctor(ctx, ctor, class_id);
+}
+
 int js_temporal_this_time_value(JSContext *ctx, double *pres, JSValueConst this_val)
 {
     return JS_ThisTimeValue(ctx, pres, this_val);
@@ -68017,6 +68055,116 @@ int js_temporal_bigint_to_i128(JSContext *ctx, __int128 *pres, JSValueConst val)
         u |= ~(unsigned __int128)0 << (p->len * JS_LIMB_BITS);
     *pres = (__int128)u;
     return 0;
+}
+
+int js_intl_this_time_value(JSContext *ctx, double *valp, JSValueConst this_val)
+{
+    return JS_ThisTimeValue(ctx, valp, this_val);
+}
+
+JSValue js_intl_this_number_value(JSContext *ctx, JSValueConst this_val)
+{
+    return js_thisNumberValue(ctx, this_val);
+}
+
+JSValue js_intl_this_bigint_value(JSContext *ctx, JSValueConst this_val)
+{
+    return js_thisBigIntValue(ctx, this_val);
+}
+
+void js_intl_set_opaque(JSValueConst obj, void *opaque)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id >= JS_CLASS_INTL_LOCALE && p->class_id <= JS_CLASS_INTL_SEGMENT_ITERATOR)
+        p->u.opaque = opaque;
+}
+
+bool js_intl_in_constructor_call(JSContext *ctx)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    return sf && sf->is_constructor;
+}
+
+int js_intl_ordinary_has_instance(JSContext *ctx, JSValueConst val, JSValueConst ctor)
+{
+    return JS_OrdinaryIsInstanceOf(ctx, val, ctor);
+}
+
+JSValue js_intl_string_case(JSContext *ctx, JSValueConst str, bool to_lower)
+{
+    return js_string_toLowerCase(ctx, str, 0, NULL, to_lower);
+}
+
+JSValue js_intl_to_primitive_number(JSContext *ctx, JSValueConst val)
+{
+    return JS_ToPrimitiveFree(ctx, js_dup(val), HINT_NUMBER);
+}
+
+JSClassID js_intl_class_id(int index)
+{
+    return JS_CLASS_INTL_LOCALE + index;
+}
+
+JSValue js_intl_get_intrinsic(JSContext *ctx, int index)
+{
+    return js_dup(ctx->intl_intrinsics[index]);
+}
+
+void js_intl_set_intrinsic(JSContext *ctx, int index, JSValue val)
+{
+    JS_FreeValue(ctx, ctx->intl_intrinsics[index]);
+    ctx->intl_intrinsics[index] = val;
+}
+
+JSValue js_intl_get_fallback_symbol(JSContext *ctx)
+{
+    return js_dup(ctx->intl_fallback_symbol);
+}
+
+void js_intl_set_fallback_symbol(JSContext *ctx, JSValue sym)
+{
+    JS_FreeValue(ctx, ctx->intl_fallback_symbol);
+    ctx->intl_fallback_symbol = sym;
+}
+
+double js_intl_local_tza(JSContext *ctx, double t, bool is_utc)
+{
+    return getTimezoneOffset((int64_t)t);
+}
+
+static int js_intl_set_rt_string(JSRuntime *rt, char **slot, const char *value)
+{
+    char *copy = NULL;
+    if (value) {
+        size_t len = strlen(value);
+        copy = js_malloc_rt(rt, len + 1);
+        if (!copy)
+            return -1;
+        memcpy(copy, value, len + 1);
+    }
+    js_free_rt(rt, *slot);
+    *slot = copy;
+    return 0;
+}
+
+int JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
+{
+    return js_intl_set_rt_string(rt, &rt->intl_default_locale, tag);
+}
+
+int JS_SetDefaultTimeZone(JSRuntime *rt, const char *time_zone)
+{
+    return js_intl_set_rt_string(rt, &rt->intl_default_time_zone, time_zone);
+}
+
+const char *js_intl_runtime_default_locale(JSRuntime *rt)
+{
+    return rt->intl_default_locale;
+}
+
+const char *js_intl_runtime_default_time_zone(JSRuntime *rt)
+{
+    return rt->intl_default_time_zone;
 }
 
 #undef malloc
