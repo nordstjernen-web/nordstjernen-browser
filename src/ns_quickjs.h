@@ -42,6 +42,14 @@ JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
     (void)mode;
 }
 
+static inline int
+JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
+{
+    (void)rt;
+    (void)tag;
+    return 0;
+}
+
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {
