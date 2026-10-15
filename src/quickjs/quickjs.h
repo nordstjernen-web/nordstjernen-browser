@@ -568,6 +568,9 @@ JS_EXTERN int JS_AddPerformance(JSContext *ctx);
 JS_EXTERN int JS_AddIntrinsicDOMException(JSContext *ctx);
 JS_EXTERN int JS_AddIntrinsicAToB(JSContext *ctx);
 JS_EXTERN int JS_AddIntrinsicTemporal(JSContext *ctx);
+JS_EXTERN int JS_AddIntrinsicIntl(JSContext *ctx);
+JS_EXTERN int JS_SetDefaultLocale(JSRuntime *rt, const char *tag);
+JS_EXTERN int JS_SetDefaultTimeZone(JSRuntime *rt, const char *time_zone);
 
 /* for equality comparisons and sameness */
 JS_EXTERN int JS_IsEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2);

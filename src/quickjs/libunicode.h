@@ -45,6 +45,7 @@ int lre_case_conv(uint32_t *res, uint32_t c, int conv_type);
 int lre_canonicalize(uint32_t c, bool is_unicode);
 bool lre_is_cased(uint32_t c);
 bool lre_is_case_ignorable(uint32_t c);
+int lre_combining_class(uint32_t c);
 
 /* char ranges */
 

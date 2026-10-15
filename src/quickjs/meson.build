@@ -37,6 +37,12 @@ qjs_srcs = files(
   'quickjs-temporal-tz.c',
   'quickjs-temporal-tzdb.c',
   'quickjs-temporal-zoned.c',
+  'quickjs-intl.c',
+  'quickjs-intl-locale.c',
+  'quickjs-intl-data.c',
+  'quickjs-intl-decimal.c',
+  'quickjs-intl-number.c',
+  'quickjs-intl-collator.c',
 )
 qjs_libc_srcs = files('quickjs-libc.c')
 
