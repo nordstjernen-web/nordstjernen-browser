@@ -24,6 +24,14 @@ Changelog:
   `Date.prototype.toTemporalInstant`. Arithmetic is exact to the
   nanosecond. Time zones are UTC and fixed offsets. test262's Temporal
   tests all pass.
+* JavaScript: deferred module imports. `import defer * as ns from "m"`
+  and `import.defer("m")` load and link a module but evaluate it only
+  when a property of its namespace is first read. Its top-level-await
+  dependencies are still evaluated ahead of time. Source phase imports
+  (`import source x from "m"`, `import.source("m")`) parse, and
+  `%AbstractModuleSource%` is available to hosts. JavaScript modules have
+  no source form, so importing one in the source phase throws a
+  `SyntaxError`. The test262 tests for both proposals pass.
 * JavaScript: an assignment resolves its target before evaluating the
   right-hand side. A strict-mode assignment to an undeclared global throws
   even when the right-hand side creates it, and a `var` introduced by a
