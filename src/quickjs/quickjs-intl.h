@@ -13,6 +13,9 @@
 JSValue js_intl_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID class_id);
 int js_intl_string_list_from_iterable(JSContext *ctx, JSValueConst iterable, JSValue **plist, uint32_t *pcount);
 void js_intl_free_value_list(JSContext *ctx, JSValue *list, uint32_t count);
+int js_intl_string_utf16(JSContext *ctx, JSValueConst val, uint16_t **pbuf, uint32_t *plen);
+JSValue js_intl_sub_string(JSContext *ctx, JSValueConst str, uint32_t start, uint32_t end);
+JSValue js_intl_iterator_proto(JSContext *ctx);
 int js_intl_this_time_value(JSContext *ctx, double *valp, JSValueConst this_val);
 JSValue js_intl_this_number_value(JSContext *ctx, JSValueConst this_val);
 JSValue js_intl_this_bigint_value(JSContext *ctx, JSValueConst this_val);

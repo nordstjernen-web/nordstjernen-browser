@@ -62,6 +62,11 @@ Changelog:
   `%AbstractModuleSource%` is available to hosts. JavaScript modules have
   no source form, so importing one in the source phase throws a
   `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: `Intl.Segmenter` splits text into graphemes, words and
+  sentences with the Unicode 17 UAX #29 rules (extended grapheme clusters,
+  emoji ZWJ sequences, Indic conjuncts), runs of Thai, Lao, Khmer and
+  Myanmar letters kept together as words, and `isWordLike`. It passes every
+  case of the Unicode break test files.
 * JavaScript: `Intl.ListFormat`, `Intl.RelativeTimeFormat`,
   `Intl.DisplayNames` and `Intl.DurationFormat` join the engine's `Intl`.
   Lists and relative times use CLDR patterns (with the Spanish `y`/`e`,

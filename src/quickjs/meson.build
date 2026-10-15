@@ -60,6 +60,7 @@ qjs_srcs = files(
   'quickjs-intl-relative.c',
   'quickjs-intl-displaynames.c',
   'quickjs-intl-duration.c',
+  'quickjs-intl-segmenter.c',
 )
 qjs_libc_srcs = files('quickjs-libc.c')
 
