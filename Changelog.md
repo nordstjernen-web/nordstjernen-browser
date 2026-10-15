@@ -3,6 +3,10 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: text with a CSS `line-height` no longer re-runs line breaking on
+  every relayout just to read back its line heights; they are cached with
+  the text measurement. Speedometer 3.1's NewsSite suites, which force
+  ~150 layouts per run, are about 30% faster.
 * Images created by script inside a frame resolve their relative `src`
   against the frame's document even before they are inserted, and image
   loads belonging to a removed frame's document are dropped instead of
