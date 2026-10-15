@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: more fixes from the SpiderMonkey test suite: `Set` methods
+  and typed-array `set`/`sort`/`with` follow the specified order of
+  observable steps, class heritage and computed keys run in strict mode,
+  `super[expr]` evaluates `expr` first, logical assignment to a `const`
+  short-circuits, Annex B block functions in `if` clauses and duplicate
+  declarations behave as in other browsers, several missing early
+  SyntaxErrors are reported, and legacy `fn.arguments` works.
 * JavaScript: fixes from the SpiderMonkey test suite: `new Function`
   rejects parameter lists that only parse together with the body, legacy
   `fn.caller` is `null` for strict, native and top-level callers, legacy

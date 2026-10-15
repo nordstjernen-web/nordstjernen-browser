@@ -1285,3 +1285,54 @@ Fixes for `test/staging/sm` failures, each following the specification:
 - `Math.acosh`/`Math.asinh` use fdlibm-style formulas (MinGW's libm is off by
   tens of ulps near 1).
 
+
+### 36. SpiderMonkey staging fixes (Set, TypedArray, syntax, classes, Annex B)
+
+Further `test/staging/sm` fixes:
+
+- `Set.prototype.difference`/`union`/`symmetricDifference` copy the receiver's
+  records instead of iterating it, and take the copy after
+  `GetIteratorFromMethod`; `GetSetRecord` always reads `size` with `Get`.
+- `RegExp.prototype[@@match]` defines its result elements
+  (CreateDataProperty).
+- `TypedArray(buffer, byteOffset, length)` allocates the object before
+  `ToIndex`; `%TypedArray%.prototype.set` still converts values after the
+  target was detached; `sort` with a comparator sorts a snapshot; `with`
+  reports a detached-after-conversion index as RangeError; `Object.freeze`
+  accepts a detached typed array.
+- Class heritage and computed keys run in strict mode at runtime
+  (`OP_special_object` STRICT_ON/OFF around the class definition in a sloppy
+  function).
+- `super[expr]` reads `[[HomeObject]].[[Prototype]]` after evaluating `expr`.
+- Assignment to a `const` binding throws at PutValue: short-circuiting
+  logical assignments do not throw, and a binding in its TDZ reports
+  ReferenceError.
+- Early errors: computed property names take an AssignmentExpression;
+  `{a() => 0}`; `new o?.C()`; `async await => 1`; `await` in parameters of
+  arrows nested in async functions; generator/async function expressions
+  named `yield`/`await`; rest parameters in getters/setters; `{'', a}`
+  patterns; `in` in an arrow's concise body inside a `for` head.
+- Annex B block functions copy the block binding's current value when the
+  declaration is evaluated, `if` clauses get their own scope, and the
+  var binding is only synthesized when no enclosing block declares the
+  name lexically (decided after the whole function is parsed). A `var`
+  created by direct eval inside `catch (x)` lives in the function's variable
+  environment (B.3.4).
+- `Object.defineProperties` interleaves `[[GetOwnProperty]]` and `Get` per key
+  and validates every descriptor before defining any;
+  `propertyIsEnumerable` converts the key first; the proxy
+  `getOwnPropertyDescriptor` invariant compares values and accessors of
+  non-configurable target properties.
+- A catch block resets the completion value; legacy `fn.arguments` returns
+  the innermost activation's arguments (or `null`).
+
+Left failing: `block-scoped-functions-annex-b-arguments.js` and
+`regress-602621.js` expect a block `function arguments` to replace the
+arguments object, but FunctionDeclarationInstantiation appends `"arguments"`
+to parameterNames when the arguments object is needed, which disables the
+Annex B binding (V8 agrees; `annexB/language/function-code/block-decl-func-skip-arguments.js`).
+`block-scoped-functions-annex-b-eval.js` needs the Annex B store from a
+direct eval inside `with` to bypass the object environment.
+`module-export-name-star.js` needs namespace imports to use an internal name
+other than the atom `"*"`, which changes the bytecode format.
+`quote-string-for-nul-character.js` needs `Intl.Collator`.
