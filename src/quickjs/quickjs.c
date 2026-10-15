@@ -69469,6 +69469,42 @@ JSValue js_intl_create_from_ctor(JSContext *ctx, JSValueConst ctor, JSClassID cl
     return js_create_from_ctor(ctx, ctor, class_id);
 }
 
+int js_intl_string_utf16(JSContext *ctx, JSValueConst val, uint16_t **pbuf, uint32_t *plen)
+{
+    JSValue s = JS_ToString(ctx, val);
+    JSString *p;
+    uint16_t *buf;
+    if (JS_IsException(s))
+        return -1;
+    p = JS_VALUE_GET_STRING(s);
+    buf = js_malloc(ctx, sizeof(uint16_t) * ((size_t)p->len + 1));
+    if (!buf) {
+        JS_FreeValue(ctx, s);
+        return -1;
+    }
+    for (uint32_t i = 0; i < p->len; i++)
+        buf[i] = (uint16_t)string_get(p, i);
+    *pbuf = buf;
+    *plen = p->len;
+    JS_FreeValue(ctx, s);
+    return 0;
+}
+
+JSValue js_intl_sub_string(JSContext *ctx, JSValueConst str, uint32_t start, uint32_t end)
+{
+    JSValue s = JS_ToString(ctx, str), r;
+    if (JS_IsException(s))
+        return s;
+    r = js_sub_string(ctx, JS_VALUE_GET_STRING(s), (int)start, (int)end);
+    JS_FreeValue(ctx, s);
+    return r;
+}
+
+JSValue js_intl_iterator_proto(JSContext *ctx)
+{
+    return js_dup(ctx->class_proto[JS_CLASS_ITERATOR]);
+}
+
 void js_intl_free_value_list(JSContext *ctx, JSValue *list, uint32_t count)
 {
     for (uint32_t i = 0; i < count; i++)
