@@ -56,6 +56,10 @@ qjs_srcs = files(
   'quickjs-intl-collator.c',
   'quickjs-intl-calendar.c',
   'quickjs-intl-datetime.c',
+  'quickjs-intl-list.c',
+  'quickjs-intl-relative.c',
+  'quickjs-intl-displaynames.c',
+  'quickjs-intl-duration.c',
 )
 qjs_libc_srcs = files('quickjs-libc.c')
 
