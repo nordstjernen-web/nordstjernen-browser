@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: `Atomics.waitAsync` is available, `Atomics` operations check
+  detached and immutable buffers in the order the specification gives, and
+  `Atomics.wait` no longer returns `"timed-out"` early on Windows. Exporting a
+  binding under the string name `"*"` works. The engine now passes all of
+  test262 (102,988 test runs) except two SpiderMonkey staging tests that
+  contradict the specification.
 * JavaScript: more fixes from the SpiderMonkey test suite: `Set` methods
   and typed-array `set`/`sort`/`with` follow the specified order of
   observable steps, class heritage and computed keys run in strict mode,
