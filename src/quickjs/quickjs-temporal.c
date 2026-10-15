@@ -205,7 +205,7 @@ JSValue tp_alloc(JSContext *ctx, JSValueConst new_target, int kind, TPObject **p
         return JS_EXCEPTION;
     }
     o->kind = kind;
-    JS_SetOpaque(v, o);
+    js_temporal_set_opaque(v, o);
     *pobj = o;
     return v;
 }
@@ -672,7 +672,7 @@ int tp_define_class(JSContext *ctx, JSValue ns, int kind, const char *name, JSCF
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSValue proto, func;
 
-    JS_NewClassID(rt, &tp_class_id[kind]);
+    tp_class_id[kind] = js_temporal_class_id(kind);
     if (!JS_IsRegisteredClass(rt, tp_class_id[kind])) {
         JSClassDef def = { tp_class_names[kind], .finalizer = tp_finalizer };
         if (JS_NewClass(rt, tp_class_id[kind], &def))
