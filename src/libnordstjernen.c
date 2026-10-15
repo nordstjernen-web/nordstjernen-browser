@@ -771,8 +771,11 @@ settle_tick_cb(gpointer user_data)
     if (settle_tick_skipped(ctx, now)) return G_SOURCE_CONTINUE;
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->videos && b->layout) {
-        ns_video_cache_discover(b->videos, b->layout, b->doc, now);
-        ns_video_cache_note_layout(b->videos, b->layout);
+        if (b->videos_noted_seq != b->layout_seq) {
+            ns_video_cache_discover(b->videos, b->layout, b->doc, now);
+            ns_video_cache_note_layout(b->videos, b->layout);
+            b->videos_noted_seq = b->layout_seq;
+        }
         ns_video_cache_tick(b->videos, now);
     }
     browser_sync_scroll_timelines(b);
