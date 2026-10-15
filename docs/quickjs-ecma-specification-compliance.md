@@ -1230,16 +1230,10 @@ format through `Intl.DateTimeFormat`, which accepts Temporal objects in
 `format`, `formatToParts` and the range methods (`HandleDateTimeValue`). The
 `Intl.Era-monthcode` and `canonical-tz` features are enabled.
 
-All `intl402/Temporal` tests pass except the `toLocaleString` ones, which
-need `Intl.DateTimeFormat`. `intl402/Temporal` runs in `test262.conf` with
-only the `*/prototype/toLocaleString/` directories excluded, and the
-`Intl.Era-monthcode` and `canonical-tz` features are enabled. Note for the Intl implementation: `Intl.DateTimeFormat`
-must accept Temporal objects in `format`, `formatToParts` and the range
-methods (ECMA-402 `HandleDateTimeValue`), and the Temporal
-`toLocaleString` methods should construct a `DateTimeFormat` and call it;
-`tp_calendar_iso_to_date` gives the calendar fields, and the
-`TPObject.cal` of an object must match the formatter's calendar except for
-`iso8601`.
+All `intl402/Temporal` tests pass, including `toLocaleString`, which goes
+through `Intl.DateTimeFormat` (`quickjs-intl-datetime.c`), and so do the
+Temporal cases in `intl402/DateTimeFormat`. `staging/Temporal` is included
+in `test262.conf`.
 
 ### 35. SpiderMonkey staging fixes (Array, Date, Function, Iterator, JSON, Map, Math, Reflect, RegExp)
 
