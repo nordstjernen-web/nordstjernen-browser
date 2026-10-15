@@ -375,8 +375,8 @@ SQLite-backed native backend with the W3C object model built in
 **EventSource**, **Web Workers** (each a separate `GThread` with its own
 runtime, cross-thread messaging by structured clone), `localStorage`/
 `sessionStorage`, Canvas 2D (Cairo, `src/js_canvas.c`), an ICU-free
-**Intl** (`src/js_intl.c`), **Temporal** (in the engine,
-`src/quickjs/quickjs-temporal*.c`), and the
+**Intl** generated from CLDR (in the engine, `src/quickjs/quickjs-intl*.c`),
+**Temporal** (in the engine, `src/quickjs/quickjs-temporal*.c`), and the
 observer APIs.
 
 **WebAssembly** runs on **WAMR** (`src/wamr/`, the fast interpreter

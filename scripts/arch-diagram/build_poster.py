@@ -239,7 +239,6 @@ L.append(node("js", "js.c  (~47 k loc, largest file)",
 L.append(node("js_realm", "js_realm.c", "native ShadowRealm"))
 L.append(node("js_canvas", "js_canvas.c",
               "Canvas 2D, Path2D, ImageBitmap, DOMMatrix", "Cairo, Pango"))
-L.append(node("js_intl", "js_intl.c", "ECMA-402 Intl, ICU-free"))
 L.append(node("js_perf", "js_perf.c", "performance.* + PerformanceObserver"))
 L.append(node("bytecode_cache", "bytecode_cache.c",
               "compiled-bytecode cache keyed by SHA-256;\n"
@@ -338,7 +337,7 @@ L.append(node("lexbor", "src/lexbor/",
               "(forked, modified freely)"))
 L.append(node("quickjs", "src/quickjs/",
               "QuickJS-ng fork: bytecode interpreter,\n"
-              "NO JIT; browser hooks in-tree"))
+              "NO JIT; Temporal, ICU-free Intl, browser hooks"))
 L.append(node("wamr", "src/wamr/",
               "WebAssembly Micro Runtime,\nclassic interpreter only"))
 L.append(node("wuffs", "subprojects/wuffs/",
@@ -433,7 +432,7 @@ for a, b in [
     ("mic", "lexbor"), ("mic", "quickjs"), ("camera", "wamr"),
     ("camera", "wuffs"), ("webgpu", "plmpeg"),
     ("config", "debuglog"), ("history", "datetime"),
-    ("js", "js_realm"), ("js", "js_intl"),
+    ("js", "js_realm"),
     ("js", "js_perf"),
     ("image_dec", "pdf"), ("texture", "spellcheck"),
     ("net", "netutil"), ("cache", "safebrowsing"), ("net_http2", "csp"),
