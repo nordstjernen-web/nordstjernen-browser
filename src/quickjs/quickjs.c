@@ -371,6 +371,7 @@ typedef struct JSClass {
 
 struct JSRuntime {
     JSValue symbol_metadata;
+    struct list_head atomics_async_waiters;
     JSMallocFunctions mf;
     char *intl_default_locale;
     char *intl_default_time_zone;
@@ -2437,6 +2438,7 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     init_list_head(&rt->string_list);
 #endif
     init_list_head(&rt->job_list);
+    init_list_head(&rt->atomics_async_waiters);
 
     if (JS_InitAtoms(rt))
         goto fail;
@@ -2644,6 +2646,11 @@ JSContext *JS_GetPendingJobRealm(JSRuntime *rt)
 
 /* return < 0 if exception, 0 if no job pending, 1 if a job was
    executed successfully. the context of the job is stored in '*pctx' */
+#ifdef CONFIG_ATOMICS
+static int js_atomics_settle_async_waiters(JSRuntime *rt, uint64_t *pnext_ns);
+static void js_atomics_free_async_waiters(JSRuntime *rt);
+#endif
+
 int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
 {
     JSContext *ctx;
@@ -2651,6 +2658,10 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     JSValue res;
     int i, ret;
 
+#ifdef CONFIG_ATOMICS
+    if (!list_empty(&rt->atomics_async_waiters))
+        js_atomics_settle_async_waiters(rt, NULL);
+#endif
     if (list_empty(&rt->job_list)) {
         *pctx = NULL;
         return 0;
@@ -2764,6 +2775,9 @@ void JS_FreeRuntime(JSRuntime *rt)
     int i;
 
     rt->in_free = true;
+#ifdef CONFIG_ATOMICS
+    js_atomics_free_async_waiters(rt);
+#endif
     JS_FreeValueRT(rt, rt->current_exception);
     js_free_rt(rt, rt->intl_default_locale);
     js_free_rt(rt, rt->intl_default_time_zone);
@@ -23554,6 +23568,7 @@ typedef struct JSFunctionDef {
     JSGlobalVar *global_vars;
 
     int annex_b_func_count;
+    bool resolve_skip_with; /* resolving an Annex B var store: skip `with` objects */
     int annex_b_func_size;
     struct JSAnnexBFunc *annex_b_funcs;
 
@@ -27017,8 +27032,19 @@ static int js_parse_decorator_list(JSParseState *s)
     int count = 0;
 
     while (s->token.val == '@') {
+        const uint8_t *at_ptr = s->token.ptr;
+        int at_line = s->token.line_num, at_col = s->token.col_num;
         if (next_token(s))
             return -1;
+        if (s->token.val != '(' && s->token.val != TOK_IDENT &&
+            s->token.val != TOK_AWAIT && s->token.val != TOK_YIELD) {
+            free_token(s, &s->token);
+            s->token.val = '@';
+            s->token.ptr = at_ptr;
+            s->token.line_num = at_line;
+            s->token.col_num = at_col;
+            return js_parse_error(s, "unexpected token in expression: '@'");
+        }
         if (s->token.val == '(') {
             if (next_token(s) || js_parse_expr(s) || js_parse_expect(s, ')'))
                 return -1;
@@ -37162,6 +37188,8 @@ static int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
                         cv->var_name == JS_ATOM__arg_var_ ||
                         cv->var_name == JS_ATOM__with_) && !is_pseudo_var) {
                 int is_with = (cv->var_name == JS_ATOM__with_);
+                if (is_with && s->resolve_skip_with)
+                    continue;
                 if (fd != s) {
                     idx = get_closure_var(ctx, s, fd,
                                           JS_CLOSURE_REF,
@@ -38125,6 +38153,8 @@ static int get_label_pos(JSFunctionDef *s, int label)
 
 /* convert global variable accesses to local variables or closure
    variables when necessary */
+static bool js_is_annex_b_store(JSFunctionDef *fd, int pos);
+
 static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
 {
     int pos, pos_next, bc_len, op, len, i, idx, line_num, col_num;
@@ -38214,8 +38244,11 @@ static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
         case OP_scope_put_var_init:
             var_name = get_u32(bc_buf + pos + 1);
             scope = get_u16(bc_buf + pos + 5);
+            s->resolve_skip_with = op == OP_scope_put_var &&
+                js_is_annex_b_store(s, pos);
             pos_next = resolve_scope_var(ctx, s, var_name, scope, op, &bc_out,
                                          NULL, NULL, pos_next);
+            s->resolve_skip_with = false;
             JS_FreeAtom(ctx, var_name);
             break;
         case OP_scope_make_ref:
@@ -40507,6 +40540,17 @@ static bool js_annex_b_has_conflict(JSFunctionDef *fd, JSAnnexBFunc *af)
     for (i = 0; i < fd->global_var_count; i++) {
         JSGlobalVar *hf = &fd->global_vars[i];
         if (hf->var_name == af->name && hf->is_lexical)
+            return true;
+    }
+    return false;
+}
+
+static bool js_is_annex_b_store(JSFunctionDef *fd, int pos)
+{
+    int i;
+
+    for (i = 0; i < fd->annex_b_func_count; i++) {
+        if (fd->annex_b_funcs[i].pos + 7 == pos)
             return true;
     }
     return false;
@@ -52537,6 +52581,15 @@ static double js_math_trunc(double d) { return trunc(d); }
 static double js_math_cosh(double d) { return cosh(d); }
 static double js_math_sinh(double d) { return sinh(d); }
 static double js_math_tanh(double d) { return tanh(d); }
+static double js_log1p_accurate(double x)
+{
+    double u = 1.0 + x;
+
+    if (u == 1.0)
+        return x;
+    return log(u) - ((u - 1.0) - x) / u;
+}
+
 static double js_math_acosh(double d)
 {
     double t;
@@ -52548,10 +52601,7 @@ static double js_math_acosh(double d)
     if (d > 2)
         return log(2 * d - 1 / (d + sqrt(d * d - 1)));
     t = d - 1;
-    {
-        long double lt = t;
-        return (double)log1pl(lt + sqrtl(2 * lt + lt * lt));
-    }
+    return js_log1p_accurate(t + sqrt(2 * t + t * t));
 }
 
 static double js_math_asinh(double d)
@@ -52566,7 +52616,7 @@ static double js_math_asinh(double d)
         r = log(2 * a + 1 / (sqrt(d * d + 1) + a));
     else {
         double t = d * d;
-        r = log1p(a + t / (1 + sqrt(1 + t)));
+        r = js_log1p_accurate(a + t / (1 + sqrt(1 + t)));
     }
     return d < 0 ? -r : r;
 }
@@ -66535,9 +66585,11 @@ static JSObject *js_atomics_get_buf(JSContext *ctx,
     JSObject *p;
     JSTypedArray *ta;
     JSArrayBuffer *abuf;
-    uint64_t idx;
-    bool err;
+    uint64_t idx, len;
+    bool err, is_write = is_waitable == 3;
 
+    if (is_write)
+        is_waitable = 0;
     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
         goto fail;
     p = JS_VALUE_GET_OBJ(obj);
@@ -66564,11 +66616,15 @@ static JSObject *js_atomics_get_buf(JSContext *ctx,
             return NULL;
         }
     }
+    if (is_write && typed_array_is_immutable(p)) {
+        JS_ThrowTypeError(ctx, "cannot modify an immutable ArrayBuffer");
+        return NULL;
+    }
+    len = p->u.array.count;
     if (JS_ToIndex(ctx, &idx, idx_val)) {
         return NULL;
     }
-    /* if the array buffer is detached, p->u.array.count = 0 */
-    if (idx >= p->u.array.count) {
+    if (idx >= len) {
         JS_ThrowRangeError(ctx, "out-of-bound access");
         return NULL;
     }
@@ -66576,6 +66632,19 @@ static JSObject *js_atomics_get_buf(JSContext *ctx,
         *pabuf = abuf;
     *pindex = idx;
     return p;
+}
+
+static int js_atomics_revalidate(JSContext *ctx, JSObject *p, uint64_t idx)
+{
+    if (typed_array_is_oob(p)) {
+        JS_ThrowTypeErrorArrayBufferOOB(ctx);
+        return -1;
+    }
+    if (idx >= p->u.array.count) {
+        JS_ThrowRangeError(ctx, "out-of-bound access");
+        return -1;
+    }
+    return 0;
 }
 
 static JSValue js_atomics_op(JSContext *ctx,
@@ -66588,7 +66657,8 @@ static JSValue js_atomics_op(JSContext *ctx,
     JSObject *p;
     JSValue ret;
 
-    p = js_atomics_get_buf(ctx, argv[0], argv[1], NULL, &idx, 0);
+    p = js_atomics_get_buf(ctx, argv[0], argv[1], NULL, &idx,
+                           op == ATOMICS_OP_LOAD ? 0 : 3);
     if (!p)
         return JS_EXCEPTION;
     size_log2 = typed_array_size_log2(p->class_id);
@@ -66619,9 +66689,8 @@ static JSValue js_atomics_op(JSContext *ctx,
         }
    }
 
-    /* check if an evil .valueOf has resized or detached the array */
-    if (idx >= p->u.array.count)
-        return JS_ThrowRangeError(ctx, "out-of-bound access");
+    if (js_atomics_revalidate(ctx, p, idx))
+        return JS_EXCEPTION;
 
     ptr = p->u.array.u.uint8_ptr + ((uintptr_t)idx << size_log2);
 
@@ -66734,7 +66803,7 @@ static JSValue js_atomics_store(JSContext *ctx,
     JSObject *p;
     JSValue ret;
 
-    p = js_atomics_get_buf(ctx, argv[0], argv[1], NULL, &idx, 0);
+    p = js_atomics_get_buf(ctx, argv[0], argv[1], NULL, &idx, 3);
     if (!p)
         return JS_EXCEPTION;
     size_log2 = typed_array_size_log2(p->class_id);
@@ -66747,10 +66816,9 @@ static JSValue js_atomics_store(JSContext *ctx,
             JS_FreeValue(ctx, ret);
             return JS_EXCEPTION;
         }
-        /* check if an evil .valueOf has resized or detached the array */
-        if (idx >= p->u.array.count) {
+        if (js_atomics_revalidate(ctx, p, idx)) {
             JS_FreeValue(ctx, ret);
-            return JS_ThrowRangeError(ctx, "out-of-bound access");
+            return JS_EXCEPTION;
         }
         ptr = p->u.array.u.uint8_ptr + ((uintptr_t)idx << size_log2);
         atomic_store((_Atomic uint64_t *)ptr, v64);
@@ -66764,10 +66832,9 @@ static JSValue js_atomics_store(JSContext *ctx,
             JS_FreeValue(ctx, ret);
             return JS_EXCEPTION;
         }
-        /* check if an evil .valueOf has resized or detached the array */
-        if (idx >= p->u.array.count) {
+        if (js_atomics_revalidate(ctx, p, idx)) {
             JS_FreeValue(ctx, ret);
-            return JS_ThrowRangeError(ctx, "out-of-bound access");
+            return JS_EXCEPTION;
         }
         ptr = p->u.array.u.uint8_ptr + ((uintptr_t)idx << size_log2);
         switch(size_log2) {
@@ -66798,15 +66865,28 @@ static JSValue js_atomics_isLockFree(JSContext *ctx,
     return js_bool(ret);
 }
 
+typedef enum {
+    JS_ATOMICS_WAITING,
+    JS_ATOMICS_NOTIFIED,
+    JS_ATOMICS_TIMED_OUT,
+} JSAtomicsWaiterState;
+
 typedef struct JSAtomicsWaiter {
     struct list_head link;
     bool linked;
     js_cond_t cond;
     int32_t *ptr;
+    JSRuntime *async_rt; /* owner runtime of an Atomics.waitAsync waiter */
+    struct list_head async_link;
+    JSAtomicsWaiterState state;
+    uint64_t deadline_ns; /* 0: no timeout */
+    JSContext *ctx;
+    JSValue resolve;
 } JSAtomicsWaiter;
 
 static js_once_t js_atomics_once = JS_ONCE_INIT;
 static js_mutex_t js_atomics_mutex;
+static js_cond_t js_atomics_async_cond;
 static struct list_head js_atomics_waiter_list =
     LIST_HEAD_INIT(js_atomics_waiter_list);
 
@@ -66893,16 +66973,29 @@ static JSValue js_atomics_wait(JSContext *ctx,
     }
 
     waiter = &waiter_s;
+    memset(waiter, 0, sizeof(*waiter));
     waiter->ptr = ptr;
     js_cond_init(&waiter->cond);
     waiter->linked = true;
     list_add_tail(&waiter->link, &js_atomics_waiter_list);
 
-    if (timeout == INT64_MAX) {
-        js_cond_wait(&waiter->cond, &js_atomics_mutex);
+    {
+        uint64_t deadline = timeout == INT64_MAX ? 0 :
+            js__hrtime_ns() + (uint64_t)timeout * 1000000;
         ret = 0;
-    } else {
-        ret = js_cond_timedwait(&waiter->cond, &js_atomics_mutex, timeout * 1e6 /* to ns */);
+        while (waiter->linked) {
+            if (!deadline) {
+                js_cond_wait(&waiter->cond, &js_atomics_mutex);
+            } else {
+                uint64_t now = js__hrtime_ns();
+                if (now >= deadline) {
+                    ret = -1;
+                    break;
+                }
+                js_cond_timedwait(&waiter->cond, &js_atomics_mutex,
+                                  deadline - now);
+            }
+        }
     }
     if (waiter->linked)
         list_del(&waiter->link);
@@ -66928,6 +67021,7 @@ static JSValue js_atomics_notify(JSContext *ctx,
     JSObject *p;
     JSArrayBuffer *abuf;
     JSAtomicsWaiter *waiter;
+    bool async_notified = false;
 
     p = js_atomics_get_buf(ctx, argv[0], argv[1], &abuf, &idx, 1);
     if (!p)
@@ -66941,10 +67035,6 @@ static JSValue js_atomics_notify(JSContext *ctx,
             return JS_EXCEPTION;
     }
 
-    /* check if an evil .valueOf has resized or detached the array */
-    if (idx >= p->u.array.count)
-        return JS_ThrowRangeError(ctx, "out-of-bound access");
-
     n = 0;
     if (abuf->shared && count > 0) {
         ptr = p->u.array.u.uint8_ptr + ((uintptr_t)idx << size_log2);
@@ -66956,7 +67046,12 @@ static JSValue js_atomics_notify(JSContext *ctx,
             if (waiter->ptr == ptr) {
                 list_del(&waiter->link);
                 waiter->linked = false;
-                list_add_tail(&waiter->link, &waiter_list);
+                if (waiter->async_rt) {
+                    waiter->state = JS_ATOMICS_NOTIFIED;
+                    async_notified = true;
+                } else {
+                    list_add_tail(&waiter->link, &waiter_list);
+                }
                 n++;
                 if (n >= count)
                     break;
@@ -66966,9 +67061,202 @@ static JSValue js_atomics_notify(JSContext *ctx,
             waiter = list_entry(el, JSAtomicsWaiter, link);
             js_cond_signal(&waiter->cond);
         }
+        if (async_notified)
+            js_cond_broadcast(&js_atomics_async_cond);
         js_mutex_unlock(&js_atomics_mutex);
     }
     return js_int32(n);
+}
+
+static JSValue js_atomics_wait_result(JSContext *ctx, bool is_async,
+                                      JSValue value)
+{
+    JSValue obj = JS_NewObject(ctx);
+
+    if (JS_IsException(obj)) {
+        JS_FreeValue(ctx, value);
+        return obj;
+    }
+    if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_async, js_bool(is_async),
+                               JS_PROP_C_W_E) < 0 ||
+        JS_DefinePropertyValue(ctx, obj, JS_ATOM_value, value,
+                               JS_PROP_C_W_E) < 0) {
+        JS_FreeValue(ctx, obj);
+        return JS_EXCEPTION;
+    }
+    return obj;
+}
+
+static JSValue js_atomics_wait_async(JSContext *ctx, JSValueConst this_obj,
+                                     int argc, JSValueConst *argv)
+{
+    int64_t v;
+    int32_t v32;
+    void *ptr;
+    uint64_t idx, timeout_ns;
+    JSObject *p;
+    JSAtomicsWaiter *waiter;
+    JSValue promise, funcs[2];
+    int size_log2;
+    bool not_equal;
+    double d;
+
+    p = js_atomics_get_buf(ctx, argv[0], argv[1], NULL, &idx, 2);
+    if (!p)
+        return JS_EXCEPTION;
+    size_log2 = typed_array_size_log2(p->class_id);
+    if (size_log2 == 3) {
+        if (JS_ToBigInt64(ctx, &v, argv[2]))
+            return JS_EXCEPTION;
+    } else {
+        if (JS_ToInt32(ctx, &v32, argv[2]))
+            return JS_EXCEPTION;
+        v = v32;
+    }
+    if (JS_ToFloat64(ctx, &d, argv[3]))
+        return JS_EXCEPTION;
+    if (isnan(d) || d >= 0x1p53)
+        timeout_ns = UINT64_MAX;
+    else if (d <= 0)
+        timeout_ns = 0;
+    else
+        timeout_ns = (uint64_t)(d * 1e6);
+    ptr = p->u.array.u.uint8_ptr + ((uintptr_t)idx << size_log2);
+    js_mutex_lock(&js_atomics_mutex);
+    if (size_log2 == 3)
+        not_equal = *(int64_t *)ptr != v;
+    else
+        not_equal = *(int32_t *)ptr != v;
+    js_mutex_unlock(&js_atomics_mutex);
+    if (not_equal)
+        return js_atomics_wait_result(ctx, false,
+                                      JS_AtomToString(ctx, JS_ATOM_not_equal));
+    if (timeout_ns == 0)
+        return js_atomics_wait_result(ctx, false,
+                                      JS_AtomToString(ctx, JS_ATOM_timed_out));
+    promise = JS_NewPromiseCapability(ctx, funcs);
+    if (JS_IsException(promise))
+        return promise;
+    JS_FreeValue(ctx, funcs[1]);
+    waiter = js_mallocz(ctx, sizeof(*waiter));
+    if (!waiter) {
+        JS_FreeValue(ctx, funcs[0]);
+        JS_FreeValue(ctx, promise);
+        return JS_EXCEPTION;
+    }
+    waiter->ptr = ptr;
+    waiter->async_rt = ctx->rt;
+    waiter->state = JS_ATOMICS_WAITING;
+    waiter->deadline_ns = timeout_ns == UINT64_MAX ? 0 :
+        js__hrtime_ns() + timeout_ns;
+    waiter->ctx = JS_DupContext(ctx);
+    waiter->resolve = funcs[0];
+    js_mutex_lock(&js_atomics_mutex);
+    waiter->linked = true;
+    list_add_tail(&waiter->link, &js_atomics_waiter_list);
+    list_add_tail(&waiter->async_link, &ctx->rt->atomics_async_waiters);
+    js_mutex_unlock(&js_atomics_mutex);
+    return js_atomics_wait_result(ctx, true, promise);
+}
+
+static int js_atomics_settle_async_waiters(JSRuntime *rt, uint64_t *pnext_ns)
+{
+    struct list_head *el, *el1, done;
+    JSAtomicsWaiter *waiter;
+    uint64_t now = js__hrtime_ns(), next = 0;
+    int settled = 0;
+
+    init_list_head(&done);
+    js_mutex_lock(&js_atomics_mutex);
+    list_for_each_safe(el, el1, &rt->atomics_async_waiters) {
+        waiter = list_entry(el, JSAtomicsWaiter, async_link);
+        if (waiter->state == JS_ATOMICS_WAITING && waiter->deadline_ns &&
+            waiter->deadline_ns <= now) {
+            if (waiter->linked) {
+                list_del(&waiter->link);
+                waiter->linked = false;
+            }
+            waiter->state = JS_ATOMICS_TIMED_OUT;
+        }
+        if (waiter->state != JS_ATOMICS_WAITING) {
+            list_del(&waiter->async_link);
+            list_add_tail(&waiter->async_link, &done);
+        } else if (waiter->deadline_ns &&
+                   (!next || waiter->deadline_ns < next)) {
+            next = waiter->deadline_ns;
+        }
+    }
+    js_mutex_unlock(&js_atomics_mutex);
+    list_for_each_safe(el, el1, &done) {
+        JSValue result, ret;
+        waiter = list_entry(el, JSAtomicsWaiter, async_link);
+        list_del(&waiter->async_link);
+        result = JS_AtomToString(waiter->ctx,
+                                 waiter->state == JS_ATOMICS_NOTIFIED ?
+                                 JS_ATOM_ok : JS_ATOM_timed_out);
+        ret = JS_Call(waiter->ctx, waiter->resolve, JS_UNDEFINED, 1, vc(&result));
+        JS_FreeValue(waiter->ctx, ret);
+        JS_FreeValue(waiter->ctx, result);
+        JS_FreeValue(waiter->ctx, waiter->resolve);
+        JS_FreeContext(waiter->ctx);
+        js_free_rt(rt, waiter);
+        settled++;
+    }
+    if (pnext_ns)
+        *pnext_ns = next;
+    return settled;
+}
+
+static void js_atomics_free_async_waiters(JSRuntime *rt)
+{
+    struct list_head *el, *el1;
+    JSAtomicsWaiter *waiter;
+
+    if (list_empty(&rt->atomics_async_waiters))
+        return;
+    js_mutex_lock(&js_atomics_mutex);
+    list_for_each_safe(el, el1, &rt->atomics_async_waiters) {
+        waiter = list_entry(el, JSAtomicsWaiter, async_link);
+        list_del(&waiter->async_link);
+        if (waiter->linked)
+            list_del(&waiter->link);
+        JS_FreeValueRT(rt, waiter->resolve);
+        JS_FreeContext(waiter->ctx);
+        js_free_rt(rt, waiter);
+    }
+    js_mutex_unlock(&js_atomics_mutex);
+}
+
+bool JS_HasAtomicsWaiters(JSRuntime *rt)
+{
+    bool ret;
+
+    if (list_empty(&rt->atomics_async_waiters))
+        return false;
+    js_mutex_lock(&js_atomics_mutex);
+    ret = !list_empty(&rt->atomics_async_waiters);
+    js_mutex_unlock(&js_atomics_mutex);
+    return ret;
+}
+
+int JS_RunAtomicsWaiters(JSRuntime *rt, bool block)
+{
+    uint64_t next, now;
+    int n;
+
+    for (;;) {
+        n = js_atomics_settle_async_waiters(rt, &next);
+        if (n || !block || !JS_HasAtomicsWaiters(rt))
+            return n;
+        js_mutex_lock(&js_atomics_mutex);
+        now = js__hrtime_ns();
+        if (!next)
+            js_cond_wait(&js_atomics_async_cond, &js_atomics_mutex);
+        else if (next > now)
+            js_cond_timedwait(&js_atomics_async_cond, &js_atomics_mutex,
+                              next - now);
+        js_mutex_unlock(&js_atomics_mutex);
+    }
 }
 
 static const JSCFunctionListEntry js_atomics_funcs[] = {
@@ -66985,6 +67273,7 @@ static const JSCFunctionListEntry js_atomics_funcs[] = {
     JS_CFUNC_DEF("pause", 0, js_atomics_pause ),
     JS_CFUNC_DEF("wait", 4, js_atomics_wait ),
     JS_CFUNC_DEF("notify", 3, js_atomics_notify ),
+    JS_CFUNC_DEF("waitAsync", 4, js_atomics_wait_async ),
     JS_PROP_STRING_DEF("[Symbol.toStringTag]", "Atomics", JS_PROP_CONFIGURABLE ),
 };
 
@@ -66994,6 +67283,7 @@ static const JSCFunctionListEntry js_atomics_obj[] = {
 
 static void js__atomics_init(void) {
     js_mutex_init(&js_atomics_mutex);
+    js_cond_init(&js_atomics_async_cond);
 }
 
 /* TODO(saghul) make this public and not dependent on typed arrays? */
@@ -67003,6 +67293,18 @@ static int JS_AddIntrinsicAtomics(JSContext *ctx)
 
     /* add Atomics as autoinit object */
     return JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_atomics_obj, countof(js_atomics_obj));
+}
+
+#else
+
+bool JS_HasAtomicsWaiters(JSRuntime *rt)
+{
+    return false;
+}
+
+int JS_RunAtomicsWaiters(JSRuntime *rt, bool block)
+{
+    return 0;
 }
 
 #endif /* CONFIG_ATOMICS */

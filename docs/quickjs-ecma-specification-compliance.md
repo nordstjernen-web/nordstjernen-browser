@@ -1347,3 +1347,45 @@ direct eval inside `with` to bypass the object environment.
 `module-export-name-star.js` needs namespace imports to use an internal name
 other than the atom `"*"`, which changes the bytecode format.
 `quote-string-for-nul-character.js` needs `Intl.Collator`.
+
+### 37. Atomics in the gated run, Atomics.waitAsync, and all of staging
+
+**`Atomics` had been silently skipped.** `test262.conf` listed
+`Atomics=!tcc # atomics are broken…`; run-test262 took the inline comment as
+part of the value, so the feature was never enabled. The comment is on its
+own line now. Fixes this exposed:
+
+- `ValidateAtomicAccess` reads the length before coercing the index, write
+  operations reject an immutable `ArrayBuffer` before coercing anything, and
+  after argument coercion `RevalidateAtomicAccess` throws a TypeError for a
+  detached or out-of-bounds view and a RangeError only for an index past a
+  valid length; `Atomics.notify` no longer revalidates.
+- `Atomics.wait` loops until it is really notified or its deadline (on the
+  high-resolution clock) has passed, so early or spurious wake-ups of the
+  Windows condition variable are not reported as `"timed-out"`.
+
+**`Atomics.waitAsync`.** Async waiters join the same FIFO waiter list as
+synchronous ones. `notify` marks them and broadcasts a condition variable;
+the owning runtime resolves their promises on its own thread, from
+`JS_ExecutePendingJob` (non-blocking) or from the new host API
+`JS_RunAtomicsWaiters(rt, block)` / `JS_HasAtomicsWaiters(rt)`, which
+run-test262 calls when its job queue is empty (agents and async tests).
+
+**Staging.** All of `test/staging` is now in the gated run. The namespace
+marker atom is no longer the string `"*"` (its text is `<namespace>`, index
+unchanged), so `export {x as "*"}` / `import {"*" as y}` work; a block
+function declared by a direct `eval` inside `with` stores into the variable
+environment, skipping the `with` object (Annex B.3.2.3); `Math.asinh`/`acosh`
+use a `log1p` built on `log` with Kahan's correction, because MinGW's x87
+`log1p` depends on the thread's FPU precision; `RelativeTimeFormat.format`
+compares the unit with its length. Two SpiderMonkey tests remain excluded
+because they contradict the specification and an official test: they expect
+a block-level `function arguments` to replace the arguments object, which
+ES2017 turned off by adding `"arguments"` to parameterNames
+(`annexB/language/function-code/block-decl-func-skip-arguments.js`).
+
+The run-test262 `monotonicNow` clock uses the high-resolution timer instead
+of `GetTickCount64` (16 ms granularity on Windows).
+
+Result: **0/102988** with only those two files excluded and nothing skipped.
+
