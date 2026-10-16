@@ -17,6 +17,32 @@ Changelog:
   so a handler that toggles `rel` cannot loop. An `as=image` preload
   with only `imagesrcset` loads the chosen candidate, and a preload does
   not hold back the window `load` event.
+* CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
+  `-webkit-` forms, the `mask-position` shorthand and the position, size
+  and repeat parts of the `mask` shorthand) are supported, and an image
+  mask applies to the whole element: its background, borders and
+  content. Image masks used to fill only the background colour, scaled
+  to fit and centred, whatever the mask's own size and position said. A
+  mask on a transformed element is now built in the element's
+  transformed space, so it stays aligned with what it masks. Google's
+  chat assistant masks its background glow, a gradient, with half of an
+  SVG, and covered the whole page in flat blue.
+* Layout: percentages in grid column sizes (`50%`, `calc(100% - 380px)`,
+  `minmax(30%, 1fr)`) resolve against the grid's content width, as CSS
+  requires, not against the width left after the gaps. AP News's main
+  column, `calc(100% - 40px - 340px)` beside a 40px gap, was 40px
+  narrower than in other browsers, and every story in it wrapped
+  differently.
+* Paint: an element that starts a 3D rendering context
+  (`transform-style: preserve-3d` or `perspective`) paints with its own
+  2D transform. The transform was dropped while hit-testing kept it, so
+  DuckDuckGo's off-canvas side menu, moved out of view with
+  `translate3d`, covered the right of the page and could not be closed.
+* Layout: the viewport takes its `overflow` from the root element, and
+  from `<body>` only when the root's `overflow` is `visible`, as CSS
+  Overflow specifies. Any `overflow: hidden` on `<html>` or `<body>`
+  locked the page, so a page styling `html { overflow: auto }` and
+  `body { overflow: hidden }` could not scroll (DuckDuckGo results).
 * Layout: a grid container whose height comes from its parent, as a
   stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
   against that height. The rows were sized as if the height were
