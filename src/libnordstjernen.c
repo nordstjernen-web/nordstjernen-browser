@@ -466,6 +466,12 @@ browser_images_outstanding(ns_browser *browser)
     return total;
 }
 
+static char *
+browser_document_base(const ns_browser *b)
+{
+    return ns_js_base_url_for_document(b->js, b->doc, b->base_url);
+}
+
 static void
 browser_ensure_images(ns_browser *browser)
 {
@@ -478,8 +484,10 @@ browser_ensure_images(ns_browser *browser)
     double vp_h = browser->cur_viewport_h > 0.0 ? browser->cur_viewport_h
                                                 : browser->vh;
     gboolean deferred = FALSE;
+    g_autofree char *img_base = browser_document_base(browser);
     ns_engine_img_session *s =
-        ns_engine_fetch_images_start(browser->layout, browser->base_url,
+        ns_engine_fetch_images_start(browser->layout,
+                                     img_base ? img_base : browser->base_url,
                                      browser->images, browser->img_requested,
                                      browser->cur_scroll_y, vp_h, &deferred,
                                      browser_image_arrived, browser);
@@ -894,7 +902,8 @@ static char *
 browser_resolve_navigation(ns_browser *b, const char *href)
 {
     if (!b || !href) return NULL;
-    char *abs = ns_url_resolve(b->base_url, href);
+    g_autofree char *base = browser_document_base(b);
+    char *abs = ns_url_resolve(base ? base : b->base_url, href);
     if (!browser_allows_navigation_url(b, abs)) {
         g_free(abs);
         return NULL;
@@ -915,7 +924,8 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
 {
     ns_browser *b = ud;
     if (!b || !url || !*url) return;
-    char *abs = ns_url_resolve(b->base_url, url);
+    g_autofree char *base = browser_document_base(b);
+    char *abs = ns_url_resolve(base ? base : b->base_url, url);
     const char *target = abs ? abs : url;
     if (!browser_allows_navigation_url(b, target)) {
         g_free(abs);
@@ -3376,8 +3386,9 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
     }
     if ((!msrc || !*msrc) && media->dom->kind == NS_NODE_ELEMENT)
         msrc = ns_element_get_attr(media->dom, NS_MEDIA_SRC_ATTR);
-    char *abs = (!force_stream && msrc) ? ns_url_resolve(browser->base_url, msrc)
-                                        : NULL;
+    g_autofree char *base = browser_document_base(browser);
+    char *abs = (!force_stream && msrc)
+        ? ns_url_resolve(base ? base : browser->base_url, msrc) : NULL;
     gboolean stream = force_stream || !abs || g_str_has_prefix(abs, "blob:") ||
                       g_str_has_prefix(abs, "data:");
     if (!stream && is_video && abs && ns_video_url_is_inline(abs)) {
@@ -3495,8 +3506,10 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     const char *formaction = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formaction") : NULL;
     if (formaction && *formaction) action = formaction;
-    char *abs_action = (action && *action) ? ns_url_resolve(b->base_url, action)
-                                           : g_strdup(b->base_url);
+    g_autofree char *base = browser_document_base(b);
+    char *abs_action = (action && *action)
+        ? ns_url_resolve(base ? base : b->base_url, action)
+        : g_strdup(b->base_url);
     if (!abs_action) return;
     if (!browser_allows_navigation_url(b, abs_action)) {
         g_free(abs_action);
@@ -4671,7 +4684,9 @@ ns_browser_favicon_url(ns_browser *browser)
     if (!browser || !browser->doc)
         return NULL;
     const char *href = find_icon_href(browser->doc, 0);
-    char *abs = (href && *href) ? ns_url_resolve(browser->base_url, href) : NULL;
+    g_autofree char *base = browser_document_base(browser);
+    char *abs = (href && *href)
+        ? ns_url_resolve(base ? base : browser->base_url, href) : NULL;
     if (abs && *abs) {
         char *out = strdup(abs);
         g_free(abs);
