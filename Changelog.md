@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: an element laid out as more than one box (a table and the
+  anonymous row around its cells, for example) reports the geometry of
+  its first box from every lookup. The lookup cache, built after a few
+  queries, kept the last box instead, so `getBoundingClientRect()` on a
+  `display: table` element with bare cells switched from the table's
+  rectangle to its inner row's halfway through a script.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image

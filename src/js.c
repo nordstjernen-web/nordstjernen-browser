@@ -38532,7 +38532,7 @@ static void
 ns_box_lookup_cache_build_walk(GHashTable *t, const ns_box *b)
 {
     if (!b) return;
-    if (b->dom)
+    if (b->dom && !g_hash_table_contains(t, b->dom))
         g_hash_table_insert(t, (gpointer)b->dom, (gpointer)b);
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         ns_box_lookup_cache_build_walk(t, c);
