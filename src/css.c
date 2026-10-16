@@ -31112,6 +31112,28 @@ html_dimension_value(const char *s, gboolean ignore_zero, double *value,
     return TRUE;
 }
 
+static void
+append_svg_dimension(GString *out, const char *prop, const char *attr)
+{
+    static const char *const units[] = {
+        "", "px", "%", "em", "ex", "rem", "in", "cm", "mm", "pt", "pc",
+        "vw", "vh",
+    };
+    if (!attr) return;
+    char *value = g_strstrip(g_strdup(attr));
+    char *end = NULL;
+    double v = g_ascii_strtod(value, &end);
+    if (end != value && isfinite(v) && v >= 0) {
+        for (gsize i = 0; i < G_N_ELEMENTS(units); i++) {
+            if (g_ascii_strcasecmp(end, units[i]) != 0) continue;
+            g_string_append_printf(out, "%s: %.10g%s;", prop, v,
+                                   *units[i] ? units[i] : "px");
+            break;
+        }
+    }
+    g_free(value);
+}
+
 static gboolean
 cell_nowrap_quirk(const ns_node *cell)
 {
@@ -31686,6 +31708,11 @@ presentational_hints_css(const ns_node *el)
     }
     if (el->flags & NS_NODE_SVG_NS)
         append_svg_presentation_hints(out, el);
+    if ((el->flags & NS_NODE_SVG_NS) && strcmp(tag, "svg") == 0 &&
+        !(el->parent && (el->parent->flags & NS_NODE_SVG_NS))) {
+        append_svg_dimension(out, "width", ns_element_get_attr(el, "width"));
+        append_svg_dimension(out, "height", ns_element_get_attr(el, "height"));
+    }
 
     if (out->len == 0) {
         g_string_free(out, TRUE);
