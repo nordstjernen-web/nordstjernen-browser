@@ -214,7 +214,6 @@ static void ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n,
                                        const char *value);
 static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
 static JSValue ns_sw_owner_client(JSContext *ctx);
-static void ns_js_link_resource_changed(ns_js *js, ns_node *link);
 static void ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n,
                                           const char *namespace_uri,
                                           const char *local_name);
@@ -29627,6 +29626,67 @@ ns_attr_invalidates_qcache(const char *name)
     return FALSE;
 }
 
+typedef enum ns_link_load_kind {
+    NS_LINK_LOAD_NONE,
+    NS_LINK_LOAD_STYLESHEET,
+    NS_LINK_LOAD_PRELOAD,
+} ns_link_load_kind;
+
+static ns_link_load_kind ns_link_load_kind_for(const char *rel, const char *as);
+static ns_link_load_kind ns_link_load_kind_of(const ns_node *n);
+static gboolean ns_link_load_pending(const ns_node *n);
+static gboolean ns_node_in_active_document(ns_js *js, const ns_node *n);
+static void ns_js_schedule_deferred_script_root(ns_js *js, ns_node *root);
+static void ns_js_link_fetches_drop(ns_js *js, const ns_node *root);
+static void ns_js_link_disconnected(ns_js *js, ns_node *node);
+static void ns_js_link_fetches_detach(ns_js *js);
+static void ns_js_link_fetches_free(ns_js *js);
+static gboolean ns_js_subresource_loads_pending(const ns_js *js);
+static gboolean ns_js_net_requests_pending(const ns_js *js);
+static gboolean ns_js_node_in_tree(const ns_node *n, const ns_node *root);
+static gboolean ns_token_list_has(const char *list, const char *token);
+
+static gboolean
+ns_link_rel_change_needs_load(ns_node *link, const char *old_value)
+{
+    ns_link_load_kind was =
+        ns_link_load_kind_for(old_value, ns_element_get_attr(link, "as"));
+    ns_link_load_kind now = ns_link_load_kind_of(link);
+    return was != now &&
+           !(was == NS_LINK_LOAD_STYLESHEET && now == NS_LINK_LOAD_PRELOAD);
+}
+
+static gboolean
+ns_link_attr_change_needs_load(ns_node *link, const char *name,
+                               const char *old_value)
+{
+    if (g_ascii_strcasecmp(name, "rel") == 0)
+        return ns_link_rel_change_needs_load(link, old_value);
+    if (ns_link_load_kind_of(link) == NS_LINK_LOAD_NONE) return FALSE;
+    if (g_ascii_strcasecmp(name, "as") == 0)
+        return ns_link_load_kind_of(link) == NS_LINK_LOAD_PRELOAD &&
+               g_ascii_strcasecmp(old_value ? old_value : "",
+                                  ns_element_get_attr(link, "as")) != 0;
+    if (g_ascii_strcasecmp(name, "href") == 0)
+        return g_strcmp0(old_value, ns_element_get_attr(link, name)) != 0;
+    return FALSE;
+}
+
+static void
+ns_js_link_attr_changed(ns_js *js, ns_node *link, const char *name,
+                        const char *namespace_uri, const char *old_value)
+{
+    if (!js || !link || !name || namespace_uri ||
+        !ns_node_is_element_named(link, "link") ||
+        !ns_node_in_active_document(js, link) ||
+        !ns_link_attr_change_needs_load(link, name, old_value))
+        return;
+    link->flags &= ~NS_NODE_LINK_LOAD_FIRED;
+    ns_js_link_fetches_drop(js, link);
+    if (ns_link_load_pending(link))
+        ns_js_schedule_deferred_script_root(js, link);
+}
+
 static void
 ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
                             const char *name, const char *namespace_uri,
@@ -29634,6 +29694,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
 {
     if (js && name && ns_attr_invalidates_qcache(name))
         ns_qcache_invalidate(js);
+    ns_js_link_attr_changed(js, target, name, namespace_uri, old_value);
     ns_node *doc = ns_node_scope_document(target);
     if (doc && ns_node_in_shadow_tree(target)) doc = NULL;
     if (js && doc && target && name &&
@@ -29674,13 +29735,6 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
             JS_FreeValue(ctx, past_map);
         }
     }
-    if (js && target && name && !namespace_uri &&
-        ns_node_is_element_named(target, "link") &&
-        (g_ascii_strcasecmp(name, "rel") == 0 ||
-         g_ascii_strcasecmp(name, "href") == 0 ||
-         g_ascii_strcasecmp(name, "as") == 0) &&
-        g_strcmp0(ns_element_get_attr(target, name), old_value) != 0)
-        ns_js_link_resource_changed(js, target);
     ns_css_mark_attr_dirty(target, name, old_value);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
@@ -33781,7 +33835,7 @@ ns_js_has_pending_work(const ns_js *js)
     }
     if (ns_raf_has_runnable(js)) return TRUE;
     if (js->pending_fetches && js->pending_fetches->len > 0) return TRUE;
-    if (js->pending_xhrs && js->pending_xhrs->len > 0) return TRUE;
+    if (ns_js_net_requests_pending(js)) return TRUE;
     if (js->pending_ws && js->pending_ws->len > 0) return TRUE;
     if (js->filereader_idles && js->filereader_idles->len > 0) return TRUE;
     if (js->pending_iframe_loads && js->pending_iframe_loads->len > 0)
@@ -33811,7 +33865,7 @@ ns_js_needs_tick(const ns_js *js)
     if (js->timers && g_hash_table_size(js->timers) > 0) return TRUE;
     if (js->message_tasks && !g_queue_is_empty(js->message_tasks))
         return TRUE;
-    if (ns_js_image_loads_pending(js))
+    if (ns_js_subresource_loads_pending(js))
         return TRUE;
     if (ns_webaudio_rt_busy((ns_js *)js))
         return TRUE;
@@ -47589,16 +47643,21 @@ ns_js_node_content_frame(const ns_node *node)
 }
 
 static gboolean
-ns_js_attr_has_token(const ns_node *el, const char *attr, const char *token)
+ns_token_list_has(const char *list, const char *token)
 {
-    const char *v = ns_element_get_attr(el, attr);
-    if (!v) return FALSE;
-    gchar **parts = g_strsplit_set(v, " \t\n\f\r", -1);
+    if (!list) return FALSE;
+    gchar **parts = g_strsplit_set(list, " \t\n\f\r", -1);
     gboolean found = FALSE;
     for (int i = 0; parts[i] && !found; i++)
         found = g_ascii_strcasecmp(parts[i], token) == 0;
     g_strfreev(parts);
     return found;
+}
+
+static gboolean
+ns_js_attr_has_token(const ns_node *el, const char *attr, const char *token)
+{
+    return ns_token_list_has(ns_element_get_attr(el, attr), token);
 }
 
 /* Whether a script or stylesheet link blocks rendering, as
@@ -55011,6 +55070,7 @@ ns_ce_disconnect_subtree_rec(ns_js *js, ns_node *root, int depth)
     if (!js || !root || !js->ctx || depth >= 512) return;
     if (js->popover_info && root->kind == NS_NODE_ELEMENT)
         ns_popover_removing_steps(js, root);
+    ns_js_link_disconnected(js, root);
     if (root->kind == NS_NODE_ELEMENT && root->js_wrapper) {
         JSContext *ctx = js->ctx;
         JSValue elem = JS_MKPTR(JS_TAG_OBJECT, root->js_wrapper);
@@ -62021,6 +62081,7 @@ ns_js_reset_runtime_state(ns_js *js)
         }
         g_ptr_array_set_size(js->pending_xhrs, 0);
     }
+    ns_js_link_fetches_detach(js);
 
     if (js->ce_registry) g_hash_table_remove_all(js->ce_registry);
     ns_css_clear_defined_elements();
@@ -62773,6 +62834,7 @@ ns_js_free(ns_js *js)
         g_ptr_array_free(js->pending_xhrs, TRUE);
         js->pending_xhrs = NULL;
     }
+    ns_js_link_fetches_free(js);
     if (js->pending_aborts) {
         for (guint i = 0; i < js->pending_aborts->len; i++) {
             ns_abort_timeout *t = g_ptr_array_index(js->pending_aborts, i);
@@ -65108,111 +65170,457 @@ ns_subtree_has_pending_script(const ns_node *n)
     return ns_subtree_has_pending_script_rec(n, 0);
 }
 
+typedef struct ns_link_as {
+    const char *as;
+    ns_csp_kind csp;
+    gboolean    lenient;
+} ns_link_as;
+
+static const ns_link_as *
+ns_link_as_entry(const char *as)
+{
+    static const ns_link_as table[] = {
+        { "style",  NS_CSP_STYLE,   FALSE },
+        { "script", NS_CSP_SCRIPT,  FALSE },
+        { "font",   NS_CSP_FONT,    FALSE },
+        { "image",  NS_CSP_IMG,     FALSE },
+        { "track",  NS_CSP_MEDIA,   TRUE },
+        { "fetch",  NS_CSP_CONNECT, TRUE },
+    };
+    for (guint i = 0; as && i < G_N_ELEMENTS(table); i++)
+        if (g_ascii_strcasecmp(as, table[i].as) == 0) return &table[i];
+    return NULL;
+}
+
+static ns_link_load_kind
+ns_link_load_kind_for(const char *rel, const char *as)
+{
+    if (ns_token_list_has(rel, "stylesheet") &&
+        !ns_token_list_has(rel, "alternate"))
+        return NS_LINK_LOAD_STYLESHEET;
+    if (ns_token_list_has(rel, "preload") && ns_link_as_entry(as))
+        return NS_LINK_LOAD_PRELOAD;
+    return NS_LINK_LOAD_NONE;
+}
+
+static ns_link_load_kind
+ns_link_load_kind_of(const ns_node *n)
+{
+    return ns_link_load_kind_for(ns_element_get_attr(n, "rel"),
+                                 ns_element_get_attr(n, "as"));
+}
+
+static const ns_link_as *
+ns_link_preload_entry(const ns_node *n)
+{
+    return ns_link_load_kind_of(n) == NS_LINK_LOAD_PRELOAD
+        ? ns_link_as_entry(ns_element_get_attr(n, "as")) : NULL;
+}
+
+static ns_csp_kind
+ns_link_csp_kind(const ns_node *n)
+{
+    const ns_link_as *entry = ns_link_preload_entry(n);
+    return entry ? entry->csp : NS_CSP_STYLE;
+}
+
 static gboolean
-ns_link_has_pending_load(const ns_node *n)
+ns_link_mime_in(const char *type, const char *const *accepted)
+{
+    while (g_ascii_isspace(*type)) type++;
+    gsize len = strcspn(type, "; \t");
+    for (; *accepted; accepted++)
+        if (strlen(*accepted) == len &&
+            g_ascii_strncasecmp(type, *accepted, len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_link_type_supported(const char *as, const char *type)
+{
+    static const char *const font_types[] = {
+        "font/woff2", "font/woff", "font/ttf", "font/otf", "font/sfnt",
+        "application/font-woff", "application/font-woff2",
+        "application/x-font-woff", "application/x-font-ttf",
+        "application/x-font-otf", "application/font-sfnt", NULL,
+    };
+    static const char *const css_types[] = { "text/css", NULL };
+    static const char *const vtt_types[] = { "text/vtt", NULL };
+    if (!type || !*type) return TRUE;
+    if (g_ascii_strcasecmp(as, "image") == 0) return ns_image_supports_mime(type);
+    if (g_ascii_strcasecmp(as, "script") == 0)
+        return content_type_is_javascript(type);
+    if (g_ascii_strcasecmp(as, "style") == 0)
+        return ns_link_mime_in(type, css_types);
+    if (g_ascii_strcasecmp(as, "font") == 0)
+        return ns_link_mime_in(type, font_types);
+    if (g_ascii_strcasecmp(as, "track") == 0)
+        return ns_link_mime_in(type, vtt_types);
+    return TRUE;
+}
+
+static gboolean
+ns_link_preload_applies(const ns_node *n)
+{
+    const char *media = ns_element_get_attr(n, "media");
+    if (media && *media && !ns_css_media_query_matches(media)) return FALSE;
+    return ns_link_type_supported(ns_element_get_attr(n, "as"),
+                                  ns_element_get_attr(n, "type"));
+}
+
+static gboolean
+ns_link_srcset_only_image(const ns_node *n)
+{
+    const char *set = ns_element_get_attr(n, "imagesrcset");
+    const char *as = ns_element_get_attr(n, "as");
+    return set && *set && as && g_ascii_strcasecmp(as, "image") == 0;
+}
+
+static gboolean
+ns_link_has_source(const ns_node *n, ns_link_load_kind kind)
+{
+    const char *href = ns_element_get_attr(n, "href");
+    if (href && *href) return TRUE;
+    return kind == NS_LINK_LOAD_PRELOAD && ns_link_srcset_only_image(n);
+}
+
+static gboolean
+ns_link_load_pending(const ns_node *n)
 {
     if (!ns_node_is_element_named(n, "link")) return FALSE;
     if (n->flags & NS_NODE_LINK_LOAD_FIRED) return FALSE;
-    const char *rel = ns_element_get_attr(n, "rel");
-    const char *href = ns_element_get_attr(n, "href");
-    if (!href || !*href || !rel) return FALSE;
-    gchar **parts = g_strsplit_set(rel, " \t\r\n\f", -1);
-    gboolean is_sheet = FALSE, is_alt = FALSE, is_preload = FALSE;
-    for (gchar **p = parts; *p; p++) {
-        if (g_ascii_strcasecmp(*p, "stylesheet") == 0) is_sheet = TRUE;
-        else if (g_ascii_strcasecmp(*p, "alternate") == 0) is_alt = TRUE;
-        else if (g_ascii_strcasecmp(*p, "preload") == 0) is_preload = TRUE;
+    ns_link_load_kind kind = ns_link_load_kind_of(n);
+    if (kind == NS_LINK_LOAD_NONE) return FALSE;
+    if (kind == NS_LINK_LOAD_PRELOAD && !ns_link_preload_applies(n))
+        return FALSE;
+    return ns_link_has_source(n, kind);
+}
+
+static char *
+ns_link_target_url(ns_js *js, const ns_node *n, const char *origin)
+{
+    g_autofree char *candidate = NULL;
+    if (ns_link_load_kind_of(n) == NS_LINK_LOAD_PRELOAD &&
+        ns_link_srcset_only_image(n))
+        candidate = ns_layout_select_srcset(
+            ns_element_get_attr(n, "imagesrcset"),
+            ns_element_get_attr(n, "imagesizes"));
+    const char *ref = candidate ? candidate : ns_element_get_attr(n, "href");
+    return ref && *ref ? ns_js_resolve_against_base(js, n, origin, ref) : NULL;
+}
+
+static gboolean
+ns_link_status_ok(gboolean lenient, long status)
+{
+    return lenient ? status > 0 : status >= 200 && status < 300;
+}
+
+static gboolean
+ns_link_loaded_with(const ns_node *n, long status)
+{
+    const ns_link_as *entry = ns_link_preload_entry(n);
+    return ns_link_status_ok(entry && entry->lenient, status);
+}
+
+typedef struct ns_link_fetch {
+    ns_js                *js;
+    char                 *url;
+    char                 *document_url;
+    GPtrArray            *nodes;
+    ns_perf_resource_info info;
+    gint64                start_us;
+    long                  status;
+    gboolean              sheet;
+} ns_link_fetch;
+
+static void
+ns_link_fetch_free(ns_link_fetch *st)
+{
+    g_free(st->url);
+    g_free(st->document_url);
+    g_ptr_array_free(st->nodes, TRUE);
+    g_free(st);
+}
+
+static ns_link_fetch *
+ns_link_fetch_new(ns_js *js, ns_node *n)
+{
+    ns_link_fetch *st = g_new0(ns_link_fetch, 1);
+    st->js = js;
+    st->nodes = g_ptr_array_new();
+    g_ptr_array_add(st->nodes, n);
+    st->sheet = ns_link_load_kind_of(n) == NS_LINK_LOAD_STYLESHEET;
+    ns_js_element_perf_info(js, n, &st->info);
+    st->document_url = g_strdup(st->info.document_url);
+    st->info.document_url = st->document_url;
+    if (!js->link_fetches) js->link_fetches = g_ptr_array_new();
+    g_ptr_array_add(js->link_fetches, st);
+    return st;
+}
+
+static ns_link_fetch *
+ns_link_fetch_join(ns_js *js, ns_node *n, const char *abs_url)
+{
+    for (guint i = 0; js->link_fetches && i < js->link_fetches->len; i++) {
+        ns_link_fetch *st = g_ptr_array_index(js->link_fetches, i);
+        if (!st->url || strcmp(st->url, abs_url) != 0) continue;
+        g_ptr_array_remove_fast(st->nodes, n);
+        g_ptr_array_add(st->nodes, n);
+        if (ns_link_load_kind_of(n) == NS_LINK_LOAD_STYLESHEET) st->sheet = TRUE;
+        return st;
     }
-    g_strfreev(parts);
-    if (is_sheet) return !is_alt;
-    const char *as = ns_element_get_attr(n, "as");
-    return is_preload && as && g_ascii_strcasecmp(as, "style") == 0;
+    return NULL;
 }
 
 static void
-ns_js_collect_pending_stylesheets_rec(ns_node *n, GPtrArray *out, int depth)
+ns_js_link_fetches_drop(ns_js *js, const ns_node *root)
+{
+    for (guint i = 0; js && js->link_fetches && i < js->link_fetches->len; i++) {
+        ns_link_fetch *st = g_ptr_array_index(js->link_fetches, i);
+        for (guint j = st->nodes->len; j > 0; j--)
+            if (ns_js_node_in_tree(g_ptr_array_index(st->nodes, j - 1), root))
+                g_ptr_array_remove_index(st->nodes, j - 1);
+    }
+}
+
+static void
+ns_js_link_disconnected(ns_js *js, ns_node *node)
+{
+    if (!ns_node_is_element_named(node, "link")) return;
+    node->flags &= ~NS_NODE_LINK_LOAD_FIRED;
+    ns_js_link_fetches_drop(js, node);
+}
+
+static void
+ns_js_link_fetches_detach(ns_js *js)
+{
+    for (guint i = 0; js && js->link_fetches && i < js->link_fetches->len; i++) {
+        ns_link_fetch *st = g_ptr_array_index(js->link_fetches, i);
+        g_ptr_array_set_size(st->nodes, 0);
+        st->js = NULL;
+    }
+    if (js && js->link_fetches) g_ptr_array_set_size(js->link_fetches, 0);
+    if (js && js->link_results) g_hash_table_remove_all(js->link_results);
+}
+
+static void
+ns_js_link_fetches_free(ns_js *js)
+{
+    ns_js_link_fetches_detach(js);
+    g_clear_pointer(&js->link_fetches, g_ptr_array_unref);
+    g_clear_pointer(&js->link_results, g_hash_table_destroy);
+}
+
+static gboolean
+ns_js_net_requests_pending(const ns_js *js)
+{
+    return (js->pending_xhrs && js->pending_xhrs->len > 0) ||
+           (js->link_fetches && js->link_fetches->len > 0);
+}
+
+static gboolean
+ns_js_link_sheets_pending(const ns_js *js)
+{
+    for (guint i = 0; js->link_fetches && i < js->link_fetches->len; i++)
+        if (((const ns_link_fetch *)g_ptr_array_index(js->link_fetches, i))->sheet)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_js_subresource_loads_pending(const ns_js *js)
+{
+    return ns_js_image_loads_pending(js) || ns_js_link_sheets_pending(js);
+}
+
+static gboolean
+ns_link_fetch_deliver(gpointer data)
+{
+    ns_link_fetch *st = data;
+    ns_js *js = st->js;
+    if (!js) {
+        ns_link_fetch_free(st);
+        return G_SOURCE_REMOVE;
+    }
+    if (!js->halted && ns_js_page_tasks_held(js)) {
+        ns_js_attach_timeout(js, 4, ns_link_fetch_deliver, st);
+        return G_SOURCE_REMOVE;
+    }
+    g_clear_pointer(&st->url, g_free);
+    while (!js->halted && st->js && st->nodes->len > 0) {
+        ns_node *n = g_ptr_array_index(st->nodes, 0);
+        g_ptr_array_remove_index(st->nodes, 0);
+        ns_js_dispatch_resource_event(js, n,
+            ns_link_loaded_with(n, st->status) ? "load" : "error");
+    }
+    if (st->js && st->js->link_fetches)
+        g_ptr_array_remove_fast(st->js->link_fetches, st);
+    ns_link_fetch_free(st);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_link_fetch_settle(ns_link_fetch *st, long status)
+{
+    st->status = status;
+    ns_js_attach_timeout(st->js, 0, ns_link_fetch_deliver, st);
+}
+
+static void
+ns_link_fetch_record(ns_js *js, ns_link_fetch *st, long status,
+                     gint64 end_us, const ns_response *resp)
+{
+    if (status > 0) {
+        if (!js->link_results)
+            js->link_results = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, NULL);
+        if (g_hash_table_size(js->link_results) >= 256)
+            g_hash_table_remove_all(js->link_results);
+        g_hash_table_replace(js->link_results, g_strdup(st->url),
+                             GINT_TO_POINTER((gint)status + 1));
+    }
+    st->info.status = status;
+    st->info.preload = !st->sheet;
+    if (!ns_perf_has_resource(js, st->info.timeline, st->url, "link"))
+        ns_perf_add_resource_timed(js, &st->info, st->url, "link",
+                                   st->start_us, end_us, resp);
+}
+
+static void
+ns_link_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
+{
+    (void)src;
+    ns_link_fetch *st = user_data;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (st->js) {
+        st->status = resp ? resp->status : 0;
+        ns_link_fetch_record(st->js, st, resp ? resp->status : 0,
+                             g_get_monotonic_time(), resp);
+        ns_js_attach_timeout(st->js, 0, ns_link_fetch_deliver, st);
+    } else {
+        ns_link_fetch_free(st);
+    }
+    ns_response_free(resp);
+    g_clear_error(&err);
+}
+
+static gboolean
+ns_link_fetch_allowed(ns_js *js, const ns_node *n, const char *abs_url,
+                      const char *origin)
+{
+    gboolean mixed = origin && g_str_has_prefix(origin, "https://") &&
+                     g_str_has_prefix(abs_url, "http://");
+    gboolean csp = !mixed && js->csp &&
+        !ns_csp_allows_with_nonce(js->csp, ns_link_csp_kind(n), abs_url,
+                                  origin, ns_element_get_attr(n, "nonce"),
+                                  !(n->flags & NS_NODE_NOT_PARSER_INSERTED));
+    if ((mixed || csp) && js->log_cb) {
+        char *line = g_strdup_printf("%s: link %s",
+            mixed ? "mixed-content blocked" : "CSP blocked", abs_url);
+        js->log_cb(line, js->log_user_data);
+        g_free(line);
+    }
+    return !mixed && !csp;
+}
+
+static gboolean
+ns_link_result_reusable(const ns_link_fetch *st, long status)
+{
+    return !st->sheet || ns_link_status_ok(FALSE, status);
+}
+
+static void
+ns_link_fetch_start(ns_js *js, ns_link_fetch *st, const ns_node *n,
+                    const char *abs_url, const char *origin)
+{
+    gpointer seen = js->link_results
+        ? g_hash_table_lookup(js->link_results, abs_url) : NULL;
+    if (seen && ns_link_result_reusable(st, GPOINTER_TO_INT(seen) - 1)) {
+        ns_link_fetch_settle(st, GPOINTER_TO_INT(seen) - 1);
+        return;
+    }
+    ns_engine_preload_result known;
+    if (ns_engine_preload_result_for(abs_url, &known) &&
+        ns_link_result_reusable(st, known.status)) {
+        st->url = g_strdup(abs_url);
+        st->start_us = known.start_us;
+        ns_link_fetch_record(js, st, known.status, known.end_us, NULL);
+        g_clear_pointer(&st->url, g_free);
+        ns_link_fetch_settle(st, known.status);
+        return;
+    }
+    ns_fetch_destination dest = ns_link_load_kind_of(n) == NS_LINK_LOAD_PRELOAD
+        ? ns_engine_preload_destination(ns_element_get_attr(n, "rel"),
+                                        ns_element_get_attr(n, "as"))
+        : NS_FETCH_DEST_STYLE;
+    st->url = g_strdup(abs_url);
+    st->start_us = g_get_monotonic_time();
+    ns_net_request_async(abs_url, origin, "GET", NULL, 0, NULL,
+                         ns_net_accept_headers_for(dest), NULL,
+                         ns_link_fetch_done, st);
+}
+
+static void
+ns_js_load_link_element(ns_js *js, ns_node *n, const char *origin)
+{
+    if (!js || !n || (n->flags & NS_NODE_LINK_LOAD_FIRED)) return;
+    n->flags |= NS_NODE_LINK_LOAD_FIRED;
+    g_autofree char *abs_url = ns_link_target_url(js, n, origin);
+    if (!abs_url || !ns_link_fetch_allowed(js, n, abs_url, origin)) {
+        ns_link_fetch_settle(ns_link_fetch_new(js, n), 0);
+        return;
+    }
+    if (ns_link_fetch_join(js, n, abs_url)) return;
+    ns_link_fetch *st = ns_link_fetch_new(js, n);
+    if (g_str_has_prefix(abs_url, "data:"))
+        ns_link_fetch_settle(st, 200);
+    else
+        ns_link_fetch_start(js, st, n, abs_url, origin);
+}
+
+static gboolean
+ns_link_sheet_known(ns_js *js, const ns_node *link, const char *origin)
+{
+    if (ns_link_load_kind_of(link) != NS_LINK_LOAD_STYLESHEET) return FALSE;
+    g_autofree char *abs = ns_link_target_url(js, link, origin);
+    return ns_engine_linked_css_known(abs);
+}
+
+static void
+ns_js_collect_pending_link_loads_rec(ns_node *n, GPtrArray *out, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
-    if (ns_link_has_pending_load(n)) {
+    if (ns_link_load_pending(n)) {
         g_ptr_array_add(out, n);
         return;
     }
     if (ns_node_is_element_named(n, "template")) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_collect_pending_stylesheets_rec(c, out, depth + 1);
+        ns_js_collect_pending_link_loads_rec(c, out, depth + 1);
 }
 
 static void
-ns_js_collect_pending_stylesheets(ns_node *n, GPtrArray *out)
+ns_js_collect_pending_link_loads(ns_node *n, GPtrArray *out)
 {
-    ns_js_collect_pending_stylesheets_rec(n, out, 0);
-}
-
-static void
-ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
-{
-    if (!js || !n || (n->flags & NS_NODE_LINK_LOAD_FIRED)) return;
-    n->flags |= NS_NODE_LINK_LOAD_FIRED;
-    const char *href = ns_element_get_attr(n, "href");
-    if (!href || !*href) {
-        ns_js_dispatch_resource_event(js, n, "error");
-        return;
-    }
-    if (g_str_has_prefix(href, "data:")) {
-        ns_js_dispatch_resource_event(js, n, "load");
-        return;
-    }
-    char *abs_url = ns_js_resolve_against_base(js, n, origin, href);
-    if (!abs_url) {
-        ns_js_dispatch_resource_event(js, n, "error");
-        return;
-    }
-    gboolean loaded = FALSE;
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_STYLE, abs_url, origin)) {
-        if (js->log_cb) {
-            char *line = g_strdup_printf("CSP blocked: stylesheet %s", abs_url);
-            js->log_cb(line, js->log_user_data);
-            g_free(line);
-        }
-    } else {
-        GError *err = NULL;
-        ns_perf_resource_info info = { 0 };
-        ns_js_element_perf_info(js, n, &info);
-        ns_response *resp = ns_js_fetch_subresource(js, abs_url, origin, NULL,
-                                                    &err, "link", &info);
-        if (resp && resp->status == 200)
-            loaded = TRUE;
-        else if (js->log_cb) {
-            const char *why = err ? err->message :
-                (resp && resp->error ? resp->error :
-                 (resp ? "non-200 status" : "fetch failed"));
-            char *line = g_strdup_printf("stylesheet %s: %s", abs_url, why);
-            js->log_cb(line, js->log_user_data);
-            g_free(line);
-        }
-        ns_response_free(resp);
-        g_clear_error(&err);
-    }
-    g_free(abs_url);
-    ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
+    ns_js_collect_pending_link_loads_rec(n, out, 0);
 }
 
 static void
 ns_js_fire_parsed_stylesheet_loads(ns_js *js, ns_node *doc)
 {
     GPtrArray *sheets = g_ptr_array_new();
-    ns_js_collect_pending_stylesheets(doc, sheets);
-    g_autofree char *origin = sheets->len ? ns_js_node_document_base_url(js, doc)
+    ns_js_collect_pending_link_loads(doc, sheets);
+    g_autofree char *origin = sheets->len ? g_strdup(ns_js_node_doc_base(js, doc))
                                           : NULL;
     for (guint i = 0; i < sheets->len && !js->halted; i++) {
         ns_node *link = g_ptr_array_index(sheets, i);
-        g_autofree char *abs =
-            ns_url_resolve(origin, ns_element_get_attr(link, "href"));
-        if (ns_engine_linked_css_known(abs)) {
+        if (ns_link_sheet_known(js, link, origin)) {
             link->flags |= NS_NODE_LINK_LOAD_FIRED;
             ns_js_dispatch_resource_event(js, link, "load");
         } else {
-            ns_js_load_stylesheet_element(js, link, origin ? origin : "inline");
+            ns_js_load_link_element(js, link, origin ? origin : "inline");
         }
     }
     g_ptr_array_free(sheets, TRUE);
@@ -65276,14 +65684,6 @@ ns_js_schedule_deferred_script_root(ns_js *js, ns_node *root)
         }
     g_ptr_array_add(js->deferred_script_roots, root);
     ns_js_schedule_pending_script_drain(js);
-}
-
-static void
-ns_js_link_resource_changed(ns_js *js, ns_node *link)
-{
-    link->flags &= ~NS_NODE_LINK_LOAD_FIRED;
-    if (ns_link_has_pending_load(link) && ns_js_node_in_page(js, link))
-        ns_js_schedule_deferred_script_root(js, link);
 }
 
 static void
@@ -65369,7 +65769,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     if (!ns_js_root_connected(js, root)) return;
     ns_js_schedule_static_iframes(js, root);
     GPtrArray *sheets = g_ptr_array_new();
-    ns_js_collect_pending_stylesheets(root, sheets);
+    ns_js_collect_pending_link_loads(root, sheets);
     if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
         g_ptr_array_free(sheets, TRUE);
         return;
@@ -65409,7 +65809,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         ns_js_schedule_async_script_root(js, root);
     g_array_free(tasks, TRUE);
     for (guint i = 0; i < sheets->len; i++)
-        ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i), origin);
+        ns_js_load_link_element(js, g_ptr_array_index(sheets, i), origin);
     g_ptr_array_free(sheets, TRUE);
 }
 
@@ -65423,7 +65823,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
         g_ptr_array_remove_index(js->deferred_script_roots, 0);
         if (!ns_js_root_connected(js, root)) continue;
         GPtrArray *sheets = g_ptr_array_new();
-        ns_js_collect_pending_stylesheets(root, sheets);
+        ns_js_collect_pending_link_loads(root, sheets);
         if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
             g_ptr_array_free(sheets, TRUE);
             continue;
@@ -65439,7 +65839,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
             ns_js_schedule_async_script_root(js, root);
         g_array_free(tasks, TRUE);
         for (guint i = 0; i < sheets->len; i++)
-            ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i),
+            ns_js_load_link_element(js, g_ptr_array_index(sheets, i),
                                           origin);
         g_ptr_array_free(sheets, TRUE);
         break;
@@ -65718,6 +66118,7 @@ ns_js_purge_subtree_node_refs(ns_js *js, ns_node *root)
     if (js->pending_fullscreen_event_target &&
         ns_js_node_in_tree(js->pending_fullscreen_event_target, root))
         js->pending_fullscreen_event_target = NULL;
+    ns_js_link_fetches_drop(js, root);
 }
 
 static void
@@ -67127,7 +67528,7 @@ ns_js_lifecycle_has_blockers(ns_js *js)
 {
     if (!js) return FALSE;
     return js->eval_depth > 0 || js->iframe_load_depth > 0 || js->in_pump ||
-        ns_js_image_loads_pending(js) ||
+        ns_js_subresource_loads_pending(js) ||
         (js->pending_iframe_loads && js->pending_iframe_loads->len > 0) ||
         (js->deferred_script_roots && js->deferred_script_roots->len > 0) ||
         (js->async_script_roots && js->async_script_roots->len > 0) ||
