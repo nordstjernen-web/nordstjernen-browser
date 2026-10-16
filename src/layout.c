@@ -7330,6 +7330,46 @@ flex_item_baseline(const ns_box *c, double fallback)
     return box_first_baseline(c, &baseline) ? baseline : fallback;
 }
 
+static gboolean
+inline_atomic_is_abs_placeholder_at(const ns_box *box, gsize byte)
+{
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+        if (a->byte_off == byte && a->box &&
+            g_hash_table_contains(g_abs_ph_set, a->box))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+inline_run_holds_only_abs_placeholders(const ns_box *box,
+                                       const ns_style *parent_style)
+{
+    if (!box->text || !box->inline_atomics || !g_abs_ph_set) return FALSE;
+    const ns_css_value *ws = parent_style
+        ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL;
+    if (ws && !keyword_is(ws, "normal") && !keyword_is(ws, "nowrap"))
+        return FALSE;
+    static const char placeholder[] = "\xef\xbf\xbc";
+    const char *t = box->text;
+    gsize i = 0;
+    gboolean any = FALSE;
+    while (t[i]) {
+        if (t[i] == ' ' || t[i] == '\t') {
+            i++;
+        } else if (strncmp(t + i, placeholder, sizeof placeholder - 1) == 0 &&
+                   inline_atomic_is_abs_placeholder_at(box, i)) {
+            any = TRUE;
+            i += sizeof placeholder - 1;
+        } else {
+            return FALSE;
+        }
+    }
+    return any;
+}
+
 static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
@@ -7492,6 +7532,10 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     box->first_baseline = (double)measured.baseline / NS_PANGO_SCALE;
     if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
+    if (inline_run_holds_only_abs_placeholders(box, parent_style)) {
+        box->content_height = 0;
+        box->first_baseline = 0;
+    }
     if (cacheable) {
         box->inline_layout_cache_style = parent_style;
         box->inline_layout_cache_width = content_width;
