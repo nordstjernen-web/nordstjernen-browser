@@ -66484,6 +66484,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                 JS_FreeValue(fctx, ex);
             }
             JS_FreeValue(fctx, v);
+            ns_js_microtask_checkpoint(js);
         }
         if (in_frame_scope) ns_js_realm_scope_leave(js, &frame_scope);
     } else if (concat->len > 0) {
