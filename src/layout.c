@@ -9649,7 +9649,6 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
                 if (float_row > max_child) max_child = float_row;
             } else {
                 if (outer > max_child) max_child = outer;
-                if (w > max_child) max_child = w;
                 float_row = 0;
             }
         } else {

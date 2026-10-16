@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a block's negative horizontal margins reduce its parent's
+  max-content width, as in other browsers. The shrink-to-fit measurement
+  took the larger of the child's margin box and its content width, so
+  negative margins never counted: Wikipedia's main-menu button
+  (`margin: 0 -12px`)
+  made its header slot 44px wide instead of 20px and pushed the logo
+  24px to the right; inline-blocks, floats, table cells and flex items
+  holding such a block came out too wide in the same way.
 * SVG: icons drawn through `<use>` take `currentColor` from where they are
   used. A sprite's `<symbol>` lives in a hidden `<svg>`, and its paths
   resolved `fill="currentColor"` against that tree's colour, so every
