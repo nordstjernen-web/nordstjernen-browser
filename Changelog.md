@@ -75,6 +75,13 @@ Changelog:
   that checked `event.source instanceof WindowClient` threw a
   ReferenceError on every message: Amazon's service worker logged six
   errors per page load and never answered the page.
+* JavaScript: an external classic script is decoded with the charset of
+  its `Content-Type` (or the `<script charset>` attribute, or a UTF-16
+  byte order mark) before it runs, and invalid UTF-8 becomes U+FFFD, as in
+  other browsers. Scripts were handed over as raw bytes, so a script
+  served as `charset=iso-8859-1` with an accented letter failed whole with
+  "invalid UTF-8 sequence": ESPN's Spanish-language i18n script, and the
+  scripts that depend on it, never ran. Module scripts stay UTF-8.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image

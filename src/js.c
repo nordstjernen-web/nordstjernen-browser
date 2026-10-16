@@ -64571,6 +64571,73 @@ ns_js_collect_script_tasks(ns_node *n, GArray *tasks)
     ns_js_collect_script_tasks_rec(n, tasks, 0);
 }
 
+static char *
+ns_js_charset_param(const char *content_type)
+{
+    if (!content_type) return NULL;
+    const char *p = content_type;
+    while ((p = strchr(p, ';'))) {
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        if (g_ascii_strncasecmp(p, "charset=", 8) != 0) continue;
+        p += 8;
+        if (*p == '"' || *p == '\'') p++;
+        gsize n = strcspn(p, "\"'; \t");
+        return n ? g_strndup(p, n) : NULL;
+    }
+    return NULL;
+}
+
+static const char *
+ns_js_script_iconv_name(const char *label)
+{
+    static const char *const windows_1252[] = {
+        "ansi_x3.4-1968", "ascii", "cp1252", "cp819", "csisolatin1",
+        "ibm819", "iso-8859-1", "iso-ir-100", "iso8859-1", "iso88591",
+        "iso_8859-1", "iso_8859-1:1987", "l1", "latin1", "us-ascii",
+        "windows-1252", "x-cp1252",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(windows_1252); i++)
+        if (g_ascii_strcasecmp(label, windows_1252[i]) == 0)
+            return "WINDOWS-1252";
+    if (g_ascii_strcasecmp(label, "utf-8") == 0 ||
+        g_ascii_strcasecmp(label, "utf8") == 0 ||
+        g_ascii_strcasecmp(label, "unicode-1-1-utf-8") == 0)
+        return "UTF-8";
+    return label;
+}
+
+static char *
+ns_js_decode_classic_script(const char *data, gsize len,
+                            const char *content_type, const char *charset_attr,
+                            gsize *out_len)
+{
+    char *out = NULL;
+    if (len >= 3 && memcmp(data, "\xef\xbb\xbf", 3) == 0) {
+        if (g_utf8_validate(data + 3, (gssize)(len - 3), NULL)) return NULL;
+        out = g_utf8_make_valid(data + 3, (gssize)(len - 3));
+    } else if (len >= 2 && (memcmp(data, "\xff\xfe", 2) == 0 ||
+                            memcmp(data, "\xfe\xff", 2) == 0)) {
+        out = g_convert(data + 2, (gssize)(len - 2), "UTF-8",
+                        data[0] == '\xff' ? "UTF-16LE" : "UTF-16BE",
+                        NULL, NULL, NULL);
+    }
+    if (!out) {
+        g_autofree char *label = ns_js_charset_param(content_type);
+        if (!label && charset_attr && *charset_attr)
+            label = g_strdup(charset_attr);
+        const char *cs = label ? ns_js_script_iconv_name(label) : "UTF-8";
+        if (g_ascii_strcasecmp(cs, "UTF-8") != 0)
+            out = g_convert(data, (gssize)len, "UTF-8", cs, NULL, NULL, NULL);
+    }
+    if (!out) {
+        if (g_utf8_validate(data, (gssize)len, NULL)) return NULL;
+        out = g_utf8_make_valid(data, (gssize)len);
+    }
+    *out_len = strlen(out);
+    return out;
+}
+
 static void
 ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
                          gsize length, const char *origin,
@@ -64765,9 +64832,21 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                     g_free(line);
                 }
             } else if (resp->body->len > 0) {
+                const char *src_data = (const char *)resp->body->data;
+                gsize src_len = resp->body->len;
+                gsize decoded_len = 0;
+                g_autofree char *decoded = is_module
+                    ? (g_utf8_validate(src_data, (gssize)src_len, NULL)
+                           ? NULL
+                           : g_utf8_make_valid(src_data, (gssize)src_len))
+                    : ns_js_decode_classic_script(src_data, src_len,
+                          resp->content_type,
+                          ns_element_get_attr(n, "charset"), &decoded_len);
+                if (decoded && !decoded_len) decoded_len = strlen(decoded);
                 ns_js_eval_script_source(js, n,
-                                         (const char *)resp->body->data,
-                                         resp->body->len, abs_url, is_module);
+                                         decoded ? decoded : src_data,
+                                         decoded ? decoded_len : src_len,
+                                         abs_url, is_module);
                 loaded = TRUE;
             } else {
                 loaded = TRUE;
