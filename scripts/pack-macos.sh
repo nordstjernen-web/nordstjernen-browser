@@ -340,6 +340,22 @@ cat > "$RES/etc/fonts/fonts.conf" <<'FONTS_EOF'
 </fontconfig>
 FONTS_EOF
 
+# The bundled Homebrew dylibs are built for the runner's macOS, so the bundle
+# runs only where every Mach-O inside it does. Declare the highest minimum OS
+# version among them, so an older Mac shows "requires a newer version of
+# macOS" instead of crashing in dyld on launch.
+MIN_MACOS=$(find "$STAGE/Contents" -type f \( -path '*/Contents/MacOS/*' \
+                -o -name '*.dylib' -o -name '*.so' \) -print0 |
+            { xargs -0 otool -l 2>/dev/null || true; } |
+            awk '$1 == "cmd" { bv = ($2 == "LC_BUILD_VERSION"); vm = ($2 == "LC_VERSION_MIN_MACOSX") }
+                 bv && $1 == "minos" { print $2 } vm && $1 == "version" { print $2 }' |
+            sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+if [ -n "$MIN_MACOS" ]; then
+    /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MIN_MACOS" \
+        "$STAGE/Contents/Info.plist"
+    echo "pack-macos.sh: LSMinimumSystemVersion $MIN_MACOS"
+fi
+
 # Sign the bundle inside-out — nested code first, the .app last — so the seal
 # stays valid. Without an Apple Developer ID the project signs ad-hoc ("-"),
 # which seals the bundle so it launches once the user clears the download
@@ -390,6 +406,16 @@ if ! hdiutil create -volname "Nordstjernen ${VERSION}" \
     echo "pack-macos.sh: hdiutil create failed" >&2
     ls -la "$STAGE" || true
     exit 1
+fi
+
+# Gatekeeper assesses a downloaded .dmg by its own signature before it looks
+# inside, so a Developer ID build signs the disk image too.
+if [ "$IDENTITY" != "-" ]; then
+    if ! codesign --force --sign "$IDENTITY" --timestamp "$DMG"; then
+        echo "pack-macos.sh: ERROR: signing $DMG with '$IDENTITY' failed" >&2
+        exit 1
+    fi
+    codesign --verify --strict "$DMG"
 fi
 
 # Notarise and staple the .dmg when a stored notarytool credential profile is

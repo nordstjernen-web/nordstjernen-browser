@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to build Linux packages and a draft release for
+        description: Existing tag to build packages and a draft release for
         required: true
 
 concurrency:
@@ -103,9 +103,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The Developer ID signed, notarised and stapled .dmg. macos.yml in release
+  # mode fails on a missing secret or any signing/notarisation error instead
+  # of falling back to an ad-hoc bundle.
+  macos:
+    name: macOS package
+    uses: ./.github/workflows/macos.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+      release: true
+    secrets: inherit
+
+  # Attaches the Linux packages even when the macOS job failed, so a notary
+  # outage does not hold them back, but then fails the run: re-run the failed
+  # jobs once macOS is fixed and the .dmg joins the same draft.
   publish:
     name: Attach to a draft release
-    needs: linux
+    needs: [linux, macos]
+    if: ${{ !cancelled() && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -126,6 +141,14 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Download the macOS .dmg
+        if: needs.macos.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: nordstjernen-macos-*-dmg
+          merge-multiple: true
+          path: dist
+
       - name: Release notes from the changelog
         run: |
           awk -v tag="$TAG" '
@@ -142,7 +165,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          sha256sum -- *.deb *.zip > SHA256SUMS
+          shopt -s nullglob
+          packages=(*.deb *.zip *.dmg)
+          sha256sum -- "${packages[@]}" > SHA256SUMS
           cat SHA256SUMS
           if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
                        --json isDraft --jq .isDraft 2>/dev/null); then
@@ -153,11 +178,17 @@ jobs:
                    "publish the draft."
               exit 1
             fi
-            gh release upload "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
+            gh release upload "$TAG" "${packages[@]}" ./SHA256SUMS \
               --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" ./*.deb ./*.zip ./SHA256SUMS \
+            gh release create "$TAG" "${packages[@]}" ./SHA256SUMS \
               --draft --verify-tag --title "$TAG" \
               --notes-file ../release-notes.md --repo "$GITHUB_REPOSITORY"
+          fi
+          if [ "${{ needs.macos.result }}" != success ]; then
+            echo "::error::The macOS job did not produce a notarised .dmg" \
+                 "(${{ needs.macos.result }}); the draft has only the Linux" \
+                 "packages. Fix it and re-run the failed jobs before publishing."
+            exit 1
           fi
           echo "Draft release $TAG has its packages; review and publish it."

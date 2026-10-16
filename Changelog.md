@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* Release: a version tag now builds the macOS `.dmg` too. `release.yml`
+  calls `macos.yml` in release mode, which requires the Developer ID and
+  notarisation secrets, fails on any signing or notarisation error
+  instead of falling back to an ad-hoc bundle, and checks the stapled
+  `.dmg` and the `.app` inside it with Gatekeeper (`spctl`) before the
+  `.dmg` is attached to the draft release. Releases 1.0.29 to 1.0.31
+  shipped no macOS package, and CI notarisation had been failing
+  unnoticed behind `continue-on-error`. `pack-macos.sh` signs the
+  `.dmg` itself with the Developer ID, and sets `LSMinimumSystemVersion`
+  from the bundled binaries instead of claiming macOS 11.
 * SVG `<use>`: the referenced content inherits the rest of its style
   from the `use` element too, not only `currentColor`. Shapes drawn
   through `<use>` kept the `fill`, `stroke`, stroke geometry,

@@ -14,9 +14,19 @@ on:
       - 'docs/**'
       - 'LICENSE'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build
+        type: string
+        required: true
+      release:
+        description: Require a Developer ID signed, notarised and stapled .dmg
+        type: boolean
+        default: false
 
 concurrency:
-  group: macos-${{ github.ref }}
+  group: macos-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -47,6 +57,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || '' }}
 
       - name: Install build dependencies (Homebrew)
         run: |
@@ -168,16 +180,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Optional Developer ID signing. With no MACOS_CERTIFICATE_* secrets the
-      # bundle is signed ad-hoc (still needs the xattr quarantine step on
-      # download); with them it is signed for real and notarised below.
+      # Developer ID signing. With no MACOS_CERTIFICATE_* secrets the bundle is
+      # signed ad-hoc (still needs the xattr quarantine step on download); with
+      # them it is signed for real and notarised below. A release build
+      # (release.yml) requires all of it and fails on any missing piece.
       - name: Import Developer ID signing identity
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.release }}
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NS_RELEASE: ${{ inputs.release && '1' || '' }}
         run: |
+          if [ -n "$NS_RELEASE" ] && { [ -z "${MACOS_CERTIFICATE_P12_BASE64}" ] || [ -z "${MACOS_SIGN_IDENTITY}" ]; }; then
+            echo "::error::A release needs the MACOS_CERTIFICATE_P12_BASE64, MACOS_CERTIFICATE_PASSWORD and MACOS_SIGN_IDENTITY secrets."
+            exit 1
+          fi
           if [ -z "${MACOS_CERTIFICATE_P12_BASE64}" ]; then
             echo "No MACOS_CERTIFICATE_P12_BASE64 secret; pack-macos.sh signs ad-hoc."
             exit 0
@@ -197,11 +216,16 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
           echo "NS_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           security find-identity -v -p codesigning "$KEYCHAIN"
+          if [ -n "${MACOS_SIGN_IDENTITY}" ] && \
+             ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -qF "\"${MACOS_SIGN_IDENTITY}\""; then
+            echo "::error::MACOS_SIGN_IDENTITY does not name the identity in MACOS_CERTIFICATE_P12_BASE64."
+            exit 1
+          fi
 
       - name: Build .app bundle and .dmg
         id: pack
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.release }}
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
           NS_PACK_AI: disabled
@@ -270,28 +294,73 @@ jobs:
 
       # Notarise + staple when the App Store Connect credentials are present;
       # otherwise the .dmg ships ad-hoc and users clear the quarantine flag
-      # once. Non-fatal so a notary outage never fails the build.
+      # once. Non-fatal on ordinary pushes so a notary outage never fails the
+      # build; fatal for a release, which must ship a notarised .dmg.
       - name: Notarize and staple the .dmg
+        id: notarize
         if: hashFiles('dist/nordstjernen-*-macos-*.dmg') != ''
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.release }}
         env:
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
           MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NS_RELEASE: ${{ inputs.release && '1' || '' }}
         run: |
           if [ -z "${MACOS_NOTARY_PASSWORD}" ]; then
+            if [ -n "$NS_RELEASE" ]; then
+              echo "::error::A release needs the MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID and MACOS_NOTARY_PASSWORD secrets."
+              exit 1
+            fi
             echo "No MACOS_NOTARY_PASSWORD secret; skipping notarization."
             exit 0
           fi
           DMG=$(ls dist/nordstjernen-*-macos-*.dmg | head -1)
           echo "Notarizing $DMG"
-          xcrun notarytool submit "$DMG" \
-            --apple-id "${MACOS_NOTARY_APPLE_ID}" \
-            --team-id "${MACOS_NOTARY_TEAM_ID}" \
-            --password "${MACOS_NOTARY_PASSWORD}" \
-            --wait
+          creds=(--apple-id "${MACOS_NOTARY_APPLE_ID}" --team-id "${MACOS_NOTARY_TEAM_ID}" --password "${MACOS_NOTARY_PASSWORD}")
+          if ! xcrun notarytool submit "$DMG" "${creds[@]}" --wait \
+                 --output-format plist > notary.plist 2> notary.err; then
+            cat notary.err
+            if grep -qi "agreement" notary.err; then
+              echo "::error::Apple notary service: a required agreement is missing or has expired. The team's Account Holder must accept the current Apple Developer Program License Agreement at https://developer.apple.com/account."
+            else
+              echo "::error::notarytool submit failed: $(head -1 notary.err)"
+            fi
+            exit 1
+          fi
+          cat notary.plist
+          status=$(plutil -extract status raw -o - notary.plist)
+          if [ "$status" != "Accepted" ]; then
+            id=$(plutil -extract id raw -o - notary.plist)
+            xcrun notarytool log "$id" "${creds[@]}" || true
+            echo "::error::Notarisation status is '$status', not Accepted."
+            exit 1
+          fi
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
+
+      # What a user's Mac checks on first open: the .dmg's own Developer ID
+      # signature with its stapled ticket, then the .app inside it.
+      - name: Gatekeeper assessment of the notarised .dmg
+        if: steps.notarize.outcome == 'success' && hashFiles('dist/nordstjernen-*-macos-*.dmg') != ''
+        continue-on-error: ${{ !inputs.release }}
+        env:
+          NS_RELEASE: ${{ inputs.release && '1' || '' }}
+        run: |
+          DMG=$(ls dist/nordstjernen-*-macos-*.dmg | head -1)
+          if ! xcrun stapler validate "$DMG" >/dev/null 2>&1; then
+            if [ -n "$NS_RELEASE" ]; then
+              echo "::error::$DMG carries no notarisation ticket."
+              exit 1
+            fi
+            echo "$DMG was not notarised; skipping the Gatekeeper check."
+            exit 0
+          fi
+          spctl -a -vv -t open --context context:primary-signature "$DMG"
+          MNT=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          trap 'hdiutil detach "$MNT" -force' EXIT
+          codesign --verify --deep --strict --verbose=2 "$MNT/Nordstjernen.app"
+          spctl -a -vv -t exec "$MNT/Nordstjernen.app"
 
       - name: Upload .dmg
         if: hashFiles('dist/nordstjernen-*-macos-*.dmg') != ''
