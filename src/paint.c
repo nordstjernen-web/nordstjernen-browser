@@ -1992,58 +1992,22 @@ paint_block(cairo_t *cr, const ns_box *b)
         }
     }
 
-    gboolean has_mask = s && s->values[NS_CSS_MASK_IMAGE] &&
-                        s->values[NS_CSS_MASK_IMAGE]->kind == NS_CSS_V_URL;
     gboolean clip_to_text = style_background_clips_to_text(s);
     if (clip_to_text) cairo_push_group(cr);
     rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
                         s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL,
                         0, 0, 0, 0);
-    if (bg.a > 0 && !has_mask) {
+    if (bg.a > 0) {
         set_source_rgba(cr, bg);
         rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
         cairo_fill(cr);
-    }
-
-    gboolean masked_fill = FALSE;
-    if (bg.a > 0 && has_mask && b->media && b->media->bg_image) {
-        ns_image *mimg = b->media->bg_image;
-        int iw = mimg->loaded && mimg->texture
-                 ? ns_texture_get_width(mimg->texture) : 0;
-        int ih = mimg->loaded && mimg->texture
-                 ? ns_texture_get_height(mimg->texture) : 0;
-        if (iw > 0 && ih > 0 && clip_w > 0 && clip_h > 0) {
-            double sc = MIN(clip_w / iw, clip_h / ih);
-            double draw_w = iw * sc, draw_h = ih * sc;
-            double off_x = (clip_w - draw_w) / 2.0;
-            double off_y = (clip_h - draw_h) / 2.0;
-            cairo_surface_t *surf = texture_surface_cached(mimg->texture, NULL);
-            if (surf) {
-                cairo_save(cr);
-                rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-                cairo_clip(cr);
-                set_source_rgba(cr, bg);
-                cairo_pattern_t *mp = cairo_pattern_create_for_surface(surf);
-                cairo_matrix_t mm;
-                cairo_matrix_init_identity(&mm);
-                cairo_matrix_scale(&mm, (double)iw / draw_w,
-                                   (double)ih / draw_h);
-                cairo_matrix_translate(&mm, -(clip_x + off_x),
-                                       -(clip_y + off_y));
-                cairo_pattern_set_matrix(mp, &mm);
-                cairo_mask(cr, mp);
-                cairo_pattern_destroy(mp);
-                cairo_restore(cr);
-                masked_fill = TRUE;
-            }
-        }
     }
 
     gboolean bg_has_url = FALSE;
     for (const ns_css_value *l = bg_head; l; l = l->next_layer)
         if (l->kind == NS_CSS_V_URL) { bg_has_url = TRUE; break; }
 
-    if (b->media && b->media->bg_image && !bg_has_url && !masked_fill) {
+    if (b->media && b->media->bg_image && !bg_has_url) {
         paint_bg_image_core(cr, b->media->bg_image,
             s ? s->values[NS_CSS_BACKGROUND_REPEAT] : NULL,
             s ? s->values[NS_CSS_BACKGROUND_SIZE] : NULL,
@@ -8043,10 +8007,20 @@ mask_layers_paintable(const ns_style *s)
     const ns_css_value *mask = s ? s->values[NS_CSS_MASK_IMAGE] : NULL;
     gboolean any = FALSE;
     for (const ns_css_value *l = mask; l; l = l->next_layer) {
-        if (mask_layer_is_gradient(l)) any = TRUE;
+        if (mask_layer_is_gradient(l) || (l->kind == NS_CSS_V_URL && l->u.url))
+            any = TRUE;
         else if (!mask_layer_is_none(l)) return FALSE;
     }
     return any;
+}
+
+static ns_image *
+mask_layer_image(const ns_box *b, const ns_css_value *layer)
+{
+    if (!b->media || !b->media->mask_image || !b->media->mask_image_src)
+        return NULL;
+    return strcmp(b->media->mask_image_src, layer->u.url) == 0
+        ? b->media->mask_image : NULL;
 }
 
 static cairo_operator_t
@@ -8091,7 +8065,7 @@ mask_clip_box_path(cairo_t *cr, const ns_box *b, const ns_css_value *clip)
 }
 
 static cairo_pattern_t *
-mask_layers_pattern(cairo_t *cr, const ns_box *b)
+mask_layers_pattern(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf)
 {
     const ns_style *s = b->style;
     const ns_css_value *mask = s->values[NS_CSS_MASK_IMAGE];
@@ -8103,6 +8077,10 @@ mask_layers_pattern(cairo_t *cr, const ns_box *b)
     double bh = b->content_height + b->padding.top + b->padding.bottom +
                 b->border.top + b->border.bottom;
     cairo_push_group_with_content(cr, CAIRO_CONTENT_ALPHA);
+    if (tf) {
+        cairo_save(cr);
+        cairo_transform(cr, tf);
+    }
     for (int i = n - 1; i >= 0; i--) {
         const ns_css_value *layer = ns_css_value_layer(mask, i);
         cairo_pattern_t *grad = mask_layer_is_gradient(layer)
@@ -8115,12 +8093,25 @@ mask_layers_pattern(cairo_t *cr, const ns_box *b)
         cairo_set_operator(cr, i == n - 1 ? CAIRO_OPERATOR_OVER
             : mask_composite_operator(ns_css_value_layer(
                   s->values[NS_CSS_MASK_COMPOSITE], i)));
-        if (grad) cairo_set_source(cr, grad);
-        else cairo_set_source_rgba(cr, 0, 0, 0, 0);
-        cairo_paint(cr);
+        if (layer->kind == NS_CSS_V_URL) {
+            ns_image *img = mask_layer_image(b, layer);
+            corner_radii square = { 0 };
+            if (img)
+                paint_bg_image_core(cr, img,
+                    ns_css_value_layer(s->values[NS_CSS_MASK_REPEAT], i),
+                    ns_css_value_layer(s->values[NS_CSS_MASK_SIZE], i),
+                    ns_css_value_layer(s->values[NS_CSS_MASK_POSITION_X], i),
+                    ns_css_value_layer(s->values[NS_CSS_MASK_POSITION_Y], i),
+                    FALSE, bx, by, bw, bh, bx, by, bw, bh, square);
+        } else {
+            if (grad) cairo_set_source(cr, grad);
+            else cairo_set_source_rgba(cr, 0, 0, 0, 0);
+            cairo_paint(cr);
+        }
         cairo_restore(cr);
         if (grad) cairo_pattern_destroy(grad);
     }
+    if (tf) cairo_restore(cr);
     return cairo_pop_group(cr);
 }
 
@@ -9238,6 +9229,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (g_paint_collect_stats) g_paint_stats.grouped++;
         cairo_push_group(cr);
     }
+    cairo_matrix_t box_tf;
+    gboolean have_box_tf = FALSE;
     if (has_transform) {
         cairo_save(cr);
         double bx, by, bw, bh;
@@ -9268,9 +9261,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
-            cairo_translate(cr, ox, oy);
-            cairo_transform(cr, &cm);
-            cairo_translate(cr, -ox, -oy);
+            cairo_matrix_init_translate(&box_tf, ox, oy);
+            cairo_matrix_multiply(&box_tf, &cm, &box_tf);
+            cairo_matrix_translate(&box_tf, -ox, -oy);
+            have_box_tf = TRUE;
+            cairo_transform(cr, &box_tf);
         }
     }
     gboolean has_path_clip = FALSE;
@@ -9655,7 +9650,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_operator_t saved_op = cairo_get_operator(cr);
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
         cairo_pattern_t *mp = NULL;
-        if (mask_grad) mp = mask_layers_pattern(cr, b);
+        if (mask_grad)
+            mp = mask_layers_pattern(cr, b, have_box_tf ? &box_tf : NULL);
         if (mp) {
             cairo_mask(cr, mp);
         } else {

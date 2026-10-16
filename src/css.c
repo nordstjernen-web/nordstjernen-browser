@@ -438,6 +438,10 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_WEBKIT_BOX_ORIENT]    = "-webkit-box-orient",
     [NS_CSS_MASK_CLIP]            = "mask-clip",
     [NS_CSS_MASK_COMPOSITE]       = "mask-composite",
+    [NS_CSS_MASK_SIZE]            = "mask-size",
+    [NS_CSS_MASK_POSITION_X]      = "mask-position-x",
+    [NS_CSS_MASK_POSITION_Y]      = "mask-position-y",
+    [NS_CSS_MASK_REPEAT]          = "mask-repeat",
     [NS_CSS_ISOLATION]            = "isolation",
     [NS_CSS_WILL_CHANGE]          = "will-change",
     [NS_CSS_CONTAIN]              = "contain",
@@ -9559,6 +9563,10 @@ ns_css_initial_value_text(const char *name)
         { "-webkit-box-orient",         "horizontal" },
         { "mask-clip",                  "border-box" },
         { "mask-composite",             "add" },
+        { "mask-size",                  "auto" },
+        { "mask-position-x",            "0%" },
+        { "mask-position-y",            "0%" },
+        { "mask-repeat",                "repeat" },
         { "scroll-timeline-name",       "none" },
         { "scroll-timeline-axis",       "block" },
         { "view-timeline-name",         "none" },
@@ -11287,7 +11295,11 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_ATTACHMENT ||
            prop == NS_CSS_MASK_IMAGE ||
            prop == NS_CSS_MASK_CLIP ||
-           prop == NS_CSS_MASK_COMPOSITE;
+           prop == NS_CSS_MASK_COMPOSITE ||
+           prop == NS_CSS_MASK_SIZE ||
+           prop == NS_CSS_MASK_POSITION_X ||
+           prop == NS_CSS_MASK_POSITION_Y ||
+           prop == NS_CSS_MASK_REPEAT;
 }
 
 static char *
@@ -14020,13 +14032,16 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_BACKGROUND_POSITION_X:
     case NS_CSS_BACKGROUND_POSITION_Y:
     case NS_CSS_OBJECT_POSITION_X:
-    case NS_CSS_OBJECT_POSITION_Y: {
+    case NS_CSS_OBJECT_POSITION_Y:
+    case NS_CSS_MASK_POSITION_X:
+    case NS_CSS_MASK_POSITION_Y: {
         if ((v = parse_calc(t))) break;
         char *kw = ascii_lower(t, strlen(t));
         double pct = -1;
         if (kw) {
             if (prop == NS_CSS_BACKGROUND_POSITION_X ||
-                prop == NS_CSS_OBJECT_POSITION_X) {
+                prop == NS_CSS_OBJECT_POSITION_X ||
+                prop == NS_CSS_MASK_POSITION_X) {
                 if (strcmp(kw, "left") == 0)   pct = 0;
                 else if (strcmp(kw, "center") == 0) pct = 50;
                 else if (strcmp(kw, "right") == 0)  pct = 100;
@@ -14055,7 +14070,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
-    case NS_CSS_BACKGROUND_SIZE: {
+    case NS_CSS_BACKGROUND_SIZE:
+    case NS_CSS_MASK_SIZE: {
         char *kw = ascii_lower(t, strlen(t));
         if (kw && (strcmp(kw, "cover") == 0 || strcmp(kw, "contain") == 0 ||
                    strcmp(kw, "auto") == 0)) {
@@ -14111,7 +14127,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
-    case NS_CSS_BACKGROUND_REPEAT: {
+    case NS_CSS_BACKGROUND_REPEAT:
+    case NS_CSS_MASK_REPEAT: {
         char *pair[3] = {0};
         int nt = split_ws_limit(t, pair, G_N_ELEMENTS(pair));
         char *kw = nt == 1 && bg_repeat_token(pair[0], TRUE)
@@ -14773,6 +14790,14 @@ prop_id(const char *name)
         return NS_CSS_MASK_CLIP;
     if (g_ascii_strcasecmp(name, "-webkit-mask-composite") == 0)
         return NS_CSS_MASK_COMPOSITE;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-size") == 0)
+        return NS_CSS_MASK_SIZE;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-repeat") == 0)
+        return NS_CSS_MASK_REPEAT;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-position-x") == 0)
+        return NS_CSS_MASK_POSITION_X;
+    if (g_ascii_strcasecmp(name, "-webkit-mask-position-y") == 0)
+        return NS_CSS_MASK_POSITION_Y;
     if (g_ascii_strcasecmp(name, "-webkit-background-clip") == 0)
         return NS_CSS_BACKGROUND_CLIP;
     if (g_ascii_strcasecmp(name, "-webkit-border-radius") == 0)
@@ -16568,20 +16593,39 @@ typedef struct mask_layer_parts {
     const char *boxes[2];
     int n_boxes;
     const char *op;
+    bg_layer_text geom;
 } mask_layer_parts;
 
 static void
 mask_layer_classify(char **toks, int n, mask_layer_parts *out)
 {
+    GString *rest = g_string_new(NULL);
     for (int i = 0; i < n; i++) {
         const char *box = mask_box_keyword(toks[i]);
         const char *comp = mask_composite_keyword(toks[i]);
-        if (box && out->n_boxes < 2) out->boxes[out->n_boxes++] = box;
-        else if (comp && !out->op) out->op = comp;
-        else if (!out->image && (strchr(toks[i], '(') ||
-                                 g_ascii_strcasecmp(toks[i], "none") == 0))
+        if (box && out->n_boxes < 2) {
+            out->boxes[out->n_boxes++] = box;
+            continue;
+        }
+        if (comp && !out->op) {
+            out->op = comp;
+            continue;
+        }
+        if (g_ascii_strcasecmp(toks[i], "alpha") == 0 ||
+            g_ascii_strcasecmp(toks[i], "luminance") == 0 ||
+            g_ascii_strcasecmp(toks[i], "match-source") == 0)
+            continue;
+        if (!out->image && (strchr(toks[i], '(') ||
+                            g_ascii_strcasecmp(toks[i], "none") == 0))
             out->image = toks[i];
+        if (rest->len) g_string_append_c(rest, ' ');
+        g_string_append(rest, toks[i]);
     }
+    char *color = NULL;
+    if (rest->len && !bg_layer_parse(rest->str, FALSE, &out->geom, &color))
+        bg_layer_text_clear(&out->geom);
+    g_free(color);
+    g_string_free(rest, TRUE);
 }
 
 static gboolean
@@ -16592,17 +16636,35 @@ mask_layer_append(const char *layer, ns_css_value **heads,
     int n = split_ws_limit(layer, toks, G_N_ELEMENTS(toks));
     mask_layer_parts parts = {0};
     mask_layer_classify(toks, n, &parts);
+    const char *image = parts.geom.image ? parts.geom.image : parts.image;
     ns_css_value *iv = parse_value_for(NS_CSS_MASK_IMAGE,
-                                       parts.image ? parts.image : "none");
+                                       image ? image : "none");
     gboolean ok = iv != NULL;
     if (ok) {
         const char *clip = parts.n_boxes ? parts.boxes[parts.n_boxes - 1]
                                          : "border-box";
+        const char *geom[4] = {
+            parts.geom.size ? parts.geom.size : "auto",
+            parts.geom.pos_x ? parts.geom.pos_x : "0%",
+            parts.geom.pos_y ? parts.geom.pos_y : "0%",
+            parts.geom.repeat ? parts.geom.repeat : "repeat",
+        };
+        static const ns_css_prop geom_props[4] = {
+            NS_CSS_MASK_SIZE, NS_CSS_MASK_POSITION_X,
+            NS_CSS_MASK_POSITION_Y, NS_CSS_MASK_REPEAT,
+        };
         mask_layer_chain_append(&heads[0], &tails[0], iv);
         mask_layer_chain_append(&heads[1], &tails[1], keyword_value_dup(clip));
         mask_layer_chain_append(&heads[2], &tails[2],
                                 keyword_value_dup(parts.op ? parts.op : "add"));
+        for (int g = 0; g < 4; g++) {
+            ns_css_value *gv = parse_value_for(geom_props[g], geom[g]);
+            if (!gv) gv = parse_value_for(geom_props[g], g == 0 ? "auto"
+                                          : g == 3 ? "repeat" : "0%");
+            mask_layer_chain_append(&heads[3 + g], &tails[3 + g], gv);
+        }
     }
+    bg_layer_text_clear(&parts.geom);
     for (int i = 0; i < n; i++) g_free(toks[i]);
     return ok;
 }
@@ -16612,8 +16674,10 @@ parse_mask_shorthand(const char *vtext, gboolean important, GArray *decls_out)
 {
     static const ns_css_prop props[] = {
         NS_CSS_MASK_IMAGE, NS_CSS_MASK_CLIP, NS_CSS_MASK_COMPOSITE,
+        NS_CSS_MASK_SIZE, NS_CSS_MASK_POSITION_X, NS_CSS_MASK_POSITION_Y,
+        NS_CSS_MASK_REPEAT,
     };
-    ns_css_value *heads[3] = {0}, *tails[3] = {0};
+    ns_css_value *heads[7] = {0}, *tails[7] = {0};
     ns_css_value *wide = parse_css_wide_keyword(vtext);
     gboolean ok = TRUE;
     if (wide) {
@@ -17704,16 +17768,23 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
-        if (strcmp(pname, "background-position") == 0 ||
+        if (strcmp(pname, "-webkit-mask-position") == 0) {
+            g_free(pname);
+            pname = g_strdup("mask-position");
+        }
+        gboolean mask_pos = strcmp(pname, "mask-position") == 0;
+        if (strcmp(pname, "background-position") == 0 || mask_pos ||
             strcmp(pname, "object-position") == 0) {
             ns_css_value *wide = parse_css_wide_keyword(vtext);
             if (wide) {
                 gboolean bg = strcmp(pname, "background-position") == 0;
                 ns_css_decl dx = { .prop = bg ? NS_CSS_BACKGROUND_POSITION_X
-                                              : NS_CSS_OBJECT_POSITION_X,
+                                         : mask_pos ? NS_CSS_MASK_POSITION_X
+                                                    : NS_CSS_OBJECT_POSITION_X,
                                    .value = wide, .important = important };
                 ns_css_decl dy = { .prop = bg ? NS_CSS_BACKGROUND_POSITION_Y
-                                              : NS_CSS_OBJECT_POSITION_Y,
+                                         : mask_pos ? NS_CSS_MASK_POSITION_Y
+                                                    : NS_CSS_OBJECT_POSITION_Y,
                                    .value = ns_css_value_dup(wide),
                                    .important = important };
                 g_array_append_val(decls_out, dx);
@@ -17724,7 +17795,11 @@ parse_declaration_block(const char **pp, const char *end,
                 continue;
             }
         }
-        if (strcmp(pname, "background-position") == 0) {
+        if (strcmp(pname, "background-position") == 0 || mask_pos) {
+            ns_css_prop pos_x_prop = mask_pos ? NS_CSS_MASK_POSITION_X
+                                              : NS_CSS_BACKGROUND_POSITION_X;
+            ns_css_prop pos_y_prop = mask_pos ? NS_CSS_MASK_POSITION_Y
+                                              : NS_CSS_BACKGROUND_POSITION_Y;
             ns_css_value *vx_head = NULL, *vx_tail = NULL;
             ns_css_value *vy_head = NULL, *vy_tail = NULL;
             const char *sp = vtext;
@@ -17747,7 +17822,7 @@ parse_declaration_block(const char **pp, const char *end,
                 position_split_specified(layer_canon, &sx, &sy);
                 g_free(layer_canon);
                 if (xs) {
-                    ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_X, xs);
+                    ns_css_value *v = parse_value_for(pos_x_prop, xs);
                     if (v) {
                         g_free(v->specified);
                         v->specified = sx;
@@ -17758,7 +17833,7 @@ parse_declaration_block(const char **pp, const char *end,
                     }
                 }
                 if (ys) {
-                    ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_Y, ys);
+                    ns_css_value *v = parse_value_for(pos_y_prop, ys);
                     if (v) {
                         g_free(v->specified);
                         v->specified = sy;
@@ -17775,11 +17850,11 @@ parse_declaration_block(const char **pp, const char *end,
                 g_free(layer);
             }
             if (vx_head) {
-                ns_css_decl d = { .prop = NS_CSS_BACKGROUND_POSITION_X, .value = vx_head, .important = important };
+                ns_css_decl d = { .prop = pos_x_prop, .value = vx_head, .important = important };
                 g_array_append_val(decls_out, d);
             }
             if (vy_head) {
-                ns_css_decl d = { .prop = NS_CSS_BACKGROUND_POSITION_Y, .value = vy_head, .important = important };
+                ns_css_decl d = { .prop = pos_y_prop, .value = vy_head, .important = important };
                 g_array_append_val(decls_out, d);
             }
             g_free(pname);

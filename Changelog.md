@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
+  `-webkit-` forms, the `mask-position` shorthand and the position, size
+  and repeat parts of the `mask` shorthand) are supported, and an image
+  mask applies to the whole element: its background, borders and
+  content. Image masks used to fill only the background colour, scaled
+  to fit and centred, whatever the mask's own size and position said. A
+  mask on a transformed element is now built in the element's
+  transformed space, so it stays aligned with what it masks. Google's
+  chat assistant masks its background glow, a gradient, with half of an
+  SVG, and covered the whole page in flat blue.
 * Layout: a grid container whose height comes from its parent, as a
   stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
   against that height. The rows were sized as if the height were
