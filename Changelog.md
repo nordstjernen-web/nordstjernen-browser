@@ -17,6 +17,12 @@ Changelog:
   passes) instead of a single box pass. SVG `filter="url(#id)"` applies
   when the filter is made of `feGaussianBlur` primitives, so blurred SVG
   shapes and SVG mask images (Gemini's background glow) are soft.
+* Layout: a `1fr` grid column (and `minmax(auto, 1fr)`) is never narrower
+  than the min-content width of its items, as `1fr` means
+  `minmax(auto, 1fr)`: when the columns do not fit, they keep that width
+  and the grid overflows, instead of squeezing every column. Items that
+  scroll or set `min-width` keep a zero floor. The Guardian's
+  six-column highlights carousel squeezed its 300px cards to 140px.
 * DOM: `<link rel="preload" as="style">` fires `load` (or `error`) once
   its fetch ends, and changing a `<link>`'s `rel`, `href` or `as` loads
   it again: a link that becomes `rel="stylesheet"` applies its sheet and
