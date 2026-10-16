@@ -213,6 +213,7 @@ static void ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n,
                                        const char *name,
                                        const char *value);
 static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
+static void ns_js_link_resource_changed(ns_js *js, ns_node *link);
 static void ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n,
                                           const char *namespace_uri,
                                           const char *local_name);
@@ -29576,6 +29577,13 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
             JS_FreeValue(ctx, past_map);
         }
     }
+    if (js && target && name && !namespace_uri &&
+        ns_node_is_element_named(target, "link") &&
+        (g_ascii_strcasecmp(name, "rel") == 0 ||
+         g_ascii_strcasecmp(name, "href") == 0 ||
+         g_ascii_strcasecmp(name, "as") == 0) &&
+        g_strcmp0(ns_element_get_attr(target, name), old_value) != 0)
+        ns_js_link_resource_changed(js, target);
     ns_css_mark_attr_dirty(target, name, old_value);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
@@ -64925,7 +64933,7 @@ ns_subtree_has_pending_script(const ns_node *n)
 }
 
 static gboolean
-ns_link_is_loadable_stylesheet(const ns_node *n)
+ns_link_has_pending_load(const ns_node *n)
 {
     if (!ns_node_is_element_named(n, "link")) return FALSE;
     if (n->flags & NS_NODE_LINK_LOAD_FIRED) return FALSE;
@@ -64933,20 +64941,23 @@ ns_link_is_loadable_stylesheet(const ns_node *n)
     const char *href = ns_element_get_attr(n, "href");
     if (!href || !*href || !rel) return FALSE;
     gchar **parts = g_strsplit_set(rel, " \t\r\n\f", -1);
-    gboolean is_sheet = FALSE, is_alt = FALSE;
+    gboolean is_sheet = FALSE, is_alt = FALSE, is_preload = FALSE;
     for (gchar **p = parts; *p; p++) {
         if (g_ascii_strcasecmp(*p, "stylesheet") == 0) is_sheet = TRUE;
         else if (g_ascii_strcasecmp(*p, "alternate") == 0) is_alt = TRUE;
+        else if (g_ascii_strcasecmp(*p, "preload") == 0) is_preload = TRUE;
     }
     g_strfreev(parts);
-    return is_sheet && !is_alt;
+    if (is_sheet) return !is_alt;
+    const char *as = ns_element_get_attr(n, "as");
+    return is_preload && as && g_ascii_strcasecmp(as, "style") == 0;
 }
 
 static void
 ns_js_collect_pending_stylesheets_rec(ns_node *n, GPtrArray *out, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
-    if (ns_link_is_loadable_stylesheet(n)) {
+    if (ns_link_has_pending_load(n)) {
         g_ptr_array_add(out, n);
         return;
     }
@@ -65089,6 +65100,14 @@ ns_js_schedule_deferred_script_root(ns_js *js, ns_node *root)
         }
     g_ptr_array_add(js->deferred_script_roots, root);
     ns_js_schedule_pending_script_drain(js);
+}
+
+static void
+ns_js_link_resource_changed(ns_js *js, ns_node *link)
+{
+    link->flags &= ~NS_NODE_LINK_LOAD_FIRED;
+    if (ns_link_has_pending_load(link) && ns_js_node_in_page(js, link))
+        ns_js_schedule_deferred_script_root(js, link);
 }
 
 static void
