@@ -20,6 +20,7 @@ void ns_page_layers_free(NsPageLayers *pl);
 void ns_page_layers_reset(NsPageLayers *pl);
 gboolean ns_page_layers_apply(NsPageLayers *pl, NsLayerUpdate *u);
 gboolean ns_page_layers_active(const NsPageLayers *pl);
+gboolean ns_page_layers_advance_videos(NsPageLayers *pl, gint64 now_us);
 int ns_page_layers_gen(const NsPageLayers *pl);
 int ns_page_layers_vp_held(const NsPageLayers *pl);
 char *ns_page_layers_have(const NsPageLayers *pl, double y0, double y1,
