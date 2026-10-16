@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: `<em>`, `<i>`, `<cite>` and `<dfn>` follow their computed
+  `font-style`. The inline builder made them italic by tag name even when a
+  stylesheet set `font-style: normal`, so Stripe's hero heading (an `<em>`
+  styled upright) rendered slanted. The user-agent stylesheet already makes
+  them italic.
 * HTML: `<base href>` applies to subresources. Scripts, stylesheets, images
   and the speculative preloader resolved relative URLs against the page URL,
   so a page with `<base href="/assets/">` (or an Angular app with
