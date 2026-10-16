@@ -29570,8 +29570,7 @@ ns_link_attr_change_needs_load(ns_node *link, const char *name,
         return ns_link_load_kind_of(link) == NS_LINK_LOAD_PRELOAD &&
                g_ascii_strcasecmp(old_value ? old_value : "",
                                   ns_element_get_attr(link, "as")) != 0;
-    if (g_ascii_strcasecmp(name, "href") == 0 ||
-        g_ascii_strcasecmp(name, "imagesrcset") == 0)
+    if (g_ascii_strcasecmp(name, "href") == 0)
         return g_strcmp0(old_value, ns_element_get_attr(link, name)) != 0;
     return FALSE;
 }
@@ -65141,6 +65140,13 @@ ns_link_status_ok(gboolean lenient, long status)
     return lenient ? status > 0 : status >= 200 && status < 300;
 }
 
+static gboolean
+ns_link_loaded_with(const ns_node *n, long status)
+{
+    const ns_link_as *entry = ns_link_preload_entry(n);
+    return ns_link_status_ok(entry && entry->lenient, status);
+}
+
 typedef struct ns_link_fetch {
     ns_js                *js;
     char                 *url;
@@ -65148,8 +65154,7 @@ typedef struct ns_link_fetch {
     GPtrArray            *nodes;
     ns_perf_resource_info info;
     gint64                start_us;
-    gboolean              lenient;
-    gboolean              loaded;
+    long                  status;
     gboolean              sheet;
 } ns_link_fetch;
 
@@ -65166,11 +65171,9 @@ static ns_link_fetch *
 ns_link_fetch_new(ns_js *js, ns_node *n)
 {
     ns_link_fetch *st = g_new0(ns_link_fetch, 1);
-    const ns_link_as *entry = ns_link_preload_entry(n);
     st->js = js;
     st->nodes = g_ptr_array_new();
     g_ptr_array_add(st->nodes, n);
-    st->lenient = entry && entry->lenient;
     st->sheet = ns_link_load_kind_of(n) == NS_LINK_LOAD_STYLESHEET;
     ns_js_element_perf_info(js, n, &st->info);
     st->document_url = g_strdup(st->info.document_url);
@@ -65188,6 +65191,7 @@ ns_link_fetch_join(ns_js *js, ns_node *n, const char *abs_url)
         if (!st->url || strcmp(st->url, abs_url) != 0) continue;
         g_ptr_array_remove_fast(st->nodes, n);
         g_ptr_array_add(st->nodes, n);
+        if (ns_link_load_kind_of(n) == NS_LINK_LOAD_STYLESHEET) st->sheet = TRUE;
         return st;
     }
     return NULL;
@@ -65271,7 +65275,8 @@ ns_link_fetch_deliver(gpointer data)
     while (!js->halted && st->js && st->nodes->len > 0) {
         ns_node *n = g_ptr_array_index(st->nodes, 0);
         g_ptr_array_remove_index(st->nodes, 0);
-        ns_js_dispatch_resource_event(js, n, st->loaded ? "load" : "error");
+        ns_js_dispatch_resource_event(js, n,
+            ns_link_loaded_with(n, st->status) ? "load" : "error");
     }
     if (st->js && st->js->link_fetches)
         g_ptr_array_remove_fast(st->js->link_fetches, st);
@@ -65280,9 +65285,9 @@ ns_link_fetch_deliver(gpointer data)
 }
 
 static void
-ns_link_fetch_settle(ns_link_fetch *st, gboolean loaded)
+ns_link_fetch_settle(ns_link_fetch *st, long status)
 {
-    st->loaded = loaded;
+    st->status = status;
     ns_js_attach_timeout(st->js, 0, ns_link_fetch_deliver, st);
 }
 
@@ -65314,7 +65319,7 @@ ns_link_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (st->js) {
-        st->loaded = resp && ns_link_status_ok(st->lenient, resp->status);
+        st->status = resp ? resp->status : 0;
         ns_link_fetch_record(st->js, st, resp ? resp->status : 0,
                              g_get_monotonic_time(), resp);
         ns_js_attach_timeout(st->js, 0, ns_link_fetch_deliver, st);
@@ -65344,24 +65349,30 @@ ns_link_fetch_allowed(ns_js *js, const ns_node *n, const char *abs_url,
     return !mixed && !csp;
 }
 
+static gboolean
+ns_link_result_reusable(const ns_link_fetch *st, long status)
+{
+    return !st->sheet || ns_link_status_ok(FALSE, status);
+}
+
 static void
 ns_link_fetch_start(ns_js *js, ns_link_fetch *st, const ns_node *n,
                     const char *abs_url, const char *origin)
 {
     gpointer seen = js->link_results
         ? g_hash_table_lookup(js->link_results, abs_url) : NULL;
-    if (seen) {
-        ns_link_fetch_settle(st,
-            ns_link_status_ok(st->lenient, GPOINTER_TO_INT(seen) - 1));
+    if (seen && ns_link_result_reusable(st, GPOINTER_TO_INT(seen) - 1)) {
+        ns_link_fetch_settle(st, GPOINTER_TO_INT(seen) - 1);
         return;
     }
     ns_engine_preload_result known;
-    if (ns_engine_preload_result_for(abs_url, &known)) {
+    if (ns_engine_preload_result_for(abs_url, &known) &&
+        ns_link_result_reusable(st, known.status)) {
         st->url = g_strdup(abs_url);
         st->start_us = known.start_us;
         ns_link_fetch_record(js, st, known.status, known.end_us, NULL);
         g_clear_pointer(&st->url, g_free);
-        ns_link_fetch_settle(st, ns_link_status_ok(st->lenient, known.status));
+        ns_link_fetch_settle(st, known.status);
         return;
     }
     ns_fetch_destination dest = ns_link_load_kind_of(n) == NS_LINK_LOAD_PRELOAD
@@ -65381,12 +65392,14 @@ ns_js_load_link_element(ns_js *js, ns_node *n, const char *origin)
     if (!js || !n || (n->flags & NS_NODE_LINK_LOAD_FIRED)) return;
     n->flags |= NS_NODE_LINK_LOAD_FIRED;
     g_autofree char *abs_url = ns_link_target_url(js, n, origin);
-    if (abs_url && ns_link_fetch_join(js, n, abs_url)) return;
+    if (!abs_url || !ns_link_fetch_allowed(js, n, abs_url, origin)) {
+        ns_link_fetch_settle(ns_link_fetch_new(js, n), 0);
+        return;
+    }
+    if (ns_link_fetch_join(js, n, abs_url)) return;
     ns_link_fetch *st = ns_link_fetch_new(js, n);
-    if (!abs_url || !ns_link_fetch_allowed(js, n, abs_url, origin))
-        ns_link_fetch_settle(st, FALSE);
-    else if (g_str_has_prefix(abs_url, "data:"))
-        ns_link_fetch_settle(st, TRUE);
+    if (g_str_has_prefix(abs_url, "data:"))
+        ns_link_fetch_settle(st, 200);
     else
         ns_link_fetch_start(js, st, n, abs_url, origin);
 }
@@ -65423,7 +65436,7 @@ ns_js_fire_parsed_stylesheet_loads(ns_js *js, ns_node *doc)
 {
     GPtrArray *sheets = g_ptr_array_new();
     ns_js_collect_pending_link_loads(doc, sheets);
-    g_autofree char *origin = sheets->len ? ns_js_node_document_base_url(js, doc)
+    g_autofree char *origin = sheets->len ? g_strdup(ns_js_node_doc_base(js, doc))
                                           : NULL;
     for (guint i = 0; i < sheets->len && !js->halted; i++) {
         ns_node *link = g_ptr_array_index(sheets, i);

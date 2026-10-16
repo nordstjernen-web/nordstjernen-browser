@@ -5,17 +5,18 @@ Changelog:
 ======
 * DOM: `<link rel="preload">` loads for every known `as` (style,
   script, font, image, track, fetch), not only `style`, in the
-  background, and reuses what the engine's preloader already fetched, so
-  a preload promoted to a stylesheet costs one request and one resource
-  timing entry. A `media` that does not match or a `type` the `as`
-  cannot use skips the preload without an event, CSP (with the element's
-  nonce) and mixed-content blocking give `error`, and `fetch` and
-  `track` preloads load on any HTTP response, the others on a 2xx
-  status. A link also loads again when its `imagesrcset` changes or when
-  it is inserted again; switching `rel` back from `stylesheet` to
-  `preload` fetches nothing, so a handler that toggles `rel` cannot
-  loop. An `as=image` preload with only `imagesrcset` loads the chosen
-  candidate, and a preload does not hold back the window `load` event.
+  background, and reuses what the engine's preloader already fetched; a
+  preload that becomes a stylesheet takes its `load` from the preload's
+  response and keeps one resource timing entry. A `media` that does not
+  match or a `type` the `as` cannot use skips the preload without an
+  event, CSP (with the element's nonce) and mixed-content blocking give
+  `error`, and `fetch` and `track` preloads load on any HTTP response,
+  the others on a 2xx status, each link by its own rule when two links
+  share one fetch. A link also loads again when it is inserted again;
+  switching `rel` back from `stylesheet` to `preload` fetches nothing,
+  so a handler that toggles `rel` cannot loop. An `as=image` preload
+  with only `imagesrcset` loads the chosen candidate, and a preload does
+  not hold back the window `load` event.
 * Layout: a grid container whose height comes from its parent, as a
   stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
   against that height. The rows were sized as if the height were
