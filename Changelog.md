@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Paint: gradient backgrounds honour `background-size`,
+  `background-position` and `background-repeat`. A gradient always filled
+  its whole box, so a `linear-gradient(red, red) 0 100% / 100% 2px
+  no-repeat` underline bar became a solid block and tiled dot or stripe
+  patterns became one large shape. Inline elements (`<span>`, `<a>`) now
+  paint their gradient backgrounds as well; only `url()` images were drawn.
 * Windows: the build moves from MSYS2's MINGW64 environment to UCRT64.
   MSYS2 no longer ships GTK 4 for MINGW64, so `pacman` could not install
   the toolchain and the Windows CI failed before compiling. The packaging
