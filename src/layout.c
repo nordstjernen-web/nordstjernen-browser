@@ -8286,6 +8286,16 @@ tree_position_cmp(tree_position a, tree_position b)
     return ns_node_document_order_cmp(a.node, b.node);
 }
 
+int
+ns_layout_tree_order_cmp(const ns_box *a, const ns_node *a_dom,
+                         const ns_box *b, const ns_node *b_dom)
+{
+    tree_position pa = a_dom ? (tree_position){ a_dom, 0 } : box_tree_position(a);
+    tree_position pb = b_dom ? (tree_position){ b_dom, 0 } : box_tree_position(b);
+    if (!pa.node && !pb.node) return 0;
+    return tree_position_cmp(pa, pb);
+}
+
 static int
 negative_layer_cmp(const ns_box *a, const ns_box *b)
 {
@@ -9731,6 +9741,13 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (replaced_width_is_cyclic(box) ||
             (g_min_measure_depth > 1 && replaced_width_is_percent(box)))
             return replaced_intrinsic_contribution(box, FALSE);
+        const ns_css_value *wv = box->style
+            ? box->style->values[NS_CSS_WIDTH] : NULL;
+        if (wv && !value_is_percent(wv) &&
+            (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
+            double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
+            if (styled >= 0) return styled;
+        }
         return box->content_width > 0 ? box->content_width : 200;
     }
     if (box->kind == NS_BOX_TEXT)

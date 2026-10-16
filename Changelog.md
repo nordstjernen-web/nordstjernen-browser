@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Paint: an absolutely positioned `::before`/`::after` is painted in tree
+  order with the other positioned boxes of its stacking context. Its box
+  has no DOM node of its own, so the deferred-layer sort could not place it
+  and it came last, above every later `position: relative` element: the
+  hero heading, button and illustration on svelte.dev were hidden under the
+  hero's `::before` gradient.
 * JavaScript: the CSS Font Loading API loads fonts. `new FontFace(family,
   source)` kept neither its `url()` source nor its `ArrayBuffer`, `load()`
   only flipped `status`, and `document.fonts` ignored `add()`, so fonts a

@@ -292,6 +292,8 @@ gboolean ns_style_is_stacking_context(const ns_style *s);
 gboolean ns_box_is_upper_layer(const ns_box *b);
 gboolean ns_box_is_flex_or_grid_item(const ns_box *b);
 int ns_box_layer_z(const ns_box *b);
+int ns_layout_tree_order_cmp(const ns_box *a, const ns_node *a_dom,
+                             const ns_box *b, const ns_node *b_dom);
 int ns_box_stack_key(const ns_box *b);
 
 typedef struct ns_sticky_y {
