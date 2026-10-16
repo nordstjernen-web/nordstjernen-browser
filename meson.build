@@ -115,6 +115,9 @@ is_android = host_machine.system() == 'android'
 # and the desktop-only helper executables, building only libnordstjernen.
 is_ios = get_option('ios')
 is_mobile = is_android or is_ios
+if is_mobile
+  add_project_arguments('-DNS_MOBILE=1', language: 'c')
+endif
 
 # Android builds only the embeddable engine library, driven by the JNI host app
 # in android/. It links the GLib/cairo/pango graphics stack directly instead of

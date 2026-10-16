@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a redistributable Nordstjernen Windows bundle: a root launcher plus the
-# mingw64 DLLs and GTK runtime data under app/ so it runs outside MSYS2.
+# MSYS2 DLLs and GTK runtime data under app/ so it runs outside MSYS2.
 #
 # Builds (or reuses) a separate --buildtype=release tree in $BUILDDIR so the
 # shipped binary has NDEBUG defined — third-party assertions in vendored deps
@@ -22,8 +22,8 @@ if [ -n "${NS_MESON_SETUP_ARGS:-}" ]; then
 fi
 
 resolve_mingw_prefix() {
-    for cand in "${MINGW_PREFIX:-}" /c/msys64/mingw64 "C:/msys64/mingw64" \
-                /mingw64; do
+    for cand in "${MINGW_PREFIX:-}" /c/msys64/ucrt64 "C:/msys64/ucrt64" \
+                /ucrt64 /c/msys64/mingw64 "C:/msys64/mingw64" /mingw64; do
         [ -n "$cand" ] || continue
         [ -d "$cand/bin" ] || continue
         [ -f "$cand/bin/libgtk-4-1.dll" ] || continue
@@ -33,7 +33,7 @@ resolve_mingw_prefix() {
 }
 
 MINGW_PREFIX=$(resolve_mingw_prefix) || {
-    echo "pack-windows: could not find mingw64/bin; set MINGW_PREFIX." >&2
+    echo "pack-windows: could not find the MSYS2 bin directory; set MINGW_PREFIX." >&2
     exit 1
 }
 
