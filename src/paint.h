@@ -76,6 +76,7 @@ gboolean ns_paint_canvas_color(const ns_box *root, double rgba_out[4]);
 void ns_paint_set_js(ns_js *js);
 void ns_paint_set_anim(struct ns_anim *anim);
 void ns_paint_set_caret_visible(gboolean visible);
+void ns_paint_set_video_layer(guint gen, double tile_y);
 
 void ns_paint_3d_invalidate(void);
 gboolean ns_paint_3d_registered(const ns_box *b);

@@ -7,6 +7,8 @@
 
 #include "libnordstjernen.h"
 #include "paint.h"
+#include "texture.h"
+#include "video.h"
 
 G_BEGIN_DECLS
 
@@ -38,6 +40,21 @@ int ns_browser_render_vp_layer(ns_browser *browser,
                                int width, int height, double scale,
                                unsigned char *out, int stride);
 gboolean ns_browser_canvas_color(ns_browser *browser, double rgba_out[4]);
+
+typedef struct ns_video_layer {
+    guint              id;
+    double             x, y, w, h;
+    ns_video_frame_ref frames[NS_VIDEO_LAYER_FRAMES];
+    guint              n_frames;
+    guint             *sent_serial;
+} ns_video_layer;
+
+void ns_browser_set_video_layer_gen(ns_browser *browser, guint gen);
+gboolean ns_browser_video_layer_frames_pending(ns_browser *browser);
+void ns_browser_foreach_video_layer(ns_browser *browser,
+                                    void (*fn)(const ns_video_layer *layer,
+                                               gpointer data),
+                                    gpointer data);
 void ns_browser_scroller_rects(ns_browser *browser, GString *out,
                                int max_rects);
 

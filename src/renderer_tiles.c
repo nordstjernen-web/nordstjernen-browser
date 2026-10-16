@@ -151,6 +151,7 @@ tiles_prepare(ns_tiles *t, ns_browser *b, const ns_tiles_view *v,
     }
     guint old_vp = t->plan.vp->len;
     t->gen++;
+    ns_browser_set_video_layer_gen(b, (guint)t->gen);
     t->width = v->vw;
     t->vh = v->vh;
     t->tile_h = (int)r->tile_h;
@@ -397,6 +398,55 @@ tiles_write_doc(ns_tiles *t, ns_browser *b, const ns_tiles_view *v,
         }
 }
 
+typedef struct tiles_video_out {
+    tiles_out *o;
+    gboolean   fresh;
+} tiles_video_out;
+
+static gboolean
+tiles_write_video_frame(tiles_video_out *vo, const ns_video_frame_ref *f,
+                        guint sent)
+{
+    tiles_out *o = vo->o;
+    int fw = ns_texture_get_width(f->tex);
+    int fh = ns_texture_get_height(f->tex);
+    if (fw <= 0 || fh <= 0) return FALSE;
+    size_t row = (size_t)fw * 4u;
+    size_t need = row * (size_t)fh;
+    long long at = -1;
+    if (vo->fresh || f->serial > sent) {
+        if (o->off > o->cap || need > o->cap - o->off) return FALSE;
+        ns_texture_download(f->tex, o->fb + o->off, row);
+        at = (long long)o->off;
+        o->off += need;
+    }
+    g_string_append_printf(o->desc, "vf %u %lld %d %d %lld\n", f->serial,
+                           (long long)f->deadline_us, fw, fh, at);
+    return TRUE;
+}
+
+static void
+tiles_write_video(const ns_video_layer *layer, gpointer data)
+{
+    tiles_video_out *vo = data;
+    g_string_append_printf(vo->o->desc, "video %u %.2f %.2f %.2f %.2f\n",
+                           layer->id, layer->x, layer->y, layer->w, layer->h);
+    guint sent = *layer->sent_serial;
+    for (guint i = 0; i < layer->n_frames; i++) {
+        if (!tiles_write_video_frame(vo, &layer->frames[i], sent)) break;
+        if (layer->frames[i].serial > *layer->sent_serial)
+            *layer->sent_serial = layer->frames[i].serial;
+    }
+}
+
+static void
+tiles_write_videos(ns_browser *b, gboolean fresh, tiles_out *o)
+{
+    tiles_video_out vo = { o, fresh };
+    g_string_append(o->desc, "videos\n");
+    ns_browser_foreach_video_layer(b, tiles_write_video, &vo);
+}
+
 static void
 tiles_write_header(const ns_tiles *t, ns_browser *b, const ns_tiles_view *v,
                    gboolean fresh, GString *desc)
@@ -430,6 +480,7 @@ ns_tiles_render(ns_tiles *t, ns_browser *b, const char *body,
     }
     tiles_write_doc(t, b, view, &r, fresh, &o);
     if (t->state < 0) return -1;
+    tiles_write_videos(b, fresh, &o);
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] tiles %6.1fms gen=%d fresh=%d bytes=%zu\n",
                    (double)(g_get_monotonic_time() - t0) / 1000.0, t->gen,

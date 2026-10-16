@@ -75,7 +75,22 @@ typedef struct ns_video {
     gboolean     track_requested;
     gboolean     sampled;
     char        *cors_allow_origin;
+    guint        layer_gen;
+    double       layer_x, layer_y, layer_w, layer_h;
+    guint        layer_sent_serial;
+    gboolean     prerolled;
+    gint64       preroll_since_us;
+    gint64       last_tick_us;
+    double       stall_peak_s;
 } ns_video;
+
+#define NS_VIDEO_LAYER_FRAMES 48
+
+typedef struct ns_video_frame_ref {
+    ns_texture *tex;
+    guint       serial;
+    gint64      deadline_us;
+} ns_video_frame_ref;
 
 typedef struct ns_video_cache ns_video_cache;
 typedef void (*ns_video_js_cb)(const void *dom_node, const char *kind,
@@ -112,6 +127,15 @@ gboolean ns_video_cache_mse_remove(ns_video_cache *cache, guint stream_id,
 gsize    ns_video_cache_mse_bytes(ns_video_cache *cache, guint stream_id,
                                   char kind);
 gboolean ns_video_cache_has_pending(const ns_video_cache *cache);
+void     ns_video_cache_set_layer_gen(ns_video_cache *cache, guint gen);
+guint    ns_video_cache_layer_gen(const ns_video_cache *cache);
+gboolean ns_video_is_layered(const ns_video_cache *cache, const ns_video *v);
+gboolean ns_video_cache_layer_frames_pending(ns_video_cache *cache);
+guint    ns_video_layer_frames(const ns_video *v, ns_video_frame_ref *out,
+                               guint max);
+void     ns_video_cache_foreach_layered(ns_video_cache *cache,
+                                        void (*fn)(ns_video *v, gpointer data),
+                                        gpointer data);
 
 gboolean ns_video_url_is_inline(const char *url);
 gboolean ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
