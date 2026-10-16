@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: text decorations propagate from a block to the text of its
+  block descendants, as CSS requires: a `display: block` or `flex` link
+  around a `<div>` or `<p>` underlines its text, and `text-decoration`
+  on a flex or grid container reaches its items. Only the element whose
+  inline content held the text was consulted. Propagation stops at
+  floats, absolutely positioned boxes and inline-blocks, and an element
+  with `display: contents` decorates nothing (MDN's banner link).
 * Layout: `margin-left: auto` and `margin-right: auto` on an image, video
   or SVG flex item push it along the line as they do for other items.
   Laying out a replaced item recomputed its margins from the style and
