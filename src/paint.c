@@ -147,10 +147,21 @@ ns_pango_stretch_from_css(int rank)
     return map[rank];
 }
 
+gboolean
+ns_paint_inline_attr_nowrap(const ns_inline_attr *r)
+{
+    if (r->kind != NS_INLINE_ELEMENT || !r->style) return FALSE;
+    const char *ws = ns_style_keyword(r->style, NS_CSS_WHITE_SPACE);
+    return ws && (strcmp(ws, "nowrap") == 0 || strcmp(ws, "pre") == 0);
+}
+
 NsPangoAttribute *
 ns_paint_inline_font_attr(const ns_inline_attr *r)
 {
     switch (r->kind) {
+    case NS_INLINE_ELEMENT:
+        return ns_paint_inline_attr_nowrap(r)
+            ? ns_pango_attr_allow_breaks_new(FALSE) : NULL;
     case NS_INLINE_BOLD:
         return ns_pango_attr_weight_new(NS_PANGO_WEIGHT_BOLD);
     case NS_INLINE_FONT_WEIGHT:
@@ -1949,6 +1960,10 @@ paint_block(cairo_t *cr, const ns_box *b)
         border_y += legend_inset;
         border_h -= legend_inset;
     }
+    double captions_above = 0, captions_below = 0;
+    ns_box_table_caption_extents(b, &captions_above, &captions_below);
+    border_y += captions_above;
+    border_h -= captions_above + captions_below;
 
     if (border_w <= 0 || border_h <= 0) return;
 
@@ -3025,6 +3040,10 @@ ns_paint_css_line_height_px(const ns_style *s)
     double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
     if (!lh || keyword_is(lh, "normal"))
         return ns_paint_normal_line_height_px(s);
+    if (ns_css_calc_is_math_fn(lh))
+        return ns_css_calc_math_fn_px(lh, font_size);
+    if (lh->kind == NS_CSS_V_CALC)
+        return lh->u.calc.px + lh->u.calc.pct / 100.0 * font_size;
     if (lh->kind != NS_CSS_V_LENGTH) return -1;
     switch (lh->u.length.unit) {
     case NS_CSS_UNIT_PX:      return lh->u.length.v;
@@ -5850,6 +5869,50 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
 }
 
 gboolean
+ns_paint_inline_empty_rect(const ns_box *b, const ns_inline_attr *r,
+                           double *out_x, double *out_y, double *out_h)
+{
+    if (!b || !b->text || r->start > strlen(b->text) ||
+        (!*b->text && !b->phantom_line))
+        return FALSE;
+    if (!*b->text)
+        ns_pango_context_set_base_dir(ns_paint_text_context(),
+                                      NS_PANGO_DIRECTION_LTR);
+    const ns_inline_attr *element = b->vertical_wm ? NULL : r;
+    NsPangoLayout *layout = element
+        ? paint_inline_make_layout(b, inherited_style(b), NULL)
+        : ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+    inline_range range = inline_range_for(b, r->start, 0, element);
+    NsPangoRectangle pos;
+    ns_pango_layout_index_to_pos(layout, (int)r->start, &pos);
+    int line_no = 0, line_x = 0;
+    ns_pango_layout_index_to_line_x(layout, (int)r->start, FALSE,
+                                    &line_no, &line_x);
+    double above = 0, below = 0, y0, y1;
+    if (b->phantom_line) {
+        y0 = y1 = b->y;
+    } else if (inline_box_vertical_reach(range.box_style, &above, &below)) {
+        double *baselines = paint_inline_line_baselines(b, layout, y_origin);
+        int lines = ns_pango_layout_get_line_count(layout);
+        double baseline =
+            baselines[CLAMP(line_no, 0, MAX(lines - 1, 0))] - range.rise;
+        g_free(baselines);
+        y0 = baseline - above;
+        y1 = baseline + below;
+    } else {
+        y0 = y_origin + (double)pos.y / NS_PANGO_SCALE;
+        y1 = y0 + (double)pos.height / NS_PANGO_SCALE;
+    }
+    g_object_unref(layout);
+    *out_x = (double)pos.x / NS_PANGO_SCALE + range.dx;
+    *out_y = y0 + range.dy - b->y;
+    *out_h = y1 - y0;
+    return TRUE;
+}
+
+gboolean
 ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
                             double *out_x, double *out_y,
                             double *out_w, double *out_h)
@@ -6765,6 +6828,18 @@ paint_image(cairo_t *cr, const ns_box *b)
     cairo_restore(cr);
 }
 
+static double
+box_content_x(const ns_box *b)
+{
+    return b->x + b->margin.left + b->border.left + b->padding.left;
+}
+
+static double
+box_content_y(const ns_box *b)
+{
+    return b->y + b->margin.top + b->border.top + b->padding.top;
+}
+
 static void
 paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
 {
@@ -6791,13 +6866,14 @@ paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
         lays[i] = layout;
         total += lh[i] + 2 * pad + (i ? gap : 0);
     }
-    double y = b->y + b->content_height - b->content_height * 0.05 - total;
-    if (y < b->y + 2) y = b->y + 2;
+    double x0 = box_content_x(b), y0 = box_content_y(b);
+    double y = y0 + b->content_height - b->content_height * 0.05 - total;
+    if (y < y0 + 2) y = y0 + 2;
     cairo_save(cr);
     for (guint i = 0; i < nl; i++) {
         double bw = lw[i] + 2 * pad;
-        double bx = b->x + (b->content_width - bw) / 2.0;
-        if (bx < b->x) bx = b->x;
+        double bx = x0 + (b->content_width - bw) / 2.0;
+        if (bx < x0) bx = x0;
         cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
         cairo_rectangle(cr, bx, y, bw, lh[i] + 2 * pad);
         cairo_fill(cr);
@@ -6819,7 +6895,8 @@ static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
-        double x = b->x, y = b->y, w = b->content_width, h = b->content_height;
+        double x = box_content_x(b), y = box_content_y(b);
+        double w = b->content_width, h = b->content_height;
         if (!(w > 0) || !(h > 0)) return;
         cairo_save(cr);
         corner_radii radii = corner_radii_uniform(4);
@@ -6907,17 +6984,12 @@ paint_video(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     if (tex) {
         paint_texture(cr, b, tex);
-    } else if (!bg_painted) {
-        gboolean ambient = b->dom &&
-            ns_element_get_attr(b->dom, "autoplay") &&
-            ns_element_get_attr(b->dom, "muted") &&
-            !ns_element_get_attr(b->dom, "controls");
-        if (!ambient) {
-            cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
-            cairo_rectangle(cr, b->x, b->y,
-                            b->content_width, b->content_height);
-            cairo_fill(cr);
-        }
+    } else if (!bg_painted && b->dom &&
+               ns_element_get_attr(b->dom, "controls")) {
+        cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
+        cairo_rectangle(cr, box_content_x(b), box_content_y(b),
+                        b->content_width, b->content_height);
+        cairo_fill(cr);
     }
     cairo_restore(cr);
 

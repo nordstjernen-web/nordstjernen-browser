@@ -213,6 +213,8 @@ struct ns_js {
     GHashTable   *fetch_states_by_id;
     guint         next_fetch_id;
     GPtrArray    *pending_xhrs;
+    GPtrArray    *link_fetches;
+    GHashTable   *link_results;
     GPtrArray    *pending_ws;
     GPtrArray    *pending_aborts;
     GPtrArray    *filereader_idles;
@@ -799,6 +801,7 @@ typedef struct ns_perf_resource_info {
     const char   *document_url;
     gboolean      render_blocking;
     gboolean      cors_mode;
+    gboolean      preload;
     const char   *next_hop_protocol;
     const char   *timing_allow_origin;
     long          status;

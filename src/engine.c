@@ -334,8 +334,8 @@ preload_target_free(gpointer p)
     g_free(t);
 }
 
-static ns_fetch_destination
-preload_destination_for(const char *rel, const char *as)
+ns_fetch_destination
+ns_engine_preload_destination(const char *rel, const char *as)
 {
     if (rel_has_token(rel, "modulepreload")) return NS_FETCH_DEST_SCRIPT;
     if (!as || !*as) return NS_FETCH_DEST_DEFAULT;
@@ -402,7 +402,7 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
         } else if (rel && (rel_has_token(rel, "preload") ||
                            rel_has_token(rel, "modulepreload"))) {
             preload_add(out, seen, base, ns_element_get_attr(n, "href"),
-                        preload_destination_for(rel,
+                        ns_engine_preload_destination(rel,
                                                 ns_element_get_attr(n, "as")));
         }
     }
@@ -411,13 +411,68 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
                         connect_out, connect_seen, depth + 1);
 }
 
+typedef struct {
+    char   *url;
+    gint64  start_us;
+} preload_flight;
+
+static GHashTable *g_preload_results;
+
+static void
+preload_flight_free(preload_flight *flight)
+{
+    if (!flight) return;
+    g_free(flight->url);
+    g_free(flight);
+}
+
+static void
+preload_remember_result(preload_flight *flight, const ns_response *resp)
+{
+    if (!flight || !resp || resp->status <= 0) return;
+    if (!g_preload_results)
+        g_preload_results = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, g_free);
+    ns_engine_preload_result *r = g_new0(ns_engine_preload_result, 1);
+    r->status = resp->status;
+    r->start_us = flight->start_us;
+    r->end_us = g_get_monotonic_time();
+    g_hash_table_replace(g_preload_results, g_strdup(flight->url), r);
+}
+
+static void
+preload_results_clear(void)
+{
+    if (g_preload_results) g_hash_table_remove_all(g_preload_results);
+}
+
+gboolean
+ns_engine_preload_result_for(const char *url, ns_engine_preload_result *out)
+{
+    const ns_engine_preload_result *r = url && g_preload_results
+        ? g_hash_table_lookup(g_preload_results, url) : NULL;
+    if (r && out) *out = *r;
+    return r != NULL;
+}
+
 static void
 on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    (void)user_data;
+    preload_flight *flight = user_data;
     ns_response *resp = ns_net_fetch_finish(res, NULL);
+    preload_remember_result(flight, resp);
+    preload_flight_free(flight);
     if (resp) ns_response_free(resp);
+}
+
+static preload_flight *
+preload_flight_new(const char *url)
+{
+    preload_flight *flight = g_new0(preload_flight, 1);
+    flight->url = g_strdup(url);
+    flight->start_us = g_get_monotonic_time();
+    return flight;
 }
 
 void
@@ -451,6 +506,7 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);
     ns_net_preload_clear();
+    preload_results_clear();
     for (guint i = 0; i < connects->len; i++)
         ns_net_preconnect_async(g_ptr_array_index(connects, i));
     for (guint i = 0; i < urls->len; i++) {
@@ -462,7 +518,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
             g_free(key);
         }
         ns_net_request_async(target->url, base_url, "GET", NULL, 0, NULL,
-                             headers, NULL, on_preload_fetched, NULL);
+                             headers, NULL, on_preload_fetched,
+                             preload_flight_new(target->url));
     }
     g_ptr_array_free(urls, TRUE);
     g_ptr_array_free(connects, TRUE);

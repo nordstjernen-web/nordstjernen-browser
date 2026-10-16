@@ -40,6 +40,16 @@ void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
 
 char *ns_engine_linked_css_text(const char *url);
 gboolean ns_engine_linked_css_known(const char *url);
+typedef struct ns_engine_preload_result {
+    long   status;
+    gint64 start_us;
+    gint64 end_us;
+} ns_engine_preload_result;
+
+gboolean ns_engine_preload_result_for(const char *url,
+                                      ns_engine_preload_result *out);
+ns_fetch_destination ns_engine_preload_destination(const char *rel,
+                                                  const char *as);
 
 /* Resource timing of the stylesheets the engine fetched for a page, held
  * until that page's JavaScript takes them for its performance timeline. */

@@ -113,6 +113,7 @@ base_key_for_url(const char *url, const char *partition)
 static char *
 body_path_for_key(const char *key, gboolean ensure_dir)
 {
+    if (!g_cache_dir || !key || !key[0] || !key[1]) return NULL;
     char prefix[3] = { key[0], key[1], '\0' };
     char *sub = g_build_filename(g_cache_dir, "bodies", prefix, NULL);
     if (ensure_dir) {
@@ -322,6 +323,7 @@ ns_cache_init(void)
 void
 ns_cache_shutdown(void)
 {
+    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
     if (g_cache_db) {
         sqlite3_close(g_cache_db);
         g_cache_db = NULL;
@@ -484,7 +486,7 @@ static void
 delete_key(const char *key)
 {
     char *bp = body_path_for_key(key, FALSE);
-    g_unlink(bp);
+    if (bp) g_unlink(bp);
     g_free(bp);
     if (!g_cache_db) return;
     sqlite3_stmt *st = NULL;
@@ -562,7 +564,7 @@ ns_cache_get(const char *url, const char *partition,
     char *data = NULL;
     gsize dlen = 0;
     GStatBuf stbuf;
-    if (g_stat(bp, &stbuf) != 0 || stbuf.st_size < 0 ||
+    if (!bp || g_stat(bp, &stbuf) != 0 || stbuf.st_size < 0 ||
         (guint64)stbuf.st_size > cache_cap_bytes()) {
         ns_cache_entry_free(e);
         delete_key(key);
@@ -672,6 +674,7 @@ ns_cache_put(const char *url,
     if (rc != SQLITE_DONE) return;
 
     g_autofree char *bp = body_path_for_key(key, TRUE);
+    if (!bp) return;
     GError *err = NULL;
     if (!g_file_set_contents_full(bp, body ? body : "", (gssize)body_len,
                                   G_FILE_SET_CONTENTS_CONSISTENT, 0600, &err)) {
