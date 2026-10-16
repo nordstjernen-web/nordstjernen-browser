@@ -12420,15 +12420,26 @@ track_is_intrinsic(ns_css_track_kind k)
            k == NS_CSS_TRACK_MAX_CONTENT;
 }
 
+static gboolean
+fr_track_min_is_auto(const ns_css_track *t)
+{
+    return t->kind == NS_CSS_TRACK_FR &&
+           (!t->has_min || track_is_intrinsic(t->min_kind));
+}
+
 static double
 grid_flex_track_sizes(const ns_css_tracks *tr, double space,
-                      double available_main, double *sizes)
+                      double available_main, const double *content_min,
+                      double *sizes)
 {
     gboolean inflexible[NS_CSS_TRACKS_MAX] = {0};
     double base[NS_CSS_TRACKS_MAX] = {0};
-    for (int i = 0; i < tr->n; i++)
-        if (tr->tracks[i].kind == NS_CSS_TRACK_FR)
-            base[i] = track_min_px(&tr->tracks[i], available_main);
+    for (int i = 0; i < tr->n; i++) {
+        if (tr->tracks[i].kind != NS_CSS_TRACK_FR) continue;
+        base[i] = track_min_px(&tr->tracks[i], available_main);
+        if (content_min && fr_track_min_is_auto(&tr->tracks[i]))
+            base[i] = MAX(base[i], content_min[i]);
+    }
     double fr = 0;
     for (int pass = 0; pass <= tr->n; pass++) {
         double leftover = space, flex_sum = 0;
@@ -12535,9 +12546,13 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     }
 
     double fr_min_total = 0;
-    for (int i = 0; i < tr->n; i++)
-        if (tr->tracks[i].kind == NS_CSS_TRACK_FR)
-            fr_min_total += track_min_px(&tr->tracks[i], available_main);
+    for (int i = 0; i < tr->n; i++) {
+        if (tr->tracks[i].kind != NS_CSS_TRACK_FR) continue;
+        double mn = track_min_px(&tr->tracks[i], available_main);
+        if (content_min && fr_track_min_is_auto(&tr->tracks[i]))
+            mn = MAX(mn, content_min[i]);
+        fr_min_total += mn;
+    }
 
     double shrink_used = 0;
     if (total_fixed + fr_min_total > available_main && total_shrink > 0) {
@@ -12571,7 +12586,8 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
 
     double fr_sizes[NS_CSS_TRACKS_MAX] = {0};
     double fr_used = total_fr > 0
-        ? grid_flex_track_sizes(tr, remaining, available_main, fr_sizes) : 0;
+        ? grid_flex_track_sizes(tr, remaining, available_main, content_min,
+                                fr_sizes) : 0;
     double per_auto = 0;
     if (n_auto > 0 && stretch_auto && remaining - fr_used > 0)
         per_auto = (remaining - fr_used) / n_auto;
@@ -13487,6 +13503,15 @@ grid_row_basis(const ns_box *box, double cw)
     return box_inset_definite_height(box);
 }
 
+static gboolean
+grid_item_has_auto_minimum(const ns_box *c)
+{
+    const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH]
+                                       : NULL;
+    if (mnw && !length_is_auto(mnw)) return FALSE;
+    return !box_is_scroll_container(c);
+}
+
 static double
 grid_item_fit_border_width(ns_box *c, const ns_style *child_inherited,
                            double area)
@@ -13931,9 +13956,10 @@ layout_grid(ns_box *box, double cw,
     double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
     for (int t = 0; t < n_cols; t++) {
+        gboolean fr_auto = fr_track_min_is_auto(&cols->tracks[t]);
         if (!track_is_intrinsic(cols->tracks[t].kind) &&
             !(cols->tracks[t].has_min &&
-              track_is_intrinsic(cols->tracks[t].min_kind)))
+              track_is_intrinsic(cols->tracks[t].min_kind)) && !fr_auto)
             continue;
         for (guint k = 0; k < items->len; k++) {
             int item_col = k < placed_cols->len
@@ -13941,6 +13967,10 @@ layout_grid(ns_box *box, double cw,
             if (item_col != t ||
                 g_array_index(col_spans, int, k) != 1) continue;
             ns_box *c = items->pdata[k];
+            if (fr_auto && !grid_item_has_auto_minimum(c)) {
+                any_auto_content = TRUE;
+                continue;
+            }
             double nw = measure_natural_width(c, child_inherited);
             double mw = min_width_of(c, child_inherited);
             if (c->style) {
