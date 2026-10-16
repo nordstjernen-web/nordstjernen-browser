@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Paint: a `<video>` with no frame and no poster to show paints
+  nothing, so its own background shows through, unless it has
+  `controls`. Such a video used to cover its box with a dark grey
+  rectangle, drawn 4px up and left of the box when the video had a
+  margin. A video that had not loaded, or failed to, covered The
+  Guardian's video cards and Apple's product tiles with a black panel.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image

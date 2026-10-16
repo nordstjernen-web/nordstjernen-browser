@@ -6765,6 +6765,18 @@ paint_image(cairo_t *cr, const ns_box *b)
     cairo_restore(cr);
 }
 
+static double
+box_content_x(const ns_box *b)
+{
+    return b->x + b->margin.left + b->border.left + b->padding.left;
+}
+
+static double
+box_content_y(const ns_box *b)
+{
+    return b->y + b->margin.top + b->border.top + b->padding.top;
+}
+
 static void
 paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
 {
@@ -6791,13 +6803,14 @@ paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
         lays[i] = layout;
         total += lh[i] + 2 * pad + (i ? gap : 0);
     }
-    double y = b->y + b->content_height - b->content_height * 0.05 - total;
-    if (y < b->y + 2) y = b->y + 2;
+    double x0 = box_content_x(b), y0 = box_content_y(b);
+    double y = y0 + b->content_height - b->content_height * 0.05 - total;
+    if (y < y0 + 2) y = y0 + 2;
     cairo_save(cr);
     for (guint i = 0; i < nl; i++) {
         double bw = lw[i] + 2 * pad;
-        double bx = b->x + (b->content_width - bw) / 2.0;
-        if (bx < b->x) bx = b->x;
+        double bx = x0 + (b->content_width - bw) / 2.0;
+        if (bx < x0) bx = x0;
         cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
         cairo_rectangle(cr, bx, y, bw, lh[i] + 2 * pad);
         cairo_fill(cr);
@@ -6819,7 +6832,8 @@ static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
-        double x = b->x, y = b->y, w = b->content_width, h = b->content_height;
+        double x = box_content_x(b), y = box_content_y(b);
+        double w = b->content_width, h = b->content_height;
         if (!(w > 0) || !(h > 0)) return;
         cairo_save(cr);
         corner_radii radii = corner_radii_uniform(4);
@@ -6907,17 +6921,12 @@ paint_video(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     if (tex) {
         paint_texture(cr, b, tex);
-    } else if (!bg_painted) {
-        gboolean ambient = b->dom &&
-            ns_element_get_attr(b->dom, "autoplay") &&
-            ns_element_get_attr(b->dom, "muted") &&
-            !ns_element_get_attr(b->dom, "controls");
-        if (!ambient) {
-            cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
-            cairo_rectangle(cr, b->x, b->y,
-                            b->content_width, b->content_height);
-            cairo_fill(cr);
-        }
+    } else if (!bg_painted && b->dom &&
+               ns_element_get_attr(b->dom, "controls")) {
+        cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
+        cairo_rectangle(cr, box_content_x(b), box_content_y(b),
+                        b->content_width, b->content_height);
+        cairo_fill(cr);
     }
     cairo_restore(cr);
 
