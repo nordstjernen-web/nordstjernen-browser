@@ -23,6 +23,15 @@ Changelog:
   rectangle, drawn 4px up and left of the box when the video had a
   margin. A video that had not loaded, or failed to, covered The
   Guardian's video cards and Apple's product tiles with a black panel.
+* Layout: an empty inline element in a line that has no line box (only
+  empty elements, collapsible spaces and absolutely positioned elements,
+  such as the `<source>` elements before a block `<img>` in a
+  `<picture>`) reports a 0x0 rectangle at the line's position, after the
+  margins it collapses with, and follows `text-align`, `text-indent` and
+  `direction`. It reported 0,0 at the page's top-left corner, or a
+  rectangle as tall as its font. Such a line no longer stops the margins
+  around it from collapsing, and an element holding only white space
+  (`<span> </span>`) counts as empty.
 * DOM: an empty inline element (`<span></span>`, an empty link)
   reports a zero-width rectangle at its place in the line from
   `getBoundingClientRect()` and `getClientRects()`, as tall as its
