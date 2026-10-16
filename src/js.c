@@ -213,6 +213,7 @@ static void ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n,
                                        const char *name,
                                        const char *value);
 static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
+static JSValue ns_sw_owner_client(JSContext *ctx);
 static void ns_js_link_resource_changed(ns_js *js, ns_node *link);
 static void ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n,
                                           const char *namespace_uri,
@@ -27041,6 +27042,8 @@ ns_worker_deliver_worker(gpointer data)
                                  NULL, NULL);
     JS_FreeValue(ctx, ns_freeze_array(ctx, ports));
     JS_SetPropertyStr(ctx, ev, "ports", ports);
+    if (host->is_service_worker)
+        JS_SetPropertyStr(ctx, ev, "source", ns_sw_owner_client(ctx));
     ns_worker_dispatch(ctx, global, type, ev);
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
@@ -27643,6 +27646,89 @@ static JSValue ns_illegal_constructor(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
 
 static void
+ns_sw_set_proto_from(JSContext *ctx, JSValueConst obj, JSValueConst global,
+                     const char *ctor_name)
+{
+    JSValue ctor = JS_GetPropertyStr(ctx, global, ctor_name);
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+}
+
+static JSValue
+ns_sw_client_focus(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_promise_resolve_take(ctx, JS_DupValue(ctx, this_val));
+}
+
+static JSValue
+ns_sw_owner_client(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue client = JS_GetPropertyStr(ctx, global, "_ns_owner_client");
+    if (!JS_IsObject(client)) {
+        JS_FreeValue(ctx, client);
+        ns_js *js = js_from_ctx(ctx);
+        ns_worker_host *host = js ? js->worker_host : NULL;
+        client = JS_NewObject(ctx);
+        ns_sw_set_proto_from(ctx, client, global, "WindowClient");
+        g_autofree char *id = g_uuid_string_random();
+        JS_SetPropertyStr(ctx, client, "id", JS_NewString(ctx, id));
+        JS_SetPropertyStr(ctx, client, "url",
+            JS_NewString(ctx, host && host->scope ? host->scope : ""));
+        JS_SetPropertyStr(ctx, client, "type", JS_NewString(ctx, "window"));
+        JS_SetPropertyStr(ctx, client, "frameType",
+                          JS_NewString(ctx, "top-level"));
+        JS_SetPropertyStr(ctx, client, "focused", JS_TRUE);
+        JS_SetPropertyStr(ctx, client, "visibilityState",
+                          JS_NewString(ctx, "visible"));
+        JS_SetPropertyStr(ctx, client, "ancestorOrigins", JS_NewArray(ctx));
+        ns_bind_fn(ctx, client, "postMessage",
+                   ns_worker_global_post_message, 1);
+        ns_bind_fn(ctx, client, "focus", ns_sw_client_focus, 0);
+        ns_bind_fn(ctx, client, "navigate", ns_returns_resolved_undefined, 1);
+        JS_DefinePropertyValueStr(ctx, global, "_ns_owner_client",
+                                  JS_DupValue(ctx, client),
+                                  JS_PROP_CONFIGURABLE);
+    }
+    JS_FreeValue(ctx, global);
+    return client;
+}
+
+static JSValue
+ns_sw_clients_match_all(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue list = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, list, 0, ns_sw_owner_client(ctx));
+    return ns_promise_resolve_take(ctx, list);
+}
+
+static JSValue
+ns_sw_clients_get(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    JSValue client = ns_sw_owner_client(ctx);
+    JSValue id = JS_GetPropertyStr(ctx, client, "id");
+    const char *want = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    const char *have = JS_ToCString(ctx, id);
+    gboolean match = want && have && strcmp(want, have) == 0;
+    if (want) JS_FreeCString(ctx, want);
+    if (have) JS_FreeCString(ctx, have);
+    JS_FreeValue(ctx, id);
+    if (!match) {
+        JS_FreeValue(ctx, client);
+        client = JS_UNDEFINED;
+    }
+    return ns_promise_resolve_take(ctx, client);
+}
+
+static void
 ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 {
     ns_bind_ctor(ctx, global, "ServiceWorkerGlobalScope",
@@ -27675,10 +27761,21 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     JS_SetPropertyStr(ctx, reg, "navigationPreload", np);
     JS_SetPropertyStr(ctx, global, "registration", reg);
 
+    ns_bind_ctor(ctx, global, "Client", ns_illegal_constructor, 0);
+    ns_bind_ctor(ctx, global, "WindowClient", ns_illegal_constructor, 0);
+    ns_bind_ctor(ctx, global, "Clients", ns_illegal_constructor, 0);
+    JSValue window_client = JS_GetPropertyStr(ctx, global, "WindowClient");
+    JSValue window_client_proto =
+        JS_GetPropertyStr(ctx, window_client, "prototype");
+    ns_sw_set_proto_from(ctx, window_client_proto, global, "Client");
+    JS_FreeValue(ctx, window_client_proto);
+    JS_FreeValue(ctx, window_client);
+
     JSValue clients = JS_NewObject(ctx);
+    ns_sw_set_proto_from(ctx, clients, global, "Clients");
     ns_bind_fn(ctx, clients, "claim",      ns_returns_resolved_undefined, 0);
-    ns_bind_fn(ctx, clients, "matchAll",   ns_returns_resolved_empty_array, 1);
-    ns_bind_fn(ctx, clients, "get",        ns_returns_resolved_undefined, 1);
+    ns_bind_fn(ctx, clients, "matchAll",   ns_sw_clients_match_all, 1);
+    ns_bind_fn(ctx, clients, "get",        ns_sw_clients_get, 1);
     ns_bind_fn(ctx, clients, "openWindow", ns_returns_resolved_undefined, 1);
     JS_SetPropertyStr(ctx, global, "clients", clients);
 
