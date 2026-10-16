@@ -22,6 +22,7 @@ static double g_viewport_w = 1000;
 static double g_viewport_h = 800;
 
 static GHashTable *g_defined_elements;
+static GHashTable *g_defined_since_restyle;
 
 void
 ns_css_register_defined_element(const char *tag)
@@ -31,8 +32,16 @@ ns_css_register_defined_element(const char *tag)
         g_defined_elements = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                    g_free, NULL);
     char *lower = g_ascii_strdown(tag, -1);
-    if (g_hash_table_contains(g_defined_elements, lower)) g_free(lower);
-    else g_hash_table_add(g_defined_elements, lower);
+    if (g_hash_table_contains(g_defined_elements, lower)) {
+        g_free(lower);
+        return;
+    }
+    if (!g_defined_since_restyle)
+        g_defined_since_restyle = g_hash_table_new_full(g_str_hash,
+                                                        g_str_equal,
+                                                        g_free, NULL);
+    g_hash_table_add(g_defined_since_restyle, g_strdup(lower));
+    g_hash_table_add(g_defined_elements, lower);
 }
 
 static GHashTable *g_js_registered_props;
@@ -31841,6 +31850,11 @@ static GHashTable    *g_desc_attr_keys;
 static gboolean       g_desc_keys_loose;
 static GHashTable    *g_incr_self_dirty;
 static gpointer       g_struct_desc_inv;
+static GHashTable    *g_struct_flood_keys;
+static GHashTable    *g_struct_flood_attrs;
+static GHashTable    *g_empty_sib_keys;
+static GHashTable    *g_empty_sib_attrs;
+static gboolean       g_empty_sib_loose;
 static GHashTable    *g_inv_sets;
 static GHashTable    *g_incr_inv_pending;
 static GPtrArray     *g_inv_active;
@@ -32400,9 +32414,41 @@ incr_state_pseudo_attr(ns_css_pseudo k)
     }
 }
 
+static void incr_collect_sib_left_at(const ns_css_simple *c, int depth);
+
+static void
+incr_collect_sib_selectors(const GPtrArray *selectors, int depth)
+{
+    for (guint si = 0; selectors && si < selectors->len; si++) {
+        const ns_css_selector *sel = g_ptr_array_index(selectors, si);
+        for (guint ci = 0; sel && sel->compounds &&
+                           ci < sel->compounds->len; ci++)
+            incr_collect_sib_left_at(g_ptr_array_index(sel->compounds, ci),
+                                     depth + 1);
+    }
+}
+
+static void
+incr_collect_sib_groups(const GPtrArray *groups, int depth)
+{
+    for (guint gi = 0; groups && gi < groups->len; gi++)
+        incr_collect_sib_selectors(g_ptr_array_index(groups, gi), depth);
+}
+
 static void
 incr_collect_sib_left(const ns_css_simple *c)
 {
+    incr_collect_sib_left_at(c, 0);
+}
+
+static void
+incr_collect_sib_left_at(const ns_css_simple *c, int depth)
+{
+    if (!c) return;
+    if (depth > 6 || c->has_groups) {
+        g_sib_loose = TRUE;
+        return;
+    }
     gboolean handled = incr_add_compound_keys(g_sib_keys, c);
     if (c->attrs)
         for (guint i = 0; i < c->attrs->len; i++) {
@@ -32428,10 +32474,11 @@ incr_collect_sib_left(const ns_css_simple *c)
                 g_hash_table_add(g_sib_attrs, g_strdup(attr));
                 g_hash_table_add(g_sib_value_attrs, g_strdup(attr));
             }
+            if (p->of_group) incr_collect_sib_selectors(p->of_group, depth);
             handled = TRUE;
         }
-    if (c->matches_any || c->matches_none || c->has_groups)
-        g_sib_loose = TRUE;
+    incr_collect_sib_groups(c->matches_any, depth);
+    incr_collect_sib_groups(c->matches_none, depth);
     (void)handled;
 }
 
@@ -32514,6 +32561,61 @@ incr_compound_position_dependent(const ns_css_simple *c)
     return FALSE;
 }
 
+static gboolean
+incr_simple_has_subject_key(const ns_css_simple *c)
+{
+    return (c->id && *c->id) ||
+           (c->classes && c->classes->len > 0 &&
+            g_ptr_array_index(c->classes, 0)) ||
+           (c->attrs && c->attrs->len > 0 &&
+            g_array_index(c->attrs, ns_css_attr_pred, 0).name) ||
+           (c->type && *c->type && strcmp(c->type, "*") != 0);
+}
+
+static gboolean
+incr_note_struct_flood_compound(const ns_css_simple *c)
+{
+    if (!g_struct_flood_keys) {
+        g_struct_flood_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                    g_free, NULL);
+        g_struct_flood_attrs = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, NULL);
+    }
+    GPtrArray *preds = g_ptr_array_new();
+    gboolean keyed = incr_add_positive_compound_deps(g_struct_flood_keys,
+                                                     preds, c, 0);
+    for (guint i = 0; i < preds->len; i++) {
+        const ns_css_attr_pred *a = g_ptr_array_index(preds, i);
+        if (a->name)
+            g_hash_table_add(g_struct_flood_attrs,
+                             g_ascii_strdown(a->name, -1));
+    }
+    g_ptr_array_free(preds, TRUE);
+    return keyed;
+}
+
+static gboolean
+incr_note_struct_flood(const ns_css_selector *sel)
+{
+    guint n = sel->compounds->len;
+    for (guint ci = 0; ci + 1 < n; ci++) {
+        ns_css_comb right = NS_CSS_COMB_NONE;
+        if (sel->combinators && ci + 1 < sel->combinators->len)
+            right = g_array_index(sel->combinators, ns_css_comb, ci + 1);
+        ns_css_comb left = NS_CSS_COMB_NONE;
+        if (sel->combinators && ci < sel->combinators->len)
+            left = g_array_index(sel->combinators, ns_css_comb, ci);
+        const ns_css_simple *c = g_ptr_array_index(sel->compounds, ci);
+        gboolean dependent = incr_compound_position_dependent(c) ||
+            left == NS_CSS_COMB_ADJACENT || left == NS_CSS_COMB_SIBLING;
+        if (dependent && (right == NS_CSS_COMB_DESCENDANT ||
+                          right == NS_CSS_COMB_CHILD) &&
+            !incr_note_struct_flood_compound(c))
+            return FALSE;
+    }
+    return TRUE;
+}
+
 static void
 incr_note_struct_descendants(const ns_css_selector *sel)
 {
@@ -32542,8 +32644,55 @@ incr_note_struct_descendants(const ns_css_selector *sel)
         inv->attrs = g_ptr_array_new_with_free_func(g_free);
         g_struct_desc_inv = inv;
     }
-    incr_inv_add_subject(g_struct_desc_inv,
-                         g_ptr_array_index(sel->compounds, n - 1));
+    const ns_css_simple *subject = g_ptr_array_index(sel->compounds, n - 1);
+    if (incr_simple_has_subject_key(subject) ||
+        !incr_note_struct_flood(sel))
+        incr_inv_add_subject(g_struct_desc_inv, subject);
+}
+
+static gboolean
+incr_simple_uses_empty(const ns_css_simple *c, int depth)
+{
+    if (!c) return FALSE;
+    if (depth > 6) return TRUE;
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++)
+        if (g_array_index(c->pseudos, ns_css_pseudo_pred, i).kind ==
+            NS_CSS_PC_EMPTY)
+            return TRUE;
+    GPtrArray *groups[2] = { c->matches_any, c->matches_none };
+    for (guint g = 0; g < G_N_ELEMENTS(groups); g++)
+        for (guint gi = 0; groups[g] && gi < groups[g]->len; gi++) {
+            const GPtrArray *group = g_ptr_array_index(groups[g], gi);
+            for (guint si = 0; group && si < group->len; si++) {
+                const ns_css_selector *sel = g_ptr_array_index(group, si);
+                for (guint ci = 0; sel && sel->compounds &&
+                                   ci < sel->compounds->len; ci++)
+                    if (incr_simple_uses_empty(
+                            g_ptr_array_index(sel->compounds, ci), depth + 1))
+                        return TRUE;
+            }
+        }
+    return FALSE;
+}
+
+static void
+incr_note_empty_sib(const ns_css_simple *c)
+{
+    if (!g_empty_sib_keys) {
+        g_empty_sib_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                 g_free, NULL);
+        g_empty_sib_attrs = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, NULL);
+    }
+    GPtrArray *preds = g_ptr_array_new();
+    if (!incr_add_positive_compound_deps(g_empty_sib_keys, preds, c, 0))
+        g_empty_sib_loose = TRUE;
+    for (guint i = 0; i < preds->len; i++) {
+        const ns_css_attr_pred *a = g_ptr_array_index(preds, i);
+        if (a->name)
+            g_hash_table_add(g_empty_sib_attrs, g_ascii_strdown(a->name, -1));
+    }
+    g_ptr_array_free(preds, TRUE);
 }
 
 static void
@@ -32567,8 +32716,11 @@ incr_collect_struct_keys(const ns_css_stylesheet *sh)
                 ns_css_comb right = NS_CSS_COMB_NONE;
                 if (sel->combinators && ci + 1 < sel->combinators->len)
                     right = g_array_index(sel->combinators, ns_css_comb, ci + 1);
-                if (right == NS_CSS_COMB_ADJACENT || right == NS_CSS_COMB_SIBLING)
+                if (right == NS_CSS_COMB_ADJACENT ||
+                    right == NS_CSS_COMB_SIBLING) {
                     incr_collect_sib_left(c);
+                    if (incr_simple_uses_empty(c, 0)) incr_note_empty_sib(c);
+                }
                 gboolean sib_subject = (left == NS_CSS_COMB_ADJACENT ||
                                         left == NS_CSS_COMB_SIBLING);
                 if (!incr_simple_has_structural(c, 0) && !sib_subject)
@@ -32827,15 +32979,15 @@ incr_struct_keys_extend(const ns_css_stylesheet *ua,
     return TRUE;
 }
 
-static void
+static gboolean
 incr_ensure_struct_keys(const ns_css_stylesheet *ua,
                         const ns_css_stylesheet *const *author, gsize n,
                         guint64 sig)
 {
-    if (g_struct_ready && g_struct_sig == sig) return;
+    if (g_struct_ready && g_struct_sig == sig) return TRUE;
     if (incr_struct_keys_extend(ua, author, n)) {
         g_struct_sig = sig;
-        return;
+        return TRUE;
     }
     if (g_struct_serials) g_hash_table_remove_all(g_struct_serials);
     else g_struct_serials = g_hash_table_new_full(g_int64_hash, g_int64_equal,
@@ -32882,6 +33034,11 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     }
     g_desc_keys_loose = FALSE;
     g_clear_pointer(&g_struct_desc_inv, incr_inv_set_free);
+    g_clear_pointer(&g_struct_flood_keys, g_hash_table_destroy);
+    g_clear_pointer(&g_struct_flood_attrs, g_hash_table_destroy);
+    g_clear_pointer(&g_empty_sib_keys, g_hash_table_destroy);
+    g_clear_pointer(&g_empty_sib_attrs, g_hash_table_destroy);
+    g_empty_sib_loose = FALSE;
     if (g_incr_inv_pending) g_hash_table_remove_all(g_incr_inv_pending);
     if (g_inv_sets) g_hash_table_remove_all(g_inv_sets);
     else g_inv_sets = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
@@ -32900,6 +33057,7 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     incr_own_attr_deps(g_struct_anc_attrs);
     g_struct_sig = sig;
     g_struct_ready = TRUE;
+    return FALSE;
 }
 
 static gboolean
@@ -33261,6 +33419,42 @@ incr_childlist_needs_flood(const ns_node *parent)
 static void incr_mark_self_dirty(ns_node *target, GPtrArray *queue);
 
 static gboolean
+incr_node_hits_key_sets(const ns_node *n, GHashTable *keys, GHashTable *attrs)
+{
+    if (!keys) return FALSE;
+    if (incr_node_matches_keys(n, keys)) return TRUE;
+    if (g_hash_table_size(attrs) == 0) return FALSE;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name) continue;
+        char *low = g_ascii_strdown(a->name, -1);
+        gboolean hit = g_hash_table_contains(attrs, low);
+        g_free(low);
+        if (hit) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_node_hits_struct_flood(const ns_node *n)
+{
+    return incr_node_hits_key_sets(n, g_struct_flood_keys,
+                                   g_struct_flood_attrs);
+}
+
+static gboolean incr_mark_following_siblings(ns_node *from);
+
+static void
+incr_mark_empty_dependents(ns_node *parent)
+{
+    if (!parent->next_sibling || parent->kind != NS_NODE_ELEMENT) return;
+    if (!g_empty_sib_loose &&
+        !incr_node_hits_key_sets(parent, g_empty_sib_keys, g_empty_sib_attrs))
+        return;
+    if (!incr_mark_following_siblings(parent->next_sibling))
+        ns_css_mark_restyle_dirty(parent->parent ? parent->parent : parent);
+}
+
+static gboolean
 incr_mark_children_positions(ns_node *parent, ns_node *added)
 {
     const incr_inv_set *desc = g_struct_desc_inv;
@@ -33270,9 +33464,13 @@ incr_mark_children_positions(ns_node *parent, ns_node *added)
     GPtrArray *queue = g_ptr_array_new();
     if (desc) g_ptr_array_add(queue, (gpointer)desc);
     incr_mark_self_dirty(parent, NULL);
-    for (ns_node *c = parent->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && c != added)
+    for (ns_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || c == added) continue;
+        if (incr_node_hits_struct_flood(c))
+            ns_css_mark_restyle_dirty(c);
+        else
             incr_mark_self_dirty(c, queue);
+    }
     g_ptr_array_free(queue, TRUE);
     if (added) ns_css_mark_restyle_dirty(added);
     return TRUE;
@@ -33281,9 +33479,12 @@ incr_mark_children_positions(ns_node *parent, ns_node *added)
 static void
 incr_mark_childlist(ns_node *parent, ns_node *added)
 {
-    if (!g_struct_ready)
+    if (!g_struct_ready) {
         ns_css_mark_restyle_dirty(parent);
-    else if (incr_childlist_needs_flood(parent)) {
+        return;
+    }
+    incr_mark_empty_dependents(parent);
+    if (incr_childlist_needs_flood(parent)) {
         if (!incr_mark_children_positions(parent, added))
             ns_css_mark_restyle_dirty(parent);
     } else if (added)
@@ -33336,21 +33537,30 @@ incr_mark_following_siblings(ns_node *from)
 }
 
 static gboolean
-incr_old_class_is_sib(const char *old_value)
+class_list_has_token(const char *list, const char *tok, gsize len)
 {
-    if (!old_value || !*old_value || !g_sib_keys ||
-        g_hash_table_size(g_sib_keys) == 0)
-        return FALSE;
-    char **toks = g_strsplit_set(old_value, " \t\r\n\f", -1);
-    gboolean hit = FALSE;
-    for (int i = 0; toks && toks[i] && !hit; i++) {
-        if (!*toks[i]) continue;
-        char *key = g_strconcat(".", toks[i], NULL);
-        if (g_hash_table_contains(g_sib_keys, key)) hit = TRUE;
-        g_free(key);
+    for (const char *q = list; q && *q; ) {
+        const char *other_tok;
+        gsize other_len;
+        q = class_token_next(q, &other_tok, &other_len);
+        if (other_len == len && memcmp(other_tok, tok, len) == 0) return TRUE;
     }
-    g_strfreev(toks);
-    return hit;
+    return FALSE;
+}
+
+static gboolean
+incr_class_tokens_added_hit(const char *list, const char *other,
+                            GHashTable *keys)
+{
+    for (const char *p = list; p && *p; ) {
+        const char *tok;
+        gsize len;
+        p = class_token_next(p, &tok, &len);
+        if (len && !class_list_has_token(other, tok, len) &&
+            incr_keyset_contains(keys, '.', tok, len, FALSE))
+            return TRUE;
+    }
+    return FALSE;
 }
 
 static gboolean
@@ -33370,8 +33580,9 @@ incr_attr_key_change_is_sib(const ns_node *target, const char *name,
         return hit;
     }
     if (g_ascii_strcasecmp(name, "class") != 0) return FALSE;
-    if (incr_node_matches_keys(target, g_sib_keys)) return TRUE;
-    return incr_old_class_is_sib(old_value);
+    const char *value = ns_element_get_attr(target, "class");
+    return incr_class_tokens_added_hit(value, old_value, g_sib_keys) ||
+           incr_class_tokens_added_hit(old_value, value, g_sib_keys);
 }
 
 static gboolean
@@ -33384,18 +33595,6 @@ incr_queue_inv(GPtrArray *queue, char prefix, const char *name, gsize len)
     if (!inv || inv->whole) return FALSE;
     g_ptr_array_add(queue, inv);
     return TRUE;
-}
-
-static gboolean
-class_list_has_token(const char *list, const char *tok, gsize len)
-{
-    for (const char *q = list; q && *q; ) {
-        const char *other_tok;
-        gsize other_len;
-        q = class_token_next(q, &other_tok, &other_len);
-        if (other_len == len && memcmp(other_tok, tok, len) == 0) return TRUE;
-    }
-    return FALSE;
 }
 
 static gboolean
@@ -35739,6 +35938,243 @@ ns_css_stylesheet_from_style_element_cached(ns_node *style)
     return sh;
 }
 
+typedef struct {
+    GHashTable *keys;
+    GPtrArray  *attrs;
+    gboolean    whole;
+} incr_sheet_deps;
+
+static GHashTable *g_sheet_deps;
+static GArray     *g_incr_prev_serials;
+static guint64     g_incr_prev_ua_serial;
+static guint64     g_incr_prev_reg_serial;
+
+static void
+incr_sheet_deps_free(gpointer data)
+{
+    incr_sheet_deps *d = data;
+    g_hash_table_destroy(d->keys);
+    g_ptr_array_free(d->attrs, TRUE);
+    g_free(d);
+}
+
+static gboolean
+incr_sheet_rule_is_global(const ns_css_rule *r)
+{
+    return r->layer_name || r->container_condition || r->container_query;
+}
+
+static gboolean
+incr_sheet_is_global(const ns_css_stylesheet *sh)
+{
+    return (sh->layer_names && sh->layer_names->len > 0) ||
+           (sh->layers && g_hash_table_size(sh->layers) > 0) ||
+           (sh->property_rules && sh->property_rules->len > 0) ||
+           (sh->imports && sh->imports->len > 0) ||
+           sh->page_rule || sh->has_container_rules;
+}
+
+static void
+incr_sheet_deps_add_selector(incr_sheet_deps *d, const ns_css_selector *sel)
+{
+    GPtrArray *preds = g_ptr_array_new();
+    if (!incr_add_positive_subject_deps(d->keys, preds, sel, 0))
+        d->whole = TRUE;
+    for (guint i = 0; i < preds->len; i++) {
+        const ns_css_attr_pred *a = g_ptr_array_index(preds, i);
+        if (a->name) g_ptr_array_add(d->attrs, g_ascii_strdown(a->name, -1));
+    }
+    g_ptr_array_free(preds, TRUE);
+}
+
+static incr_sheet_deps *
+incr_sheet_deps_build(const ns_css_stylesheet *sh)
+{
+    incr_sheet_deps *d = g_new0(incr_sheet_deps, 1);
+    d->keys = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    d->attrs = g_ptr_array_new_with_free_func(g_free);
+    d->whole = incr_sheet_is_global(sh);
+    for (guint i = 0; !d->whole && sh->rules && i < sh->rules->len; i++) {
+        const ns_css_rule *r = g_ptr_array_index(sh->rules, i);
+        if (incr_sheet_rule_is_global(r)) {
+            d->whole = TRUE;
+            break;
+        }
+        for (guint si = 0; !d->whole && r->selectors &&
+                           si < r->selectors->len; si++)
+            incr_sheet_deps_add_selector(d,
+                g_ptr_array_index(r->selectors, si));
+    }
+    return d;
+}
+
+static const incr_sheet_deps *
+incr_sheet_deps_for(const ns_css_stylesheet *sh)
+{
+    if (!g_sheet_deps)
+        g_sheet_deps = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                             g_free, incr_sheet_deps_free);
+    incr_sheet_deps *d = g_hash_table_lookup(g_sheet_deps, &sh->serial);
+    if (d) return d;
+    d = incr_sheet_deps_build(sh);
+    g_hash_table_insert(g_sheet_deps, g_memdup2(&sh->serial, sizeof sh->serial),
+                        d);
+    return d;
+}
+
+static GArray *
+incr_serials_of(const ns_css_stylesheet *const *author, gsize n)
+{
+    GArray *serials = g_array_sized_new(FALSE, FALSE, sizeof(guint64),
+                                        (guint)n);
+    for (gsize i = 0; i < n; i++) {
+        guint64 serial = author[i] ? author[i]->serial : 0;
+        g_array_append_val(serials, serial);
+    }
+    return serials;
+}
+
+static gboolean
+incr_node_has_attr_named(const ns_node *n, const char *name)
+{
+    for (const ns_attr *a = n->attrs; a; a = a->next)
+        if (a->name && g_ascii_strcasecmp(a->name, name) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_node_hits_sheet_deps(const ns_node *n, GPtrArray *deps)
+{
+    for (guint i = 0; i < deps->len; i++) {
+        const incr_sheet_deps *d = g_ptr_array_index(deps, i);
+        if (incr_node_matches_keys(n, d->keys)) return TRUE;
+        for (guint a = 0; a < d->attrs->len; a++)
+            if (incr_node_has_attr_named(n, g_ptr_array_index(d->attrs, a)))
+                return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_mark_sheet_deps_walk(ns_node *n, GPtrArray *deps, guint *marked)
+{
+    if (n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_QUIRKS))
+        return FALSE;
+    if (n->kind == NS_NODE_ELEMENT && incr_node_hits_sheet_deps(n, deps)) {
+        incr_add_self_dirty(n);
+        (*marked)++;
+    }
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        if (!incr_mark_sheet_deps_walk(c, deps, marked)) return FALSE;
+    return TRUE;
+}
+
+static void
+incr_sheet_deps_prune(const GArray *live)
+{
+    if (!g_sheet_deps) return;
+    GHashTable *keep = g_hash_table_new(g_int64_hash, g_int64_equal);
+    for (guint i = 0; i < live->len; i++)
+        g_hash_table_add(keep, &g_array_index(live, guint64, i));
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, g_sheet_deps);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        if (!g_hash_table_contains(keep, key))
+            g_hash_table_iter_remove(&it);
+    g_hash_table_destroy(keep);
+}
+
+static gboolean
+incr_collect_changed_sheet_deps(const ns_css_stylesheet *const *author,
+                                const GArray *prev, const GArray *now,
+                                GPtrArray *deps)
+{
+    guint shorter = MIN(prev->len, now->len);
+    guint head = 0;
+    while (head < shorter && g_array_index(prev, guint64, head) ==
+                             g_array_index(now, guint64, head))
+        head++;
+    guint tail = 0;
+    while (tail < shorter - head &&
+           g_array_index(prev, guint64, prev->len - 1 - tail) ==
+           g_array_index(now, guint64, now->len - 1 - tail))
+        tail++;
+    for (guint i = head; i < now->len - tail; i++) {
+        if (!author[i]) continue;
+        const incr_sheet_deps *d = incr_sheet_deps_for(author[i]);
+        if (d->whole) return FALSE;
+        g_ptr_array_add(deps, (gpointer)d);
+    }
+    for (guint i = head; i < prev->len - tail; i++) {
+        guint64 serial = g_array_index(prev, guint64, i);
+        if (!serial) continue;
+        const incr_sheet_deps *d =
+            g_sheet_deps ? g_hash_table_lookup(g_sheet_deps, &serial) : NULL;
+        if (!d || d->whole) return FALSE;
+        g_ptr_array_add(deps, (gpointer)d);
+    }
+    return TRUE;
+}
+
+static gboolean
+incr_apply_sheet_change(ns_node *doc, const ns_css_stylesheet *ua,
+                        const ns_css_stylesheet *const *author, gsize n,
+                        guint *marked)
+{
+    if (!g_incr_prev_serials || !ua ||
+        ua->serial != g_incr_prev_ua_serial ||
+        ns_css_registered_property_serial() != g_incr_prev_reg_serial)
+        return FALSE;
+    GArray *now = incr_serials_of(author, n);
+    GPtrArray *deps = g_ptr_array_new();
+    gboolean ok = incr_collect_changed_sheet_deps(author, g_incr_prev_serials,
+                                                  now, deps) &&
+                  incr_mark_sheet_deps_walk(doc, deps, marked);
+    g_ptr_array_free(deps, TRUE);
+    g_array_free(now, TRUE);
+    return ok;
+}
+
+static void
+incr_remember_sheets(const ns_css_stylesheet *ua,
+                     const ns_css_stylesheet *const *author, gsize n)
+{
+    if (g_incr_prev_serials) g_array_free(g_incr_prev_serials, TRUE);
+    g_incr_prev_serials = incr_serials_of(author, n);
+    g_incr_prev_ua_serial = ua ? ua->serial : 0;
+    g_incr_prev_reg_serial = ns_css_registered_property_serial();
+    for (gsize i = 0; i < n; i++)
+        if (author[i]) (void)incr_sheet_deps_for(author[i]);
+    incr_sheet_deps_prune(g_incr_prev_serials);
+}
+
+static void
+incr_mark_newly_defined_walk(ns_node *n)
+{
+    if (n->kind == NS_NODE_ELEMENT && n->name && strchr(n->name, '-')) {
+        char *lower = g_ascii_strdown(n->name, -1);
+        gboolean hit = g_hash_table_contains(g_defined_since_restyle, lower);
+        g_free(lower);
+        if (hit) {
+            ns_css_mark_restyle_dirty(n);
+            return;
+        }
+    }
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        incr_mark_newly_defined_walk(c);
+}
+
+static void
+incr_mark_newly_defined(ns_node *doc)
+{
+    if (!g_defined_since_restyle ||
+        g_hash_table_size(g_defined_since_restyle) == 0)
+        return;
+    if (g_incr_pass_active) incr_mark_newly_defined_walk(doc);
+    g_hash_table_remove_all(g_defined_since_restyle);
+}
+
 static gboolean
 incr_prev_update_in_place(GHashTable *out)
 {
@@ -35839,10 +36275,12 @@ ns_css_compute(ns_node *doc,
     ns_css_selector_batch_begin();
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
+    gboolean has_reset = FALSE;
     if (sig != g_incr_has_sig) {
         gboolean extend = g_has_anchors && g_has_serials &&
             g_hash_table_size(g_has_serials) <= 2 * (n_sheets + 1) + 64;
         if (!extend) {
+            has_reset = TRUE;
             g_has_anchor_gen++;
             if (g_has_anchors) g_ptr_array_set_size(g_has_anchors, 0);
             else g_has_anchors =
@@ -35870,17 +36308,24 @@ ns_css_compute(ns_node *doc,
         && fabs(g_incr_zoom - 1.0) <= 0.001;
     gboolean incr_want = incr_usable;
     guint64 cq_sig = cq_map_signature(g_cq_map);
+    gboolean struct_kept =
+        incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
-        && g_incr_prev_sig == sig
         && g_incr_prev_cq_sig == cq_sig
         && g_css_focus_node == g_incr_prev_focus
         && g_css_hover_node == g_incr_prev_hover
         && g_css_active_node == g_incr_prev_active
         && g_css_fullscreen_node == g_incr_prev_fullscreen;
+    guint sheet_marked = 0;
+    if (g_incr_pass_active && g_incr_prev_sig != sig)
+        g_incr_pass_active = struct_kept && !has_reset &&
+            incr_apply_sheet_change(doc, cached_ua, author_sheets, n_sheets,
+                                    &sheet_marked);
     g_incr_reused = 0;
     g_incr_recomputed = 0;
+    incr_mark_newly_defined(doc);
     incr_mark_loose_has_subjects(doc);
     if (g_incr_walk_needed) g_hash_table_remove_all(g_incr_walk_needed);
     if (g_incr_pass_active) incr_walk_needed_build();
@@ -35889,8 +36334,6 @@ ns_css_compute(ns_node *doc,
     g_cascade_parent_node = NULL;
     if (!g_incr_changed) g_incr_changed = g_ptr_array_new();
     g_ptr_array_set_size(g_incr_changed, 0);
-
-    incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
 
     memset(g_ancestor_filter, 0, sizeof g_ancestor_filter);
     g_ancestor_filter_active = TRUE;
@@ -35923,14 +36366,17 @@ ns_css_compute(ns_node *doc,
         }
         g_incr_prev_doc = doc;
         g_incr_prev_sig = sig;
+        incr_remember_sheets(cached_ua, author_sheets, n_sheets);
         g_incr_prev_cq_sig = cq_sig;
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;
         g_incr_prev_fullscreen = g_css_fullscreen_node;
         if (g_getenv("NS_PROFILE"))
-            g_printerr("[incr] active=%d reused=%u recomputed=%u\n",
-                       g_incr_pass_active, g_incr_reused, g_incr_recomputed);
+            g_printerr("[incr] active=%d reused=%u recomputed=%u "
+                       "sheet_marked=%u\n",
+                       g_incr_pass_active, g_incr_reused, g_incr_recomputed,
+                       sheet_marked);
     } else if (g_incr_prev_styles && !incr_usable) {
         g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = NULL;

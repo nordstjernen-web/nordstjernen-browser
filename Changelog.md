@@ -3,6 +3,22 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: adding or removing a stylesheet no longer restyles the whole
+  document. The cascade compares the sheet list with the previous pass
+  and restyles only the elements the changed sheets' selectors can
+  match (by id, class, attribute or tag of each selector's subject);
+  sheets with `@layer`, `@property`, `@import`, `@container` or a
+  selector without such a key still restyle everything. Sibling
+  invalidation now follows selectors nested in `:is()`/`:not()` and
+  `:nth-child(… of …)` instead of treating any of them as "every
+  attribute change restyles the following siblings", and a class change
+  counts only the classes that were added or removed. Inserting a child
+  floods only the children whose position-dependent compound can match.
+  Two invalidation gaps are closed: `customElements.define()` restyles
+  the elements it defines (`:defined`), and a child-list change restyles
+  the following siblings of an element used as `X:empty + Y`. On a
+  YouTube watch page the full restyles during start-up drop from ~20 to
+  ~5 and cascade time from ~1.7 s to ~0.6 s.
 * Release: a version tag now builds the macOS `.dmg` too. `release.yml`
   calls `macos.yml` in release mode, which requires the Developer ID and
   notarisation secrets, fails on any signing or notarisation error
