@@ -69,12 +69,26 @@ typedef struct ns_anim_script_timing {
     const char *direction;
     const char *fill;
     const char *easing;
+    const char *composite;
 } ns_anim_script_timing;
 gboolean ns_anim_script_start(ns_anim *a, const ns_node *node,
                               const char *const *stop_css, const double *stop_pct,
                               int n_stops, const ns_anim_script_timing *t,
                               int *out_prop, guint *out_generation);
 void     ns_anim_prune(ns_anim *a, GHashTable *live);
+gboolean ns_anim_is_scroll_source(const ns_anim *a, const ns_node *node);
+gboolean ns_anim_scroll_needs_sync(const ns_anim *a, guint epoch);
+gboolean ns_anim_scroll_fresh(const ns_anim *a);
+gboolean ns_anim_scroll_uses_root(const ns_anim *a);
+gboolean ns_anim_scroll_has_sources(const ns_anim *a);
+void     ns_anim_scroll_reset(ns_anim *a, guint epoch);
+void     ns_anim_note_scroll(ns_anim *a, const ns_node *node, double x,
+                             double y, double max_x, double max_y);
+gboolean ns_anim_scroll_resample(ns_anim *a, gboolean *out_layout);
+typedef gboolean (*ns_anim_scroll_lookup_cb)(const ns_node *node, double pos[2],
+                                             double max[2], gpointer user);
+void     ns_anim_set_scroll_lookup(ns_anim *a, ns_anim_scroll_lookup_cb cb,
+                                   gpointer user);
 void     ns_anim_rebase(ns_anim *a, gint64 base_us);
 G_END_DECLS
 #endif

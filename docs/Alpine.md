@@ -2,7 +2,7 @@
 
 `data/packaging/APKBUILD` builds Nordstjernen from source on Alpine
 (musl) with `abuild`. It produces a minimal package: the `nordstjernen`,
-`nordstjernen-renderer`, `nordstjernen-audio` and `nordstjernen-video`
+`nordstjernen-renderer` and `nordstjernen-audio`
 binaries plus icons, the desktop file, the
 i18n catalogues and the license texts — **nothing is bundled**. Every runtime
 library (GTK 4, libcurl, OpenSSL, libwebp, libavif, FFmpeg, poppler-glib, …)

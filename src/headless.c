@@ -779,6 +779,37 @@ headless_video_event(const void *node, const char *kind, double value,
 }
 
 static gboolean
+headless_media_seek(const void *node, double seconds, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    return cache && ns_video_cache_seek_node(cache, node, seconds,
+                                             g_get_monotonic_time());
+}
+
+static void
+headless_media_play(const void *node, gboolean play, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache)
+        ns_video_cache_set_node_playing(cache, node, play,
+                                        g_get_monotonic_time());
+}
+
+static void
+headless_media_muted(const void *node, gboolean muted, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache) ns_video_cache_set_node_muted(cache, node, muted);
+}
+
+static void
+headless_media_volume(const void *node, double volume, gpointer ud)
+{
+    ns_video_cache *cache = ud;
+    if (cache) ns_video_cache_set_node_volume(cache, node, volume);
+}
+
+static gboolean
 headless_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
                   gboolean eos, gpointer ud)
 {
@@ -792,14 +823,15 @@ headless_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
 }
 
 static double
-headless_mse_buffered(guint stream_id, char kind, double *start, gpointer ud)
+headless_mse_buffered(guint stream_id, char kind, int index, double *start,
+                      gpointer ud)
 {
     ns_video_cache *cache = ud;
     if (!cache) {
         if (start) *start = 0.0;
         return 0.0;
     }
-    return ns_video_cache_mse_buffered(cache, stream_id, kind, start);
+    return ns_video_cache_mse_buffered(cache, stream_id, kind, index, start);
 }
 
 static gboolean
@@ -844,6 +876,7 @@ typedef struct headless_flush_ctx {
     gsize              caret;
     gsize              anchor;
     gboolean           relaying;
+    gboolean           scroll_pass;
     GHashTable        *retired_styles;
     guint64            styles_serial;
     guint64            layout_serial;
@@ -859,6 +892,20 @@ headless_focus(const headless_flush_ctx *c)
     return focused ? focused : c->focused;
 }
 
+static void headless_relayout(headless_flush_ctx *c);
+
+static void
+headless_relayout_scroll_pass(headless_flush_ctx *c)
+{
+    gboolean layout = FALSE;
+    if (c->scroll_pass || !ns_anim_scroll_fresh(c->anim) ||
+        !ns_engine_anim_scroll_sync(c->anim, *c->layout, c->vw, c->vh, &layout))
+        return;
+    c->scroll_pass = TRUE;
+    headless_relayout(c);
+    c->scroll_pass = FALSE;
+}
+
 static void
 headless_relayout(headless_flush_ctx *c)
 {
@@ -869,6 +916,7 @@ headless_relayout(headless_flush_ctx *c)
     }
     c->relaying = TRUE;
     if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
+    GHashTable *scroll_save = ns_box_scroll_save(*c->layout);
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
     if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
     g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
@@ -879,9 +927,11 @@ headless_relayout(headless_flush_ctx *c)
                                     c->image_cache, c->anim, c->js,
                                     c->css_cache, headless_focus(c), NULL,
                                     c->caret, c->anchor, c->layout);
+    ns_box_scroll_restore(*c->layout, scroll_save);
     c->relaying = FALSE;
     c->layout_serial++;
     c->styles_serial = c->js ? ns_js_mutation_serial(c->js) : 0;
+    headless_relayout_scroll_pass(c);
 }
 
 static void
@@ -905,8 +955,11 @@ headless_stream_images(headless_flush_ctx *c)
     if (!c->image_sessions)
         c->image_sessions = g_ptr_array_new_with_free_func(
             (GDestroyNotify)ns_engine_img_session_close);
+    g_autofree char *img_base = ns_js_base_url_for_document(c->js, c->doc,
+                                                            c->base);
     ns_engine_img_session *session =
-        ns_engine_fetch_images_start(*c->layout, c->base, c->image_cache,
+        ns_engine_fetch_images_start(*c->layout, img_base ? img_base : c->base,
+                                     c->image_cache,
                                      c->images_requested, 0.0, c->vh, NULL,
                                      headless_image_arrived, c);
     if (session) g_ptr_array_add(c->image_sessions, session);
@@ -917,6 +970,16 @@ headless_stop_images(headless_flush_ctx *c)
 {
     g_clear_pointer(&c->image_sessions, g_ptr_array_unref);
     g_clear_pointer(&c->images_requested, g_hash_table_destroy);
+}
+
+static void
+headless_sync_scroll_timelines(headless_flush_ctx *fc)
+{
+    gboolean layout = FALSE;
+    if (!ns_engine_anim_scroll_sync(fc->anim, *fc->layout, fc->vw, fc->vh, &layout))
+        return;
+    g_headless_styles_stale = TRUE;
+    if (layout) g_headless_layout_dirty = TRUE;
 }
 
 static void headless_flush_layout(gpointer ud);
@@ -985,6 +1048,7 @@ settle_tick_media(headless_flush_ctx *fc, gint64 now)
 static gboolean
 settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
 {
+    headless_sync_scroll_timelines(fc);
     if (fc->anim && ns_anim_tick(fc->anim, now)) {
         g_headless_styles_stale = TRUE;
         if (ns_anim_needs_layout(fc->anim)) g_headless_layout_dirty = TRUE;
@@ -1023,6 +1087,7 @@ static gboolean
 settle_raf_tick(gpointer user_data)
 {
     settle_state *s = user_data;
+    if (ns_js_page_busy(s->fc->js)) return G_SOURCE_CONTINUE;
     gint64 now = g_get_monotonic_time();
     settle_tick_media(s->fc, now);
     if (settle_tick_scripts(s->fc, now)) s->pending_mutation = TRUE;
@@ -1080,7 +1145,8 @@ static gboolean
 wpt_poll_cb(gpointer user_data)
 {
     wpt_wait_state *w = user_data;
-    if (!wpt_results_ready(w->fc->js)) return G_SOURCE_CONTINUE;
+    if (ns_js_page_busy(w->fc->js) || !wpt_results_ready(w->fc->js))
+        return G_SOURCE_CONTINUE;
     w->done = TRUE;
     g_main_loop_quit(w->loop);
     return G_SOURCE_REMOVE;
@@ -2241,6 +2307,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_video_cache *video_cache = ns_video_cache_new();
     ns_box *layout = NULL;
+    ns_engine_anim_track_layout(anim, &layout);
     const char *flush_base = resp->final_url ? resp->final_url : opts->url;
     headless_flush_ctx flush_ctx = {
         .doc = doc, .js = js, .base = flush_base, .vw = vw, .vh = vh,
@@ -2259,6 +2326,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_mse_remove_cb(js, headless_mse_remove, video_cache);
         ns_js_set_mse_bytes_cb(js, headless_mse_bytes, video_cache);
         ns_js_set_media_frame_cb(js, headless_media_frame, video_cache);
+        ns_js_set_media_seek_cb(js, headless_media_seek, video_cache);
+        ns_js_set_media_play_cb(js, headless_media_play, video_cache);
+        ns_js_set_media_muted_cb(js, headless_media_muted, video_cache);
+        ns_js_set_media_volume_cb(js, headless_media_volume, video_cache);
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);

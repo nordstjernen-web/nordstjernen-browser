@@ -122,7 +122,6 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 %{_bindir}/nordstjernen
 %{_bindir}/nordstjernen-renderer
 %{_bindir}/nordstjernen-audio
-%{_bindir}/nordstjernen-video
 %{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 %{_datadir}/metainfo/org.nordstjernen.WebBrowser.metainfo.xml
 %{_datadir}/%{name}/

@@ -636,55 +636,6 @@ ns_canvas_color_string(const char *css)
                              (guint8)round(b * 255), (guint8)round(a * 255));
 }
 
-static const char *
-ns_skip_spaces(const char *p)
-{
-    while (g_ascii_isspace(*p)) p++;
-    return p;
-}
-
-static gboolean
-ns_filter_name_known(const char *name, gsize n)
-{
-    static const char *const names[] = {
-        "blur", "brightness", "contrast", "drop-shadow", "grayscale",
-        "hue-rotate", "invert", "opacity", "saturate", "sepia", "url",
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
-        if (strlen(names[i]) == n && g_ascii_strncasecmp(name, names[i], n) == 0)
-            return TRUE;
-    return FALSE;
-}
-
-static const char *
-ns_filter_skip_arguments(const char *p)
-{
-    int depth = 0;
-    for (; *p; p++) {
-        if (*p == '(') depth++;
-        else if (*p == ')' && --depth == 0) return p + 1;
-    }
-    return NULL;
-}
-
-static gboolean
-ns_filter_valid(const char *s)
-{
-    const char *p = ns_skip_spaces(s);
-    if (!*p) return FALSE;
-    if (g_ascii_strncasecmp(p, "none", 4) == 0)
-        return !*ns_skip_spaces(p + 4);
-    while (*p) {
-        const char *start = p;
-        while (g_ascii_isalpha(*p) || *p == '-') p++;
-        if (!ns_filter_name_known(start, (gsize)(p - start)) || *p != '(') return FALSE;
-        p = ns_filter_skip_arguments(p);
-        if (!p) return FALSE;
-        p = ns_skip_spaces(p);
-    }
-    return TRUE;
-}
-
 static gboolean
 ns_length_valid(const char *s)
 {
@@ -744,7 +695,8 @@ ns_assign_string_value(JSContext *ctx, JSValueConst owner, const ns_attr_def *a,
     switch (a->type) {
     case NS_AT_COLOR:  return ns_canvas_color_for(ctx, owner, s);
     case NS_AT_FONT:   return ns_canvas_font_string(s);
-    case NS_AT_FILTER: return ns_filter_valid(s) ? g_strstrip(g_strdup(s)) : NULL;
+    case NS_AT_FILTER:
+        return ns_css_filter_list_valid(s) ? g_strstrip(g_strdup(s)) : NULL;
     case NS_AT_LENGTH: return ns_length_valid(s) ? g_ascii_strdown(s, -1) : NULL;
     case NS_AT_ENUM:   return ns_enum_has(a->values, s) ? g_strdup(s) : NULL;
     default:           return g_strdup(s);

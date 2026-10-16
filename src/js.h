@@ -39,7 +39,7 @@ typedef gboolean (*ns_js_mse_cb)(guint stream_id, char kind,
                                  const guint8 *data, gsize len, gboolean eos,
                                  gpointer user_data);
 typedef double (*ns_js_mse_buffered_cb)(guint stream_id, char kind,
-                                         double *start,
+                                         int index, double *start,
                                          gpointer user_data);
 typedef gboolean (*ns_js_mse_remove_cb)(guint stream_id, char kind,
                                         double start, double end,
@@ -134,6 +134,8 @@ void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer use
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
 gboolean ns_js_csp_form_action_allowed(const ns_js *js, const char *action_url);
+char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
+                                     const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
 void   ns_js_dispatch_hashchange(ns_js *js,
@@ -141,6 +143,7 @@ void   ns_js_dispatch_hashchange(ns_js *js,
 void   ns_js_free(ns_js *js);
 
 gboolean ns_js_in_pump(const ns_js *js);
+gboolean ns_js_page_busy(const ns_js *js);
 
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url);
 
