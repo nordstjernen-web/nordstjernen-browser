@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a `line-height` given as `calc()` with a length
+  (`calc(0.0625rem * 24)`, `calc(1.5em)`, `calc(150%)`) sets the
+  line height. Such values fell back to `normal`, while
+  `getComputedStyle` reported the right value. Booking.com sets its
+  line heights this way, so its text lines were laid out at the font's
+  normal height: a two-line hotel name was 38px tall instead of 48px.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
