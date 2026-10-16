@@ -23,6 +23,12 @@ Changelog:
   rectangle, drawn 4px up and left of the box when the video had a
   margin. A video that had not loaded, or failed to, covered The
   Guardian's video cards and Apple's product tiles with a black panel.
+* DOM: an empty inline element (`<span></span>`, an empty link)
+  reports a zero-width rectangle at its place in the line from
+  `getBoundingClientRect()` and `getClientRects()`, as tall as its
+  font. It used to report an empty rectangle at the page's top-left
+  corner, so scripts that measure such markers (Wikipedia's citation
+  metadata spans, scroll anchors) saw them at 0,0.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
