@@ -418,6 +418,7 @@ double ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx,
 void     ns_webaudio_rt_free(ns_js *js);
 void ns_js_promise_reject(JSContext *ctx, JSValue resolvers[2], const char *message);
 JSValue ns_make_element(JSContext *ctx, const ns_node *cnode);
+JSValue ns_js_realm_event(JSContext *ctx, JSValueConst target, const char *type);
 const ns_node *ns_unwrap_element(JSValueConst val);
 
 /* Canvas API implemented in js_canvas.c */
