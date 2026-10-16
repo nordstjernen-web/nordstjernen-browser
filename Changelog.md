@@ -82,6 +82,12 @@ Changelog:
   served as `charset=iso-8859-1` with an accented letter failed whole with
   "invalid UTF-8 sequence": ESPN's Spanish-language i18n script, and the
   scripts that depend on it, never ran. Module scripts stay UTF-8.
+* DOM: `URLSearchParams.prototype.forEach` walks the live list, so an
+  entry deleted or added inside the callback changes the rest of the loop,
+  as the specification and other browsers do. It walked a copy, which
+  failed core-js's feature test (delete during forEach must give "a1c3"):
+  core-js then replaced `URLSearchParams` with its polyfill, and Roblox's
+  page threw "Incorrect invocation" from it.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
