@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* SVG: icons drawn through `<use>` take `currentColor` from where they are
+  used. A sprite's `<symbol>` lives in a hidden `<svg>`, and its paths
+  resolved `fill="currentColor"` against that tree's colour, so every
+  sprite icon (Bootstrap, svelte.dev and most icon sets) came out black
+  instead of in the colour of the link or button around it.
 * Layout: images and SVGs sized with `calc()` contribute that size to grid
   and table tracks. The min-content contribution of a replaced element read
   only its laid-out width and fell back to 200px, so Tailwind's `size-4`

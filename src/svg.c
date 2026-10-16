@@ -73,6 +73,7 @@ typedef struct {
     GHashTable    *styles;
     GHashTable    *ids;
     int            depth;
+    int            use_depth;
     int            nesting;
     int            nodes;
     double         vw, vh;
@@ -415,7 +416,14 @@ svg_apply_css_paint(svg_state *st, const ns_style *s, ns_css_prop prop,
 {
     const ns_css_value *v = s->values[prop];
     if (!v) return;
-    if (v->kind == NS_CSS_V_COLOR) {
+    if (v->kind == NS_CSS_V_COLOR && ns_style_prop_from_currentcolor(s, prop)) {
+        svg_paint_clear(out);
+        out->kind = SVG_PAINT_COLOR;
+        out->r = st->color_r;
+        out->g = st->color_g;
+        out->b = st->color_b;
+        out->a = st->color_a;
+    } else if (v->kind == NS_CSS_V_COLOR) {
         svg_paint_clear(out);
         out->kind = SVG_PAINT_COLOR;
         out->r = v->u.color.r / 255.0;
@@ -441,6 +449,20 @@ svg_css_number(const ns_style *s, ns_css_prop prop, double basis,
     return ns_css_length_or(v, fallback);
 }
 
+static gboolean
+svg_color_inherited_outside_instance(svg_ctx *ctx, const ns_node *n,
+                                     const ns_css_value *color)
+{
+    if (ctx->use_depth == 0 || !n->parent) return FALSE;
+    const ns_style *ps = g_hash_table_lookup(ctx->styles, (gpointer)n->parent);
+    const ns_css_value *pc = ps ? ps->values[NS_CSS_COLOR] : NULL;
+    return pc && pc->kind == NS_CSS_V_COLOR &&
+           pc->u.color.r == color->u.color.r &&
+           pc->u.color.g == color->u.color.g &&
+           pc->u.color.b == color->u.color.b &&
+           pc->u.color.a == color->u.color.a;
+}
+
 static void
 svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
 {
@@ -452,10 +474,13 @@ svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
 
     if (s && s->values[NS_CSS_COLOR] &&
         s->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR) {
-        st->color_r = s->values[NS_CSS_COLOR]->u.color.r / 255.0;
-        st->color_g = s->values[NS_CSS_COLOR]->u.color.g / 255.0;
-        st->color_b = s->values[NS_CSS_COLOR]->u.color.b / 255.0;
-        st->color_a = s->values[NS_CSS_COLOR]->u.color.a / 255.0;
+        if (!svg_color_inherited_outside_instance(ctx, n,
+                                                  s->values[NS_CSS_COLOR])) {
+            st->color_r = s->values[NS_CSS_COLOR]->u.color.r / 255.0;
+            st->color_g = s->values[NS_CSS_COLOR]->u.color.g / 255.0;
+            st->color_b = s->values[NS_CSS_COLOR]->u.color.b / 255.0;
+            st->color_a = s->values[NS_CSS_COLOR]->u.color.a / 255.0;
+        }
     } else {
         const char *col = svg_prop(n, "color");
         guint8 r, g, b, a;
@@ -1889,6 +1914,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
             cairo_translate(cr, x, y);
             ctx->depth++;
+            ctx->use_depth++;
             if (t->name && strcmp(t->name, "symbol") == 0) {
                 double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
                 double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
@@ -1902,6 +1928,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             } else {
                 svg_render_node(ctx, t, &st);
             }
+            ctx->use_depth--;
             ctx->depth--;
         }
     } else if (strcmp(tag, "foreignObject") == 0) {
