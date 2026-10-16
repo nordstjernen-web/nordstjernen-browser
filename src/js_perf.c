@@ -29,6 +29,7 @@ typedef struct ns_perf_entry {
     double connect_start, connect_end, secure_connection_start;
     double request_start, response_start, response_end;
     gboolean render_blocking;
+    gboolean preload_unclaimed;
     /* The realm of the document whose performance timeline holds the
      * entry; frames have timelines of their own. */
     gconstpointer realm;
@@ -554,6 +555,24 @@ ns_perf_resource_timing_allowed(const ns_perf_resource_info *info,
  * resource came over the network, the response's own phase timings.  A
  * cross-origin resource that fails the timing allow check keeps only its
  * start and end, as other browsers do. */
+static gboolean
+ns_perf_resource_skipped(ns_js *js, const ns_perf_resource_info *info,
+                         const char *url)
+{
+    if (ns_perf_url_untimed(url)) return TRUE;
+    if (!info || info->preload) return FALSE;
+    gconstpointer key = ns_perf_realm_key(js, info->timeline);
+    for (guint i = 0; i < js->perf_entries->len; i++) {
+        ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
+        if (e && e->preload_unclaimed && e->realm == key &&
+            g_strcmp0(e->name, url) == 0) {
+            e->preload_unclaimed = FALSE;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 void
 ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
                            const char *url, const char *initiator,
@@ -562,7 +581,9 @@ ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
 {
     static const ns_perf_resource_info no_info = { 0 };
     if (!info) info = &no_info;
-    if (!js || !js->perf_entries || !url || ns_perf_url_untimed(url)) return;
+    if (!js || !js->perf_entries || !url ||
+        ns_perf_resource_skipped(js, info, url))
+        return;
     if (js->perf_entries->len >= NS_PERF_ENTRY_CAP)
         g_ptr_array_remove_index(js->perf_entries, 0);
     ns_perf_entry *e = g_new0(ns_perf_entry, 1);
@@ -572,6 +593,7 @@ ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
     e->type = g_strdup("resource");
     e->initiator_type = g_strdup(initiator ? initiator : "other");
     e->render_blocking = info->render_blocking;
+    e->preload_unclaimed = info->preload;
     e->start_time = ns_perf_relative_ms(start_us, origin);
     double end = ns_perf_relative_ms(MAX(end_us, start_us), origin);
     e->duration = end - e->start_time;

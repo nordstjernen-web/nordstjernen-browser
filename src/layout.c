@@ -4943,6 +4943,12 @@ srcset_select(const char *srcset, const char *sizes, const char *src,
     return url;
 }
 
+char *
+ns_layout_select_srcset(const char *srcset, const char *sizes)
+{
+    return srcset_select(srcset, sizes, NULL, NULL);
+}
+
 static gboolean
 srcset_has_width_descriptor(const char *srcset)
 {

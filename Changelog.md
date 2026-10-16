@@ -104,6 +104,20 @@ Changelog:
   one: YouTube's embed defines `writeEmbed` in a promise callback and calls
   it from the next inline script, so every embedded YouTube player (on AP
   News and most news sites) stayed black with "writeEmbed is not defined".
+* DOM: `<link rel="preload">` loads for every known `as` (style,
+  script, font, image, track, fetch), not only `style`, in the
+  background, and reuses what the engine's preloader already fetched; a
+  preload that becomes a stylesheet takes its `load` from the preload's
+  response and keeps one resource timing entry. A `media` that does not
+  match or a `type` the `as` cannot use skips the preload without an
+  event, CSP (with the element's nonce) and mixed-content blocking give
+  `error`, and `fetch` and `track` preloads load on any HTTP response,
+  the others on a 2xx status, each link by its own rule when two links
+  share one fetch. A link also loads again when it is inserted again;
+  switching `rel` back from `stylesheet` to `preload` fetches nothing,
+  so a handler that toggles `rel` cannot loop. An `as=image` preload
+  with only `imagesrcset` loads the chosen candidate, and a preload does
+  not hold back the window `load` event.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
