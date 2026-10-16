@@ -20,6 +20,12 @@
 #include "net.h"
 #include "video_decode.h"
 
+#define NS_VIDEO_AHEAD_MIN_S      0.12
+#define NS_VIDEO_AHEAD_MAX_S      1.50
+#define NS_VIDEO_STALL_DECAY_S    8.0
+#define NS_VIDEO_AHEAD_BYTES      (64u * 1024u * 1024u)
+#define NS_VIDEO_PREROLL_MAX_US   G_GINT64_CONSTANT(2000000)
+
 #define NS_VIDEO_MAX_BYTES (256u * 1024u * 1024u)
 
 typedef struct ns_vtt_cue {
@@ -177,6 +183,7 @@ struct ns_video_cache {
     guint             next_seq;
     guint             layout_note_gen;
     guint             discover_gen;
+    guint             layer_gen;
 };
 
 typedef struct ns_pending {
@@ -2082,6 +2089,75 @@ ns_video_track_frame_size(ns_video *v, GArray *emits)
     ns_video_queue_emit(emits, v, "vheight", (double)h);
 }
 
+static void
+ns_video_note_tick_gap(ns_video *v, gint64 now_us)
+{
+    if (v->last_tick_us > 0 && now_us > v->last_tick_us) {
+        double gap = (double)(now_us - v->last_tick_us) / 1e6;
+        v->stall_peak_s *= exp(-gap / NS_VIDEO_STALL_DECAY_S);
+        if (gap > v->stall_peak_s) v->stall_peak_s = MIN(gap, 10.0);
+    }
+    v->last_tick_us = now_us;
+}
+
+static double
+ns_video_ahead_seconds(const ns_video *v)
+{
+    return CLAMP(v->stall_peak_s * 1.5, NS_VIDEO_AHEAD_MIN_S,
+                 NS_VIDEO_AHEAD_MAX_S);
+}
+
+static guint
+ns_video_ahead_frames(const ns_video *v)
+{
+    int w = v->frame_texture ? ns_texture_get_width(v->frame_texture) : 0;
+    int h = v->frame_texture ? ns_texture_get_height(v->frame_texture) : 0;
+    gsize bytes = w > 0 && h > 0 ? (gsize)w * (gsize)h * 4u : 0;
+    gsize fit = bytes ? NS_VIDEO_AHEAD_BYTES / bytes : NS_VIDEO_LAYER_FRAMES;
+    return (guint)CLAMP(fit, 2, NS_VIDEO_LAYER_FRAMES - 1);
+}
+
+static void
+ns_video_prefetch(ns_video *v, double t)
+{
+    ns_video_player_prefetch(v->player, t + ns_video_ahead_seconds(v),
+                             ns_video_ahead_frames(v));
+}
+
+static gboolean
+ns_video_preroll(ns_video *v, gint64 now_us, gboolean *changed)
+{
+    if (v->prerolled || v->loop) return TRUE;
+    if (!v->preroll_since_us) v->preroll_since_us = now_us;
+    ns_texture *frame = ns_video_player_frame_at(v->player, v->cur_time,
+                                                 FALSE, NULL);
+    if (frame) {
+        ns_texture_unref(v->frame_texture);
+        v->frame_texture = ns_texture_ref(frame);
+        *changed = TRUE;
+    }
+    ns_video_prefetch(v, v->cur_time);
+    double ahead = -1.0;
+    ns_texture *tex = NULL;
+    double pts = 0.0;
+    guint queued = 0;
+    while (ns_video_player_upcoming(v->player, queued, &tex, &pts)) {
+        ahead = pts;
+        queued++;
+    }
+    gboolean ready = queued >= ns_video_ahead_frames(v) ||
+                     ahead >= v->cur_time + ns_video_ahead_seconds(v) * 0.9 ||
+                     now_us - v->preroll_since_us > NS_VIDEO_PREROLL_MAX_US;
+    if (!ready) {
+        v->base_us = now_us - (gint64)(v->cur_time * 1e6);
+        v->prev_tick_time = v->cur_time;
+        return FALSE;
+    }
+    v->prerolled = TRUE;
+    v->base_us = now_us - (gint64)(v->cur_time * 1e6);
+    return TRUE;
+}
+
 gboolean
 ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
 {
@@ -2162,7 +2238,12 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
                 ns_video_queue_emit(emits, v, "buf", buffered_end);
             }
         }
-        if (!v->playing) continue;
+        if (!v->playing) {
+            v->last_tick_us = 0;
+            continue;
+        }
+        ns_video_note_tick_gap(v, now_us);
+        if (!ns_video_preroll(v, now_us, &changed)) continue;
 
         if (!v->audio_opened && !v->muted &&
             (v->has_audio || v->audio_file)) {
@@ -2229,13 +2310,15 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (frame) {
             ns_texture_unref(v->frame_texture);
             v->frame_texture = ns_texture_ref(frame);
-            changed = TRUE;
+            if (!ns_video_is_layered(cache, v)) changed = TRUE;
             if (v->stalled) {
                 v->stalled = FALSE;
                 ns_video_queue_emit(emits, v, "resumed", t);
             }
         }
         v->cur_time = t;
+        if (!v->loop && ns_video_is_layered(cache, v))
+            ns_video_prefetch(v, t);
         if (t - v->last_emit_time >= 0.20 || ended) {
             v->last_emit_time = t;
             ns_video_queue_emit(emits, v, "pos", v->cur_time);
@@ -2285,6 +2368,78 @@ ns_video_cache_waiting_growth(const ns_video_cache *cache)
         if (v->playing && v->stalled) return TRUE;
     }
     return FALSE;
+}
+
+void
+ns_video_cache_set_layer_gen(ns_video_cache *cache, guint gen)
+{
+    if (cache) cache->layer_gen = gen;
+}
+
+guint
+ns_video_cache_layer_gen(const ns_video_cache *cache)
+{
+    return cache ? cache->layer_gen : 0;
+}
+
+gboolean
+ns_video_is_layered(const ns_video_cache *cache, const ns_video *v)
+{
+    return cache && v && cache->layer_gen != 0 &&
+           v->layer_gen == cache->layer_gen && v->frame_texture;
+}
+
+guint
+ns_video_layer_frames(const ns_video *v, ns_video_frame_ref *out, guint max)
+{
+    if (!v || !v->frame_texture || max == 0) return 0;
+    out[0].tex = v->frame_texture;
+    out[0].serial = ns_video_player_current_serial(v->player);
+    out[0].deadline_us = v->base_us + (gint64)(v->cur_time * 1e6);
+    guint n = 1;
+    if (!v->playing || v->loop || v->base_us == 0) return n;
+    for (guint i = 0; n < max; i++) {
+        ns_texture *tex = NULL;
+        double pts = 0.0;
+        guint serial = ns_video_player_upcoming(v->player, i, &tex, &pts);
+        if (!serial || !tex) break;
+        out[n].tex = tex;
+        out[n].serial = serial;
+        out[n].deadline_us = v->base_us + (gint64)(pts * 1e6);
+        n++;
+    }
+    return n;
+}
+
+gboolean
+ns_video_cache_layer_frames_pending(ns_video_cache *cache)
+{
+    if (!cache) return FALSE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (!ns_video_is_layered(cache, v)) continue;
+        ns_video_frame_ref frames[NS_VIDEO_LAYER_FRAMES];
+        guint n = ns_video_layer_frames(v, frames, NS_VIDEO_LAYER_FRAMES);
+        for (guint i = 0; i < n; i++)
+            if (frames[i].serial > v->layer_sent_serial) return TRUE;
+    }
+    return FALSE;
+}
+
+void
+ns_video_cache_foreach_layered(ns_video_cache *cache,
+                               void (*fn)(ns_video *v, gpointer data),
+                               gpointer data)
+{
+    if (!cache || !fn) return;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val))
+        if (ns_video_is_layered(cache, val)) fn(val, data);
 }
 
 gboolean

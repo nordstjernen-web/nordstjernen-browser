@@ -5,6 +5,7 @@
 #include "renderer_serve.h"
 #include "libnordstjernen.h"
 #include "renderer_tiles.h"
+#include "layers.h"
 #include "print.h"
 #include "proc_limits.h"
 #include "net.h"
@@ -744,6 +745,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         }
         int changed = session_tick(s);
         if (changed) s->frame_valid = 0;
+        else if (ns_browser_video_layer_frames_pending(s->cur)) changed = 1;
         char *nav = ns_browser_take_pending_nav(s->cur);
         if (nav) {
             for (char *p = nav; *p; p++)

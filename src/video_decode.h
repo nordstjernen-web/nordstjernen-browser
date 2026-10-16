@@ -32,6 +32,11 @@ gboolean ns_video_player_extend(ns_video_player *player, const guint8 *bytes,
 
 ns_texture *ns_video_player_frame_at(ns_video_player *player, double seconds,
                                      gboolean loop, gboolean *out_ended);
+void   ns_video_player_prefetch(ns_video_player *player, double until,
+                                guint max_frames);
+guint  ns_video_player_current_serial(const ns_video_player *player);
+guint  ns_video_player_upcoming(const ns_video_player *player, guint index,
+                                ns_texture **out_tex, double *out_pts);
 
 
 G_END_DECLS

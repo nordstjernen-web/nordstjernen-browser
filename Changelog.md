@@ -36,6 +36,18 @@ Changelog:
   without `type` or `data`, and a worker whose `ErrorEvent` is gone
   still runs `self.onerror`; ChatGPT's answer worker never replied and
   the page spun until its scripts were halted.
+* Media: a playing video is composited by the window as its own layer
+  instead of being painted into the page tiles. The page tile under the
+  video is left transparent, so captions and player controls drawn on
+  top still blend over it, and a new video frame no longer repaints the
+  page. The renderer decodes ahead and hands the window a queue of
+  frames with their display times on the shared monotonic clock; the
+  window shows the due frame at every vsync, so a busy page (layout,
+  scripts, tile repaints) no longer stalls the picture. How far it
+  decodes ahead adapts to how long the renderer has recently stalled,
+  within a memory budget, and playback starts once that queue is
+  filled. YouTube went from about 3 to a steady 25 frames per second
+  and keeps its 720p stream instead of dropping to 360p.
 * Layout: a table cell lays out its content as a block formatting
   context, so a float inside a cell shrinks to fit and sits beside the
   text, and sibling margins collapse. A styled cell used to stack its

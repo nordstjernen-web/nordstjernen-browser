@@ -2435,15 +2435,59 @@ ns_browser_render_doc_tile(ns_browser *browser,
     }
     doc_tile_transform(cr, &p);
     browser_paint_begin(browser);
+    ns_paint_set_video_layer(ns_video_cache_layer_gen(browser->videos),
+                             (double)tile_y);
     gboolean ok = ns_paint_doc_layers(cr, doc_tile_upper, &p, browser->layout,
                                       browser->search_query,
                                       browser_paint_selection(browser), plan);
+    ns_paint_set_video_layer(0, 0);
     browser_paint_end();
     for (int i = 0; i < n_upper; i++)
         if (p.upper[i]) browser_paint_context_done(p.upper[i]);
     g_free(p.upper);
     browser_paint_context_done(cr);
     return ok ? 0 : -2;
+}
+
+void
+ns_browser_set_video_layer_gen(ns_browser *browser, guint gen)
+{
+    if (browser) ns_video_cache_set_layer_gen(browser->videos, gen);
+}
+
+gboolean
+ns_browser_video_layer_frames_pending(ns_browser *browser)
+{
+    return browser && ns_video_cache_layer_frames_pending(browser->videos);
+}
+
+typedef struct video_layer_visit {
+    void   (*fn)(const ns_video_layer *layer, gpointer data);
+    gpointer data;
+} video_layer_visit;
+
+static void
+video_layer_visit_one(ns_video *v, gpointer data)
+{
+    video_layer_visit *visit = data;
+    ns_video_layer layer = { .id = v->seq, .x = v->layer_x, .y = v->layer_y,
+                             .w = v->layer_w, .h = v->layer_h,
+                             .sent_serial = &v->layer_sent_serial };
+    layer.n_frames = ns_video_layer_frames(v, layer.frames,
+                                           NS_VIDEO_LAYER_FRAMES);
+    if (layer.n_frames > 0) visit->fn(&layer, visit->data);
+}
+
+void
+ns_browser_foreach_video_layer(ns_browser *browser,
+                               void (*fn)(const ns_video_layer *layer,
+                                          gpointer data),
+                               gpointer data)
+{
+    if (!browser || !fn) return;
+    video_layer_visit visit = { fn, data };
+    ns_video_cache_foreach_layered(browser->videos, video_layer_visit_one,
+                                   &visit);
 }
 
 static const ns_paint_vp_capture *
