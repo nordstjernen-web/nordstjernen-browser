@@ -467,6 +467,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_MASK_BORDER_OUTSET]   = "mask-border-outset",
     [NS_CSS_MASK_BORDER_REPEAT]   = "mask-border-repeat",
     [NS_CSS_MASK_BORDER_MODE]     = "mask-border-mode",
+    [NS_CSS_WEBKIT_TEXT_FILL_COLOR] = "-webkit-text-fill-color",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -582,6 +583,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_WORD_BREAK:
     case NS_CSS_OVERFLOW_WRAP:
     case NS_CSS_CARET_COLOR:
+    case NS_CSS_WEBKIT_TEXT_FILL_COLOR:
     case NS_CSS_ACCENT_COLOR:
     case NS_CSS_FILL:
     case NS_CSS_FILL_OPACITY:
@@ -6260,6 +6262,109 @@ gradient_finish_stops(ns_css_gradient *gr)
         if (st[i].is_hint) gradient_hint_color(&st[i], &st[i - 1], &st[i + 1]);
 }
 
+static const char *
+gradient_skip_vendor_prefix(const char *p, gboolean *legacy)
+{
+    if (g_ascii_strncasecmp(p, "-webkit-", 8) != 0) return p;
+    if (legacy) *legacy = TRUE;
+    return p + 8;
+}
+
+static const char *
+legacy_side_opposite(const char *t)
+{
+    if (token_eq(t, "left")) return "right";
+    if (token_eq(t, "right")) return "left";
+    if (token_eq(t, "top")) return "bottom";
+    if (token_eq(t, "bottom")) return "top";
+    return NULL;
+}
+
+static gboolean
+legacy_position_token(const char *t)
+{
+    return legacy_side_opposite(t) || token_eq(t, "center") ||
+           g_ascii_isdigit(t[0]) || t[0] == '.' || t[0] == '-' || t[0] == '+';
+}
+
+static const char *
+legacy_radial_shape_token(const char *t)
+{
+    if (token_eq(t, "cover")) return "farthest-corner";
+    if (token_eq(t, "contain")) return "closest-side";
+    static const char *const kept[] = {
+        "circle", "ellipse", "closest-side", "closest-corner",
+        "farthest-side", "farthest-corner",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(kept); i++)
+        if (token_eq(t, kept[i])) return kept[i];
+    return NULL;
+}
+
+static char *
+legacy_linear_prelude(char **tok, int n)
+{
+    if (n == 1 && token_is_angle(tok[0])) {
+        char deg[G_ASCII_DTOSTR_BUF_SIZE];
+        g_ascii_formatd(deg, sizeof deg, "%g", 90.0 - parse_angle_deg(tok[0]));
+        return g_strconcat(deg, "deg", NULL);
+    }
+    if (n < 1 || n > 2) return NULL;
+    GString *out = g_string_new("to");
+    for (int k = 0; k < n; k++) {
+        const char *opposite = legacy_side_opposite(tok[k]);
+        if (!opposite) return g_string_free(out, TRUE);
+        g_string_append_printf(out, " %s", opposite);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+legacy_radial_shape(const char *part)
+{
+    char *tok[4] = {0};
+    int n = split_ws_paren(part, tok, 4);
+    GString *out = g_string_new(NULL);
+    gboolean ok = n > 0;
+    for (int k = 0; k < n && ok; k++) {
+        const char *word = legacy_radial_shape_token(tok[k]);
+        if (!word) ok = FALSE;
+        else g_string_append_printf(out, "%s%s", out->len ? " " : "", word);
+    }
+    for (int k = 0; k < n; k++) g_free(tok[k]);
+    return g_string_free(out, !ok);
+}
+
+static void
+gradient_legacy_prelude(GPtrArray *parts, gboolean radial)
+{
+    if (parts->len == 0) return;
+    char *tok[4] = {0};
+    int n = split_ws_paren(parts->pdata[0], tok, 4);
+    char *prelude = NULL;
+    if (!radial) {
+        prelude = legacy_linear_prelude(tok, n);
+    } else {
+        gboolean position = n > 0 && n <= 2;
+        for (int k = 0; k < n && position; k++)
+            position = legacy_position_token(tok[k]);
+        char *shape = parts->len > 1 ? legacy_radial_shape(parts->pdata[1]) : NULL;
+        if (position) {
+            prelude = shape ? g_strdup_printf("%s at %s", shape,
+                                              (char *)parts->pdata[0])
+                            : g_strconcat("at ", parts->pdata[0], NULL);
+            if (shape) g_ptr_array_remove_index(parts, 1);
+        } else {
+            prelude = legacy_radial_shape(parts->pdata[0]);
+        }
+        g_free(shape);
+    }
+    for (int k = 0; k < n; k++) g_free(tok[k]);
+    if (!prelude) return;
+    g_free(parts->pdata[0]);
+    parts->pdata[0] = prelude;
+}
+
 static gboolean
 gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
                gboolean keep_texts)
@@ -6267,6 +6372,8 @@ gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
     memset(gp, 0, sizeof *gp);
     const char *p = text;
     while (*p && is_ws(*p)) p++;
+    gboolean legacy = FALSE;
+    p = gradient_skip_vendor_prefix(p, &legacy);
     if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) {
         gp->gr.repeating = TRUE;
         p += 10;
@@ -6315,6 +6422,7 @@ gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
     gboolean ok = TRUE;
     for (guint i = 0; i < parts->len && ok; i++)
         if (!*(char *)parts->pdata[i]) ok = FALSE;
+    if (ok && legacy && !gp->gr.conic) gradient_legacy_prelude(parts, gp->gr.radial);
     guint start = 0;
     if (ok && parts->len > 0) {
         char *tok[24] = {0};
@@ -6550,6 +6658,7 @@ static gboolean
 text_starts_gradient(const char *p)
 {
     while (*p && is_ws(*p)) p++;
+    p = gradient_skip_vendor_prefix(p, NULL);
     if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) p += 10;
     return g_ascii_strncasecmp(p, "linear-gradient", 15) == 0 ||
            g_ascii_strncasecmp(p, "radial-gradient", 15) == 0 ||
@@ -10397,6 +10506,7 @@ prop_name_is_color(const char *prop)
         "outline-color", "text-decoration-color", "column-rule-color",
         "caret-color", "accent-color", "fill", "stroke", "stop-color",
         "flood-color", "lighting-color", "text-emphasis-color",
+        "-webkit-text-fill-color",
         "border-block-start-color", "border-block-end-color",
         "border-inline-start-color", "border-inline-end-color",
     };
@@ -13570,6 +13680,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_COLUMN_RULE_COLOR:
     case NS_CSS_CARET_COLOR:
     case NS_CSS_STOP_COLOR:
+    case NS_CSS_WEBKIT_TEXT_FILL_COLOR:
     case NS_CSS_ACCENT_COLOR: {
         guint8 r, g, b, a;
         static const guint8 opaque_black[4] = { 0, 0, 0, 255 };
@@ -27640,6 +27751,15 @@ ns_css_declarations_free(GArray *decls)
 }
 
 static GHashTable *g_incr_exclude;
+
+const ns_css_value *
+ns_style_text_fill_color(const ns_style *s)
+{
+    if (!s) return NULL;
+    const ns_css_value *fill = s->values[NS_CSS_WEBKIT_TEXT_FILL_COLOR];
+    if (fill && fill->kind == NS_CSS_V_COLOR) return fill;
+    return s->values[NS_CSS_COLOR];
+}
 
 gboolean
 ns_style_prop_from_currentcolor(const ns_style *s, int prop)

@@ -3,6 +3,18 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: the legacy `-webkit-linear-gradient()`, `-webkit-radial-gradient()`
+  and their repeating forms are understood, with their old conventions
+  (angles measured from east, counter-clockwise; a bare side naming where
+  the gradient starts; `position, shape` for radials), as Chromium and
+  Firefox still accept them. vuejs.org's tagline gradient and older
+  sites' button and banner gradients were dropped.
+* CSS: `background-clip: text` (and `-webkit-background-clip: text`)
+  paints the background only inside the glyphs of the element's text,
+  for blocks and for inline elements, and `-webkit-text-fill-color` sets
+  the colour text is filled with. Gradient headlines (nodejs.org's "Run
+  JavaScript Everywhere", Tailwind's `bg-clip-text text-transparent`)
+  showed a solid gradient rectangle with the text cut out of view.
 * Layout: the text of a block `::before`/`::after` collapses its white
   space like any other text, so the widespread clearfix
   `content: " "; display: block; clear: both` no longer adds an empty
