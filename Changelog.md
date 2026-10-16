@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Google is now the default search engine for the address bar and the
+  `about:start` search box. A config still holding the previous
+  DuckDuckGo default moves to Google; DuckDuckGo stays selectable in
+  Settings.
+* The status bar no longer shows "WebGL enabled" when a page creates a
+  WebGL context.
 * CSS: adding or removing a stylesheet no longer restyles the whole
   document. The cascade compares the sheet list with the previous pass
   and restyles only the elements the changed sheets' selectors can

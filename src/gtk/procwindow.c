@@ -59,7 +59,6 @@ typedef struct {
     char           *status_base;
     guint           status_timer;
     gulong          theme_watch[2];
-    gboolean        webgl_active;
     gboolean        element_fullscreen;
     NsProcView     *fullscreen_view;
     GtkWidget      *fullscreen_notice;
@@ -983,18 +982,9 @@ static void
 pw_render_status(ProcWindow *pw)
 {
     const char *base = pw->status_base ? pw->status_base : "";
-    if (pw->webgl_active) {
-        char *composed = *base
-            ? g_strconcat(base, " · ", ns_i18n("WebGL enabled"), NULL)
-            : g_strdup(ns_i18n("WebGL enabled"));
-        gtk_label_set_text(GTK_LABEL(pw->status), composed);
-        g_free(composed);
-    } else {
-        gtk_label_set_text(GTK_LABEL(pw->status), base);
-    }
+    gtk_label_set_text(GTK_LABEL(pw->status), base);
     gtk_widget_set_visible(pw->status,
-                           !pw->element_fullscreen &&
-                           (*base != '\0' || pw->webgl_active));
+                           !pw->element_fullscreen && *base != '\0');
 }
 
 static void
@@ -1145,7 +1135,6 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             pw_set_element_fullscreen(pw, FALSE);
         if (is_current) {
             set_address_text(pw, text);
-            pw->webgl_active = FALSE;
             pw_set_status_persistent(pw, NULL);
         }
         break;
@@ -1154,10 +1143,6 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             pw_set_status_persistent(pw, text);
         break;
     case NS_PROC_EVT_WEBGL:
-        if (is_current && !pw->webgl_active) {
-            pw->webgl_active = TRUE;
-            pw_render_status(pw);
-        }
         break;
     case NS_PROC_EVT_FULLSCREEN:
         if (is_current)

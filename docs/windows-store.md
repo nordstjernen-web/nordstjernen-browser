@@ -297,14 +297,14 @@ inside the package), and uninstall from Start removes it cleanly.
 >   no update pinger, no accounts. Nordstjernen never phones home;
 >   the only servers it talks to are the sites you visit.
 > - **Secure by default.** Every tab renders in its own isolated
->   process. WebGL use is visible and can be disabled globally. If it is launched
+>   process. WebGL can be disabled globally. If it is launched
 >   with administrator rights, the browser drops them.
 > - **Modern web, no bloat.** HTML5, modern CSS and JavaScript,
 >   WebAssembly, WebCrypto, WebGL and experimental WebGPU — without
 >   ad tech or AI surface area. WebM, MPEG-1 and MP3 media play
 >   inline.
 > - **Yours.** Open source, with your history, cookies and settings
->   stored only on your device. Search defaults to DuckDuckGo
+>   stored only on your device. Search defaults to Google
 >   and is one setting away from anything else.
 >
 > The UI speaks your language: the interface translates to the
@@ -316,7 +316,7 @@ inside the package), and uninstall from Start removes it cleanly.
 - Independent browser engine — not Chromium, not a fork
 - Per-tab renderer process isolation
 - Zero telemetry, zero phone-home connections
-- WebGL enabled by default with visible use indicator
+- WebGL enabled by default, switchable off in Settings
 - In-box UI translation for 40 languages
 - Small footprint, fast startup
 

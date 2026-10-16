@@ -20,8 +20,7 @@ Update Changelog.md
   far as is feasible without bloat.
 - **No** AI-style web APIs. WebGL **is** supported: a working, minimalist
   WebGL 1 / 2 over OpenGL ES (`src/webgl.c`, see `docs/webgl.md`). It is
-  enabled by default, can be disabled globally in Settings, and reports
-  active use in the browser status bar. The `WebGLRenderingContext` /
+  enabled by default and can be disabled globally in Settings. The `WebGLRenderingContext` /
   `WebGL2RenderingContext` interface objects also carry the GL enum
   constants so feature code resolves them without a live context.
 - **WebGPU** (`navigator.gpu`) is an **experimental** feature that layers
