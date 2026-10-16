@@ -4969,6 +4969,8 @@ static JSClassDef ns_window_named_class = {
 static void ns_js_start_image_load(ns_js *js, ns_node *el, const char *src);
 static void ns_js_flush_ready_images(ns_js *js);
 static const char *ns_js_node_doc_base(ns_js *js, const ns_node *el);
+static char *ns_js_resolve_against_base(ns_js *js, const ns_node *n,
+                                        const char *fallback, const char *url);
 static void ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth);
 
 static ns_node *
@@ -39485,8 +39487,7 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
     char *chosen = ns_img_chosen_url(n);
     if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
     ns_js *js = js_from_ctx(ctx);
-    const char *base = js ? ns_js_node_doc_base(js, n) : NULL;
-    char *abs_url = base ? ns_url_resolve(base, chosen) : NULL;
+    char *abs_url = js ? ns_js_resolve_against_base(js, n, NULL, chosen) : NULL;
     JSValue r = JS_NewString(ctx, abs_url ? abs_url : chosen);
     g_free(abs_url);
     g_free(chosen);
@@ -42985,6 +42986,8 @@ static char *
 ns_js_document_base_url(ns_js *js, const ns_node *doc, const char *current_url)
 {
     if (doc) {
+        if (doc->kind == NS_NODE_DOCUMENT && !doc->tag_index)
+            ns_doc_tag_index_build((ns_node *)doc);
         GPtrArray *bases = ns_doc_tag_index_lookup(doc, "base");
         for (guint i = 0; bases && i < bases->len; i++) {
             const ns_node *b = g_ptr_array_index(bases, i);
@@ -42993,7 +42996,7 @@ ns_js_document_base_url(ns_js *js, const ns_node *doc, const char *current_url)
             if (current_url && *current_url) {
                 char *r = ns_url_resolve(current_url, bh);
                 if (r) {
-                    if (js->csp &&
+                    if (js && js->csp &&
                         !ns_csp_allows(js->csp, NS_CSP_BASE_URI, r,
                                        current_url)) {
                         g_free(r);
@@ -43002,13 +43005,20 @@ ns_js_document_base_url(ns_js *js, const ns_node *doc, const char *current_url)
                     return r;
                 }
             }
-            if (js->csp &&
+            if (js && js->csp &&
                 !ns_csp_allows(js->csp, NS_CSP_BASE_URI, bh, current_url))
                 continue;
             return g_strdup(bh);
         }
     }
     return current_url && *current_url ? g_strdup(current_url) : NULL;
+}
+
+char *
+ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
+                            const char *document_url)
+{
+    return ns_js_document_base_url(js, doc, document_url);
 }
 
 static char *
@@ -47432,6 +47442,14 @@ ns_js_node_document_base_url(ns_js *js, const ns_node *node)
     return ns_js_document_base_url(js, doc, fallback);
 }
 
+static char *
+ns_js_resolve_against_base(ns_js *js, const ns_node *n, const char *fallback,
+                           const char *url)
+{
+    g_autofree char *base = ns_js_node_document_base_url(js, n);
+    return ns_url_resolve(base ? base : fallback, url);
+}
+
 static void
 ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
 {
@@ -47442,8 +47460,7 @@ ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
         ns_js_image_load *r = (src && *src && js->js_image_loads)
             ? g_hash_table_lookup(js->js_image_loads, root) : NULL;
         if (r && r->requested_url) {
-            const char *base = ns_js_node_doc_base(js, root);
-            char *abs = base ? ns_url_resolve(base, src) : NULL;
+            char *abs = ns_js_resolve_against_base(js, root, NULL, src);
             if (abs && strcmp(abs, r->requested_url) != 0) {
                 root->flags &= ~NS_NODE_IMG_LOAD_FIRED;
                 ns_js_start_image_load(js, root, src);
@@ -47574,7 +47591,8 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         return;
     }
     const char *base = ns_js_node_doc_base(js, el);
-    char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
+    char *abs_url = base ? ns_js_resolve_against_base(js, el, base, src)
+                         : g_strdup(src);
     if (!abs_url) {
         g_hash_table_remove(js->js_image_loads, el);
         return;
@@ -47607,7 +47625,8 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
         const char *src = ns_element_get_attr(el, "src");
         if (src && *src) {
             const char *base = ns_js_node_doc_base(js, el);
-            char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
+            char *abs_url = base ? ns_js_resolve_against_base(js, el, base, src)
+                                 : g_strdup(src);
             if (abs_url) {
                 ns_image *im = ns_image_cache_peek(js->image_cache, abs_url);
                 g_free(abs_url);
@@ -64427,7 +64446,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             }
             return;
         }
-        char *abs_url = ns_url_resolve(origin, src);
+        char *abs_url = ns_js_resolve_against_base(js, n, origin, src);
         if (!abs_url) return;
         if (g_str_has_prefix(origin, "https://") &&
             g_str_has_prefix(abs_url, "http://")) {
@@ -64695,7 +64714,7 @@ ns_js_module_prefetch_scripts(ns_js *js, GArray *tasks, const char *origin)
         if (!src || !*src || !ns_script_type_is_module(n) ||
             ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
             continue;
-        char *abs_url = ns_url_resolve(origin, src);
+        char *abs_url = ns_js_resolve_against_base(js, n, origin, src);
         if (abs_url && ns_js_module_script_fetch_allowed(js, n, abs_url, origin))
             ns_module_prefetch_url(abs_url, js->current_url);
         g_free(abs_url);
@@ -64804,7 +64823,7 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
         ns_js_dispatch_resource_event(js, n, "load");
         return;
     }
-    char *abs_url = ns_url_resolve(origin, href);
+    char *abs_url = ns_js_resolve_against_base(js, n, origin, href);
     if (!abs_url) {
         ns_js_dispatch_resource_event(js, n, "error");
         return;
@@ -64941,7 +64960,7 @@ ns_js_drain_async_script_roots(ns_js *js)
         ns_node *root = g_ptr_array_index(js->async_script_roots, 0);
         g_ptr_array_remove_index(js->async_script_roots, 0);
         if (!ns_js_root_connected(js, root)) continue;
-        g_autofree char *origin = ns_js_node_document_base_url(js, root);
+        g_autofree char *origin = g_strdup(ns_js_node_doc_base(js, root));
         if (!origin) origin = g_strdup("inline");
         GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
         ns_js_register_import_maps(js, root);
@@ -64975,7 +64994,8 @@ ns_js_preload_inserted_script(ns_js *js, const ns_node *script,
     if (!src || !*src || ns_script_type_is_module(script) ||
         g_str_has_prefix(src, "data:") || g_str_has_prefix(src, "blob:"))
         return;
-    g_autofree char *abs_url = ns_url_resolve(origin, src);
+    g_autofree char *abs_url = ns_js_resolve_against_base(js, script, origin,
+                                                          src);
     if (!abs_url || (g_str_has_prefix(origin, "https://") &&
                      !g_str_has_prefix(abs_url, "https://")))
         return;
@@ -65007,7 +65027,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         g_ptr_array_free(sheets, TRUE);
         return;
     }
-    g_autofree char *origin = ns_js_node_document_base_url(js, root);
+    g_autofree char *origin = g_strdup(ns_js_node_doc_base(js, root));
     if (!origin) origin = g_strdup("inline");
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, root);
@@ -65061,7 +65081,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
             g_ptr_array_free(sheets, TRUE);
             continue;
         }
-        g_autofree char *origin = ns_js_node_document_base_url(js, root);
+        g_autofree char *origin = g_strdup(ns_js_node_doc_base(js, root));
         if (!origin) origin = g_strdup("inline");
         GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
         ns_js_register_import_maps(js, root);

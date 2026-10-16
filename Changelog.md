@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* HTML: `<base href>` applies to subresources. Scripts, stylesheets, images
+  and the speculative preloader resolved relative URLs against the page URL,
+  so a page with `<base href="/assets/">` (or an Angular app with
+  `<base href="/">` opened on a nested route) loaded none of them. Link
+  clicks, form actions, media and the favicon follow the base too. Only
+  `a.href` and other script-visible URLs honoured it before. CSP `base-uri`
+  still applies, and the referrer and CSP `'self'` stay the page URL.
 * Paint: gradient backgrounds honour `background-size`,
   `background-position` and `background-repeat`. A gradient always filled
   its whole box, so a `linear-gradient(red, red) 0 100% / 100% 2px

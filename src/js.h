@@ -134,6 +134,8 @@ void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer use
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
 gboolean ns_js_csp_form_action_allowed(const ns_js *js, const char *action_url);
+char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
+                                     const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
 void   ns_js_dispatch_hashchange(ns_js *js,
