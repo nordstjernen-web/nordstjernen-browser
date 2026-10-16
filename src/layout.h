@@ -163,6 +163,7 @@ typedef struct ns_box {
     gboolean has_flex_main;
     gboolean is_rendered_legend;
     gboolean inline_split_tail;
+    gboolean phantom_line;
     double margin_top_through;
     double paint_top, paint_bottom;
     GPtrArray *negative_layers;
