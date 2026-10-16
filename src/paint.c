@@ -1427,11 +1427,136 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
     }
 }
 
+static gboolean
+bg_repeat_word_tiles(const char *word, size_t len)
+{
+    return len != strlen("no-repeat") || strncmp(word, "no-repeat", len) != 0;
+}
+
+static void
+bg_repeat_axes(const ns_css_value *rep_v, gboolean *tile_x, gboolean *tile_y)
+{
+    *tile_x = *tile_y = TRUE;
+    const char *k = rep_v && rep_v->kind == NS_CSS_V_KEYWORD
+                    ? rep_v->u.keyword : NULL;
+    if (!k) return;
+    if (strcmp(k, "repeat-x") == 0) { *tile_y = FALSE; return; }
+    if (strcmp(k, "repeat-y") == 0) { *tile_x = FALSE; return; }
+    const char *space = strchr(k, ' ');
+    *tile_x = bg_repeat_word_tiles(k, space ? (size_t)(space - k) : strlen(k));
+    *tile_y = space ? bg_repeat_word_tiles(space + 1, strlen(space + 1))
+                    : *tile_x;
+}
+
+static double
+bg_offset_px(const ns_css_value *p, double avail)
+{
+    if (p && p->kind == NS_CSS_V_LENGTH)
+        return p->u.length.unit == NS_CSS_UNIT_PERCENT
+               ? avail * (p->u.length.v / 100.0) : p->u.length.v;
+    if (p && p->kind == NS_CSS_V_CALC)
+        return avail * (p->u.calc.pct / 100.0) + p->u.calc.px;
+    return 0;
+}
+
+static void
+bg_gradient_tile_size(const ns_css_value *sz, double w, double h,
+                      double *tw, double *th)
+{
+    *tw = w;
+    *th = h;
+    if (sz && sz->kind == NS_CSS_V_LENGTH) {
+        *tw = bg_size_px(sz->u.length.v, sz->u.length.unit, w);
+    } else if (sz && sz->kind == NS_CSS_V_SIZE) {
+        if (!sz->u.size.w_auto)
+            *tw = bg_size_px(sz->u.size.w, sz->u.size.w_unit, w);
+        if (!sz->u.size.h_auto)
+            *th = bg_size_px(sz->u.size.h, sz->u.size.h_unit, h);
+    }
+}
+
+static cairo_pattern_t *
+bg_gradient_tile_pattern(cairo_t *cr, const ns_css_gradient *gr,
+                         double tx, double ty, double tw, double th)
+{
+    double dx = 1, dy = 1;
+    cairo_user_to_device_distance(cr, &dx, &dy);
+    int pw = MAX((int)ceil(MIN(tw * MAX(fabs(dx), 1.0), 4096.0)), 1);
+    int ph = MAX((int)ceil(MIN(th * MAX(fabs(dy), 1.0), 4096.0)), 1);
+    cairo_surface_t *tile = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                       pw, ph);
+    if (cairo_surface_status(tile) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(tile);
+        return NULL;
+    }
+    cairo_t *gc = cairo_create(tile);
+    cairo_scale(gc, pw / tw, ph / th);
+    corner_radii square = {0};
+    paint_bg_gradient_core(gc, gr, 0, 0, tw, th, 0, 0, tw, th, square);
+    cairo_destroy(gc);
+    cairo_pattern_t *pat = cairo_pattern_create_for_surface(tile);
+    cairo_surface_destroy(tile);
+    cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
+    cairo_matrix_t m;
+    cairo_matrix_init_scale(&m, pw / tw, ph / th);
+    cairo_matrix_translate(&m, -tx, -ty);
+    cairo_pattern_set_matrix(pat, &m);
+    return pat;
+}
+
+static void
+paint_bg_gradient_layer(cairo_t *cr, const ns_css_gradient *gr,
+                        const ns_css_value *rep_v, const ns_css_value *sz,
+                        const ns_css_value *px, const ns_css_value *py,
+                        double x, double y, double w, double h,
+                        double clip_x, double clip_y,
+                        double clip_w, double clip_h,
+                        corner_radii radii)
+{
+    double tw, th;
+    bg_gradient_tile_size(sz, w, h, &tw, &th);
+    if (tw <= 0 || th <= 0 || clip_w <= 0 || clip_h <= 0) return;
+    double tx = x + bg_offset_px(px, w - tw);
+    double ty = y + bg_offset_px(py, h - th);
+    gboolean tile_x, tile_y;
+    bg_repeat_axes(rep_v, &tile_x, &tile_y);
+    gboolean covers_x = tx <= clip_x && tx + tw >= clip_x + clip_w;
+    gboolean covers_y = ty <= clip_y && ty + th >= clip_y + clip_h;
+    cairo_save(cr);
+    rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
+    cairo_clip(cr);
+    if ((covers_x || !tile_x) && (covers_y || !tile_y)) {
+        corner_radii square = {0};
+        paint_bg_gradient_core(cr, gr, tx, ty, tw, th, tx, ty, tw, th, square);
+    } else {
+        cairo_pattern_t *pat = bg_gradient_tile_pattern(cr, gr, tx, ty, tw, th);
+        if (pat) {
+            cairo_rectangle(cr, tile_x ? clip_x : tx, tile_y ? clip_y : ty,
+                            tile_x ? clip_w : tw, tile_y ? clip_h : th);
+            cairo_set_source(cr, pat);
+            cairo_fill(cr);
+            cairo_pattern_destroy(pat);
+        }
+    }
+    cairo_restore(cr);
+}
+
 static void
 paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
                               const ns_style *s, double x, double y,
                               double w, double h, corner_radii radii)
 {
+    const ns_css_value *head = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    for (int li = ns_css_value_layer_count(head) - 1; li >= 0; li--) {
+        const ns_css_value *lv = ns_css_value_layer(head, li);
+        if (lv->kind != NS_CSS_V_GRADIENT) continue;
+        paint_bg_gradient_layer(cr, &lv->u.gradient,
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_Y], li),
+            x, y, w, h, x, y, w, h, radii);
+    }
     ns_image *img = r && r->bg_image ? r->bg_image : NULL;
     if (!img) return;
     paint_bg_image_core(cr, img,
@@ -1910,7 +2035,11 @@ paint_block(cairo_t *cr, const ns_box *b)
         bg_layer_origin_area(b, li, border_x, border_y, border_w, border_h,
                              &lpos_x, &lpos_y, &lpos_w, &lpos_h);
         if (lv->kind == NS_CSS_V_GRADIENT) {
-            paint_bg_gradient_core(cr, &lv->u.gradient,
+            paint_bg_gradient_layer(cr, &lv->u.gradient,
+                ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
+                ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
+                ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
+                ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_Y], li),
                 lpos_x, lpos_y, lpos_w, lpos_h,
                 lclip_x, lclip_y, lclip_w, lclip_h, radii);
             continue;
