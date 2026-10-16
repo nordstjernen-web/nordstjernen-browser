@@ -63130,57 +63130,6 @@ ns_js_profile_enabled(void)
     return cached == 1;
 }
 
-static void
-ns_js_apply_site_quirks(ns_js *js)
-{
-    static const char src[] =
-        "(function(){"
-        "try{"
-        "var l=location&&location.hostname||'';"
-        "if(l!=='freecivweb.com'&&l!=='www.freecivweb.com'&&l!=='fcw.movingborders.es')return;"
-        "if(typeof tile_types_setup!=='object'||!tile_types_setup)return;"
-        "if(typeof MATCH_NONE!=='number'||typeof MATCH_SAME!=='number'||"
-        "typeof MATCH_PAIR!=='number'||typeof MATCH_FULL!=='number'||"
-        "typeof CELL_WHOLE!=='number'||typeof CELL_CORNER!=='number')return;"
-        "var r=typeof MATCH_RANDOM==='number'?MATCH_RANDOM:4,t=tile_types_setup;"
-        "function s(k,m,c){var o=t[k];if(!o)return;if(o.match_style===void 0)o.match_style=m;if(o.sprite_type===void 0)o.sprite_type=c;}"
-        "s('l0.lake',MATCH_PAIR,CELL_CORNER);"
-        "s('l0.coast',MATCH_FULL,CELL_CORNER);"
-        "s('l1.coast',MATCH_PAIR,CELL_CORNER);"
-        "s('l0.floor',MATCH_FULL,CELL_CORNER);"
-        "s('l1.floor',MATCH_PAIR,CELL_CORNER);"
-        "s('l0.arctic',MATCH_NONE,CELL_WHOLE);"
-        "s('l0.desert',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.desert',r,CELL_WHOLE);"
-        "s('l0.forest',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.forest',MATCH_SAME,CELL_WHOLE);"
-        "s('l0.grassland',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.grassland',r,CELL_WHOLE);"
-        "s('l0.hills',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.hills',MATCH_SAME,CELL_WHOLE);"
-        "s('l0.jungle',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.jungle',MATCH_SAME,CELL_WHOLE);"
-        "s('l0.mountains',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.mountains',MATCH_SAME,CELL_WHOLE);"
-        "s('l0.plains',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.plains',r,CELL_WHOLE);"
-        "s('l0.swamp',MATCH_NONE,CELL_WHOLE);"
-        "s('l1.swamp',r,CELL_WHOLE);"
-        "s('l0.tundra',MATCH_NONE,CELL_WHOLE);"
-        "s('l0.inaccessible',MATCH_NONE,CELL_WHOLE);"
-        "}catch(e){}"
-        "})()";
-    if (!js || js->halted || !js->current_url ||
-        (!strstr(js->current_url, "freecivweb.com") &&
-         !strstr(js->current_url, "fcw.movingborders.es")))
-        return;
-    JSValue v = JS_Eval(js->ctx, src, strlen(src), "site-quirks",
-                        JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(v))
-        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
-    JS_FreeValue(js->ctx, v);
-}
-
 static gboolean
 ns_js_eval_bytecode_cached(ns_js *js, const char *src, gsize len,
                            const char *origin, JSValue *out_value,
@@ -63636,7 +63585,6 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         ns_js_report_uncaught(js, ex, origin);
         JS_FreeValue(js->ctx, ex);
     }
-    ns_js_apply_site_quirks(js);
     JS_FreeValue(js->ctx, v);
     ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
