@@ -17,7 +17,7 @@ const big = 0x123456789abcn;
     } catch (e) {
         err = e;
     }
-    assert(err instanceof RangeError, true);
+    assert(err instanceof TypeError, true);
 }
 
 // Shrunk resizable buffer.

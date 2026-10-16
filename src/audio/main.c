@@ -17,16 +17,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <time.h>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#endif
-
 #include <curl/curl.h>
 
 #include "pl_mpeg.h"
-#include "../media_shm.h"
 
 #ifndef MINIMP3_FLOAT_OUTPUT
 #define MINIMP3_FLOAT_OUTPUT
@@ -38,6 +31,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
+#include "media_os.h"
 #endif
 
 #ifdef NS_HAVE_VORBISFILE
@@ -78,6 +72,7 @@ typedef struct {
 #ifdef NS_HAVE_LIBAV
     AVFormatContext *in_fmt;
     AVCodecContext  *in_dec;
+    ns_os_adec      *in_os;
     SwrContext      *in_swr;
     AVPacket        *in_pkt;
     AVFrame         *in_frame;
@@ -112,107 +107,6 @@ static SDL_mutex        *g_null_lock;
 static SDL_Thread       *g_null_thread;
 static SDL_atomic_t      g_null_quit;
 static ns_audio_player   g_players[NS_AUDIO_MAX_PLAYERS];
-static ns_audio_clock_hdr *g_clock;
-static size_t              g_clock_bytes;
-static char                g_clock_name[64];
-#ifdef _WIN32
-static HANDLE              g_clock_map;
-#else
-static int                 g_clock_fd = -1;
-#endif
-
-static int64_t
-audio_now_us(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
-
-static int
-audio_clock_create(void)
-{
-    g_clock_bytes = sizeof *g_clock;
-    snprintf(g_clock_name, sizeof g_clock_name, "/nsaud-%d", (int)getpid());
-#ifdef _WIN32
-    g_clock_map = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-                                     0, (DWORD)g_clock_bytes, g_clock_name);
-    if (!g_clock_map) return 0;
-    g_clock = MapViewOfFile(g_clock_map, FILE_MAP_ALL_ACCESS, 0, 0,
-                            g_clock_bytes);
-    if (!g_clock) {
-        CloseHandle(g_clock_map);
-        g_clock_map = NULL;
-        return 0;
-    }
-#else
-    g_clock_fd = shm_open(g_clock_name, O_CREAT | O_EXCL | O_RDWR, 0600);
-    if (g_clock_fd < 0) return 0;
-    if (ftruncate(g_clock_fd, (off_t)g_clock_bytes) != 0) {
-        close(g_clock_fd);
-        g_clock_fd = -1;
-        shm_unlink(g_clock_name);
-        return 0;
-    }
-    g_clock = mmap(NULL, g_clock_bytes, PROT_READ | PROT_WRITE,
-                   MAP_SHARED, g_clock_fd, 0);
-    if (g_clock == MAP_FAILED) {
-        g_clock = NULL;
-        close(g_clock_fd);
-        g_clock_fd = -1;
-        shm_unlink(g_clock_name);
-        return 0;
-    }
-#endif
-    memset(g_clock, 0, g_clock_bytes);
-    g_clock->magic = NS_AUDIO_CLOCK_MAGIC;
-    g_clock->version = NS_AUDIO_CLOCK_VERSION;
-    g_clock->nslots = NS_AUDIO_CLOCK_SLOTS;
-    return 1;
-}
-
-static void
-audio_clock_destroy(void)
-{
-#ifdef _WIN32
-    if (g_clock) UnmapViewOfFile(g_clock);
-    if (g_clock_map) CloseHandle(g_clock_map);
-    g_clock_map = NULL;
-#else
-    if (g_clock) munmap(g_clock, g_clock_bytes);
-    if (g_clock_fd >= 0) close(g_clock_fd);
-    if (g_clock_name[0]) shm_unlink(g_clock_name);
-    g_clock_fd = -1;
-#endif
-    g_clock = NULL;
-    g_clock_name[0] = '\0';
-}
-
-static void
-audio_clock_store(ns_audio_player *p, int clear)
-{
-    if (!g_clock || !p) return;
-    ptrdiff_t index = p - g_players;
-    if (index < 0 || index >= NS_AUDIO_MAX_PLAYERS) return;
-    ns_audio_clock_slot *slot = &g_clock->slots[index];
-    uint32_t seq = __atomic_load_n(&slot->sequence, __ATOMIC_RELAXED);
-    if (seq & 1u) seq++;
-    __atomic_store_n(&slot->sequence, seq + 1u, __ATOMIC_RELEASE);
-    if (clear) {
-        slot->flags = 0;
-        slot->position = 0.0;
-        slot->token[0] = '\0';
-    } else {
-        slot->flags = NS_MEDIA_CLOCK_USED |
-                      (p->playing ? NS_MEDIA_CLOCK_PLAYING : 0u);
-        slot->position = p->timeline_offset +
-                         (p->seek_pending ? p->seek_target
-                          : (double)p->cursor / NS_AUDIO_DEVICE_RATE);
-        snprintf(slot->token, sizeof slot->token, "%s", p->token);
-    }
-    slot->monotonic_us = audio_now_us();
-    __atomic_store_n(&slot->sequence, seq + 2u, __ATOMIC_RELEASE);
-}
 
 #if defined(__GNUC__)
 #define NS_AUDIO_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -279,7 +173,6 @@ player_alloc(const char *token)
             g_players[i].used = 1;
             g_players[i].volume = 1.0f;
             snprintf(g_players[i].token, sizeof g_players[i].token, "%s", token);
-            audio_clock_store(&g_players[i], 0);
             return &g_players[i];
         }
     }
@@ -295,6 +188,8 @@ ain_close(ns_audio_player *p)
     if (p->in_frame) av_frame_free(&p->in_frame);
     if (p->in_pkt) av_packet_free(&p->in_pkt);
     if (p->in_dec) avcodec_free_context(&p->in_dec);
+    if (p->in_os) ns_os_adec_free(p->in_os);
+    p->in_os = NULL;
     if (p->in_fmt) avformat_close_input(&p->in_fmt);
     p->in_stream = NULL;
     p->in_sidx = -1;
@@ -306,7 +201,6 @@ static void
 player_release(ns_audio_player *p)
 {
     if (!p || !p->used) return;
-    audio_clock_store(p, 1);
 #ifdef NS_HAVE_LIBAV
     ain_close(p);
 #endif
@@ -331,7 +225,6 @@ audio_cb(void *userdata, Uint8 *stream, int len)
     for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++) {
         ns_audio_player *p = &g_players[i];
         if (!p->used || !p->playing || !p->pcm) continue;
-        audio_clock_store(p, 0);
         for (int f = 0; f < nframes; f++) {
             if (p->cursor >= p->frames) {
                 if (p->loop && p->frames > 0) {
@@ -346,7 +239,6 @@ audio_cb(void *userdata, Uint8 *stream, int len)
             out[f * 2 + 1] += p->pcm[p->cursor * 2 + 1] * p->volume;
             p->cursor++;
         }
-        if (!p->playing) audio_clock_store(p, 0);
     }
 
     for (int i = 0; i < NS_AUDIO_MAX_STREAMS; i++) {
@@ -752,6 +644,81 @@ ah_seek(void *opaque, int64_t off, int whence)
     return np;
 }
 
+static ns_os_adec *
+ah_os_aac_open(const AVCodecParameters *par)
+{
+    if (par->codec_id != AV_CODEC_ID_AAC || !par->extradata ||
+        par->extradata_size <= 0 || getenv("NS_MEDIA_NO_OS_DECODER"))
+        return NULL;
+    return ns_os_adec_new_aac(par->extradata, (size_t)par->extradata_size,
+                              par->sample_rate, par->ch_layout.nb_channels);
+}
+
+static int
+pcm_buf_append(float **pcm, size_t *len, size_t *cap, const float *src,
+               size_t count)
+{
+    if (*len + count > *cap) {
+        size_t want = *cap ? *cap : 65536;
+        while (*len + count > want) {
+            if (want > SIZE_MAX / (2u * sizeof(float))) return 0;
+            want *= 2;
+        }
+        float *grown = realloc(*pcm, want * sizeof(float));
+        if (!grown) return 0;
+        *pcm = grown;
+        *cap = want;
+    }
+    memcpy(*pcm + *len, src, count * sizeof(float));
+    *len += count;
+    return 1;
+}
+
+static int
+decode_os_aac(AVFormatContext *fmt, int sidx, ns_os_adec *dec,
+              float **out_pcm, size_t *out_frames, int *out_rate, int *out_ch)
+{
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return 0;
+    float *pcm = NULL;
+    size_t len = 0, cap = 0;
+    int rate = 0, ch = 0, ok = 1, eof = 0;
+    while (ok && !eof) {
+        float *chunk = NULL;
+        size_t frames = 0;
+        int crate = 0, cch = 0;
+        if (av_read_frame(fmt, pkt) < 0) {
+            eof = 1;
+            ns_os_adec_decode(dec, NULL, 0, &chunk, &frames, &crate, &cch);
+        } else {
+            if (pkt->stream_index == sidx)
+                ns_os_adec_decode(dec, pkt->data, (size_t)pkt->size, &chunk,
+                                  &frames, &crate, &cch);
+            av_packet_unref(pkt);
+        }
+        if (chunk && frames) {
+            if (!rate) { rate = crate; ch = cch; }
+            if (crate == rate && cch == ch)
+                ok = pcm_buf_append(&pcm, &len, &cap, chunk,
+                                    frames * (size_t)ch);
+            if ((size_t)rate * NS_AUDIO_MAX_SECONDS * (size_t)ch <= len ||
+                len >= NS_AUDIO_MAX_FLOATS)
+                eof = 1;
+        }
+        free(chunk);
+    }
+    av_packet_free(&pkt);
+    if (!len || rate <= 0 || ch < 1 || ch > 8) {
+        free(pcm);
+        return 0;
+    }
+    *out_pcm = pcm;
+    *out_frames = len / (size_t)ch;
+    *out_rate = rate;
+    *out_ch = ch;
+    return 1;
+}
+
 static int
 decode_libav(const unsigned char *bytes, size_t n,
              float **out_pcm, size_t *out_frames, int *out_rate, int *out_ch)
@@ -762,6 +729,7 @@ decode_libav(const unsigned char *bytes, size_t n,
     AVFormatContext *fmt = NULL;
     AVIOContext *avio = NULL;
     AVCodecContext *dec = NULL;
+    ns_os_adec *osdec = NULL;
     SwrContext *swr = NULL;
     AVPacket *pkt = NULL;
     AVFrame *frame = NULL;
@@ -784,8 +752,16 @@ decode_libav(const unsigned char *bytes, size_t n,
     }
     if (avformat_find_stream_info(fmt, NULL) < 0) goto done;
 
-    sidx = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
-    if (sidx < 0 || !codec) goto done;
+    sidx = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    if (sidx < 0) goto done;
+    osdec = ah_os_aac_open(fmt->streams[sidx]->codecpar);
+    if (osdec) {
+        ret = decode_os_aac(fmt, sidx, osdec, out_pcm, out_frames, out_rate,
+                            out_ch);
+        goto done;
+    }
+    codec = avcodec_find_decoder(fmt->streams[sidx]->codecpar->codec_id);
+    if (!codec) goto done;
 
     dec = avcodec_alloc_context3(codec);
     if (!dec) goto done;
@@ -878,6 +854,7 @@ done:
     if (pkt) av_packet_free(&pkt);
     if (swr) swr_free(&swr);
     if (dec) avcodec_free_context(&dec);
+    if (osdec) ns_os_adec_free(osdec);
     if (fmt) avformat_close_input(&fmt);
     if (avio) { av_freep(&avio->buffer); avio_context_free(&avio); }
     return ret;
@@ -955,6 +932,58 @@ ain_drain_stream(ns_audio_player *p)
 }
 
 static int
+ain_open_finish(ns_audio_player *p, const char *path)
+{
+    p->in_pkt = av_packet_alloc();
+    p->in_frame = av_frame_alloc();
+    p->in_stream = SDL_NewAudioStream(AUDIO_F32SYS, (Uint8)p->in_ch,
+                                      p->in_rate, AUDIO_F32SYS, 2,
+                                      NS_AUDIO_DEVICE_RATE);
+    if (!p->in_pkt || !p->in_frame || !p->in_stream) { ain_close(p); return 0; }
+    snprintf(p->in_path, sizeof p->in_path, "%s", path);
+    p->in_known_size = file_size_of(path);
+    return 1;
+}
+
+static void
+ain_os_put(ns_audio_player *p, double pkt_time)
+{
+    float *pcm = NULL;
+    size_t frames = 0;
+    int rate = 0, ch = 0;
+    ns_os_adec_decode(p->in_os, p->in_pkt->data, (size_t)p->in_pkt->size,
+                      &pcm, &frames, &rate, &ch);
+    if (!pcm || !frames || rate <= 0 || ch < 1 || ch > 8) {
+        free(pcm);
+        return;
+    }
+    if (p->in_resume_pending) {
+        p->in_resume_pending = 0;
+        double ahead = p->in_resume_target - pkt_time;
+        p->in_discard_frames = ahead > 0
+            ? (size_t)(ahead * NS_AUDIO_DEVICE_RATE) : 0;
+    }
+    if (rate != p->in_rate || ch != p->in_ch) {
+        ain_drain_stream(p);
+        SDL_AudioStream *st = SDL_NewAudioStream(AUDIO_F32SYS, (Uint8)ch, rate,
+                                                 AUDIO_F32SYS, 2,
+                                                 NS_AUDIO_DEVICE_RATE);
+        if (!st) {
+            free(pcm);
+            return;
+        }
+        SDL_FreeAudioStream(p->in_stream);
+        p->in_stream = st;
+        p->in_rate = rate;
+        p->in_ch = ch;
+    }
+    SDL_AudioStreamPut(p->in_stream, pcm,
+                       (int)(frames * (size_t)ch * sizeof(float)));
+    free(pcm);
+    ain_drain_stream(p);
+}
+
+static int
 ain_open(ns_audio_player *p, const char *path)
 {
     ain_close(p);
@@ -964,10 +993,23 @@ ain_open(ns_audio_player *p, const char *path)
     av_dict_free(&opts);
     if (rc < 0) return 0;
     if (avformat_find_stream_info(p->in_fmt, NULL) < 0) { ain_close(p); return 0; }
-    const AVCodec *codec = NULL;
     p->in_sidx = av_find_best_stream(p->in_fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
-                                     &codec, 0);
-    if (p->in_sidx < 0 || !codec) { ain_close(p); return 0; }
+                                     NULL, 0);
+    if (p->in_sidx < 0) { ain_close(p); return 0; }
+    const AVCodecParameters *par = p->in_fmt->streams[p->in_sidx]->codecpar;
+    p->in_os = ah_os_aac_open(par);
+    if (p->in_os) {
+        p->in_rate = par->sample_rate;
+        p->in_ch = par->ch_layout.nb_channels;
+        if (p->in_rate <= 0 || p->in_rate > 192000 ||
+            p->in_ch < 1 || p->in_ch > 8) {
+            ain_close(p);
+            return 0;
+        }
+        return ain_open_finish(p, path);
+    }
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec) { ain_close(p); return 0; }
     p->in_dec = avcodec_alloc_context3(codec);
     if (!p->in_dec ||
         avcodec_parameters_to_context(
@@ -993,15 +1035,7 @@ ain_open(ns_audio_player *p, const char *path)
     av_opt_set_sample_fmt(p->in_swr, "in_sample_fmt", p->in_sfmt, 0);
     av_opt_set_sample_fmt(p->in_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(p->in_swr) < 0) { ain_close(p); return 0; }
-    p->in_pkt = av_packet_alloc();
-    p->in_frame = av_frame_alloc();
-    p->in_stream = SDL_NewAudioStream(AUDIO_F32SYS, (Uint8)p->in_ch,
-                                      p->in_rate, AUDIO_F32SYS, 2,
-                                      NS_AUDIO_DEVICE_RATE);
-    if (!p->in_pkt || !p->in_frame || !p->in_stream) { ain_close(p); return 0; }
-    snprintf(p->in_path, sizeof p->in_path, "%s", path);
-    p->in_known_size = file_size_of(path);
-    return 1;
+    return ain_open_finish(p, path);
 }
 
 static int
@@ -1017,7 +1051,8 @@ ain_reopen_resume(ns_audio_player *p)
         int64_t ts = (int64_t)(decoded_end / av_q2d(tb));
         if (av_seek_frame(p->in_fmt, p->in_sidx, ts,
                           AVSEEK_FLAG_BACKWARD) >= 0) {
-            avcodec_flush_buffers(p->in_dec);
+            if (p->in_os) ns_os_adec_flush(p->in_os);
+            else avcodec_flush_buffers(p->in_dec);
             p->in_resume_target = decoded_end;
             p->in_resume_pending = 1;
         }
@@ -1040,6 +1075,14 @@ ain_pump(ns_audio_player *p)
             break;
         }
         if (p->in_pkt->stream_index != p->in_sidx) {
+            av_packet_unref(p->in_pkt);
+            continue;
+        }
+        if (p->in_os) {
+            AVRational tb = p->in_fmt->streams[p->in_sidx]->time_base;
+            double t = p->in_pkt->pts != AV_NOPTS_VALUE
+                ? (double)p->in_pkt->pts * av_q2d(tb) : p->in_resume_target;
+            ain_os_put(p, t);
             av_packet_unref(p->in_pkt);
             continue;
         }
@@ -1360,6 +1403,7 @@ cmd_reload(const char *token, const char *url)
         ain_close(p);
         p->in_fmt = fresh.in_fmt;
         p->in_dec = fresh.in_dec;
+        p->in_os = fresh.in_os;
         p->in_swr = fresh.in_swr;
         p->in_pkt = fresh.in_pkt;
         p->in_frame = fresh.in_frame;
@@ -1444,7 +1488,6 @@ cmd_play(const char *token)
     if (p->cursor >= p->frames) p->cursor = 0;
     p->reached_end = 0;
     p->playing = 1;
-    audio_clock_store(p, 0);
     audio_unlock();
     emit("playing %s", token);
 }
@@ -1459,7 +1502,6 @@ cmd_resume(const char *token)
     if (can_resume) {
         p->reached_end = 0;
         p->playing = 1;
-        audio_clock_store(p, 0);
     }
     audio_unlock();
     if (can_resume) emit("playing %s", token);
@@ -1472,7 +1514,6 @@ cmd_pause(const char *token)
     if (!p || !p->pcm) return;
     audio_lock();
     p->playing = 0;
-    audio_clock_store(p, 0);
     audio_unlock();
     emit("paused %s", token);
 }
@@ -1492,7 +1533,6 @@ cmd_seek(const char *token, double seconds)
     if (frame > p->frames) frame = p->frames;
     p->cursor = frame;
     p->reached_end = 0;
-    audio_clock_store(p, 0);
     audio_unlock();
 }
 
@@ -1503,7 +1543,6 @@ cmd_offset(const char *token, double seconds)
     if (!p) return;
     audio_lock();
     p->timeline_offset = seconds > 0.0 ? seconds : 0.0;
-    audio_clock_store(p, 0);
     audio_unlock();
 }
 
@@ -1722,8 +1761,8 @@ void ns_security_seccomp_init(void);
 static void
 sandbox_self(void)
 {
+    ns_os_media_preinit();
     ns_security_add_writable_dir(audio_tmp_dir());
-    ns_security_add_writable_dir("/dev/shm");
     char self[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     self[n > 0 ? n : 0] = '\0';
@@ -1757,7 +1796,6 @@ main(void)
         }
     }
     if (!g_dev_ok) null_audio_start();
-    if (audio_clock_create()) emit("clock %s", g_clock_name);
     emit("ready %s", g_dev_ok || g_null_thread ? "1" : "0");
 
 #ifdef __linux__
@@ -1824,7 +1862,6 @@ main(void)
         if (g_players[i].used) player_release(&g_players[i]);
     for (int i = 0; i < NS_AUDIO_MAX_STREAMS; i++)
         if (g_streams[i].used) stream_release(&g_streams[i]);
-    audio_clock_destroy();
     SDL_Quit();
     curl_global_cleanup();
     return 0;

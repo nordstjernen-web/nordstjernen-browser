@@ -89,6 +89,7 @@ the 1.0.31-dev source.
 |-------|:--:|------|
 | `position: static / relative / absolute / fixed` | ✅ | |
 | `position: sticky` | ✅ | verified: header pins within its scroll container |
+| Anchor positioning (`anchor-name`, `position-anchor`, `anchor()`, `anchor-size()`, `position-area`, `anchor-center`) | 🟡 | absolutely and fixed positioned boxes resolve against the last matching anchor in tree order (`src/css_anchor.c`); `position-try-fallbacks` (flip tactics, `@position-try` rules, `position-area` options) and `position-try-order` pick the first option that fits; `position-visibility`, implicit anchors and vertical writing modes are not applied yet |
 | `top`/`right`/`bottom`/`left`, `inset` shorthand | ✅ | |
 | `z-index` & stacking contexts | ✅ | opacity/transform/filter establish contexts |
 | Top layer (`dialog` modal, `::backdrop`) | 🟡 | modal `<dialog>` painted in the top layer; popover top-layer limited |
@@ -183,6 +184,9 @@ the 1.0.31-dev source.
 | `white-space` (`normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line`/`break-spaces`) | ✅ | |
 | `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
 | `font-variant: small-caps`, `font-variant-ligatures`, `font-feature-settings`, `font-variation-settings` | ✅ | common/discretionary/historical/contextual ligature keywords, quoted four-character feature tags, and variable-font axes map to Pango OpenType settings |
+| `font-size-adjust` | 🟡 | parsed with metric keywords, `from-font` and `calc()`; inherited, computed (from-font resolves through font metrics), interpolated and composited as a number; not yet applied when sizing glyphs |
+| `text-align-last`, `text-justify` | 🟡 | last-line alignment of justified text (including `justify` via Pango's justify-last-line) and `text-justify: none`; the last line of non-justified text keeps the `text-align` alignment |
+| `contain: size`/`inline-size`/`strict`, `contain-intrinsic-size` | ✅ | size containment sizes the box as if empty or from `contain-intrinsic-*` (`auto` treated as its length; no last-remembered size) |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | 🟡 | vertical inline runs are measured and painted in right-to-left or left-to-right columns; `text-orientation:upright` stacks glyphs and `mixed`/`sideways` rotate the run. Orthogonal-flow box layout and full vertical line breaking remain limited; invalid values are rejected |
 | Ruby (`display:ruby`) | 🟡 | parsed; no ruby positioning |
@@ -192,7 +196,7 @@ the 1.0.31-dev source.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `background-color` / `-image` / `-repeat` / `-position` / `-size` | ✅ | incl. multiple background layers and stylesheet-relative `url(...)` |
-| Gradients: `linear-gradient` / `radial-gradient` / `conic-gradient` | ✅ | incl. `repeating-*` variants (stop pattern tiles via `CAIRO_EXTEND_REPEAT` / angular modulo), `%` and `px` colour-stop positions, the double-position shorthand (`#222 0 20px`), and `at <position>` centring (radial sizes to the farthest corner from the centre) |
+| Gradients: `linear-gradient` / `radial-gradient` / `conic-gradient` | ✅ | incl. `repeating-*` variants (stop pattern tiles via `CAIRO_EXTEND_REPEAT` / angular modulo), `%` and `px` colour-stop positions, the double-position shorthand (`#222 0 20px`), and `at <position>` centring (radial sizes to the farthest corner from the centre). A gradient layer is sized, positioned and tiled by `background-size` / `background-position` / `background-repeat` like an image without intrinsic size (`paint_bg_gradient_layer`), so stripes, dot grids and underline bars render; inline boxes paint gradient layers too |
 | `background-clip` (`border-box`/`padding-box`/`content-box`) | ✅ | clips background colour/image/gradient to the chosen box; `text` falls back to border-box |
 | `box-shadow` (incl. inset, multiple) | ✅ | |
 | `border-image` | ✅ | the five longhands (`-source`/`-slice`/`-width`/`-outset`/`-repeat`), the `border-image` shorthand and the `-webkit-border-image` alias parse, cascade and serialize canonically (`getComputedStyle` reports each longhand, and the `border` shorthand resets them). `paint_border_image` in `src/paint.c` nine-slices the source — a `url()` raster image or a gradient rasterized to the border-image area — honouring `fill`, number and percentage slices, `auto`/length/percentage/number widths, outsets, and `stretch`/`repeat`/`round`/`space` on both axes; while it renders it replaces the element's border style. Block-level boxes only — an inline box's border image is not painted
@@ -203,8 +207,10 @@ the 1.0.31-dev source.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | Named, `#hex`, `rgb()`/`rgba()`, `hsl()`/`hsla()` | ✅ | modern space/slash syntax |
-| `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()` | ✅ | converted to sRGB |
-| `color-mix()` | 🟡 | `in srgb` and `in oklab`/`in oklch` interpolate in that space; `srgb-linear`, `hsl`, `hwb`, `lab`, `lch` and `xyz` are accepted but mixed in sRGB |
+| `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()`, `color()` | ✅ | every predefined space; values keep their color space and `none` components through specified and computed serialization (`src/css_color.c`); painted after conversion to sRGB |
+| Relative colors (`rgb(from …)`, `oklch(from …)`, `color(from …)`), `alpha()` | ✅ | channel keywords and math functions |
+| `color-mix()` | ✅ | any number of colors, every interpolation space and hue method, missing-component carry-forward and powerless hues |
+| `contrast-color()`, `color-layers()`, `light-dark()` | 🟡 | `color-layers()` accepts every blend mode but composites them all as `normal` |
 | `currentColor`, `transparent` | ✅ | |
 | `accent-color` / `caret-color` | ✅ | |
 
@@ -224,8 +230,10 @@ the 1.0.31-dev source.
 | `opacity` | ✅ | |
 | `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur/drop-shadow) | ✅ | on images; `blur()` is a separable box blur; `drop-shadow()` uses the image alpha mask, CSS lengths, and parsed colors/currentColor |
 | `mix-blend-mode` | ✅ | |
-| `clip-path` (basic shapes) | ✅ | |
+| `clip-path` (basic shapes) | ✅ | `circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()` with geometry boxes; canonical specified and computed serialization; interpolation and `add` composition |
+| `shape-outside` / `shape-margin` / `shape-image-threshold` | 🟡 | parsed and serialized (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()`, shape boxes; interpolation and `add` composition; computed values resolve lengths and positions); floats do not wrap around the shape yet |
 | `mask-image` (`url()` + linear/radial gradient) | ✅ | gradient masks composite the whole element through the gradient's alpha (fade effects); `mask`/`-webkit-mask` aliased; conic masks skipped |
+| `mask-border` (+ longhands) | 🟡 | parsed, computed and animated like `border-image`; not painted yet |
 | `image-rendering` (`pixelated`/`crisp-edges`) | ✅ | nearest-neighbour upscaling for raster `<img>` |
 | `-webkit-line-clamp` | ✅ | |
 
