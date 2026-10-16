@@ -424,6 +424,15 @@ static JSValue ns_target_make_event(JSContext *ctx, JSValueConst target,
                                     const char *type);
 static void    ns_event_adopt_interface(JSContext *ctx, JSValueConst ev,
                                         const char *iface);
+static JSValue ns_realm_proto(JSContext *ctx, const char *name);
+static JSValue ns_realm_protos(JSContext *ctx);
+static JSValue ns_realm_proto_in(JSContext *ctx, JSValueConst reg,
+                                 const char *name);
+static void    ns_realm_protos_capture(JSContext *ctx);
+static void    ns_realm_protos_record_names(JSContext *ctx,
+                                            const char *const *names,
+                                            gsize count);
+static void    ns_realm_protos_seed(ns_js *js, JSContext *ctx, JSContext *from);
 static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   JSValueConst this_obj, const char *type,
                                   JSValue event, gboolean window_like,
@@ -2259,12 +2268,7 @@ ns_event_new_proto(JSContext *ctx, JSValueConst proto)
 static gboolean
 ns_proto_is_event(JSContext *ctx, JSValueConst proto)
 {
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "Event");
-    JSValue event_proto = JS_IsObject(ctor)
-        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
+    JSValue event_proto = ns_realm_proto(ctx, "Event");
     gboolean is_event = FALSE;
     JSValue p = JS_DupValue(ctx, proto);
     for (int depth = 0; JS_IsObject(p) && depth < 32 && !is_event; depth++) {
@@ -14911,11 +14915,9 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
      * receiving window's realm: it is that window's MessageEvent and its
      * time stamp is the delivery time on that window's clock. */
     JSContext *realm = ns_window_message_realm(ctx, target);
-    JSValue realm_global = JS_GetGlobalObject(realm);
-    JSValue realm_proto = ns_proto_of(realm, realm_global, "MessageEvent");
+    JSValue realm_proto = ns_realm_proto(realm, "MessageEvent");
     if (JS_IsObject(realm_proto)) JS_SetPrototype(ctx, ev, realm_proto);
     JS_FreeValue(realm, realm_proto);
-    JS_FreeValue(realm, realm_global);
     JS_SetPropertyStr(ctx, ev, "timeStamp",
                       JS_NewFloat64(ctx, ns_perf_realm_now_ms(realm)));
     JSValue forwarded = ns_window_forward_of(js, target);
@@ -20617,6 +20619,12 @@ ns_target_make_event(JSContext *ctx, JSValueConst target, const char *type)
     return ev;
 }
 
+JSValue
+ns_js_realm_event(JSContext *ctx, JSValueConst target, const char *type)
+{
+    return ns_target_make_event(ctx, target, type);
+}
+
 typedef struct {
     JSValue  global;
     JSValue  prev;
@@ -20978,14 +20986,7 @@ ns_xhr_fire_progress_event(JSContext *ctx, JSValueConst target,
                            gboolean length_computable)
 {
     JSValue event = ns_target_make_event(ctx, target, type);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "ProgressEvent");
-    JSValue proto = JS_IsObject(ctor)
-        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
-    if (JS_IsObject(proto)) JS_SetPrototype(ctx, event, proto);
-    JS_FreeValue(ctx, proto);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
+    ns_event_adopt_interface(ctx, event, "ProgressEvent");
     JS_SetPropertyStr(ctx, event, "lengthComputable",
                       length_computable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "loaded", JS_NewFloat64(ctx, loaded));
@@ -26524,15 +26525,8 @@ static void
 ns_worker_shape_error_event(JSContext *ctx, JSValueConst ev,
                             const ns_worker_message *msg)
 {
-    JSValue g = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, g, msg->is_load_error ? "Event"
-                                                                : "ErrorEvent");
-    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
-                                      : JS_UNDEFINED;
-    if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
-    JS_FreeValue(ctx, proto);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, g);
+    ns_event_adopt_interface(ctx, ev,
+                             msg->is_load_error ? "Event" : "ErrorEvent");
     if (msg->is_load_error) {
         static const char *const extra[] = {
             "message", "filename", "lineno", "colno", "error", "data",
@@ -26866,6 +26860,24 @@ ns_js_exception_position(JSContext *ctx, JSValueConst ex, char **file,
     if (text) JS_FreeCString(ctx, text);
 }
 
+static JSValue
+ns_worker_make_error_event(JSContext *ctx, JSValueConst global,
+                           const char *message, const char *file, int line,
+                           int col, JSValueConst error)
+{
+    JSValue ev = ns_target_make_event(ctx, global, "error");
+    if (JS_IsException(ev)) return ev;
+    ns_event_adopt_interface(ctx, ev, "ErrorEvent");
+    JS_DefinePropertyValueStr(ctx, ev, "__ndErrorEvent", JS_TRUE, 0);
+    JS_SetPropertyStr(ctx, ev, "cancelable", JS_TRUE);
+    JS_SetPropertyStr(ctx, ev, "message", JS_NewString(ctx, message));
+    JS_SetPropertyStr(ctx, ev, "filename", JS_NewString(ctx, file));
+    JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, line));
+    JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, col));
+    JS_SetPropertyStr(ctx, ev, "error", JS_DupValue(ctx, error));
+    return ev;
+}
+
 /* Reports an uncaught exception in a worker as the HTML standard does: an
  * ErrorEvent at the worker's global, which self.onerror or a listener can
  * cancel, and otherwise an ErrorEvent at the Worker object in the owner,
@@ -26891,20 +26903,9 @@ ns_worker_report_exception(ns_js *js, JSValueConst ex)
 
     gboolean handled = FALSE;
     JSValue g = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, g, "ErrorEvent");
-    JSValue init = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, init, "message", JS_NewString(ctx, message));
-    JS_SetPropertyStr(ctx, init, "filename", JS_NewString(ctx, file));
-    JS_SetPropertyStr(ctx, init, "lineno", JS_NewInt32(ctx, line));
-    JS_SetPropertyStr(ctx, init, "colno", JS_NewInt32(ctx, col));
-    JS_SetPropertyStr(ctx, init, "error", JS_DupValue(ctx, ex));
-    JS_SetPropertyStr(ctx, init, "cancelable", JS_TRUE);
-    JSValue type = JS_NewString(ctx, "error");
-    JSValueConst args[2] = { type, init };
-    JSValue ev = JS_IsConstructor(ctx, ctor)
-        ? JS_CallConstructor(ctx, ctor, 2, args) : JS_EXCEPTION;
+    JSValue ev = ns_worker_make_error_event(ctx, g, message, file, line, col,
+                                            ex);
     if (!JS_IsException(ev)) {
-        JS_DefinePropertyValueStr(ctx, ev, "isTrusted", JS_TRUE, JS_PROP_C_W_E);
         JSValue dispatch = JS_GetPropertyStr(ctx, g, "dispatchEvent");
         JSValueConst dargs[1] = { ev };
         JSValue r = JS_Call(ctx, dispatch, g, 1, dargs);
@@ -26916,9 +26917,6 @@ ns_worker_report_exception(ns_js *js, JSValueConst ex)
     } else {
         JS_FreeValue(ctx, JS_GetException(ctx));
     }
-    JS_FreeValue(ctx, type);
-    JS_FreeValue(ctx, init);
-    JS_FreeValue(ctx, ctor);
     JS_FreeValue(ctx, g);
     js->in_error_report = 0;
     if (!handled && !g_atomic_int_get(&host->closing))
@@ -27789,6 +27787,9 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     ns_bind_ctor(ctx, global, "ExtendableEvent",        ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FetchEvent",             ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_window_event_ctor, 2);
+    static const char *const sw_events[] = { "ExtendableEvent", "FetchEvent",
+                                             "ExtendableMessageEvent" };
+    ns_realm_protos_record_names(ctx, sw_events, G_N_ELEMENTS(sw_events));
     ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 0);
     ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  1);
     ns_fetch_install_interface(ctx, global, "Response");
@@ -27976,6 +27977,7 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndIsEngineFunction",
                                          "__ndDispatchPath",
                                          "__ndRealmProto",
+                                         "__ndRealmProtos",
                                          "__ndAdoptCss" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
@@ -28463,6 +28465,7 @@ ns_worker_js_new(ns_worker_host *host)
         JS_FreeValue(ctx, g);
     }
     ns_js_name_engine_members(ctx);
+    ns_realm_protos_capture(ctx);
     {
         JSValue crypto = JS_NewObject(ctx);
         ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);
@@ -31563,34 +31566,32 @@ ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst obj)
 }
 
 static void
-ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
+ns_event_adopt_type_interface(JSContext *ctx, JSValueConst ev)
 {
-    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = ns_realm_protos(ctx);
     JSValue cur_proto = JS_GetPrototype(ctx, ev);
-    JSValue object_ctor = JS_GetPropertyStr(ctx, global, "Object");
-    JSValue object_proto = JS_GetPropertyStr(ctx, object_ctor, "prototype");
+    JSValue object_proto = ns_realm_proto_in(ctx, reg, "Object");
     gboolean plain = JS_VALUE_GET_PTR(cur_proto) ==
                      JS_VALUE_GET_PTR(object_proto);
     JS_FreeValue(ctx, object_proto);
-    JS_FreeValue(ctx, object_ctor);
     JS_FreeValue(ctx, cur_proto);
-    if (plain) {
-        JSValue ev_ctor = JS_GetPropertyStr(ctx, global,
-                                            ns_event_interface_for(ctx, ev));
-        if (!JS_IsObject(ev_ctor)) {
-            JS_FreeValue(ctx, ev_ctor);
-            ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
-        }
-        if (JS_IsObject(ev_ctor)) {
-            JSValue proto = JS_GetPropertyStr(ctx, ev_ctor, "prototype");
-            if (JS_IsObject(proto) &&
-                JS_VALUE_GET_PTR(proto) != JS_VALUE_GET_PTR(ev))
-                JS_SetPrototype(ctx, ev, proto);
-            JS_FreeValue(ctx, proto);
-        }
-        JS_FreeValue(ctx, ev_ctor);
+    JSValue proto = plain
+        ? ns_realm_proto_in(ctx, reg, ns_event_interface_for(ctx, ev))
+        : JS_UNDEFINED;
+    if (plain && !JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        proto = ns_realm_proto_in(ctx, reg, "Event");
     }
-    JS_FreeValue(ctx, global);
+    if (JS_IsObject(proto) && JS_VALUE_GET_PTR(proto) != JS_VALUE_GET_PTR(ev))
+        JS_SetPrototype(ctx, ev, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, reg);
+}
+
+static void
+ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
+{
+    ns_event_adopt_type_interface(ctx, ev);
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
     ns_event_define_legacy_accessors(ctx, ev);
@@ -34196,18 +34197,165 @@ ns_event_define_readonly(JSContext *ctx, JSValueConst ev, const char *name,
                               JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
 }
 
+static JSValue
+ns_realm_protos(JSContext *ctx)
+{
+    JSAtom key = JS_GetEnginePrivateAtom(ctx, "__ndRealmProtos");
+    if (key == JS_ATOM_NULL) return JS_NewObjectProto(ctx, JS_NULL);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = JS_GetProperty(ctx, global, key);
+    if (!JS_IsObject(reg)) {
+        JS_FreeValue(ctx, reg);
+        reg = JS_NewObjectProto(ctx, JS_NULL);
+        JS_DefinePropertyValue(ctx, global, key, JS_DupValue(ctx, reg), 0);
+    }
+    JS_FreeValue(ctx, global);
+    JS_FreeAtom(ctx, key);
+    return reg;
+}
+
+static gboolean
+ns_realm_proto_recorded(JSContext *ctx, JSValueConst reg, JSAtom atom)
+{
+    int has = JS_GetOwnProperty(ctx, NULL, reg, atom);
+    if (has < 0) JS_FreeValue(ctx, JS_GetException(ctx));
+    return has != 0;
+}
+
+static void
+ns_realm_proto_store(JSContext *ctx, JSValueConst reg, JSAtom atom,
+                     JSValueConst proto)
+{
+    if (!JS_IsObject(proto)) return;
+    if (JS_DefinePropertyValue(ctx, reg, atom, JS_DupValue(ctx, proto), 0) < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+}
+
+static void
+ns_realm_proto_record(JSContext *ctx, JSValueConst reg, JSValueConst global,
+                      const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSPropertyDescriptor desc;
+    if (!ns_realm_proto_recorded(ctx, reg, atom)) {
+        int own = JS_GetOwnProperty(ctx, &desc, global, atom);
+        if (own < 0) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        } else if (own > 0) {
+            if (!(desc.flags & JS_PROP_GETSET)) {
+                JSValue proto = ns_proto_of(ctx, global, name);
+                if (JS_IsException(proto))
+                    JS_FreeValue(ctx, JS_GetException(ctx));
+                ns_realm_proto_store(ctx, reg, atom, proto);
+                JS_FreeValue(ctx, proto);
+            }
+            JS_FreeValue(ctx, desc.value);
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+    }
+    JS_FreeAtom(ctx, atom);
+}
+
+static gboolean
+ns_realm_proto_is_kept(const char *name)
+{
+    return strcmp(name, "Object") == 0 || g_str_has_suffix(name, "Event");
+}
+
+static void
+ns_realm_protos_capture(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = ns_realm_protos(ctx);
+    JSPropertyEnum *props = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &props, &len, global,
+                               JS_GPN_STRING_MASK) < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        len = 0;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        const char *name = JS_AtomToCString(ctx, props[i].atom);
+        if (!name)
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        else if (ns_realm_proto_is_kept(name))
+            ns_realm_proto_record(ctx, reg, global, name);
+        JS_FreeCString(ctx, name);
+    }
+    if (props) JS_FreePropertyEnum(ctx, props, len);
+    JS_FreeValue(ctx, reg);
+    JS_FreeValue(ctx, global);
+}
+
+static void
+ns_realm_protos_record_names(JSContext *ctx, const char *const *names,
+                             gsize count)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = ns_realm_protos(ctx);
+    for (gsize i = 0; i < count; i++)
+        ns_realm_proto_record(ctx, reg, global, names[i]);
+    JS_FreeValue(ctx, reg);
+    JS_FreeValue(ctx, global);
+}
+
+static void
+ns_realm_protos_seed(ns_js *js, JSContext *ctx, JSContext *from)
+{
+    JSValue src = ns_realm_protos(from);
+    JSValue dst = ns_realm_protos(ctx);
+    JSPropertyEnum *props = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(from, &props, &len, src,
+                               JS_GPN_STRING_MASK) < 0) {
+        JS_FreeValue(from, JS_GetException(from));
+        len = 0;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue proto = JS_GetProperty(from, src, props[i].atom);
+        if (JS_IsException(proto)) JS_FreeValue(from, JS_GetException(from));
+        else if (!ns_realm_proto_recorded(ctx, dst, props[i].atom))
+            ns_realm_proto_store(ctx, dst, props[i].atom,
+                                 ns_realm_proto_for(js, ctx, proto));
+        JS_FreeValue(from, proto);
+    }
+    if (props) JS_FreePropertyEnum(from, props, len);
+    JS_FreeValue(ctx, dst);
+    JS_FreeValue(from, src);
+}
+
+static JSValue
+ns_realm_proto_in(JSContext *ctx, JSValueConst reg, const char *name)
+{
+    JSValue proto = JS_GetPropertyStr(ctx, reg, name);
+    if (JS_IsObject(proto)) return proto;
+    JS_FreeValue(ctx, proto);
+    JSValue global = JS_GetGlobalObject(ctx);
+    proto = ns_proto_of(ctx, global, name);
+    JS_FreeValue(ctx, global);
+    if (JS_IsException(proto)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        proto = JS_UNDEFINED;
+    }
+    return proto;
+}
+
+static JSValue
+ns_realm_proto(JSContext *ctx, const char *name)
+{
+    JSValue reg = ns_realm_protos(ctx);
+    JSValue proto = ns_realm_proto_in(ctx, reg, name);
+    JS_FreeValue(ctx, reg);
+    return proto;
+}
+
 static void
 ns_event_adopt_interface(JSContext *ctx, JSValueConst ev, const char *iface)
 {
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, iface);
-    if (JS_IsObject(ctor)) {
-        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
-        if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
-        JS_FreeValue(ctx, proto);
-    }
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
+    JSValue proto = ns_realm_proto(ctx, iface);
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
+    JS_FreeValue(ctx, proto);
 }
 
 static gboolean
@@ -49266,13 +49414,9 @@ static void
 ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
 {
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, iface);
-    if (JS_IsObject(ctor)) {
-        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
-        if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
-        JS_FreeValue(ctx, proto);
-    }
-    JS_FreeValue(ctx, ctor);
+    JSValue proto = ns_proto_of(ctx, global, iface);
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
+    JS_FreeValue(ctx, proto);
     JS_FreeValue(ctx, global);
 }
 
@@ -51413,6 +51557,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         ns_js_link_interface_ctors(fctx);
         ns_js_lock_global_prototypes(fctx);
         ns_js_brand_node_interfaces(fctx, ns_element_class_id, ns_attr_class_id);
+        ns_realm_protos_seed(js, fctx, parent_ctx);
+        ns_realm_protos_capture(fctx);
     }
     if (ok) {
         JSValue parent_performance =
@@ -54611,7 +54757,7 @@ ns_js_dispatch_rejection_event(ns_js *js, JSContext *ctx, const char *type,
 {
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue event = ns_target_make_event(ctx, global, type);
-    ns_obj_adopt_global_proto(ctx, event, "PromiseRejectionEvent");
+    ns_event_adopt_interface(ctx, event, "PromiseRejectionEvent");
     JS_SetPropertyStr(ctx, event, "promise", JS_DupValue(ctx, promise));
     JS_SetPropertyStr(ctx, event, "reason", JS_DupValue(ctx, reason));
     JS_SetPropertyStr(ctx, event, "cancelable",
@@ -62666,6 +62812,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_js_shape_window_global(ctx);
     ns_js_link_interface_ctors(ctx);
     ns_js_lock_global_prototypes(ctx);
+    ns_realm_protos_capture(ctx);
     {
         JSValue g = JS_GetGlobalObject(ctx);
         JSValue doc_val = JS_GetPropertyStr(ctx, g, "document");
@@ -63196,13 +63343,8 @@ ns_js_report_error_event(ns_js *js, const char *message, const char *filename,
     JS_DefinePropertyValueStr(ctx, ev, "__ndErrorEvent", JS_TRUE, 0);
     JSValue g = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, g));
-    JSValue error_event = JS_GetPropertyStr(ctx, g, "ErrorEvent");
-    JSValue error_proto = JS_IsObject(error_event)
-        ? JS_GetPropertyStr(ctx, error_event, "prototype") : JS_UNDEFINED;
-    if (JS_IsObject(error_proto)) JS_SetPrototype(ctx, ev, error_proto);
-    JS_FreeValue(ctx, error_proto);
-    JS_FreeValue(ctx, error_event);
     JS_FreeValue(ctx, g);
+    ns_event_adopt_interface(ctx, ev, "ErrorEvent");
 
     JS_SetPropertyStr(ctx, ev, "message",
                       JS_NewString(ctx, message ? message : ""));

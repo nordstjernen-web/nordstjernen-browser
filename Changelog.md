@@ -3,6 +3,19 @@ Changelog:
 
 1.0.32:
 ======
+* JS: events the browser creates itself (`message` on ports, windows
+  and workers, `error`, `unhandledrejection`, XMLHttpRequest progress
+  events, a worker's error events and WebGL context events) take their
+  prototype from the realm's own interfaces, recorded when the window,
+  frame or worker realm is set up, instead of looking `MessageEvent`,
+  `ErrorEvent` or `Event` up on the global object each time. A frame
+  starts from its parent's original interfaces, so the events a frame
+  receives keep the original prototypes. A
+  worker that deletes its globals for sandboxing, or a page that
+  replaces `window.MessageEvent`, no longer makes messages arrive
+  without `type` or `data`, and a worker whose `ErrorEvent` is gone
+  still runs `self.onerror`; ChatGPT's answer worker never replied and
+  the page spun until its scripts were halted.
 * Layout: a table cell lays out its content as a block formatting
   context, so a float inside a cell shrinks to fit and sits beside the
   text, and sibling margins collapse. A styled cell used to stack its
