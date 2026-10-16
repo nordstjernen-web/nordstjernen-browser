@@ -8948,6 +8948,28 @@ ns_paint_box_establishes_3d(const ns_box *b)
     return box_establishes_3d(b);
 }
 
+static gboolean
+apply_3d_root_affine(cairo_t *cr, const ns_box *b, const ns_css_transform *tf)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double ox, oy, oz;
+    box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
+                         &ox, &oy, &oz);
+    ns_mat4 m;
+    ns_css_transform_to_mat4(tf, bw, bh, &m);
+    if (!ns_mat4_is_affine2d(&m)) return FALSE;
+    cairo_matrix_t cm;
+    cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
+    cairo_matrix_t inverse = cm;
+    if (cairo_matrix_invert(&inverse) != CAIRO_STATUS_SUCCESS) return FALSE;
+    cairo_save(cr);
+    cairo_translate(cr, ox, oy);
+    cairo_transform(cr, &cm);
+    cairo_translate(cr, -ox, -oy);
+    return TRUE;
+}
+
 static void
 paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -9178,7 +9200,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         double u0 = 0, u1 = 0, u2 = 0, u3 = 0;
         if (g_dbg_paint_x >= 0)
             cairo_clip_extents(cr, &u0, &u1, &u2, &u3);
+        gboolean root_tf = has_transform && box_establishes_3d(b) &&
+                           apply_3d_root_affine(cr, b, &eff_tf);
         paint_3d_root(cr, b, highlight);
+        if (root_tf) cairo_restore(cr);
         if (g_dbg_paint_x >= 0) {
             double z0, z1, z2, z3;
             cairo_clip_extents(cr, &z0, &z1, &z2, &z3);

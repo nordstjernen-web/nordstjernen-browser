@@ -389,17 +389,38 @@ box_axis_overflow_hidden(const ns_box *b, ns_css_prop axis)
 }
 
 static gboolean
+box_overflow_visible(const ns_box *b)
+{
+    if (!b || !b->style) return TRUE;
+    const ns_css_prop axes[] = { NS_CSS_OVERFLOW_X, NS_CSS_OVERFLOW_Y };
+    for (size_t i = 0; i < G_N_ELEMENTS(axes); i++) {
+        const char *kw = ns_style_keyword(b->style, axes[i]);
+        if (!kw) kw = ns_style_keyword(b->style, NS_CSS_OVERFLOW);
+        if (kw && g_ascii_strcasecmp(kw, "visible") != 0) return FALSE;
+    }
+    return TRUE;
+}
+
+static const ns_box *
+find_element_box(const ns_box *b, const char *name)
+{
+    if (!b) return NULL;
+    if (b->dom && b->dom->name && strcmp(b->dom->name, name) == 0) return b;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        const ns_box *found = find_element_box(c, name);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static gboolean
 root_axis_overflow_hidden(const ns_box *b, ns_css_prop axis)
 {
-    if (!b) return FALSE;
-    if (b->dom && b->dom->name &&
-        (strcmp(b->dom->name, "html") == 0 ||
-         strcmp(b->dom->name, "body") == 0) &&
-        box_axis_overflow_hidden(b, axis))
-        return TRUE;
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        if (root_axis_overflow_hidden(c, axis)) return TRUE;
-    return FALSE;
+    const ns_box *root = find_element_box(b, "html");
+    if (root && !box_overflow_visible(root))
+        return box_axis_overflow_hidden(root, axis);
+    const ns_box *body = find_element_box(root ? root : b, "body");
+    return box_axis_overflow_hidden(body, axis);
 }
 
 static int browser_images_outstanding(ns_browser *browser);
