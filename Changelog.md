@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* CSS: the `width` and `height` attributes of an outer `<svg>` element
+  map to the CSS `width` and `height` properties, as SVG 2 has it, so a
+  stylesheet that sets only one of them keeps the other from the
+  attribute, and lengths in `em` or `%` resolve. An `<svg width="24">`
+  styled `height: 1rem` was drawn 16px wide from its viewBox's ratio
+  instead of 24px wide, which shifted IMDb's reaction counts 8px left.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
