@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* Performance: forced style updates after script writes to inline styles
+  recompute far fewer elements. An element whose style an animation
+  rewrites is recomputed alone, with its descendants kept unless the
+  values they inherit change; a `style` attribute change no longer
+  re-runs `:has()` invalidation when no selector tests that attribute;
+  and custom-property maps are compared layer by layer instead of by
+  flattening every inherited variable. On deno.com, whose GSAP code reads
+  `getComputedStyle` after each inline write, a style pass went from
+  about 300ms to about 21ms.
 * Layout: an inline element with `position: relative` (or any other
   containing-block trigger) is the containing block of its absolutely
   positioned descendants, which were laid out against the page instead;
