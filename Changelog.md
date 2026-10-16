@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Cache: shutting the cache down now waits for a cache write that is
+  still running on a network thread. The write could see the cache
+  directory already freed, build a relative path from the cache key,
+  and leave the response body as a file named by 62 hex characters in
+  the directory the browser was started from. A body path is now never
+  built without a cache directory.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
