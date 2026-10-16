@@ -1,6 +1,15 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.33:
+======
+* README: brought up to date with the source — per-platform renderer
+  sandboxing (Seatbelt on macOS, mitigation policies on Windows),
+  OS-decoded H.264/AAC, Web Audio and camera/microphone capture, WOFF2,
+  the bytecode cache, watchdog, tiled renderer IPC, macOS `.dmg` and
+  Debian/Ubuntu `.deb` downloads, the full optional-dependency list and
+  the BSD/musl CI badges.
+
 1.0.32:
 ======
 * Google is now the default search engine for the address bar and the
