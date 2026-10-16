@@ -467,6 +467,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_MASK_BORDER_OUTSET]   = "mask-border-outset",
     [NS_CSS_MASK_BORDER_REPEAT]   = "mask-border-repeat",
     [NS_CSS_MASK_BORDER_MODE]     = "mask-border-mode",
+    [NS_CSS_WEBKIT_TEXT_FILL_COLOR] = "-webkit-text-fill-color",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
@@ -582,6 +583,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_WORD_BREAK:
     case NS_CSS_OVERFLOW_WRAP:
     case NS_CSS_CARET_COLOR:
+    case NS_CSS_WEBKIT_TEXT_FILL_COLOR:
     case NS_CSS_ACCENT_COLOR:
     case NS_CSS_FILL:
     case NS_CSS_FILL_OPACITY:
@@ -10397,6 +10399,7 @@ prop_name_is_color(const char *prop)
         "outline-color", "text-decoration-color", "column-rule-color",
         "caret-color", "accent-color", "fill", "stroke", "stop-color",
         "flood-color", "lighting-color", "text-emphasis-color",
+        "-webkit-text-fill-color",
         "border-block-start-color", "border-block-end-color",
         "border-inline-start-color", "border-inline-end-color",
     };
@@ -13570,6 +13573,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_COLUMN_RULE_COLOR:
     case NS_CSS_CARET_COLOR:
     case NS_CSS_STOP_COLOR:
+    case NS_CSS_WEBKIT_TEXT_FILL_COLOR:
     case NS_CSS_ACCENT_COLOR: {
         guint8 r, g, b, a;
         static const guint8 opaque_black[4] = { 0, 0, 0, 255 };
@@ -27640,6 +27644,15 @@ ns_css_declarations_free(GArray *decls)
 }
 
 static GHashTable *g_incr_exclude;
+
+const ns_css_value *
+ns_style_text_fill_color(const ns_style *s)
+{
+    if (!s) return NULL;
+    const ns_css_value *fill = s->values[NS_CSS_WEBKIT_TEXT_FILL_COLOR];
+    if (fill && fill->kind == NS_CSS_V_COLOR) return fill;
+    return s->values[NS_CSS_COLOR];
+}
 
 gboolean
 ns_style_prop_from_currentcolor(const ns_style *s, int prop)
