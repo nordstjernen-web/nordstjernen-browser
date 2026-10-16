@@ -4361,20 +4361,16 @@ static const char k_about_start_template[] =
     "<meta name=\"color-scheme\" content=\"light dark\">"
     "<title>New Tab</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
-    "html,body{height:100%}\n"
-    "body{background:radial-gradient(1100px 520px at 50% -140px,"
-    "rgba(83,130,255,.22),transparent),"
-    "radial-gradient(700px 380px at 85% 0,rgba(40,190,200,.12),transparent),"
-    "var(--bg)}\n"
+    "html,body{height:100%;background:#fff}\n"
     ".ntp{max-width:720px;margin:0 auto;padding:13vh 24px 40px;"
     "display:flex;flex-direction:column;align-items:center}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;"
     "gap:14px;margin-bottom:30px}\n"
     ".mark-img{display:block;width:76px;height:76px;border-radius:20px;"
     "box-shadow:0 10px 30px rgba(20,40,110,.28)}\n"
-    ".brand h1{margin:0;font-size:34px;font-weight:700;"
-    "letter-spacing:-.02em;line-height:1.1}\n"
-    ".tagline{margin:-6px 0 0;color:var(--muted);font-size:14px}\n"
+    ".brand h1{margin:0;font-size:32px;font-weight:700;"
+    "letter-spacing:-.02em;line-height:1.1;text-align:center}\n"
+    ".brand h1 .ver{color:var(--faint);font-weight:500}\n"
     ".search{display:flex;align-items:center;gap:12px;width:100%;"
     "height:58px;padding:0 7px 0 22px;border-radius:999px;"
     "background:var(--card);border:1px solid var(--line);"
@@ -4391,30 +4387,30 @@ static const char k_about_start_template[] =
     "cursor:pointer}\n"
     ".search button svg{color:var(--accent-ink)}\n"
     ".search button:hover{filter:brightness(1.08)}\n"
-    ".tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;"
-    "width:100%;margin-top:34px}\n"
-    ".tile{display:flex;flex-direction:column;align-items:center;gap:10px;"
-    "padding:18px 8px 16px;border-radius:var(--radius);"
-    "background:var(--card);border:1px solid var(--line);"
-    "box-shadow:var(--shadow);color:var(--text);font-size:14px;"
+    ".hint{min-height:18px;margin:10px 0 0;color:var(--faint);"
+    "font-size:13px;text-align:center}\n"
+    ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
+    "border-radius:5px;font:inherit;font-size:12px;color:var(--muted)}\n"
+    ".tiles{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;"
+    "margin-top:22px}\n"
+    ".tile{display:flex;align-items:center;gap:7px;padding:6px 14px 6px 8px;"
+    "border-radius:999px;background:var(--card);"
+    "border:1px solid var(--line);color:var(--text);font-size:13px;"
     "font-weight:600}\n"
-    ".tile:hover{text-decoration:none;border-color:var(--accent)}\n"
+    ".tile:hover{text-decoration:none;border-color:var(--accent);"
+    "background:var(--accent-soft)}\n"
     ".ic{display:flex;align-items:center;justify-content:center;"
-    "width:44px;height:44px;border-radius:50%;"
+    "width:24px;height:24px;border-radius:50%;"
     "background:var(--accent-soft);color:var(--accent)}\n"
     ".foot{margin-top:40px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin:0 8px}\n"
-    "@media (prefers-color-scheme:dark){body{background:"
-    "radial-gradient(1100px 520px at 50% -140px,rgba(70,110,255,.28),"
-    "transparent),radial-gradient(700px 380px at 85% 0,"
-    "rgba(40,190,200,.10),transparent),var(--bg)}}\n"
+    "@media (prefers-color-scheme:dark){html,body{background:var(--bg)}}\n"
     "@media (max-width:560px){.ntp{padding-top:7vh}"
-    ".tiles{grid-template-columns:repeat(2,1fr)}"
-    ".brand h1{font-size:28px}}\n"
+    ".brand h1{font-size:26px}}\n"
     "</style></head>"
     "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen</h1>"
-    "<p class=\"tagline\">__ND_TAGLINE__</p></div>"
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Browser "
+    "<span class=\"ver\">" NS_VERSION "</span></h1></div>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\">"
@@ -4427,6 +4423,7 @@ static const char k_about_start_template[] =
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
     " stroke-linejoin=\"round\"><path d=\"M3 8h9.5M8.5 4l4 4-4 4\"/></svg>"
     "</button></form>"
+    "<p class=\"hint\" id=\"hint\" aria-live=\"polite\"></p>"
     "<nav class=\"tiles\">"
     "<a class=\"tile\" href=\"about:history\"><span class=\"ic\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
@@ -4462,6 +4459,18 @@ static const char k_about_start_template[] =
     " if(!/\\s/.test(s)&&/^(localhost|[^\\s.\\/:]+(\\.[^\\s.\\/:]+)+)"
     "(:\\d+)?(\\/.*)?$/i.test(s)) return 'https://'+s;\n"
     " return null;}\n"
+    "var hint=document.getElementById('hint');\n"
+    "function showHint(){\n"
+    " var s=sq.value.trim(); hint.textContent='';\n"
+    " if(!s) return;\n"
+    " var a=addressFor(s);\n"
+    " hint.appendChild(document.createTextNode('Press '));\n"
+    " var k=document.createElement('kbd'); k.textContent='Enter';\n"
+    " hint.appendChild(k);\n"
+    " hint.appendChild(document.createTextNode(a\n"
+    "  ? ' to open '+a.replace(/^https:\\/\\//,'')\n"
+    "  : ' to search with __ND_SEARCH_NAME__'));}\n"
+    "sq.addEventListener('input',showHint);\n"
     "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
     " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
@@ -4870,19 +4879,6 @@ about_settings_clear(void)
     ns_net_site_storage_clear();
 }
 
-static const char *
-about_start_tagline(void)
-{
-    static const char *const taglines[] = {
-        "Nordstjernen the unique web browser",
-        "Northstar the unique web browser",
-        "Nordstjärnan the unique web browser",
-        "Étoile du Nord the unique web browser",
-        "Nordstern the unique web browser",
-    };
-    return taglines[g_random_int_range(0, G_N_ELEMENTS(taglines))];
-}
-
 static gboolean
 about_request_from_chrome(const char *top_url)
 {
@@ -4963,14 +4959,10 @@ synthesize_about_response(const char *url, const char *top_url,
         g_string_free(esc_engine, TRUE);
         g_free(engine_host);
         char *logo_markup = about_logo_markup();
-        char *with_logo = about_substitute(with_name,
-                                           "__ND_LOGO_MARK__",
-                                           logo_markup);
+        char *body = about_substitute(with_name, "__ND_LOGO_MARK__",
+                                      logo_markup);
         g_free(logo_markup);
         g_free(with_name);
-        char *body = about_substitute(with_logo, "__ND_TAGLINE__",
-                                      about_start_tagline());
-        g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
