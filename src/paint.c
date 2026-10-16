@@ -6280,8 +6280,26 @@ paint_texture_drop_shadows(cairo_t *cr, cairo_surface_t *surf, const ns_box *b,
     }
 }
 
+void
+ns_paint_blur_argb(guchar *data, int stride, int w, int h, double sigma)
+{
+    if (sigma < 0.5) return;
+    double ideal = sqrt(12.0 * sigma * sigma / 3.0 + 1.0);
+    int wl = (int)floor(ideal);
+    if (wl % 2 == 0) wl--;
+    int wu = wl + 2;
+    double m_ideal = (12.0 * sigma * sigma - 3.0 * wl * wl - 12.0 * wl - 9.0) /
+                     (-4.0 * wl - 4.0);
+    int m = (int)lround(m_ideal);
+    for (int i = 0; i < 3; i++) {
+        int r = ((i < m ? wl : wu) - 1) / 2;
+        box_blur_argb(data, stride, w, h, MIN(r, 512));
+    }
+}
+
 static void
-apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
+apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
+                   double blur_scale)
 {
     if (!filter || !*filter) return;
     typedef struct { int op; double amount; } fop;
@@ -6374,11 +6392,8 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
             px[2] = (guchar)(r * a * 255.0 + 0.5);
         }
     }
-    if (blur_radius > 0) {
-        int r = (int)(blur_radius + 0.5);
-        if (r > 512) r = 512;
-        box_blur_argb(data, stride, w, h, r);
-    }
+    if (blur_radius > 0)
+        ns_paint_blur_argb(data, stride, w, h, blur_radius * blur_scale);
 }
 
 static gboolean
@@ -6513,7 +6528,7 @@ texture_surface_create(ns_texture *tex, int iw, int ih, const char *filter_kw)
     int dst_stride = cairo_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
     if (filter_kw)
-        apply_image_filter(dst, dst_stride, iw, ih, filter_kw);
+        apply_image_filter(dst, dst_stride, iw, ih, filter_kw, 1.0);
     cairo_surface_mark_dirty(surf);
     return surf;
 }
@@ -8160,6 +8175,154 @@ box_border_rect(const ns_box *b, double *bx, double *by, double *bw, double *bh)
           b->border.top + b->border.bottom;
 }
 
+static double
+filter_blur_sigma(const char *filter)
+{
+    double sigma = 0;
+    const char *p = filter;
+    while (p && *p) {
+        const char *name = NULL;
+        const char *body = NULL;
+        gsize nlen = 0;
+        const char *next = filter_function_next(p, &name, &nlen, &body, NULL);
+        if (!next) break;
+        if (filter_name_is(name, nlen, "blur")) {
+            double amt = parse_filter_amount(body, NULL);
+            if (amt > sigma) sigma = amt;
+        }
+        p = next;
+    }
+    return sigma;
+}
+
+static const char *
+box_filter_layer_keyword(const ns_box *b)
+{
+    if (!b->style || b == g_paint_tex_root) return NULL;
+    if (b->kind != NS_BOX_BLOCK && b->kind != NS_BOX_TABLE &&
+        b->kind != NS_BOX_TABLE_CAPTION && b->kind != NS_BOX_TABLE_CELL)
+        return NULL;
+    const ns_css_value *v = b->style->values[NS_CSS_FILTER];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
+    return filter_has_bitmap_effect(v->u.keyword) ? v->u.keyword : NULL;
+}
+
+static void
+box_ink_extents_x(const ns_box *b, double *x0, double *x1, int depth)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    if (bw > 0) {
+        *x0 = MIN(*x0, bx);
+        *x1 = MAX(*x1, bx + bw);
+    }
+    if (depth >= 64) return;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        box_ink_extents_x(c, x0, x1, depth + 1);
+}
+
+typedef enum {
+    FILTER_LAYER_NONE,
+    FILTER_LAYER_OPEN,
+    FILTER_LAYER_INVISIBLE,
+} filter_layer_state;
+
+typedef struct {
+    cairo_t         *outer;
+    cairo_t         *cr;
+    cairo_surface_t *surf;
+    double           x, y, k;
+    const char      *filter;
+} filter_layer;
+
+static filter_layer_state
+filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
+                   gboolean transformed, filter_layer *fl)
+{
+    double sigma = filter_blur_sigma(filter);
+    double spread = ceil(sigma * 3.0);
+    double cx0, cy0, cx1, cy1;
+    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double x0 = bx, x1 = bx + bw;
+    box_ink_extents_x(b, &x0, &x1, 0);
+    double y0 = by, y1 = by + bh;
+    if (b->paint_bottom > b->paint_top) {
+        y0 = MIN(y0, b->paint_top);
+        y1 = MAX(y1, b->paint_bottom);
+    }
+    if (transformed) {
+        x0 = cx0 - spread;
+        y0 = cy0 - spread;
+        x1 = cx1 + spread;
+        y1 = cy1 + spread;
+    }
+    x0 = MAX(x0, cx0 - spread) - spread;
+    y0 = MAX(y0, cy0 - spread) - spread;
+    x1 = MIN(x1, cx1 + spread) + spread;
+    y1 = MIN(y1, cy1 + spread) + spread;
+    if (x1 - x0 < 1 || y1 - y0 < 1 || x1 < cx0 || x0 > cx1 ||
+        y1 < cy0 || y0 > cy1)
+        return FILTER_LAYER_INVISIBLE;
+    double ux = 1, uy = 0;
+    cairo_user_to_device_distance(cr, &ux, &uy);
+    double k = MAX(hypot(ux, uy), 0.05);
+    if (sigma > 0) k = MIN(k, MAX(8.0 / sigma, 0.05));
+    double maxdim = MAX(x1 - x0, y1 - y0);
+    if (maxdim * k > 4096.0) k = 4096.0 / maxdim;
+    int tw = (int)ceil((x1 - x0) * k);
+    int th = (int)ceil((y1 - y0) * k);
+    if (tw < 1 || th < 1) return FILTER_LAYER_INVISIBLE;
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                       tw, th);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return FILTER_LAYER_NONE;
+    }
+    cairo_t *tcr = cairo_create(surf);
+    cairo_scale(tcr, k, k);
+    cairo_translate(tcr, -x0, -y0);
+    *fl = (filter_layer){
+        .outer = cr, .cr = tcr, .surf = surf,
+        .x = x0, .y = y0, .k = k, .filter = filter,
+    };
+    return FILTER_LAYER_OPEN;
+}
+
+static void
+filter_layer_discard(filter_layer *fl)
+{
+    cairo_destroy(fl->cr);
+    cairo_surface_destroy(fl->surf);
+    fl->cr = NULL;
+    fl->surf = NULL;
+}
+
+static void
+filter_layer_end(filter_layer *fl)
+{
+    cairo_destroy(fl->cr);
+    fl->cr = NULL;
+    cairo_surface_flush(fl->surf);
+    apply_image_filter(cairo_image_surface_get_data(fl->surf),
+                       cairo_image_surface_get_stride(fl->surf),
+                       cairo_image_surface_get_width(fl->surf),
+                       cairo_image_surface_get_height(fl->surf),
+                       fl->filter, fl->k);
+    cairo_surface_mark_dirty(fl->surf);
+    cairo_t *cr = fl->outer;
+    cairo_save(cr);
+    cairo_translate(cr, fl->x, fl->y);
+    cairo_scale(cr, 1.0 / fl->k, 1.0 / fl->k);
+    cairo_set_source_surface(cr, fl->surf, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+    cairo_paint(cr);
+    cairo_restore(cr);
+    cairo_surface_destroy(fl->surf);
+    fl->surf = NULL;
+}
+
 static gboolean
 style_keyword_set(const ns_style *s, ns_css_prop prop, const char *neutral)
 {
@@ -8433,7 +8596,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
             cairo_surface_flush(tex);
             apply_image_filter(cairo_image_surface_get_data(tex),
                                cairo_image_surface_get_stride(tex),
-                               tw, th, filter_kw);
+                               tw, th, filter_kw, 1.0);
             cairo_surface_mark_dirty(tex);
         }
         if (cacheable) {
@@ -8986,7 +9149,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     double op = box_opacity(b);
     cairo_operator_t blend = blend_mode_operator(style);
     gboolean mask_grad = mask_layers_paintable(style);
-    gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask_grad;
+    const char *filter_kw = box_filter_layer_keyword(b);
+    gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER ||
+                       mask_grad || filter_kw;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
     if (isnan(sticky_dx) || isnan(sticky_dy)) {
@@ -9038,6 +9203,20 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         return;
     }
 
+    filter_layer fl = { 0 };
+    if (filter_kw) {
+        filter_layer_state fs = filter_layer_begin(cr, b, filter_kw,
+                                                   has_transform, &fl);
+        if (fs == FILTER_LAYER_INVISIBLE) {
+            if (has_sticky)
+                paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
+            return;
+        }
+        if (fs == FILTER_LAYER_OPEN) {
+            cr = fl.cr;
+            g_paint_no_cull++;
+        }
+    }
     gboolean box_offscreen = FALSE;
     if (!has_transform && !has_sticky && !g_paint_no_cull) {
         const ns_css_value *posv = style ? style->values[NS_CSS_POSITION] : NULL;
@@ -9081,6 +9260,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_restore(cr);
             if (grouped)
                 cairo_pattern_destroy(cairo_pop_group(cr));
+            if (fl.cr) {
+                g_paint_no_cull--;
+                cr = fl.outer;
+                filter_layer_discard(&fl);
+            }
             if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
@@ -9480,6 +9664,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, saved_op);
         if (mp) cairo_pattern_destroy(mp);
         cairo_pattern_destroy(group_source);
+    }
+    if (fl.cr) {
+        g_paint_no_cull--;
+        cr = fl.outer;
+        filter_layer_end(&fl);
     }
 
     if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);

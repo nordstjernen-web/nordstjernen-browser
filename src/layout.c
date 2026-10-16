@@ -18186,6 +18186,20 @@ inline_shift_paint_bounds(const ns_box *b, double *top, double *bottom)
     *bottom = MAX(*bottom, b->y + b->content_height + y1);
 }
 
+static double
+style_filter_blur_spread(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_FILTER] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
+    double spread = 0;
+    for (const char *p = strstr(v->u.keyword, "blur("); p;
+         p = strstr(p + 5, "blur(")) {
+        double sigma = g_ascii_strtod(p + 5, NULL);
+        if (sigma * 3.0 > spread) spread = sigma * 3.0;
+    }
+    return spread;
+}
+
 static void
 compute_paint_bounds(ns_box *b)
 {
@@ -18215,8 +18229,9 @@ compute_paint_bounds(ns_box *b)
             if (ab->paint_bottom + dy > bottom) bottom = ab->paint_bottom + dy;
         }
     }
-    b->paint_top = top;
-    b->paint_bottom = bottom;
+    double spread = style_filter_blur_spread(b->style);
+    b->paint_top = top - spread;
+    b->paint_bottom = bottom + spread;
 }
 
 static ns_box *

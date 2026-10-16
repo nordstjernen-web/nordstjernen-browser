@@ -8,6 +8,15 @@ Changelog:
   against that height. The rows were sized as if the height were
   unknown, so a `1fr` row took only its content and a footer row sat
   right under it instead of at the bottom (Gemini's sidebar "Sign in").
+* Paint: CSS `filter` (`blur()`, `grayscale()`, `brightness()` and the
+  other bitmap functions) applies to any block, table or cell, not only
+  to images: the box and its descendants are painted into a layer with
+  room for the blur, filtered, then composited. Large blurs are drawn at
+  a lower resolution, as other browsers do, so a `blur(146px)` glow
+  costs a few milliseconds. `blur()` is now a Gaussian (three box
+  passes) instead of a single box pass. SVG `filter="url(#id)"` applies
+  when the filter is made of `feGaussianBlur` primitives, so blurred SVG
+  shapes and SVG mask images (Gemini's background glow) are soft.
 * DOM: `<link rel="preload" as="style">` fires `load` (or `error`) once
   its fetch ends, and changing a `<link>`'s `rel`, `href` or `as` loads
   it again: a link that becomes `rel="stylesheet"` applies its sheet and
