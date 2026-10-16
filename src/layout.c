@@ -1340,6 +1340,10 @@ static gboolean inline_atomic_needs_layout(const ns_box *ab);
 static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
                                        const ns_style *host_style);
 static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
+static void append_node_children(ns_box *block, const ns_node *n,
+                                 GHashTable *styles,
+                                 gboolean blockify_children,
+                                 ns_box **pending_before);
 static void register_abs_pseudo(const ns_node *host, const ns_style *ps);
 static ns_box *build_blockified_inline_item(const ns_node *n, GHashTable *styles,
                                             ns_box **pending_before);
@@ -1834,7 +1838,15 @@ build_table_caption(const ns_node *n, GHashTable *styles)
     caption->dom = n;
     caption->style = g_hash_table_lookup(styles, n);
     collect_box_bg_image(caption, caption->style);
-    append_display_contents_children(caption, n, styles, FALSE, NULL);
+    const ns_style *s = caption->style;
+    if (s) {
+        register_abs_pseudo(n, s->before);
+        register_abs_pseudo(n, s->after);
+    }
+    ns_box *inline_before = cell_pseudo_before(caption, n, s);
+    if (inline_before) box_append_child(caption, inline_before);
+    append_node_children(caption, n, styles, FALSE, NULL);
+    cell_pseudo_after(caption, n, s);
     return caption;
 }
 
@@ -5716,6 +5728,19 @@ append_slot_assigned(ns_box *block, const ns_node *slot, GHashTable *styles,
 }
 
 static void
+append_node_children(ns_box *block, const ns_node *n, GHashTable *styles,
+                     gboolean blockify_children, ns_box **pending_before)
+{
+    const ns_node *shadow_root = layout_shadow_root(n);
+    if (!append_slot_assigned(block, n, styles, blockify_children,
+                              pending_before))
+        append_contents_range(block,
+                              shadow_root ? shadow_root->first_child
+                                          : n->first_child,
+                              NULL, styles, blockify_children, pending_before);
+}
+
+static void
 append_display_contents_children(ns_box *block, const ns_node *n,
                                  GHashTable *styles,
                                  gboolean blockify_children,
@@ -5734,13 +5759,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
     if (contents_before)
         box_append_child(block, contents_before);
 
-    const ns_node *shadow_root = layout_shadow_root(n);
-    if (!append_slot_assigned(block, n, styles, blockify_children,
-                              pending_before))
-        append_contents_range(block,
-                              shadow_root ? shadow_root->first_child
-                                          : n->first_child,
-                              NULL, styles, blockify_children, pending_before);
+    append_node_children(block, n, styles, blockify_children, pending_before);
 
     if (s && s->after && !style_is_absolute_or_fixed(s->after)) {
         ns_box *contents_after = build_pseudo_inline_for(s->after, n, s);
