@@ -1085,12 +1085,14 @@ typedef struct ns_style {
     guint64 share_id;
     int   ref;
     guint32 currentcolor_bits;
+    guint32 inherited_bits;
     guint8 animation_hint;
     guint8 explicit_inherit;
     struct ns_var_map *vars;
 } ns_style;
 
 gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
+gboolean ns_style_prop_inherited(const ns_style *s, int prop);
 const ns_css_value *ns_style_text_fill_color(const ns_style *s);
 
 void   ns_style_free(ns_style *s);

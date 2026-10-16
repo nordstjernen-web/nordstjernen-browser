@@ -27761,6 +27761,33 @@ ns_style_text_fill_color(const ns_style *s)
     return s->values[NS_CSS_COLOR];
 }
 
+/* Inherited properties whose computed value records whether it came from
+ * the parent (implicitly, through `inherit` or `color: currentcolor`)
+ * rather than from a declaration that matched the element itself. */
+static const ns_css_prop inherited_tracked_props[] = {
+    NS_CSS_COLOR, NS_CSS_FILL, NS_CSS_STROKE, NS_CSS_FILL_OPACITY,
+    NS_CSS_STROKE_OPACITY, NS_CSS_STROKE_WIDTH, NS_CSS_STROKE_MITERLIMIT,
+    NS_CSS_STROKE_DASHOFFSET, NS_CSS_STROKE_DASHARRAY, NS_CSS_STROKE_LINECAP,
+    NS_CSS_STROKE_LINEJOIN, NS_CSS_FILL_RULE, NS_CSS_CLIP_RULE,
+    NS_CSS_TEXT_ANCHOR, NS_CSS_PAINT_ORDER, NS_CSS_VISIBILITY,
+    NS_CSS_FONT_SIZE, NS_CSS_FONT_WEIGHT, NS_CSS_FONT_STYLE,
+    NS_CSS_FONT_FAMILY,
+};
+
+static guint32
+inherited_tracked_bit(int prop)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(inherited_tracked_props); i++)
+        if ((int)inherited_tracked_props[i] == prop) return 1u << i;
+    return 0;
+}
+
+gboolean
+ns_style_prop_inherited(const ns_style *s, int prop)
+{
+    return s && (s->inherited_bits & inherited_tracked_bit(prop)) != 0;
+}
+
 gboolean
 ns_style_prop_from_currentcolor(const ns_style *s, int prop)
 {
@@ -30758,6 +30785,19 @@ initial_value_of(int prop)
     return ns_css_value_dup(parsed[prop]);
 }
 
+/* `color: currentcolor` is the parent's colour, as `inherit` would be. */
+static void
+color_from_parent(ns_style *out, const ns_style *parent_style)
+{
+    ns_css_value_free(out->values[NS_CSS_COLOR]);
+    if (!parent_style) {
+        out->values[NS_CSS_COLOR] = initial_value_of(NS_CSS_COLOR);
+        return;
+    }
+    out->values[NS_CSS_COLOR] = ns_css_value_dup(parent_style->values[NS_CSS_COLOR]);
+    out->inherited_bits |= inherited_tracked_bit(NS_CSS_COLOR);
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
@@ -30781,6 +30821,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         if (value_is_inherit(out->values[i])) {
             if (!prop_inherits((ns_css_prop)i)) out->explicit_inherit = 1;
+            out->inherited_bits |= inherited_tracked_bit(i);
             ns_css_value_free(out->values[i]);
             out->values[i] = parent_style && parent_style->values[i]
                              ? ns_css_value_dup(parent_style->values[i])
@@ -30800,16 +30841,14 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             if (out->values[i]) continue;
             if (explicit_initial[i]) continue;
             if (!prop_inherits((ns_css_prop)i)) continue;
-            if (parent_style->values[i])
+            if (parent_style->values[i]) {
                 out->values[i] = ns_css_value_dup(parent_style->values[i]);
+                out->inherited_bits |= inherited_tracked_bit(i);
+            }
         }
     }
-    if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor")) {
-        ns_css_value_free(out->values[NS_CSS_COLOR]);
-        out->values[NS_CSS_COLOR] = parent_style
-            ? ns_css_value_dup(parent_style->values[NS_CSS_COLOR])
-            : initial_value_of(NS_CSS_COLOR);
-    }
+    if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor"))
+        color_from_parent(out, parent_style);
     if (ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder") ||
         ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "lighter")) {
         int parent_weight = parent_style
@@ -34007,6 +34046,7 @@ ns_style_clone_shared(const ns_style *s)
     c->display  = s->display;
     c->explicit_inherit = s->explicit_inherit;
     c->currentcolor_bits = s->currentcolor_bits;
+    c->inherited_bits = s->inherited_bits;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         c->values[i] = s->values[i];
         if (c->values[i]) c->values[i]->ref++;
