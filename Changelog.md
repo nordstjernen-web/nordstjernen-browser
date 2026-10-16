@@ -29,6 +29,13 @@ Changelog:
   font. It used to report an empty rectangle at the page's top-left
   corner, so scripts that measure such markers (Wikipedia's citation
   metadata spans, scroll anchors) saw them at 0,0.
+* Layout: `<source>` and `<track>` elements generate boxes when their
+  `display` is not `none`, as HTML's rendering rules have it: inside a
+  `<picture>` they lay out like any other empty element, and inside
+  `<video>` they stay invisible with the rest of the video's children.
+  The engine dropped them from layout, so a page that positions a
+  picture's children absolutely, as The Guardian does for every
+  thumbnail, measured all of its 676 sources at 0,0.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image

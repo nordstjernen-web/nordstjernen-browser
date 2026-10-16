@@ -2256,7 +2256,7 @@ tag_is_non_rendering(const char *name)
 {
     static const char *const set[] = {
         "area", "base", "head", "link", "meta", "noscript", "param",
-        "script", "source", "style", "template", "title", "track", NULL,
+        "script", "style", "template", "title", NULL,
     };
     return name_in(name, set);
 }
