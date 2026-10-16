@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: an inline element with `position: relative` (or any other
+  containing-block trigger) is the containing block of its absolutely
+  positioned descendants, which were laid out against the page instead;
+  an absolutely positioned `::before`/`::after` of an inline element is
+  laid out as a box rather than having its text pasted into the line;
+  and an absolutely positioned box whose position comes from where it
+  sits in a line starts at that line's top rather than at the first
+  line's. MDN's external-link icons, drawn by an absolute `::after` of
+  each link, appear after the link text as in other browsers.
 * Layout: text decorations propagate from a block to the text of its
   block descendants, as CSS requires: a `display: block` or `flex` link
   around a `<div>` or `<p>` underlines its text, and `text-decoration`
