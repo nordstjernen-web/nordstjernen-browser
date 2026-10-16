@@ -1180,8 +1180,8 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (ns_display_is_flex_container(d) || ns_display_is_grid_container(d)) {
         if (d.outer == NS_DISPLAY_OUTER_INLINE) return TRUE;
     }
-    if (n->name && strcmp(n->name, "br") == 0 && clear_kind_of(s))
-        return FALSE;
+    if (n->name && strcmp(n->name, "br") == 0)
+        return !clear_kind_of(s);
     if (!style_is_block(s) && contains_block_media(n, styles)) return FALSE;
     if (display_is_atomic_inline_container(d)) return TRUE;
     return !style_is_block(s);
@@ -4379,6 +4379,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     gsize   *map = g_new(gsize, buf->len + 1);
     gboolean prev_ws = run_ws_mode != NS_WS_PRESERVE;
     gboolean trailing_preserved = FALSE;
+    gsize collapsible_space_end = 0;
     guint ri = 0;
     for (gsize i = 0; i < buf->len; i++) {
         char c = buf->str[i];
@@ -4403,13 +4404,26 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
             continue;
         }
         gboolean ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f');
+        gboolean line_break = i + 2 < buf->len &&
+                              memcmp(buf->str + i, "\xe2\x80\xa8", 3) == 0;
         if (ws) {
             if (!prev_ws) {
                 map[i] = collapsed->len;
                 g_string_append_c(collapsed, ' ');
+                collapsible_space_end = collapsed->len;
             } else {
                 map[i] = collapsed->len;
             }
+            prev_ws = TRUE;
+        } else if (line_break) {
+            if (collapsed->len > 0 && collapsible_space_end == collapsed->len) {
+                g_string_set_size(collapsed, collapsed->len - 1);
+                for (gsize k = i; k > 0 && map[k - 1] > collapsed->len; k--)
+                    map[k - 1] = collapsed->len;
+            }
+            for (int k = 0; k < 3; k++) map[i + k] = collapsed->len;
+            g_string_append_len(collapsed, buf->str + i, 3);
+            i += 2;
             prev_ws = TRUE;
         } else {
             map[i] = collapsed->len;
