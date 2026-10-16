@@ -1854,6 +1854,32 @@ bg_layer_keyword(const ns_style *s, ns_css_prop prop, int li)
     return v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
 }
 
+static void paint_box_text_path(cairo_t *cr, const ns_box *b, int depth);
+
+static gboolean
+style_background_clips_to_text(const ns_style *s)
+{
+    const ns_css_value *head = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    int layers = ns_css_value_layer_count(head);
+    const char *clip = bg_layer_keyword(s, NS_CSS_BACKGROUND_CLIP,
+                                        layers > 0 ? layers - 1 : 0);
+    return clip && strcmp(clip, "text") == 0;
+}
+
+static void
+paint_background_clipped_to_text(cairo_t *cr, const ns_box *b,
+                                 cairo_pattern_t *background)
+{
+    cairo_save(cr);
+    cairo_new_path(cr);
+    paint_box_text_path(cr, b, 0);
+    cairo_clip(cr);
+    cairo_set_source(cr, background);
+    cairo_paint(cr);
+    cairo_restore(cr);
+    cairo_pattern_destroy(background);
+}
+
 static void
 bg_layer_clip_area(const ns_box *b, int li,
                    double bx, double by, double bw, double bh,
@@ -1968,6 +1994,8 @@ paint_block(cairo_t *cr, const ns_box *b)
 
     gboolean has_mask = s && s->values[NS_CSS_MASK_IMAGE] &&
                         s->values[NS_CSS_MASK_IMAGE]->kind == NS_CSS_V_URL;
+    gboolean clip_to_text = style_background_clips_to_text(s);
+    if (clip_to_text) cairo_push_group(cr);
     rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
                         s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL,
                         0, 0, 0, 0);
@@ -2061,6 +2089,7 @@ paint_block(cairo_t *cr, const ns_box *b)
             lpos_x, lpos_y, lpos_w, lpos_h,
             lclip_x, lclip_y, lclip_w, lclip_h, radii);
     }
+    if (clip_to_text) paint_background_clipped_to_text(cr, b, cairo_pop_group(cr));
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
@@ -2574,6 +2603,57 @@ inline_run_advance(const NsPangoLayoutRun *run)
         width = n > 0 ? MAX(w, w + w * (n - 1)) : 0;
     }
     return run->start_x_offset + width + run->end_x_offset;
+}
+
+static void
+glyph_range_path(cairo_t *cr, const NsPangoLayoutRun *run, double x, double y,
+                 int start, int end)
+{
+    const NsPangoGlyphString *glyphs = run->glyphs;
+    int offset = run->item->offset;
+    if (offset >= start && offset + run->item->length <= end) {
+        cairo_move_to(cr, x, y);
+        ns_pango_cairo_glyph_string_path(cr, run->item->analysis.font,
+                                         (NsPangoGlyphString *)glyphs);
+        return;
+    }
+    NsPangoGlyphString *one = ns_pango_glyph_string_new();
+    ns_pango_glyph_string_set_size(one, 1);
+    for (int g = 0; g < glyphs->num_glyphs; g++) {
+        int byte = offset + glyphs->log_clusters[g];
+        if (byte >= start && byte < end) {
+            one->glyphs[0] = glyphs->glyphs[g];
+            one->log_clusters[0] = 0;
+            cairo_move_to(cr, x, y);
+            ns_pango_cairo_glyph_string_path(cr, run->item->analysis.font, one);
+        }
+        x += (double)glyphs->glyphs[g].geometry.width / NS_PANGO_SCALE;
+    }
+    ns_pango_glyph_string_free(one);
+}
+
+static void
+layout_range_text_path(cairo_t *cr, NsPangoLayout *layout, double x0,
+                       double y0, int start, int end)
+{
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        double y = y0 + (double)ns_pango_layout_iter_get_baseline(it) / NS_PANGO_SCALE;
+        int x = logical.x;
+        for (GSList *l = line ? line->runs : NULL; l; l = l->next) {
+            const NsPangoLayoutRun *run = l->data;
+            int item_end = run->item->offset + run->item->length;
+            if (run->item->offset < end && item_end > start)
+                glyph_range_path(cr, run,
+                                 x0 + (double)(x + run->start_x_offset) / NS_PANGO_SCALE,
+                                 y, start, end);
+            x += inline_run_advance(run);
+        }
+    } while (ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
 }
 
 static void
@@ -4776,10 +4856,23 @@ paint_inline_element_box(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
                          double text_x, double y_origin,
                          const ns_inline_attr *r)
 {
+    gboolean clip_to_text = style_background_clips_to_text(r->style);
+    if (clip_to_text) cairo_push_group(cr);
     inline_box_paint p = { cr, r, text_x };
     inline_range range = inline_range_for(b, r->start, r->len, r);
     inline_range_fragments(b, layout, y_origin, &range,
                            paint_inline_box_fragment, &p);
+    if (!clip_to_text) return;
+    cairo_pattern_t *background = cairo_pop_group(cr);
+    cairo_save(cr);
+    cairo_new_path(cr);
+    layout_range_text_path(cr, layout, text_x, y_origin,
+                           (int)r->start, (int)(r->start + r->len));
+    cairo_clip(cr);
+    cairo_set_source(cr, background);
+    cairo_paint(cr);
+    cairo_restore(cr);
+    cairo_pattern_destroy(background);
 }
 
 static void
@@ -4902,6 +4995,9 @@ paint_inline_atomics(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
 static rgba
 paint_inline_color(const ns_box *b, const ns_style *s)
 {
+    const ns_css_value *fill = s ? s->values[NS_CSS_WEBKIT_TEXT_FILL_COLOR] : NULL;
+    if (fill && fill->kind == NS_CSS_V_COLOR)
+        return rgba_of(fill, 0.07, 0.07, 0.07, 1);
     return rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
                      s ? s->values[NS_CSS_COLOR] : NULL, 0.07, 0.07, 0.07, 1);
 }
@@ -4923,6 +5019,22 @@ paint_inline_layout(const ns_box *b, const ns_style *s, const char *highlight)
     if (cacheable)
         ((ns_box *)b)->paint_layout = g_object_ref(layout);
     return layout;
+}
+
+static void
+paint_box_text_path(cairo_t *cr, const ns_box *b, int depth)
+{
+    if (!b || depth > NS_DOM_MAX_DEPTH) return;
+    if (b->kind == NS_BOX_INLINE && b->text && *b->text && !b->vertical_wm) {
+        const ns_style *s = inherited_style(b);
+        NsPangoLayout *layout = paint_inline_layout(b, s, NULL);
+        cairo_move_to(cr, paint_inline_text_x(b, s),
+                      b->y + ns_paint_inline_y_offset_for_layout(b, layout));
+        ns_pango_cairo_layout_path(cr, layout);
+        g_object_unref(layout);
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        paint_box_text_path(cr, c, depth + 1);
 }
 
 typedef struct inline_layer_place {

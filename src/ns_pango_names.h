@@ -58,6 +58,7 @@
 #define ns_pango_cairo_context_set_resolution             pango_cairo_context_set_resolution
 #define ns_pango_cairo_create_layout                      pango_cairo_create_layout
 #define ns_pango_cairo_font_map_get_default               pango_cairo_font_map_get_default
+#define ns_pango_cairo_glyph_string_path                  pango_cairo_glyph_string_path
 #define ns_pango_cairo_layout_path                        pango_cairo_layout_path
 #define ns_pango_cairo_show_layout                        pango_cairo_show_layout
 #define ns_pango_cairo_show_layout_line                   pango_cairo_show_layout_line
@@ -98,10 +99,12 @@
 #define ns_pango_font_metrics_get_descent                 pango_font_metrics_get_descent
 #define ns_pango_font_metrics_get_height                  pango_font_metrics_get_height
 #define ns_pango_font_metrics_unref                       pango_font_metrics_unref
-#define ns_pango_get_log_attrs                            pango_get_log_attrs
 #define ns_pango_glyph_item_split                         pango_glyph_item_split
 #define ns_pango_glyph_string_extents                     pango_glyph_string_extents
+#define ns_pango_glyph_string_free                        pango_glyph_string_free
 #define ns_pango_glyph_string_get_width                   pango_glyph_string_get_width
+#define ns_pango_glyph_string_new                         pango_glyph_string_new
+#define ns_pango_glyph_string_set_size                    pango_glyph_string_set_size
 #define NS_PANGO_IS_FC_FONT_MAP                           PANGO_IS_FC_FONT_MAP
 #define ns_pango_language_from_string                     pango_language_from_string
 #define ns_pango_language_to_string                       pango_language_to_string
@@ -212,7 +215,7 @@
 #define NsPangoFontFamily                                 PangoFontFamily
 #define NsPangoFontMap                                    PangoFontMap
 #define NsPangoFontMetrics                                PangoFontMetrics
-#define NsPangoLanguage                                   PangoLanguage
+#define NsPangoGlyphString                                PangoGlyphString
 #define NsPangoLayout                                     PangoLayout
 #define NsPangoLayoutIter                                 PangoLayoutIter
 #define NsPangoLayoutLine                                 PangoLayoutLine

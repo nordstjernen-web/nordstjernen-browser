@@ -287,6 +287,7 @@ typedef enum ns_css_prop {
     NS_CSS_MASK_BORDER_OUTSET,
     NS_CSS_MASK_BORDER_REPEAT,
     NS_CSS_MASK_BORDER_MODE,
+    NS_CSS_WEBKIT_TEXT_FILL_COLOR,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -1090,6 +1091,7 @@ typedef struct ns_style {
 } ns_style;
 
 gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
+const ns_css_value *ns_style_text_fill_color(const ns_style *s);
 
 void   ns_style_free(ns_style *s);
 ns_style *ns_style_clone(const ns_style *src);
