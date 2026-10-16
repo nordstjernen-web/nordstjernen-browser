@@ -10676,7 +10676,6 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             cell->x = inner_x + (col < max_cols ? col_x[col] : 0);
             cell->y = cursor_y;
-            const ns_style *cs = cell->style ? cell->style : child_inherited;
             edges_from_style(cell->style, cell_outer_w,
                              &cell->margin, &cell->padding, &cell->border);
             double cell_inner_w = cell_outer_w
@@ -10685,29 +10684,9 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                 - cell->margin.left - cell->margin.right;
             if (cell_inner_w < 0) cell_inner_w = 0;
             cell->content_width = cell_inner_w;
-            double ix = cell->x + cell->margin.left + cell->border.left + cell->padding.left;
-            double iy = cell->y + cell->margin.top  + cell->border.top  + cell->padding.top;
-            double cell_h;
-            if (!cell->style) {
-                layout_block(cell, cell_outer_w, cs);
-                cell_inner_w = cell->content_width;
-                cell_h = cell->content_height;
-            } else {
-                double sub_y = iy;
-                for (ns_box *child = cell->first_child; child; child = child->next_sibling) {
-                    child->x = ix;
-                    child->y = sub_y;
-                    layout_box(child, cell_inner_w, cs);
-                    legacy_align_block_child(child, ix, cell_inner_w, cs);
-                    double dh = child->content_height;
-                    if (child->kind == NS_BOX_BLOCK || child->kind == NS_BOX_TABLE)
-                        dh += child->margin.top + child->margin.bottom +
-                              child->padding.top + child->padding.bottom +
-                              child->border.top + child->border.bottom;
-                    sub_y += dh;
-                }
-                cell_h = sub_y - iy;
-            }
+            layout_block(cell, cell_outer_w, child_inherited);
+            cell_inner_w = cell->content_width;
+            double cell_h = cell->measured_content_height;
             const ns_css_value *cell_hv = cell->style
                 ? cell->style->values[NS_CSS_HEIGHT] : NULL;
             const ns_css_value *cell_mnh = cell->style
@@ -10759,16 +10738,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                          - cell->margin.top - cell->margin.bottom
                          - cell->padding.top - cell->padding.bottom
                          - cell->border.top - cell->border.bottom;
-            double natural = 0;
-            for (ns_box *ch = cell->first_child; ch; ch = ch->next_sibling) {
-                double dh = ch->content_height;
-                if (ch->kind == NS_BOX_BLOCK || ch->kind == NS_BOX_TABLE)
-                    dh += ch->margin.top + ch->margin.bottom +
-                          ch->padding.top + ch->padding.bottom +
-                          ch->border.top + ch->border.bottom;
-                natural += dh;
-            }
-            double extra = avail - natural;
+            double extra = avail - cell->measured_content_height;
             if (extra > 0) {
                 double factor = 0;
                 const ns_css_value *va = cell->style
@@ -15127,7 +15097,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double pct_width_base = cb_pct_basis;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
-    if (box->has_flex_main) {
+    gboolean table_cell = box->kind == NS_BOX_TABLE_CELL;
+    if (table_cell) {
+        cw = parent_content_width - horiz_total;
+        if (cw < 0) cw = 0;
+    } else if (box->has_flex_main) {
         box->has_flex_main = FALSE;
         cw = box->flex_main_size;
         if (cw < 0) cw = 0;
@@ -15202,8 +15176,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         cw -= horiz_extras;
         if (cw < 0) cw = 0;
     }
-    double max_cw = length_resolve(mxw, pct_width_base, -1);
-    if (max_cw < 0 && mxw && mxw->kind == NS_CSS_V_KEYWORD) {
+    double max_cw = table_cell ? -1 : length_resolve(mxw, pct_width_base, -1);
+    if (!table_cell && max_cw < 0 && mxw && mxw->kind == NS_CSS_V_KEYWORD) {
         max_cw = intrinsic_keyword_width(box, mxw->u.keyword,
                                          inherited_style ? inherited_style : box->style,
                                          parent_content_width - horiz_total);
@@ -15213,8 +15187,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         if (border_box) max_cw -= horiz_extras;
         if (max_cw >= 0 && cw > max_cw) { cw = max_cw; explicit_width = TRUE; }
     }
-    double min_cw = length_resolve(mnw, pct_width_base, -1);
-    if (min_cw < 0 && mnw && mnw->kind == NS_CSS_V_KEYWORD) {
+    double min_cw = table_cell ? -1 : length_resolve(mnw, pct_width_base, -1);
+    if (!table_cell && min_cw < 0 && mnw && mnw->kind == NS_CSS_V_KEYWORD) {
         min_cw = intrinsic_keyword_width(box, mnw->u.keyword,
                                          inherited_style ? inherited_style : box->style,
                                          parent_content_width - horiz_total);

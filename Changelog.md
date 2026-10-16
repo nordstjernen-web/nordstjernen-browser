@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a table cell lays out its content as a block formatting
+  context, so a float inside a cell shrinks to fit and sits beside the
+  text, and sibling margins collapse. A styled cell used to stack its
+  children one under the other at full width: Wikipedia's navbox title
+  row put its "show" button, its "v t e" links and its title on three
+  lines (71px tall instead of 28px).
 * Layout: an auto-width table in a container with no room (width 0)
   shrinks to its min-content width instead of growing to its max-content
   width, and a cell holding a percentage-width table counts that table's
