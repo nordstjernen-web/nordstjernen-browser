@@ -258,6 +258,36 @@ typedef enum ns_css_prop {
     NS_CSS_WEBKIT_BOX_ORIENT,
     NS_CSS_MASK_CLIP,
     NS_CSS_MASK_COMPOSITE,
+    NS_CSS_ISOLATION,
+    NS_CSS_WILL_CHANGE,
+    NS_CSS_CONTAIN,
+    NS_CSS_BACKDROP_FILTER,
+    NS_CSS_SCROLL_TIMELINE_NAME,
+    NS_CSS_SCROLL_TIMELINE_AXIS,
+    NS_CSS_VIEW_TIMELINE_NAME,
+    NS_CSS_TIMELINE_SCOPE,
+    NS_CSS_ANCHOR_NAME,
+    NS_CSS_ANCHOR_SCOPE,
+    NS_CSS_POSITION_ANCHOR,
+    NS_CSS_POSITION_AREA,
+    NS_CSS_POSITION_TRY_FALLBACKS,
+    NS_CSS_POSITION_TRY_ORDER,
+    NS_CSS_POSITION_VISIBILITY,
+    NS_CSS_SHAPE_OUTSIDE,
+    NS_CSS_SHAPE_MARGIN,
+    NS_CSS_SHAPE_IMAGE_THRESHOLD,
+    NS_CSS_FONT_SIZE_ADJUST,
+    NS_CSS_TEXT_JUSTIFY,
+    NS_CSS_TEXT_ALIGN_LAST,
+    NS_CSS_CONTAIN_INTRINSIC_WIDTH,
+    NS_CSS_CONTAIN_INTRINSIC_HEIGHT,
+    NS_CSS_MASK_BORDER_SOURCE,
+    NS_CSS_MASK_BORDER_SLICE,
+    NS_CSS_MASK_BORDER_WIDTH,
+    NS_CSS_MASK_BORDER_OUTSET,
+    NS_CSS_MASK_BORDER_REPEAT,
+    NS_CSS_MASK_BORDER_MODE,
+    NS_CSS_WEBKIT_TEXT_FILL_COLOR,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -333,6 +363,33 @@ typedef enum ns_css_anim_fill {
     NS_CSS_ANIM_FILL_BOTH,
 } ns_css_anim_fill;
 
+typedef enum ns_css_timeline_kind {
+    NS_CSS_TIMELINE_AUTO,
+    NS_CSS_TIMELINE_NONE,
+    NS_CSS_TIMELINE_NAMED,
+    NS_CSS_TIMELINE_SCROLL,
+    NS_CSS_TIMELINE_VIEW,
+} ns_css_timeline_kind;
+
+typedef enum ns_css_scroller {
+    NS_CSS_SCROLLER_NEAREST,
+    NS_CSS_SCROLLER_ROOT,
+    NS_CSS_SCROLLER_SELF,
+} ns_css_scroller;
+
+typedef enum ns_css_scroll_axis {
+    NS_CSS_SCROLL_AXIS_BLOCK,
+    NS_CSS_SCROLL_AXIS_INLINE,
+    NS_CSS_SCROLL_AXIS_X,
+    NS_CSS_SCROLL_AXIS_Y,
+} ns_css_scroll_axis;
+
+typedef struct ns_css_timeline {
+    ns_css_timeline_kind kind;
+    ns_css_scroller      scroller;
+    ns_css_scroll_axis   axis;
+} ns_css_timeline;
+
 typedef struct ns_css_anim_entry {
     ns_css_anim_target target;
     char         *name;
@@ -345,6 +402,7 @@ typedef struct ns_css_anim_entry {
     gboolean      paused;
     gboolean      duration_auto;
     gboolean      allow_discrete;
+    ns_css_timeline timeline;
 } ns_css_anim_entry;
 
 #define NS_CSS_ANIM_ENTRIES_MAX 8
@@ -365,6 +423,13 @@ char *ns_css_anim_shorthand_serialize(const ns_css_anim_list *list,
                                       gboolean is_animation);
 char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation);
 char *ns_css_ident_serialize(const char *name);
+gboolean ns_css_timeline_parse(const char *item, ns_css_timeline *out);
+gboolean ns_css_scroll_axis_parse(const char *item, ns_css_scroll_axis *out);
+int   ns_css_timeline_name_index(const struct ns_style *s, ns_css_prop prop,
+                                 const char *name);
+char *ns_css_timeline_name_at(const struct ns_style *s, int index);
+ns_css_scroll_axis ns_css_timeline_axis_at(const struct ns_style *s, int index);
+char *ns_css_scroll_timeline_compose(const char *names, const char *axes);
 char *ns_css_list_style_serialize(const char *type, const char *position,
                                   const char *image);
 char *ns_css_grid_shorthand_compose(char *const values[6], gboolean full);
@@ -630,6 +695,7 @@ double   ns_css_length_or(const ns_css_value *v, double fallback);
 gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
 double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
+gboolean ns_css_filter_list_valid(const char *s);
 char    *ns_css_font_family_for_pango(const char *css_family);
 char    *ns_css_font_family_first_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
@@ -749,6 +815,7 @@ typedef struct ns_css_simple {
     GPtrArray *matches_none;
     GPtrArray *has_groups;
     gboolean   never_match;
+    gboolean   known_unmatched;
     gboolean   ns_none;
 } ns_css_simple;
 
@@ -1024,8 +1091,11 @@ typedef struct ns_style {
 } ns_style;
 
 gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
+const ns_css_value *ns_style_text_fill_color(const ns_style *s);
 
 void   ns_style_free(ns_style *s);
+ns_style *ns_style_clone(const ns_style *src);
+const char *ns_css_position_try_rule(const char *name);
 double ns_css_dimension_px(const ns_css_value *v, double font_size,
                            double basis);
 const ns_style *ns_css_style_before_change(const void *node);
@@ -1205,6 +1275,9 @@ void ns_css_forget_node(const ns_node *node);
 
 void ns_css_mark_visited(const char *abs_url);
 void ns_css_set_doc_base(const char *base_url);
+int           ns_css_font_face_weight(const char *val);
+ns_font_slant ns_css_font_face_slant(const char *val);
+char         *ns_css_font_face_src_url(const char *src);
 void ns_css_set_doc_language(const char *lang);
 
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
@@ -1221,6 +1294,11 @@ char *ns_css_background_shorthand_serialize(const char *image, const char *posit
                                             const char *color);
 char *ns_css_content_canonical(const char *text);
 ns_css_value *ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t);
+ns_css_value *ns_css_value_interpolate_prop(int prop, const ns_css_value *a,
+                                            const ns_css_value *b, double t);
+ns_css_value *ns_css_value_composite(int prop, const ns_css_value *underlying,
+                                     const ns_css_value *v, gboolean accumulate);
+void          ns_css_value_clamp_animated(int prop, ns_css_value *v);
 gboolean ns_css_value_equal(const ns_css_value *a, const ns_css_value *b);
 ns_css_value *ns_css_value_dup(const ns_css_value *v);
 void ns_css_value_free(ns_css_value *v);
@@ -1242,6 +1320,10 @@ char *ns_css_value_serialize(const ns_css_value *v);
 char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
+char *ns_css_font_size_adjust_computed(const ns_style *s);
+double ns_css_contain_intrinsic_px(const ns_style *s, gboolean height);
+char *ns_css_contain_intrinsic_computed(const ns_style *s, int prop);
+char *ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int prop);
 char *ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
                                        int prop);
 char *ns_css_transform_canonical(const char *value);
@@ -1252,6 +1334,7 @@ char *ns_css_time_computed(const char *value);
 
 gboolean ns_css_parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b,
                             guint8 *a);
+gboolean ns_css_named_color(const char *name, guint8 *r, guint8 *g, guint8 *b);
 
 G_END_DECLS
 

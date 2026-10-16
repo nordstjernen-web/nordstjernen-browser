@@ -71,7 +71,6 @@ nordstjernen (watchdog supervisor)
 └── nordstjernen (GTK shell — thin, engine-free UI)
     ├── nordstjernen-renderer   (tab 1 — sandboxed engine)
     ├── nordstjernen-audio      (tab 1 — lazy, spawned by the shell)
-    ├── nordstjernen-video      (tab 1 — lazy, spawned by the shell)
     ├── nordstjernen-renderer   (tab 2 — sandboxed engine)
     └── …
 ```
@@ -376,7 +375,8 @@ SQLite-backed native backend with the W3C object model built in
 **EventSource**, **Web Workers** (each a separate `GThread` with its own
 runtime, cross-thread messaging by structured clone), `localStorage`/
 `sessionStorage`, Canvas 2D (Cairo, `src/js_canvas.c`), an ICU-free
-**Intl** (`src/js_intl.c`) and **Temporal** (`src/js_date.c`), and the
+**Intl** generated from CLDR (in the engine, `src/quickjs/quickjs-intl*.c`),
+**Temporal** (in the engine, `src/quickjs/quickjs-temporal*.c`), and the
 observer APIs.
 
 **WebAssembly** runs on **WAMR** (`src/wamr/`, the fast interpreter
@@ -502,10 +502,8 @@ emits on the `X-Audio` side-channel (see [media.md](media.md)):
   pl_mpeg (MPEG-1/MP2), minimp3 (MP3), and libav (Opus/Vorbis) — and
   plays through SDL2. It speaks a one-command-per-line text protocol over
   stdin/stdout.
-- **`nordstjernen-video`** (`src/videoproc/main.c`) decodes MSE/WebM
-  frames and publishes BGRA frames into its **own shared-memory ring**,
-  which the shell maps read-only and composites over the page surface
-  each frame tick.
+- Video, MSE streams included, decodes inside the sandboxed renderer and
+  is painted into the page like any other replaced element.
 
 The always-on, in-tree codecs are **pl_mpeg** (MPEG-1) and **minimp3**
 (MP3). **WebM (VP9/VP8 + Opus/Vorbis)** is the one FFmpeg-backed

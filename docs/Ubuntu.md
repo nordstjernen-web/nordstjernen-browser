@@ -92,7 +92,6 @@ browser ships —
   * `nordstjernen`          — the GTK 4 shell
   * `nordstjernen-renderer` — the sandboxed per-tab engine process
   * `nordstjernen-audio`    — the audio helper (MP2/MP3, Opus/Vorbis)
-  * `nordstjernen-video`    — the MSE video helper (built with libav)
 
 — into `usr/bin` alongside the data, icons, `.desktop` file, and
 AppStream metainfo. The shell locates the helper binaries relative

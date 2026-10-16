@@ -13,6 +13,16 @@ endif
 if qjs_host_system == 'windows'
   qjs_extra_args += ['-DWIN32_LEAN_AND_MEAN', '-D_WIN32_WINNT=0x0601']
 endif
+if qjs_host_system == 'windows'
+  qjs_fs = import('fs')
+  qjs_cc_prog = find_program(cc.cmd_array()[0], required: false)
+  if qjs_cc_prog.found()
+    qjs_tzdir = qjs_fs.parent(qjs_fs.parent(qjs_cc_prog.full_path())).replace('\\', '/') + '/share/zoneinfo'
+    if qjs_fs.is_file(qjs_tzdir + '/tzdata.zi')
+      qjs_extra_args += '-DTP_DEFAULT_TZDIR="' + qjs_tzdir + '"'
+    endif
+  endif
+endif
 
 qjs_c_args = cc.get_supported_arguments(qjs_warning_args) + qjs_extra_args
 
@@ -27,6 +37,30 @@ qjs_srcs = files(
   'libregexp.c',
   'libunicode.c',
   'quickjs.c',
+  'quickjs-temporal.c',
+  'quickjs-temporal-calendar.c',
+  'quickjs-temporal-calendars.c',
+  'quickjs-temporal-duration.c',
+  'quickjs-temporal-instant.c',
+  'quickjs-temporal-parse.c',
+  'quickjs-temporal-partial.c',
+  'quickjs-temporal-plain.c',
+  'quickjs-temporal-tz.c',
+  'quickjs-temporal-tzdb.c',
+  'quickjs-temporal-zoned.c',
+  'quickjs-intl.c',
+  'quickjs-intl-locale.c',
+  'quickjs-intl-data.c',
+  'quickjs-intl-decimal.c',
+  'quickjs-intl-number.c',
+  'quickjs-intl-collator.c',
+  'quickjs-intl-calendar.c',
+  'quickjs-intl-datetime.c',
+  'quickjs-intl-list.c',
+  'quickjs-intl-relative.c',
+  'quickjs-intl-displaynames.c',
+  'quickjs-intl-duration.c',
+  'quickjs-intl-segmenter.c',
 )
 qjs_libc_srcs = files('quickjs-libc.c')
 
