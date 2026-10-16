@@ -13484,7 +13484,9 @@ grid_row_basis(const ns_box *box, double cw)
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         return clamp_height_minmax_px(box->style,
                                       resolve_used_height(box, hv, cw, -1));
-    return box_inset_definite_height(box);
+    double inset = box_inset_definite_height(box);
+    if (inset > 0) return inset;
+    return box_read_definite_height(box) > 0 ? box->definite_height : -1;
 }
 
 static double

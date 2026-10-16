@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a grid container whose height comes from its parent, as a
+  stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
+  against that height. The rows were sized as if the height were
+  unknown, so a `1fr` row took only its content and a footer row sat
+  right under it instead of at the bottom (Gemini's sidebar "Sign in").
 * DOM: `<link rel="preload" as="style">` fires `load` (or `error`) once
   its fetch ends, and changing a `<link>`'s `rel`, `href` or `as` loads
   it again: a link that becomes `rel="stylesheet"` applies its sheet and
