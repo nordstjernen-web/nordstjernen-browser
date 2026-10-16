@@ -60,6 +60,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.32" date="2026-10-16">
+      <description>
+        <p>JavaScript, CSS and media release.</p>
+        <ul>
+          <li>Google is the default search engine, and the new tab page is redesigned with compact shortcuts and a hint that says whether Enter opens an address or searches.</li>
+          <li>JavaScript gains Temporal, ShadowRealm, decorators, deferred module imports, Intl.Segmenter and the rest of Intl inside the engine, and WHATWG Streams.</li>
+          <li>CSS gains anchor positioning, scroll-driven animations, the shape() function, size containment, mask-border and Color 4/5 parsing.</li>
+          <li>Videos are composited as their own window layer for smoother playback, and H.264/AAC are decoded by the operating system.</li>
+          <li>Adding a stylesheet or changing the DOM restyles only the elements it can affect.</li>
+          <li>Many layout fixes for tables, grids, inline boxes and line heights, and security fixes in select, regular expressions, module loading and WebGL 2.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.31" date="2026-10-11">
       <description>
         <p>Input, media and security release.</p>
