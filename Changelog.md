@@ -3,6 +3,16 @@ Changelog:
 
 1.0.32:
 ======
+* SVG `<use>`: the referenced content inherits the rest of its style
+  from the `use` element too, not only `currentColor`. Shapes drawn
+  through `<use>` kept the `fill`, `stroke`, stroke geometry,
+  `visibility` and font they inherit where their definition sits in the
+  document, so a stroke set on a sprite leaked into every icon and a
+  sprite hidden with `visibility: hidden` drew nothing. An instance now
+  keeps only what the referenced elements declare themselves, a
+  `<symbol>`'s own properties reach its content, and `fill:
+  currentColor` from a rule stays tied to the text colour on elements
+  that share one computed style.
 * Layout: a table cell lays out its content as a block formatting
   context, so a float inside a cell shrinks to fit and sits beside the
   text, and sibling margins collapse. A styled cell used to stack its
