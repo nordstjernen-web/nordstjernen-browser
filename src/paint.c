@@ -5861,8 +5861,12 @@ gboolean
 ns_paint_inline_empty_rect(const ns_box *b, const ns_inline_attr *r,
                            double *out_x, double *out_y, double *out_h)
 {
-    if (!b || !b->text || !*b->text || r->start > strlen(b->text))
+    if (!b || !b->text || r->start > strlen(b->text) ||
+        (!*b->text && !b->phantom_line))
         return FALSE;
+    if (!*b->text)
+        ns_pango_context_set_base_dir(ns_paint_text_context(),
+                                      NS_PANGO_DIRECTION_LTR);
     const ns_inline_attr *element = b->vertical_wm ? NULL : r;
     NsPangoLayout *layout = element
         ? paint_inline_make_layout(b, inherited_style(b), NULL)
@@ -5876,7 +5880,9 @@ ns_paint_inline_empty_rect(const ns_box *b, const ns_inline_attr *r,
     ns_pango_layout_index_to_line_x(layout, (int)r->start, FALSE,
                                     &line_no, &line_x);
     double above = 0, below = 0, y0, y1;
-    if (inline_box_vertical_reach(range.box_style, &above, &below)) {
+    if (b->phantom_line) {
+        y0 = y1 = b->y;
+    } else if (inline_box_vertical_reach(range.box_style, &above, &below)) {
         double *baselines = paint_inline_line_baselines(b, layout, y_origin);
         int lines = ns_pango_layout_get_line_count(layout);
         double baseline =

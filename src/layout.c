@@ -4512,10 +4512,16 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         gsize ns = map[a->start];
         gsize ne = map[end];
         if (ne > collapsed->len) ne = collapsed->len;
-        if (ne <= ns && !(a->kind == NS_INLINE_EMPTY_ELEMENT &&
-                          ns <= collapsed->len))
+        gboolean collapses_empty = ne <= ns &&
+            (a->kind == NS_INLINE_EMPTY_ELEMENT ||
+             a->kind == NS_INLINE_ELEMENT) && ns <= collapsed->len;
+        if (ne <= ns && !collapses_empty)
             continue;
         ns_inline_attr out = *a;
+        if (collapses_empty) {
+            out.kind = NS_INLINE_EMPTY_ELEMENT;
+            ne = ns;
+        }
         out.start = ns;
         out.len = ne - ns;
         g_array_append_val(box->attrs, out);
@@ -4684,6 +4690,23 @@ build_inline_run_no_abs_placeholders(const ns_node *first,
                                      GHashTable *styles)
 {
     return build_inline_run_impl(first, last_excl, styles, FALSE);
+}
+
+static gboolean
+inline_run_has_empty_elements(const ns_box *run)
+{
+    for (guint i = 0; run->attrs && i < run->attrs->len; i++)
+        if (g_array_index(run->attrs, ns_inline_attr, i).kind ==
+            NS_INLINE_EMPTY_ELEMENT)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+inline_run_worth_keeping(const ns_box *run)
+{
+    return run && run->text &&
+           (run->text[0] || inline_run_has_empty_elements(run));
 }
 
 static ns_box *
@@ -5661,7 +5684,7 @@ append_flow_child(ns_box *block, const ns_node *c, const ns_node *end,
     if (is_inline_dom(c, styles)) {
         const ns_node *stop = inline_run_end(c->next_sibling, end, styles);
         ns_box *run = build_inline_run(c, stop, styles);
-        if (run && run->text && run->text[0])
+        if (inline_run_worth_keeping(run))
             box_append_child(block, run);
         else if (run)
             ns_box_free(run);
@@ -6305,7 +6328,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 pending_before = NULL;
             }
 
-            if (run->text && run->text[0] != '\0')
+            if (inline_run_worth_keeping(run))
                 box_append_child(block, run);
             else
                 ns_box_free(run);
@@ -7401,7 +7424,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
     g_assert(box->kind == NS_BOX_INLINE);
     if (!box->text || !*box->text) {
-        box->content_width  = 0;
+        box->phantom_line = inline_run_has_empty_elements(box);
+        box->content_width  = box->phantom_line ? content_width : 0;
         box->content_height = 0;
         box->first_baseline = 0;
         return;
@@ -7418,6 +7442,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->content_width  = thickness;
         box->content_height = length;
         box->first_baseline = 0;
+        box->phantom_line = FALSE;
         box->inline_layout_cache_valid = FALSE;
         return;
     }
@@ -7441,6 +7466,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         return;
     }
 
+    box->phantom_line = FALSE;
     box->content_width = content_width;
     NsPangoLayout *layout = make_pango_layout(parent_style);
     gboolean ws_nowrap = keyword_is(
@@ -7559,6 +7585,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
     if (inline_run_holds_only_abs_placeholders(box, parent_style)) {
+        box->phantom_line = TRUE;
         box->content_height = 0;
         box->first_baseline = 0;
     }
@@ -14698,6 +14725,13 @@ collapsed_margin(double a, double b)
     return positive + negative;
 }
 
+static void
+phantom_lines_move_to(ns_box *first, const ns_box *stop, double y)
+{
+    for (ns_box *c = first; c && c != stop; c = c->next_sibling)
+        if (c->phantom_line && c->y != y) shift_box_tree(c, 0, y - c->y);
+}
+
 static gboolean
 empty_block_collapses_through(const ns_box *box, int clear)
 {
@@ -15249,6 +15283,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     if (g_inherited_floats.box == box)
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
     double inline_line_top = -1;
+    const ns_box *top_collapse_child = NULL;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
         c->x = inner_x;
@@ -15455,6 +15490,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                     collapsed_margin(prev_margin_bottom, mt),
                     c->margin.bottom);
             } else {
+                if (collapses_through_top) top_collapse_child = c;
                 collapse_top_with_parent = FALSE;
                 cursor_y += c->margin_top_through;
                 if (collapses_through_top) top_through += c->margin_top_through;
@@ -15465,17 +15501,22 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             inline_line_top = -1;
         } else {
-            cursor_y += prev_margin_bottom;
-            prev_margin_bottom = 0;
+            double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
-            floats_offsets_at(floats, cursor_y, &left_off, &right_off);
-            floats_advance_to_readable_width(floats, cw, &cursor_y,
+            floats_offsets_at(floats, line_y, &left_off, &right_off);
+            floats_advance_to_readable_width(floats, cw, &line_y,
                                              &left_off, &right_off);
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
-            c->y = cursor_y;
+            c->y = line_y;
             layout_box(c, cw_avail, child_inherited);
+            if (c->phantom_line) {
+                collect_escaping_floats(c, floats, 0);
+                continue;
+            }
+            cursor_y = line_y;
+            prev_margin_bottom = 0;
             if (c->kind == NS_BOX_INLINE && c->text && cw_avail < cw) {
                 double band_bottom = floats_band_bottom(floats, cursor_y);
                 if (band_bottom > cursor_y &&
@@ -15519,6 +15560,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         }
     }
     if (top_through != 0) {
+        phantom_lines_move_to(box->first_child, top_collapse_child,
+                              inner_y + top_through);
         box->margin.top += top_through;
         box->margin_top_through = top_through;
         inner_y += top_through;
