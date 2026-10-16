@@ -166,6 +166,12 @@ JS_AddEnginePrivateName(JSContext *ctx, const char *name)
     return 0;
 }
 
+static inline JSAtom
+JS_GetEnginePrivateAtom(JSContext *ctx, const char *name)
+{
+    return JS_NewAtom(ctx, name);
+}
+
 static inline JSValue
 JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
                             size_t *pbyte_offset, size_t *pbyte_length)
