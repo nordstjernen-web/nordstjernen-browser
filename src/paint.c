@@ -7564,8 +7564,8 @@ deferred_capture_tree_cmp(const deferred_capture *a, const deferred_capture *b)
 {
     if (a->layout && b->layout && a->box == b->box)
         return a->layer < b->layer ? -1 : (a->layer > b->layer ? 1 : 0);
-    return dom_tree_order_cmp(a->layout ? a->dom : a->box->dom,
-                              b->layout ? b->dom : b->box->dom);
+    return ns_layout_tree_order_cmp(a->box, a->layout ? a->dom : NULL,
+                                    b->box, b->layout ? b->dom : NULL);
 }
 
 static int
