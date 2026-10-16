@@ -4326,6 +4326,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 
 enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
 
+static gsize
+bidi_control_len(const char *s, gsize avail)
+{
+    if (avail < 3 || (guchar)s[0] != 0xe2) return 0;
+    guchar b1 = (guchar)s[1], b2 = (guchar)s[2];
+    if (b1 == 0x81 && b2 >= 0xa6 && b2 <= 0xa9) return 3;
+    if (b1 == 0x80 && b2 >= 0xaa && b2 <= 0xae) return 3;
+    return 0;
+}
+
 static int
 white_space_mode(const ns_node *node, GHashTable *styles)
 {
@@ -4472,6 +4482,10 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
             g_string_append_len(collapsed, buf->str + i, 3);
             i += 2;
             prev_ws = TRUE;
+        } else if (bidi_control_len(buf->str + i, buf->len - i)) {
+            for (int k = 0; k < 3; k++) map[i + k] = collapsed->len;
+            g_string_append_len(collapsed, buf->str + i, 3);
+            i += 2;
         } else {
             map[i] = collapsed->len;
             g_string_append_c(collapsed, c);
@@ -4481,9 +4495,13 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     map[buf->len] = collapsed->len;
 
     ns_box *box = box_new_inline();
-    if (!trailing_preserved && collapsed->len > 0 &&
-        collapsed->str[collapsed->len - 1] == ' ')
-        g_string_set_size(collapsed, collapsed->len - 1);
+    gsize tail = collapsed->len;
+    while (tail >= 3 && bidi_control_len(collapsed->str + tail - 3, 3)) tail -= 3;
+    if (!trailing_preserved && tail > 0 && collapsed->str[tail - 1] == ' ') {
+        g_string_erase(collapsed, (gssize)tail - 1, 1);
+        for (gsize k = 0; k <= buf->len; k++)
+            if (map[k] >= tail) map[k]--;
+    }
 
     for (guint i = 0; i < raw_links->len; i++) {
         ns_link_range *r = &g_array_index(raw_links, ns_link_range, i);
@@ -6386,6 +6404,7 @@ typedef struct ns_text_measure {
 } ns_text_measure;
 
 #define NS_TEXT_MEASURE_CACHE_MAX 32768
+#define NS_ASCII_MIN_WIDTH_MAX_WORDS 64
 
 typedef struct text_measure_key {
     guint                   hash;
@@ -7218,7 +7237,9 @@ inline_box_has_measure_attrs(const ns_box *box)
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *a =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (inline_attr_affects_measure(a->kind)) return TRUE;
+        if (inline_attr_affects_measure(a->kind) ||
+            ns_paint_inline_attr_nowrap(a))
+            return TRUE;
     }
     return FALSE;
 }
@@ -7266,36 +7287,42 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
         keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "pre"))
         return measure_natural_width(box, parent_style);
 
-    const char *best = NULL;
-    gsize best_len = 0;
+    gsize text_len = strlen(box->text);
+    NsPangoLayout *layout = NULL;
+    double widest = 0;
+    int words = 0;
     const char *run = NULL;
     gsize run_len = 0;
     for (const char *p = box->text;; p++) {
         gboolean br = *p == '\0' || *p == ' ' || *p == '\t' ||
                       *p == '\r' || *p == '\n' || *p == '\f';
-        if (br) {
-            if (run_len > best_len) {
-                best = run;
-                best_len = run_len;
-            }
-            run = NULL;
-            run_len = 0;
-            if (*p == '\0') break;
-        } else {
+        if (!br) {
             if (!run) run = p;
             run_len++;
+            continue;
         }
+        if (run_len == text_len) return measure_natural_width(box, parent_style);
+        if (run_len > 0) {
+            if (++words > NS_ASCII_MIN_WIDTH_MAX_WORDS) {
+                g_object_unref(layout);
+                return -1;
+            }
+            if (!layout) {
+                layout = make_pango_layout(parent_style);
+                ns_pango_layout_set_width(layout, -1);
+            }
+            ns_pango_layout_set_text(layout, run, (int)run_len);
+            ns_text_measure m;
+            text_measure(layout, &m);
+            double w = ceil((double)m.logical.width / NS_PANGO_SCALE);
+            if (w > widest) widest = w;
+        }
+        run = NULL;
+        run_len = 0;
+        if (*p == '\0') break;
     }
-    if (best_len == 0) return 0;
-    if (best_len == strlen(box->text)) return measure_natural_width(box, parent_style);
-
-    NsPangoLayout *layout = make_pango_layout(parent_style);
-    ns_pango_layout_set_width(layout, -1);
-    ns_pango_layout_set_text(layout, best, (int)best_len);
-    ns_text_measure m;
-    text_measure(layout, &m);
-    g_object_unref(layout);
-    return ceil((double)m.logical.width / NS_PANGO_SCALE);
+    if (layout) g_object_unref(layout);
+    return widest;
 }
 
 static void shift_box_tree(ns_box *b, double dx, double dy);
@@ -9846,6 +9873,15 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
 
 static int g_min_measure_depth;
 
+static gboolean
+box_is_compressible_control(const ns_box *box)
+{
+    const ns_node *n = box->dom;
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    return strcmp(n->name, "input") == 0 || strcmp(n->name, "textarea") == 0 ||
+           strcmp(n->name, "select") == 0;
+}
+
 static double measure_min_width(ns_box *box, const ns_style *parent_style);
 
 static double
@@ -9936,7 +9972,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (box->style) {
         const ns_css_value *wv = box->style->values[NS_CSS_WIDTH];
         if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
-            double w = length_resolve(wv, 0, -1);
+            double w = value_is_percent(wv) && !box_is_compressible_control(box)
+                ? -1 : length_resolve(wv, 0, -1);
             if (w >= 0) {
                 if (ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING],
                                       "border-box")) {
@@ -9990,6 +10027,10 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
     if (!c->style || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
         return min_width_of(c, child_style);
     const ns_style *s = c->style;
+    if (box_is_compressible_control(c) &&
+        (value_is_percent(s->values[NS_CSS_WIDTH]) ||
+         value_is_percent(s->values[NS_CSS_MAX_WIDTH])))
+        return 0;
     double min_content = min_content_width_of(c, child_style);
     double preferred = definite_width_limit(c, s->values[NS_CSS_WIDTH]);
     double contribution = flex_contribution_clamp_to_basis(
@@ -10516,7 +10557,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         }
         double natural_sum_pre = 0;
         for (guint i = 0; i < max_cols; i++) natural_sum_pre += col_widths[i];
-        if (has_explicit_cols || (natural_sum_pre > col_avail && col_avail > 0)) {
+        if (has_explicit_cols || natural_sum_pre > col_avail) {
             for (ns_box *row = box->first_child; row; row = row->next_sibling) {
                 if (row->kind != NS_BOX_TABLE_ROW) continue;
                 guint col = 0;
@@ -10549,7 +10590,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         }
         double natural_sum = 0;
         for (guint i = 0; i < max_cols; i++) natural_sum += col_widths[i];
-        if (natural_sum > col_avail && col_avail > 0) {
+        if (natural_sum > col_avail) {
             double min_sum = 0;
             for (guint i = 0; i < max_cols; i++) min_sum += col_min[i];
             if (min_sum >= col_avail) {
@@ -10635,7 +10676,6 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             cell->x = inner_x + (col < max_cols ? col_x[col] : 0);
             cell->y = cursor_y;
-            const ns_style *cs = cell->style ? cell->style : child_inherited;
             edges_from_style(cell->style, cell_outer_w,
                              &cell->margin, &cell->padding, &cell->border);
             double cell_inner_w = cell_outer_w
@@ -10644,29 +10684,9 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                 - cell->margin.left - cell->margin.right;
             if (cell_inner_w < 0) cell_inner_w = 0;
             cell->content_width = cell_inner_w;
-            double ix = cell->x + cell->margin.left + cell->border.left + cell->padding.left;
-            double iy = cell->y + cell->margin.top  + cell->border.top  + cell->padding.top;
-            double cell_h;
-            if (!cell->style) {
-                layout_block(cell, cell_outer_w, cs);
-                cell_inner_w = cell->content_width;
-                cell_h = cell->content_height;
-            } else {
-                double sub_y = iy;
-                for (ns_box *child = cell->first_child; child; child = child->next_sibling) {
-                    child->x = ix;
-                    child->y = sub_y;
-                    layout_box(child, cell_inner_w, cs);
-                    legacy_align_block_child(child, ix, cell_inner_w, cs);
-                    double dh = child->content_height;
-                    if (child->kind == NS_BOX_BLOCK || child->kind == NS_BOX_TABLE)
-                        dh += child->margin.top + child->margin.bottom +
-                              child->padding.top + child->padding.bottom +
-                              child->border.top + child->border.bottom;
-                    sub_y += dh;
-                }
-                cell_h = sub_y - iy;
-            }
+            layout_block(cell, cell_outer_w, child_inherited);
+            cell_inner_w = cell->content_width;
+            double cell_h = cell->measured_content_height;
             const ns_css_value *cell_hv = cell->style
                 ? cell->style->values[NS_CSS_HEIGHT] : NULL;
             const ns_css_value *cell_mnh = cell->style
@@ -10718,16 +10738,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                          - cell->margin.top - cell->margin.bottom
                          - cell->padding.top - cell->padding.bottom
                          - cell->border.top - cell->border.bottom;
-            double natural = 0;
-            for (ns_box *ch = cell->first_child; ch; ch = ch->next_sibling) {
-                double dh = ch->content_height;
-                if (ch->kind == NS_BOX_BLOCK || ch->kind == NS_BOX_TABLE)
-                    dh += ch->margin.top + ch->margin.bottom +
-                          ch->padding.top + ch->padding.bottom +
-                          ch->border.top + ch->border.bottom;
-                natural += dh;
-            }
-            double extra = avail - natural;
+            double extra = avail - cell->measured_content_height;
             if (extra > 0) {
                 double factor = 0;
                 const ns_css_value *va = cell->style
@@ -15086,7 +15097,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double pct_width_base = cb_pct_basis;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
-    if (box->has_flex_main) {
+    gboolean table_cell = box->kind == NS_BOX_TABLE_CELL;
+    if (table_cell) {
+        cw = parent_content_width - horiz_total;
+        if (cw < 0) cw = 0;
+    } else if (box->has_flex_main) {
         box->has_flex_main = FALSE;
         cw = box->flex_main_size;
         if (cw < 0) cw = 0;
@@ -15161,8 +15176,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         cw -= horiz_extras;
         if (cw < 0) cw = 0;
     }
-    double max_cw = length_resolve(mxw, pct_width_base, -1);
-    if (max_cw < 0 && mxw && mxw->kind == NS_CSS_V_KEYWORD) {
+    double max_cw = table_cell ? -1 : length_resolve(mxw, pct_width_base, -1);
+    if (!table_cell && max_cw < 0 && mxw && mxw->kind == NS_CSS_V_KEYWORD) {
         max_cw = intrinsic_keyword_width(box, mxw->u.keyword,
                                          inherited_style ? inherited_style : box->style,
                                          parent_content_width - horiz_total);
@@ -15172,8 +15187,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         if (border_box) max_cw -= horiz_extras;
         if (max_cw >= 0 && cw > max_cw) { cw = max_cw; explicit_width = TRUE; }
     }
-    double min_cw = length_resolve(mnw, pct_width_base, -1);
-    if (min_cw < 0 && mnw && mnw->kind == NS_CSS_V_KEYWORD) {
+    double min_cw = table_cell ? -1 : length_resolve(mnw, pct_width_base, -1);
+    if (!table_cell && min_cw < 0 && mnw && mnw->kind == NS_CSS_V_KEYWORD) {
         min_cw = intrinsic_keyword_width(box, mnw->u.keyword,
                                          inherited_style ? inherited_style : box->style,
                                          parent_content_width - horiz_total);
