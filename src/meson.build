@@ -51,6 +51,10 @@ nordstjernen_engine_sources = files(
   'config.c',
   'csp.c',
   'css.c',
+  'css_color.c',
+  'css_anchor.c',
+  'css_shape.c',
+  'css_filter.c',
   'css_media.c',
   'css_prop_syntax.c',
   'css_syntax.c',
@@ -101,8 +105,6 @@ nordstjernen_engine_sources += files(
   'js_brand.c',
   'js_canvas.c',
   'js_canvas_api.c',
-  'js_intl.c',
-  'js_date.c',
   'js_perf.c',
   'js_realm.c',
   'wasm.c',
@@ -139,6 +141,11 @@ endif
 
 if have_webgpu
   nordstjernen_engine_sources += files('webgpu.c')
+endif
+
+nordstjernen_engine_sources += media_os_sources
+if have_os_mp4
+  nordstjernen_engine_sources += files('mp4.c', 'video_mp4.c')
 endif
 
 nordstjernen_win_resources = []
@@ -240,6 +247,7 @@ if have_woff2
 endif
 
 nordstjernen_deps += [libpsl]
+nordstjernen_deps += media_os_deps
 
 if http_backend == 'nghttp2'
   nordstjernen_deps += http_backend_deps
@@ -393,11 +401,8 @@ if not is_mobile
     endif
     # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
     # the C runtime on macOS and Windows, where find_library('m') is a harmless
-    # no-op. librt carries shm_open/shm_unlink (the audio clock's POSIX shared
-    # memory) on the BSDs, where they live outside libc; it is a harmless no-op
-    # where absent, matching the renderer and video-helper link lines.
-    audio_lib_deps = [cc.find_library('m', required: false),
-                      cc.find_library('rt', required: false)]
+    # no-op.
+    audio_lib_deps = [cc.find_library('m', required: false)]
 
     # On Linux the helper confines itself with the same Landlock + seccomp
     # profile as the renderer once its audio device and network stack are up,
@@ -413,39 +418,16 @@ if not is_mobile
 
     executable(
       'nordstjernen-audio',
-      files('audio/main.c') + audio_sandbox_sources,
+      files('audio/main.c') + audio_sandbox_sources + media_os_sources,
       include_directories: include_directories('audio', '.'),
       link_with: libminimp3,
-      dependencies: audio_deps + audio_lib_deps,
+      dependencies: audio_deps + audio_lib_deps + media_os_deps,
       link_args: nordstjernen_link_args,
       win_subsystem: 'windows',
       install: true,
     )
   else
     message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
-  endif
-
-  if have_libav
-    videoproc_deps = [libavformat, libavcodec, libavutil, libswscale,
-                      dependency('threads')]
-    videoproc_sources = files('videoproc/main.c')
-    if host_machine.system() == 'linux'
-      videoproc_sources += files('security.c')
-      videoproc_deps += [glib]
-      if have_seccomp
-        videoproc_deps += [libseccomp]
-      endif
-      videoproc_deps += [cc.find_library('rt', required: false)]
-    endif
-    executable(
-      'nordstjernen-video',
-      videoproc_sources,
-      include_directories: include_directories('.'),
-      dependencies: videoproc_deps + [cc.find_library('m', required: false)],
-      link_args: nordstjernen_link_args,
-      win_subsystem: 'windows',
-      install: true,
-    )
   endif
 endif
 

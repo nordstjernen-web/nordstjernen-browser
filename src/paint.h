@@ -35,6 +35,7 @@ typedef struct ns_paint_stats {
 } ns_paint_stats;
 
 void ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query);
+void ns_paint_blur_argb(guchar *data, int stride, int w, int h, double sigma);
 void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const char *highlight_query,
                              const struct ns_selection *sel);
@@ -78,6 +79,9 @@ void ns_paint_set_caret_visible(gboolean visible);
 
 void ns_paint_3d_invalidate(void);
 gboolean ns_paint_3d_registered(const ns_box *b);
+gboolean ns_paint_box_paints_children(const ns_box *b);
+gboolean ns_paint_box_clip_hides(const ns_box *b);
+gboolean ns_paint_box_establishes_3d(const ns_box *b);
 const ns_box *ns_paint_3d_pick(const ns_box *root3d, double x, double y);
 
 

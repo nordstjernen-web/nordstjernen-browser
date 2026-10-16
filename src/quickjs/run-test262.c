@@ -633,6 +633,10 @@ static void agent_start(void *arg)
             js_std_dump_error(ctx);
             break;
         } else if (ret == 0) {
+            if (JS_HasAtomicsWaiters(rt)) {
+                JS_RunAtomicsWaiters(rt, true);
+                continue;
+            }
             if (JS_IsUndefined(agent->broadcast_func)) {
                 break;
             } else {
@@ -803,13 +807,7 @@ static JSValue js_agent_sleep(JSContext *ctx, JSValueConst this_val,
 
 static int64_t get_clock_ms(void)
 {
-#ifdef _WIN32
-    return GetTickCount64();
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
-#endif
+    return js__hrtime_ns() / 1000000;
 }
 
 static JSValue js_agent_monotonicNow(JSContext *ctx, JSValueConst this_val,
@@ -937,6 +935,8 @@ static JSValue add_helpers1(JSContext *ctx)
     JS_SetPropertyStr(ctx, obj262, "IsHTMLDDA", is_html_dda);
     JS_SetPropertyStr(ctx, obj262, "agent", js_new_agent(ctx));
     JS_SetPropertyStr(ctx, obj262, "global", JS_GetGlobalObject(ctx));
+    JS_SetPropertyStr(ctx, obj262, "AbstractModuleSource",
+                      JS_GetAbstractModuleSource(ctx));
     /* $262 special object used by the tests */
     JS_SetPropertyStr(ctx, global_obj, "$262", JS_DupValue(ctx, obj262));
     JS_FreeValue(ctx, global_obj);
@@ -960,11 +960,47 @@ static char *load_file(const char *filename, size_t *lenp)
     return buf;
 }
 
+static int js_module_source_init(JSContext *ctx, JSModuleDef *m)
+{
+    return 0;
+}
+
+static JSModuleDef *js_module_source_test(JSContext *ctx,
+                                          const char *module_name)
+{
+    JSValue ctor, abstract_proto, proto, source;
+    JSModuleDef *m;
+
+    m = JS_NewCModule(ctx, module_name, js_module_source_init);
+    if (!m)
+        return NULL;
+    ctor = JS_GetAbstractModuleSource(ctx);
+    if (JS_IsException(ctor))
+        return NULL;
+    abstract_proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(abstract_proto))
+        return NULL;
+    proto = JS_NewObjectProto(ctx, abstract_proto);
+    JS_FreeValue(ctx, abstract_proto);
+    if (JS_IsException(proto))
+        return NULL;
+    source = JS_NewModuleSource(ctx, proto, "ModuleSource");
+    JS_FreeValue(ctx, proto);
+    if (JS_IsException(source))
+        return NULL;
+    JS_SetModuleSource(ctx, m, source);
+    return m;
+}
+
 static JSModuleDef *js_module_loader_test(JSContext *ctx,
                                           const char *module_name, void *opaque,
                                           JSValueConst attributes)
 {
     char *filename, *slash, path[1024];
+
+    if (!strcmp(module_name, "<module source>"))
+        return js_module_source_test(ctx, module_name);
 
     // interpret import("bar.js") from path/to/foo.js as
     // import("path/to/bar.js") but leave import("./bar.js") untouched
@@ -1358,6 +1394,9 @@ static int eval_buf(JSContext *ctx, const char *buf, size_t buf_len,
             if (ret < 0) {
                 res_val = JS_EXCEPTION;
                 break;
+            } else if (ret == 0 && JS_HasAtomicsWaiters(JS_GetRuntime(ctx))) {
+                JS_RunAtomicsWaiters(JS_GetRuntime(ctx), true);
+                continue;
             } else if (ret == 0) {
                 if (is_async) {
                     /* test if the test called $DONE() once */

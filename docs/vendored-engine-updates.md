@@ -33,6 +33,48 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-10-15 — QuickJS 60984dc → 9b06171
+
+| | value |
+|---|---|
+| Fork base | `60984dc` |
+| Updated to | `9b06171` (master, "Explain new security policy in SECURITY.md (#1818)") |
+| Reported version | `0.17.0` (unchanged) |
+
+Five upstream commits, done as a three-way merge per file (base `60984dc`).
+
+- **Language** — an untagged template literal converts each substitution
+  with `ToString` right after evaluating it, instead of calling
+  `String.prototype.concat` on the first chunk (`c359cac`). The `concat`
+  predefined atom is gone, and `BC_VERSION` goes from 28 to 29. The
+  precompiled builtins (`builtin-*.h`, `gen/*.c`) are upstream's
+  regenerated blobs.
+- **Errors** — `InternalError`, including out-of-memory, can no longer be
+  caught by JS code (`90aa2c4`, `db0fe52`).
+
+**Local modifications preserved.** One hunk conflicted, the `BC_VERSION`
+definitions, where the fork keeps reading older stored data.
+
+**Adaptation required.**
+
+- `JS_ReadObject` accepts data written as version 27 or 28 and shifts the
+  predefined atom indices past the removed `concat` atom, so IndexedDB
+  records stored by an earlier build stay readable. Bytecode of those
+  versions is refused; `NS_BYTECODE_CACHE_FORMAT_VERSION` is bumped so cached
+  scripts are compiled again.
+- The browser threw `InternalError` for failures a page should be able to
+  catch: WebGPU object creation (`src/webgpu.c`), WebAssembly table and
+  import failures (`src/wasm.c`, now `RangeError` or
+  `WebAssembly.RuntimeError`), `crypto.getRandomValues` and the zlib
+  streams (`src/js.c`). They now throw catchable `TypeError`/`RangeError`.
+
+### Verification
+
+- The GCC build compiles with no new warnings; a headless page using
+  template literals renders.
+- test262 main @ `d53ebc8b`: 0/82248 failures (the two fixes below cover
+  the five failures that this test262 revision added).
+
 ## 2026-10-08 — QuickJS 0.16.2 → 60984dc
 
 | | value |

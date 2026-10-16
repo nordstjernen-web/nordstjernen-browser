@@ -78,6 +78,7 @@ codegen: $(QJSC)
 	$(QJSC) -e -o gen/test_fib.c -m examples/test_fib.js
 	$(QJSC) -C -ss -o builtin-array-fromasync.h builtin-array-fromasync.js
 	$(QJSC) -C -ss -o builtin-iterator-zip.h builtin-iterator-zip.js
+	$(QJSC) -C -ss -o builtin-decorators.h builtin-decorators.js
 	$(QJSC) -C -ss -o builtin-iterator-zip-keyed.h builtin-iterator-zip-keyed.js
 
 debug:
