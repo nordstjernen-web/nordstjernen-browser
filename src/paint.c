@@ -5854,6 +5854,44 @@ ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
 }
 
 gboolean
+ns_paint_inline_empty_rect(const ns_box *b, const ns_inline_attr *r,
+                           double *out_x, double *out_y, double *out_h)
+{
+    if (!b || !b->text || !*b->text || r->start > strlen(b->text))
+        return FALSE;
+    const ns_inline_attr *element = b->vertical_wm ? NULL : r;
+    NsPangoLayout *layout = element
+        ? paint_inline_make_layout(b, inherited_style(b), NULL)
+        : ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+    inline_range range = inline_range_for(b, r->start, 0, element);
+    NsPangoRectangle pos;
+    ns_pango_layout_index_to_pos(layout, (int)r->start, &pos);
+    int line_no = 0, line_x = 0;
+    ns_pango_layout_index_to_line_x(layout, (int)r->start, FALSE,
+                                    &line_no, &line_x);
+    double above = 0, below = 0, y0, y1;
+    if (inline_box_vertical_reach(range.box_style, &above, &below)) {
+        double *baselines = paint_inline_line_baselines(b, layout, y_origin);
+        int lines = ns_pango_layout_get_line_count(layout);
+        double baseline =
+            baselines[CLAMP(line_no, 0, MAX(lines - 1, 0))] - range.rise;
+        g_free(baselines);
+        y0 = baseline - above;
+        y1 = baseline + below;
+    } else {
+        y0 = y_origin + (double)pos.y / NS_PANGO_SCALE;
+        y1 = y0 + (double)pos.height / NS_PANGO_SCALE;
+    }
+    g_object_unref(layout);
+    *out_x = (double)pos.x / NS_PANGO_SCALE + range.dx;
+    *out_y = y0 + range.dy - b->y;
+    *out_h = y1 - y0;
+    return TRUE;
+}
+
+gboolean
 ns_paint_inline_toggle_rect(const ns_box *b, const ns_inline_attr *r,
                             double *out_x, double *out_y,
                             double *out_w, double *out_h)

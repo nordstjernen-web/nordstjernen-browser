@@ -4307,17 +4307,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         g_free(close_q);
     }
     append_inline_spacer(ctx, pr);
-    if (ctx->out->len > elem_start) {
-        ns_inline_attr elem = {
-            .kind = NS_INLINE_ELEMENT,
-            .start = elem_start,
-            .len = ctx->out->len - elem_start,
-            .rise_px = ctx->rise,
-            .dom = n,
-            .style = s,
-        };
-        g_array_append_val(ctx->attrs, elem);
-    }
+    ns_inline_attr elem = {
+        .kind = ctx->out->len > elem_start ? NS_INLINE_ELEMENT
+                                           : NS_INLINE_EMPTY_ELEMENT,
+        .start = elem_start,
+        .len = ctx->out->len - elem_start,
+        .rise_px = ctx->rise,
+        .dom = n,
+        .style = s,
+    };
+    g_array_append_val(ctx->attrs, elem);
     ctx->rise = outer_rise;
     append_inline_spacer(ctx, mr);
     ctx->active_href   = prev_href;
@@ -4513,7 +4512,9 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         gsize ns = map[a->start];
         gsize ne = map[end];
         if (ne > collapsed->len) ne = collapsed->len;
-        if (ne <= ns) continue;
+        if (ne <= ns && !(a->kind == NS_INLINE_EMPTY_ELEMENT &&
+                          ns <= collapsed->len))
+            continue;
         ns_inline_attr out = *a;
         out.start = ns;
         out.len = ne - ns;
@@ -7764,7 +7765,10 @@ inline_box_clone_range(const ns_box *src, gsize start, gsize end)
             gsize a_end = range_end_clamped(a->start, a->len, text_len);
             gsize is = MAX(a->start, start);
             gsize ie = MIN(a_end, end);
-            if (ie <= is) continue;
+            gboolean marker_here = a->kind == NS_INLINE_EMPTY_ELEMENT &&
+                a->start >= start &&
+                (a->start < end || a->start == text_len);
+            if (ie <= is && !marker_here) continue;
             ns_inline_attr copy = *a;
             copy.start = is - start;
             copy.len = ie - is;
@@ -19839,13 +19843,19 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
         for (guint i = 0; i < root->attrs->len; i++) {
             const ns_inline_attr *r =
                 &g_array_index(root->attrs, ns_inline_attr, i);
-            if (r->dom != target || r->len == 0) continue;
-            double ex, ey, ew, eh;
-            if (!ns_paint_inline_toggle_rect(root, r, &ex, &ey, &ew, &eh) &&
-                !ns_paint_inline_range_extents(root, r->start, r->len,
-                                               inline_attr_element(r),
-                                               &ex, &ey, &ew, &eh))
+            if (r->dom != target) continue;
+            double ex, ey, ew = 0, eh;
+            if (r->kind == NS_INLINE_EMPTY_ELEMENT) {
+                if (!ns_paint_inline_empty_rect(root, r, &ex, &ey, &eh))
+                    continue;
+            } else if (r->len == 0 ||
+                       (!ns_paint_inline_toggle_rect(root, r, &ex, &ey,
+                                                     &ew, &eh) &&
+                        !ns_paint_inline_range_extents(root, r->start, r->len,
+                                                       inline_attr_element(r),
+                                                       &ex, &ey, &ew, &eh))) {
                 continue;
+            }
             double rx0 = root->x + dx + ex;
             double ry0 = root->y + dy + ey;
             double rx1 = rx0 + ew;
