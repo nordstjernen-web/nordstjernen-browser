@@ -1949,6 +1949,10 @@ paint_block(cairo_t *cr, const ns_box *b)
         border_y += legend_inset;
         border_h -= legend_inset;
     }
+    double captions_above = 0, captions_below = 0;
+    ns_box_table_caption_extents(b, &captions_above, &captions_below);
+    border_y += captions_above;
+    border_h -= captions_above + captions_below;
 
     if (border_w <= 0 || border_h <= 0) return;
 
