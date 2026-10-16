@@ -4326,6 +4326,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 
 enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
 
+static gsize
+bidi_control_len(const char *s, gsize avail)
+{
+    if (avail < 3 || (guchar)s[0] != 0xe2) return 0;
+    guchar b1 = (guchar)s[1], b2 = (guchar)s[2];
+    if (b1 == 0x81 && b2 >= 0xa6 && b2 <= 0xa9) return 3;
+    if (b1 == 0x80 && b2 >= 0xaa && b2 <= 0xae) return 3;
+    return 0;
+}
+
 static int
 white_space_mode(const ns_node *node, GHashTable *styles)
 {
@@ -4472,6 +4482,10 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
             g_string_append_len(collapsed, buf->str + i, 3);
             i += 2;
             prev_ws = TRUE;
+        } else if (bidi_control_len(buf->str + i, buf->len - i)) {
+            for (int k = 0; k < 3; k++) map[i + k] = collapsed->len;
+            g_string_append_len(collapsed, buf->str + i, 3);
+            i += 2;
         } else {
             map[i] = collapsed->len;
             g_string_append_c(collapsed, c);
@@ -4481,9 +4495,13 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     map[buf->len] = collapsed->len;
 
     ns_box *box = box_new_inline();
-    if (!trailing_preserved && collapsed->len > 0 &&
-        collapsed->str[collapsed->len - 1] == ' ')
-        g_string_set_size(collapsed, collapsed->len - 1);
+    gsize tail = collapsed->len;
+    while (tail >= 3 && bidi_control_len(collapsed->str + tail - 3, 3)) tail -= 3;
+    if (!trailing_preserved && tail > 0 && collapsed->str[tail - 1] == ' ') {
+        g_string_erase(collapsed, (gssize)tail - 1, 1);
+        for (gsize k = 0; k <= buf->len; k++)
+            if (map[k] >= tail) map[k]--;
+    }
 
     for (guint i = 0; i < raw_links->len; i++) {
         ns_link_range *r = &g_array_index(raw_links, ns_link_range, i);
@@ -7218,7 +7236,9 @@ inline_box_has_measure_attrs(const ns_box *box)
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *a =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (inline_attr_affects_measure(a->kind)) return TRUE;
+        if (inline_attr_affects_measure(a->kind) ||
+            ns_paint_inline_attr_nowrap(a))
+            return TRUE;
     }
     return FALSE;
 }

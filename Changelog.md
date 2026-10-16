@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: `white-space: nowrap` (and `pre`) on an inline element inside
+  wrapping text keeps the element on one line, and spaces on either side
+  of a bidi isolate (an inline `<li>`, `<bdi>` or `[dir]` element)
+  collapse into one. A nowrap link such as Wikipedia's `.nowraplinks a` could
+  break inside, and a list made inline (`.hlist`) kept a second space
+  after each separator.
 * DOM: an element laid out as more than one box (a table and the
   anonymous row around its cells, for example) reports the geometry of
   its first box from every lookup. The lookup cache, built after a few
