@@ -4337,6 +4337,37 @@ white_space_mode(const ns_node *node, GHashTable *styles)
     return NS_WS_COLLAPSE;
 }
 
+static int float_side_of(const ns_style *s);
+
+static void
+append_decoration_attrs(GArray *attrs, const ns_style *ps, gsize len)
+{
+    const ns_css_value *v = ps ? ps->values[NS_CSS_TEXT_DECORATION] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    const char *kw = v->u.keyword;
+    const ns_css_value *pc = ps->values[NS_CSS_TEXT_DECORATION_COLOR];
+    if (strstr(kw, "none") || (pc && pc->kind == NS_CSS_V_COLOR && pc->u.color.a == 0))
+        return;
+    static const struct { const char *word; ns_inline_attr_kind kind; } lines[] = {
+        { "underline",    NS_INLINE_UNDERLINE },
+        { "overline",     NS_INLINE_OVERLINE },
+        { "line-through", NS_INLINE_STRIKETHROUGH },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(lines); i++) {
+        if (!strstr(kw, lines[i].word)) continue;
+        ns_inline_attr a = { .kind = lines[i].kind, .style = ps,
+                             .start = 0, .len = len };
+        g_array_append_val(attrs, a);
+    }
+}
+
+static gboolean
+decoration_stops_at(const ns_style *s)
+{
+    return style_is_absolute_or_fixed(s) || float_side_of(s) >= 0 ||
+           ns_display_is_atomic_inline(ns_css_display_of(s));
+}
+
 static ns_box *
 build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
                       GHashTable *styles, gboolean abs_placeholders)
@@ -4479,38 +4510,14 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         }
     }
 
-    if (first && first->parent && collapsed->len > 0) {
-        const ns_style *ps = g_hash_table_lookup(styles, first->parent);
-        if (ps && ps->values[NS_CSS_TEXT_DECORATION] &&
-            ps->values[NS_CSS_TEXT_DECORATION]->kind == NS_CSS_V_KEYWORD &&
-            ps->values[NS_CSS_TEXT_DECORATION]->u.keyword) {
-            const char *kw = ps->values[NS_CSS_TEXT_DECORATION]->u.keyword;
-            const ns_css_value *pc = ps->values[NS_CSS_TEXT_DECORATION_COLOR];
-            gboolean invisible = pc && pc->kind == NS_CSS_V_COLOR &&
-                                 pc->u.color.a == 0;
-            if (!strstr(kw, "none") && !invisible) {
-                if (strstr(kw, "underline")) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_UNDERLINE, .style = ps,
-                        .start = 0, .len = collapsed->len
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                if (strstr(kw, "overline")) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_OVERLINE, .style = ps,
-                        .start = 0, .len = collapsed->len
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                if (strstr(kw, "line-through")) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_STRIKETHROUGH, .style = ps,
-                        .start = 0, .len = collapsed->len
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-            }
+    if (first && collapsed->len > 0) {
+        for (const ns_node *p = first->parent;
+             p && p->kind == NS_NODE_ELEMENT; p = p->parent) {
+            const ns_style *ps = g_hash_table_lookup(styles, p);
+            if (!ps) break;
+            if (style_is_contents(ps)) continue;
+            append_decoration_attrs(box->attrs, ps, collapsed->len);
+            if (decoration_stops_at(ps)) break;
         }
     }
 
@@ -5844,7 +5851,6 @@ build_blockified_inline_item(const ns_node *n, GHashTable *styles,
 }
 
 static const ns_node *g_blockified_legend;
-static int float_side_of(const ns_style *s);
 
 static gboolean
 style_can_be_rendered_legend(const ns_style *s)
@@ -11308,6 +11314,16 @@ flex_preset_cross_size(ns_box *c, double line_cross_size, double width_basis)
 }
 
 static void
+flex_item_keep_auto_margins(ns_box *c, double share)
+{
+    if (!c->style || share <= 0) return;
+    if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto"))
+        c->margin.left = share;
+    if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto"))
+        c->margin.right = share;
+}
+
+static void
 layout_flex_row(ns_box *box, double cw,
                 double inner_x, double inner_y,
                 const ns_style *child_inherited,
@@ -11395,6 +11411,7 @@ layout_flex_row(ns_box *box, double cw,
     g_free(lens);
     double free_main = cw - used_main;
     int auto_margins = 0;
+    double auto_share = 0;
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
         if (!c->style) continue;
@@ -11403,6 +11420,7 @@ layout_flex_row(ns_box *box, double cw,
     }
     if (auto_margins > 0 && free_main > 0) {
         double share = free_main / auto_margins;
+        auto_share = share;
         for (guint i = 0; i < items->len; i++) {
             ns_box *c = items->pdata[i];
             if (!c->style) continue;
@@ -11432,6 +11450,7 @@ layout_flex_row(ns_box *box, double cw,
         layout_box(c, a + c->margin.left + c->margin.right
                        + c->border.left + c->border.right
                        + c->padding.left + c->padding.right, child_inherited);
+        flex_item_keep_auto_margins(c, auto_share);
         c->flex_pass_x = c->x;
         c->flex_pass_y = c->y;
         double item_h = c->content_height +
@@ -11517,6 +11536,7 @@ layout_flex_row(ns_box *box, double cw,
             shift_box_tree(c, cursor_x - inner_x, cy - inner_y);
         } else {
             layout_box(c, item_layout_width, child_inherited);
+            flex_item_keep_auto_margins(c, auto_share);
         }
         if (!stretches)
             flex_item_fit_line_keyword_limits(c, cross_size, cw);
@@ -11663,6 +11683,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             remaining -= lens[line_start + k].target;
 
         int line_auto_margins = 0;
+        double line_auto_share = 0;
         for (guint k = 0; k < line_count; k++) {
             ns_box *c = items->pdata[line_start + k];
             if (!c->style) continue;
@@ -11673,6 +11694,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
         }
         if (line_auto_margins > 0 && remaining > 0) {
             double share = remaining / line_auto_margins;
+            line_auto_share = share;
             for (guint k = 0; k < line_count; k++) {
                 ns_box *c = items->pdata[line_start + k];
                 if (!c->style) continue;
@@ -11705,6 +11727,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->y = line_y;
             layout_box(c, a + g_array_index(extras_arr, double, gi),
                        child_inherited);
+            flex_item_keep_auto_margins(c, line_auto_share);
             double item_h = c->content_height +
                             c->padding.top + c->padding.bottom +
                             c->border.top + c->border.bottom +
