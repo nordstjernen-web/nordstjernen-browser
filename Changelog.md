@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* Service workers: `Client`, `WindowClient` and `Clients` exist in the
+  worker scope, a message from the page arrives with a `WindowClient` as
+  its `source` (with `id`, `url`, `type`, `postMessage()`, `focus()`), and
+  `clients.matchAll()` and `clients.get(id)` return that client. A worker
+  that checked `event.source instanceof WindowClient` threw a
+  ReferenceError on every message: Amazon's service worker logged six
+  errors per page load and never answered the page.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
