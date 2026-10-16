@@ -69,9 +69,45 @@ struct ns_video_player {
     double      demuxed_end;
     ns_texture *cur_tex;
     double      cur_time;
+    guint       cur_serial;
     ns_texture *pending_tex;
     double      pending_time;
+    guint       pending_serial;
+    GArray     *ahead;
+    guint       next_serial;
 };
+
+typedef struct ns_vframe {
+    ns_texture *tex;
+    double      pts;
+    guint       serial;
+} ns_vframe;
+
+static void
+ns_vframe_clear(gpointer p)
+{
+    ns_texture_unref(((ns_vframe *)p)->tex);
+}
+
+static void
+ns_video_player_drop_ahead(ns_video_player *player)
+{
+    if (player->ahead) g_array_set_size(player->ahead, 0);
+}
+
+static gboolean
+ns_video_player_take_ahead(ns_video_player *player)
+{
+    if (!player->ahead || player->ahead->len == 0) return FALSE;
+    ns_vframe f = g_array_index(player->ahead, ns_vframe, 0);
+    g_array_index(player->ahead, ns_vframe, 0).tex = NULL;
+    g_array_remove_index(player->ahead, 0);
+    ns_texture_unref(player->pending_tex);
+    player->pending_tex = f.tex;
+    player->pending_time = f.pts;
+    player->pending_serial = f.serial;
+    return TRUE;
+}
 
 static gboolean
 bytes_are_mpeg1(const guint8 *bytes, gsize len)
@@ -721,6 +757,7 @@ ns_video_player_free(ns_video_player *player)
     if (!player) return;
     ns_texture_unref(player->cur_tex);
     ns_texture_unref(player->pending_tex);
+    if (player->ahead) g_array_free(player->ahead, TRUE);
     if (player->plm) plm_destroy(player->plm);
 #ifdef NS_HAVE_LIBAV
     if (player->lav) ns_lav_free(player->lav);
@@ -995,6 +1032,7 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
             player->cur_time = -1.0;
             ns_texture_clear(&player->pending_tex);
             player->pending_time = -1.0;
+            ns_video_player_drop_ahead(player);
         }
     }
 #ifdef NS_HAVE_LIBAV
@@ -1015,6 +1053,7 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
                 ns_texture_unref(player->cur_tex);
                 player->cur_tex = player->pending_tex;
                 player->cur_time = player->pending_time;
+                player->cur_serial = player->pending_serial;
                 player->pending_tex = NULL;
                 player->pending_time = -1.0;
                 changed = TRUE;
@@ -1022,6 +1061,7 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
             }
             break;
         }
+        if (ns_video_player_take_ahead(player)) continue;
 
         ns_texture *tex = NULL;
         double pts = 0.0;
@@ -1034,7 +1074,56 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
         ns_texture_unref(player->pending_tex);
         player->pending_tex = tex;
         player->pending_time = pts < 0.0 ? 0.0 : pts;
+        player->pending_serial = ++player->next_serial;
     }
 
     return changed ? player->cur_tex : NULL;
+}
+
+void
+ns_video_player_prefetch(ns_video_player *player, double until,
+                         guint max_frames)
+{
+    if (!player || player->pending_time < 0.0) return;
+    if (!player->ahead) {
+        player->ahead = g_array_new(FALSE, FALSE, sizeof(ns_vframe));
+        g_array_set_clear_func(player->ahead, ns_vframe_clear);
+    }
+    while (player->ahead->len + 1 < max_frames) {
+        double last = player->ahead->len > 0
+            ? g_array_index(player->ahead, ns_vframe,
+                            player->ahead->len - 1).pts
+            : player->pending_time;
+        if (last >= until) break;
+        ns_vframe f = { NULL, 0.0, 0 };
+        gboolean eof = FALSE;
+        if (!ns_video_backend_next(player, &f.tex, &f.pts, &eof)) break;
+        if (f.pts < 0.0) f.pts = 0.0;
+        f.serial = ++player->next_serial;
+        g_array_append_val(player->ahead, f);
+    }
+}
+
+guint
+ns_video_player_current_serial(const ns_video_player *player)
+{
+    return player ? player->cur_serial : 0;
+}
+
+guint
+ns_video_player_upcoming(const ns_video_player *player, guint index,
+                         ns_texture **out_tex, double *out_pts)
+{
+    if (!player || player->pending_time < 0.0 || !player->pending_tex)
+        return 0;
+    if (index == 0) {
+        *out_tex = player->pending_tex;
+        *out_pts = player->pending_time;
+        return player->pending_serial;
+    }
+    if (!player->ahead || index - 1 >= player->ahead->len) return 0;
+    const ns_vframe *f = &g_array_index(player->ahead, ns_vframe, index - 1);
+    *out_tex = f->tex;
+    *out_pts = f->pts;
+    return f->serial;
 }

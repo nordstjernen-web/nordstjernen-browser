@@ -1877,6 +1877,8 @@ anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     }
     gint64 now = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     if (now <= 0) now = g_get_monotonic_time();
+    if (ns_page_layers_advance_videos(v->layers, g_get_monotonic_time()))
+        gtk_widget_queue_draw(v->area);
     gint64 interval = v->page_animating ? G_USEC_PER_SEC / 60
                                         : NS_PROC_CARET_BLINK_US;
     if (v->last_anim_frame_us > 0 && now - v->last_anim_frame_us < interval)

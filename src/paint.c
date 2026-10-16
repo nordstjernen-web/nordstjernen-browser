@@ -61,6 +61,15 @@ typedef struct paint_layers_state {
 
 static paint_layers_state g_layers;
 static const ns_box *g_paint_sticky_static_box;
+static guint g_paint_video_layer_gen;
+static double g_paint_video_tile_y;
+
+void
+ns_paint_set_video_layer(guint gen, double tile_y)
+{
+    g_paint_video_layer_gen = gen;
+    g_paint_video_tile_y = tile_y;
+}
 
 void
 ns_paint_set_caret_visible(gboolean visible)
@@ -6600,24 +6609,11 @@ object_position_offset(const ns_style *st, ns_css_prop prop,
     return delta * 0.5;
 }
 
-static gboolean
-paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+static void
+texture_fit(const ns_box *b, int iw, int ih, double *out_sx, double *out_sy,
+            double *out_ox, double *out_oy)
 {
-    int iw = ns_texture_get_width(tex);
-    int ih = ns_texture_get_height(tex);
-    if (iw <= 0 || ih <= 0) return FALSE;
-    if (b->content_width <= 0 || b->content_height <= 0) return FALSE;
     const ns_style *st = b->style;
-    const char *filter_kw = NULL;
-    if (st && st->values[NS_CSS_FILTER] &&
-        st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD &&
-        st->values[NS_CSS_FILTER]->u.keyword) {
-        filter_kw = st->values[NS_CSS_FILTER]->u.keyword;
-    }
-    const char *surface_filter =
-        filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
-    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
-    if (!surf) return FALSE;
     double cw = b->content_width, ch = b->content_height;
     double sx = cw / iw, sy = ch / ih;
     const char *fit = (st && st->values[NS_CSS_OBJECT_FIT] &&
@@ -6640,6 +6636,83 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
                                         ch, ih * s);
         }
     }
+    *out_sx = sx;
+    *out_sy = sy;
+    *out_ox = ox;
+    *out_oy = oy;
+}
+
+static gboolean
+video_layer_target(cairo_t *cr, const ns_box *b)
+{
+    if (!g_paint_video_layer_gen || g_layers.mode != PAINT_LAYERS_DOC ||
+        cr != g_layers.doc ||
+        cairo_get_group_target(cr) != cairo_get_target(cr))
+        return FALSE;
+    cairo_matrix_t m;
+    cairo_get_matrix(cr, &m);
+    if (m.xy != 0 || m.yx != 0 || m.xx <= 0 || m.yy <= 0) return FALSE;
+    const ns_style *st = b->style;
+    return !(st && st->values[NS_CSS_FILTER] &&
+             st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD &&
+             st->values[NS_CSS_FILTER]->u.keyword &&
+             strcmp(st->values[NS_CSS_FILTER]->u.keyword, "none") != 0);
+}
+
+static gboolean
+paint_video_layer_hole(cairo_t *cr, const ns_box *b, ns_video *v,
+                       ns_texture *tex)
+{
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
+    if (iw <= 0 || ih <= 0 || b->content_width <= 0 ||
+        b->content_height <= 0 || !video_layer_target(cr, b))
+        return FALSE;
+    double sx, sy, ox, oy;
+    texture_fit(b, iw, ih, &sx, &sy, &ox, &oy);
+    double cx = b->x + b->margin.left + b->border.left + b->padding.left;
+    double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
+    double x0 = cx + ox, y0 = cy + oy;
+    double x1 = x0 + iw * sx, y1 = y0 + ih * sy;
+    cairo_save(cr);
+    apply_box_content_clip(cr, b);
+    cairo_rectangle(cr, cx, cy, b->content_width, b->content_height);
+    cairo_clip(cr);
+    cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_fill(cr);
+    cairo_restore(cr);
+    cairo_user_to_device(cr, &x0, &y0);
+    cairo_user_to_device(cr, &x1, &y1);
+    v->layer_x = x0;
+    v->layer_y = y0 + g_paint_video_tile_y;
+    v->layer_w = x1 - x0;
+    v->layer_h = y1 - y0;
+    v->layer_gen = g_paint_video_layer_gen;
+    return TRUE;
+}
+
+static gboolean
+paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+{
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
+    if (iw <= 0 || ih <= 0) return FALSE;
+    if (b->content_width <= 0 || b->content_height <= 0) return FALSE;
+    const ns_style *st = b->style;
+    const char *filter_kw = NULL;
+    if (st && st->values[NS_CSS_FILTER] &&
+        st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD &&
+        st->values[NS_CSS_FILTER]->u.keyword) {
+        filter_kw = st->values[NS_CSS_FILTER]->u.keyword;
+    }
+    const char *surface_filter =
+        filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
+    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
+    if (!surf) return FALSE;
+    double cw = b->content_width, ch = b->content_height;
+    double sx, sy, ox, oy;
+    texture_fit(b, iw, ih, &sx, &sy, &ox, &oy);
     double cx = b->x + b->margin.left + b->border.left + b->padding.left;
     double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
     paint_texture_drop_shadows(cr, surf, b, iw, ih, sx, sy, ox, oy, filter_kw);
@@ -6982,8 +7055,10 @@ paint_video(cairo_t *cr, const ns_box *b)
         }
     }
     cairo_save(cr);
+    gboolean layered = tex && tex == v->frame_texture &&
+                       paint_video_layer_hole(cr, b, v, tex);
     if (tex) {
-        paint_texture(cr, b, tex);
+        if (!layered) paint_texture(cr, b, tex);
     } else if (!bg_painted && b->dom &&
                ns_element_get_attr(b->dom, "controls")) {
         cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);

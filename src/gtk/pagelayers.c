@@ -37,6 +37,19 @@ typedef struct {
     gboolean fixed;
 } PlScroller;
 
+typedef struct {
+    guint       serial;
+    gint64      deadline_us;
+    GdkTexture *tex;
+} PlFrame;
+
+typedef struct {
+    guint       id;
+    double      x, y, w, h;
+    GArray     *frames;
+    guint       shown;
+} PlVideo;
+
 struct NsLayerUpdate {
     int         gen;
     int         width;
@@ -53,6 +66,8 @@ struct NsLayerUpdate {
     gboolean    scrollers_all;
     GArray     *wheels;
     gboolean    wheels_all;
+    GPtrArray  *videos;
+    gboolean    videos_listed;
 };
 
 struct NsPageLayers {
@@ -70,6 +85,7 @@ struct NsPageLayers {
     gboolean    scrollers_all;
     GArray     *wheels;
     gboolean    wheels_all;
+    GPtrArray  *videos;
 };
 
 static void
@@ -94,6 +110,20 @@ pl_view_layer_free(gpointer p)
     PlViewLayer *l = p;
     g_clear_object(&l->tex);
     g_free(l);
+}
+
+static void
+pl_frame_clear(gpointer p)
+{
+    g_clear_object(&((PlFrame *)p)->tex);
+}
+
+static void
+pl_video_free(gpointer p)
+{
+    PlVideo *v = p;
+    g_array_unref(v->frames);
+    g_free(v);
 }
 
 static GdkTexture *
@@ -207,6 +237,35 @@ pl_parse_wheel(NsLayerUpdate *u, const char *line)
 }
 
 static void
+pl_parse_video(NsLayerUpdate *u, const char *line)
+{
+    PlVideo v = { 0 };
+    if (sscanf(line, "video %u %lf %lf %lf %lf", &v.id, &v.x, &v.y, &v.w,
+               &v.h) != 5 || !(v.w > 0) || !(v.h > 0))
+        return;
+    v.frames = g_array_new(FALSE, TRUE, sizeof(PlFrame));
+    g_array_set_clear_func(v.frames, pl_frame_clear);
+    g_ptr_array_add(u->videos, g_memdup2(&v, sizeof v));
+}
+
+static void
+pl_parse_video_frame(NsLayerUpdate *u, const char *line,
+                     const unsigned char *map, size_t map_size)
+{
+    if (u->videos->len == 0) return;
+    PlVideo *v = g_ptr_array_index(u->videos, u->videos->len - 1);
+    PlFrame f = { 0 };
+    int fw = 0, fh = 0;
+    long long deadline = 0, at = -1;
+    if (sscanf(line, "vf %u %lld %d %d %lld", &f.serial, &deadline, &fw, &fh,
+               &at) != 5)
+        return;
+    f.deadline_us = deadline;
+    f.tex = at >= 0 ? pl_texture(map, map_size, at, fw, fh) : NULL;
+    g_array_append_val(v->frames, f);
+}
+
+static void
 pl_parse_keep(NsLayerUpdate *u, const char *line)
 {
     long index = 0;
@@ -228,6 +287,12 @@ pl_parse_line(NsLayerUpdate *u, const char *line, const unsigned char *map,
         pl_parse_scroller(u, line);
     else if (g_str_has_prefix(line, "wr"))
         pl_parse_wheel(u, line);
+    else if (g_str_has_prefix(line, "video "))
+        pl_parse_video(u, line);
+    else if (g_str_has_prefix(line, "vf "))
+        pl_parse_video_frame(u, line, map, map_size);
+    else if (strcmp(line, "videos") == 0)
+        u->videos_listed = TRUE;
 }
 
 NsLayerUpdate *
@@ -241,6 +306,7 @@ ns_layer_update_parse(const char *desc, const unsigned char *map,
     u->keeps = g_array_new(FALSE, FALSE, sizeof(long));
     u->scrollers = g_array_new(FALSE, FALSE, sizeof(PlScroller));
     u->wheels = g_array_new(FALSE, FALSE, sizeof(PlScroller));
+    u->videos = g_ptr_array_new_with_free_func(pl_video_free);
     char **lines = g_strsplit(desc, "\n", -1);
     gboolean ok = lines[0] && pl_parse_gen(u, lines[0]);
     for (int i = 1; ok && lines[i]; i++)
@@ -263,6 +329,7 @@ ns_layer_update_free(NsLayerUpdate *u)
     g_array_unref(u->keeps);
     g_array_unref(u->scrollers);
     g_array_unref(u->wheels);
+    g_ptr_array_unref(u->videos);
     g_free(u);
 }
 
@@ -275,6 +342,7 @@ ns_page_layers_new(void)
                                       pl_tile_free);
     pl->scrollers = g_array_new(FALSE, FALSE, sizeof(PlScroller));
     pl->wheels = g_array_new(FALSE, FALSE, sizeof(PlScroller));
+    pl->videos = g_ptr_array_new_with_free_func(pl_video_free);
     return pl;
 }
 
@@ -289,6 +357,7 @@ ns_page_layers_reset(NsPageLayers *pl)
     pl->scrollers_all = FALSE;
     g_array_set_size(pl->wheels, 0);
     pl->wheels_all = FALSE;
+    g_ptr_array_set_size(pl->videos, 0);
 }
 
 void
@@ -299,6 +368,7 @@ ns_page_layers_free(NsPageLayers *pl)
     g_hash_table_destroy(pl->tiles);
     g_array_unref(pl->scrollers);
     g_array_unref(pl->wheels);
+    g_ptr_array_unref(pl->videos);
     g_free(pl);
 }
 
@@ -358,6 +428,83 @@ pl_relabel_kept(NsPageLayers *pl, const NsLayerUpdate *u)
     }
 }
 
+static const PlVideo *
+pl_video_by_id(const NsPageLayers *pl, guint id)
+{
+    for (guint i = 0; i < pl->videos->len; i++) {
+        const PlVideo *v = g_ptr_array_index(pl->videos, i);
+        if (v->id == id) return v;
+    }
+    return NULL;
+}
+
+static GdkTexture *
+pl_video_frame_texture(const PlVideo *v, guint serial)
+{
+    for (guint i = 0; v && i < v->frames->len; i++) {
+        const PlFrame *f = &g_array_index(v->frames, PlFrame, i);
+        if (f->serial == serial) return f->tex;
+    }
+    return NULL;
+}
+
+static guint
+pl_video_due(const PlVideo *v, gint64 now_us)
+{
+    guint due = 0;
+    for (guint i = 0; i < v->frames->len; i++) {
+        const PlFrame *f = &g_array_index(v->frames, PlFrame, i);
+        if (!f->tex) continue;
+        if (!due || f->deadline_us <= now_us) due = f->serial;
+        if (f->deadline_us > now_us) break;
+    }
+    return due;
+}
+
+static gboolean
+pl_adopt_videos(NsPageLayers *pl, NsLayerUpdate *u)
+{
+    gboolean changed = u->videos->len != pl->videos->len;
+    gint64 now = g_get_monotonic_time();
+    for (guint i = 0; i < u->videos->len; i++) {
+        PlVideo *v = g_ptr_array_index(u->videos, i);
+        const PlVideo *old = pl_video_by_id(pl, v->id);
+        for (guint j = 0; j < v->frames->len; j++) {
+            PlFrame *f = &g_array_index(v->frames, PlFrame, j);
+            GdkTexture *kept = f->tex ? NULL
+                                      : pl_video_frame_texture(old, f->serial);
+            if (kept) f->tex = g_object_ref(kept);
+        }
+        v->shown = old ? old->shown : 0;
+        if (!pl_video_frame_texture(v, v->shown)) {
+            v->shown = pl_video_due(v, now);
+            changed = TRUE;
+        }
+        if (!old || old->x != v->x || old->y != v->y || old->w != v->w ||
+            old->h != v->h)
+            changed = TRUE;
+    }
+    GPtrArray *videos = pl->videos;
+    pl->videos = u->videos;
+    u->videos = videos;
+    return changed;
+}
+
+gboolean
+ns_page_layers_advance_videos(NsPageLayers *pl, gint64 now_us)
+{
+    gboolean changed = FALSE;
+    for (guint i = 0; pl && i < pl->videos->len; i++) {
+        PlVideo *v = g_ptr_array_index(pl->videos, i);
+        guint due = pl_video_due(v, now_us);
+        if (due && due != v->shown) {
+            v->shown = due;
+            changed = TRUE;
+        }
+    }
+    return changed;
+}
+
 gboolean
 ns_page_layers_apply(NsPageLayers *pl, NsLayerUpdate *u)
 {
@@ -375,6 +522,7 @@ ns_page_layers_apply(NsPageLayers *pl, NsLayerUpdate *u)
     pl_relabel_kept(pl, u);
     g_ptr_array_set_free_func(u->tiles, NULL);
     gboolean changed = u->fresh || u->tiles->len > 0 || u->keeps->len > 0;
+    if (u->videos_listed && pl_adopt_videos(pl, u)) changed = TRUE;
     g_ptr_array_set_size(u->tiles, 0);
     return changed;
 }
@@ -547,6 +695,22 @@ pl_snapshot_doc_layer(const NsPageLayers *pl, int layer, GtkSnapshot *snapshot,
     }
 }
 
+static void
+pl_snapshot_videos(const NsPageLayers *pl, GtkSnapshot *snapshot,
+                   double raster, double ox, double oy)
+{
+    for (guint i = 0; i < pl->videos->len; i++) {
+        const PlVideo *v = g_ptr_array_index(pl->videos, i);
+        GdkTexture *tex = pl_video_frame_texture(v, v->shown);
+        if (!tex) continue;
+        graphene_rect_t r = GRAPHENE_RECT_INIT(
+            (float)((v->x - ox) / raster), (float)((v->y - oy) / raster),
+            (float)(v->w / raster), (float)(v->h / raster));
+        gtk_snapshot_append_scaled_texture(snapshot, tex,
+                                           GSK_SCALING_FILTER_LINEAR, &r);
+    }
+}
+
 void
 ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
                         double width, double height, double raster,
@@ -561,6 +725,7 @@ ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
     long k0 = (long)floor(oy / pl->tile_h);
     long k1 = (long)floor((oy + height * raster - 1) / pl->tile_h);
     gtk_snapshot_push_clip(snapshot, &area);
+    pl_snapshot_videos(pl, snapshot, raster, ox, oy);
     for (int layer = 0; layer <= pl->n_vp; layer++) {
         if (layer > 0 && (guint)layer <= pl->vp->len)
             pl_snapshot_view_layer(pl, g_ptr_array_index(pl->vp, layer - 1),
