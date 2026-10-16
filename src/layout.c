@@ -2936,6 +2936,15 @@ emit_color_attr(GArray *attrs, gsize start, gsize end,
 }
 
 static void
+emit_generated_attr(GArray *attrs, gsize start, gsize end, const ns_style *ps)
+{
+    if (end <= start) return;
+    ns_inline_attr a = { .kind = NS_INLINE_GENERATED, .start = start,
+                         .len = end - start, .style = ps };
+    g_array_append_val(attrs, a);
+}
+
+static void
 emit_font_family_attr(GArray *attrs, gsize start, gsize end, const char *family)
 {
     if (end <= start || !family) return;
@@ -3440,7 +3449,9 @@ append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
     }
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_LEFT], 0));
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_LEFT], 0));
+    gsize start = ctx->out->len;
     append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
+    emit_generated_attr(ctx->attrs, start, ctx->out->len, ps);
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_RIGHT], 0));
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_RIGHT], 0));
 }
@@ -5475,6 +5486,7 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
     box->style = ps;
 
     gsize tlen = strlen(box->text);
+    emit_generated_attr(box->attrs, 0, tlen, ps);
     const char *vis = ns_style_keyword(ps, NS_CSS_VISIBILITY);
     gboolean invisible = vis && (strcmp(vis, "hidden") == 0 ||
                                  strcmp(vis, "collapse") == 0);
