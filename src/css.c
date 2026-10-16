@@ -31602,21 +31602,29 @@ ns_css_cached_decl_sheet(const char *decls)
 }
 
 static gboolean
+incr_var_layers_equal(GHashTable *a, GHashTable *b)
+{
+    guint na = a ? g_hash_table_size(a) : 0;
+    guint nb = b ? g_hash_table_size(b) : 0;
+    if (na != nb) return FALSE;
+    if (na == 0) return TRUE;
+    GHashTableIter it;
+    gpointer k, v, bv;
+    g_hash_table_iter_init(&it, a);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        if (!g_hash_table_lookup_extended(b, k, NULL, &bv) ||
+            g_strcmp0(v, bv) != 0)
+            return FALSE;
+    return TRUE;
+}
+
+static gboolean
 incr_var_maps_equal(const ns_var_map *a, const ns_var_map *b)
 {
-    if (a == b) return TRUE;
-    GPtrArray *na = ns_var_map_names(a);
-    GPtrArray *nb = ns_var_map_names(b);
-    gboolean eq = na->len == nb->len;
-    for (guint i = 0; eq && i < na->len; i++) {
-        const char *name = g_ptr_array_index(na, i);
-        eq = strcmp(name, g_ptr_array_index(nb, i)) == 0 &&
-             g_strcmp0(ns_var_map_lookup(a, name),
-                       ns_var_map_lookup(b, name)) == 0;
-    }
-    g_ptr_array_unref(na);
-    g_ptr_array_unref(nb);
-    return eq;
+    for (; a != b; a = a->parent, b = b->parent)
+        if (!a || !b || !incr_var_layers_equal(a->own, b->own))
+            return FALSE;
+    return TRUE;
 }
 
 static GHashTable *g_explicit_inherit_parents;
@@ -33346,11 +33354,17 @@ incr_queue_attr_change(GPtrArray *queue, const ns_node *target,
 }
 
 static void
-incr_mark_self_dirty(ns_node *target, GPtrArray *queue)
+incr_add_self_dirty(ns_node *target)
 {
     if (!g_incr_self_dirty)
         g_incr_self_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_hash_table_add(g_incr_self_dirty, target);
+}
+
+static void
+incr_mark_self_dirty(ns_node *target, GPtrArray *queue)
+{
+    incr_add_self_dirty(target);
     if (queue && queue->len > 0) {
         if (!g_incr_inv_pending)
             g_incr_inv_pending = g_hash_table_new_full(
@@ -33397,6 +33411,13 @@ ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
     gboolean gated = incr_has_mut_begin_attr(target, name, old_value);
     incr_mark_attr_change(target, name, old_value);
     incr_has_mut_end(gated);
+}
+
+static gboolean
+incr_style_attr_untested(const char *name)
+{
+    return name && g_ascii_strcasecmp(name, "style") == 0 && g_attr_keys &&
+           !g_hash_table_contains(g_attr_keys, "style");
 }
 
 static gboolean
@@ -33454,6 +33475,10 @@ incr_mark_attr_change(ns_node *target, const char *name, const char *old_value)
 {
     if (!g_struct_ready) {
         ns_css_mark_restyle_dirty(target->parent ? target->parent : target);
+        return;
+    }
+    if (incr_style_attr_untested(name)) {
+        incr_add_self_dirty(target);
         return;
     }
     if (incr_style_attr_restyles_self(name)) {
@@ -34442,10 +34467,10 @@ cascade_walk(ns_node *node,
                                     parent_changed;
     if (node->kind == NS_NODE_ELEMENT) {
         gboolean nd_node_dirty = under_dirty ||
-            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node)) ||
-            (g_incr_exclude && g_hash_table_contains(g_incr_exclude, node));
+            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
         gboolean nd_self_only = !nd_node_dirty &&
             (parent_changed ||
+             (g_incr_exclude && g_hash_table_contains(g_incr_exclude, node)) ||
              (g_incr_self_dirty &&
               g_hash_table_contains(g_incr_self_dirty, node)) ||
              (g_inv_active && g_inv_active->len > 0 &&
