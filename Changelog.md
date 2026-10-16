@@ -9,8 +9,8 @@ Changelog:
   prototype from the realm's own interfaces, recorded when the window,
   frame or worker realm is set up, instead of looking `MessageEvent`,
   `ErrorEvent` or `Event` up on the global object each time. A frame
-  starts from its parent's original interfaces, so a parent that
-  replaced one of them does not change what the frame receives. A
+  starts from its parent's original interfaces, so the events a frame
+  receives keep the original prototypes. A
   worker that deletes its globals for sandboxing, or a page that
   replaces `window.MessageEvent`, no longer makes messages arrive
   without `type` or `data`, and a worker whose `ErrorEvent` is gone

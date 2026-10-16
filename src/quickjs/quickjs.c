@@ -7060,6 +7060,27 @@ int JS_AddEnginePrivateName(JSContext *ctx, const char *name)
     return -1;
 }
 
+/* The embedder's own atom for an engine-private name, whoever is on the
+   stack.  For state the embedder reaches while a built-in acts for a page
+   script (a promise's catch(), a Storage setter), where js_access_atom
+   would hand out the page's property of that name.  JS_ATOM_NULL when the
+   name is not engine-private; the caller frees the atom. */
+JSAtom JS_GetEnginePrivateAtom(JSContext *ctx, const char *name)
+{
+    JSRuntime *rt = ctx->rt;
+    JSAtom atom, shadow = JS_ATOM_NULL;
+    int i;
+
+    atom = JS_NewAtom(ctx, name);
+    if (atom == JS_ATOM_NULL)
+        return JS_ATOM_NULL;
+    for (i = 0; i < rt->engine_private_count; i++)
+        if (rt->engine_private[i].name == atom)
+            shadow = JS_DupAtom(ctx, rt->engine_private[i].shadow);
+    JS_FreeAtom(ctx, atom);
+    return shadow;
+}
+
 static void js_free_engine_private_names(JSRuntime *rt)
 {
     int i;
