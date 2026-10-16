@@ -3,6 +3,31 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: the text of a block `::before`/`::after` collapses its white
+  space like any other text, so the widespread clearfix
+  `content: " "; display: block; clear: both` no longer adds an empty
+  line under every container that uses it. NPR's front page came out
+  700px taller than in Chromium, EFF's tagline sat 64px low, and apple.com
+  and Smashing Magazine had gaps between sections.
+* Layout: a line break from `<br>` drops the collapsible spaces around it,
+  so the next line no longer starts with a space ("one <br> two" put
+  " two" on the second line), and a `<br>` styled `display: block` or
+  `flex` still breaks the line as in other browsers instead of joining
+  the text on both sides: rust-lang.org's tagline read "everyoneto
+  build" on one line.
+* Layout: a block's negative horizontal margins reduce its parent's
+  max-content width, as in other browsers. The shrink-to-fit measurement
+  took the larger of the child's margin box and its content width, so
+  negative margins never counted: Wikipedia's main-menu button
+  (`margin: 0 -12px`)
+  made its header slot 44px wide instead of 20px and pushed the logo
+  24px to the right; inline-blocks, floats, table cells and flex items
+  holding such a block came out too wide in the same way.
+* SVG: icons drawn through `<use>` take `currentColor` from where they are
+  used. A sprite's `<symbol>` lives in a hidden `<svg>`, and its paths
+  resolved `fill="currentColor"` against that tree's colour, so every
+  sprite icon (Bootstrap, svelte.dev and most icon sets) came out black
+  instead of in the colour of the link or button around it.
 * Layout: images and SVGs sized with `calc()` contribute that size to grid
   and table tracks. The min-content contribution of a replaced element read
   only its laid-out width and fell back to 200px, so Tailwind's `size-4`
