@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: percentages in grid column sizes (`50%`, `calc(100% - 380px)`,
+  `minmax(30%, 1fr)`) resolve against the grid's content width, as CSS
+  requires, not against the width left after the gaps. AP News's main
+  column, `calc(100% - 40px - 340px)` beside a 40px gap, was 40px
+  narrower than in other browsers, and every story in it wrapped
+  differently.
 * Layout: a grid container whose height comes from its parent, as a
   stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
   against that height. The rows were sized as if the height were
