@@ -465,14 +465,11 @@ svg_node_style(svg_ctx *ctx, const svg_state *st, const ns_node *n,
 {
     const ns_style *s = ctx->styles
         ? g_hash_table_lookup(ctx->styles, (gpointer)n) : NULL;
-    const ns_style *from = s && st->instanced && n->parent
-        ? g_hash_table_lookup(ctx->styles, (gpointer)n->parent) : NULL;
-    if (!from) return s;
+    if (!s || !st->instanced) return s;
     *own = *s;
     for (gsize i = 0; i < G_N_ELEMENTS(svg_inherited_props); i++) {
         ns_css_prop prop = svg_inherited_props[i];
-        if (s->values[prop] == from->values[prop] &&
-            !ns_style_prop_from_currentcolor(s, prop))
+        if (ns_style_prop_inherited(s, prop))
             own->values[prop] = NULL;
     }
     return own;
