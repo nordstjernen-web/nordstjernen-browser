@@ -1273,6 +1273,9 @@ void ns_css_forget_node(const ns_node *node);
 
 void ns_css_mark_visited(const char *abs_url);
 void ns_css_set_doc_base(const char *base_url);
+int           ns_css_font_face_weight(const char *val);
+ns_font_slant ns_css_font_face_slant(const char *val);
+char         *ns_css_font_face_src_url(const char *src);
 void ns_css_set_doc_language(const char *lang);
 
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
