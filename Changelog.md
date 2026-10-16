@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: desktop builds ignore the width in `<meta name="viewport">`, as
+  desktop browsers do. A page asking for `width=1120` (Wikipedia) was laid
+  out 1120px wide in a narrower window, so its narrow-window media queries
+  and `matchMedia()` never matched and the page scrolled sideways. Android
+  and iOS keep honouring it.
 * Headless runs look for `<video>` elements once per layout instead of on
   every settle tick, matching the interactive renderer.
 * Style: elements whose style reads an attribute through `attr()` are
