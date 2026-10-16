@@ -731,6 +731,7 @@ JS_EXTERN JSValue JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
                                               size_t *pbyte_offset,
                                               size_t *pbyte_length);
 JS_EXTERN int JS_AddEnginePrivateName(JSContext *ctx, const char *name);
+JS_EXTERN JSAtom JS_GetEnginePrivateAtom(JSContext *ctx, const char *name);
 JS_EXTERN void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj);
 JS_EXTERN int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
                                      JSValue val, JSValueConst receiver, int flags);
