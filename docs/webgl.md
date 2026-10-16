@@ -14,7 +14,7 @@ command-stream validator between the page and the driver: WebGL calls
 become GL calls.
 
 Because that is a deliberately thin bridge to the GPU driver, WebGL use is
-shown in the browser status bar and can be disabled globally in Settings.
+can be disabled globally in Settings.
 The data-transfer entry points are bounds-checked and zero-initialised (see
 [Security](#security)).
 
@@ -23,8 +23,8 @@ The data-transfer entry points are bounds-checked and zero-initialised (see
 The first time a page calls `canvas.getContext("webgl")` (or `"webgl2"` /
 `"experimental-webgl"`), Nordstjernen creates the context immediately when
 WebGL is globally enabled. The origin is remembered for the session and sent
-to the GTK shell over the renderer IPC channel (`X-WebGL`), which adds
-**WebGL enabled** to the status bar. There is no permission dialog.
+to the GTK shell over the renderer IPC channel (`X-WebGL`). The shell shows
+no indicator for it, and there is no permission dialog.
 
 Turn off **Enable WebGL** on `about:settings` to make subsequent
 `getContext("webgl")` and `getContext("webgl2")` calls return `null`. Hosts
@@ -187,8 +187,8 @@ The original cut shipped with "no security measures"; this is the
 hardened model. WebGL is a thin bridge to the GPU driver, so the
 mitigations focus on the parts a hostile page can actually reach.
 
-- **Visible activity and global control.** The status bar reports WebGL use,
-  and the global Settings switch can prevent all new context creation.
+- **Global control.** The Settings switch can prevent all new context
+  creation.
 - **No JS-heap out-of-bounds.** Every pixel-transfer entry point validates
   the caller-supplied `ArrayBufferView` against the exact number of bytes
   GL will touch — computed from width/height/depth, format, type and the
@@ -294,5 +294,4 @@ python3 -m http.server 8000 &
 
 A minimal smoke test page is a hello-triangle: create a vertex + fragment
 shader, link a program, upload three vertices, and call
-`drawArrays(gl.TRIANGLES, 0, 3)`. The browser status bar reports that the page
-enabled WebGL.
+`drawArrays(gl.TRIANGLES, 0, 3)`.
