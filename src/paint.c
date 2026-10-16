@@ -3029,6 +3029,10 @@ ns_paint_css_line_height_px(const ns_style *s)
     double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
     if (!lh || keyword_is(lh, "normal"))
         return ns_paint_normal_line_height_px(s);
+    if (ns_css_calc_is_math_fn(lh))
+        return ns_css_calc_math_fn_px(lh, font_size);
+    if (lh->kind == NS_CSS_V_CALC)
+        return lh->u.calc.px + lh->u.calc.pct / 100.0 * font_size;
     if (lh->kind != NS_CSS_V_LENGTH) return -1;
     switch (lh->u.length.unit) {
     case NS_CSS_UNIT_PX:      return lh->u.length.v;
