@@ -155,6 +155,7 @@ typedef struct ns_box {
     gboolean definite_height_read;
     double measured_content_height;
     double cb_height_override;
+    gboolean block_size_indefinite;
     double cb_width_override;
     gboolean cb_width_set;
     double flex_main_size;
