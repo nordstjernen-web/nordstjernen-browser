@@ -1337,7 +1337,6 @@ static ns_box *build_inline_run(const ns_node *first, const ns_node *last_excl, 
 static void translate_subtree(ns_box *box, double dx, double dy);
 static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static gboolean inline_atomic_needs_layout(const ns_box *ab);
-static double pango_layout_line_top(NsPangoLayout *layout, int line_index);
 static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
                                        const ns_style *host_style);
 static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
@@ -3296,12 +3295,25 @@ append_pseudo_content(GString *out, const ns_css_value *cv,
 static ns_box *pseudo_block_with_text(const ns_style *ps, const char *txt);
 
 static void
+append_abs_placeholder(collector_ctx *ctx, gconstpointer key)
+{
+    if (!ctx->atomics || !ctx->abs_placeholders || !g_abs_ph_set) return;
+    ns_box *ph = box_new(NS_BOX_BLOCK);
+    ns_atomic_raw rec = { .start = ctx->out->len, .box = ph };
+    g_string_append(ctx->out, "\xef\xbf\xbc");
+    g_array_append_val(ctx->atomics, rec);
+    g_hash_table_insert(g_abs_ph_set, ph, (gpointer)key);
+}
+
+static void
 append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
                      const ns_node *host)
 {
     if (!pseudo_generates_box(ps) || style_is_none(ps)) return;
     if (style_is_absolute_or_fixed(ps)) {
-        append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
+        register_abs_pseudo(host, ps);
+        if (!keyword_is(ps->values[NS_CSS_POSITION], "fixed"))
+            append_abs_placeholder(ctx, ps);
         return;
     }
     if (ctx->atomics && ns_display_is_atomic_inline(ns_css_display_of(ps))) {
@@ -3523,13 +3535,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             e.fixed = fixed;
             g_array_append_val(g_abs_pending, e);
         }
-        if (ctx->atomics && !fixed && ctx->abs_placeholders && g_abs_ph_set) {
-            ns_box *ph = box_new(NS_BOX_BLOCK);
-            ns_atomic_raw rec = { .start = ctx->out->len, .box = ph };
-            g_string_append(ctx->out, "\xef\xbf\xbc");
-            g_array_append_val(ctx->atomics, rec);
-            g_hash_table_insert(g_abs_ph_set, ph, (gpointer)n);
-        }
+        if (!fixed) append_abs_placeholder(ctx, n);
         return;
     }
 
@@ -5790,6 +5796,10 @@ register_abs_pseudo(const ns_node *host, const ns_style *ps)
 {
     if (!ps || !g_abs_pending) return;
     if (!style_is_absolute_or_fixed(ps) || !pseudo_generates_box(ps)) return;
+    for (guint i = 0; i < g_abs_pending->len; i++) {
+        const ns_abs_entry *seen = &g_array_index(g_abs_pending, ns_abs_entry, i);
+        if (seen->dom == host && seen->pseudo == ps) return;
+    }
     ns_abs_entry e;
     e.dom = host;
     e.pseudo = ps;
@@ -7395,27 +7405,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_pango_extents_to_pixels(&measured_px, NULL);
     int measured_h = measured_px.height;
     int line_count = measured.lines;
-    if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
-        double indent = ns_inline_text_indent_px(box, parent_style, content_width);
-        for (guint i = 0; i < box->inline_atomics->len; i++) {
-            const ns_inline_atomic *a =
-                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
-            if (!a->box) continue;
-            const ns_node *dom = g_hash_table_lookup(g_abs_ph_set, a->box);
-            if (!dom) continue;
-            NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
-            int line_index = 0;
-            ns_pango_layout_index_to_line_x(layout, (int)a->byte_off, FALSE,
-                                            &line_index, NULL);
-            ns_abs_static *st = g_new0(ns_abs_static, 1);
-            st->run   = box;
-            st->rel_x = indent + (double)pos.x / NS_PANGO_SCALE;
-            st->rel_y = pango_layout_line_top(layout, line_index);
-            st->byte_off = a->byte_off;
-            g_hash_table_insert(g_abs_static, (gpointer)dom, st);
-        }
-    }
     if (line_count < 1) line_count = 1;
     double lh_default = inline_line_height(parent_style);
     if (box->parent && ns_input_is_one_line_text(box->parent->dom))
@@ -7443,6 +7432,30 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
                 + atomic->border.top + atomic->border.bottom
                 + atomic->margin.top + atomic->margin.bottom;
             if (outer > line_heights[line]) line_heights[line] = outer;
+        }
+    }
+    if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
+        double indent = ns_inline_text_indent_px(box, parent_style, content_width);
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *a =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            if (!a->box) continue;
+            gconstpointer key = g_hash_table_lookup(g_abs_ph_set, a->box);
+            if (!key) continue;
+            NsPangoRectangle pos;
+            ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            int line_index = 0;
+            ns_pango_layout_index_to_line_x(layout, (int)a->byte_off, FALSE,
+                                            &line_index, NULL);
+            double line_y = 0;
+            for (int j = 0; j < line_index && j < line_count; j++)
+                line_y += line_heights[j];
+            ns_abs_static *st = g_new0(ns_abs_static, 1);
+            st->run   = box;
+            st->rel_x = indent + (double)pos.x / NS_PANGO_SCALE;
+            st->rel_y = line_y;
+            st->byte_off = a->byte_off;
+            g_hash_table_insert(g_abs_static, (gpointer)key, st);
         }
     }
     double expected = 0;
@@ -8998,21 +9011,6 @@ layout_image(ns_box *box, double parent_content_width)
 
     box->content_width = w;
     box->content_height = h;
-}
-
-static double
-pango_layout_line_top(NsPangoLayout *layout, int line_index)
-{
-    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
-    double top = 0;
-    for (int j = 0; ; j++) {
-        NsPangoRectangle logical;
-        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
-        top = (double)logical.y / NS_PANGO_SCALE;
-        if (j >= line_index || !ns_pango_layout_iter_next_line(iter)) break;
-    }
-    ns_pango_layout_iter_free(iter);
-    return top;
 }
 
 static gboolean
@@ -16349,6 +16347,41 @@ fixed_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
     return NULL;
 }
 
+static gboolean
+inline_containing_block(const ns_box *root, const ns_node *cb_dom,
+                        GHashTable *styles, ns_box *out)
+{
+    double x, y, w, h;
+    if (!cb_dom || !ns_box_inline_rect_for_dom(root, cb_dom, &x, &y, &w, &h))
+        return FALSE;
+    memset(out, 0, sizeof *out);
+    out->kind = NS_BOX_BLOCK;
+    out->style = g_hash_table_lookup(styles, cb_dom);
+    ns_edges m = {0}, pd = {0}, bd = {0};
+    edges_from_style(out->style, 0, &m, &pd, &bd);
+    out->x = x + bd.left;
+    out->y = y + bd.top;
+    out->content_width = MAX(0, w - bd.left - bd.right);
+    out->content_height = MAX(0, h - bd.top - bd.bottom);
+    return TRUE;
+}
+
+static ns_box *
+nearest_ancestor_box(const ns_node *n, GHashTable *box_map, ns_box *root)
+{
+    for (const ns_node *p = n; p; p = layout_flat_parent(p)) {
+        ns_box *b = g_hash_table_lookup(box_map, p);
+        if (b) return b;
+    }
+    return root;
+}
+
+static gconstpointer
+abs_entry_static_key(const ns_abs_entry *e)
+{
+    return e->pseudo ? (gconstpointer)e->pseudo : (gconstpointer)e->dom;
+}
+
 static const ns_node *
 positioned_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
 {
@@ -16476,8 +16509,8 @@ static_abs_y_precompute(ns_box *root, GHashTable *box_map, GHashTable *styles,
                                               NULL, abs_calc_array_free);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
-        ns_abs_static *st = (g_abs_static && !e.pseudo)
-            ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
+        ns_abs_static *st = g_abs_static
+            ? g_hash_table_lookup(g_abs_static, abs_entry_static_key(&e)) : NULL;
         if (st && st->run) continue;
         guint rank = GPOINTER_TO_UINT(
             g_hash_table_lookup(g_node_order, (gpointer)e.dom));
@@ -17794,12 +17827,19 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
         const ns_node *cb_dom = positioned_entry_cb_dom(&e, styles);
         ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
-        if (!cb) {
+        ns_box *static_cb = cb;
+        ns_box inline_cb;
+        if (!cb && !e.fixed &&
+            inline_containing_block(root, cb_dom, styles, &inline_cb)) {
+            cb = &inline_cb;
+            static_cb = nearest_ancestor_box(cb_dom, box_map, root);
+        } else if (!cb) {
             cb = root;
+            static_cb = root;
             if (e.fixed) cb_dom = NULL;
         }
 
-        ns_box *paint_parent = cb;
+        ns_box *paint_parent = static_cb;
         if (e.fixed && !cb_dom) {
             const ns_node *anc_dom = abs_entry_cb_dom(&e, styles);
             ns_box *anc = anc_dom ? g_hash_table_lookup(box_map, anc_dom) : NULL;
@@ -17912,8 +17952,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             avail = grid_w;
             cb_h = grid_h;
         }
-        ns_abs_static *st = (g_abs_static && !e.pseudo)
-            ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
+        ns_abs_static *st = g_abs_static
+            ? g_hash_table_lookup(g_abs_static, abs_entry_static_key(&e)) : NULL;
         const ns_box *flex_parent = e.pseudo ? NULL
             : abs_flex_parent_box(e.dom, box_map);
         gboolean static_rtl = FALSE;
@@ -17921,14 +17961,15 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (st && st->run) {
             abs_place_at_static_run(abox, st);
         } else {
-            double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
+            double static_y = static_cb->y + static_cb->margin.top +
+                              static_cb->border.top + static_cb->padding.top;
             if (i < batch_len && batch_resolved[i])
                 static_y = batch_y[i];
             else
-                static_abs_y_walk(cb, e.dom, &static_y);
-            double base_x = cb->x + cb->margin.left + cb->border.left +
-                            cb->padding.left;
-            abox->x = static_abs_x_from_ancestors(cb, e.dom, box_map, base_x,
+                static_abs_y_walk(static_cb, e.dom, &static_y);
+            double base_x = static_cb->x + static_cb->margin.left +
+                            static_cb->border.left + static_cb->padding.left;
+            abox->x = static_abs_x_from_ancestors(static_cb, e.dom, box_map, base_x,
                                                    &static_rtl, &static_right);
             abox->y = static_y;
         }
