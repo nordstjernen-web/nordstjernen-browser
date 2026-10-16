@@ -617,6 +617,84 @@ ns_font_install_file(const char *path, const ns_font_entry *face)
 }
 #endif
 
+static guint8 *
+ns_font_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
+                const char **out_ext)
+{
+    guint8 *converted = NULL;
+    gboolean cff = FALSE;
+#ifdef NS_HAVE_FREETYPE
+    if (ns_font_bytes_are_woff(data, len))
+        converted = ns_font_woff_to_sfnt(data, len, out_len, &cff);
+#endif
+#ifdef NS_HAVE_WOFF2
+    if (!converted && ns_woff2_is_woff2(data, len))
+        converted = ns_woff2_to_sfnt(data, len, out_len, &cff);
+#endif
+    if (converted) *out_ext = cff ? ".otf" : ".ttf";
+    return converted;
+}
+
+static gboolean
+ns_font_store_entry(ns_font_entry *e, const guint8 *data, gsize len)
+{
+    gsize sfnt_len = 0;
+    const char *forced_ext = NULL;
+    guint8 *converted = ns_font_to_sfnt(data, len, &sfnt_len, &forced_ext);
+    if (converted) {
+        data = converted;
+        len = sfnt_len;
+    }
+    char *path = ns_font_cache_path_for(e->family, e->url, forced_ext);
+    GError *werr = NULL;
+    gboolean stored = path &&
+        g_file_set_contents(path, (const char *)data, (gssize)len, &werr);
+    if (stored) {
+#ifdef NS_HAVE_FONTCONFIG
+        ns_font_install_file(path, e);
+#endif
+        e->loaded = TRUE;
+        g_font_generation++;
+        if (g_loaded_cb) g_loaded_cb(e->family, g_loaded_ud);
+    }
+    g_clear_error(&werr);
+    g_free(path);
+    g_free(converted);
+    return stored;
+}
+
+gboolean
+ns_font_install_bytes(const char *family, const guint8 *data, gsize len,
+                      ns_font_descriptors descriptors)
+{
+    if (!ns_font_available() || !family || !*family || !data || len == 0 ||
+        !ns_font_bytes_look_like_font(data, len))
+        return FALSE;
+    if (!g_entries) ns_font_init();
+    char *digest = g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, len);
+    char *url = g_strconcat("buffer:", digest, NULL);
+    g_free(digest);
+    char *key = ns_font_entry_key(family, url, descriptors);
+    ns_font_entry *e = g_hash_table_lookup(g_entries, key);
+    if (e && e->loaded) {
+        g_free(key);
+        g_free(url);
+        return TRUE;
+    }
+    if (!e) {
+        e = g_new0(ns_font_entry, 1);
+        e->family = g_strdup(family);
+        e->url = url;
+        e->descriptors = descriptors;
+        e->declared = ++g_faces_declared;
+        g_hash_table_insert(g_entries, key, e);
+    } else {
+        g_free(key);
+        g_free(url);
+    }
+    return ns_font_store_entry(e, data, len);
+}
+
 static void
 ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 {
@@ -640,61 +718,12 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
     if (resp && !resp->error && resp->status < 400 &&
         resp->body && resp->body->len > 0 &&
         ns_font_bytes_look_like_font(resp->body->data, resp->body->len)) {
-        const guint8 *write_data = resp->body->data;
-        gsize write_len = resp->body->len;
-        const char *forced_ext = NULL;
-        guint8 *converted = NULL;
-#ifdef NS_HAVE_FREETYPE
-        if (ns_font_bytes_are_woff(resp->body->data, resp->body->len)) {
-            gsize clen = 0;
-            gboolean cff = FALSE;
-            converted = ns_font_woff_to_sfnt(resp->body->data,
-                                             resp->body->len, &clen, &cff);
-            if (converted) {
-                write_data = converted;
-                write_len = clen;
-                forced_ext = cff ? ".otf" : ".ttf";
-            }
+        for (guint i = 0; keys && i < keys->len; i++) {
+            ns_font_entry *e = g_entries
+                ? g_hash_table_lookup(g_entries, g_ptr_array_index(keys, i))
+                : NULL;
+            if (e) ns_font_store_entry(e, resp->body->data, resp->body->len);
         }
-#endif
-#ifdef NS_HAVE_WOFF2
-        if (!converted &&
-            ns_woff2_is_woff2(resp->body->data, resp->body->len)) {
-            gsize clen = 0;
-            gboolean cff = FALSE;
-            converted = ns_woff2_to_sfnt(resp->body->data, resp->body->len,
-                                         &clen, &cff);
-            if (converted) {
-                write_data = converted;
-                write_len = clen;
-                forced_ext = cff ? ".otf" : ".ttf";
-            }
-        }
-#endif
-        if (keys) {
-            for (guint i = 0; i < keys->len; i++) {
-                ns_font_entry *e = g_entries
-                    ? g_hash_table_lookup(g_entries, g_ptr_array_index(keys, i))
-                    : NULL;
-                if (!e) continue;
-                char *path = ns_font_cache_path_for(e->family, e->url,
-                                                    forced_ext);
-                if (!path) continue;
-                GError *werr = NULL;
-                if (g_file_set_contents(path, (const char *)write_data,
-                                        (gssize)write_len, &werr)) {
-#ifdef NS_HAVE_FONTCONFIG
-                    ns_font_install_file(path, e);
-#endif
-                    e->loaded = TRUE;
-                    g_font_generation++;
-                    if (g_loaded_cb) g_loaded_cb(e->family, g_loaded_ud);
-                }
-                g_clear_error(&werr);
-                g_free(path);
-            }
-        }
-        g_free(converted);
     }
     if (g_pending_by_url) g_hash_table_remove(g_pending_by_url, ctx->url);
     ns_response_free(resp);

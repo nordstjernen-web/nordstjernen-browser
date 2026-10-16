@@ -19096,6 +19096,18 @@ font_face_style_descriptor(const char *val)
     return NS_FONT_SLANT_AUTO;
 }
 
+int
+ns_css_font_face_weight(const char *val)
+{
+    return val ? font_face_weight_descriptor(val) : 0;
+}
+
+ns_font_slant
+ns_css_font_face_slant(const char *val)
+{
+    return val ? font_face_style_descriptor(val) : NS_FONT_SLANT_AUTO;
+}
+
 static void
 font_face_clear(gpointer data)
 {
@@ -19240,6 +19252,14 @@ font_src_consider_urls(char **best, const char *value)
             p++;
         }
     }
+}
+
+char *
+ns_css_font_face_src_url(const char *src)
+{
+    char *best = NULL;
+    if (src) font_src_consider_urls(&best, src);
+    return best;
 }
 
 static char *

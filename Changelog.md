@@ -3,6 +3,15 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: the CSS Font Loading API loads fonts. `new FontFace(family,
+  source)` kept neither its `url()` source nor its `ArrayBuffer`, `load()`
+  only flipped `status`, and `document.fonts` ignored `add()`, so fonts a
+  page loaded from script never rendered. `url()` sources now load through
+  the `@font-face` loader (resolved against the document base), buffers are
+  installed from memory, `status` and `loaded` settle to `loaded` or
+  `error`, and `document.fonts` is a set: `add`, `delete`, `clear`, `has`,
+  `size`, `forEach`, `values`/`keys`/`entries` and `for…of`. Faces added
+  while unloaded start loading.
 * Layout: `<em>`, `<i>`, `<cite>` and `<dfn>` follow their computed
   `font-style`. The inline builder made them italic by tag name even when a
   stylesheet set `font-style: normal`, so Stripe's hero heading (an `<em>`

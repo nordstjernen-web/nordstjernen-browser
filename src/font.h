@@ -40,6 +40,9 @@ void     ns_font_request(const char *family, const char *src_url,
                          const char *base_url,
                          ns_font_descriptors descriptors);
 
+gboolean ns_font_install_bytes(const char *family, const guint8 *data,
+                               gsize len, ns_font_descriptors descriptors);
+
 guint    ns_font_pending_count(void);
 
 typedef void (*ns_font_idle_cb)(gpointer user_data);
