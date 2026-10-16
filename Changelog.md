@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: a line break from `<br>` drops the collapsible spaces around it,
+  so the next line no longer starts with a space ("one <br> two" put
+  " two" on the second line), and a `<br>` styled `display: block` or
+  `flex` still breaks the line as in other browsers instead of joining
+  the text on both sides: rust-lang.org's tagline read "everyoneto
+  build" on one line.
 * Layout: a block's negative horizontal margins reduce its parent's
   max-content width, as in other browsers. The shrink-to-fit measurement
   took the larger of the child's margin box and its content width, so
