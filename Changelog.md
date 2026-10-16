@@ -55,6 +55,12 @@ Changelog:
   `getComputedStyle` reported the right value. Booking.com sets its
   line heights this way, so its text lines were laid out at the font's
   normal height: a two-line hotel name was 38px tall instead of 48px.
+* Layout: an inline element whose `line-height` equals its block's
+  keeps that line height inside an outer inline element with a
+  different one. `<a style="line-height: 18px"><span style="line-height:
+  20.8px">` in a block with `line-height: 20.8px` laid its lines out
+  18px tall, as if the span had no line height of its own; AP News
+  headlines are built this way.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
