@@ -4089,11 +4089,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         const char *kw = fw->u.keyword;
         if (strcmp(kw, "bold") == 0 || strcmp(kw, "bolder") == 0) bold = TRUE;
     }
-    if (s && s->values[NS_CSS_FONT_STYLE] &&
-        s->values[NS_CSS_FONT_STYLE]->kind == NS_CSS_V_KEYWORD &&
-        (strcmp(s->values[NS_CSS_FONT_STYLE]->u.keyword, "italic") == 0 ||
-         strcmp(s->values[NS_CSS_FONT_STYLE]->u.keyword, "oblique") == 0))
-        italic = TRUE;
+    const ns_css_value *fsv = s ? s->values[NS_CSS_FONT_STYLE] : NULL;
+    if (fsv && fsv->kind == NS_CSS_V_KEYWORD && fsv->u.keyword)
+        italic = strcmp(fsv->u.keyword, "italic") == 0 ||
+                 g_str_has_prefix(fsv->u.keyword, "oblique");
     if (s && s->values[NS_CSS_TEXT_DECORATION] &&
         s->values[NS_CSS_TEXT_DECORATION]->kind == NS_CSS_V_KEYWORD) {
         const char *kw = s->values[NS_CSS_TEXT_DECORATION]->u.keyword;

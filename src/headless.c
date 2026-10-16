@@ -955,8 +955,11 @@ headless_stream_images(headless_flush_ctx *c)
     if (!c->image_sessions)
         c->image_sessions = g_ptr_array_new_with_free_func(
             (GDestroyNotify)ns_engine_img_session_close);
+    g_autofree char *img_base = ns_js_base_url_for_document(c->js, c->doc,
+                                                            c->base);
     ns_engine_img_session *session =
-        ns_engine_fetch_images_start(*c->layout, c->base, c->image_cache,
+        ns_engine_fetch_images_start(*c->layout, img_base ? img_base : c->base,
+                                     c->image_cache,
                                      c->images_requested, 0.0, c->vh, NULL,
                                      headless_image_arrived, c);
     if (session) g_ptr_array_add(c->image_sessions, session);

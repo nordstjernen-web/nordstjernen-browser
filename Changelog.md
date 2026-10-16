@@ -3,6 +3,24 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: `<em>`, `<i>`, `<cite>` and `<dfn>` follow their computed
+  `font-style`. The inline builder made them italic by tag name even when a
+  stylesheet set `font-style: normal`, so Stripe's hero heading (an `<em>`
+  styled upright) rendered slanted. The user-agent stylesheet already makes
+  them italic.
+* HTML: `<base href>` applies to subresources. Scripts, stylesheets, images
+  and the speculative preloader resolved relative URLs against the page URL,
+  so a page with `<base href="/assets/">` (or an Angular app with
+  `<base href="/">` opened on a nested route) loaded none of them. Link
+  clicks, form actions, media and the favicon follow the base too. Only
+  `a.href` and other script-visible URLs honoured it before. CSP `base-uri`
+  still applies, and the referrer and CSP `'self'` stay the page URL.
+* Paint: gradient backgrounds honour `background-size`,
+  `background-position` and `background-repeat`. A gradient always filled
+  its whole box, so a `linear-gradient(red, red) 0 100% / 100% 2px
+  no-repeat` underline bar became a solid block and tiled dot or stripe
+  patterns became one large shape. Inline elements (`<span>`, `<a>`) now
+  paint their gradient backgrounds as well; only `url()` images were drawn.
 * Windows: the build moves from MSYS2's MINGW64 environment to UCRT64.
   MSYS2 no longer ships GTK 4 for MINGW64, so `pacman` could not install
   the toolchain and the Windows CI failed before compiling. The packaging

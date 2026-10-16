@@ -127,7 +127,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | Element | Status | Notes |
 |---------|:--:|------|
 | `title` | ✅ | window/tab title; `title.text` IDL attribute returns/sets the child text content per spec |
-| `base` (`href`, `target`) | ✅ | `href` feeds URL resolution via `ns_url_resolve` |
+| `base` (`href`, `target`) | ✅ | the first `href` (subject to CSP `base-uri`) is the document base URL for scripts, stylesheets, images, the speculative preloader, link and form navigation, media and the favicon (`ns_js_base_url_for_document`); referrer, CSP `'self'` and mixed-content checks keep the document URL |
 | `link rel="stylesheet"` | ✅ | fetched and cascaded (`src/css.c`) |
 | `link rel="icon"` | ✅ | favicon fetched as image |
 | `link rel="preload"`/`prefetch` | ✅ | fetched early into the disk cache by the speculative-preload scanner (`src/engine.c`); no `as=`-based prioritization |
