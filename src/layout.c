@@ -4188,12 +4188,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     gsize color_start = ctx->out->len;
     gboolean color_active = FALSE;
     guint8 cr = 0, cg = 0, cb = 0, ca = 0;
-    if (s && s->values[NS_CSS_COLOR] &&
-        s->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR) {
-        cr = s->values[NS_CSS_COLOR]->u.color.r;
-        cg = s->values[NS_CSS_COLOR]->u.color.g;
-        cb = s->values[NS_CSS_COLOR]->u.color.b;
-        ca = s->values[NS_CSS_COLOR]->u.color.a;
+    const ns_css_value *text_color = ns_style_text_fill_color(s);
+    if (text_color && text_color->kind == NS_CSS_V_COLOR) {
+        cr = text_color->u.color.r;
+        cg = text_color->u.color.g;
+        cb = text_color->u.color.b;
+        ca = text_color->u.color.a;
         color_active = TRUE;
     }
     {
@@ -4544,15 +4544,15 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
                     };
                     g_array_append_val(box->attrs, a);
                 }
-                if (fl->values[NS_CSS_COLOR] &&
-                    fl->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR) {
+                const ns_css_value *fl_color = ns_style_text_fill_color(fl);
+                if (fl_color && fl_color->kind == NS_CSS_V_COLOR) {
                     ns_inline_attr a = {
                         .kind = NS_INLINE_COLOR,
                         .start = fl_start, .len = fl_len,
-                        .r = fl->values[NS_CSS_COLOR]->u.color.r,
-                        .g = fl->values[NS_CSS_COLOR]->u.color.g,
-                        .b = fl->values[NS_CSS_COLOR]->u.color.b,
-                        .a = fl->values[NS_CSS_COLOR]->u.color.a,
+                        .r = fl_color->u.color.r,
+                        .g = fl_color->u.color.g,
+                        .b = fl_color->u.color.b,
+                        .a = fl_color->u.color.a,
                     };
                     g_array_append_val(box->attrs, a);
                 }
@@ -5302,9 +5302,9 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
     const char *vis = ns_style_keyword(ps, NS_CSS_VISIBILITY);
     gboolean invisible = vis && (strcmp(vis, "hidden") == 0 ||
                                  strcmp(vis, "collapse") == 0);
-    if (invisible ||
-        (ps->values[NS_CSS_COLOR] && ps->values[NS_CSS_COLOR]->kind == NS_CSS_V_COLOR)) {
-        const ns_css_value *color = ps->values[NS_CSS_COLOR];
+    const ns_css_value *pseudo_color = ns_style_text_fill_color(ps);
+    if (invisible || (pseudo_color && pseudo_color->kind == NS_CSS_V_COLOR)) {
+        const ns_css_value *color = pseudo_color;
         gboolean have = color && color->kind == NS_CSS_V_COLOR;
         ns_inline_attr a = {
             .kind = NS_INLINE_COLOR,
