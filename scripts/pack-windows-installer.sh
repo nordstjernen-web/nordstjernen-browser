@@ -29,6 +29,9 @@ fi
 
 resolve_makensis() {
     for cand in "${MAKENSIS:-}" \
+                "${MINGW_PREFIX:+$MINGW_PREFIX/bin/makensis.exe}" \
+                /c/msys64/ucrt64/bin/makensis.exe \
+                /ucrt64/bin/makensis.exe \
                 /c/msys64/mingw64/bin/makensis.exe \
                 /mingw64/bin/makensis.exe \
                 "/c/Program Files (x86)/NSIS/makensis.exe" \
@@ -42,7 +45,7 @@ resolve_makensis() {
 
 MAKENSIS=$(resolve_makensis) || {
     echo "pack-windows-installer: makensis not found." >&2
-    echo "Install with: pacman -S mingw-w64-x86_64-nsis" >&2
+    echo "Install with: pacman -S mingw-w64-ucrt-x86_64-nsis" >&2
     exit 1
 }
 
