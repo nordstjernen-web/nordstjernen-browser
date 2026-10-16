@@ -35,6 +35,7 @@ typedef struct ns_paint_stats {
 } ns_paint_stats;
 
 void ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query);
+void ns_paint_blur_argb(guchar *data, int stride, int w, int h, double sigma);
 void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const char *highlight_query,
                              const struct ns_selection *sel);
