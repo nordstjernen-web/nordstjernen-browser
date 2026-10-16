@@ -12471,6 +12471,7 @@ grid_flex_track_sizes(const ns_css_tracks *tr, double space,
 
 static void
 resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
+                         double pct_basis,
                          const double *content_min, const double *content_max,
                          double *out_sizes, gboolean stretch_auto)
 {
@@ -12487,8 +12488,8 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         case NS_CSS_TRACK_PX:
         case NS_CSS_TRACK_PERCENT:
             fixed = t->kind == NS_CSS_TRACK_PX
-                ? t->v + t->pct * available_main / 100.0
-                : t->v * available_main / 100.0;
+                ? t->v + t->pct * pct_basis / 100.0
+                : t->v * pct_basis / 100.0;
             if (t->fit_content)
                 fixed = MIN(fixed, content_max ? content_max[i] : 0);
             if (t->has_min && track_is_intrinsic(t->min_kind) &&
@@ -12505,7 +12506,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         }
         if ((t->kind == NS_CSS_TRACK_PX || t->kind == NS_CSS_TRACK_PERCENT) &&
             t->has_min) {
-            double mn = track_min_px(t, available_main);
+            double mn = track_min_px(t, pct_basis);
             if (fixed > mn) {
                 shrink_px[i] = fixed - mn;
                 total_shrink += shrink_px[i];
@@ -12548,7 +12549,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     double fr_min_total = 0;
     for (int i = 0; i < tr->n; i++) {
         if (tr->tracks[i].kind != NS_CSS_TRACK_FR) continue;
-        double mn = track_min_px(&tr->tracks[i], available_main);
+        double mn = track_min_px(&tr->tracks[i], pct_basis);
         if (content_min && fr_track_min_is_auto(&tr->tracks[i]))
             mn = MAX(mn, content_min[i]);
         fr_min_total += mn;
@@ -12586,7 +12587,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
 
     double fr_sizes[NS_CSS_TRACKS_MAX] = {0};
     double fr_used = total_fr > 0
-        ? grid_flex_track_sizes(tr, remaining, available_main, content_min,
+        ? grid_flex_track_sizes(tr, remaining, pct_basis, content_min,
                                 fr_sizes) : 0;
     double per_auto = 0;
     if (n_auto > 0 && stretch_auto && remaining - fr_used > 0)
@@ -12612,7 +12613,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             out_sizes[i] = auto_lim[i] > auto_base[i] ? auto_lim[i] : auto_base[i];
             break;
         }
-        double mn = track_min_px(t, available_main);
+        double mn = track_min_px(t, pct_basis);
         if (out_sizes[i] < mn) out_sizes[i] = mn;
         if (out_sizes[i] < 0) out_sizes[i] = 0;
     }
@@ -14012,7 +14013,7 @@ layout_grid(ns_box *box, double cw,
                 any_auto_content = TRUE;
         }
     }
-    resolve_track_sizes_full(cols, avail,
+    resolve_track_sizes_full(cols, avail, cw,
                              any_auto_content ? col_min : NULL,
                              any_auto_content ? col_content : NULL, col_sizes,
                              justify_kw_stretches_auto(
