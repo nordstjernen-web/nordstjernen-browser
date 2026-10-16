@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Windows: the build moves from MSYS2's MINGW64 environment to UCRT64.
+  MSYS2 no longer ships GTK 4 for MINGW64, so `pacman` could not install
+  the toolchain and the Windows CI failed before compiling. The packaging
+  scripts look for the UCRT64 prefix first, and `docs/Windows.md` gives
+  the UCRT64 package names.
 * Layout: desktop builds ignore the width in `<meta name="viewport">`, as
   desktop browsers do. A page asking for `width=1120` (Wikipedia) was laid
   out 1120px wide in a narrower window, so its narrow-window media queries
