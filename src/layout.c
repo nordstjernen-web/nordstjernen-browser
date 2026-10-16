@@ -11308,6 +11308,16 @@ flex_preset_cross_size(ns_box *c, double line_cross_size, double width_basis)
 }
 
 static void
+flex_item_keep_auto_margins(ns_box *c, double share)
+{
+    if (!c->style || share <= 0) return;
+    if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto"))
+        c->margin.left = share;
+    if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto"))
+        c->margin.right = share;
+}
+
+static void
 layout_flex_row(ns_box *box, double cw,
                 double inner_x, double inner_y,
                 const ns_style *child_inherited,
@@ -11395,6 +11405,7 @@ layout_flex_row(ns_box *box, double cw,
     g_free(lens);
     double free_main = cw - used_main;
     int auto_margins = 0;
+    double auto_share = 0;
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
         if (!c->style) continue;
@@ -11403,6 +11414,7 @@ layout_flex_row(ns_box *box, double cw,
     }
     if (auto_margins > 0 && free_main > 0) {
         double share = free_main / auto_margins;
+        auto_share = share;
         for (guint i = 0; i < items->len; i++) {
             ns_box *c = items->pdata[i];
             if (!c->style) continue;
@@ -11432,6 +11444,7 @@ layout_flex_row(ns_box *box, double cw,
         layout_box(c, a + c->margin.left + c->margin.right
                        + c->border.left + c->border.right
                        + c->padding.left + c->padding.right, child_inherited);
+        flex_item_keep_auto_margins(c, auto_share);
         c->flex_pass_x = c->x;
         c->flex_pass_y = c->y;
         double item_h = c->content_height +
@@ -11517,6 +11530,7 @@ layout_flex_row(ns_box *box, double cw,
             shift_box_tree(c, cursor_x - inner_x, cy - inner_y);
         } else {
             layout_box(c, item_layout_width, child_inherited);
+            flex_item_keep_auto_margins(c, auto_share);
         }
         if (!stretches)
             flex_item_fit_line_keyword_limits(c, cross_size, cw);
@@ -11663,6 +11677,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             remaining -= lens[line_start + k].target;
 
         int line_auto_margins = 0;
+        double line_auto_share = 0;
         for (guint k = 0; k < line_count; k++) {
             ns_box *c = items->pdata[line_start + k];
             if (!c->style) continue;
@@ -11673,6 +11688,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
         }
         if (line_auto_margins > 0 && remaining > 0) {
             double share = remaining / line_auto_margins;
+            line_auto_share = share;
             for (guint k = 0; k < line_count; k++) {
                 ns_box *c = items->pdata[line_start + k];
                 if (!c->style) continue;
@@ -11705,6 +11721,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->y = line_y;
             layout_box(c, a + g_array_index(extras_arr, double, gi),
                        child_inherited);
+            flex_item_keep_auto_margins(c, line_auto_share);
             double item_h = c->content_height +
                             c->padding.top + c->padding.bottom +
                             c->border.top + c->border.bottom +
