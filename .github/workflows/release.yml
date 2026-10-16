@@ -1,11 +1,11 @@
 name: release
 
-# The repository has immutable releases enabled: once a release is published
-# nothing can be attached to it. So the packages are built from a pushed
-# version tag and attached to a *draft* release, which is published by hand
-# after review. Push the tag (git push origin 1.2.3) and do not publish a
-# release for it yourself; this workflow creates the draft, or fills one that
-# was saved as a draft for the tag.
+# Once an immutable release is published nothing can be attached to it. So
+# the packages are built from a pushed version tag and attached to a *draft*
+# release, which is published by hand after review. Push the tag (git push
+# origin 1.2.3) and let this workflow create the draft, or fill one that was
+# saved as a draft for the tag. A release published early is still filled
+# when GitHub reports it as not immutable.
 
 on:
   push:
@@ -169,9 +169,9 @@ jobs:
           packages=(*.deb *.zip *.dmg)
           sha256sum -- "${packages[@]}" > SHA256SUMS
           cat SHA256SUMS
-          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-                       --json isDraft --jq .isDraft 2>/dev/null); then
-            if [ "$draft" != true ]; then
+          if state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+                       --jq '"\(.draft) \(.immutable // false)"' 2>/dev/null); then
+            if [ "$state" = "false true" ]; then
               echo "::error::Release $TAG is already published. Releases are" \
                    "immutable here, so its packages can no longer be attached." \
                    "Push the tag and let this workflow create the draft, then" \
