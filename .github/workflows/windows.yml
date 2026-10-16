@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   build:
-    name: msys2/mingw64 on windows-${{ matrix.windows }}
+    name: msys2/ucrt64 on windows-${{ matrix.windows }}
     runs-on: windows-${{ matrix.windows }}
     timeout-minutes: 60
 
@@ -41,33 +41,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up MSYS2 (mingw64)
+      - name: Set up MSYS2 (ucrt64)
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           cache: true
           install: >-
             base-devel
             git
-            mingw-w64-x86_64-clang
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-meson
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-ccache
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-gtk4
-            mingw-w64-x86_64-libepoxy
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-ca-certificates
-            mingw-w64-x86_64-uchardet
-            mingw-w64-x86_64-libpsl
-            mingw-w64-x86_64-sqlite3
-            mingw-w64-x86_64-libwebp
-            mingw-w64-x86_64-libavif
-            mingw-w64-x86_64-libjxl
-            mingw-w64-x86_64-SDL2
-            mingw-w64-x86_64-nasm
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libepoxy
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-ca-certificates
+            mingw-w64-ucrt-x86_64-uchardet
+            mingw-w64-ucrt-x86_64-libpsl
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-libwebp
+            mingw-w64-ucrt-x86_64-libavif
+            mingw-w64-ucrt-x86_64-libjxl
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-nasm
             make
             zip
 
@@ -76,9 +76,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}\ccache
-          key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}
           restore-keys: |
-            ccache-windows-${{ matrix.windows }}-
+            ccache-windows-${{ matrix.windows }}-ucrt64-
 
       - name: Configure ccache
         run: |
@@ -101,13 +101,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}\ffmpeg-lgpl
-          key: ffmpeg-lgpl-win-${{ matrix.windows }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.sh') }}
+          key: ffmpeg-lgpl-win-${{ matrix.windows }}-ucrt64-${{ hashFiles('scripts/build-ffmpeg-lgpl.sh') }}
 
       - name: Provide LGPL FFmpeg (inline WebM)
         run: |
           # MSYS2's mingw FFmpeg is GPL; use a minimal LGPL one (VP9/VP8 +
           # Opus/Vorbis only). Build it once into a cached prefix (keyed on the
-          # build script), then install it into the mingw prefix so meson finds
+          # build script), then install it into the MSYS2 prefix so meson finds
           # it via the default pkg-config path and pack-windows.sh's DLL chase
           # bundles it. WebM is required on Windows, so this must succeed.
           PREFIX="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-lgpl"
@@ -116,11 +116,12 @@ jobs:
           else
             echo "using cached LGPL FFmpeg at $PREFIX"
           fi
-          cp -r "$PREFIX"/bin/. /mingw64/bin/
-          cp -r "$PREFIX"/lib/. /mingw64/lib/
-          cp -r "$PREFIX"/include/. /mingw64/include/
-          sed -i "s|^prefix=.*|prefix=/mingw64|" /mingw64/lib/pkgconfig/libav*.pc \
-                                                 /mingw64/lib/pkgconfig/libsw*.pc
+          cp -r "$PREFIX"/bin/. "$MINGW_PREFIX"/bin/
+          cp -r "$PREFIX"/lib/. "$MINGW_PREFIX"/lib/
+          cp -r "$PREFIX"/include/. "$MINGW_PREFIX"/include/
+          sed -i "s|^prefix=.*|prefix=$MINGW_PREFIX|" \
+              "$MINGW_PREFIX"/lib/pkgconfig/libav*.pc \
+              "$MINGW_PREFIX"/lib/pkgconfig/libsw*.pc
 
       - name: Build
         id: build
@@ -141,7 +142,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}\ccache
-          key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
+          key: ccache-windows-${{ matrix.windows }}-ucrt64-${{ github.sha }}
 
       - name: Smoke test (binary present)
         if: hashFiles('builddir/src/gtk/nordstjernen.exe') != ''
