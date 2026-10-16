@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: in strict-mode code, `return f()` inside a `try` block
+  with a `catch` is no longer turned into a tail call. The tail call
+  reused the frame and dropped the live `catch`, so an exception thrown by
+  `f` escaped the `try` and aborted the script: helpers such as
+  `try { return fn() } catch (e) { return fallback }`, common in bundled
+  code, stopped whole scripts (BBC's paywall script, among others). A
+  `return` in a `catch` clause without `finally` is still a tail call.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
