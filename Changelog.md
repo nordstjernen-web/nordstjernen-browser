@@ -7,6 +7,11 @@ Changelog:
   `about:start` search box. A config still holding the previous
   DuckDuckGo default moves to Google; DuckDuckGo stays selectable in
   Settings.
+* `about:start` redesign: the heading reads "Nordstjernen Browser" with
+  the version, the rotating tagline is gone, the page sits on a plain
+  white background, and the four shortcuts are compact pill buttons. A
+  hint under the search box says whether Enter will open the typed
+  address or search for it, and with which engine.
 * The status bar no longer shows "WebGL enabled" when a page creates a
   WebGL context.
 * CSS: adding or removing a stylesheet no longer restyles the whole
