@@ -6865,23 +6865,48 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
 }
 
 static gboolean
+inline_attr_within_override(const ns_box *box, const double *px, guint i,
+                            double strut_px)
+{
+    const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+    for (guint j = 0; j < box->attrs->len; j++) {
+        if (j == i || px[j] < 0 || fabs(px[j] - strut_px) < 0.01) continue;
+        const ns_inline_attr *o = &g_array_index(box->attrs, ns_inline_attr, j);
+        if (o->start <= r->start && o->start + o->len >= r->start + r->len)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
                           double strut_px)
 {
     inline_insert_line_height(list, strut_px, 0, G_MAXUINT);
     if (!box || !box->attrs) return FALSE;
-    gboolean has_shorter = FALSE;
-    for (guint i = box->attrs->len; i-- > 0;) {
+    guint n = box->attrs->len;
+    double *px = g_new(double, n);
+    gboolean any_override = FALSE;
+    for (guint i = 0; i < n; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (r->kind != NS_INLINE_ELEMENT || !r->style || r->len == 0)
+        px[i] = r->kind == NS_INLINE_ELEMENT && r->style && r->len > 0
+            ? ns_paint_css_line_height_px(r->style) : -1;
+        if (px[i] >= 0 && fabs(px[i] - strut_px) >= 0.01) any_override = TRUE;
+    }
+    gboolean has_shorter = FALSE;
+    for (guint i = n; any_override && i-- > 0;) {
+        if (px[i] < 0) continue;
+        if (fabs(px[i] - strut_px) < 0.01 &&
+            !inline_attr_within_override(box, px, i, strut_px))
             continue;
-        double px = ns_paint_css_line_height_px(r->style);
-        if (px < 0 || fabs(px - strut_px) < 0.01) continue;
-        if (px < strut_px) has_shorter = TRUE;
-        inline_insert_line_height(list, px, (guint)r->start,
+        if (px[i] < strut_px - 0.01) has_shorter = TRUE;
+        const ns_inline_attr *r =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        inline_insert_line_height(list, px[i], (guint)r->start,
                                   (guint)(r->start + r->len));
     }
+    g_free(px);
     inline_insert_spacer_line_heights(list, box);
     return has_shorter;
 }
