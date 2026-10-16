@@ -32594,50 +32594,51 @@ incr_note_struct_flood_compound(const ns_css_simple *c)
     return keyed;
 }
 
+static ns_css_comb
+incr_selector_comb(const ns_css_selector *sel, guint i)
+{
+    if (!sel->combinators || i >= sel->combinators->len)
+        return NS_CSS_COMB_NONE;
+    return g_array_index(sel->combinators, ns_css_comb, i);
+}
+
+static gboolean
+incr_compound_is_dependent_ancestor(const ns_css_selector *sel, guint ci)
+{
+    ns_css_comb left = incr_selector_comb(sel, ci);
+    ns_css_comb right = incr_selector_comb(sel, ci + 1);
+    if (right != NS_CSS_COMB_DESCENDANT && right != NS_CSS_COMB_CHILD)
+        return FALSE;
+    return left == NS_CSS_COMB_ADJACENT || left == NS_CSS_COMB_SIBLING ||
+        incr_compound_position_dependent(g_ptr_array_index(sel->compounds, ci));
+}
+
 static gboolean
 incr_note_struct_flood(const ns_css_selector *sel)
 {
     guint n = sel->compounds->len;
-    for (guint ci = 0; ci + 1 < n; ci++) {
-        ns_css_comb right = NS_CSS_COMB_NONE;
-        if (sel->combinators && ci + 1 < sel->combinators->len)
-            right = g_array_index(sel->combinators, ns_css_comb, ci + 1);
-        ns_css_comb left = NS_CSS_COMB_NONE;
-        if (sel->combinators && ci < sel->combinators->len)
-            left = g_array_index(sel->combinators, ns_css_comb, ci);
-        const ns_css_simple *c = g_ptr_array_index(sel->compounds, ci);
-        gboolean dependent = incr_compound_position_dependent(c) ||
-            left == NS_CSS_COMB_ADJACENT || left == NS_CSS_COMB_SIBLING;
-        if (dependent && (right == NS_CSS_COMB_DESCENDANT ||
-                          right == NS_CSS_COMB_CHILD) &&
-            !incr_note_struct_flood_compound(c))
+    for (guint ci = 0; ci + 1 < n; ci++)
+        if (incr_compound_is_dependent_ancestor(sel, ci) &&
+            !incr_note_struct_flood_compound(g_ptr_array_index(sel->compounds, ci)))
             return FALSE;
-    }
     return TRUE;
+}
+
+static gboolean
+incr_selector_has_dependent_ancestor(const ns_css_selector *sel)
+{
+    guint n = sel->compounds->len;
+    for (guint ci = 0; ci + 1 < n; ci++)
+        if (incr_compound_is_dependent_ancestor(sel, ci))
+            return TRUE;
+    return FALSE;
 }
 
 static void
 incr_note_struct_descendants(const ns_css_selector *sel)
 {
     guint n = sel->compounds->len;
-    if (n < 2) return;
-    gboolean dependent_ancestor = FALSE;
-    for (guint ci = 0; ci + 1 < n; ci++) {
-        ns_css_comb right = NS_CSS_COMB_NONE;
-        if (sel->combinators && ci + 1 < sel->combinators->len)
-            right = g_array_index(sel->combinators, ns_css_comb, ci + 1);
-        ns_css_comb left = NS_CSS_COMB_NONE;
-        if (sel->combinators && ci < sel->combinators->len)
-            left = g_array_index(sel->combinators, ns_css_comb, ci);
-        gboolean dependent =
-            incr_compound_position_dependent(g_ptr_array_index(sel->compounds, ci)) ||
-            left == NS_CSS_COMB_ADJACENT || left == NS_CSS_COMB_SIBLING;
-        if (dependent && (right == NS_CSS_COMB_DESCENDANT ||
-                          right == NS_CSS_COMB_CHILD))
-            dependent_ancestor = TRUE;
-        if (dependent_ancestor) break;
-    }
-    if (!dependent_ancestor) return;
+    if (n < 2 || !incr_selector_has_dependent_ancestor(sel)) return;
     if (!g_struct_desc_inv) {
         incr_inv_set *inv = g_new0(incr_inv_set, 1);
         inv->keys = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
