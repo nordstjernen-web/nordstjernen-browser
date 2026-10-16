@@ -33494,9 +33494,11 @@ incr_mark_attr_change(ns_node *target, const char *name, const char *old_value)
 gboolean
 ns_css_attr_may_affect_style(const ns_node *target, const char *name)
 {
-    (void)target;
     if (!name || !*name || !g_struct_ready || !g_attr_keys) return TRUE;
     if (is_presentational_attr_name(name)) return TRUE;
+    if (g_ascii_strcasecmp(name, "rel") == 0 &&
+        ns_node_is_element_named(target, "link"))
+        return TRUE;
     char *low = g_ascii_strdown(name, -1);
     gboolean affects = g_hash_table_contains(g_attr_keys, low);
     static const char *const intrinsic[] = {

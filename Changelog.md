@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: `<link rel="preload" as="style">` fires `load` (or `error`) once
+  its fetch ends, and changing a `<link>`'s `rel`, `href` or `as` loads
+  it again: a link that becomes `rel="stylesheet"` applies its sheet and
+  fires `load`. The common async-CSS pattern,
+  `<link rel="preload" as="style" onload="this.rel='stylesheet'">`,
+  never applied its sheet, so chatgpt.com kept its narrow-screen styles
+  and its cookie dialog covered the whole page in white.
 * Performance: forced style updates after script writes to inline styles
   recompute far fewer elements. An element whose style an animation
   rewrites is recomputed alone, with its descendants kept unless the
