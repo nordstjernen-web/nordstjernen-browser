@@ -34049,15 +34049,17 @@ ns_event_define_readonly(JSContext *ctx, JSValueConst ev, const char *name,
 static JSValue
 ns_realm_protos(JSContext *ctx)
 {
+    JSAtom key = JS_GetEnginePrivateAtom(ctx, "__ndRealmProtos");
+    if (key == JS_ATOM_NULL) return JS_NewObjectProto(ctx, JS_NULL);
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue reg = JS_GetPropertyStr(ctx, global, "__ndRealmProtos");
+    JSValue reg = JS_GetProperty(ctx, global, key);
     if (!JS_IsObject(reg)) {
         JS_FreeValue(ctx, reg);
         reg = JS_NewObjectProto(ctx, JS_NULL);
-        JS_DefinePropertyValueStr(ctx, global, "__ndRealmProtos",
-                                  JS_DupValue(ctx, reg), 0);
+        JS_DefinePropertyValue(ctx, global, key, JS_DupValue(ctx, reg), 0);
     }
     JS_FreeValue(ctx, global);
+    JS_FreeAtom(ctx, key);
     return reg;
 }
 
