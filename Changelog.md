@@ -3,6 +3,13 @@ Changelog:
 
 1.0.32:
 ======
+* JavaScript: an iframe's scripts get a microtask checkpoint after each
+  script, as the top-level document's already did, so a promise callback
+  queued by one script runs before the next script starts. Frame scripts
+  ran back to back and their promise callbacks only ran after the last
+  one: YouTube's embed defines `writeEmbed` in a promise callback and calls
+  it from the next inline script, so every embedded YouTube player (on AP
+  News and most news sites) stayed black with "writeEmbed is not defined".
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
