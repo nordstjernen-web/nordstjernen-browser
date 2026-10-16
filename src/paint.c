@@ -147,10 +147,21 @@ ns_pango_stretch_from_css(int rank)
     return map[rank];
 }
 
+gboolean
+ns_paint_inline_attr_nowrap(const ns_inline_attr *r)
+{
+    if (r->kind != NS_INLINE_ELEMENT || !r->style) return FALSE;
+    const char *ws = ns_style_keyword(r->style, NS_CSS_WHITE_SPACE);
+    return ws && (strcmp(ws, "nowrap") == 0 || strcmp(ws, "pre") == 0);
+}
+
 NsPangoAttribute *
 ns_paint_inline_font_attr(const ns_inline_attr *r)
 {
     switch (r->kind) {
+    case NS_INLINE_ELEMENT:
+        return ns_paint_inline_attr_nowrap(r)
+            ? ns_pango_attr_allow_breaks_new(FALSE) : NULL;
     case NS_INLINE_BOLD:
         return ns_pango_attr_weight_new(NS_PANGO_WEIGHT_BOLD);
     case NS_INLINE_FONT_WEIGHT:
