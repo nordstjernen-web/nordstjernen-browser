@@ -20076,7 +20076,7 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init,
             "   meth('append', function(k,v){ var P = chk(this); req(2,arguments.length); P.push([String(k),String(v)]); this.__ndNotify(); }); "
             "   meth('delete', function(k){ var P = chk(this); req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; this.__ndPairs=P.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));}); this.__ndNotify(); }); "
             "   meth('sort', function(){ var P = chk(this); P.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;}); this.__ndNotify(); }); "
-            "   meth('forEach', function(cb){ var P = chk(this); req(1,arguments.length); if (typeof cb !== 'function') throw new TypeError(\"Failed to execute 'forEach' on 'URLSearchParams': parameter 1 is not of type 'Function'.\"); var th=arguments[1]; for (var i=0;i<P.length;i++) cb.call(th,P[i][1],P[i][0],this); }); "
+            "   meth('forEach', function(cb){ var P = chk(this); req(1,arguments.length); if (typeof cb !== 'function') throw new TypeError(\"Failed to execute 'forEach' on 'URLSearchParams': parameter 1 is not of type 'Function'.\"); var th=arguments[1]; for (var i=0;i<this.__ndPairs.length;i++){ var e=this.__ndPairs[i]; cb.call(th,e[1],e[0],this); } }); "
             "   function* walk(o, kind){ for (var i=0;i<o.__ndPairs.length;i++){ var e=o.__ndPairs[i]; yield kind===0?[e[0],e[1]]:kind===1?e[0]:e[1]; } } "
             "   meth('keys', function(){ chk(this); return walk(this, 1); }); "
             "   meth('values', function(){ chk(this); return walk(this, 2); }); "
