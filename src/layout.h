@@ -73,6 +73,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_ELEMENT,
     NS_INLINE_SPACER,
     NS_INLINE_SPELLCHECK,
+    NS_INLINE_EMPTY_ELEMENT,
 } ns_inline_attr_kind;
 
 typedef struct ns_inline_attr {
@@ -162,6 +163,7 @@ typedef struct ns_box {
     gboolean has_flex_main;
     gboolean is_rendered_legend;
     gboolean inline_split_tail;
+    gboolean phantom_line;
     double margin_top_through;
     double paint_top, paint_bottom;
     GPtrArray *negative_layers;
@@ -231,6 +233,7 @@ gboolean ns_inline_shift_bounds(const ns_box *box, double *x0, double *y0,
                                 double *x1, double *y1);
 gboolean ns_inline_unshift_point(const ns_box *box, struct _PangoLayout *layout,
                                  double *x, double *y);
+char *ns_layout_select_srcset(const char *srcset, const char *sizes);
 double ns_text_indent_px(const ns_style *s, double basis);
 double ns_inline_text_indent_px(const ns_box *run, const ns_style *s,
                                 double basis);
@@ -246,6 +249,9 @@ double ns_box_max_bottom(const ns_box *root, double seed);
 gboolean ns_box_fieldset_legend_gap(const ns_box *fieldset, double *border_inset,
                                     double *gap_x0, double *gap_x1,
                                     double *gap_y0, double *gap_y1);
+
+void ns_box_table_caption_extents(const ns_box *table, double *above,
+                                  double *below);
 
 void ns_paint_drop_box_cache(ns_box *box);
 

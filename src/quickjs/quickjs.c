@@ -38289,7 +38289,8 @@ static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
                 label = get_u32(bc_buf + pos + 1);
                 assert(label >= 0 && label < s->label_count);
                 ls = &s->label_slots[label];
-                if (code_match(&cc, ls->pos, OP_ret, -1)) {
+                if (!ls->empty_catch_finally &&
+                    code_match(&cc, ls->pos, OP_ret, -1)) {
                     ls->ref_count--;
                     break;
                 }
@@ -38684,6 +38685,24 @@ static bool code_has_label(CodeContext *s, int pos, int label)
 /* return the target label, following the OP_goto jumps
    the first opcode at destination is stored in *pop
  */
+static int js_code_skip_labels(JSFunctionDef *s, int pos)
+{
+    const uint8_t *buf = s->byte_code.buf;
+
+    while (pos < s->byte_code.size &&
+           (buf[pos] == OP_source_loc || buf[pos] == OP_label))
+        pos += opcode_info[buf[pos]].size;
+    return pos;
+}
+
+static bool js_code_is_empty_catch_finally(JSFunctionDef *s, int pos)
+{
+    const uint8_t *buf = s->byte_code.buf;
+
+    return pos < s->byte_code.size && buf[pos] == OP_gosub &&
+        s->label_slots[get_u32(buf + pos + 1)].empty_catch_finally;
+}
+
 static bool js_code_reaches_return(JSFunctionDef *s, int pos)
 {
     const uint8_t *buf = s->byte_code.buf;
@@ -38691,11 +38710,13 @@ static bool js_code_reaches_return(JSFunctionDef *s, int pos)
 
     while (pos < s->byte_code.size) {
         op = buf[pos];
-        if (op == OP_source_loc || op == OP_label || op == OP_nip_catch) {
+        if (op == OP_source_loc || op == OP_label) {
             pos += opcode_info[op].size;
-        } else if (op == OP_gosub &&
-                   s->label_slots[get_u32(buf + pos + 1)].empty_catch_finally) {
-            pos += opcode_info[op].size;
+        } else if (op == OP_nip_catch) {
+            pos = js_code_skip_labels(s, pos + opcode_info[op].size);
+            if (!js_code_is_empty_catch_finally(s, pos))
+                return false;
+            pos += opcode_info[OP_gosub].size;
         } else if (op == OP_goto && jumps++ < 16) {
             pos = s->label_slots[get_u32(buf + pos + 1)].pos2;
         } else {

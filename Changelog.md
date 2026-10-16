@@ -13,6 +13,147 @@ Changelog:
   `<symbol>`'s own properties reach its content, and `fill:
   currentColor` from a rule stays tied to the text colour on elements
   that share one computed style.
+* Layout: a table cell lays out its content as a block formatting
+  context, so a float inside a cell shrinks to fit and sits beside the
+  text, and sibling margins collapse. A styled cell used to stack its
+  children one under the other at full width: Wikipedia's navbox title
+  row put its "show" button, its "v t e" links and its title on three
+  lines (71px tall instead of 28px).
+* Layout: an auto-width table in a container with no room (width 0)
+  shrinks to its min-content width instead of growing to its max-content
+  width, and a cell holding a percentage-width table counts that table's
+  min-content. The min-content width of plain text is its widest word,
+  not its word with the most letters ("alpha beta gamma" measured
+  "alpha"). Wikipedia's collapsed navbox rows, which are zero-width
+  absolutely positioned blocks, laid their cells out 400px wide or more
+  where other browsers use about 230px.
+* Layout: `white-space: nowrap` (and `pre`) on an inline element inside
+  wrapping text keeps the element on one line, and spaces on either side
+  of a bidi isolate (an inline `<li>`, `<bdi>` or `[dir]` element)
+  collapse into one. A nowrap link such as Wikipedia's `.nowraplinks a` could
+  break inside, and a list made inline (`.hlist`) kept a second space
+  after each separator.
+* DOM: an element laid out as more than one box (a table and the
+  anonymous row around its cells, for example) reports the geometry of
+  its first box from every lookup. The lookup cache, built after a few
+  queries, kept the last box instead, so `getBoundingClientRect()` on a
+  `display: table` element with bare cells switched from the table's
+  rectangle to its inner row's halfway through a script.
+* Layout: a table caption sits outside the table's border and padding,
+  as wide as the table's border box, and the table's border and
+  background frame only its rows. The longest word of a caption widens
+  the table, and a table holding only a caption shrinks to it. The
+  table's box, as `getBoundingClientRect()` reports it, includes its
+  captions. Captions used to be laid out inside the border at the
+  width of the cells, so a two-letter table squeezed its caption into
+  one word per line.
+* Paint: a `<video>` with no frame and no poster to show paints
+  nothing, so its own background shows through, unless it has
+  `controls`. Such a video used to cover its box with a dark grey
+  rectangle, drawn 4px up and left of the box when the video had a
+  margin. A video that had not loaded, or failed to, covered The
+  Guardian's video cards and Apple's product tiles with a black panel.
+* Layout: an empty inline element in a line that has no line box (only
+  empty elements, collapsible spaces and absolutely positioned elements,
+  such as the `<source>` elements before a block `<img>` in a
+  `<picture>`) reports a 0x0 rectangle at the line's position, after the
+  margins it collapses with, and follows `text-align`, `text-indent` and
+  `direction`. It reported 0,0 at the page's top-left corner, or a
+  rectangle as tall as its font. Such a line no longer stops the margins
+  around it from collapsing, and an element holding only white space
+  (`<span> </span>`) counts as empty.
+* DOM: an empty inline element (`<span></span>`, an empty link)
+  reports a zero-width rectangle at its place in the line from
+  `getBoundingClientRect()` and `getClientRects()`, as tall as its
+  font. It used to report an empty rectangle at the page's top-left
+  corner, so scripts that measure such markers (Wikipedia's citation
+  metadata spans, scroll anchors) saw them at 0,0.
+* Layout: `<source>` and `<track>` elements generate boxes when their
+  `display` is not `none`, as HTML's rendering rules have it: inside a
+  `<picture>` they lay out like any other empty element, and inside
+  `<video>` they stay invisible with the rest of the video's children.
+  The engine dropped them from layout, so a page that positions a
+  picture's children absolutely, as The Guardian does for every
+  thumbnail, measured all of its 676 sources at 0,0.
+* CSS: the `width` and `height` attributes of an outer `<svg>` element
+  map to the CSS `width` and `height` properties, as SVG 2 has it, so a
+  stylesheet that sets only one of them keeps the other from the
+  attribute, and lengths in `em` or `%` resolve. An `<svg width="24">`
+  styled `height: 1rem` was drawn 16px wide from its viewBox's ratio
+  instead of 24px wide, which shifted IMDb's reaction counts 8px left.
+* Layout: a line that holds nothing but absolutely positioned elements,
+  empty inline elements and collapsible spaces takes no height, as CSS
+  requires of such lines. An absolutely positioned element between two
+  empty inline elements (`<span></span> <svg style="position:
+  absolute"></svg> <span></span>`) gave its line a full line height,
+  which pushed everything below it down; YouTube's `<body>` was 11px
+  tall instead of 0px.
+* Layout: a `line-height` given as `calc()` with a length
+  (`calc(0.0625rem * 24)`, `calc(1.5em)`, `calc(150%)`) sets the
+  line height. Such values fell back to `normal`, while
+  `getComputedStyle` reported the right value. Booking.com sets its
+  line heights this way, so its text lines were laid out at the font's
+  normal height: a two-line hotel name was 38px tall instead of 48px.
+* Layout: an inline element whose `line-height` equals its block's
+  keeps that line height inside an outer inline element with a
+  different one. `<a style="line-height: 18px"><span style="line-height:
+  20.8px">` in a block with `line-height: 20.8px` laid its lines out
+  18px tall, as if the span had no line height of its own; AP News
+  headlines are built this way.
+* JavaScript: in strict-mode code, `return f()` inside a `try` block
+  with a `catch` is no longer turned into a tail call. The tail call
+  reused the frame and dropped the live `catch`, so an exception thrown by
+  `f` escaped the `try` and aborted the script: helpers such as
+  `try { return fn() } catch (e) { return fallback }`, common in bundled
+  code, stopped whole scripts (BBC's paywall script, among others). A
+  `return` in a `catch` clause without `finally` is still a tail call.
+* Service workers: `Client`, `WindowClient` and `Clients` exist in the
+  worker scope, a message from the page arrives with a `WindowClient` as
+  its `source` (with `id`, `url`, `type`, `postMessage()`, `focus()`), and
+  `clients.matchAll()` and `clients.get(id)` return that client. A worker
+  that checked `event.source instanceof WindowClient` threw a
+  ReferenceError on every message: Amazon's service worker logged six
+  errors per page load and never answered the page.
+* JavaScript: an external classic script is decoded with the charset of
+  its `Content-Type` (or the `<script charset>` attribute, or a UTF-16
+  byte order mark) before it runs, and invalid UTF-8 becomes U+FFFD, as in
+  other browsers. Scripts were handed over as raw bytes, so a script
+  served as `charset=iso-8859-1` with an accented letter failed whole with
+  "invalid UTF-8 sequence": ESPN's Spanish-language i18n script, and the
+  scripts that depend on it, never ran. Module scripts stay UTF-8.
+* DOM: `URLSearchParams.prototype.forEach` walks the live list, so an
+  entry deleted or added inside the callback changes the rest of the loop,
+  as the specification and other browsers do. It walked a copy, which
+  failed core-js's feature test (delete during forEach must give "a1c3"):
+  core-js then replaced `URLSearchParams` with its polyfill, and Roblox's
+  page threw "Incorrect invocation" from it.
+* JavaScript: an iframe's scripts get a microtask checkpoint after each
+  script, as the top-level document's already did, so a promise callback
+  queued by one script runs before the next script starts. Frame scripts
+  ran back to back and their promise callbacks only ran after the last
+  one: YouTube's embed defines `writeEmbed` in a promise callback and calls
+  it from the next inline script, so every embedded YouTube player (on AP
+  News and most news sites) stayed black with "writeEmbed is not defined".
+* DOM: `<link rel="preload">` loads for every known `as` (style,
+  script, font, image, track, fetch), not only `style`, in the
+  background, and reuses what the engine's preloader already fetched; a
+  preload that becomes a stylesheet takes its `load` from the preload's
+  response and keeps one resource timing entry. A `media` that does not
+  match or a `type` the `as` cannot use skips the preload without an
+  event, CSP (with the element's nonce) and mixed-content blocking give
+  `error`, and `fetch` and `track` preloads load on any HTTP response,
+  the others on a 2xx status, each link by its own rule when two links
+  share one fetch. A link also loads again when it is inserted again;
+  switching `rel` back from `stylesheet` to `preload` fetches nothing,
+  so a handler that toggles `rel` cannot loop. An `as=image` preload
+  with only `imagesrcset` loads the chosen candidate, and a preload does
+  not hold back the window `load` event.
+* Cache: shutting the cache down now waits for a cache write that is
+  still running on a network thread. The write could see the cache
+  directory already freed, build a relative path from the cache key,
+  and leave the response body as a file named by 62 hex characters in
+  the directory the browser was started from. A body path is now never
+  built without a cache directory.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
