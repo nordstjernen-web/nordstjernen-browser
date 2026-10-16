@@ -247,6 +247,9 @@ gboolean ns_box_fieldset_legend_gap(const ns_box *fieldset, double *border_inset
                                     double *gap_x0, double *gap_x1,
                                     double *gap_y0, double *gap_y1);
 
+void ns_box_table_caption_extents(const ns_box *table, double *above,
+                                  double *below);
+
 void ns_paint_drop_box_cache(ns_box *box);
 
 struct ns_image_cache;

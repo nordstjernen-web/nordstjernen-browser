@@ -9,6 +9,14 @@ Changelog:
   queries, kept the last box instead, so `getBoundingClientRect()` on a
   `display: table` element with bare cells switched from the table's
   rectangle to its inner row's halfway through a script.
+* Layout: a table caption sits outside the table's border and padding,
+  as wide as the table's border box, and the table's border and
+  background frame only its rows. The longest word of a caption widens
+  the table, and a table holding only a caption shrinks to it. The
+  table's box, as `getBoundingClientRect()` reports it, includes its
+  captions. Captions used to be laid out inside the border at the
+  width of the cells, so a two-letter table squeezed its caption into
+  one word per line.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
