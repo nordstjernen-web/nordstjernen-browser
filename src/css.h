@@ -1075,10 +1075,20 @@ gboolean ns_css_stylesheet_has_hover_rules(const ns_css_stylesheet *sh);
 gboolean ns_css_text_has_container_units(const char *text, gssize len);
 gboolean ns_css_stylesheet_has_active_rules(const ns_css_stylesheet *sh);
 
+typedef void (*ns_css_match_fn)(const ns_css_rule *rule, guint rule_index,
+                                const ns_css_selector *sel, gpointer data);
+void ns_css_stylesheet_each_match(const ns_css_stylesheet *sheet,
+                                  const ns_node *el, ns_css_match_fn fn,
+                                  gpointer data);
+GHashTable *ns_css_layer_ranks_new(const ns_css_stylesheet *const *sheets,
+                                   gsize n);
+int         ns_css_layer_rank(GHashTable *ranks, const char *layer_name);
+
 #define NS_CSS_IMPORT_MAX_DEPTH 8
 
 ns_css_stylesheet *ns_css_stylesheet_parse(const char *text, gssize len);
 const ns_css_stylesheet *ns_css_ua_stylesheet(void);
+ns_css_stylesheet *ns_css_stylesheet_parse_detached(const char *text, gssize len);
 gboolean           ns_css_supports_declaration(const char *property,
                                                const char *value);
 gboolean           ns_css_supports_condition(const char *condition,

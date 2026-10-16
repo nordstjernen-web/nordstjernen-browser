@@ -3,6 +3,20 @@ Changelog:
 
 1.0.33:
 ======
+* SVG: an SVG used as an image applies its own `<style>` sheets and
+  draws `<pattern>` fills and `<image>` elements. A logo loaded through
+  `<img>` or `background-image` whose colours come from class rules such
+  as `.c{fill:#ff4500}` drew every shape black, and reddit's robot
+  avatar (a rect filled with a pattern that shows an embedded PNG) was
+  blank. The sheets cascade with specificity, `@layer`, `!important`
+  and the `style` attribute; `@media`, `vw`, `em` and `rem` follow the
+  image's own size and fonts, and nothing in them reaches the page. The
+  image is drawn where its CSS animations settle, so a logo that fades
+  in with `animation: show .3s forwards` shows; links and `:hover` never
+  match inside it, and a pattern tile shrunk below a pixel is filled
+  with its average colour. CSS also accepts the plain numbers SVG
+  allows, in pages too: `fill-opacity: .5` and `stroke-width: 2` were
+  dropped as invalid.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
