@@ -244,8 +244,27 @@ re-architecture. It needs a paid Apple Developer account ($99/yr).
 
 **In CI**, `.github/workflows/macos.yml` performs steps 2–4 automatically
 when these repository secrets are present — which they are for this
-project, so the published `.dmg` is signed and notarised. Without them the
-workflow falls back to an ad-hoc `.dmg`:
+project. On an ordinary push a missing secret or a notary failure only
+leaves an ad-hoc or un-notarised `.dmg` behind. **A release is strict**:
+pushing a version tag runs `release.yml`, which calls `macos.yml` in release
+mode. There a missing secret, a signing error, a notarisation that is not
+*Accepted* or a failed Gatekeeper check (`spctl` on the `.dmg` and on the
+`.app` inside it) fails the job. The draft release then gets the Linux
+packages only, and the run is marked failed until the macOS job is re-run
+and its `.dmg` is attached.
+
+If notarytool answers *HTTP status code: 403. A required agreement is
+missing or has expired*, the team's Account Holder has to accept the
+current Apple Developer Program License Agreement at
+<https://developer.apple.com/account>. Apple updates it periodically, and
+notarisation is refused until it is accepted. Nothing in the build can work
+around this.
+
+`pack-macos.sh` sets `LSMinimumSystemVersion` to the highest minimum macOS
+version among the Mach-O files in the bundle. The Homebrew dylibs are built
+for the runner's macOS, so on an older Mac the bundle could not load them.
+
+The secrets:
 
 | Secret | Meaning |
 |--------|---------|
