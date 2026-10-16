@@ -72,6 +72,17 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | `for await` loop must not close the iterator when `next()` itself rejects | 2 | medium | **done** |
 | `Function.prototype.caller`/`.arguments` as %ThrowTypeError% poison pills | 4 | medium | **done** (see #26 — matches modern V8: poison pair on the prototype, legacy magic on sloppy instances) |
 | Top-level-await rejection settles promises root-first instead of leaf-first | 1 | low | **done** (see #27) |
+| Module-level `using` binding exported from the module | 3 | medium | **done** (module variable + hidden disposal local) |
+| Native `toString` of a built-in with a non-identifier name (`RegExp.$&`) | 2 | low | **done** (computed-key form) |
+| Assignment resolves its Reference before the right-hand side (strict unresolvable global, `eval`-introduced `var`) | 14 | medium | **done** (previously excluded in `test262.conf`; see #28) |
+| `Promise.allKeyed` / `Promise.allSettledKeyed` (await-dictionary) | 72 | low | **done** (feature enabled in `test262.conf`) |
+| Legacy RegExp statics: receiver check, getter-only accessors, subclass/cross-realm invalidation, `compile` restriction | 50 | low | **done** (`legacy-regexp` enabled) |
+| `ShadowRealm` (evaluate, importValue, wrapped functions) | 124 | medium | **done** (`ShadowRealm` enabled; see #29) |
+| Proper tail calls in strict mode | 35 | medium | **done** (`tail-call-optimization` enabled; see #30) |
+| Decorators and auto-accessors | 31 | high | **done** (`decorators` enabled, `staging/decorators` included; see #33) |
+| Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
+| Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
+| Temporal non-ISO calendars, eras and month codes (`intl402/Temporal`, `Intl.Era-monthcode`) | ~2000 | high | **done** (see #34) |
 
 ## Changes
 
@@ -946,3 +957,435 @@ lookup intercept (`JS_GetPropertyInternal` in `src/quickjs/quickjs.c`),
 not as a prototype accessor, so the property-descriptor surface test262
 checks stays exactly per spec. No test262 test observes the extension —
 the suite runs at zero failures with it in place.
+
+### 28. Assignment resolves its Reference before evaluating the right-hand side
+
+**Spec:** [AssignmentExpression evaluation](https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation)
+evaluates the LeftHandSideExpression to a Reference first, then the
+right-hand side, then `PutValue`. A strict-mode assignment to a name that
+was unresolvable when the Reference was made throws a `ReferenceError` even
+if the right-hand side creates the global (`undeclared = (this.undeclared =
+5)`), and a sloppy-mode assignment keeps writing to the binding it resolved
+even when a direct `eval` in the right-hand side declares a closer `var`.
+
+**Bug:** a plain identifier target was stored with `put_var`/`put_loc`
+after the right-hand side, resolving the name only then. Only targets inside
+`with` produced a Reference first.
+
+**Fix:** `get_lvalue` emits `OP_scope_make_ref` for every identifier target.
+Variable resolution still folds it back into a plain local, argument or
+closure store, and into `put_var` for sloppy-mode globals, so only
+references that pass through an `eval` variable object, and strict-mode
+global stores, keep the `make_var_ref`/`put_ref_value` pair. The 14 tests
+were removed from the `test262.conf` exclude list, along with the three
+`caller`-feature exclusions, which pass (two of them no longer exist).
+
+### 29. ShadowRealm
+
+**Spec:** [proposal-shadowrealm](https://tc39.es/proposal-shadowrealm/).
+`new ShadowRealm()` creates a fresh realm (`JS_NewContext` on the same
+runtime, sharing the embedder's context opaque). `evaluate` compiles the
+source as an indirect eval in that realm; a parse error becomes a
+`SyntaxError` of the caller's realm and any other abrupt completion a
+`TypeError` of the caller's realm. Values cross the boundary through
+`GetWrappedValue`: primitives pass, callables become wrapped function
+exotic objects (`JS_CLASS_WRAPPED_FUNCTION`, whose `[[Call]]` wraps the
+arguments and `this` into the target's realm and the result back), and other
+objects throw. `importValue` enqueues the dynamic-import job in the shadow
+realm, resolved against the calling script's name, and chains realm-bound
+native handlers that read the export or turn a failure into a `TypeError`.
+
+### 30. Proper tail calls
+
+**Spec:** [PrepareForTailCall](https://tc39.es/ecma262/#sec-preparefortailcall)
+and the HasCallInTailPosition rules: a call in tail position of strict-mode
+code must not grow the stack.
+
+**Fix:** `OP_tail_call`/`OP_tail_call_method` (and an `OP_eval` that is not a
+direct eval, followed by `return`) reuse the running interpreter frame when
+the caller is a strict, ordinary (not generator/async, not constructing)
+bytecode function and the callee is an ordinary bytecode function: the
+caller's variable references are closed, its locals freed, the callee,
+`this` and arguments moved to the start of the frame buffer (which then owns
+them), and execution restarts at the callee's first instruction. The buffer
+is reused when the callee fits and grown with `alloca` only when it needs
+more room, so self- and mutual recursion run in constant C stack. Calls to C
+functions, generators and async functions keep the previous call-and-return
+behaviour.
+
+Tail position is recognised in more places: `resolve_labels` turns a call
+into a tail call when only labels, jumps and `return` follow it in strict
+code (conditional, `&&`, `||`, `??` operands), and a `return` inside a catch
+clause of a `try` without `finally` now goes through a dedicated label that
+is a bare `ret`, so the call before it is in tail position as the
+specification says. The interpreter is faster on tail calls than before
+because no new frame is set up.
+
+### 31. Temporal is an engine intrinsic
+
+**Spec:** [Temporal](https://tc39.es/proposal-temporal/) (now merged into
+the ECMA-262 draft) and `Date.prototype.toTemporalInstant`.
+
+**Gap:** the engine had no Temporal at all; `test262.conf` skipped the
+feature and the browser installed a small partial shim (`src/js_date.c`)
+on its own contexts only.
+
+**Implementation:** `JS_AddIntrinsicTemporal`, called from
+`JS_NewContext`, registers the namespace from
+`src/quickjs/quickjs-temporal*.c`: the class plumbing and option readers
+(`quickjs-temporal.c`), ISO 8601 date arithmetic and the calendar
+interface (`-calendar.c`), the RFC 9557 grammar as a hand-written parser
+(`-parse.c`), time zones (`-tz.c`), Duration with the
+difference/rounding/total engine (`-duration.c`), and the types
+(`-instant.c`, `-zoned.c`, `-plain.c`, `-partial.c`). Epoch nanoseconds
+and time durations are `__int128`, so every mathematical-value step of
+the specification is exact; `total()` divides exactly and rounds once.
+Five engine hooks at the end of `quickjs.c` give the module
+`OrdinaryCreateFromConstructor`, `thisTimeValue`, `ToPrimitive`,
+`ToBigInt` and 128-bit BigInt conversion. Calendars other than `iso8601`
+and IANA time zones other than `UTC` plug in behind
+`tp_calendar_*`/`tz_named_*` without changing the types. The browser shim
+is gone.
+
+All 4603 `built-ins/Temporal` and `toTemporalInstant` tests pass in both
+modes, and `Temporal` is enabled in `test262.conf`. Two places follow the
+reference implementation rather than the literal spec text:
+`ComputeNudgeWindow` uses the origin as the window start only when the
+start duration is zero, and the ISO `CalendarDateUntil` jumps straight to
+the candidate year/month instead of stepping one unit at a time.
+### 32. Module import phases: `import defer` and `import source`
+
+**Spec:** the Stage 3 proposals
+[Deferred Imports Evaluation](https://tc39.es/proposal-defer-import-eval/)
+and [Source Phase Imports](https://tc39.es/proposal-source-phase-imports/).
+Both add a `[[Phase]]` to every ModuleRequest: `evaluation` (an ordinary
+import), `defer` or `source`.
+
+**Implementation:** each requested-module entry carries its phase, and two
+requests for the same specifier and attributes in different phases are
+separate entries. The phase is written into module bytecode, so
+`BC_VERSION` is 30. Stored data written as version 29 stays readable, and
+the browser's bytecode cache format version is bumped.
+
+- `import defer * as ns from "m"` and `import.defer("m")` give a deferred
+  namespace (`JS_CLASS_DEFERRED_MODULE_NS`). It is created when the module
+  is linked. Any string-keyed operation other than `"then"` first evaluates
+  the module synchronously (`EvaluateModuleSync`), then forwards to the
+  ordinary namespace. If the module or one of its dependencies is still
+  evaluating or uses top-level await, that operation throws a `TypeError`.
+  `[[Set]]`, symbol keys and `"then"` never evaluate the module. Its
+  `@@toStringTag` is `"Deferred Module"`. During evaluation, a deferred
+  request contributes only the asynchronous transitive dependencies found
+  by `GatherAsynchronousTransitiveDependencies`, and `import.defer()` waits
+  only for those before resolving.
+- `import source x from "m"` and `import.source("m")` read the module's
+  source object (`JS_SetModuleSource`). A source-phase request is not
+  linked or evaluated. A JavaScript module has no source representation,
+  so both forms throw a `SyntaxError`, at link time for the static form.
+  `%AbstractModuleSource%` is reachable through
+  `JS_GetAbstractModuleSource()`, and hosts create module source objects
+  with `JS_NewModuleSource()`. `run-test262` uses these for
+  `$262.AbstractModuleSource` and for the `<module source>` specifier.
+- A namespace or source binding re-exported through `export { x }`
+  resolves to the module and the phase together. Two star exports of the
+  same source binding are therefore unambiguous.
+
+The `import-defer`, `source-phase-imports` and
+`source-phase-imports-module-source` features are enabled in
+`test262.conf`, and `staging/source-phase-imports` is included. Every
+test with these features passes.
+
+## ECMA-402 (Intl) in the engine
+
+`Intl` is part of the engine rather than the browser shell, so `qjs`,
+`run-test262` and every browser realm share one implementation. It is
+installed by `JS_AddIntrinsicIntl()` from `JS_NewContext()`; embedders pass
+the host locale and time zone in with `JS_SetDefaultLocale()` and
+`JS_SetDefaultTimeZone()` (without them `Intl` reports `en-US`). There is no
+ICU dependency.
+
+| File | Contents |
+| --- | --- |
+| `quickjs-intl.c` | `Intl` object, locale negotiation (`CanonicalizeLocaleList`, `ResolveLocale`), option readers, `getCanonicalLocales`, `supportedValuesOf` |
+| `quickjs-intl-locale.c` | BCP 47 parsing, UTS #35 canonicalization (alias rules, likely subtags, `u`/`t` extension values), `Intl.Locale` |
+| `quickjs-intl-decimal.c` | exact decimal values (`ToIntlMathematicalValue`), `ToRawPrecision`/`ToRawFixed` rounding with every rounding mode and increment, CLDR plural-rule evaluation |
+| `quickjs-intl-number.c` | `Intl.NumberFormat` (all v3 options, compact/scientific/engineering notation, units, currencies, ranges), `Intl.PluralRules`, `Number`/`BigInt` `toLocaleString` |
+| `quickjs-intl-collator.c` | `Intl.Collator`, `String.prototype.localeCompare`, `toLocaleLowerCase`/`toLocaleUpperCase` (Turkish, Azeri, Lithuanian special casing) |
+| `quickjs-intl-datetime.c` | `Intl.DateTimeFormat` (skeleton matching, styles, time-zone names, intervals, Temporal values), `Date` and Temporal `toLocaleString` |
+| `quickjs-intl-list.c` | `Intl.ListFormat` |
+| `quickjs-intl-relative.c` | `Intl.RelativeTimeFormat` |
+| `quickjs-intl-displaynames.c` | `Intl.DisplayNames` |
+| `quickjs-intl-duration.c` | `Intl.DurationFormat`, `Temporal.Duration.prototype.toLocaleString` |
+| `quickjs-intl-segmenter.c` | `Intl.Segmenter` (UAX #29 grapheme, word and sentence boundaries) |
+| `quickjs-intl-calendar.c` | dates in each supported calendar; the non-Gregorian arithmetic comes from Temporal's calendar code so both APIs agree |
+| `quickjs-intl-data.c` | lookup in the generated CLDR tables with locale inheritance |
+
+The locale data is generated from Unicode CLDR **48.2.3** (cldr-json) by
+`scripts/gen-intl-data.py`, which writes `quickjs-intl-locale-data.h`
+(alias rules, likely subtags, `u`/`t` value aliases, region week/hour-cycle/
+calendar data, time-zone identifiers, numbering systems, currency digits,
+script directions) and `quickjs-intl-cldr-data.h` (per-locale strings, stored
+as differences from the parent locale). Number formatting covers the ~100
+languages with CLDR "modern" coverage; unit names and currency names are kept
+for the 30 most widely used languages and fall back to the root data
+elsewhere. Date patterns are kept for the same languages in every calendar
+whose patterns differ from the generic ones; the other languages carry
+Gregorian patterns and fall back to them. Metazone names (`Pacific Standard
+Time`) are kept for 13 languages, others use localized GMT offsets. The
+generator writes date patterns with an ASCII space where CLDR has U+202F
+before the day period, matching what test262 and other engines produce.
+List patterns and the `h:mm:ss` duration pattern are kept for every
+language, relative-time patterns for the 30 languages that carry unit
+names, and display names (languages, regions, scripts, calendars, date-time
+fields) for the 13 languages that carry metazone names; English has every
+language, script, variant and currency name, the others the languages and
+scripts of the available locales. Plural rules cover every language CLDR has rules for. To
+regenerate, unpack `cldr-<version>-json-full.zip` from the
+[cldr-json releases](https://github.com/unicode-org/cldr-json/releases)
+outside the tree and run
+`python scripts/gen-intl-data.py <unpacked dir> src/quickjs`.
+
+`Intl.Segmenter` uses `quickjs-intl-segment-data.h`, generated by
+`scripts/gen-intl-segment-data.py` from the Unicode **17.0.0** character
+database (`GraphemeBreakProperty.txt`, `WordBreakProperty.txt`,
+`SentenceBreakProperty.txt`, `DerivedCoreProperties.txt` for `InCB` and
+`Alphabetic`, `emoji-data.txt`, `LineBreak.txt` for `SA`): about 4,900 ranges
+packed as one word each plus a table of property sets. Rules are the
+untailored UAX #29 ones; there are no dictionaries, so a run of Thai, Lao,
+Khmer or Myanmar letters (`Line_Break=SA`) stays one word and CJK
+ideographs are one word each. Regenerate with
+`python scripts/gen-intl-segment-data.py <ucd dir> src/quickjs`.
+
+Collation is a compact multi-level comparison rather than the full UCA:
+NFD-normalized input, letters ordered by base letter with per-language
+tailorings (Nordic, German phonebook, Spanish, Turkish, Polish, Czech,
+Baltic, Romanian, Croatian), accents at the secondary level, case at the
+tertiary level, numeric collation and punctuation-ignoring alternate
+handling.
+
+| Area (test262 `intl402/`) | Status |
+| --- | --- |
+| every directory: `Intl`, `Locale`, `NumberFormat`, `PluralRules`, `Collator`, `DateTimeFormat`, `Date`, `FallbackSymbol`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `DurationFormat`, `Segmenter`, `String`, `Number`, `BigInt`, `Array`, `TypedArray`, `Temporal` | enabled in `test262.conf`, all pass |
+
+Time zones: `Intl.DateTimeFormat` resolves offsets through Temporal's tz
+database reader. On Windows without a tz database it maps the IANA name to a
+Windows zone (CLDR `windowsZones`) and computes the offset from the
+registry's `GetTimeZoneInformationForYear` rules, so current rules are right
+and historical ones are approximate.
+
+### 33. Decorators and auto-accessors
+
+**Spec:** [proposal-decorators](https://github.com/tc39/proposal-decorators)
+(with decorator metadata).
+
+`accessor` class elements (public, private, static, computed) store their
+value in a hidden private field and get a synthesized getter/setter pair,
+built as bytecode functions the way the default constructor is.
+
+Decorators (`@x`, `@x.y.#z`, `@x(...)`, `@(expr)`) are parsed on class
+declarations, class expressions, `export` forms and class elements; the
+postfix-expression parser takes a `PF_DECORATOR` flag that limits it to the
+decorator grammar. Each decorator list is evaluated in source order, with the
+computed keys, into a hidden class-scope variable. At the end of the class
+body the compiler emits calls into a small runtime written in JS
+(`builtin-decorators.js`, compiled to `builtin-decorators.h` with `qjsc` like
+the other builtin blobs, receiving the intrinsics it needs as parameters so a
+page cannot tamper with them; reached through a new `OP_special_object`
+operand). The runtime calls element decorators innermost first with the
+`kind`/`name`/`static`/`private`/`access`/`addInitializer`/`metadata`
+context, validates and installs replacements, sets `Symbol.metadata`, applies
+class decorators, and runs the extra initializers at the specified times:
+static method initializers before static fields, field and accessor
+initializers right after their element, instance method initializers at
+construction after private methods are branded and before fields (a hook in
+the instance field initializer that constant-folds away in classes without
+decorators), class initializers last. `#private` elements get access
+functions synthesized in the class scope; a decorated private method,
+getter, setter or accessor is installed through a branded trampoline that
+forwards to the decorator's result, since QuickJS derives the private brand
+from the method's home object. `Symbol.metadata` is a runtime-created symbol
+shared by all realms (adding a predefined atom would renumber the bytecode
+atom table).
+### 34. Temporal calendars other than ISO 8601
+
+**Spec:** ECMA-402's Temporal calendar operations and the
+[Intl era and monthCode](https://tc39.es/proposal-intl-era-monthcode/)
+proposal.
+
+**Implementation:** `src/quickjs/quickjs-temporal-calendars.c` models each
+calendar as a sequence of years, each with a start day, its month lengths
+and the ordinal of its leap month. The arithmetic calendars (Gregorian
+family, Coptic/Ethiopic, Indian, Persian with the 33-year rule and its
+correction list, Hebrew from the molad, tabular Hijri) are computed
+directly. Chinese and Korean years 1900-2102 and Umm al-Qura years
+1300-1600 come from `quickjs-temporal-caldata.h`, packed from ICU4X data
+by `scripts/gen-temporal-calendar-data.py`; outside those ranges the
+lunisolar calendars use ICU4X's mean-motion approximation and Umm al-Qura
+falls back to the civil calendar. `NonISODateUntil` binary-searches the
+year and month counts instead of stepping one unit at a time, and Chinese
+and Korean month addition counts mean synodic months between new years,
+so differences across the whole Temporal range stay fast.
+
+On Windows the system zone comes from `GetDynamicTimeZoneInformation`,
+mapped to IANA through `quickjs-temporal-winzones.h`, generated from CLDR
+`windowsZones.xml` by `scripts/gen-temporal-windows-zones.py`.
+
+A Link in the tz database is its own primary identifier when `zone.tab`
+puts it in a different country than its target (`Europe/Oslo`,
+`Africa/Accra`); a country-less alias that CLDR maps onto such a zone
+(`Atlantic/Jan_Mayen`) resolves there. `Intl.supportedValuesOf("timeZone")`
+leaves out names the tz database treats as links, so the two APIs agree. On
+Windows the CMake and meson builds also look in the toolchain's
+`share/zoneinfo`, and `scripts/pack-windows.sh` ships `share/zoneinfo` with
+the browser.
+
+Named time zones no longer apply `CheckISODaysRange` in
+`GetPossibleEpochNanoseconds`; the specification applies it only to offset
+zones, and differences against the minimum instant in a zone west of UTC
+need the day before the limit.
+
+All `intl402/Temporal` tests pass; the `toLocaleString` methods are
+installed by `quickjs-intl-datetime.c` over the Temporal prototypes and
+format through `Intl.DateTimeFormat`, which accepts Temporal objects in
+`format`, `formatToParts` and the range methods (`HandleDateTimeValue`). The
+`Intl.Era-monthcode` and `canonical-tz` features are enabled.
+
+All `intl402/Temporal` tests pass, including `toLocaleString`, which goes
+through `Intl.DateTimeFormat` (`quickjs-intl-datetime.c`), and so do the
+Temporal cases in `intl402/DateTimeFormat`. `staging/Temporal` is included
+in `test262.conf`.
+
+### 35. SpiderMonkey staging fixes (Array, Date, Function, Iterator, JSON, Map, Math, Reflect, RegExp)
+
+Fixes for `test/staging/sm` failures, each following the specification:
+
+- Proxy `[[DefineOwnProperty]]`: the non-configurable writable check
+  (step 16.c) only applies when the descriptor has a `[[Writable]]` field, so
+  `proxy.length = 0` on an array proxy no longer throws.
+- `Array.prototype.sort` writes every element back (observable through
+  setters, and a TypeError on frozen arrays). `Array.from` calls the
+  `@@iterator` method it read once, treats `null` as absent, and does not
+  close the iterator when `next()` itself throws or returns a non-object;
+  the Map/Set/WeakMap/WeakSet constructors likewise.
+- `Object.groupBy` converts the key with ToPropertyKey once; both `groupBy`s
+  call the callback with an undefined receiver and close the iterator when it
+  throws.
+- `Date` and `Date.UTC` convert every argument before giving up on a
+  non-finite one. Legacy date strings keep a `-07`/`-0700` offset after the
+  time instead of reading it as a year, reject a second year-like number,
+  and the ISO format requires `HH:mm` offsets.
+- `new Function(...)` checks that the parameters and the body each parse
+  on their own (the parser verifies the parameter list and body end at the
+  inserted `)` and `}`), and the function does not bind its own name
+  `anonymous`.
+- Annex B `for (var x = function(){} in o)` names the function `x`.
+- Legacy `fn.caller` skips direct-eval frames and is `null` for native,
+  strict, async, generator and top-level callers.
+- A function called through an `eval`-created variable object gets an
+  undefined `this`; with parameter expressions, a body `var arguments` is a
+  separate binding from the parameter scope's `arguments`.
+- `%WrapForValidIteratorPrototype%` `next`/`return` call the wrapped methods
+  with no arguments and return their results unchanged.
+- `JSON.parse` with a reviver reports the source of the last occurrence of a
+  duplicated key.
+- `Reflect.apply`/`construct` read `argumentsList.length` with ToLength.
+- `RegExp` reads the pattern's slots, then allocates (prototype lookup), then
+  stringifies; `source`/`toString` escape line terminators, including
+  escaped ones; `RegExp.escape` keeps surrogate pairs and non-whitespace
+  Latin-1 characters.
+- `Math.acosh`/`Math.asinh` use fdlibm-style formulas (MinGW's libm is off by
+  tens of ulps near 1).
+
+
+### 36. SpiderMonkey staging fixes (Set, TypedArray, syntax, classes, Annex B)
+
+Further `test/staging/sm` fixes:
+
+- `Set.prototype.difference`/`union`/`symmetricDifference` copy the receiver's
+  records instead of iterating it, and take the copy after
+  `GetIteratorFromMethod`; `GetSetRecord` always reads `size` with `Get`.
+- `RegExp.prototype[@@match]` defines its result elements
+  (CreateDataProperty).
+- `TypedArray(buffer, byteOffset, length)` allocates the object before
+  `ToIndex`; `%TypedArray%.prototype.set` still converts values after the
+  target was detached; `sort` with a comparator sorts a snapshot; `with`
+  reports a detached-after-conversion index as RangeError; `Object.freeze`
+  accepts a detached typed array.
+- Class heritage and computed keys run in strict mode at runtime
+  (`OP_special_object` STRICT_ON/OFF around the class definition in a sloppy
+  function).
+- `super[expr]` reads `[[HomeObject]].[[Prototype]]` after evaluating `expr`.
+- Assignment to a `const` binding throws at PutValue: short-circuiting
+  logical assignments do not throw, and a binding in its TDZ reports
+  ReferenceError.
+- Early errors: computed property names take an AssignmentExpression;
+  `{a() => 0}`; `new o?.C()`; `async await => 1`; `await` in parameters of
+  arrows nested in async functions; generator/async function expressions
+  named `yield`/`await`; rest parameters in getters/setters; `{'', a}`
+  patterns; `in` in an arrow's concise body inside a `for` head.
+- Annex B block functions copy the block binding's current value when the
+  declaration is evaluated, `if` clauses get their own scope, and the
+  var binding is only synthesized when no enclosing block declares the
+  name lexically (decided after the whole function is parsed). A `var`
+  created by direct eval inside `catch (x)` lives in the function's variable
+  environment (B.3.4).
+- `Object.defineProperties` interleaves `[[GetOwnProperty]]` and `Get` per key
+  and validates every descriptor before defining any;
+  `propertyIsEnumerable` converts the key first; the proxy
+  `getOwnPropertyDescriptor` invariant compares values and accessors of
+  non-configurable target properties.
+- A catch block resets the completion value; legacy `fn.arguments` returns
+  the innermost activation's arguments (or `null`).
+
+Left failing: `block-scoped-functions-annex-b-arguments.js` and
+`regress-602621.js` expect a block `function arguments` to replace the
+arguments object, but FunctionDeclarationInstantiation appends `"arguments"`
+to parameterNames when the arguments object is needed, which disables the
+Annex B binding (V8 agrees; `annexB/language/function-code/block-decl-func-skip-arguments.js`).
+`block-scoped-functions-annex-b-eval.js` needs the Annex B store from a
+direct eval inside `with` to bypass the object environment.
+`module-export-name-star.js` needs namespace imports to use an internal name
+other than the atom `"*"`, which changes the bytecode format.
+`quote-string-for-nul-character.js` needs `Intl.Collator`.
+
+### 37. Atomics in the gated run, Atomics.waitAsync, and all of staging
+
+**`Atomics` had been silently skipped.** `test262.conf` listed
+`Atomics=!tcc # atomics are broken…`; run-test262 took the inline comment as
+part of the value, so the feature was never enabled. The comment is on its
+own line now. Fixes this exposed:
+
+- `ValidateAtomicAccess` reads the length before coercing the index, write
+  operations reject an immutable `ArrayBuffer` before coercing anything, and
+  after argument coercion `RevalidateAtomicAccess` throws a TypeError for a
+  detached or out-of-bounds view and a RangeError only for an index past a
+  valid length; `Atomics.notify` no longer revalidates.
+- `Atomics.wait` loops until it is really notified or its deadline (on the
+  high-resolution clock) has passed, so early or spurious wake-ups of the
+  Windows condition variable are not reported as `"timed-out"`.
+
+**`Atomics.waitAsync`.** Async waiters join the same FIFO waiter list as
+synchronous ones. `notify` marks them and broadcasts a condition variable;
+the owning runtime resolves their promises on its own thread, from
+`JS_ExecutePendingJob` (non-blocking) or from the new host API
+`JS_RunAtomicsWaiters(rt, block)` / `JS_HasAtomicsWaiters(rt)`, which
+run-test262 calls when its job queue is empty (agents and async tests).
+
+**Staging.** All of `test/staging` is now in the gated run. The namespace
+marker atom is no longer the string `"*"` (its text is `<namespace>`, index
+unchanged), so `export {x as "*"}` / `import {"*" as y}` work; a block
+function declared by a direct `eval` inside `with` stores into the variable
+environment, skipping the `with` object (Annex B.3.2.3); `Math.asinh`/`acosh`
+use a `log1p` built on `log` with Kahan's correction, because MinGW's x87
+`log1p` depends on the thread's FPU precision; `RelativeTimeFormat.format`
+compares the unit with its length. Two SpiderMonkey tests remain excluded
+because they contradict the specification and an official test: they expect
+a block-level `function arguments` to replace the arguments object, which
+ES2017 turned off by adding `"arguments"` to parameterNames
+(`annexB/language/function-code/block-decl-func-skip-arguments.js`).
+
+The run-test262 `monotonicNow` clock uses the high-resolution timer instead
+of `GetTickCount64` (16 ms granularity on Windows).
+
+Result: **0/102988** with only those two files excluded and nothing skipped.
+

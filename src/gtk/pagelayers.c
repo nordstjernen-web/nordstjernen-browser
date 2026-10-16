@@ -550,8 +550,7 @@ pl_snapshot_doc_layer(const NsPageLayers *pl, int layer, GtkSnapshot *snapshot,
 void
 ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
                         double width, double height, double raster,
-                        double scroll_x, double scroll_y,
-                        NsPageLayersUnder under, gpointer under_data)
+                        double scroll_x, double scroll_y)
 {
     if (!pl || !pl->active || !(raster > 0)) return;
     graphene_rect_t area = GRAPHENE_RECT_INIT(0, 0, (float)width,
@@ -562,8 +561,6 @@ ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
     long k0 = (long)floor(oy / pl->tile_h);
     long k1 = (long)floor((oy + height * raster - 1) / pl->tile_h);
     gtk_snapshot_push_clip(snapshot, &area);
-    if (under)
-        under(snapshot, ox, oy, under_data);
     for (int layer = 0; layer <= pl->n_vp; layer++) {
         if (layer > 0 && (guint)layer <= pl->vp->len)
             pl_snapshot_view_layer(pl, g_ptr_array_index(pl->vp, layer - 1),

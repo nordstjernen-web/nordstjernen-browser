@@ -573,6 +573,7 @@ render_style_tables_equal(GHashTable *a, GHashTable *b)
     return TRUE;
 }
 
+#ifdef NS_MOBILE
 static const ns_node *
 render_find_viewport_meta(const ns_node *n, int depth)
 {
@@ -625,6 +626,13 @@ render_effective_viewport_width(const ns_render_ctx *c)
     if (hint > width) width = hint;
     return width;
 }
+#else
+static double
+render_effective_viewport_width(const ns_render_ctx *c)
+{
+    return c->viewport_width;
+}
+#endif
 
 static double
 render_pass_begin(const ns_render_ctx *c)

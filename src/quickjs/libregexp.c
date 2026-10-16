@@ -3515,8 +3515,16 @@ static void re_prefilter_init(REPrefilter *pf, const uint8_t *pc,
     }
 }
 
+static bool re_inside_pair(const uint16_t *p, const uint8_t *cbuf,
+                           int cbuf_type)
+{
+    return cbuf_type == 2 && (const uint8_t *)p > cbuf &&
+           is_lo_surrogate(*p) && is_hi_surrogate(p[-1]);
+}
+
 static const uint8_t *re_prefilter_skip(const REPrefilter *pf,
                                         const uint8_t *cptr,
+                                        const uint8_t *cbuf,
                                         const uint8_t *cbuf_end, int cbuf_type)
 {
     if (cbuf_type == 0) {
@@ -3541,13 +3549,13 @@ static const uint8_t *re_prefilter_skip(const REPrefilter *pf,
                 want = get_hi_surrogate(pf->c);
             }
             for(; p < end; p++) {
-                if (*p == want)
+                if (*p == want && !re_inside_pair(p, cbuf, cbuf_type))
                     return (const uint8_t *)p;
             }
             return NULL;
         }
         for(; p < end; p++) {
-            if (re_prefilter_test(pf, *p))
+            if (re_prefilter_test(pf, *p) && !re_inside_pair(p, cbuf, cbuf_type))
                 return (const uint8_t *)p;
         }
         return NULL;
@@ -3570,7 +3578,7 @@ static intptr_t re_exec_search(REExecContext *s, uint8_t **capture,
             if (cptr != s->cbuf)
                 return 0;
         } else {
-            cptr = re_prefilter_skip(pf, cptr, cbuf_end, cbuf_type);
+            cptr = re_prefilter_skip(pf, cptr, s->cbuf, cbuf_end, cbuf_type);
             if (!cptr)
                 return 0;
         }

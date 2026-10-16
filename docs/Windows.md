@@ -7,7 +7,7 @@ Nordstjernen on Windows. The Windows CI workflow
 (`.github/workflows/windows.yml`) is the authoritative spec; what
 follows is the same recipe verified on a local Windows 11 box.
 
-The Windows build uses **MSYS2 / MINGW64** with the same toolchain
+The Windows build uses **MSYS2 / UCRT64** with the same toolchain
 the CI workflow installs. No Visual Studio, no MSVC, no vcpkg.
 The rationale is identical to the macOS Homebrew path: one
 package source, audited DLLs, and the resulting binary is a
@@ -22,32 +22,32 @@ Install MSYS2 (use `winget` if you have it):
 winget install -e --id MSYS2.MSYS2
 ```
 
-Open the **MSYS2 MINGW64** shell (not the plain MSYS shell — the
-window title and prompt must say `MINGW64`) and install the build
+Open the **MSYS2 UCRT64** shell (not the plain MSYS shell — the
+window title and prompt must say `UCRT64`) and install the build
 and runtime dependencies:
 
 ```sh
 pacman -Sy --noconfirm --needed \
     base-devel \
     git \
-    mingw-w64-x86_64-clang \
-    mingw-w64-x86_64-pkgconf \
-    mingw-w64-x86_64-meson \
-    mingw-w64-x86_64-ninja \
-    mingw-w64-x86_64-ccache \
-    mingw-w64-x86_64-gtk4 \
-    mingw-w64-x86_64-libepoxy \
-    mingw-w64-x86_64-curl \
-    mingw-w64-x86_64-ca-certificates \
-    mingw-w64-x86_64-uchardet \
-    mingw-w64-x86_64-libpsl \
-    mingw-w64-x86_64-sqlite3 \
-    mingw-w64-x86_64-libwebp \
-    mingw-w64-x86_64-SDL2 \
-    mingw-w64-x86_64-ffmpeg
+    mingw-w64-ucrt-x86_64-clang \
+    mingw-w64-ucrt-x86_64-pkgconf \
+    mingw-w64-ucrt-x86_64-meson \
+    mingw-w64-ucrt-x86_64-ninja \
+    mingw-w64-ucrt-x86_64-ccache \
+    mingw-w64-ucrt-x86_64-gtk4 \
+    mingw-w64-ucrt-x86_64-libepoxy \
+    mingw-w64-ucrt-x86_64-curl \
+    mingw-w64-ucrt-x86_64-ca-certificates \
+    mingw-w64-ucrt-x86_64-uchardet \
+    mingw-w64-ucrt-x86_64-libpsl \
+    mingw-w64-ucrt-x86_64-sqlite3 \
+    mingw-w64-ucrt-x86_64-libwebp \
+    mingw-w64-ucrt-x86_64-SDL2 \
+    mingw-w64-ucrt-x86_64-ffmpeg
 ```
 
-`mingw-w64-x86_64-ffmpeg` is **required**, not optional: meson fails on
+`mingw-w64-ucrt-x86_64-ffmpeg` is **required**, not optional: meson fails on
 Windows without the `libav*` libraries (version 6.0 or newer), which carry
 inline WebM — VP9/VP8 video plus Opus/Vorbis audio. MSYS2's build is
 GPL-configured, which is fine for a local developer build; the
@@ -57,7 +57,7 @@ redistributable packages instead link the minimal LGPL FFmpeg that
 `git` is needed because the first `meson setup` clones the ns-pango
 subproject (`subprojects/ns-pango.wrap`). MSYS2's stock `gtk4` must be
 4.22.1 or newer — meson enforces that floor on Windows.
-`mingw-w64-x86_64-libavif` and `mingw-w64-x86_64-libjxl` are optional and
+`mingw-w64-ucrt-x86_64-libavif` and `mingw-w64-ucrt-x86_64-libjxl` are optional and
 add AVIF and JPEG XL decoding (CI installs both).
 
 This pulls in roughly 600 MB of runtime + headers. `pacman -Syu`
@@ -67,17 +67,17 @@ rolling latest.
 A few of these pull in transitively but are listed explicitly so a
 fresh box gets them in one command:
 
-- `mingw-w64-x86_64-ca-certificates` is a hard dependency of
-  `mingw-w64-x86_64-curl`, so it always arrives with curl. It
+- `mingw-w64-ucrt-x86_64-ca-certificates` is a hard dependency of
+  `mingw-w64-ucrt-x86_64-curl`, so it always arrives with curl. It
   supplies the CA bundle for dev builds —
   `src/net.c::ns_net_resolve_ca_bundle` lists
-  `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` among its Windows
+  `C:/msys64/ucrt64/etc/ssl/certs/ca-bundle.crt` among its Windows
   fallback paths, so dev builds reach `https://` without any
   env-var fiddling.
-- `mingw-w64-x86_64-uchardet` is the charset detector used by
+- `mingw-w64-ucrt-x86_64-uchardet` is the charset detector used by
   `ns_html_decode_body`. Per `CLAUDE.md` it's a hard dependency;
   without it `meson setup` fails the `uchardet` pkg-config check.
-- `mingw-w64-x86_64-libwebp` is a hard build dependency for
+- `mingw-w64-ucrt-x86_64-libwebp` is a hard build dependency for
   WebP. Both lossy VP8 — used by the BBC, Wikipedia thumbnails,
   and most modern CDNs — and lossless VP8L decode in-tree via
   `src/image_webp.c` (animated WebP too); no gdk-pixbuf loader or
@@ -85,7 +85,7 @@ fresh box gets them in one command:
 
 ## Build
 
-From the MINGW64 shell, in the checkout:
+From the UCRT64 shell, in the checkout:
 
 ```sh
 cd /c/dev/nordstjernen
@@ -113,8 +113,6 @@ Build artifacts:
   sandboxed renderer the shell spawns per tab. Ship it next to
   `nordstjernen.exe` (the packaging scripts do).
 - `builddir/src/nordstjernen-audio.exe` — the SDL2 audio helper.
-- `builddir/src/nordstjernen-video.exe` — the MSE video helper (built
-  with libav).
 - `builddir/src/nordstjernen-launcher.exe` — the small Win32 launcher
   that `scripts/pack-windows.sh` installs as the bundle's
   `nordstjernen.exe`.
@@ -122,8 +120,8 @@ Build artifacts:
 - `builddir/src/lexbor/liblexbor_static.a`
 
 Running the exe directly out of `builddir` works as long as the
-MSYS2 mingw64 `bin` directory is on `PATH` (it is inside the
-MINGW64 shell; from PowerShell, prepend `C:\msys64\mingw64\bin`).
+MSYS2 ucrt64 `bin` directory is on `PATH` (it is inside the
+UCRT64 shell; from PowerShell, prepend `C:\msys64\ucrt64\bin`).
 PowerShell smoke launches should use `scripts\smoke-windows.ps1`,
 which sets that DLL search path before creating the process and
 suppresses Windows loader dialog boxes if a dependency is still
@@ -147,7 +145,7 @@ folder that runs on a Windows machine with no MSYS2 install. It:
    real GTK shell as `app/nordstjernen-ui.exe`, copies
    `app/nordstjernen-renderer.exe` (and `app/nordstjernen-audio.exe`
    when built), and transitively resolves every
-   imported DLL via `objdump -p`, pulling each one from `/mingw64/bin/`
+   imported DLL via `objdump -p`, pulling each one from `/ucrt64/bin/`
    into `app/` (system DLLs like `KERNEL32.dll` are skipped because
    they aren't found there).
 2. Copies the GTK runtime data the binary needs at startup:
@@ -167,7 +165,7 @@ folder that runs on a Windows machine with no MSYS2 install. It:
    the public executable name and to show a clear error if a user runs
    it from inside the ZIP before extracting the whole folder.
 
-Run it from the MINGW64 shell:
+Run it from the UCRT64 shell:
 
 ```sh
 ./scripts/pack-windows.sh
@@ -204,10 +202,10 @@ LZMA-compressed). It runs `scripts/pack-windows.sh` first to populate
 One-time tooling install — NSIS only, the bundle deps cover the rest:
 
 ```sh
-pacman -S --noconfirm --needed mingw-w64-x86_64-nsis
+pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-nsis
 ```
 
-Build the installer from the MINGW64 shell:
+Build the installer from the UCRT64 shell:
 
 ```sh
 ./scripts/pack-windows-installer.sh
@@ -316,7 +314,7 @@ fetch fails with `error adding trust anchors from file:
 ca-bundle.crt` (or the equivalent OpenSSL error).
 
 The file `ca-bundle.crt` we ship is the one packaged by MSYS2 as
-`mingw-w64-x86_64-ca-certificates`, which itself is sourced from
+`mingw-w64-ucrt-x86_64-ca-certificates`, which itself is sourced from
 the Mozilla NSS / `certdata.txt` curated root list — the same
 source Firefox uses. We bundle it because:
 
@@ -325,8 +323,8 @@ source Firefox uses. We bundle it because:
   also sets `CURLSSLOPT_NATIVE_CA`, asking libcurl to consult that
   store, but the bundled file keeps a known root set available
   regardless of what the store holds.
-- The mingw libcurl is compiled with a default CA path of
-  `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt`. That path
+- The MSYS2 libcurl is compiled with a default CA path of
+  `C:/msys64/ucrt64/etc/ssl/certs/ca-bundle.crt`. That path
   only exists on a machine with MSYS2 installed; on a fresh
   user box it is missing.
 
@@ -341,7 +339,7 @@ source Firefox uses. We bundle it because:
    Homebrew-style `../etc/...` paths). In the redistributable bundle,
    `<exe_dir>` is `app/`.
 4. On Windows: the MSYS2 install paths
-   (`C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` and friends).
+   (`C:/msys64/ucrt64/etc/ssl/certs/ca-bundle.crt` and friends).
 
 If found, the resolved path is applied to every `curl_easy`
 handle via `CURLOPT_CAINFO` before `curl_easy_perform`. The
