@@ -915,6 +915,7 @@ ns_box_free(ns_box *box)
             g_free(cur->media->bg_image_src);
             g_free(cur->media->marker_image_src);
             g_free(cur->media->border_image_src);
+            g_free(cur->media->mask_image_src);
             if (cur->media->bg_layer_srcs)
                 g_ptr_array_free(cur->media->bg_layer_srcs, TRUE);
             if (cur->media->bg_layer_images)
@@ -1622,19 +1623,17 @@ collect_box_bg_image(ns_box *box, const ns_style *s)
     gboolean any_url = FALSE;
     for (const ns_css_value *l = bg; l; l = l->next_layer)
         if (l->kind == NS_CSS_V_URL && l->u.url) { any_url = TRUE; break; }
-    const ns_css_value *mask =
-        (s && s->values[NS_CSS_MASK_IMAGE] &&
-         s->values[NS_CSS_MASK_IMAGE]->kind == NS_CSS_V_URL &&
-         s->values[NS_CSS_MASK_IMAGE]->u.url)
-            ? s->values[NS_CSS_MASK_IMAGE]
-            : NULL;
-    if (!any_url && !mask) return;
-    ns_box_media *m = ns_box_media_ensure(box);
-    if (!any_url) {
-        m->bg_image_src = g_strdup(mask->u.url);
-        m->bg_image = collect_peek_image(m->bg_image_src);
-        return;
+    const ns_css_value *mask = NULL;
+    for (const ns_css_value *l = s ? s->values[NS_CSS_MASK_IMAGE] : NULL; l;
+         l = l->next_layer)
+        if (l->kind == NS_CSS_V_URL && l->u.url) { mask = l; break; }
+    if (mask) {
+        ns_box_media *mm = ns_box_media_ensure(box);
+        mm->mask_image_src = g_strdup(mask->u.url);
+        mm->mask_image = collect_peek_image(mm->mask_image_src);
     }
+    if (!any_url) return;
+    ns_box_media *m = ns_box_media_ensure(box);
     if (bg->next_layer) {
         m->bg_layer_srcs = g_ptr_array_new_with_free_func(g_free);
         m->bg_layer_images = g_ptr_array_new();
@@ -18332,7 +18331,7 @@ collect_images_walk(const ns_box *b, GPtrArray *out)
     if (!b) return;
     if (b->kind == NS_BOX_IMAGE) g_ptr_array_add(out, (gpointer)b);
     if (b->media && (b->media->bg_image_src || b->media->marker_image_src ||
-                     b->media->border_image_src))
+                     b->media->border_image_src || b->media->mask_image_src))
         g_ptr_array_add(out, (gpointer)b);
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         collect_images_walk(c, out);
