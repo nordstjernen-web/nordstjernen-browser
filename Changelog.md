@@ -3,6 +3,11 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: the viewport takes its `overflow` from the root element, and
+  from `<body>` only when the root's `overflow` is `visible`, as CSS
+  Overflow specifies. Any `overflow: hidden` on `<html>` or `<body>`
+  locked the page, so a page styling `html { overflow: auto }` and
+  `body { overflow: hidden }` could not scroll (DuckDuckGo results).
 * Layout: a grid container whose height comes from its parent, as a
   stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
   against that height. The rows were sized as if the height were
