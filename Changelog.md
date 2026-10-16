@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* DOM: an empty inline element (`<span></span>`, an empty link)
+  reports a zero-width rectangle at its place in the line from
+  `getBoundingClientRect()` and `getClientRects()`, as tall as its
+  font. It used to report an empty rectangle at the page's top-left
+  corner, so scripts that measure such markers (Wikipedia's citation
+  metadata spans, scroll anchors) saw them at 0,0.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
