@@ -1390,6 +1390,57 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     return a8;
 }
 
+static double
+svg_filter_blur(svg_ctx *ctx, const ns_node *n)
+{
+    const char *fv = svg_prop(n, "filter");
+    if (!fv) return 0;
+    char *id = svg_url_id(fv, NULL);
+    if (!id) return 0;
+    const ns_node *f = svg_by_id(ctx, id);
+    g_free(id);
+    if (!f || !f->name || strcmp(f->name, "filter") != 0) return 0;
+    double variance = 0;
+    for (const ns_node *c = f->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        if (strcmp(c->name, "feGaussianBlur") != 0) return 0;
+        const char *in = ns_element_get_attr(c, "in");
+        if (in && *in && strcmp(in, "SourceGraphic") != 0) return 0;
+        const char *p = ns_element_get_attr(c, "stdDeviation");
+        double sx = 0, sy;
+        if (!p || !svg_num(&p, &sx)) continue;
+        if (svg_num(&p, &sy)) sx = MAX(sx, sy);
+        if (sx > 0) variance += sx * sx;
+    }
+    return sqrt(variance);
+}
+
+static void
+svg_blur_source(cairo_t *cr, double sigma)
+{
+    cairo_surface_t *group = NULL;
+    if (cairo_pattern_get_surface(cairo_get_source(cr), &group) !=
+            CAIRO_STATUS_SUCCESS || !group)
+        return;
+    cairo_matrix_t m;
+    cairo_get_matrix(cr, &m);
+    double dsx = 1, dsy = 1;
+    cairo_surface_get_device_scale(group, &dsx, &dsy);
+    double scale = sqrt(fabs(m.xx * m.yy - m.xy * m.yx)) * MAX(dsx, dsy);
+    cairo_surface_t *img = cairo_surface_map_to_image(group, NULL);
+    if (cairo_surface_status(img) == CAIRO_STATUS_SUCCESS &&
+        cairo_image_surface_get_format(img) == CAIRO_FORMAT_ARGB32) {
+        cairo_surface_flush(img);
+        ns_paint_blur_argb(cairo_image_surface_get_data(img),
+                           cairo_image_surface_get_stride(img),
+                           cairo_image_surface_get_width(img),
+                           cairo_image_surface_get_height(img),
+                           sigma * scale);
+        cairo_surface_mark_dirty(img);
+    }
+    cairo_surface_unmap_image(group, img);
+}
+
 static void
 svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
@@ -1871,7 +1922,8 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
     svg_apply_transform_attr(ctx, n, "transform");
 
     cairo_surface_t *mask = svg_mask_surface(ctx, n, &st);
-    gboolean grouped = opacity < 1.0 || mask != NULL;
+    double blur = svg_filter_blur(ctx, n);
+    gboolean grouped = opacity < 1.0 || mask != NULL || blur > 0;
     if (grouped) cairo_push_group(cr);
 
     svg_apply_clip(ctx, n, &st);
@@ -1968,6 +2020,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
 
     if (grouped) {
         cairo_pop_group_to_source(cr);
+        if (blur > 0) svg_blur_source(cr, blur);
         if (mask) {
             cairo_save(cr);
             cairo_identity_matrix(cr);
