@@ -6404,6 +6404,7 @@ typedef struct ns_text_measure {
 } ns_text_measure;
 
 #define NS_TEXT_MEASURE_CACHE_MAX 32768
+#define NS_ASCII_MIN_WIDTH_MAX_WORDS 64
 
 typedef struct text_measure_key {
     guint                   hash;
@@ -7286,36 +7287,42 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
         keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "pre"))
         return measure_natural_width(box, parent_style);
 
-    const char *best = NULL;
-    gsize best_len = 0;
+    gsize text_len = strlen(box->text);
+    NsPangoLayout *layout = NULL;
+    double widest = 0;
+    int words = 0;
     const char *run = NULL;
     gsize run_len = 0;
     for (const char *p = box->text;; p++) {
         gboolean br = *p == '\0' || *p == ' ' || *p == '\t' ||
                       *p == '\r' || *p == '\n' || *p == '\f';
-        if (br) {
-            if (run_len > best_len) {
-                best = run;
-                best_len = run_len;
-            }
-            run = NULL;
-            run_len = 0;
-            if (*p == '\0') break;
-        } else {
+        if (!br) {
             if (!run) run = p;
             run_len++;
+            continue;
         }
+        if (run_len == text_len) return measure_natural_width(box, parent_style);
+        if (run_len > 0) {
+            if (++words > NS_ASCII_MIN_WIDTH_MAX_WORDS) {
+                g_object_unref(layout);
+                return -1;
+            }
+            if (!layout) {
+                layout = make_pango_layout(parent_style);
+                ns_pango_layout_set_width(layout, -1);
+            }
+            ns_pango_layout_set_text(layout, run, (int)run_len);
+            ns_text_measure m;
+            text_measure(layout, &m);
+            double w = ceil((double)m.logical.width / NS_PANGO_SCALE);
+            if (w > widest) widest = w;
+        }
+        run = NULL;
+        run_len = 0;
+        if (*p == '\0') break;
     }
-    if (best_len == 0) return 0;
-    if (best_len == strlen(box->text)) return measure_natural_width(box, parent_style);
-
-    NsPangoLayout *layout = make_pango_layout(parent_style);
-    ns_pango_layout_set_width(layout, -1);
-    ns_pango_layout_set_text(layout, best, (int)best_len);
-    ns_text_measure m;
-    text_measure(layout, &m);
-    g_object_unref(layout);
-    return ceil((double)m.logical.width / NS_PANGO_SCALE);
+    if (layout) g_object_unref(layout);
+    return widest;
 }
 
 static void shift_box_tree(ns_box *b, double dx, double dy);
@@ -9866,6 +9873,15 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
 
 static int g_min_measure_depth;
 
+static gboolean
+box_is_compressible_control(const ns_box *box)
+{
+    const ns_node *n = box->dom;
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    return strcmp(n->name, "input") == 0 || strcmp(n->name, "textarea") == 0 ||
+           strcmp(n->name, "select") == 0;
+}
+
 static double measure_min_width(ns_box *box, const ns_style *parent_style);
 
 static double
@@ -9956,7 +9972,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (box->style) {
         const ns_css_value *wv = box->style->values[NS_CSS_WIDTH];
         if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
-            double w = length_resolve(wv, 0, -1);
+            double w = value_is_percent(wv) && !box_is_compressible_control(box)
+                ? -1 : length_resolve(wv, 0, -1);
             if (w >= 0) {
                 if (ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING],
                                       "border-box")) {
@@ -10010,6 +10027,10 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
     if (!c->style || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
         return min_width_of(c, child_style);
     const ns_style *s = c->style;
+    if (box_is_compressible_control(c) &&
+        (value_is_percent(s->values[NS_CSS_WIDTH]) ||
+         value_is_percent(s->values[NS_CSS_MAX_WIDTH])))
+        return 0;
     double min_content = min_content_width_of(c, child_style);
     double preferred = definite_width_limit(c, s->values[NS_CSS_WIDTH]);
     double contribution = flex_contribution_clamp_to_basis(
@@ -10536,7 +10557,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         }
         double natural_sum_pre = 0;
         for (guint i = 0; i < max_cols; i++) natural_sum_pre += col_widths[i];
-        if (has_explicit_cols || (natural_sum_pre > col_avail && col_avail > 0)) {
+        if (has_explicit_cols || natural_sum_pre > col_avail) {
             for (ns_box *row = box->first_child; row; row = row->next_sibling) {
                 if (row->kind != NS_BOX_TABLE_ROW) continue;
                 guint col = 0;
@@ -10569,7 +10590,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         }
         double natural_sum = 0;
         for (guint i = 0; i < max_cols; i++) natural_sum += col_widths[i];
-        if (natural_sum > col_avail && col_avail > 0) {
+        if (natural_sum > col_avail) {
             double min_sum = 0;
             for (guint i = 0; i < max_cols; i++) min_sum += col_min[i];
             if (min_sum >= col_avail) {

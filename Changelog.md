@@ -3,6 +3,14 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: an auto-width table in a container with no room (width 0)
+  shrinks to its min-content width instead of growing to its max-content
+  width, and a cell holding a percentage-width table counts that table's
+  min-content. The min-content width of plain text is its widest word,
+  not its word with the most letters ("alpha beta gamma" measured
+  "alpha"). Wikipedia's collapsed navbox rows, which are zero-width
+  absolutely positioned blocks, laid their cells out 400px wide or more
+  where other browsers use about 230px.
 * Layout: `white-space: nowrap` (and `pre`) on an inline element inside
   wrapping text keeps the element on one line, and spaces on either side
   of a bidi isolate (an inline `<li>`, `<bdi>` or `[dir]` element)
