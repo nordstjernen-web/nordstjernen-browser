@@ -5180,16 +5180,44 @@ build_video_box(const ns_node *n)
     return box;
 }
 
+static gboolean
+pseudo_text_collapses(const ns_style *ps)
+{
+    const char *ws = ns_style_keyword(ps, NS_CSS_WHITE_SPACE);
+    return !ws || strcmp(ws, "normal") == 0 || strcmp(ws, "nowrap") == 0;
+}
+
+static char *
+pseudo_block_text(const ns_style *ps, const char *txt)
+{
+    if (!pseudo_text_collapses(ps)) return g_strdup(txt);
+    GString *out = g_string_new(NULL);
+    gboolean pending_space = FALSE;
+    for (const char *p = txt; *p; p++) {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f') {
+            pending_space = out->len > 0;
+            continue;
+        }
+        if (pending_space) g_string_append_c(out, ' ');
+        pending_space = FALSE;
+        g_string_append_c(out, *p);
+    }
+    return g_string_free(out, FALSE);
+}
+
 static ns_box *
 pseudo_block_with_text(const ns_style *ps, const char *txt)
 {
     ns_box *block = box_new(NS_BOX_BLOCK);
     block->style = ps;
     collect_box_bg_image(block, ps);
-    if (txt && *txt) {
+    char *text = txt ? pseudo_block_text(ps, txt) : NULL;
+    if (text && *text) {
         ns_box *txtrun = box_new_inline();
-        txtrun->text = g_strdup(txt);
+        txtrun->text = text;
         box_append_child(block, txtrun);
+    } else {
+        g_free(text);
     }
     return block;
 }

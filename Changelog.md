@@ -3,6 +3,12 @@ Changelog:
 
 1.0.32:
 ======
+* Layout: the text of a block `::before`/`::after` collapses its white
+  space like any other text, so the widespread clearfix
+  `content: " "; display: block; clear: both` no longer adds an empty
+  line under every container that uses it. NPR's front page came out
+  700px taller than in Chromium, EFF's tagline sat 64px low, and apple.com
+  and Smashing Magazine had gaps between sections.
 * Layout: a line break from `<br>` drops the collapsible spaces around it,
   so the next line no longer starts with a space ("one <br> two" put
   " two" on the second line), and a `<br>` styled `display: block` or
