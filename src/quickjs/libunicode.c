@@ -922,6 +922,13 @@ static int unicode_compose_pair(uint32_t c0, uint32_t c1)
 }
 
 /* return the combining class of character c (between 0 and 255) */
+static int unicode_get_cc(uint32_t c);
+
+int lre_combining_class(uint32_t c)
+{
+    return unicode_get_cc(c);
+}
+
 static int unicode_get_cc(uint32_t c)
 {
     uint32_t code, n, type, cc, c1, b;

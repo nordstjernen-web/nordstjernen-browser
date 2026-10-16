@@ -98,24 +98,22 @@ ECMA-402 surface backed by ICU, under `Libraries/LibJS/Runtime/Intl/`:
 | `Intl.RelativeTimeFormat` | "3 days ago" style formatting |
 | `Intl.Segmenter`        | Grapheme/word/sentence segmentation |
 
-**Nordstjernen status: implemented natively in `src/js_intl.c`.** All ten
-constructors plus `getCanonicalLocales` and `supportedValuesOf` are
-provided over the public QuickJS C API, ICU-free. `Number/Date/String`'s
-`toLocaleString`/`toLocale*String`/`localeCompare` are wired through it,
-so they are now locale-aware (`localeCompare` uses GLib's Unicode
-casefold/normalize/collate; `Segmenter` uses Pango grapheme/word/sentence
-boundaries; `PluralRules` ships the common CLDR rule families). This
-supersedes — and removed — the older JavaScript `Intl` polyfill in
-`data/js/polyfills.js`, and adds `DisplayNames` and `DurationFormat`,
-which that polyfill lacked.
+**Nordstjernen status: implemented in the engine (`src/quickjs/quickjs-intl*.c`),
+generated from CLDR without ICU.** All ten constructors plus
+`getCanonicalLocales` and `supportedValuesOf` pass test262 `intl402`.
+`Number`/`BigInt`/`Date`/`Array`/`String` `toLocaleString`, `toLocale*String`,
+`localeCompare` and the Temporal `toLocaleString` methods go through it.
+The browser passes `navigator.language` in as the default locale
+(`JS_SetDefaultLocale`).
 
-The deliberate limitation versus LibJS is **data depth, not API
-coverage**: without ICU/CLDR, locale-specific month/weekday names,
-display names, and number/currency symbols come from compact built-in
-tables centred on English and a set of common European locales, with
-graceful fallback. Formatting is correct for the common cases; it is not
-full ECMA-402 conformance for every locale. This is the intended trade-off
-under the project's no-ICU/no-bloat constraint.
+The limitation versus LibJS is **data depth, not API coverage**: the data
+is generated from CLDR by `scripts/gen-intl-data.py` and kept compact by
+tiering. Numbers, dates, plural rules and list patterns cover every
+language with CLDR modern coverage; unit and currency names, relative
+times and non-Gregorian calendar patterns cover 30 languages; time-zone
+and display names 13; collation is a compact multi-level comparison with
+per-language tailorings rather than full UCA. See
+`docs/quickjs-ecma-specification-compliance.md`.
 
 ### 2. Temporal — modern date/time API
 
@@ -137,24 +135,19 @@ proposal under `Libraries/LibJS/Runtime/Temporal/`:
 plus the supporting calendar, time-zone, and ISO-8601 parsing
 machinery.
 
-**Nordstjernen status: implemented natively in `src/js_date.c`.** All
-nine types above are provided, sharing the civil-date math in
-`src/datetime.c`: `from()` (ISO-string and property-bag forms),
-`toString()`/`toJSON()`, the full getter surface (`year`, `monthCode`,
-`dayOfWeek`, `daysInMonth`, `inLeapYear`, `weekOfYear`, …),
-`add`/`subtract` (with ISO calendar month-overflow constrain and
-time/day carry), `with`, `until`/`since`, `equals`/`compare`, the
-`toPlainDate`/`toPlainTime`/`toPlainDateTime`/`toInstant` conversions,
-and `Temporal.Now`. This replaces the former empty `Temporal` stub.
+**Nordstjernen status: implemented in the engine** (`src/quickjs/quickjs-temporal*.c`,
+registered by `JS_AddIntrinsicTemporal`), so it is available to every QuickJS
+context, including workers and `run-test262`. All nine types are complete
+against the current specification, including `round()`, `total()`,
+`relativeTo`, every rounding mode and the RFC 9557 string grammar, with
+exact 128-bit nanosecond arithmetic. `Date.prototype.toTemporalInstant` is
+provided too. test262's `built-ins/Temporal` passes in full.
 
-Deliberate limitations versus LibJS: the calendar is **ISO-8601 only**
-(no Hebrew/Islamic/Japanese/… calendars); time zones are limited to
-**UTC and fixed offsets** (no IANA tz database, so `Now.*ISO()` and
-`ZonedDateTime` are UTC-based); `Instant`/`ZonedDateTime` carry
-nanosecond precision in a signed 64-bit nanosecond field (≈ years
-1678–2262); and `round()`/`total()`/`largestUnit`-style `since`/`until`
-balancing are not implemented. The common date arithmetic and
-formatting paths are correct.
+Current limitations: the calendar is **ISO-8601 only** and the available
+named time zone is **`UTC`** (plus fixed offsets), so `Temporal.Now`
+reports UTC. Calendar and time-zone handling sit behind small internal
+interfaces (`quickjs-temporal-calendar.c`, `quickjs-temporal-tz.c`) so
+IANA zones and further calendars can be added without touching the types.
 
 ### 3. JSON modules
 
@@ -250,7 +243,7 @@ set is already present in the bundled QuickJS.
 ## Implications for Nordstjernen
 
 - **Intl** and **Temporal** are now provided natively in C
-  (`src/js_intl.c`, `src/js_date.c`) and verified through the headless
+  (the engine's `src/quickjs/quickjs-intl*.c` and `src/quickjs/quickjs-temporal*.c`) and verified through the headless
   `--eval` harness. Sites calling `new Intl.NumberFormat(...)`,
   `Intl.DateTimeFormat`, `Temporal.Now.plainDateISO()`, etc. work. The
   ICU-free trade-off is reduced locale/calendar/time-zone fidelity, not

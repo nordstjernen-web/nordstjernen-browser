@@ -127,13 +127,13 @@ standards mode (see [§13](#13-the-html-syntax)).
 | Element | Status | Notes |
 |---------|:--:|------|
 | `title` | ✅ | window/tab title; `title.text` IDL attribute returns/sets the child text content per spec |
-| `base` (`href`, `target`) | ✅ | `href` feeds URL resolution via `ns_url_resolve` |
+| `base` (`href`, `target`) | ✅ | the first `href` (subject to CSP `base-uri`) is the document base URL for scripts, stylesheets, images, the speculative preloader, link and form navigation, media and the favicon (`ns_js_base_url_for_document`); referrer, CSP `'self'` and mixed-content checks keep the document URL |
 | `link rel="stylesheet"` | ✅ | fetched and cascaded (`src/css.c`) |
 | `link rel="icon"` | ✅ | favicon fetched as image |
 | `link rel="preload"`/`prefetch` | ✅ | fetched early into the disk cache by the speculative-preload scanner (`src/engine.c`); no `as=`-based prioritization |
 | `link rel="preconnect"`/`dns-prefetch` | ✅ | warm the origin's DNS + TLS connection early via libcurl (`ns_net_preconnect_async`) |
 | `meta charset` | ✅ | feeds charset decode |
-| `meta name="viewport"` | 🟡 | parsed; viewport width/height come from `ns_css_set_viewport` (`src/css.c`); not all directives enforced |
+| `meta name="viewport"` | 🟡 | ignored on desktop, as in desktop browsers; Android and iOS widen the layout viewport to a fixed `width=` larger than the screen (`src/render.c`); other directives are not enforced |
 | `meta http-equiv` (CSP, refresh, etc.) | ✅ | CSP/Referrer-Policy honoured where reflected; **declarative refresh is applied**: the `refresh` directive and the HTTP `Refresh` response header are parsed per the WHATWG shared-declarative-refresh steps (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL — `ns_net_parse_refresh` in `src/net.c`), armed on document open (`browser_arm_declarative_refresh` in `src/libnordstjernen.c`, header first then the first `<meta>` in tree order), and after the timeout the navigation is handed to the shell through the pending-nav channel (`ns_browser_take_pending_nav` → the renderer's `X-Nav` header); an armed refresh keeps `ns_browser_animating` true so the shell's frame loop stays alive to deliver it |
 | `meta name="referrer"` | ✅ | Referrer-Policy applied in `src/net.c` |
 | `style` (inline sheet) | ✅ | parsed and cascaded by `src/css.c` |
@@ -187,7 +187,7 @@ elements (`head title meta link style script noscript template`) to
 | `iframe` | 🟡 | `src`/`srcdoc` load; a **srcless or `about:blank`** frame, when connected, runs the load algorithm — a real same-origin `about:blank` content document is created and a `load` event fires (`ns_js_load_iframe_now`), so script that waits on `iframe.onload` proceeds; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
-| `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and VP9/VP8 WebM (`.webm`, with FFmpeg libav), honouring `autoplay`/`loop`/`muted`/`poster`, play/pause, seeking, volume, `played` and timed events. `MediaSource`/`SourceBuffer` streams use the same standards path: YouTube- and Vimeo-style WebM segments are accumulated in the renderer, video is decoded in `nordstjernen-video`, audio in `nordstjernen-audio`, and old prefix segments are evicted when the page calls `SourceBuffer.remove()`. `SourceBuffer.buffered` exposes the retained demux timestamp range after eviction. Unsupported codecs retain the poster + play overlay. See [media.md](media.md) |
+| `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and VP9/VP8 WebM (`.webm`, with FFmpeg libav), honouring `autoplay`/`loop`/`muted`/`poster`, play/pause, seeking, volume, `played` and timed events. `MediaSource`/`SourceBuffer` streams use the same standards path: YouTube- and Vimeo-style WebM segments are accumulated in the renderer, video is decoded there from the contiguous range around the playhead, audio in `nordstjernen-audio`, and segments are evicted when the page calls `SourceBuffer.remove()`. `SourceBuffer.buffered` reports every disjoint buffered range, so a seek past the buffer makes the player fetch the target segment and playback resumes there. Unsupported codecs retain the poster + play overlay. See [media.md](media.md) |
 | `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) play via the unsandboxed `nordstjernen-audio` helper; for other codecs a click resolves the media URL and reports it over the renderer protocol for an embedder — the GTK shell launches no external player. See [media.md](media.md) |
 | `track` (captions) | 🟡 | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path. **Rendered**: a `<track default>` whose `kind` is `subtitles`/`captions` (the missing-value default) is fetched, its WebVTT parsed into timed cues (`ns_vtt_parse` in `src/video.c` — `[HH:]MM:SS.mmm` timings, cue-setting/identifier/`NOTE` skipping, `<…>` tag and entity stripping), and the cue active at the video's current time is painted as centred captions over the bottom of the inline video (`paint_video_caption` in `src/paint.c`). Only the `default` track auto-shows (per the spec's initial mode); JS `TextTrack.mode` switching and cue positioning settings (`line`/`position`/`align`) are not wired |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
@@ -717,7 +717,7 @@ defects, and will not be added:
 - Plugin content (`embed`/`object` via NPAPI/PPAPI).
 - A broad vendored codec collection. MPEG-1/MP2 and MP3 are in-tree; WebM
   playback uses optional system-provided FFmpeg components and the dedicated
-  audio/video helper processes described in [`media.md`](media.md).
+  audio helper process described in [`media.md`](media.md).
 - **JIT** (interpreter-only, to preserve W^X process-wide).
 - Telemetry, crash reporters, update pingers, "studies".
 - gettext / `.po` localisation tooling. (UI strings *are* translated to

@@ -773,7 +773,7 @@ wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
             "OperationError: getMappedRange: size must be a multiple of 4 "
             "within the mapped range");
     void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, (size_t)sz);
-    if (!p) return JS_ThrowInternalError(ctx, "getMappedRange failed");
+    if (!p) return JS_ThrowRangeError(ctx, "getMappedRange failed");
     JSValue *held = g_new(JSValue, 1);
     *held = JS_DupValue(ctx, this_val);
     JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, (size_t)sz, 0, wg_ab_free,
@@ -864,7 +864,7 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
     desc.mappedAtCreation = mapped ? 1 : 0;
     WGPUBuffer wbuf = wgpuDeviceCreateBuffer(d->device, &desc);
     if (!wbuf)
-        return JS_ThrowInternalError(ctx, "createBuffer: wgpu returned null");
+        return JS_ThrowTypeError(ctx, "createBuffer: wgpu returned null");
 
     JSValue obj = JS_NewObjectClass(ctx, g_buffer_class);
     if (JS_IsException(obj)) return obj;
@@ -2305,7 +2305,7 @@ wg_ctx_getCurrentTexture(JSContext *ctx, JSValueConst this_val,
     if (!c || !c->configured || !c->device)
         return JS_ThrowTypeError(ctx, "InvalidStateError: getCurrentTexture: not configured");
     if (!wg_ctx_ensure_target(c))
-        return JS_ThrowInternalError(ctx, "getCurrentTexture: no target");
+        return JS_ThrowTypeError(ctx, "getCurrentTexture: no target");
     c->pending = TRUE;
     if (JS_IsObject(c->current)) return JS_DupValue(ctx, c->current);
     wgpuTextureAddRef(c->target);
@@ -2597,7 +2597,7 @@ wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
     desc.nextInChain = (WGPUChainedStruct *)&src;
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(d->device, &desc);
     g_free(wgsl);
-    if (!mod) return JS_ThrowInternalError(ctx, "createShaderModule failed");
+    if (!mod) return JS_ThrowTypeError(ctx, "createShaderModule failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_shader_class);
     if (JS_IsException(obj)) return obj;
@@ -2883,7 +2883,7 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     wg_constants_clear(&fs_consts);
     if (vs_entry) JS_FreeCString(ctx, vs_entry);
     if (fs_entry) JS_FreeCString(ctx, fs_entry);
-    if (!pipe) return JS_ThrowInternalError(ctx, "createRenderPipeline failed");
+    if (!pipe) return JS_ThrowTypeError(ctx, "createRenderPipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_pipeline_class);
     if (JS_IsException(obj)) return obj;
@@ -3057,7 +3057,7 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
     desc.entries = entries;
     WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(d->device, &desc);
     if (!layout)
-        return JS_ThrowInternalError(ctx, "createBindGroupLayout failed");
+        return JS_ThrowTypeError(ctx, "createBindGroupLayout failed");
     return wg_make_bgl(ctx, layout);
 }
 
@@ -3105,7 +3105,7 @@ wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
     WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(d->device, &desc);
     wg_hold_release(&hold);
     if (!layout)
-        return JS_ThrowInternalError(ctx, "createPipelineLayout failed");
+        return JS_ThrowTypeError(ctx, "createPipelineLayout failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_pllayout_class);
     if (JS_IsException(obj)) return obj;
@@ -3204,7 +3204,7 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     wg_hold_release(&hold);
     for (size_t i = 0; i < n_owned_views; i++)
         if (owned_views[i]) wgpuTextureViewRelease(owned_views[i]);
-    if (!group) return JS_ThrowInternalError(ctx, "createBindGroup failed");
+    if (!group) return JS_ThrowTypeError(ctx, "createBindGroup failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_bindgroup_class);
     if (JS_IsException(obj)) return obj;
@@ -3544,7 +3544,7 @@ wg_device_createSampler(JSContext *ctx, JSValueConst this_val,
     }
 
     WGPUSampler sampler = wgpuDeviceCreateSampler(d->device, &desc);
-    if (!sampler) return JS_ThrowInternalError(ctx, "createSampler failed");
+    if (!sampler) return JS_ThrowTypeError(ctx, "createSampler failed");
     JSValue obj = JS_NewObjectClass(ctx, g_sampler_class);
     if (JS_IsException(obj)) return obj;
     ns_wg_sampler *s = g_new0(ns_wg_sampler, 1);
@@ -3624,7 +3624,7 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jdim);
 
     WGPUTexture tex = wgpuDeviceCreateTexture(d->device, &desc);
-    if (!tex) return JS_ThrowInternalError(ctx, "createTexture failed");
+    if (!tex) return JS_ThrowTypeError(ctx, "createTexture failed");
     JSValue obj = wg_make_texture(ctx, tex);
     JSValue jbvd = JS_GetPropertyStr(ctx, argv[0], "textureBindingViewDimension");
     if (JS_IsString(jbvd) && JS_IsObject(obj))
@@ -3888,7 +3888,7 @@ wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
     wg_hold_release(&hold);
     wg_constants_clear(&consts);
     if (entry) JS_FreeCString(ctx, entry);
-    if (!pipe) return JS_ThrowInternalError(ctx, "createComputePipeline failed");
+    if (!pipe) return JS_ThrowTypeError(ctx, "createComputePipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_compute_pipe_class);
     if (JS_IsException(obj)) return obj;
@@ -4060,7 +4060,7 @@ wg_device_createRenderBundleEncoder(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, js);
 
     WGPURenderBundleEncoder enc = wgpuDeviceCreateRenderBundleEncoder(d->device, &desc);
-    if (!enc) return JS_ThrowInternalError(ctx, "createRenderBundleEncoder failed");
+    if (!enc) return JS_ThrowTypeError(ctx, "createRenderBundleEncoder failed");
     JSValue obj = JS_NewObjectClass(ctx, g_bundle_encoder_class);
     if (JS_IsException(obj)) { wgpuRenderBundleEncoderRelease(enc); return obj; }
     ns_wg_bundle_encoder *b = g_new0(ns_wg_bundle_encoder, 1);

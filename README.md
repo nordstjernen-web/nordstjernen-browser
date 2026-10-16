@@ -24,6 +24,22 @@ rows fully implemented, 31 partial, 0 absent** (July 2026), besides a handful
 that are non-goals by design: `embed`/`object` plugins, `frame`/`frameset`,
 `applet`/`marquee`, telemetry, and AI-style web APIs.
 
+Conformance is also measured with the shared test suites, run locally
+against a static [web-platform-tests](https://github.com/web-platform-tests/wpt)
+checkout (October 2026). These are the subtests that pass:
+
+| Suite | Passing |
+|-------|---------|
+| WPT `css/` (6,991 test files) | 110,540 of 151,048 subtests (73.2 %) |
+| WPT `html/`, `dom/`, `url/` and related (4,899 test files) | 151,974 of 166,164 subtests (91.5 %) |
+| [test262](https://github.com/tc39/test262) on the QuickJS engine | 82,243 of 82,248 tests run (5 failures) |
+
+The HTML run leaves out the `canvas`, `browsers` and cross-origin
+directories. Tests that need the WPT Python server, such as
+form-submission echo handlers, cannot pass against a static checkout
+and are counted as failures. The test262 count covers the tests run
+after the engine's feature exclusions.
+
 **Security.** Each tab's engine runs in its own sandboxed process (seccomp +
 Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary. No JIT.
 
@@ -55,7 +71,13 @@ DirectComposition). Every other platform builds from source — see
 - **HTML/CSS** — HTML is parsed by the in-tree lexbor engine; the CSS engine
   covers the modern cascade and CSSOM, Media Queries Level 4, container
   queries and units, flex, grid, transforms, gradients, animations and
-  vertical writing modes.
+  vertical writing modes. It also covers CSS Color 4/5 (`oklch()`,
+  `color-mix()`, relative colors, `light-dark()`, `contrast-color()`) and
+  CSS anchor positioning with `@position-try` fallbacks. CSS Shapes
+  (`shape-outside`, `clip-path` basic shapes, `path()` and `shape()`)
+  are parsed, and floats do not yet wrap around a shape. Web Animations
+  composition (`add`/`accumulate`) works for transforms, filters and
+  shapes, and transform lists interpolate through matrix decomposition.
 - **Text layout** — desktop builds shape text with **ns-pango**, a Pango fork
   pinned as a meson subproject that caches finished glyph strings and font
   metrics across layouts, so measuring and painting a run reach HarfBuzz once
@@ -82,8 +104,7 @@ DirectComposition). Every other platform builds from source — see
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and **WebM** (VP9/VP8 +
   Opus/Vorbis) through FFmpeg's libav, which Linux and Windows builds require. MSE/`blob:`
-  streaming and HLS/DASH manifests play through the `nordstjernen-video`
-  helper, and a `<track default>` WebVTT file is drawn over the video. Other
+  streaming and HLS/DASH manifests decode in the renderer too, and a `<track default>` WebVTT file is drawn over the video. Other
   codecs render a poster and play overlay. See [docs/media.md](docs/media.md).
 - **WebGL / WebGPU / WebAssembly** — WebGL 1/2 mapped onto OpenGL ES, on by
   default ([docs/webgl.md](docs/webgl.md)); `navigator.gpu` over

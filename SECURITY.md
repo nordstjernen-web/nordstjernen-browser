@@ -118,8 +118,8 @@ socket, so it normally needs no `/dev/shm` name at all.
   absent from the allow-list. `clone` is allowed only without the
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
-  `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio and
-  video helpers also keep `AF_UNIX` for the sound server). Landlock does
+  `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio
+  helper also keeps `AF_UNIX` for the sound server). Landlock does
   not govern `connect()` to a UNIX socket, so without that rule a
   compromised renderer could reach the session D-Bus and have it start
   programs outside the sandbox. On setups whose EGL lacks the surfaceless
@@ -130,11 +130,11 @@ socket, so it normally needs no `/dev/shm` name at all.
   MP3 (minimp3) always, plus WebM/VP9/VP8 video and Opus/Vorbis audio
   through FFmpeg's `libav*` where it is built in. Video frames decode
   inside the seccomp + Landlock renderer, so attacker-controlled codec
-  bytes stay within the strongest sandbox; audio and out-of-process MSE
-  video decode in the `nordstjernen-audio` / `nordstjernen-video` helper
-  processes, which on Linux run under the **same** Landlock + seccomp
-  profile (`src/security.c`), applied before the first byte is decoded.
-  On macOS and Windows those helpers are not yet syscall-confined, so a
+  bytes stay within the strongest sandbox — MSE streams included; audio
+  decodes in the `nordstjernen-audio` helper process, which on Linux runs
+  under the **same** Landlock + seccomp profile (`src/security.c`),
+  applied before the first byte is decoded. On macOS and Windows that
+  helper is not yet syscall-confined, so a
   decoder memory-safety bug there runs with the helper's own privileges
   (a known gap). A media type outside the in-tree set is not played: the
   renderer shows a poster/overlay and only *resolves* the URL

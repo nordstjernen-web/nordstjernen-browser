@@ -55,13 +55,11 @@ Update Changelog.md
   renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
   commands that ride the render-response `X-Audio` side-channel to the
   shell, which spawns and pumps the helper (`src/gtk/procview.c`).
-  MSE video frames decode in a third process, `nordstjernen-video`
-  (`src/videoproc/main.c`, built when libav is present): the renderer
-  materializes the growing stream to `~/.cache/nordstjernen/msvideo/`
-  and drives it with `video …` lines on the same side-channel; the
-  helper writes BGRA frames into a shm ring that the shell composites
-  over the page surface each tick (see `docs/media.md`). Without the
-  helper (headless, Windows) the renderer decodes in-process as before. The
+  MSE video frames decode in the sandboxed renderer too (`src/video.c`):
+  it keeps the appended segments in memory with their time ranges and
+  feeds the decoder the contiguous buffered range around the playhead,
+  so playback starts on the first media segment and a seek rebuilds the
+  decoder at the segment holding the target (see `docs/media.md`). The
   in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
   vendor further single-file codecs. **WebM is the one FFmpeg-backed
   extension**, over `libav\*` (`libavformat`/`libavcodec`/`libavutil`/
@@ -79,7 +77,15 @@ Update Changelog.md
   is FFmpeg 6.0's library sonames (libavcodec ≥ 60, libavutil ≥ 58, …) — the
   oldest release carrying the `AVChannelLayout` API this code uses. Android
   stays on the external-player path — its dependency sysroot does not
-  cross-build FFmpeg. Other `<audio>` and other `<video>`
+  cross-build FFmpeg. **H.264 video and AAC audio are decoded by the
+  operating system, never by a bundled decoder** (`src/media_os.h`): Media
+  Foundation on Windows (`media_os_mf.c`, mfplat loaded at runtime),
+  VideoToolbox/AudioToolbox on macOS and iOS (`media_os_vt.c`), MediaCodec on
+  Android (`media_os_android.c`) and GStreamer on Linux/BSD
+  (`media_os_gst.c`, auto-detected, `-Dgstreamer`). libav only demuxes MP4
+  for them (builds without libav use the in-tree `src/mp4.c` +
+  `src/video_mp4.c` instead); don't add an H.264/AAC decoder to the LGPL FFmpeg build. Encrypted
+  media (EME/Widevine) is out of scope. Other `<audio>` and other `<video>`
   codecs render a
   poster and play overlay; clicking resolves the media URL in the renderer
   (`ns_browser_media_at`) and reports it over the renderer protocol for
@@ -130,7 +136,7 @@ This repo is driven by Claude in long uninterrupted sessions.
 - **Local machine is the build *and* run oracle.** The repo can be
   driven from either a Linux box (GTK 4 / libcurl / meson / clang +
   an X session at `DISPLAY=:0`) or a Windows 11 box via MSYS2
-  MINGW64 (same toolchain, same meson/ninja invocation; the binary
+  UCRT64 (same toolchain, same meson/ninja invocation; the binary
   is `./builddir/src/gtk/nordstjernen.exe`). Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
@@ -291,7 +297,7 @@ if uchardet can't classify the bytes at all.
 
 Required dependency (Debian/Ubuntu `libwebp-dev`, Fedora/RHEL
 `libwebp-devel`, openSUSE `libwebp-devel`, Alpine `libwebp-dev`,
-MSYS2 `mingw-w64-x86_64-libwebp`, Homebrew `webp`). WebP —
+MSYS2 `mingw-w64-ucrt-x86_64-libwebp`, Homebrew `webp`). WebP —
 lossy VP8 (the dominant variant served by the BBC, Wikipedia
 thumbnails, and most modern CDNs), lossless VP8L, and **animated
 WebP** (via libwebpdemux's `WebPAnimDecoder`, playing like animated
@@ -321,6 +327,11 @@ sudo apt install build-essential pkg-config meson ninja-build \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
+Optional: `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` enables
+H.264/AAC playback through the system GStreamer (which then needs a decoder
+plugin at runtime: `gstreamer1.0-vaapi`/`gstreamer1.0-plugins-bad` for VA-API,
+or `gstreamer1.0-libav`). It is auto-detected.
+
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
 the build works without it and simply does no spell-checking. `libavif-dev` is optional too and adds
@@ -331,7 +342,7 @@ animations, `image/jxl` in `<picture>` and the image `Accept` header);
 `-Djxl=disabled` drops it.
 
 The FFmpeg libav\* dev packages in the command above (MSYS2
-`mingw-w64-x86_64-ffmpeg`, or the LGPL build from
+`mingw-w64-ucrt-x86_64-ffmpeg`, or the LGPL build from
 `scripts/build-ffmpeg-lgpl.sh`) enable inline WebM playback (VP9/VP8 video
 + Opus/Vorbis audio). **Required on Linux and Windows** (`meson setup` fails
 without them, or with a pre-6.0 FFmpeg); auto-detected on macOS, where without

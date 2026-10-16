@@ -32,12 +32,15 @@ nothing imported.
   Audio plays via the unsandboxed `nordstjernen-audio` helper
   (`src/audio/main.c`), which decodes MPEG-1/MP2 (pl_mpeg) and MP3
   (vendored minimp3, `src/audio/minimp3.h`) and outputs through SDL2.
-  MSE video frames decode in the `nordstjernen-video` helper
-  (`src/videoproc/main.c`, built when libav is present); the shell
-  composites its BGRA frames from a shm ring (see `docs/media.md`).
+  MSE video frames decode in the sandboxed renderer, which keeps the
+  appended segments in memory and plays the buffered range around the
+  playhead (see `docs/media.md`).
   When FFmpeg's libav\* system packages are present, the build also
   gains inline WebM (VP9/VP8 video + Opus/Vorbis audio) — never
-  vendored. Other `<audio>`/`<video>` codecs render a poster and
+  vendored. H.264 and AAC are decoded by the operating system (Media
+  Foundation, VideoToolbox/AudioToolbox, MediaCodec, or GStreamer on
+  Linux; `src/media_os*.c`), never by a bundled decoder.
+  Other `<audio>`/`<video>` codecs render a poster and
   play overlay; the renderer resolves the media URL under the
   pointer via `ns_browser_media_at`.
 - UI strings are English-source and translated to the operating-system
@@ -88,7 +91,7 @@ This repo is driven by Codex in long uninterrupted sessions.
 - **Local machine is the build *and* run oracle.** The repo can be
   driven from either a Linux box (GTK 4 / libcurl / meson / clang +
   an X session at `DISPLAY=:0`) or a Windows 11 box via MSYS2
-  MINGW64 (same toolchain, same meson/ninja invocation; the binary
+  UCRT64 (same toolchain, same meson/ninja invocation; the binary
   is `./builddir/src/gtk/nordstjernen.exe`). Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
@@ -216,7 +219,7 @@ if uchardet can't classify the bytes at all.
 
 Required dependency (Debian/Ubuntu `libwebp-dev`, Fedora/RHEL
 `libwebp-devel`, openSUSE `libwebp-devel`, Alpine `libwebp-dev`,
-MSYS2 `mingw-w64-x86_64-libwebp`, Homebrew `webp`). WebP —
+MSYS2 `mingw-w64-ucrt-x86_64-libwebp`, Homebrew `webp`). WebP —
 lossy VP8 (the dominant variant served by the BBC, Wikipedia
 thumbnails, and most modern CDNs), lossless VP8L, and **animated
 WebP** (via libwebpdemux's `WebPAnimDecoder`, playing like animated
@@ -280,7 +283,7 @@ sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-de
 On macOS and Windows it is not used and the syscall filter is a no-op.
 
 The FFmpeg libav\* packages are required on Linux and Windows too (MSYS2
-`mingw-w64-x86_64-ffmpeg`, or the LGPL build from
+`mingw-w64-ucrt-x86_64-ffmpeg`, or the LGPL build from
 `scripts/build-ffmpeg-lgpl.sh`): they carry inline WebM playback, and
 `meson setup` fails without them or with a pre-6.0 FFmpeg. On macOS they
 are auto-detected, and a build without them carries no libav dependency and

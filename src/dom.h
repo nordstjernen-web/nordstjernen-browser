@@ -66,6 +66,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_INPUT_INDETERMINATE (1u << 18)
 #define NS_NODE_HAS_LISTENERS  (1u << 19)
 #define NS_NODE_SHEET_DISABLED (1u << 20)
+#define NS_NODE_STYLE_USES_ATTR (1u << 21)
 
 struct ns_node {
     ns_node_kind kind;

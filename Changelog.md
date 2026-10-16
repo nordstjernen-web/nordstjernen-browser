@@ -16,6 +16,779 @@ Changelog:
   without `type` or `data`, and a worker whose `ErrorEvent` is gone
   still runs `self.onerror`; ChatGPT's answer worker never replied and
   the page spun until its scripts were halted.
+* Layout: a grid container whose height comes from its parent, as a
+  stretched grid item or a flex item with `flex: 1`, sizes its `fr` rows
+  against that height. The rows were sized as if the height were
+  unknown, so a `1fr` row took only its content and a footer row sat
+  right under it instead of at the bottom (Gemini's sidebar "Sign in").
+* Paint: CSS `filter` (`blur()`, `grayscale()`, `brightness()` and the
+  other bitmap functions) applies to any block, table or cell, not only
+  to images: the box and its descendants are painted into a layer with
+  room for the blur, filtered, then composited. Large blurs are drawn at
+  a lower resolution, as other browsers do, so a `blur(146px)` glow
+  costs a few milliseconds. `blur()` is now a Gaussian (three box
+  passes) instead of a single box pass. SVG `filter="url(#id)"` applies
+  when the filter is made of `feGaussianBlur` primitives, so blurred SVG
+  shapes and SVG mask images (Gemini's background glow) are soft.
+* Layout: a `1fr` grid column (and `minmax(auto, 1fr)`) is never narrower
+  than the min-content width of its items, as `1fr` means
+  `minmax(auto, 1fr)`: when the columns do not fit, they keep that width
+  and the grid overflows, instead of squeezing every column. Items that
+  scroll or set `min-width` keep a zero floor. The Guardian's
+  six-column highlights carousel squeezed its 300px cards to 140px.
+* DOM: `<link rel="preload" as="style">` fires `load` (or `error`) once
+  its fetch ends, and changing a `<link>`'s `rel`, `href` or `as` loads
+  it again: a link that becomes `rel="stylesheet"` applies its sheet and
+  fires `load`. The common async-CSS pattern,
+  `<link rel="preload" as="style" onload="this.rel='stylesheet'">`,
+  never applied its sheet, so chatgpt.com kept its narrow-screen styles
+  and its cookie dialog covered the whole page in white.
+* Layout: a table caption's `::before` and `::after` are built like a
+  table cell's, so a floated or block pseudo-element inside a caption is
+  a float or a block, and an absolutely positioned one is laid out.
+  Captions turned every pseudo-element into inline text, so the floated
+  magnifier slot in Wikipedia's thumbnail captions took no room and the
+  caption text wrapped differently from other browsers.
+* Performance: forced style updates after script writes to inline styles
+  recompute far fewer elements. An element whose style an animation
+  rewrites is recomputed alone, with its descendants kept unless the
+  values they inherit change; a `style` attribute change no longer
+  re-runs `:has()` invalidation when no selector tests that attribute;
+  and custom-property maps are compared layer by layer instead of by
+  flattening every inherited variable. On deno.com, whose GSAP code reads
+  `getComputedStyle` after each inline write, a style pass went from
+  about 300ms to about 21ms.
+* Layout: an inline element with `position: relative` (or any other
+  containing-block trigger) is the containing block of its absolutely
+  positioned descendants, which were laid out against the page instead;
+  an absolutely positioned `::before`/`::after` of an inline element is
+  laid out as a box rather than having its text pasted into the line;
+  and an absolutely positioned box whose position comes from where it
+  sits in a line starts at that line's top rather than at the first
+  line's. MDN's external-link icons, drawn by an absolute `::after` of
+  each link, appear after the link text as in other browsers.
+* Layout: text decorations propagate from a block to the text of its
+  block descendants, as CSS requires: a `display: block` or `flex` link
+  around a `<div>` or `<p>` underlines its text, and `text-decoration`
+  on a flex or grid container reaches its items. Only the element whose
+  inline content held the text was consulted. Propagation stops at
+  floats, absolutely positioned boxes and inline-blocks, and an element
+  with `display: contents` decorates nothing (MDN's banner link).
+* Layout: `margin-left: auto` and `margin-right: auto` on an image, video
+  or SVG flex item push it along the line as they do for other items.
+  Laying out a replaced item recomputed its margins from the style and
+  dropped the share of free space the auto margin had taken, so
+  kotlinlang.org's menu arrows sat right after their labels instead of
+  at the right edge of each card.
+* CSS: the legacy `-webkit-linear-gradient()`, `-webkit-radial-gradient()`
+  and their repeating forms are understood, with their old conventions
+  (angles measured from east, counter-clockwise; a bare side naming where
+  the gradient starts; `position, shape` for radials), as Chromium and
+  Firefox still accept them. vuejs.org's tagline gradient and older
+  sites' button and banner gradients were dropped.
+* CSS: `background-clip: text` (and `-webkit-background-clip: text`)
+  paints the background only inside the glyphs of the element's text,
+  for blocks and for inline elements, and `-webkit-text-fill-color` sets
+  the colour text is filled with. Gradient headlines (nodejs.org's "Run
+  JavaScript Everywhere", Tailwind's `bg-clip-text text-transparent`)
+  showed a solid gradient rectangle with the text cut out of view.
+* Layout: the text of a block `::before`/`::after` collapses its white
+  space like any other text, so the widespread clearfix
+  `content: " "; display: block; clear: both` no longer adds an empty
+  line under every container that uses it. NPR's front page came out
+  700px taller than in Chromium, EFF's tagline sat 64px low, and apple.com
+  and Smashing Magazine had gaps between sections.
+* Layout: a line break from `<br>` drops the collapsible spaces around it,
+  so the next line no longer starts with a space ("one <br> two" put
+  " two" on the second line), and a `<br>` styled `display: block` or
+  `flex` still breaks the line as in other browsers instead of joining
+  the text on both sides: rust-lang.org's tagline read "everyoneto
+  build" on one line.
+* Layout: a block's negative horizontal margins reduce its parent's
+  max-content width, as in other browsers. The shrink-to-fit measurement
+  took the larger of the child's margin box and its content width, so
+  negative margins never counted: Wikipedia's main-menu button
+  (`margin: 0 -12px`)
+  made its header slot 44px wide instead of 20px and pushed the logo
+  24px to the right; inline-blocks, floats, table cells and flex items
+  holding such a block came out too wide in the same way.
+* SVG: icons drawn through `<use>` take `currentColor` from where they are
+  used. A sprite's `<symbol>` lives in a hidden `<svg>`, and its paths
+  resolved `fill="currentColor"` against that tree's colour, so every
+  sprite icon (Bootstrap, svelte.dev and most icon sets) came out black
+  instead of in the colour of the link or button around it.
+* Layout: images and SVGs sized with `calc()` contribute that size to grid
+  and table tracks. The min-content contribution of a replaced element read
+  only its laid-out width and fell back to 200px, so Tailwind's `size-4`
+  icons (`calc(var(--spacing) * 4)`) widened an `auto` grid column to 200px:
+  tailwindcss.com's "Quick search" label wrapped onto two lines.
+* Paint: an absolutely positioned `::before`/`::after` is painted in tree
+  order with the other positioned boxes of its stacking context. Its box
+  has no DOM node of its own, so the deferred-layer sort could not place it
+  and it came last, above every later `position: relative` element: the
+  hero heading, button and illustration on svelte.dev were hidden under the
+  hero's `::before` gradient.
+* JavaScript: the CSS Font Loading API loads fonts. `new FontFace(family,
+  source)` kept neither its `url()` source nor its `ArrayBuffer`, `load()`
+  only flipped `status`, and `document.fonts` ignored `add()`, so fonts a
+  page loaded from script never rendered. `url()` sources now load through
+  the `@font-face` loader (resolved against the document base), buffers are
+  installed from memory, `status` and `loaded` settle to `loaded` or
+  `error`, and `document.fonts` is a set: `add`, `delete`, `clear`, `has`,
+  `size`, `forEach`, `values`/`keys`/`entries` and `for…of`. Faces added
+  while unloaded start loading.
+* Layout: `<em>`, `<i>`, `<cite>` and `<dfn>` follow their computed
+  `font-style`. The inline builder made them italic by tag name even when a
+  stylesheet set `font-style: normal`, so Stripe's hero heading (an `<em>`
+  styled upright) rendered slanted. The user-agent stylesheet already makes
+  them italic.
+* HTML: `<base href>` applies to subresources. Scripts, stylesheets, images
+  and the speculative preloader resolved relative URLs against the page URL,
+  so a page with `<base href="/assets/">` (or an Angular app with
+  `<base href="/">` opened on a nested route) loaded none of them. Link
+  clicks, form actions, media and the favicon follow the base too. Only
+  `a.href` and other script-visible URLs honoured it before. CSP `base-uri`
+  still applies, and the referrer and CSP `'self'` stay the page URL.
+* Paint: gradient backgrounds honour `background-size`,
+  `background-position` and `background-repeat`. A gradient always filled
+  its whole box, so a `linear-gradient(red, red) 0 100% / 100% 2px
+  no-repeat` underline bar became a solid block and tiled dot or stripe
+  patterns became one large shape. Inline elements (`<span>`, `<a>`) now
+  paint their gradient backgrounds as well; only `url()` images were drawn.
+* Windows: the build moves from MSYS2's MINGW64 environment to UCRT64.
+  MSYS2 no longer ships GTK 4 for MINGW64, so `pacman` could not install
+  the toolchain and the Windows CI failed before compiling. The packaging
+  scripts look for the UCRT64 prefix first, and `docs/Windows.md` gives
+  the UCRT64 package names.
+* Layout: desktop builds ignore the width in `<meta name="viewport">`, as
+  desktop browsers do. A page asking for `width=1120` (Wikipedia) was laid
+  out 1120px wide in a narrower window, so its narrow-window media queries
+  and `matchMedia()` never matched and the page scrolled sideways. Android
+  and iOS keep honouring it.
+* Headless runs look for `<video>` elements once per layout instead of on
+  every settle tick, matching the interactive renderer.
+* Style: elements whose style reads an attribute through `attr()` are
+  restyled when one of their attributes changes instead of on every
+  relayout, so forced layouts on image-heavy pages skip most of the tree.
+* Layout: text with a CSS `line-height` no longer re-runs line breaking on
+  every relayout just to read back its line heights; they are cached with
+  the text measurement. Speedometer 3.1's NewsSite suites, which force
+  ~150 layouts per run, are about 30% faster.
+* Images created by script inside a frame resolve their relative `src`
+  against the frame's document even before they are inserted, and image
+  loads belonging to a removed frame's document are dropped instead of
+  being refetched against the parent page (Speedometer's NewsSite suites
+  no longer request hundreds of 404ing placeholders).
+* JavaScript: `Atomics.waitAsync` is available, `Atomics` operations check
+  detached and immutable buffers in the order the specification gives, and
+  `Atomics.wait` no longer returns `"timed-out"` early on Windows. Exporting a
+  binding under the string name `"*"` works. The engine now passes all of
+  test262 (102,988 test runs) except two SpiderMonkey staging tests that
+  contradict the specification.
+* JavaScript: more fixes from the SpiderMonkey test suite: `Set` methods
+  and typed-array `set`/`sort`/`with` follow the specified order of
+  observable steps, class heritage and computed keys run in strict mode,
+  `super[expr]` evaluates `expr` first, logical assignment to a `const`
+  short-circuits, Annex B block functions in `if` clauses and duplicate
+  declarations behave as in other browsers, several missing early
+  SyntaxErrors are reported, and legacy `fn.arguments` works.
+* JavaScript: fixes from the SpiderMonkey test suite: `new Function`
+  rejects parameter lists that only parse together with the body, legacy
+  `fn.caller` is `null` for strict, native and top-level callers, legacy
+  date strings with `-07` offsets parse, `Array.from`/`Map`/`Set` close
+  iterators only when the specification says so, `RegExp.prototype.source`
+  escapes line terminators, and `Math.acosh`/`asinh` are accurate.
+* JavaScript: decorators (`@dec` on classes, methods, getters, setters,
+  fields and `accessor` elements, with `context.access`,
+  `addInitializer` and `Symbol.metadata`) and auto-accessors
+  (`accessor x = 1`) are supported.
+* JavaScript: calls in tail position of strict-mode code reuse the
+  caller's frame, so deep recursion written in tail form (including
+  through `?:`, `&&`, `||`, `??` and catch clauses) no longer overflows the
+  stack, and such calls are faster.
+* JavaScript: `ShadowRealm` is available: `evaluate` runs code in a
+  separate realm and `importValue` loads a module there, with only
+  primitives and wrapped functions crossing the boundary.
+  `Promise.allKeyed` and `Promise.allSettledKeyed` await the values of an
+  object's own enumerable properties. The legacy `RegExp.$1`…`$9`,
+  `lastMatch` and related statics are read-only (except `input`), throw for
+  a receiver other than `RegExp`, and are cleared by a match of a `RegExp`
+  subclass or another realm's regexp; a `String.prototype.replace` that
+  deletes matches updates them too.
+* JavaScript: Temporal is built into the engine and follows the current
+  specification for the ISO 8601 calendar: `PlainDate`, `PlainTime`,
+  `PlainDateTime`, `PlainYearMonth`, `PlainMonthDay`, `ZonedDateTime`,
+  `Instant`, `Duration` and `Temporal.Now`, with `round()`, `total()`,
+  `relativeTo`, every rounding mode, the RFC 9557 string formats and
+  `Date.prototype.toTemporalInstant`. Arithmetic is exact to the
+  nanosecond. test262's Temporal tests all pass.
+* JavaScript: Temporal uses the system time zone database, so
+  `ZonedDateTime` accepts IANA names such as `Europe/Oslo` and follows
+  their daylight-saving rules, and `Temporal.Now.timeZoneId()` reports the
+  system zone. On Windows the database is read from `TZDIR` or a
+  `share/zoneinfo` folder next to the browser.
+* JavaScript: Temporal supports the calendars of ECMA-402: `buddhist`,
+  `chinese`, `coptic`, `dangi`, `ethioaa`, `ethiopic`, `gregory`,
+  `hebrew`, `indian`, `islamic-civil`, `islamic-tbla`,
+  `islamic-umalqura`, `japanese`, `persian` and `roc`, with `era`,
+  `eraYear`, leap-month codes such as `M05L`, and date arithmetic in each
+  calendar. On Windows, `Temporal.Now.timeZoneId()` maps the system zone
+  to its IANA name, and the Windows package ships the time zone database.
+  Zones in different countries, such as `Europe/Oslo` and `Europe/Berlin`,
+  are never treated as the same zone.
+* JavaScript: deferred module imports. `import defer * as ns from "m"`
+  and `import.defer("m")` load and link a module but evaluate it only
+  when a property of its namespace is first read. Its top-level-await
+  dependencies are still evaluated ahead of time. Source phase imports
+  (`import source x from "m"`, `import.source("m")`) parse, and
+  `%AbstractModuleSource%` is available to hosts. JavaScript modules have
+  no source form, so importing one in the source phase throws a
+  `SyntaxError`. The test262 tests for both proposals pass.
+* JavaScript: the browser's own `Intl` (`src/js_intl.c`) is gone; every
+  page, worker and test262 run uses the engine's CLDR-generated `Intl`,
+  whose default locale is now the page's `navigator.language`.
+* JavaScript: `Intl.Segmenter` splits text into graphemes, words and
+  sentences with the Unicode 17 UAX #29 rules (extended grapheme clusters,
+  emoji ZWJ sequences, Indic conjuncts), runs of Thai, Lao, Khmer and
+  Myanmar letters kept together as words, and `isWordLike`. It passes every
+  case of the Unicode break test files.
+* JavaScript: `Intl.ListFormat`, `Intl.RelativeTimeFormat`,
+  `Intl.DisplayNames` and `Intl.DurationFormat` join the engine's `Intl`.
+  Lists and relative times use CLDR patterns (with the Spanish `y`/`e`,
+  `o`/`u` and Hebrew `ו` rules), display names cover languages with
+  dialect names, regions, scripts, currencies, calendars and date-time
+  fields, and `DurationFormat` handles every style including `digital` and
+  fractional seconds. `Temporal.Duration.prototype.toLocaleString` formats
+  through it.
+* JavaScript: the engine's `Intl.DateTimeFormat` formats dates in the
+  Gregorian, Buddhist, Japanese, ROC, Chinese, Dangi, Hebrew, Islamic,
+  Persian, Indian, Coptic and Ethiopic calendars with CLDR patterns, the
+  skeleton matcher, `dateStyle`/`timeStyle`, day periods, fractional
+  seconds, every `timeZoneName` style (metazone names for 13 languages),
+  `formatRange` with CLDR interval patterns, and Temporal values;
+  `Date.prototype.toLocaleString` and the Temporal `toLocaleString`
+  methods use it. Named time zones come from the system tz database, and
+  on Windows from the registry when no tz database is installed.
+* JavaScript: `Intl` moves into the QuickJS engine, generated from
+  Unicode CLDR 48 without ICU. Language tags are canonicalized per UTS #35
+  (aliases, likely subtags, extension values) and `Intl.Locale` has the
+  full API including `maximize`, `minimize`, `getWeekInfo`,
+  `getTextInfo` and the other info methods. `Intl.NumberFormat` supports
+  every v3 option: exact decimal strings, nine rounding modes, rounding
+  increments and priorities, compact, scientific and engineering notation,
+  units, currencies with accounting signs, `formatRange` and
+  `formatToParts`, in about 100 languages and their numbering systems.
+  `Intl.PluralRules` covers every CLDR language, and `Intl.Collator`,
+  `localeCompare` and Turkish/Lithuanian `toLocaleUpperCase`/
+  `toLocaleLowerCase` are locale-aware.
+* JavaScript: an assignment resolves its target before evaluating the
+  right-hand side. A strict-mode assignment to an undeclared global throws
+  even when the right-hand side creates it, and a `var` introduced by a
+  direct `eval` in the right-hand side no longer captures the store.
+* JavaScript: QuickJS is updated to quickjs-ng 9b06171. Template
+  literals convert each substitution to a string as soon as it is
+  evaluated, and engine-internal errors can no longer be caught by page
+  scripts. Failures in WebGPU, WebAssembly, `getRandomValues` and the
+  compression streams throw catchable `TypeError`/`RangeError` instead.
+* JavaScript: a module's top-level `using` and `await using` bindings can
+  be exported, and functions declared in the module see them.
+  `Function.prototype.toString` of a built-in whose name is not an
+  identifier, such as the `RegExp.$&` getter, prints the name as a
+  computed key. test262 reports no failures on the enabled tests.
+* DOM: the HTML insertion methods `appendHTML`, `prependHTML`,
+  `beforeHTML`, `afterHTML` and `replaceWithHTML`, with their
+  `…Unsafe` variants, are available on elements, shadow roots and
+  character data. They parse with the right context element (the
+  parent, the shadow host or the owning `<template>`) and support
+  declarative shadow roots. The `Unsafe` variants run scripts when
+  `runScripts: true` is given. The safe variants strip scripts,
+  embedding elements, event-handler attributes and `javascript:` URLs,
+  and do nothing on `<script>` elements. Both kinds honour a
+  `sanitizer` option's `removeElements`/`elements` lists. They throw
+  `HierarchyRequestError` where the specification requires it.
+* DOM Ranges: exceptions thrown by `Range` methods are created in the
+  range's own window. A range in an `<iframe>` document used to throw
+  the top window's `DOMException`, so `e instanceof
+  frame.contentWindow.DOMException` was false.
+* README: the conformance table uses a full re-run with the corrected
+  test runner. The earlier HTML figure missed about 88,000 subtests
+  that the runner had wrongly recorded as crashes.
+* CSSOM: `@position-try` rules appear in `cssRules` as
+  `CSSPositionTryRule`, with `name`, `cssText` and a `style` of type
+  `CSSPositionTryDescriptors`. The descriptors expose only the
+  properties allowed in a position-try block (insets, margins, sizes,
+  self-alignment, `position-anchor`, `position-area`) and drop any
+  others. Editing them through `setProperty`, `cssText` or the
+  property accessors updates the fallback positions on the page.
+* CSS Masking: `mask-border` and its longhands (`mask-border-source`,
+  `-slice`, `-width`, `-outset`, `-repeat`, `-mode`) parse, serialize,
+  inherit, interpolate and composite the way the matching
+  `border-image` properties do, with the mask-border initial values
+  (`slice: 0`, `width: auto`, `mode: alpha`). Painting with a mask
+  border is not implemented yet.
+* HTML rendering: an `<iframe>` with no `width`/`height` attribute or
+  CSS size now takes the 300×150 default size of a replaced element,
+  as in other browsers. It used to stretch to its container's width
+  and grow to its document's height.
+* Forms: the `select` event of text controls now follows the HTML
+  text-selection APIs. It is queued as a task instead of dispatched
+  synchronously, fires only when the selection or direction actually
+  changed, and several changes before it runs produce one event. This
+  also applies to disconnected elements.
+* HTML focus: a focused form control that becomes disabled, for
+  example through a disabled ancestor `<fieldset>`, loses focus at the
+  next rendering update, as the HTML focus-fixup rule requires.
+  `document.activeElement` falls back to the body, and `blur` and
+  `focusout` fire.
+* Performance: a custom property whose `var()` expansion grows to the
+  1 MB substitution limit no longer makes every restyle quadratic.
+  The container-unit scan re-measured the remaining text at every
+  digit, and the exponential-blowup test page took 19 s to style. It
+  now takes 3.5 s, most of it the capped substitution itself.
+* Security: `HTMLSelectElement.add()` did not check its argument.
+  Adding an `<option>` that contains the select made the option its own
+  ancestor, and the renderer then looped forever. `add()` now follows
+  the HTML algorithm: it accepts only `option`/`optgroup`, throws
+  `HierarchyRequestError` for an ancestor and `NotFoundError` for a
+  `before` element outside the select, counts options inside
+  optgroups for a numeric `before`, and inserts next to the reference
+  even when it is in an optgroup.
+* Security: deeply nested elements whose `min-width` or `max-width` is
+  an intrinsic keyword (every `<fieldset>` has
+  `min-inline-size: min-content` in the UA stylesheet) took exponential
+  time to lay out. Each level measured its subtree twice, so 100
+  nested fieldsets hung the renderer. The measurement is now reused,
+  and that page lays out in under a second.
+* Security: a module graph where a dependency failed to load and other
+  modules imported the failed module through a cycle could crash the
+  renderer. The failed module was freed while the cycle still pointed
+  at it, and the next script that imported it ran into the freed
+  memory. Modules whose resolution failed now stay registered and
+  reject every later import with a fresh `TypeError`.
+* Images: `img.width` and `img.height` report the rendered content box
+  instead of the border box. An SVG image without a `width`, `height`
+  or `viewBox` takes the 300×150 default object size, and a missing
+  dimension falls back to that default, instead of a 512-pixel square.
+  The window `load` event now also waits for images that scripts
+  inserted before it fired.
+* CSS Sizing / Containment: size containment now affects layout. The
+  block size is contained by `contain: size`/`strict`,
+  `container-type: size` or `content-visibility: hidden`, the inline
+  size also by `contain: inline-size` and `container-type: inline-size`.
+  A contained box is sized as if empty, or from the new
+  `contain-intrinsic-width`/`-height` (logical
+  `-block-size`/`-inline-size`, shorthand `contain-intrinsic-size`),
+  which accept `none`, a length, or `auto` with either. Their lengths
+  interpolate. Content that overflows a contained box still scrolls.
+* CSS Text: `text-align-last` and `text-justify` are supported, both
+  inherited. In justified text, `text-align-last: justify` stretches
+  the last line too, `center`/`right`/`end` place it accordingly, and
+  `text-justify: none` turns justification off. `distribute` is parsed
+  as its alias `inter-character`.
+* README: conformance numbers from the local web-platform-tests and
+  test262 runs, and the new CSS Color, anchor positioning, Shapes and
+  animation-composition coverage in the feature list.
+* DOM: `offsetTop`, `offsetLeft` and `offsetParent` of elements inside
+  an `<iframe>` are measured within the frame's own document. They
+  used to include the frame's position in the embedding page, which
+  sent scripts that pass those offsets to `elementFromPoint()` (image
+  maps, drag handles, tooltips) far outside the frame.
+* HTML rendering: the UA stylesheet now has the bidirectional-text
+  rules from the HTML rendering section. Block containers, sectioning
+  and heading elements, table parts, lists, `bdi` and `output` get
+  `unicode-bidi: isolate`. So does any element with `dir=ltr`, `rtl`
+  or `auto` (matched case-insensitively). `bdo` is `isolate-override`,
+  and `dir=auto` search/tel/url/email inputs, textareas and `pre` use
+  `plaintext`. Inline elements with a `dir` attribute are now isolated
+  from the surrounding text, as in other browsers.
+* Animations: `filter` and `backdrop-filter` interpolate the way
+  Filter Effects specifies. Function lists interpolate per function,
+  the shorter list is padded with identity functions, and `none` acts
+  as the identity list. Results are clamped to each function's range.
+  `drop-shadow()` colors interpolate premultiplied. Composition `add`
+  appends the lists and `accumulate` sums matching functions. The
+  computed value is now canonical: amounts as numbers clamped to
+  their range, `hue-rotate()` in degrees, `blur()` in pixels,
+  `drop-shadow()` as color + three lengths with `currentcolor`
+  resolved, and quoted `url()`.
+* CSS Fonts: `font-size-adjust` is a known, inherited property. It
+  accepts `none`, an optional metric (`ex-height`, `cap-height`,
+  `ch-width`, `ic-width`, `ic-height`) followed by a number, `calc()`
+  or `from-font`, and leaves the default `ex-height` out when
+  serializing. `from-font` computes to the primary font's aspect value.
+  Values with the same metric interpolate and add as numbers without
+  going negative. Glyph sizing does not use it yet.
+* CSS Shapes: the `shape()` function (`from`, `move`/`line`/`hline`/
+  `vline`/`curve`/`smooth`/`arc` commands with `to` or `by` endpoints,
+  control-point anchors, arc sweep/size/rotation and `close`) parses
+  for `shape-outside` and `clip-path`. Its computed value resolves
+  positions and lengths, and it interpolates command by command,
+  also against a `path()` that has the same command list. `clip-path`
+  basic shapes now share the `shape-outside` parser, so invalid shapes
+  are rejected, positions and radii serialize canonically,
+  `border-box` drops out next to a shape, and `getComputedStyle`
+  resolves lengths and percentages.
+* CSS Shapes: `shape-outside` accepts `path()`, with an optional fill
+  rule. Its path data keeps the commands as written in the specified
+  value and becomes absolute in the computed value
+  (`m 10 10 h 80` → `M 10 10 H 90`). Paths with the same command
+  sequence interpolate segment by segment; any other pair animates
+  discretely.
+* Animations: basic shapes interpolate and add. `shape-outside` and
+  `clip-path` transitions and keyframes between `circle()`,
+  `ellipse()`, `inset()`/`rect()`/`xywh()` and `polygon()` values
+  blend radii, positions, insets, corner radii and points component
+  by component (mixed lengths and percentages become `calc()`), and
+  `composition: add` sums them. Shapes of different kinds, different
+  reference boxes or polygons with different point counts stay
+  discrete. `polygon()` accepts the CSS Shapes 2 `round <length>`
+  corner radius.
+* CSS Shapes: `shape-outside`, `shape-margin` and
+  `shape-image-threshold` are real properties now. Basic shapes
+  (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`,
+  `polygon()`) and shape boxes parse with the specification's
+  validity rules and serialize in canonical form: positions reorder to
+  horizontal-first, default radii and `margin-box` drop out, inset and
+  corner-radius lists collapse like the `margin` shorthand, and
+  `calc()` keeps relative units. Computed values resolve lengths
+  against the element's font and the viewport, positions to
+  percentages, and `rect()`/`xywh()` to `inset()`. Floats do not yet
+  wrap around the shape.
+* Animations: transform lists interpolate as CSS Transforms specifies.
+  Lists of different lengths are padded with identity functions, so
+  `translateX(0)` → `translateX(100px) rotate(90deg)` animates both
+  functions instead of jumping. Functions that do not match, and
+  `matrix()` values, interpolate through the 2D matrix decomposition
+  (translate, scale, rotation, skew) instead of component by component.
+  `perspective()` interpolates through 1/d. Singular 3D matrices stay
+  discrete. Keyframes written as `initial`, `inherit`, `unset` or
+  `revert` resolve to the matching computed value before interpolation.
+  The individual `translate`, `scale` and `rotate` properties, and
+  `transform-origin`/`perspective-origin`, compose by combining values
+  rather than concatenating function lists. 2,376 more interpolation
+  and composition subtests pass.
+* CSS: the `columns`, `flex-flow`, `list-style`, `animation-range`,
+  `scroll-margin-block`/`-inline`, `scroll-padding-block`/`-inline` and
+  `position-try` shorthands accept CSS-wide keywords (`initial`,
+  `inherit`, `unset`, `revert`, `revert-layer`) and expand them to their
+  longhands. These declarations used to be dropped, so
+  `CSS.supports('columns', 'initial')` was false and removing such a
+  shorthand from an inline style left its longhands behind.
+* JavaScript: module scripts fetched over HTTP must be served with a
+  JavaScript MIME type, and `import ... with { type: "json" }` modules
+  with a JSON MIME type (`application/json`, `text/json` or `*/*+json`).
+  The Content-Type is parsed as the MIME Sniffing spec says, so a value
+  with control characters, separators or non-ASCII characters in its
+  type or subtype is rejected. Rejected and failed module fetches throw
+  `TypeError`, as in other browsers, instead of `ReferenceError`.
+* CSS: anchored boxes that overflow fall back through
+  `position-try-fallbacks`. The flip tactics (`flip-block`,
+  `flip-inline`, `flip-start`, `flip-x`, `flip-y`) mirror insets,
+  margins, self-alignment, `anchor()` sides (percentages included) and
+  `position-area`. `@position-try` rules supply replacement declarations,
+  and `position-area` values can be options themselves. The first option
+  whose box fits its inset-modified containing block wins; if none fits,
+  the base position is used. `position-try-order` sorts the options by
+  available width or height. 286 more css-anchor-position subtests pass.
+* HTML: `<input type=color>` supports the `alpha` and `colorspace`
+  attributes and their `alpha`/`colorSpace` IDL reflections. Its value
+  now accepts any CSS color (named, `rgb()`, `oklch()`, `color()`, ...)
+  through the CSS Color module. Without `alpha` it serializes as `#rrggbb`
+  in `limited-srgb` and as `color(display-p3 ...)` in `display-p3`; with
+  `alpha` the alpha channel is kept. Values that do not parse become
+  opaque black. WPT `color.window.html` goes from 21 to 187 of 196.
+* HTML: `<script>` decides whether to run from its `type` and `language`
+  attributes as the HTML spec says. Every JavaScript MIME type essence
+  now runs: `application/ecmascript`, `application/x-javascript`,
+  `text/javascript1.0`–`1.5`, `text/jscript`, `text/livescript`,
+  `text/x-ecmascript` and the rest, case-insensitively and with
+  surrounding whitespace ignored. So does a `language` attribute naming
+  a JavaScript type. Before, only `text/javascript` and
+  `application/javascript` ran. `module` and `importmap` still have to
+  match exactly. 618 more WPT subtests pass in scripting-1.
+* CSS: anchor positioning. `anchor-name` and `position-anchor` tie an
+  absolutely or fixed positioned box to an anchor element, the last one
+  in tree order carrying the name. Its insets can use `anchor()`, its
+  sizes, insets and margins can use `anchor-size()`, and both can appear
+  inside calc(), min()/max()/clamp() and each other's fallbacks.
+  `position-area` places the box in one cell or span of the 3x3 grid
+  around the anchor. Auto insets resolve to 0 and normal alignment
+  points toward the anchor. `justify-self`/`align-self: anchor-center`
+  centers the box on the anchor. A function that cannot resolve falls
+  back as the spec says, including in getComputedStyle. `anchor-scope`,
+  `position-try-fallbacks`, `position-try-order`, `position-try` and
+  `position-visibility` parse and serialize; fallback positions are not
+  applied yet. css-anchor-position goes from 445 to 11,564 passing WPT
+  subtests.
+* CSS: gradient color stops keep their color space in computed values.
+  `linear-gradient(in oklch, color(srgb 1 0 0), blue)` used to compute
+  to `rgb(255, 0, 0)` for the first stop. It now serializes
+  `color(srgb 1 0 0)`, and specified stops use the canonical CSS Color 4
+  form. All 932 `gradient-interpolation-method-computed` subtests pass.
+* Animations: keyframe composition is implemented. `composite: 'add'`
+  and `'accumulate'` on Web Animations keyframes and effects, and
+  `animation-composition` on CSS animations and their keyframes, combine
+  the keyframe value with the underlying value before interpolating:
+  lengths and calc() sums, numbers, colors, rects, shadow lists (added
+  as concatenation, accumulated pairwise) and transform lists
+  (concatenated, or accumulated function by function). Web Animations
+  also extrapolate when the effect's easing pushes progress outside
+  0..1, using the first or last keyframe interval as the specs require,
+  instead of clamping. Animated integer properties (`order`, `z-index`,
+  `column-count`, `orphans`, `widows`, ...) round and stay in range.
+  2,328 more WPT interpolation and composition subtests pass.
+* CSS: selectors follow the Selectors 4 rules for what may come after a
+  pseudo-element. A class, attribute, type selector or combinator after
+  one makes the selector invalid (`::before.a`, `::before div`), and so
+  does a pseudo-element inside `:not()`, `:has()` or `:is()`. After a
+  pseudo-element only user-action pseudo-classes are allowed, or
+  `:only-child` on the view-transition tree. `::part()` and `::slotted()`
+  may be followed only by the pseudo-elements they allow. The
+  `::view-transition-*()` argument grammar is validated (`*`, a name, and
+  `.class` tags), and `CSS.supports(selector(…))` reports known
+  pseudo-elements that the engine never matches as supported. 1,136 more
+  WPT subtests pass in css-view-transitions, css-pseudo and selectors.
+* JavaScript: `Promise.try()` returns the callback's promise unchanged
+  when it is already an instance of the receiver, as the current spec
+  requires, instead of wrapping it in a new one. A unicode regular
+  expression no longer finds a match that starts on the second half of
+  a surrogate pair (`/\udf06/u.exec('\ud834\udf06')` is `null`), which
+  the search prefilter allowed. `TypedArray.prototype.with()` reads
+  elements past a buffer shrunk during argument coercion as
+  `undefined`: `NaN` in float arrays and a `TypeError` in BigInt
+  arrays. Nine more test262 tests pass.
+* CSS: colors are parsed and serialized according to CSS Color 4 and 5
+  by a new module, `src/css_color.c`. `lab()`, `lch()`, `oklab()` and
+  `oklch()` used to be flattened to 8-bit sRGB. They keep their color
+  space now, along with `color()` in every predefined space
+  (`srgb-linear`, `display-p3`, `a98-rgb`, `prophoto-rgb`, `rec2020`,
+  `xyz-d50`/`xyz-d65`) and `none` components. Relative color syntax
+  (`rgb(from …)`, `oklch(from …)`, `color(from …)`) is supported, as are
+  `color-mix()` with any number of colors in every interpolation space
+  and hue method, missing-component carry-forward, powerless hues,
+  `alpha()`, `contrast-color()` and `color-layers()`. Specified and
+  computed values serialize the way the specs describe, for example
+  `color-mix(in srgb, red, blue)` computes to
+  `color(srgb 0.5 0 0.5)`. WPT `css/css-color/parsing` passes 11,914
+  of 12,154 subtests, up from about 5,200.
+* Media: a <video> removed from the document, or whose source is
+  replaced or cleared, stops its sound. The player record kept playing
+  - and the audio helper kept looping its track - whenever the page
+  took the element away without calling pause() first, as single-page
+  sites do when they swap content on an in-page navigation; the
+  cleanup for abandoned players only ran when two or more were open.
+* Media: a video's `videoWidth`/`videoHeight` follow the frames being
+  shown and a `resize` event fires when they change. They used to be
+  fixed by the first stream, so after an adaptive-quality switch to a
+  stream of another shape (YouTube serving a 4:3 video after a 16:9
+  start) the page kept sizing the player for the old aspect. libav
+  frames are also no longer stretched to the size the decoder opened
+  with when the stream's resolution changes, and anamorphic sample
+  aspect ratios are applied.
+* Media: libavcodec decodes video with frame and slice threads again
+  (up to 8 per decoder), as the removed video helper did, and opening a
+  WebM/MP4 decoder no longer runs avformat_find_stream_info when the
+  container already describes the stream. A YouTube seek that rebuilds
+  the decoder now resumes in under a second. The in-tree MP4 demuxer
+  caps a fragment run without per-sample fields at 65536 samples and a
+  track at two million, so a malformed file cannot make it allocate
+  hundreds of megabytes.
+* Media: builds without libav - Android, iOS, and macOS without
+  FFmpeg - play MP4 and H.264 MSE video through a small in-tree MP4
+  demuxer (sample tables, edit lists and fragmented MP4) feeding the
+  platform decoder (MediaCodec, VideoToolbox). Their audio has no MP4
+  path yet.
+* Media: H.264 video and AAC audio are decoded by the operating
+  system's own codecs: Media Foundation on Windows, VideoToolbox and
+  AudioToolbox on macOS and iOS, MediaCodec on Android, and GStreamer
+  (VA-API, V4L2 or an installed software decoder) on Linux and the
+  BSDs. The browser ships no H.264 or AAC decoder, so it pays no codec
+  licence; the LGPL FFmpeg bundled with the macOS and Windows packages
+  gains only the MP4 demuxer and the H.264/AAC parsers. MP4 and HLS
+  video and H.264 MSE players now play there, and `avc1`/`mp4a`
+  report as supported. Media Foundation loads at runtime, so Windows N
+  editions without the Media Feature Pack still start. Frames are
+  converted to BGRA only when shown, so a seek no longer converts
+  every frame between the keyframe and the target.
+* Media: MSE video decodes in the renderer again, and the separate
+  `nordstjernen-video` process is gone. The renderer keeps each
+  appended segment with its time range and feeds the decoder only the
+  contiguous run that holds the playhead, so a stream starts on its
+  first media segment, a seek rebuilds the decoder at the segment
+  holding the target instead of seeking through a byte stream whose
+  offsets do not match the original file, and a seek past the buffer
+  waits at the target until the page appends it. `SourceBuffer.buffered`
+  now lists every disjoint range rather than one range from the first
+  to the last byte, so YouTube fetches the segment a seek lands in
+  instead of believing the gap is buffered. Evicting segments with
+  `remove()` no longer restarts the decoder. Headless runs now drive
+  `play()`, `pause()`, `currentTime`, `muted` and `volume` like the
+  shell does.
+* JS: Streams follow the WHATWG Streams standard. `ReadableStream`,
+  `WritableStream` and `TransformStream` queue chunks by size, apply
+  backpressure through `highWaterMark`, call `pull()` only when there
+  is room, and `pipeTo()`/`pipeThrough()` honour `preventClose`,
+  `preventAbort`, `preventCancel` and an abort `signal`. `tee()`,
+  `ReadableStream.from()`, async iteration, BYOB readers over byte
+  streams (buffers are transferred, not copied), the queuing strategies
+  and the controller classes are there too. A stream that pulled
+  lazily, as ChatGPT's answer stream does, never delivered a chunk
+  before. Not there yet: `byobRequest` is always null and
+  `autoAllocateChunkSize` is ignored, so a byte source has to
+  `enqueue()` its chunks.
+* Fetch: `Response.body` and `Blob.stream()` are byte streams, so
+  `getReader({mode: 'byob'})` works on them. The body stream of a
+  buffered response is made on first use and copies nothing until it
+  is read. `clone()` tees a streamed body and gives the clone its own
+  copy of each chunk, and `bytes()` returns its own copy, so
+  transferring one buffer no longer empties the other. A body whose
+  stream is locked or was already read makes `text()`, `json()`,
+  `arrayBuffer()`, `bytes()`, `blob()` and `formData()` reject with a
+  TypeError, and `clone()` throws for it; a locked body keeps
+  `bodyUsed` false, and reading the body stream of a buffered response
+  sets it. Of the streams, fetch body, encoding stream and compression
+  web-platform tests, 1802 of 2289 subtests pass, up from 629 of 2039.
+* CSS: scroll-driven animations. `scroll-timeline-name`,
+  `scroll-timeline-axis` and the `scroll-timeline` shorthand are parsed,
+  serialised and reported by `getComputedStyle`, and `animation-timeline`
+  takes `none`, a named timeline or `scroll(nearest|root|self
+  block|inline|x|y)`. Such an animation follows its scroller's scroll
+  position instead of the clock, with iteration count, direction, fill and
+  easing applied, and updates on the next frame after a script, wheel or
+  scrollbar scroll, laying the page out again when it animates a layout
+  property. The nearest scroller is looked up along the containing block
+  chain, a `body` whose overflow belongs to the viewport counts as the
+  root scroller, and an animation without a declared duration spans the
+  whole scroll range. `none` and a name that no element declares hold the
+  animation at time zero, with its delay, fill and an auto duration of
+  zero applied as on the document clock. `view-timeline-name`,
+  `timeline-scope` and the names in the `view-timeline` shorthand are
+  parsed, and a name that only they declare runs on the document clock
+  like `view()` does, since view timelines are not implemented yet.
+  Changing `animation-timeline` between the clock and a scroll timeline
+  restarts the animation. A sidebar whose grid columns are driven by a
+  named horizontal scroll timeline now opens at its full width. Not yet
+  supported: view timelines, `view-timeline-axis` and
+  `view-timeline-inset`, scroll timelines shared through
+  `timeline-scope`, `animation-delay` and `animation-range` on scroll
+  timelines, and the scripting API of a scroll-driven animation.
+* Layout: a grid item stretched to its row (`align-self: normal` or
+  `stretch`, `height: auto`) has a definite height, so `height: 100%`
+  on its children resolves against the stretched size, as in Chrome. A
+  child with `height:100%` used to collapse to its content, so content
+  meant to sit centred between `1fr` rows stuck to the top instead. A
+  stretched item that is itself a flex container is laid out against the
+  stretched height, so `justify-content`, `align-items` and `flex-grow`
+  inside it use the row height. The stretch respects the item's
+  `min-height` and `max-height`, percentages against the grid area, and
+  skips items that behave as `start` (`align-self: normal` with an
+  `aspect-ratio` or an intrinsic `height`).
+* Layout: a column flex container whose height comes from its flex
+  parent (a stretched row item or the main size of a column) no longer
+  subtracts its padding and border a second time with
+  `box-sizing: border-box`, so its children are no longer placed too
+  high, and a `height: 100%` card in such a column keeps its size when
+  the row is laid out twice.
+* Paint: gradients interpolate in premultiplied alpha, as CSS requires.
+  A stop that is `transparent` (transparent black) no longer pulls the
+  colour of its neighbour towards black, so
+  `linear-gradient(transparent, #fcfcfc)` fades without a grey band and
+  `linear-gradient(red, transparent)` stays red as it fades. This covers
+  linear, radial, repeating and conic gradients and mask gradients; a
+  transition hint takes the premultiplied average of its neighbours at
+  its position (its curve is still a straight segment through that
+  colour). Colour stops placed before the previous stop, for example
+  `red 50%, blue 20px`, are clamped to it instead of scrambling the
+  colours.
+* Layout: a `::before` or `::after` whose `content` is `none` or `normal`
+  generates no box, also when it is absolutely positioned or an
+  inline-block. Such pseudo-elements used to paint their background, so
+  a decorative `content:none; position:absolute; inset:0` gradient
+  covered the text around it. Such a pseudo-element also no longer
+  changes counters with `counter-increment`, `counter-reset` or
+  `counter-set`.
+* Layout: percentage `max-width`, `min-width`, padding and margins on a
+  floated box, a column flex item or a grid item that is not stretched
+  (images, tables and absolutely positioned boxes included) now resolve
+  against the containing block instead of the box's own fitted width.
+  A chat bubble with `max-width: 70%` in a column flex container used to
+  be squeezed to 70% of its own text width and wrapped mid-word; it now
+  keeps the width of its text. A floated image with `padding: 0 5%` in a
+  600px container is now 160px wide, not 126px. A grid item that is
+  fitted by `justify-self` or `justify-items` other than stretch now
+  includes its padding and border in the fitted width. A float with
+  `max-width: 50%` inside a zero-width parent is 0px wide. Images with
+  `box-sizing: border-box`, padding and `max-width: 100%` no longer
+  overflow their container by the padding.
+* Layout: an absolutely positioned box inside a scrolling element
+  (`overflow: auto` or `scroll`) now counts toward how far that element
+  can scroll when the element or a box between it and the positioned box
+  is the containing block, including the box's own descendants and boxes
+  inside inline-blocks. Before, `scrollWidth` reported the overflow but
+  `scrollLeft` stayed at 0 and no scrollbar appeared, so a 410px-wide
+  positioned bar in a 200px scroller could not be scrolled; it now
+  scrolls up to 210px like Chrome, rounded to whole pixels. Transformed
+  boxes and everything inside them, fixed boxes, zero-size boxes,
+  `content-visibility` subtrees and subtrees clipped by an inner
+  `overflow` are not counted, so a centered `translate(-50%, -50%)`
+  modal adds no scrollbar. In right-to-left and reversed (`row-reverse`,
+  `column-reverse`, `wrap-reverse`) scrollers the flipped axis gets no
+  range and boxes lying past its start edge are ignored on the other
+  axis; the page's own `html`/`body` scroller is untouched.
+* Paint: elements with a negative `z-index` paint and receive clicks
+  below the in-flow content of their stacking context (CSS 2.1
+  Appendix E step 3), not inside their nearest positioned parent. A
+  `z-index: -1` background inside a `position: relative` wrapper with
+  no `z-index` used to sit on top of the text after the wrapper and
+  swallow its clicks, which is how chatgpt.com backgrounds covered
+  text. Positioned elements and flex or grid items qualify. A layer
+  inside an overflow clip stays in the clip, the layers of the root
+  context paint above the background propagated from `html` or `body`,
+  and clicks on `body` outside its children still reach `body`.
+  Layers with the same `z-index` keep document order, with `::before`
+  ahead of the element's children and `::after` behind them. Not
+  lifted yet: positioned inline elements and inline-blocks with a
+  negative `z-index`, which still paint with the line that holds them.
+* Paint: paint and hit testing share one stacking-context test: the
+  root, `fixed` and `sticky`, positioned or flex/grid items with a
+  `z-index`, opacity below 1, transforms, `perspective`,
+  `preserve-3d`, `filter`, `backdrop-filter`, `clip-path`, masks,
+  `mix-blend-mode`, `isolation: isolate`, `will-change` of those,
+  `contain` with layout or paint, and `content-visibility` other than
+  `visible`. Such an element keeps its positioned descendants inside
+  it and, like a positioned element, paints and takes clicks above
+  the in-flow content that follows it. A dropdown inside a wrapper
+  with `opacity`, `transform` or `will-change` was drawn under the
+  next block and clicks on it went to that block. Inline-blocks and
+  images that form a stacking context still paint and take clicks in
+  their line, as before.
+* Input: hit testing skips the contents of `content-visibility:
+  hidden` elements and elements hidden by `clip: rect(0 0 0 0)`, as
+  painting does, and boxes outside the point are dropped before they
+  are queued as layers. `elementFromPoint` on a list of 4000
+  `position: relative` rows took 20 ms and now takes 0.3 ms.
+* CSS: `isolation`, `will-change`, `contain` and `backdrop-filter` are
+  parsed from style sheets (they were only read from inline styles by
+  `getComputedStyle`). Invalid values are dropped, so a later invalid
+  declaration no longer overrides a valid one, and `CSS.supports`
+  answers for them; `backdrop-filter` is checked as a filter list.
+  `will-change` keeps the case of the names it lists. Integer
+  properties such as `z-index` clamp to the 32-bit range, so
+  `z-index: 99999999999` stays on top (on x86-64 it turned negative).
+* JS: microtasks, `requestAnimationFrame` callbacks, ResizeObserver and
+  IntersectionObserver callbacks and the rendering tick no longer run in
+  the middle of another script. The microtask checkpoint after a script
+  inserted by other script (`appendChild()` of an inline script,
+  `document.write()`) is left to the outer task, as the HTML standard
+  says. While a script waits for a stylesheet that `getComputedStyle()`,
+  `offsetWidth` or `getAnimations()` needs, or for a synchronous
+  `XMLHttpRequest`, the rendering tick, animation frames, animation
+  events and observer deliveries wait until it returns. Observer
+  callbacks forced by a layout read run after the script, resize
+  observations before intersection ones, each followed by a microtask
+  checkpoint. ChatGPT spun in its render loop at startup until its
+  scripts were halted, because its own queued flush ran inside the
+  flush that was waiting for a stylesheet.
 * SVG `foreignObject`: scripts can measure the HTML inside it.
   `getBoundingClientRect()` returned an empty rectangle and `offsetWidth`
   0 for every element in a foreignObject, so diagram labels that size

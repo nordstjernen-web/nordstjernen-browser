@@ -387,7 +387,7 @@ ns_wasm_js_to_val(JSContext *ctx, ns_wasm_instance *wi, JSValueConst v,
     case WASM_EXTERNREF: {
         ns_wasm_ref *r = ns_wasm_ref_box(ctx, v);
         if (!ns_wasm_ref_register(wi->inst, r, NULL)) {
-            JS_ThrowInternalError(ctx, "wasm externref registration failed");
+            JS_ThrowRangeError(ctx, "wasm externref registration failed");
             return -1;
         }
         out->of.foreign = (uintptr_t)r;
@@ -924,7 +924,7 @@ ns_wasm_table_set(JSContext *ctx, JSValueConst this_val, int argc,
             return JS_ThrowRangeError(ctx, "table index out of bounds");
         ns_wasm_ref *r = ns_wasm_ref_box(ctx, v);
         if (!ns_wasm_ref_register(wi->inst, r, &ref))
-            return JS_ThrowInternalError(ctx,
+            return JS_ThrowRangeError(ctx,
                                          "wasm externref registration failed");
     }
     if (!ns_wamr_table_set_ref(wi->inst, t->name, idx, ref))
@@ -954,7 +954,7 @@ ns_wasm_table_grow(JSContext *ctx, JSValueConst this_val, int argc,
         if (t->elem_kind == WASM_EXTERNREF && !JS_IsNull(argv[1])) {
             ns_wasm_ref *r = ns_wasm_ref_box(ctx, argv[1]);
             if (!ns_wasm_ref_register(wi->inst, r, &ref))
-                return JS_ThrowInternalError(
+                return JS_ThrowRangeError(
                     ctx, "wasm externref registration failed");
             fill_externref = TRUE;
         }
@@ -1261,7 +1261,7 @@ ns_wasm_native_fail(JSContext *ctx, ns_wasm_instance *wi,
                     wasm_module_inst_t inst, const char *msg)
 {
     if (!JS_HasException(ctx))
-        JS_ThrowInternalError(ctx, "%s", msg ? msg : "wasm import failed");
+        ns_wasm_throw_named(ctx, "RuntimeError", msg ? msg : "wasm import failed");
     JSValue exc = JS_GetException(ctx);
     if (wi && !wi->has_pending) {
         wi->pending_exc = exc;
@@ -1824,7 +1824,7 @@ static JSValue
 ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
 {
     if (!ns_wasm_runtime_ready())
-        return JS_ThrowInternalError(ctx, "wasm runtime init failed");
+        return JS_ThrowRangeError(ctx, "wasm runtime init failed");
     if (len > G_MAXUINT32)
         return ns_wasm_throw_named(ctx, "CompileError",
                                    "wasm module too large");
@@ -2019,7 +2019,7 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         ns_wasm_linkage_clear(rt, &wi->linkage);
         JS_FreeValueRT(rt, wi->pending_exc);
         g_free(wi);
-        return JS_ThrowInternalError(ctx, "wasm exec env creation failed");
+        return JS_ThrowRangeError(ctx, "wasm exec env creation failed");
     }
 
     JSValue obj = JS_NewObjectClass(ctx, ns_wasm_instance_class_id);
