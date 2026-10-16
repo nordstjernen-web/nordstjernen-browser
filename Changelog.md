@@ -10,6 +10,12 @@ Changelog:
   `<link rel="preload" as="style" onload="this.rel='stylesheet'">`,
   never applied its sheet, so chatgpt.com kept its narrow-screen styles
   and its cookie dialog covered the whole page in white.
+* Layout: a table caption's `::before` and `::after` are built like a
+  table cell's, so a floated or block pseudo-element inside a caption is
+  a float or a block, and an absolutely positioned one is laid out.
+  Captions turned every pseudo-element into inline text, so the floated
+  magnifier slot in Wikipedia's thumbnail captions took no room and the
+  caption text wrapped differently from other browsers.
 * Performance: forced style updates after script writes to inline styles
   recompute far fewer elements. An element whose style an animation
   rewrites is recomputed alone, with its descendants kept unless the
