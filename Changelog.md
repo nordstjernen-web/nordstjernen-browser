@@ -36,6 +36,10 @@ Changelog:
   without `type` or `data`, and a worker whose `ErrorEvent` is gone
   still runs `self.onerror`; ChatGPT's answer worker never replied and
   the page spun until its scripts were halted.
+* Media: a renderer stall no longer seeks the audio. Audio keeps the
+  clock and the video catches up to it, as other browsers do; before,
+  any tick more than a second late clamped the video clock and seeked
+  the audio back, which was heard as skips.
 * Media: a playing video is composited by the window as its own layer
   instead of being painted into the page tiles. The page tile under the
   video is left transparent, so captions and player controls drawn on

@@ -2260,7 +2260,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             g_printerr("[clock] elapsed=%.2f prev=%.2f cur=%.2f edge=%.2f\n",
                        elapsed, v->prev_tick_time, v->cur_time,
                        ns_video_buffered_end(cache, v));
-        if (elapsed - v->prev_tick_time > 1.0) {
+        if (elapsed - v->prev_tick_time > 1.0 && !v->audio_opened) {
             elapsed = v->prev_tick_time + 1.0;
             v->base_us = now_us - (gint64)(elapsed * 1e6);
             if (v->audio_opened)
