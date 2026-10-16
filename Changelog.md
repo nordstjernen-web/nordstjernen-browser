@@ -9,6 +9,13 @@ Changelog:
   font. It used to report an empty rectangle at the page's top-left
   corner, so scripts that measure such markers (Wikipedia's citation
   metadata spans, scroll anchors) saw them at 0,0.
+* Layout: a line that holds nothing but absolutely positioned elements,
+  empty inline elements and collapsible spaces takes no height, as CSS
+  requires of such lines. An absolutely positioned element between two
+  empty inline elements (`<span></span> <svg style="position:
+  absolute"></svg> <span></span>`) gave its line a full line height,
+  which pushed everything below it down; YouTube's `<body>` was 11px
+  tall instead of 0px.
 * CSS: `mask-size`, `mask-position` and `mask-repeat` (and their
   `-webkit-` forms, the `mask-position` shorthand and the position, size
   and repeat parts of the `mask` shorthand) are supported, and an image
