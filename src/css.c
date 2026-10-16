@@ -24,6 +24,7 @@ static double g_viewport_h = 800;
 
 static GHashTable *g_defined_elements;
 static GHashTable *g_defined_since_restyle;
+static __thread gboolean g_css_detached;
 
 void
 ns_css_register_defined_element(const char *tag)
@@ -121,7 +122,7 @@ ns_css_clear_defined_elements(void)
 static gboolean
 ns_css_is_defined_element(const char *tag)
 {
-    if (!g_defined_elements || !tag) return FALSE;
+    if (g_css_detached || !g_defined_elements || !tag) return FALSE;
     char *lower = g_ascii_strdown(tag, -1);
     gboolean ok = g_hash_table_contains(g_defined_elements, lower);
     g_free(lower);
@@ -270,6 +271,12 @@ ns_css_set_fullscreen_node(const ns_node *node)
     const ns_node *prev = g_css_fullscreen_node;
     g_css_fullscreen_node = node;
     return prev;
+}
+
+static const ns_node *
+css_state_node(const ns_node *node)
+{
+    return g_css_detached ? NULL : node;
 }
 
 static const char *kProp[NS_CSS_PROP_COUNT] = {
@@ -2044,12 +2051,12 @@ typedef struct ns_css_scope_text {
 #define NS_CSS_MAX_SELECTOR_NESTING 48
 #define NS_CSS_MAX_AT_NESTING 32
 
-static gboolean g_sel_parse_error;
-static gboolean g_sel_ns_prefix;
-static gboolean g_sel_has_hover;
-static gboolean g_sel_has_active;
-static gboolean g_sel_strict;
-static int g_sel_has_depth;
+static __thread gboolean g_sel_parse_error;
+static __thread gboolean g_sel_ns_prefix;
+static __thread gboolean g_sel_has_hover;
+static __thread gboolean g_sel_has_active;
+static __thread gboolean g_sel_strict;
+static __thread int g_sel_has_depth;
 
 static ns_css_selector *parse_one_selector_rel(const char **pp, const char *end,
                                                int depth, gboolean relative);
@@ -2557,7 +2564,7 @@ css_selector_collect_attr_ancestor_hashes(ns_css_selector *sel)
             css_selector_add_ancestor_hash(
                 sel, css_attr_value_hash(a->name, a->value, strlen(a->value)));
             sel->n_ancestor_attr_hashes = sel->n_ancestor_hashes;
-            g_css_attr_ancestor_hashes = TRUE;
+            if (!g_css_detached) g_css_attr_ancestor_hashes = TRUE;
         }
     }
 }
@@ -12598,10 +12605,37 @@ prop_requires_nonnegative(ns_css_prop prop)
 }
 
 static gboolean
+prop_is_number(ns_css_prop prop)
+{
+    switch (prop) {
+    case NS_CSS_OPACITY:
+    case NS_CSS_FLEX_GROW: case NS_CSS_FLEX_SHRINK:
+    case NS_CSS_LINE_HEIGHT:
+    case NS_CSS_FILL_OPACITY: case NS_CSS_STROKE_OPACITY:
+    case NS_CSS_STOP_OPACITY: case NS_CSS_STROKE_MITERLIMIT:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
 prop_bare_number_is_length(ns_css_prop prop)
 {
-    return prop != NS_CSS_OPACITY && prop != NS_CSS_FLEX_GROW &&
-           prop != NS_CSS_FLEX_SHRINK && prop != NS_CSS_LINE_HEIGHT;
+    return !prop_is_number(prop);
+}
+
+static gboolean
+prop_length_nonnegative(ns_css_prop prop)
+{
+    return prop_requires_nonnegative(prop) || prop == NS_CSS_STROKE_WIDTH;
+}
+
+static gboolean
+prop_accepts_bare_number(ns_css_prop prop)
+{
+    return prop_is_number(prop) || prop == NS_CSS_STROKE_WIDTH ||
+           prop == NS_CSS_STROKE_DASHOFFSET;
 }
 
 static gboolean
@@ -12624,10 +12658,10 @@ numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
                    unit == NS_CSS_UNIT_PERCENT;
         if (prop == NS_CSS_FLEX_GROW || prop == NS_CSS_FLEX_SHRINK)
             return unit == NS_CSS_UNIT_NUMBER && num >= 0;
-        if (unit == NS_CSS_UNIT_NUMBER && prop != NS_CSS_LINE_HEIGHT &&
+        if (unit == NS_CSS_UNIT_NUMBER && !prop_accepts_bare_number(prop) &&
             num != 0)
             return FALSE;
-        if (prop_requires_nonnegative(prop) && num < 0)
+        if (prop_length_nonnegative(prop) && num < 0)
             return FALSE;
         return TRUE;
     }
@@ -22988,7 +23022,7 @@ parse_rules_until(const char **pp, const char *end,
                   char close_at, const char *current_layer,
                   GPtrArray *scope_stack)
 {
-    static int at_depth;
+    static __thread int at_depth;
     gboolean nested = close_at == '}';
     if (nested) {
         if (at_depth >= NS_CSS_MAX_AT_NESTING) {
@@ -23853,6 +23887,16 @@ css_flatten_nesting(const char *text, gssize len)
 }
 
 static guint64 g_stylesheet_serial_next = 1;
+static GMutex  g_stylesheet_serial_lock;
+
+static guint64
+css_stylesheet_serial_take(void)
+{
+    g_mutex_lock(&g_stylesheet_serial_lock);
+    guint64 serial = g_stylesheet_serial_next++;
+    g_mutex_unlock(&g_stylesheet_serial_lock);
+    return serial;
+}
 
 gboolean
 ns_css_text_has_container_units(const char *text, gssize len)
@@ -23875,10 +23919,20 @@ ns_css_text_has_container_units(const char *text, gssize len)
 }
 
 ns_css_stylesheet *
+ns_css_stylesheet_parse_detached(const char *text, gssize len)
+{
+    gboolean outer = g_css_detached;
+    g_css_detached = TRUE;
+    ns_css_stylesheet *sh = ns_css_stylesheet_parse(text, len);
+    g_css_detached = outer;
+    return sh;
+}
+
+ns_css_stylesheet *
 ns_css_stylesheet_parse(const char *text, gssize len_in)
 {
     ns_css_stylesheet *sh = g_new0(ns_css_stylesheet, 1);
-    sh->serial = g_stylesheet_serial_next++;
+    sh->serial = css_stylesheet_serial_take();
     sh->rules = g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_rule_free);
     if (!text) return sh;
     if (len_in < 0) len_in = (gssize)strlen(text);
@@ -24102,7 +24156,7 @@ void
 ns_css_stylesheet_force_layer(ns_css_stylesheet *s, const char *layer_name)
 {
     if (!s || !layer_name || !*layer_name) return;
-    s->serial = g_stylesheet_serial_next++;
+    s->serial = css_stylesheet_serial_take();
     GPtrArray *old_names = s->layer_names;
     GHashTable *old_layers = s->layers;
     s->layer_names = NULL;
@@ -24549,7 +24603,7 @@ ns_css_rule_index_ensure(const ns_css_stylesheet *sheet)
 }
 
 static gboolean match_selector(const ns_css_selector *sel, const ns_node *el);
-static const ns_node *g_css_match_scope;
+static __thread const ns_node *g_css_match_scope;
 typedef struct css_sibling_position {
     int child;
     int last_child;
@@ -24805,7 +24859,7 @@ ns_el_is_empty(const ns_node *el)
 static gboolean
 ns_el_is_link(const ns_node *el)
 {
-    if (!ns_element_get_attr(el, "href")) return FALSE;
+    if (g_css_detached || !ns_element_get_attr(el, "href")) return FALSE;
     return ns_node_is_element_named(el, "a") ||
            ns_node_is_element_named(el, "area");
 }
@@ -24813,6 +24867,12 @@ ns_el_is_link(const ns_node *el)
 static GHashTable *g_visited_urls = NULL;
 static char       *g_css_doc_base = NULL;
 static char       *g_css_doc_language = NULL;
+
+static const char *
+css_doc_language(void)
+{
+    return g_css_detached ? NULL : g_css_doc_language;
+}
 
 void
 ns_css_mark_visited(const char *abs_url)
@@ -25000,7 +25060,7 @@ ns_css_node_language(const ns_node *el)
         g_pragma_lang = found;
         g_pragma_valid = TRUE;
     }
-    return g_pragma_lang ? g_pragma_lang : g_css_doc_language;
+    return g_pragma_lang ? g_pragma_lang : css_doc_language();
 }
 
 static gboolean
@@ -25166,7 +25226,7 @@ ns_css_node_dir(const ns_node *el)
 static gboolean
 ns_css_node_is_target(const ns_node *el)
 {
-    if (!g_target_fragment || !el) return FALSE;
+    if (g_css_detached || !g_target_fragment || !el) return FALSE;
     const char *eid = ns_element_get_attr(el, "id");
     if (eid && strcmp(eid, g_target_fragment) == 0) return TRUE;
     if (el->name && g_ascii_strcasecmp(el->name, "a") == 0) {
@@ -25405,7 +25465,7 @@ has_memo_equal(gconstpointer pa, gconstpointer pb)
     return a->group == b->group && a->anchor == b->anchor;
 }
 
-static GHashTable *g_has_memo;
+static __thread GHashTable *g_has_memo;
 
 static gboolean
 has_group_matches(const GPtrArray *group, const ns_node *anchor)
@@ -25707,7 +25767,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
             case NS_CSS_PC_HOVER: {
                 if (!g_css_hover_node) return FALSE;
                 gboolean on = FALSE;
-                for (const ns_node *h = g_css_hover_node; h; h = h->parent)
+                for (const ns_node *h = css_state_node(g_css_hover_node); h;
+                     h = h->parent)
                     if (h == el) { on = TRUE; break; }
                 if (!on) return FALSE;
                 break;
@@ -25715,7 +25776,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
             case NS_CSS_PC_ACTIVE: {
                 if (!g_css_active_node) return FALSE;
                 gboolean pressed = FALSE;
-                for (const ns_node *a = g_css_active_node; a; a = a->parent)
+                for (const ns_node *a = css_state_node(g_css_active_node); a;
+                     a = a->parent)
                     if (a == el) { pressed = TRUE; break; }
                 if (!pressed) return FALSE;
                 break;
@@ -25730,7 +25792,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 break;
             case NS_CSS_PC_FOCUS_WITHIN: {
                 if (!g_css_focus_node) return FALSE;
-                const ns_node *f = g_css_focus_node;
+                const ns_node *f = css_state_node(g_css_focus_node);
                 gboolean within = FALSE;
                 for (; f; f = f->parent)
                     if (f == el) { within = TRUE; break; }
@@ -28165,6 +28227,7 @@ static GHashTable *g_position_try_rules;
 static void
 position_try_register(const char *name, const char *body, const char *body_end)
 {
+    if (g_css_detached) return;
     if (!g_position_try_rules)
         g_position_try_rules = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, g_free);
@@ -29904,6 +29967,87 @@ css_element_keys_for(const ns_node *el)
     return keys;
 }
 
+static GArray *
+css_index_bucket(const ns_css_rule_index *idx, const css_element_key *k)
+{
+    if (!index_bloom_may_contain(idx->bloom, k->hash)) return NULL;
+    GArray *bucket = NULL;
+    char small[64];
+    char *key = k->len < sizeof(small) ? small : g_malloc(k->len + 1);
+    memcpy(key, k->text, k->len);
+    key[k->len] = '\0';
+    switch (k->kind) {
+    case '#': bucket = g_hash_table_lookup(idx->by_id, key); break;
+    case '.': bucket = g_hash_table_lookup(idx->by_class, key); break;
+    case '%': bucket = css_index_lookup_ci(idx->by_tag, key, k->len); break;
+    default:  bucket = css_index_lookup_ci(idx->by_attr, key, k->len); break;
+    }
+    if (key != small) g_free(key);
+    return bucket;
+}
+
+static gboolean
+css_element_is_root(const ns_node *el)
+{
+    return el->kind == NS_NODE_ELEMENT && el->parent &&
+           el->parent->kind == NS_NODE_DOCUMENT &&
+           !(el->parent->flags & NS_NODE_FRAGMENT);
+}
+
+static void
+css_bucket_each_match(const ns_css_stylesheet *sheet, const GArray *bucket,
+                      const ns_node *el, ns_css_match_fn fn, gpointer data)
+{
+    for (guint i = 0; bucket && i < bucket->len; i++) {
+        const css_candidate *c = &g_array_index(bucket, css_candidate, i);
+        const ns_css_rule *r = c->rule_idx < sheet->rules->len
+            ? g_ptr_array_index(sheet->rules, c->rule_idx) : NULL;
+        if (!r || r->container_condition ||
+            c->selector_idx >= r->selectors->len) continue;
+        const ns_css_selector *sel =
+            g_ptr_array_index(r->selectors, c->selector_idx);
+        if (!sel || sel->pseudo_element != NS_CSS_PE_NONE) continue;
+        if (rule_selector_matches(r, sel, el, NS_CSS_PE_NONE, NULL))
+            fn(r, c->rule_idx, sel, data);
+    }
+}
+
+void
+ns_css_stylesheet_each_match(const ns_css_stylesheet *sheet,
+                             const ns_node *el, ns_css_match_fn fn,
+                             gpointer data)
+{
+    if (!sheet || !sheet->rules || !el || el->kind != NS_NODE_ELEMENT) return;
+    const ns_css_rule_index *idx = ns_css_rule_index_ensure(sheet);
+    gboolean outer_detached = g_css_detached;
+    g_css_detached = TRUE;
+    g_element_keys_pass++;
+    const css_element_keys *keys = css_element_keys_for(el);
+    for (guint ki = 0; ki < keys->n; ki++)
+        css_bucket_each_match(sheet, css_index_bucket(idx, &keys->k[ki]), el,
+                              fn, data);
+    css_bucket_each_match(sheet, idx->universal, el, fn, data);
+    if (css_element_is_root(el))
+        css_bucket_each_match(sheet, idx->root_only, el, fn, data);
+    g_css_detached = outer_detached;
+}
+
+GHashTable *
+ns_css_layer_ranks_new(const ns_css_stylesheet *const *sheets, gsize n)
+{
+    GHashTable *ranks = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, NULL);
+    for (gsize i = 0; i < n; i++) css_layer_rank_add_sheet(ranks, sheets[i]);
+    css_layer_ranks_finalize(ranks);
+    return ranks;
+}
+
+int
+ns_css_layer_rank(GHashTable *ranks, const char *layer_name)
+{
+    return css_layer_rank_for(ranks, layer_name);
+}
+
 static void
 gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                      int sheet_index, const ns_node *el,
@@ -29941,29 +30085,12 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     if (el && el->kind == NS_NODE_ELEMENT) {
         const css_element_keys *keys = css_element_keys_for(el);
         for (guint ki = 0; ki < keys->n; ki++) {
-            const css_element_key *k = &keys->k[ki];
-            if (!index_bloom_may_contain(idx->bloom, k->hash))
-                continue;
-            GArray *bucket = NULL;
-            char small[64];
-            char *key = k->len < sizeof(small) ? small
-                                               : g_malloc(k->len + 1);
-            memcpy(key, k->text, k->len);
-            key[k->len] = '\0';
-            switch (k->kind) {
-            case '#': bucket = g_hash_table_lookup(idx->by_id, key); break;
-            case '.': bucket = g_hash_table_lookup(idx->by_class, key); break;
-            case '%': bucket = css_index_lookup_ci(idx->by_tag, key, k->len); break;
-            default:  bucket = css_index_lookup_ci(idx->by_attr, key, k->len); break;
-            }
-            if (key != small) g_free(key);
+            GArray *bucket = css_index_bucket(idx, &keys->k[ki]);
             CAND_PUSH_ARR(bucket);
         }
     }
     CAND_PUSH_ARR(idx->universal);
-    if (el && el->kind == NS_NODE_ELEMENT && el->parent &&
-        el->parent->kind == NS_NODE_DOCUMENT &&
-        !(el->parent->flags & NS_NODE_FRAGMENT))
+    if (el && css_element_is_root(el))
         CAND_PUSH_ARR(idx->root_only);
     #undef CAND_PUSH_ARR
 

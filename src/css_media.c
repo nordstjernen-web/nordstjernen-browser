@@ -13,8 +13,8 @@
 
 typedef enum { MQ_NO, MQ_YES, MQ_DUNNO } mq_tri;
 
-static struct { double w, h; } g_mq_stack[MQ_VIEWPORT_STACK];
-static int g_mq_stack_len;
+static __thread struct { double w, h; } g_mq_stack[MQ_VIEWPORT_STACK];
+static __thread int g_mq_stack_len;
 
 static double g_mq_device_w = 1920;
 static double g_mq_device_h = 1080;
