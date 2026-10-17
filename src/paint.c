@@ -1951,9 +1951,26 @@ bg_layer_origin_area(const ns_box *b, int li,
     if (*h < 1) *h = 1;
 }
 
+static gboolean
+cell_hides_empty(const ns_box *b)
+{
+    if (b->kind != NS_BOX_TABLE_CELL || !b->style || !b->dom ||
+        !ns_css_keyword_is(b->style->values[NS_CSS_EMPTY_CELLS], "hide") ||
+        ns_css_keyword_is(b->style->values[NS_CSS_BORDER_COLLAPSE], "collapse"))
+        return FALSE;
+    for (const ns_node *c = b->dom->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT) return FALSE;
+        if (c->kind != NS_NODE_TEXT || !c->text) continue;
+        for (const char *p = c->text; *p; p++)
+            if (!g_ascii_isspace(*p)) return FALSE;
+    }
+    return TRUE;
+}
+
 static void
 paint_block(cairo_t *cr, const ns_box *b)
 {
+    if (cell_hides_empty(b)) return;
     double border_x = b->x + b->margin.left;
     double border_y = b->y + b->margin.top;
     double border_w = b->content_width + b->padding.left + b->padding.right +
@@ -3887,6 +3904,50 @@ apply_first_line_attrs(NsPangoAttrList *attrs, const ns_style *fl,
                           start, len);
 }
 
+static const ns_css_value *
+decoration_value_of(const ns_inline_attr *r, const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = r && r->style ? r->style->values[prop] : NULL;
+    if (!v && s) v = s->values[prop];
+    return v;
+}
+
+static gboolean
+decoration_length_px(const ns_css_value *v, double em, double *px)
+{
+    if (!v) return FALSE;
+    if (v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PERCENT) {
+        *px = v->u.length.v * em / 100.0;
+        return TRUE;
+    }
+    if (v->kind != NS_CSS_V_LENGTH && v->kind != NS_CSS_V_CALC) return FALSE;
+    *px = ns_css_dimension_px(v, em, em);
+    return TRUE;
+}
+
+static double
+decoration_thickness_px(const ns_inline_attr *r, const ns_style *s, double em)
+{
+    double px;
+    if (decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_DECORATION_THICKNESS),
+                             em, &px))
+        return MAX(px, 1.0);
+    return MAX(em / 16.0, 1.0);
+}
+
+static gboolean
+decoration_has_custom_metrics(const ns_inline_attr *r, const ns_style *s)
+{
+    double px;
+    double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
+    if (decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_DECORATION_THICKNESS),
+                             em, &px))
+        return TRUE;
+    return r->kind == NS_INLINE_UNDERLINE &&
+           decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_UNDERLINE_OFFSET),
+                                em, &px);
+}
+
 static const char *
 underline_dash_style(const ns_inline_attr *r, const ns_style *s)
 {
@@ -3895,11 +3956,11 @@ underline_dash_style(const ns_inline_attr *r, const ns_style *s)
         dv = r->style->values[NS_CSS_TEXT_DECORATION_STYLE];
     else if (s && s->values[NS_CSS_TEXT_DECORATION_STYLE])
         dv = s->values[NS_CSS_TEXT_DECORATION_STYLE];
-    if (!dv || dv->kind != NS_CSS_V_KEYWORD || !dv->u.keyword)
-        return NULL;
-    if (strcmp(dv->u.keyword, "dotted") == 0 ||
-        strcmp(dv->u.keyword, "dashed") == 0)
-        return dv->u.keyword;
+    const char *kw = dv && dv->kind == NS_CSS_V_KEYWORD ? dv->u.keyword : NULL;
+    if (kw && (strcmp(kw, "dotted") == 0 || strcmp(kw, "dashed") == 0))
+        return kw;
+    if ((!kw || strcmp(kw, "solid") == 0) && decoration_has_custom_metrics(r, s))
+        return "solid";
     return NULL;
 }
 
@@ -3930,13 +3991,17 @@ typedef struct dashed_decoration {
 } dashed_decoration;
 
 static double
-dashed_decoration_y(const ns_inline_attr *r, double base_y, double em,
-                    double thick)
+dashed_decoration_y(const ns_inline_attr *r, const ns_style *s, double base_y,
+                    double em, double thick)
 {
     if (r->kind == NS_INLINE_STRIKETHROUGH)
         return base_y - em * 0.28;
     if (r->kind == NS_INLINE_OVERLINE)
         return base_y - em * 0.78;
+    double offset;
+    if (decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_UNDERLINE_OFFSET),
+                             em, &offset))
+        return base_y + offset + thick / 2.0;
     return base_y + thick * 1.5;
 }
 
@@ -3947,16 +4012,18 @@ paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
 {
     const ns_inline_attr *r = d->attr;
     gboolean dotted = strcmp(d->keyword, "dotted") == 0;
+    gboolean solid = strcmp(d->keyword, "solid") == 0;
     int xa = 0, xb = 0;
     ns_pango_layout_line_index_to_x(line, seg0, FALSE, &xa);
     ns_pango_layout_line_index_to_x(line, seg1, FALSE, &xb);
     double x0 = dx + d->text_x + (double)MIN(xa, xb) / NS_PANGO_SCALE;
     double x1 = dx + d->text_x + (double)MAX(xa, xb) / NS_PANGO_SCALE;
     double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
-    double thick = MAX(em / 16.0, 1.0);
-    double uy = dy + dashed_decoration_y(r, d->base_y, em, thick);
+    double thick = decoration_thickness_px(r, d->box->style, em);
+    double uy = dy + dashed_decoration_y(r, d->box->style, d->base_y, em, thick);
     const ns_css_value *dc =
         r->style ? r->style->values[NS_CSS_TEXT_DECORATION_COLOR] : NULL;
+    if (!dc && r->style) dc = r->style->values[NS_CSS_COLOR];
     cairo_save(cr);
     if (dc && dc->kind == NS_CSS_V_COLOR)
         cairo_set_source_rgba(cr, dc->u.color.r / 255.0,
@@ -3968,7 +4035,7 @@ paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
     cairo_set_line_width(cr, thick);
     double dash[2] = { dotted ? thick : thick * 3.0,
                        dotted ? thick * 1.6 : thick * 2.5 };
-    cairo_set_dash(cr, dash, 2, 0);
+    cairo_set_dash(cr, dash, solid ? 0 : 2, 0);
     cairo_set_line_cap(cr, dotted ? CAIRO_LINE_CAP_ROUND
                                   : CAIRO_LINE_CAP_BUTT);
     cairo_move_to(cr, x0, uy);

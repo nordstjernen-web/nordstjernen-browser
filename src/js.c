@@ -17402,6 +17402,10 @@ ns_computed_simple_shorthand(JSContext *ctx, const ns_node *n,
         { "border-style", { "border-top-style", "border-right-style",
                             "border-bottom-style", "border-left-style" } },
         { "inset", { "top", "right", "bottom", "left" } },
+        { "scroll-margin", { "scroll-margin-top", "scroll-margin-right",
+                             "scroll-margin-bottom", "scroll-margin-left" } },
+        { "scroll-padding", { "scroll-padding-top", "scroll-padding-right",
+                              "scroll-padding-bottom", "scroll-padding-left" } },
     };
     *matched = TRUE;
     for (gsize i = 0; i < G_N_ELEMENTS(boxes); i++)
@@ -18057,7 +18061,8 @@ ns_computed_defaults_to_currentcolor(int pid)
     return pid == NS_CSS_BORDER_TOP_COLOR || pid == NS_CSS_BORDER_RIGHT_COLOR ||
            pid == NS_CSS_BORDER_BOTTOM_COLOR || pid == NS_CSS_BORDER_LEFT_COLOR ||
            pid == NS_CSS_OUTLINE_COLOR || pid == NS_CSS_COLUMN_RULE_COLOR ||
-           pid == NS_CSS_TEXT_DECORATION_COLOR || pid == NS_CSS_CARET_COLOR;
+           pid == NS_CSS_TEXT_DECORATION_COLOR || pid == NS_CSS_CARET_COLOR ||
+           ns_css_prop_initial_currentcolor(pid);
 }
 
 static char *
@@ -18076,15 +18081,36 @@ ns_computed_join3(JSContext *ctx, const ns_node *n, const char *a,
 }
 
 static char *
+ns_computed_keyword_shorthand(JSContext *ctx, const ns_node *n, const char *name,
+                              gboolean *matched)
+{
+    int props[NS_CSS_KEYWORD_SHORTHAND_PARTS_MAX];
+    int count = ns_css_keyword_shorthand_parts(name, props);
+    *matched = count > 0;
+    if (!count) return NULL;
+    char *values[NS_CSS_KEYWORD_SHORTHAND_PARTS_MAX] = { 0 };
+    for (int i = 0; i < count; i++) {
+        values[i] = ns_computed_lookup(ctx, n, ns_css_prop_name(props[i]));
+        if (!values[i]) values[i] = g_strdup("");
+    }
+    char *out = ns_css_keyword_shorthand_compose(name, values);
+    for (int i = 0; i < count; i++) g_free(values[i]);
+    return out;
+}
+
+static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
     if (!n || !name) return NULL;
+    gboolean keyword_matched = FALSE;
+    char *keyword_shorthand = ns_computed_keyword_shorthand(ctx, n, name, &keyword_matched);
+    if (keyword_matched) return keyword_shorthand;
     if (strcmp(name, "css-float") == 0 || strcmp(name, "cssFloat") == 0)
         name = "float";
 
     if (strcmp(name, "font") == 0) {
         char *fstyle = ns_computed_lookup(ctx, n, "font-style");
-        char *fvariant = ns_computed_lookup(ctx, n, "font-variant");
+        char *fvariant = ns_computed_lookup(ctx, n, "font-variant-caps");
         char *fweight = ns_computed_lookup(ctx, n, "font-weight");
         char *fstretch = ns_computed_lookup(ctx, n, "font-stretch");
         char *fsize = ns_computed_lookup(ctx, n, "font-size");
@@ -18300,7 +18326,9 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (computed && (tracks_id == NS_CSS_SHAPE_OUTSIDE || tracks_id == NS_CSS_SHAPE_MARGIN ||
                      tracks_id == NS_CSS_CLIP_PATH || tracks_id == NS_CSS_FILTER ||
                      tracks_id == NS_CSS_BACKDROP_FILTER ||
-                     tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD)) {
+                     tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD ||
+                     tracks_id == NS_CSS_OFFSET_PATH || tracks_id == NS_CSS_OFFSET_POSITION ||
+                     tracks_id == NS_CSS_OFFSET_ANCHOR)) {
         const ns_node *root = n;
         while (root->parent && root->parent->kind == NS_NODE_ELEMENT)
             root = root->parent;
@@ -18660,66 +18688,100 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
 }
 
 static const char *const ns_css_computed_props[] = {
-    "-webkit-text-fill-color", "accent-color", "border-collapse", "border-spacing", "caption-side", "caret-color",
-    "clip-rule", "color", "color-interpolation", "color-interpolation-filters", "color-scheme", "cursor",
-    "direction", "dominant-baseline", "empty-cells", "fill", "fill-opacity", "fill-rule",
-    "font-family", "font-feature-settings", "font-kerning", "font-language-override", "font-optical-sizing", "font-size", "font-size-adjust",
-    "font-style", "font-variant-alternates", "font-variant-caps", "font-variant-east-asian", "font-variant-emoji", "font-variant-ligatures",
-    "font-variant-numeric", "font-variant-position", "font-variation-settings", "font-weight", "font-width", "image-rendering",
-    "letter-spacing", "line-height", "list-style-image", "list-style-position", "list-style-type", "math-depth",
-    "math-shift", "math-style", "orphans", "overflow-wrap", "paint-order", "pointer-events",
-    "quotes", "scrollbar-color", "shape-rendering", "stroke", "stroke-dasharray", "stroke-dashoffset",
-    "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width", "tab-size",
-    "text-align", "text-align-last", "text-anchor", "text-decoration-line", "text-decoration-skip-ink", "text-indent", "text-justify",
-    "text-rendering", "text-shadow", "text-transform", "text-underline-offset", "text-underline-position", "text-wrap-mode",
-    "text-wrap-style", "visibility", "white-space-collapse", "widows", "word-break", "word-spacing",
-    "writing-mode", "align-content", "align-items", "align-self", "anchor-name", "anchor-scope",
-    "animation-composition", "animation-delay", "animation-direction", "animation-duration", "animation-fill-mode", "animation-iteration-count",
-    "animation-name", "animation-play-state", "animation-timeline", "animation-timing-function", "appearance", "aspect-ratio",
-    "backdrop-filter", "background-attachment", "background-blend-mode", "background-clip", "background-color", "background-image",
-    "background-origin", "background-position-x", "background-position-y", "background-repeat", "background-size", "block-size",
-    "border-block-end-color", "border-block-end-style", "border-block-end-width", "border-block-start-color", "border-block-start-style", "border-block-start-width",
-    "border-bottom-color", "border-bottom-left-radius", "border-bottom-right-radius", "border-bottom-style", "border-bottom-width", "border-end-end-radius",
-    "border-end-start-radius", "border-image-outset", "border-image-repeat", "border-image-slice", "border-image-source", "border-image-width",
-    "border-inline-end-color", "border-inline-end-style", "border-inline-end-width", "border-inline-start-color", "border-inline-start-style", "border-inline-start-width",
-    "border-left-color", "border-left-style", "border-left-width", "border-right-color", "border-right-style", "border-right-width",
-    "border-start-end-radius", "border-start-start-radius", "border-top-color", "border-top-left-radius", "border-top-right-radius", "border-top-style",
-    "border-top-width", "bottom", "box-shadow", "box-sizing", "break-after", "break-before",
-    "break-inside", "clear", "clip",
-    "clip-path", "column-count", "column-gap", "column-height", "column-span", "column-width",
-    "contain", "contain-intrinsic-height", "contain-intrinsic-width", "container-name", "container-type", "content", "content-visibility", "corner-bottom-left-shape",
-    "corner-bottom-right-shape", "corner-end-end-shape", "corner-end-start-shape", "corner-start-end-shape", "corner-start-start-shape", "corner-top-left-shape",
-    "corner-top-right-shape", "counter-increment", "counter-reset", "counter-set", "cx", "cy",
-    "display", "filter", "flex-basis", "flex-direction", "flex-grow", "flex-shrink",
-    "flex-wrap", "float", "flood-color", "flood-opacity", "grid-auto-columns", "grid-auto-flow",
-    "grid-auto-rows", "grid-column-end", "grid-column-start", "grid-row-end", "grid-row-start", "grid-template-areas",
-    "grid-template-columns", "grid-template-rows", "height", "inline-size", "inset-block-end", "inset-block-start",
-    "inset-inline-end", "inset-inline-start", "isolation", "justify-content", "justify-items", "justify-self",
-    "left", "margin-block-end", "margin-block-start", "margin-bottom", "margin-inline-end", "margin-inline-start",
-    "margin-left", "margin-right", "margin-top", "mask-border-mode", "mask-border-outset",
-    "mask-border-repeat", "mask-border-slice", "mask-border-source", "mask-border-width",
-    "mask-clip", "mask-composite", "mask-image",
-    "mask-mode", "mask-origin", "mask-position", "mask-repeat", "mask-size", "mask-type",
-    "max-block-size", "max-height", "max-inline-size", "max-width", "min-block-size", "min-height",
-    "min-inline-size", "min-width", "mix-blend-mode", "object-fit", "object-position", "opacity",
-    "order", "outline-color", "outline-offset", "outline-style", "outline-width", "overflow-block",
-    "overflow-clip-margin-block-end", "overflow-clip-margin-block-start", "overflow-clip-margin-bottom", "overflow-clip-margin-inline-end", "overflow-clip-margin-inline-start", "overflow-clip-margin-left",
-    "overflow-clip-margin-right", "overflow-clip-margin-top", "overflow-inline", "overflow-x", "overflow-y", "padding-block-end",
-    "padding-block-start", "padding-bottom", "padding-inline-end", "padding-inline-start", "padding-left", "padding-right",
-    "padding-top", "perspective", "perspective-origin", "position", "position-anchor", "position-area",
-    "position-try-fallbacks", "position-try-order", "position-visibility", "r", "resize", "right",
-    "rotate", "row-gap", "rx", "ry", "scale", "scroll-behavior",
-    "scroll-margin-block-end", "scroll-margin-block-start", "scroll-margin-bottom", "scroll-margin-inline-end", "scroll-margin-inline-start", "scroll-margin-left",
-    "scroll-margin-right", "scroll-margin-top", "scroll-padding-block-end", "scroll-padding-block-start", "scroll-padding-bottom", "scroll-padding-inline-end",
-    "scroll-padding-inline-start", "scroll-padding-left", "scroll-padding-right", "scroll-padding-top", "scroll-snap-align", "scroll-snap-stop",
-    "scroll-snap-type", "scroll-timeline-axis", "scroll-timeline-name",
-    "scrollbar-gutter", "scrollbar-width", "shape-image-threshold", "shape-margin", "shape-outside", "stop-color",
-    "stop-opacity", "table-layout", "text-decoration-color", "text-decoration-style", "text-decoration-thickness", "text-overflow",
-    "timeline-scope", "top", "touch-action", "transform", "transform-box", "transform-origin",
-    "transform-style", "transition-behavior", "transition-delay", "transition-duration", "transition-property", "transition-timing-function",
-    "translate", "unicode-bidi", "user-select", "vector-effect", "vertical-align", "view-timeline-axis",
-    "view-timeline-inset", "view-timeline-name", "view-transition-name", "white-space-trim", "width", "will-change",
-    "x", "y", "z-index",
+    "-webkit-text-fill-color", "-webkit-text-stroke-color", "-webkit-text-stroke-width",
+    "accent-color", "border-collapse", "border-spacing", "caption-side", "caret-color",
+    "clip-rule", "color", "color-interpolation", "color-interpolation-filters",
+    "color-rendering", "color-scheme", "cursor", "direction", "dominant-baseline",
+    "empty-cells", "fill", "fill-opacity", "fill-rule", "font-family", "font-feature-settings",
+    "font-kerning", "font-language-override", "font-optical-sizing", "font-palette",
+    "font-size", "font-size-adjust", "font-style", "font-synthesis-position",
+    "font-synthesis-small-caps", "font-synthesis-style", "font-synthesis-weight",
+    "font-variant-alternates", "font-variant-caps", "font-variant-east-asian",
+    "font-variant-emoji", "font-variant-ligatures", "font-variant-numeric",
+    "font-variant-position", "font-variation-settings", "font-weight", "font-width",
+    "forced-color-adjust", "hyphenate-character", "hyphenate-limit-chars", "image-orientation",
+    "image-rendering", "interpolate-size", "letter-spacing", "line-break", "line-height",
+    "list-style-image", "list-style-position", "list-style-type", "marker-end", "marker-mid",
+    "marker-start", "math-depth", "math-shift", "math-style", "orphans", "overflow-wrap",
+    "paint-order", "pointer-events", "print-color-adjust", "quotes", "ruby-align",
+    "ruby-position", "scrollbar-color", "shape-rendering", "stroke", "stroke-dasharray",
+    "stroke-dashoffset", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-opacity", "stroke-width", "tab-size", "text-align", "text-align-last",
+    "text-anchor", "text-combine-upright", "text-decoration-line", "text-decoration-skip-ink",
+    "text-decoration-skip-spaces", "text-emphasis-color", "text-emphasis-position",
+    "text-emphasis-style", "text-indent", "text-justify", "text-rendering", "text-shadow",
+    "text-size-adjust", "text-transform", "text-underline-offset", "text-underline-position",
+    "text-wrap-mode", "text-wrap-style", "visibility", "white-space-collapse", "widows",
+    "word-break", "word-spacing", "writing-mode", "align-content", "align-items", "align-self",
+    "alignment-baseline", "anchor-name", "anchor-scope", "animation-composition",
+    "animation-delay", "animation-direction", "animation-duration", "animation-fill-mode",
+    "animation-iteration-count", "animation-name", "animation-play-state", "animation-timeline",
+    "animation-timing-function", "appearance", "aspect-ratio", "backdrop-filter",
+    "background-attachment", "background-blend-mode", "background-clip", "background-color",
+    "background-image", "background-origin", "background-position-x", "background-position-y",
+    "background-repeat", "background-size", "baseline-shift", "baseline-source", "block-size",
+    "border-block-end-color", "border-block-end-style", "border-block-end-width",
+    "border-block-start-color", "border-block-start-style", "border-block-start-width",
+    "border-bottom-color", "border-bottom-left-radius", "border-bottom-right-radius",
+    "border-bottom-style", "border-bottom-width", "border-end-end-radius",
+    "border-end-start-radius", "border-image-outset", "border-image-repeat",
+    "border-image-slice", "border-image-source", "border-image-width",
+    "border-inline-end-color", "border-inline-end-style", "border-inline-end-width",
+    "border-inline-start-color", "border-inline-start-style", "border-inline-start-width",
+    "border-left-color", "border-left-style", "border-left-width", "border-right-color",
+    "border-right-style", "border-right-width", "border-start-end-radius",
+    "border-start-start-radius", "border-top-color", "border-top-left-radius",
+    "border-top-right-radius", "border-top-style", "border-top-width", "bottom",
+    "box-decoration-break", "box-shadow", "box-sizing", "break-after", "break-before",
+    "break-inside", "clear", "clip", "clip-path", "column-count", "column-gap", "column-height",
+    "column-span", "column-width", "contain", "contain-intrinsic-height",
+    "contain-intrinsic-width", "container-name", "container-type", "content",
+    "content-visibility", "corner-bottom-left-shape", "corner-bottom-right-shape",
+    "corner-end-end-shape", "corner-end-start-shape", "corner-start-end-shape",
+    "corner-start-start-shape", "corner-top-left-shape", "corner-top-right-shape",
+    "counter-increment", "counter-reset", "counter-set", "cx", "cy", "display", "field-sizing",
+    "filter", "flex-basis", "flex-direction", "flex-grow", "flex-shrink", "flex-wrap", "float",
+    "flood-color", "flood-opacity", "grid-auto-columns", "grid-auto-flow", "grid-auto-rows",
+    "grid-column-end", "grid-column-start", "grid-row-end", "grid-row-start",
+    "grid-template-areas", "grid-template-columns", "grid-template-rows", "height",
+    "initial-letter", "inline-size", "inset-block-end", "inset-block-start", "inset-inline-end",
+    "inset-inline-start", "isolation", "justify-content", "justify-items", "justify-self",
+    "left", "lighting-color", "margin-block-end", "margin-block-start", "margin-bottom",
+    "margin-inline-end", "margin-inline-start", "margin-left", "margin-right", "margin-top",
+    "margin-trim", "mask-border-mode", "mask-border-outset", "mask-border-repeat",
+    "mask-border-slice", "mask-border-source", "mask-border-width", "mask-clip",
+    "mask-composite", "mask-image", "mask-mode", "mask-origin", "mask-position", "mask-repeat",
+    "mask-size", "mask-type", "max-block-size", "max-height", "max-inline-size", "max-width",
+    "min-block-size", "min-height", "min-inline-size", "min-width", "mix-blend-mode",
+    "object-fit", "object-position", "offset-anchor", "offset-distance", "offset-path",
+    "offset-position", "offset-rotate", "opacity", "order", "outline-color", "outline-offset",
+    "outline-style", "outline-width", "overflow-anchor", "overflow-block",
+    "overflow-clip-margin-block-end", "overflow-clip-margin-block-start",
+    "overflow-clip-margin-bottom", "overflow-clip-margin-inline-end",
+    "overflow-clip-margin-inline-start", "overflow-clip-margin-left",
+    "overflow-clip-margin-right", "overflow-clip-margin-top", "overflow-inline", "overflow-x",
+    "overflow-y", "overscroll-behavior-block", "overscroll-behavior-inline",
+    "overscroll-behavior-x", "overscroll-behavior-y", "padding-block-end",
+    "padding-block-start", "padding-bottom", "padding-inline-end", "padding-inline-start",
+    "padding-left", "padding-right", "padding-top", "perspective", "perspective-origin",
+    "position", "position-anchor", "position-area", "position-try-fallbacks",
+    "position-try-order", "position-visibility", "r", "resize", "right", "rotate", "row-gap",
+    "rx", "ry", "scale", "scroll-behavior", "scroll-margin-block-end",
+    "scroll-margin-block-start", "scroll-margin-bottom", "scroll-margin-inline-end",
+    "scroll-margin-inline-start", "scroll-margin-left", "scroll-margin-right",
+    "scroll-margin-top", "scroll-padding-block-end", "scroll-padding-block-start",
+    "scroll-padding-bottom", "scroll-padding-inline-end", "scroll-padding-inline-start",
+    "scroll-padding-left", "scroll-padding-right", "scroll-padding-top", "scroll-snap-align",
+    "scroll-snap-stop", "scroll-snap-type", "scroll-timeline-axis", "scroll-timeline-name",
+    "scrollbar-gutter", "scrollbar-width", "shape-image-threshold", "shape-margin",
+    "shape-outside", "stop-color", "stop-opacity", "table-layout", "text-decoration-color",
+    "text-decoration-style", "text-decoration-thickness", "text-overflow", "timeline-scope",
+    "top", "touch-action", "transform", "transform-box", "transform-origin", "transform-style",
+    "transition-behavior", "transition-delay", "transition-duration", "transition-property",
+    "transition-timing-function", "translate", "unicode-bidi", "user-select", "vector-effect",
+    "vertical-align", "view-timeline-axis", "view-timeline-inset", "view-timeline-name",
+    "view-transition-class", "view-transition-name", "white-space-trim", "width", "will-change",
+    "x", "y", "z-index", "zoom",
 };
 
 static int
