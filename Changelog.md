@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* `position: relative` offsets given in percent or `calc()` move the box
+  even when its parent's height comes from its content or from `top` and
+  `bottom`, as in other browsers. bing.com's homepage photo fills the
+  window again instead of being covered by the news strip.
 * Multi-column layout balances its columns like other browsers: it
   looks for the lowest column height at which the content fits in the
   column count, instead of cutting at the average height and leaving

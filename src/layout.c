@@ -16120,17 +16120,6 @@ style_is_relative(const ns_style *s)
            strcmp(v->u.keyword, "relative") == 0;
 }
 
-static double
-length_or_zero(const ns_css_value *v, double basis)
-{
-    if (!v || v->kind != NS_CSS_V_LENGTH) return 0;
-    if (v->u.length.unit == NS_CSS_UNIT_PERCENT)
-        return v->u.length.v * basis / 100.0;
-    if (v->u.length.unit == NS_CSS_UNIT_EM)
-        return v->u.length.v * 16.0;
-    return v->u.length.v;
-}
-
 static void
 translate_subtree(ns_box *box, double dx, double dy)
 {
@@ -16172,9 +16161,10 @@ relative_offset_y(const ns_style *s, double parent_h, const ns_box *pct_of)
     const ns_css_value *v = from_top ? tv : bv;
     double sign = from_top ? 1 : -1;
     if (!v || length_is_auto(v)) return 0;
-    if (!value_is_percent(v)) return sign * length_or_zero(v, parent_h);
+    if (!value_is_percent(v)) return sign * length_resolve(v, parent_h, 0);
     double cb_h = relative_pct_cb_height(pct_of);
-    return cb_h < 0 ? 0 : sign * length_or_zero(v, cb_h);
+    if (cb_h < 0) cb_h = containing_block_definite_height(pct_of);
+    return cb_h < 0 ? 0 : sign * length_resolve(v, cb_h, 0);
 }
 
 static double
@@ -16183,9 +16173,9 @@ relative_offset_x(const ns_style *s, double parent_w)
     const ns_css_value *lv = s->values[NS_CSS_LEFT];
     const ns_css_value *rv = s->values[NS_CSS_RIGHT];
     if (lv && !length_is_auto(lv))
-        return length_or_zero(lv, parent_w);
+        return length_resolve(lv, parent_w, 0);
     if (rv && !length_is_auto(rv))
-        return -length_or_zero(rv, parent_w);
+        return -length_resolve(rv, parent_w, 0);
     return 0;
 }
 
