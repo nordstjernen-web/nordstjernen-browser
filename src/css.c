@@ -724,6 +724,16 @@ static const prop_def kPropDefs[] = {
       "0px", "thin | medium | thick | <length [0,inf]>" },
     { NS_CSS_WEBKIT_TEXT_STROKE_COLOR, "-webkit-text-stroke-color", PROP_DEF_COLOR, TRUE,
       "currentcolor", "currentcolor | <color>" },
+    { NS_CSS_OFFSET_PATH, "offset-path", PROP_DEF_KEYWORDS, FALSE,
+      "none", "none" },
+    { NS_CSS_OFFSET_DISTANCE, "offset-distance", PROP_DEF_LENGTH, FALSE,
+      "0px", "<length-percentage>" },
+    { NS_CSS_OFFSET_ROTATE, "offset-rotate", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto" },
+    { NS_CSS_OFFSET_ANCHOR, "offset-anchor", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto" },
+    { NS_CSS_OFFSET_POSITION, "offset-position", PROP_DEF_KEYWORDS, FALSE,
+      "normal", "normal" },
 };
 
 static const prop_def *
@@ -10885,6 +10895,7 @@ anchor_fn_list_canonical(const char *value, gboolean allow_anchor)
 }
 
 static char *def_keyword_canonical(const prop_def *def, const char *t);
+static char *offset_rotate_canonical(const char *t, gboolean specified);
 static char *keyword_shorthand_specified(const char *name, const char *value);
 
 static char *
@@ -10892,7 +10903,9 @@ def_specified_canonical(const prop_def *def, const char *value)
 {
     char *t = g_strstrip(g_strdup(value));
     char *out = NULL;
-    if (def->kind == PROP_DEF_KEYWORDS)
+    if (def->prop == NS_CSS_OFFSET_ROTATE)
+        out = offset_rotate_canonical(t, TRUE);
+    else if (def->kind == PROP_DEF_KEYWORDS)
         out = def_keyword_canonical(def, t);
     else if (def->kind == PROP_DEF_COLOR)
         out = ns_css_color_specified(t);
@@ -13375,6 +13388,9 @@ font_size_adjust_mix(const ns_css_value *a, const ns_css_value *b, double wa, do
     return out;
 }
 
+static gboolean offset_mix(int prop, const char *a, const char *b, double wa, double wb,
+                           char **out);
+
 static gboolean
 keyword_starts_numeric(const char *kw)
 {
@@ -13396,6 +13412,9 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
 {
     if (a && b && a->kind == NS_CSS_V_KEYWORD && b->kind == NS_CSS_V_KEYWORD &&
         a->u.keyword && b->u.keyword) {
+        char *mixed = NULL;
+        if (offset_mix(prop, a->u.keyword, b->u.keyword, 1 - t, t, &mixed))
+            return mixed ? keyword_value(mixed) : NULL;
         if (!def_keywords_numeric(prop, a->u.keyword, b->u.keyword)) return NULL;
     }
     if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
@@ -13566,6 +13585,342 @@ prop_is_anchor_property(ns_css_prop prop)
            prop == NS_CSS_POSITION_ANCHOR || prop == NS_CSS_POSITION_AREA ||
            prop == NS_CSS_POSITION_TRY_FALLBACKS ||
            prop == NS_CSS_POSITION_TRY_ORDER || prop == NS_CSS_POSITION_VISIBILITY;
+}
+
+static gboolean position_is_keyword(const char *t);
+
+static gboolean
+angle_token_deg(const char *tok, double *deg)
+{
+    if (strchr(tok, '(')) return !strchr(tok, '%') && parse_angle_any(tok, deg);
+    char *end = NULL;
+    g_ascii_strtod(tok, &end);
+    if (!end || end == tok || !keyword_choice_valid(end, "deg rad grad turn")) return FALSE;
+    *deg = parse_angle_deg(tok);
+    return TRUE;
+}
+
+typedef struct {
+    gboolean auto_rotate;
+    gboolean reverse;
+    gboolean has_angle;
+    double   deg;
+    char    *angle_text;
+} offset_rotate_value;
+
+static gboolean
+offset_rotate_parse(const char *t, offset_rotate_value *out)
+{
+    memset(out, 0, sizeof *out);
+    char *tok[3] = { 0 };
+    int n = split_ws_paren(t, tok, 3);
+    gboolean ok = n >= 1 && n <= 2;
+    gboolean seen_keyword = FALSE;
+    for (int i = 0; ok && i < n; i++) {
+        if (keyword_choice_valid(tok[i], "auto reverse")) {
+            ok = !seen_keyword;
+            seen_keyword = TRUE;
+            out->auto_rotate = TRUE;
+            out->reverse = g_ascii_strcasecmp(tok[i], "reverse") == 0;
+        } else {
+            ok = !out->has_angle && angle_token_deg(tok[i], &out->deg);
+            out->has_angle = ok;
+            if (ok) out->angle_text = g_ascii_strdown(tok[i], -1);
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    if (!ok) g_free(out->angle_text);
+    return ok;
+}
+
+static char *
+offset_rotate_computed_text(gboolean auto_rotate, double deg)
+{
+    if (!auto_rotate) return g_strdup_printf("%gdeg", deg);
+    if (deg == 0) return g_strdup("auto");
+    return g_strdup_printf("auto %gdeg", deg);
+}
+
+static char *
+offset_rotate_canonical(const char *t, gboolean specified)
+{
+    offset_rotate_value r;
+    if (!offset_rotate_parse(t, &r)) return NULL;
+    char *out;
+    if (specified) {
+        const char *kw = !r.auto_rotate ? NULL : r.reverse ? "reverse" : "auto";
+        out = kw && r.angle_text ? g_strdup_printf("%s %s", kw, r.angle_text)
+            : g_strdup(kw ? kw : r.angle_text);
+    } else {
+        out = offset_rotate_computed_text(r.auto_rotate, r.deg + (r.reverse ? 180 : 0));
+    }
+    g_free(r.angle_text);
+    return out;
+}
+
+static gboolean
+offset_rotate_numbers(const char *canon, gboolean *auto_rotate, double *deg)
+{
+    offset_rotate_value r;
+    if (!canon || !offset_rotate_parse(canon, &r)) return FALSE;
+    *auto_rotate = r.auto_rotate;
+    *deg = r.deg + (r.reverse ? 180 : 0);
+    g_free(r.angle_text);
+    return TRUE;
+}
+
+static char *
+offset_position_canonical(const char *t, gboolean allow_normal)
+{
+    if (keyword_choice_valid(t, allow_normal ? "auto normal" : "auto"))
+        return ascii_lower(t, strlen(t));
+    char *tok[5] = { 0 };
+    int n = split_ws_paren(t, tok, 5);
+    gboolean ok = n >= 1 && n <= 4 && n != 3;
+    for (int i = 0; ok && i < n; i++)
+        ok = position_is_keyword(tok[i]) || token_is_length_pct(tok[i]);
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    return ok ? position_canonical_ex(t, FALSE, FALSE) : NULL;
+}
+
+static gboolean
+position_component_eval(const char *text, const ns_shape_ctx *cx, double *pct, double *px)
+{
+    gboolean valid = TRUE;
+    GPtrArray *list = ns_css_component_values_parse(text, -1, &valid);
+    double num = 0;
+    gboolean dim = FALSE;
+    gboolean ok = valid && list->len == 1 &&
+                  ns_css_shape_eval_math(g_ptr_array_index(list, 0), cx, &num, pct, px, &dim);
+    g_ptr_array_free(list, TRUE);
+    if (ok && !dim && *pct == 0 && *px == 0 && num != 0) ok = FALSE;
+    return ok;
+}
+
+static char *
+position_component_text(double pct, double px, gboolean prefer_percent)
+{
+    if (px == 0 && (pct != 0 || prefer_percent)) return g_strdup_printf("%g%%", pct);
+    if (pct == 0 && !prefer_percent) return g_strdup_printf("%gpx", px);
+    return g_strdup_printf("calc(%g%% %c %gpx)", pct, px < 0 ? '-' : '+', fabs(px));
+}
+
+static gboolean
+position_numbers(const char *canon, const ns_shape_ctx *cx, double out[4], gboolean pct_only[2])
+{
+    char *xs = NULL, *ys = NULL;
+    position_split(canon, &xs, &ys);
+    gboolean ok = position_component_eval(xs, cx, &out[0], &out[1]) &&
+                  position_component_eval(ys, cx, &out[2], &out[3]);
+    pct_only[0] = strchr(xs, '%') != NULL;
+    pct_only[1] = strchr(ys, '%') != NULL;
+    g_free(xs);
+    g_free(ys);
+    return ok;
+}
+
+static char *
+position_text_from_numbers(const double v[4], const gboolean pct[2])
+{
+    char *x = position_component_text(v[0], v[1], pct[0]);
+    char *y = position_component_text(v[2], v[3], pct[1]);
+    char *out = g_strdup_printf("%s %s", x, y);
+    g_free(x);
+    g_free(y);
+    return out;
+}
+
+static char *
+position_computed(const char *canon, const ns_shape_ctx *cx)
+{
+    double v[4];
+    gboolean pct[2];
+    if (!position_numbers(canon, cx, v, pct)) return NULL;
+    return position_text_from_numbers(v, pct);
+}
+
+static const char *const kRaySizes = "closest-side closest-corner farthest-side "
+                                     "farthest-corner sides";
+static const char *const kCoordBoxes = "content-box padding-box border-box fill-box "
+                                       "stroke-box view-box";
+
+static char *
+ray_canonical(const char *inner, const ns_shape_ctx *cx)
+{
+    char *tok[12] = { 0 };
+    int n = split_ws_paren(inner, tok, 12);
+    gboolean ok = n >= 1 && n < 12;
+    gboolean has_angle = FALSE, contain = FALSE;
+    double deg = 0;
+    char *size = NULL, *at = NULL, *angle_text = NULL;
+    for (int i = 0; ok && i < n; i++) {
+        if (keyword_choice_valid(tok[i], kRaySizes)) {
+            ok = !size;
+            size = ascii_lower(tok[i], strlen(tok[i]));
+        } else if (keyword_choice_valid(tok[i], "contain")) {
+            ok = !contain;
+            contain = TRUE;
+        } else if (keyword_choice_valid(tok[i], "at")) {
+            GString *pos = g_string_new(NULL);
+            int j = i + 1;
+            for (; j < n && j <= i + 4; j++) {
+                if (!position_is_keyword(tok[j]) && !token_is_length_pct(tok[j])) break;
+                if (pos->len) g_string_append_c(pos, ' ');
+                g_string_append(pos, tok[j]);
+            }
+            char *canon = pos->len && !at ? offset_position_canonical(pos->str, FALSE) : NULL;
+            g_string_free(pos, TRUE);
+            ok = canon != NULL;
+            if (ok && cx) {
+                at = position_computed(canon, cx);
+                g_free(canon);
+                ok = at != NULL;
+            } else if (ok) {
+                at = canon;
+            }
+            i = j - 1;
+        } else {
+            ok = !has_angle && angle_token_deg(tok[i], &deg);
+            has_angle = ok;
+            if (ok) angle_text = ascii_lower(tok[i], strlen(tok[i]));
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    char *out = NULL;
+    if (ok && has_angle) {
+        GString *s = g_string_new(NULL);
+        if (cx) g_string_append_printf(s, "ray(%gdeg", deg);
+        else g_string_append_printf(s, "ray(%s", angle_text);
+        if (size && (!cx || strcmp(size, "closest-side") != 0))
+            g_string_append_printf(s, " %s", size);
+        if (contain) g_string_append(s, " contain");
+        if (at) g_string_append_printf(s, " at %s", at);
+        g_string_append_c(s, ')');
+        out = g_string_free(s, FALSE);
+    }
+    g_free(size);
+    g_free(at);
+    g_free(angle_text);
+    return out;
+}
+
+static gboolean
+path_has_fill_rule(const char *t)
+{
+    const char *p = t;
+    while ((p = strstr(p, "path("))) {
+        p += 5;
+        while (is_ws(*p)) p++;
+        if (g_ascii_strncasecmp(p, "nonzero", 7) == 0 || g_ascii_strncasecmp(p, "evenodd", 7) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static char *
+offset_path_canonical(const char *t, const ns_shape_ctx *cx)
+{
+    if (keyword_choice_valid(t, "none")) return g_strdup("none");
+    char *url = ns_css_grammar_canonical("<url>", t);
+    if (url) return url;
+    char *tok[4] = { 0 };
+    int n = split_ws_paren(t, tok, 4);
+    char *out = NULL;
+    int ray_at = -1, box_at = -1;
+    for (int i = 0; i < n; i++) {
+        if (g_ascii_strncasecmp(tok[i], "ray(", 4) == 0 && ray_at < 0) ray_at = i;
+        else if (keyword_choice_valid(tok[i], kCoordBoxes) && box_at < 0) box_at = i;
+    }
+    if (ray_at >= 0 && n <= 2 && (n == 1 || box_at >= 0)) {
+        gsize len = strlen(tok[ray_at]);
+        char *inner = len > 5 && tok[ray_at][len - 1] == ')'
+            ? g_strndup(tok[ray_at] + 4, len - 5) : NULL;
+        char *ray = inner ? ray_canonical(inner, cx) : NULL;
+        g_free(inner);
+        if (ray && box_at >= 0 && !keyword_choice_valid(tok[box_at], "border-box")) {
+            out = g_strdup_printf("%s %s", ray, tok[box_at]);
+            g_free(ray);
+        } else {
+            out = ray;
+        }
+    } else if (ray_at < 0 && !strstr(t, "margin-box") && !path_has_fill_rule(t)) {
+        gboolean is_shape = FALSE;
+        out = ns_css_clip_path_canonical(t, cx, &is_shape);
+        if (out && !is_shape) {
+            g_free(out);
+            out = NULL;
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    return out;
+}
+
+static char *
+offset_prop_canonical(ns_css_prop prop, const char *t)
+{
+    switch (prop) {
+    case NS_CSS_OFFSET_PATH:     return offset_path_canonical(t, NULL);
+    case NS_CSS_OFFSET_ROTATE:   return offset_rotate_canonical(t, FALSE);
+    case NS_CSS_OFFSET_ANCHOR:   return offset_position_canonical(t, FALSE);
+    case NS_CSS_OFFSET_POSITION: return offset_position_canonical(t, TRUE);
+    default:                     return NULL;
+    }
+}
+
+static char *
+ray_mix(const char *a, const char *b, double wa, double wb)
+{
+    char *ia = g_strndup(a + 4, strlen(a) - 5);
+    char *ib = g_strndup(b + 4, strlen(b) - 5);
+    char *ra = strchr(ia, ' '), *rb = strchr(ib, ' ');
+    double da = g_ascii_strtod(ia, NULL), db = g_ascii_strtod(ib, NULL);
+    char *out = NULL;
+    if (g_strcmp0(ra ? ra : "", rb ? rb : "") == 0)
+        out = g_strdup_printf("ray(%gdeg%s)", da * wa + db * wb, ra ? ra : "");
+    g_free(ia);
+    g_free(ib);
+    return out;
+}
+
+static gboolean
+offset_mix(int prop, const char *a, const char *b, double wa, double wb, char **out)
+{
+    *out = NULL;
+    if (prop == NS_CSS_OFFSET_ROTATE) {
+        gboolean auto_a, auto_b;
+        double da, db;
+        if (offset_rotate_numbers(a, &auto_a, &da) && offset_rotate_numbers(b, &auto_b, &db) &&
+            auto_a == auto_b)
+            *out = offset_rotate_computed_text(auto_a, da * wa + db * wb);
+        return TRUE;
+    }
+    if (prop == NS_CSS_OFFSET_POSITION || prop == NS_CSS_OFFSET_ANCHOR) {
+        ns_shape_ctx cx = { .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+                            .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h() };
+        double va[4], vb[4], vo[4];
+        gboolean pa[2], pb[2], po[2];
+        if (position_numbers(a, &cx, va, pa) && position_numbers(b, &cx, vb, pb) &&
+            !keyword_choice_valid(a, "auto normal") && !keyword_choice_valid(b, "auto normal")) {
+            for (int i = 0; i < 4; i++) vo[i] = va[i] * wa + vb[i] * wb;
+            for (int i = 0; i < 2; i++) po[i] = pa[i] || pb[i];
+            *out = position_text_from_numbers(vo, po);
+        }
+        return TRUE;
+    }
+    if (prop == NS_CSS_OFFSET_PATH) {
+        if (!g_str_has_prefix(a, "ray(") && !g_str_has_prefix(b, "ray(")) return FALSE;
+        ns_shape_ctx cx = { .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
+                            .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h() };
+        char *ca = offset_path_canonical(a, &cx);
+        char *cb = offset_path_canonical(b, &cx);
+        if (ca && cb && g_str_has_prefix(ca, "ray(") && g_str_has_prefix(cb, "ray(") &&
+            g_str_has_suffix(ca, ")") && g_str_has_suffix(cb, ")"))
+            *out = ray_mix(ca, cb, wa, wb);
+        g_free(ca);
+        g_free(cb);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static ns_css_value *
@@ -13842,6 +14197,11 @@ def_keyword_canonical(const prop_def *def, const char *t)
         return color_scheme_canonical(t);
     case NS_CSS_FONT_VARIANT_ALTERNATES:
         return font_variant_alternates_canonical(t);
+    case NS_CSS_OFFSET_PATH:
+    case NS_CSS_OFFSET_ROTATE:
+    case NS_CSS_OFFSET_ANCHOR:
+    case NS_CSS_OFFSET_POSITION:
+        return offset_prop_canonical(def->prop, t);
     default:
         break;
     }
@@ -17842,6 +18202,8 @@ static const keyword_shorthand kKeywordShorthands[] = {
                           NS_CSS_PROP_COUNT } },
     { "overscroll-behavior", { NS_CSS_OVERSCROLL_BEHAVIOR_X, NS_CSS_OVERSCROLL_BEHAVIOR_Y,
                                NS_CSS_PROP_COUNT } },
+    { "offset", { NS_CSS_OFFSET_POSITION, NS_CSS_OFFSET_PATH, NS_CSS_OFFSET_DISTANCE,
+                  NS_CSS_OFFSET_ROTATE, NS_CSS_OFFSET_ANCHOR, NS_CSS_PROP_COUNT } },
 };
 
 static const struct { const char *keyword; const char *collapse; const char *mode; }
@@ -17870,9 +18232,99 @@ initial_text_of(ns_css_prop prop)
 }
 
 static gboolean
+token_parses_as(ns_css_prop prop, const char *text)
+{
+    ns_css_value *v = parse_value_for(prop, text);
+    gboolean ok = v != NULL;
+    ns_css_value_free(v);
+    return ok;
+}
+
+static int
+offset_position_prefix(char **tok, int n)
+{
+    static const int lengths[] = { 4, 2, 1 };
+    for (gsize k = 0; k < G_N_ELEMENTS(lengths); k++) {
+        int len = lengths[k];
+        if (len > n) continue;
+        GString *s = g_string_new(NULL);
+        for (int i = 0; i < len; i++) {
+            if (i) g_string_append_c(s, ' ');
+            g_string_append(s, tok[i]);
+        }
+        gboolean ok = token_parses_as(NS_CSS_OFFSET_POSITION, s->str);
+        g_string_free(s, TRUE);
+        if (ok) return len;
+    }
+    return 0;
+}
+
+static gboolean
+offset_shorthand_values(const char *vtext, char **values)
+{
+    char term = 0;
+    const char *end = vtext + strlen(vtext);
+    const char *slash = css_scan_until(vtext, end, "/", &term);
+    char *main = g_strndup(vtext, (gsize)(slash - vtext));
+    char *anchor = term == '/' ? g_strstrip(g_strdup(slash + 1)) : NULL;
+    char *tok[16] = { 0 };
+    int n = split_ws_paren(main, tok, 16);
+    gboolean ok = n < 16 && (n > 0 || anchor) && (!anchor || *anchor);
+    int i = ok ? offset_position_prefix(tok, n) : 0;
+    GString *pos = g_string_new(NULL);
+    for (int k = 0; k < i; k++) {
+        if (k) g_string_append_c(pos, ' ');
+        g_string_append(pos, tok[k]);
+    }
+    GString *path = g_string_new(NULL);
+    if (ok && i < n && (strchr(tok[i], '(') || keyword_choice_valid(tok[i], "none") ||
+                        keyword_choice_valid(tok[i], kCoordBoxes))) {
+        g_string_append(path, tok[i++]);
+        if (i < n && (keyword_choice_valid(tok[i], kCoordBoxes) ||
+                      (keyword_choice_valid(path->str, kCoordBoxes) && strchr(tok[i], '(')))) {
+            g_string_append_printf(path, " %s", tok[i++]);
+        }
+        ok = token_parses_as(NS_CSS_OFFSET_PATH, path->str);
+    }
+    GString *distance = g_string_new(NULL), *rotate = g_string_new(NULL);
+    int last_rotate = -2;
+    for (; ok && i < n; i++) {
+        if (!path->len) {
+            ok = FALSE;
+        } else if (!distance->len && token_parses_as(NS_CSS_OFFSET_DISTANCE, tok[i])) {
+            g_string_append(distance, tok[i]);
+        } else {
+            ok = !rotate->len || last_rotate == i - 1;
+            if (rotate->len) g_string_append_c(rotate, ' ');
+            g_string_append(rotate, tok[i]);
+            last_rotate = i;
+        }
+    }
+    if (ok && rotate->len) ok = token_parses_as(NS_CSS_OFFSET_ROTATE, rotate->str);
+    if (ok && anchor) ok = token_parses_as(NS_CSS_OFFSET_ANCHOR, anchor);
+    if (ok && !pos->len && !path->len) ok = FALSE;
+    if (ok) {
+        values[0] = g_strdup(pos->len ? pos->str : "normal");
+        values[1] = g_strdup(path->len ? path->str : "none");
+        values[2] = g_strdup(distance->len ? distance->str : "0px");
+        values[3] = g_strdup(rotate->len ? rotate->str : "auto");
+        values[4] = g_strdup(anchor ? anchor : "auto");
+    }
+    g_string_free(pos, TRUE);
+    g_string_free(path, TRUE);
+    g_string_free(distance, TRUE);
+    g_string_free(rotate, TRUE);
+    for (int k = 0; k < n; k++) g_free(tok[k]);
+    g_free(main);
+    g_free(anchor);
+    return ok;
+}
+
+static gboolean
 keyword_shorthand_values(const keyword_shorthand *sh, const char *vtext, char **values)
 {
     int n = keyword_shorthand_count(sh);
+    if (strcmp(sh->name, "offset") == 0) return offset_shorthand_values(vtext, values);
     gboolean white_space = strcmp(sh->name, "white-space") == 0;
     if (white_space) {
         for (gsize i = 0; i < G_N_ELEMENTS(kWhiteSpaceLegacy); i++) {
@@ -18023,6 +18475,23 @@ font_synthesis_compose(char *const *values, int n)
     return g_string_free(out, FALSE);
 }
 
+static char *
+offset_compose(char *const *values)
+{
+    GString *out = g_string_new(NULL);
+    if (strcmp(values[0], "normal") != 0) g_string_append(out, values[0]);
+    gboolean has_distance = strcmp(values[2], "0px") != 0;
+    gboolean has_rotate = strcmp(values[3], "auto") != 0 && strcmp(values[3], "auto 0deg") != 0;
+    if (strcmp(values[1], "none") != 0 || has_distance || has_rotate) {
+        g_string_append_printf(out, "%s%s", out->len ? " " : "", values[1]);
+        if (has_distance) g_string_append_printf(out, " %s", values[2]);
+        if (has_rotate) g_string_append_printf(out, " %s", values[3]);
+    }
+    if (!out->len) g_string_append(out, "normal");
+    if (strcmp(values[4], "auto") != 0) g_string_append_printf(out, " / %s", values[4]);
+    return g_string_free(out, FALSE);
+}
+
 char *
 ns_css_keyword_shorthand_compose(const char *name, char *const *values)
 {
@@ -18032,6 +18501,7 @@ ns_css_keyword_shorthand_compose(const char *name, char *const *values)
     if (strcmp(sh->name, "white-space") == 0) return white_space_compose(values[0], values[1]);
     if (strcmp(sh->name, "font-variant") == 0) return font_variant_compose(values, n);
     if (strcmp(sh->name, "font-synthesis") == 0) return font_synthesis_compose(values, n);
+    if (strcmp(sh->name, "offset") == 0) return offset_compose(values);
     if (strcmp(sh->name, "overscroll-behavior") == 0 && strcmp(values[0], values[1]) == 0)
         return g_strdup(values[0]);
     if (strcmp(sh->name, "text-wrap") == 0) {
@@ -28498,6 +28968,10 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
     case NS_CSS_V_KEYWORD: {
         double na, nb;
         gboolean ia, ib;
+        char *offset_sum = NULL;
+        if (underlying->u.keyword && v->u.keyword &&
+            offset_mix(prop, underlying->u.keyword, v->u.keyword, 1, 1, &offset_sum))
+            return offset_sum ? keyword_value(offset_sum) : NULL;
         if (!def_keywords_numeric(prop, underlying->u.keyword, v->u.keyword)) return NULL;
         if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(underlying, v, 1, 1);
         if (prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) {
@@ -28513,7 +28987,8 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
             out->u.keyword = sum;
             return out;
         }
-        if ((prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_CLIP_PATH) && !accumulate) {
+        if ((prop == NS_CSS_SHAPE_OUTSIDE || prop == NS_CSS_CLIP_PATH ||
+             prop == NS_CSS_OFFSET_PATH) && !accumulate) {
             ns_shape_ctx cx = {
                 .font_px = 16, .root_px = 16, .ex_px = 8, .ch_px = 8,
                 .vw = ns_css_viewport_w(), .vh = ns_css_viewport_h(),
@@ -30191,7 +30666,9 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
     if (prop == NS_CSS_SHAPE_IMAGE_THRESHOLD)
         return ns_css_shape_image_threshold_canonical(v->u.keyword, TRUE);
     if (prop != NS_CSS_SHAPE_OUTSIDE && prop != NS_CSS_SHAPE_MARGIN &&
-        prop != NS_CSS_CLIP_PATH && prop != NS_CSS_FILTER && prop != NS_CSS_BACKDROP_FILTER)
+        prop != NS_CSS_CLIP_PATH && prop != NS_CSS_FILTER && prop != NS_CSS_BACKDROP_FILTER &&
+        prop != NS_CSS_OFFSET_PATH && prop != NS_CSS_OFFSET_POSITION &&
+        prop != NS_CSS_OFFSET_ANCHOR)
         return NULL;
     ns_css_syntax_ctx sc;
     syntax_ctx_for_style(&sc, s, style_font_px(root ? root : s), TRUE);
@@ -30203,6 +30680,11 @@ ns_css_shape_computed_serialize(const ns_style *s, const ns_style *root, int pro
     if (prop == NS_CSS_CLIP_PATH) {
         gboolean is_shape = FALSE;
         return ns_css_clip_path_canonical(v->u.keyword, &cx, &is_shape);
+    }
+    if (prop == NS_CSS_OFFSET_PATH) return offset_path_canonical(v->u.keyword, &cx);
+    if (prop == NS_CSS_OFFSET_POSITION || prop == NS_CSS_OFFSET_ANCHOR) {
+        if (keyword_choice_valid(v->u.keyword, "auto normal")) return g_strdup(v->u.keyword);
+        return position_computed(v->u.keyword, &cx);
     }
     if (prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) {
         const ns_css_value *c = s->values[NS_CSS_COLOR];

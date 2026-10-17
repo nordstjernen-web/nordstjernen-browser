@@ -18326,7 +18326,9 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (computed && (tracks_id == NS_CSS_SHAPE_OUTSIDE || tracks_id == NS_CSS_SHAPE_MARGIN ||
                      tracks_id == NS_CSS_CLIP_PATH || tracks_id == NS_CSS_FILTER ||
                      tracks_id == NS_CSS_BACKDROP_FILTER ||
-                     tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD)) {
+                     tracks_id == NS_CSS_SHAPE_IMAGE_THRESHOLD ||
+                     tracks_id == NS_CSS_OFFSET_PATH || tracks_id == NS_CSS_OFFSET_POSITION ||
+                     tracks_id == NS_CSS_OFFSET_ANCHOR)) {
         const ns_node *root = n;
         while (root->parent && root->parent->kind == NS_NODE_ELEMENT)
             root = root->parent;
@@ -18751,8 +18753,8 @@ static const char *const ns_css_computed_props[] = {
     "mask-composite", "mask-image", "mask-mode", "mask-origin", "mask-position", "mask-repeat",
     "mask-size", "mask-type", "max-block-size", "max-height", "max-inline-size", "max-width",
     "min-block-size", "min-height", "min-inline-size", "min-width", "mix-blend-mode",
-    "object-fit", "object-position",
-    "opacity", "order", "outline-color", "outline-offset",
+    "object-fit", "object-position", "offset-anchor", "offset-distance", "offset-path",
+    "offset-position", "offset-rotate", "opacity", "order", "outline-color", "outline-offset",
     "outline-style", "outline-width", "overflow-anchor", "overflow-block",
     "overflow-clip-margin-block-end", "overflow-clip-margin-block-start",
     "overflow-clip-margin-bottom", "overflow-clip-margin-inline-end",

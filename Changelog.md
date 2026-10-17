@@ -102,6 +102,12 @@ Changelog:
 * A `<button>` styled `display: inline` is laid out as an inline-block
   like in other browsers instead of disappearing with its label
   (python.org's search "GO" button).
+* The motion-path properties `offset-path`, `offset-distance`,
+  `offset-rotate`, `offset-position`, `offset-anchor` and the `offset`
+  shorthand are parsed and computed, and animate: `ray()` angles,
+  rotations, positions and distances interpolate, and shapes and paths
+  interpolate as they do for `clip-path`. Elements are not yet moved
+  along the path.
 * About seventy standard CSS properties the engine did not know are now
   parsed, cascaded and reported by `getComputedStyle()`:
   `text-underline-offset`, `text-decoration-thickness`,
