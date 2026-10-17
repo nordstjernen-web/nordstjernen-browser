@@ -102,6 +102,11 @@ Changelog:
 * A `<button>` styled `display: inline` is laid out as an inline-block
   like in other browsers instead of disappearing with its label
   (python.org's search "GO" button).
+* Underlines honour `text-underline-offset` and
+  `text-decoration-thickness` (GitHub's links set an offset), and lines
+  drawn by the engine itself take the link's colour instead of the
+  paragraph's. Table cells with `empty-cells: hide` and no content no
+  longer paint their background and borders.
 * The motion-path properties `offset-path`, `offset-distance`,
   `offset-rotate`, `offset-position`, `offset-anchor` and the `offset`
   shorthand are parsed and computed, and animate: `ray()` angles,
