@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* `em` and `rem` inside `min()`, `max()` and `clamp()` resolve against
+  the element's real font size and the root's, as in other browsers,
+  not against 16px. AP News sets the root to 62.5% and sizes its footer
+  links `clamp(1rem, 1.4rem, 3.4rem)`; they came out 22.4px instead of
+  14px and pushed the footer 250px down. The frozen sitebench pages gain
+  142 matching elements (apnews.com). A `min()` or `clamp()` nested in a
+  `calc()` still uses 16px for now.
 * A flex row's max-content width counts its `gap` when the gap is a
   `calc()` or comes from a custom property, as it already did for a
   plain length. Booking.com's property cards size their price line,
