@@ -1051,6 +1051,10 @@ ns_css_used_column_count(const ns_style *s, double avail_w, double *out_gap)
 {
     double gap = 16.0;
     if (s) {
+        const ns_css_value *fs = s->values[NS_CSS_FONT_SIZE];
+        if (fs && fs->kind == NS_CSS_V_LENGTH &&
+            fs->u.length.unit == NS_CSS_UNIT_PX && fs->u.length.v > 0)
+            gap = fs->u.length.v;
         const ns_css_value *cg = s->values[NS_CSS_COLUMN_GAP];
         if (!cg || cg->kind != NS_CSS_V_LENGTH)
             cg = s->values[NS_CSS_GAP];
