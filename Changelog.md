@@ -18,7 +18,7 @@ Changelog:
   shrinking to fit. wikipedia.org's "other projects" grid, an
   `inline-block` of `width: 65%` beside a 35% float, came out 65% of
   65% wide and wrapped every tagline. The frozen sitebench pages gain
-  152 matching elements (wikipedia.org +61, nytimes.com +53).
+  100 matching elements (wikipedia.org +61).
 * An iframe placed inside a shadow root keeps its own styles; MDN's
   "Try it" demos rendered as unstyled text.
 * An inline `<svg>` in a flex row takes the width the flex algorithm
@@ -27,7 +27,7 @@ Changelog:
   sizing too: `height: 32px; width: auto` on a `270x40` viewBox gives
   216px, not the 270px of the attribute. BBC's content-type icons are
   `width="30"` SVGs in a 20px flex box and came out 30px wide. The
-  frozen sitebench pages gain 236 matching elements (bbc.com +164).
+  frozen sitebench pages gain 175 matching elements (bbc.com +164).
 * Security: a `fetch()` or `XMLHttpRequest` started in a web worker no
   longer completes on the page's main thread. When the response arrived
   while the main thread was waiting for a parser-blocking script, the
