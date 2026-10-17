@@ -32517,11 +32517,20 @@ ns_fire_window_level_handlers(ns_js *js, const ns_node *doc_node,
 
     gboolean fired = FALSE;
     JSContext *ctx = js->ctx;
-    (void)doc_node;
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue doc_obj = JS_GetPropertyStr(ctx, global, "document");
+    if (doc_node && ns_unwrap_element(doc_obj) != doc_node) {
+        JS_FreeValue(ctx, doc_obj);
+        doc_obj = doc_node->js_wrapper
+            ? JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, doc_node->js_wrapper))
+            : JS_UNDEFINED;
+    }
+    if (!JS_IsObject(doc_obj)) {
+        JS_FreeValue(ctx, global);
+        return FALSE;
+    }
     JSValue handler = JS_GetPropertyStr(ctx, doc_obj, prop_name);
     if (JS_IsFunction(ctx, handler)) {
         JSValue ret = JS_Call(ctx, handler, doc_obj, 1, &event);

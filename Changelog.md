@@ -18,6 +18,14 @@ Changelog:
   `ExtendableMessageEvent` does. TikTok's service worker calls it for
   every config message from the page and threw three TypeErrors on each
   visit, so it never stored its A/B and consent settings.
+* An iframe's document no longer runs the top page's
+  `document.onreadystatechange` (or any other `document.on…` handler)
+  when its own events fire. The handler was looked up on whatever
+  `document` the running realm had, so every iframe load called the top
+  page's handler twice more. washingtonpost.com's performance script
+  adds an iframe from that handler when the page is complete, so each
+  new iframe added another one: thousands of iframes, the memory grew,
+  and the page never settled.
 * Spelling mistakes are underlined only in text fields you have clicked
   into, like other browsers, instead of in every prefilled field (search
   result pages showed the query underlined in red).
