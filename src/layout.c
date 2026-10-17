@@ -15138,6 +15138,38 @@ block_align_content_shift(const ns_box *box, double free_space)
     return 0;
 }
 
+static double
+multicol_child_height(const ns_box *c)
+{
+    if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE)
+        return c->content_height + c->padding.top + c->padding.bottom +
+               c->border.top + c->border.bottom;
+    return c->content_height;
+}
+
+static double
+multicol_balanced_height(const ns_box *host, int n_cols, double total_h)
+{
+    double h = total_h / n_cols;
+    for (int iter = 0; iter < 256; iter++) {
+        int col = 0;
+        double y = 0, min_excess = -1;
+        for (const ns_box *c = host->first_child; c; c = c->next_sibling) {
+            double ch = multicol_child_height(c);
+            if (y > 0 && y + ch > h + 0.01) {
+                double excess = y + ch - h;
+                if (min_excess < 0 || excess < min_excess) min_excess = excess;
+                col++;
+                y = 0;
+            }
+            y += ch;
+        }
+        if (col < n_cols || min_excess <= 0) return h;
+        h += min_excess;
+    }
+    return h;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -15723,21 +15755,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                     total_h += c->content_height;
             }
         }
-        double target_h = total_h / n_cols;
+        double target_h = multicol_balanced_height(host, n_cols, total_h);
         double cur_y = 0;
         double max_col_h = 0;
         int cur_col = 0;
         for (ns_box *c = host->first_child; c; c = c->next_sibling) {
-            double c_full_h;
-            if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE) {
-                c_full_h = c->content_height +
-                           c->padding.top + c->padding.bottom +
-                           c->border.top + c->border.bottom;
-            } else {
-                c_full_h = c->content_height;
-            }
+            double c_full_h = multicol_child_height(c);
             if (cur_col < n_cols - 1 &&
-                cur_y > 0 && cur_y + c_full_h > target_h) {
+                cur_y > 0 && cur_y + c_full_h > target_h + 0.01) {
                 cur_col++;
                 cur_y = 0;
             }
