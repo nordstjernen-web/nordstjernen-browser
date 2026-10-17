@@ -34581,6 +34581,21 @@ display_contents_to_none(const ns_node *el, ns_style *s)
 }
 
 static void
+button_inline_to_inline_block(const ns_node *el, ns_style *s)
+{
+    const ns_css_value *v = s->values[NS_CSS_DISPLAY];
+    if (s->display.box != NS_DISPLAY_BOX_NORMAL ||
+        s->display.outer != NS_DISPLAY_OUTER_INLINE ||
+        s->display.inner != NS_DISPLAY_INNER_FLOW ||
+        !v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
+        (strcmp(v->u.keyword, "inline") != 0 &&
+         strcmp(v->u.keyword, "inline flow") != 0) ||
+        !ns_node_is_element_named(el, "button"))
+        return;
+    s->display = ns_css_display_from_keyword("inline-block");
+}
+
+static void
 strip_native_widget_decorations(const ns_node *el, ns_style *s)
 {
     if (!ns_node_is_element_named(el, "input")) return;
@@ -35049,6 +35064,7 @@ cascade_walk(ns_node *node,
             ns_style_free(s);
             s = ns_style_clone_shared(shared);
             display_contents_to_none(node, s);
+            button_inline_to_inline_block(node, s);
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
@@ -35065,6 +35081,7 @@ cascade_walk(ns_node *node,
             compute_registered_vars(s, parent_style, *root_px);
             strip_native_widget_decorations(node, s);
             if (display_contents_to_none(node, s)) have_key = FALSE;
+            button_inline_to_inline_block(node, s);
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);

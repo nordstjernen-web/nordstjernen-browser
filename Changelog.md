@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* A `<button>` styled `display: inline` is laid out as an inline-block
+  like in other browsers instead of disappearing with its label
+  (python.org's search "GO" button).
 * `@font-face` rules keep `src`, `unicode-range`, `font-display` and the
   other descriptors in CSSOM (`rule.cssText`, `rule.style.src`). Pages
   using Modernizr's web-font test concluded fonts were unsupported and
