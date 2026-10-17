@@ -619,7 +619,7 @@ ns_js_in_pump(const ns_js *js)
 static gboolean
 ns_js_page_tasks_held(const ns_js *js)
 {
-    return js->in_pump || ns_engine_in_blocking_fetch();
+    return js->in_pump || (!js->worker_host && ns_engine_in_blocking_fetch());
 }
 
 static gboolean
@@ -9622,7 +9622,7 @@ ns_on_js_fetch_deliver_idle(gpointer user_data)
 {
     ns_js_fetch_delivery *d = user_data;
     if (d->st && d->st->js && ns_js_page_tasks_held(d->st->js)) {
-        g_timeout_add(4, ns_on_js_fetch_deliver_idle, d);
+        ns_js_attach_timeout(d->st->js, 4, ns_on_js_fetch_deliver_idle, d);
         return G_SOURCE_REMOVE;
     }
     ns_on_js_fetch_deliver(d->st, d->resp, d->err);
@@ -21178,7 +21178,7 @@ ns_on_xhr_deliver_idle(gpointer user_data)
 {
     ns_xhr_delivery *d = user_data;
     if (d->st && d->st->js && ns_js_page_tasks_held(d->st->js)) {
-        g_timeout_add(4, ns_on_xhr_deliver_idle, d);
+        ns_js_attach_timeout(d->st->js, 4, ns_on_xhr_deliver_idle, d);
         return G_SOURCE_REMOVE;
     }
     ns_xhr_deliver(d->st, d->resp, d->err);
@@ -21198,7 +21198,7 @@ ns_on_xhr_done(GObject *src, GAsyncResult *result, gpointer user_data)
         d->st = st;
         d->resp = resp;
         d->err = err;
-        g_timeout_add(4, ns_on_xhr_deliver_idle, d);
+        ns_js_attach_timeout(st->js, 4, ns_on_xhr_deliver_idle, d);
         return;
     }
     ns_xhr_deliver(st, resp, err);
@@ -21209,7 +21209,7 @@ ns_xhr_emit_blocked_idle(gpointer user_data)
 {
     ns_xhr_state *st = user_data;
     if (st->js && ns_js_page_tasks_held(st->js)) {
-        g_timeout_add(4, ns_xhr_emit_blocked_idle, st);
+        ns_js_attach_timeout(st->js, 4, ns_xhr_emit_blocked_idle, st);
         return G_SOURCE_REMOVE;
     }
     if (st->ctx) {
