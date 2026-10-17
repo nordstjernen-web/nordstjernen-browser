@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* A shrink-to-fit box holding a float next to text is wide enough for
+  both, instead of only the wider one, so the float no longer covers the
+  text (python.org's Donate button sat inside the search field).
 * A `<button>` styled `display: inline` is laid out as an inline-block
   like in other browsers instead of disappearing with its label
   (python.org's search "GO" button).
