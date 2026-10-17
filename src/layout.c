@@ -9872,11 +9872,12 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
         } else if (box->kind == NS_BOX_BLOCK ||
                    box->kind == NS_BOX_TABLE_CELL ||
                    box->kind == NS_BOX_TABLE_CAPTION) {
-            if (fside >= 0) {
+            if (clear_kind_of(c->style)) float_row = 0;
+            if (fside >= 0 || c->kind == NS_BOX_INLINE) {
                 float_row += outer;
                 if (float_row > max_child) max_child = float_row;
             } else {
-                if (outer > max_child) max_child = outer;
+                if (float_row + outer > max_child) max_child = float_row + outer;
                 float_row = 0;
             }
         } else {
