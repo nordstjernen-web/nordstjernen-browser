@@ -484,11 +484,8 @@ ns_security_sandbox_init(const char *self_exe)
         add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/snd");
 
     const char *xauth = g_getenv("XAUTHORITY");
-    if (xauth && *xauth) {
-        char *xauth_dir = g_path_get_dirname(xauth);
-        add_path_rw(rfd, fs_read, xauth_dir);
-        g_free(xauth_dir);
-    }
+    if (xauth && *xauth)
+        add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, xauth);
 
     static const char *const ca_bundle_envs[] = {
         "CURL_CA_BUNDLE", "SSL_CERT_FILE", NULL,
