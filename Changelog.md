@@ -3,6 +3,19 @@ Changelog:
 
 1.0.33:
 ======
+* Layout: an HTML comment, a `display: none` element, a float or an
+  absolutely positioned element at the start of a block or table cell
+  no longer pushes the text after it onto a new line. The comment ended
+  the inline content opened by the element's `::before`, and a float
+  left the `::before` text or an inside list marker on a line of its
+  own, so `<div class="tag"><!-- x -->text</div>` with
+  `.tag::before { content: "#" }` drew the `#` and the text on two
+  lines, and `<summary><!----><span style="float: right"></span>Title
+  </summary>` put the disclosure triangle above the title and made the
+  box twice as tall. Such nodes now continue the line like they already
+  did in the middle of a paragraph: the `#` and the text share one line
+  as in Chrome, the triangle sits before the title beside the float,
+  and the summary no longer loses its marker when a float comes first.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
