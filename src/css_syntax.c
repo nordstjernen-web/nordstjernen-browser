@@ -328,8 +328,15 @@ css_syntax_parse_list(ns_css_syntax_parser *parser, char closing)
         }
         if (c == ')' || c == ']' || c == '}') {
             parser->valid = FALSE;
-            parser->offset++;
-            if (closing) break;
+            if (closing) {
+                parser->offset++;
+                break;
+            }
+            ns_css_component *stray =
+                css_component_new(NS_CSS_COMPONENT_DELIM, parser->offset);
+            stray->delimiter = c;
+            stray->end = ++parser->offset;
+            g_ptr_array_add(components, stray);
             continue;
         }
         g_ptr_array_add(components, css_syntax_consume(parser));
