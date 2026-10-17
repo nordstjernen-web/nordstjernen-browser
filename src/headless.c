@@ -1658,6 +1658,10 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
             ns_js_dispatch_key_event(fc->js, t, "keydown", jskey, jskey,
                                      key_code, FALSE, FALSE, FALSE, FALSE,
                                      &key_prevented);
+            if (key_code == 13 && !key_prevented)
+                ns_js_dispatch_key_event_full(fc->js, t, "keypress", jskey,
+                                              jskey, 13, 13, FALSE, FALSE,
+                                              FALSE, FALSE, &key_prevented);
             ns_js_dispatch_key_event(fc->js, t, "keyup", jskey, jskey,
                                      key_code, FALSE, FALSE, FALSE, FALSE, NULL);
             ns_js_consume_mutated(fc->js);
@@ -1691,6 +1695,8 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
     }
     if (g_ascii_strcasecmp(name, "Enter") == 0 ||
         g_ascii_strcasecmp(name, "Return") == 0) {
+        if (key_prevented)
+            return;
         if (multiline)
             headless_edit_replace(fc, lo, hi, "\n");
         else if (!key_prevented && t->name && strcmp(t->name, "input") == 0)
