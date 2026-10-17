@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* Floats whose percentage widths add up to their container's width (six
+  tabs of `16.6667%`) stay on one line instead of the last one dropping
+  to a new row over a rounding error. python.org's top bar is one row
+  again.
 * A `<video>` now takes its natural size from the decoded video once
   its metadata arrives, as the spec says, instead of staying at the
   300x150 default. A video sized only on one axis (`height: 100%;
