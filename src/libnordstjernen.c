@@ -4355,6 +4355,21 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
         browser->keydown_prevented = kind == 0 && prevented;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
 
+        if (kind == 0 && !prevented && key && strcmp(key, "Enter") == 0 &&
+            (mods & (2 | 4 | 8)) == 0) {
+            gboolean press_prevented = FALSE;
+            ns_js_dispatch_key_event_full(browser->js, target, "keypress",
+                                          "Enter", code ? code : "Enter",
+                                          13, 13, (mods & 1) != 0,
+                                          FALSE, FALSE, FALSE,
+                                          &press_prevented);
+            if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+            if (press_prevented) {
+                prevented = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
+        }
+
         if (kind == 0 && !prevented && (mods & 4) && !(mods & (2 | 8)) &&
             key && g_utf8_validate(key, -1, NULL) &&
             g_utf8_strlen(key, -1) == 1 && browser->doc) {

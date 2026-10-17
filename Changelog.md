@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* Pressing Enter fires a `keypress` event like other browsers, and a page
+  that cancels it suppresses the newline. Chat boxes that send on
+  keypress, such as duck.ai's prompt, now send when Enter is pressed.
 * A shrink-to-fit box holding a float next to text is wide enough for
   both, instead of only the wider one, so the float no longer covers the
   text (python.org's Donate button sat inside the search field).
