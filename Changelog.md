@@ -3,6 +3,8 @@ Changelog:
 
 1.0.33:
 ======
+* `@font-face` descriptors read back through CSSOM are validated and
+  normalized like in other browsers (ranges, `calc()`, `oblique 0deg`).
 * Responsive images pick the same `srcset` candidate as other browsers
   for any `sizes` value: the attribute is now parsed with the HTML
   algorithm, so comments, escapes, `0`, unclosed `calc(`, negative
