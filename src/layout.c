@@ -11055,6 +11055,44 @@ cq_set_dims_from_ancestors(const ns_box *box)
 }
 
 static void
+inline_balance(ns_box *box, double width, const ns_style *style)
+{
+    if (!style || box->phantom_line || box->vertical_wm || width <= 0 ||
+        !keyword_is(style->values[NS_CSS_TEXT_WRAP_STYLE], "balance") ||
+        keyword_is(style->values[NS_CSS_WHITE_SPACE], "nowrap") ||
+        keyword_is(style->values[NS_CSS_WHITE_SPACE], "pre"))
+        return;
+    double height = box->content_height;
+    double line = inline_line_height(style);
+    if (line <= 0 || height < line * 1.5 || height > line * 6.5) return;
+    double lo = width * 0.4, hi = width;
+    for (int i = 0; i < 10 && hi - lo > 0.5; i++) {
+        double mid = (lo + hi) / 2.0;
+        inline_layout(box, mid, style);
+        if (box->content_height <= height + 0.5) hi = mid;
+        else lo = mid;
+    }
+    inline_layout(box, hi, style);
+    if (box->content_height > height + 0.5) {
+        inline_layout(box, width, style);
+        return;
+    }
+    const char *align = ns_style_keyword(style, NS_CSS_TEXT_ALIGN);
+    gboolean rtl = keyword_is(style->values[NS_CSS_DIRECTION], "rtl");
+    double slack = width - hi;
+    double dx = 0;
+    if (align && (strcmp(align, "center") == 0 ||
+                  strcmp(align, "-webkit-center") == 0))
+        dx = slack / 2.0;
+    else if (align && (strcmp(align, "right") == 0 ||
+                       strcmp(align, "-webkit-right") == 0 ||
+                       (strcmp(align, "end") == 0 && !rtl) ||
+                       (strcmp(align, "start") == 0 && rtl)))
+        dx = slack;
+    if (dx > 0) shift_box_tree(box, dx, 0);
+}
+
+static void
 layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
     box->definite_height_read = FALSE;
@@ -11065,6 +11103,7 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
         layout_block(box, parent_content_width, inherited_style);
     } else if (box->kind == NS_BOX_INLINE) {
         inline_layout(box, parent_content_width, inherited_style);
+        inline_balance(box, parent_content_width, inherited_style);
     } else if (box->kind == NS_BOX_IMAGE) {
         layout_image(box, parent_content_width);
     } else if (box->kind == NS_BOX_VIDEO) {
