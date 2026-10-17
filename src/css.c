@@ -1699,6 +1699,16 @@ ns_css_font_family_for_pango(const char *css_family)
 }
 
 char *
+ns_css_font_family_first_name(const char *css_family)
+{
+    if (!css_family) return NULL;
+    const char *p = css_family;
+    while (*p == ',' || is_ws(*p)) p++;
+    const char *end = font_family_token_end(p);
+    return font_family_token_clean(p, (gsize)(end - p));
+}
+
+char *
 ns_css_font_family_first_for_pango(const char *css_family)
 {
     if (!css_family) return NULL;
@@ -31529,7 +31539,7 @@ static const char *kUa =
     "input[type=\"button\"], input[type=\"submit\"], input[type=\"color\"], "
     "input[type=\"search\"], select, button { box-sizing: border-box; }\n"
     "input, select, textarea, button { font-style: normal; font-weight: normal; "
-    "font-size: 13.333333px; font-family: system-ui, sans-serif; }\n"
+    "font-size: 13.333333px; font-family: Arial; }\n"
     "textarea { font-family: monospace; }\n"
     "button { display: inline-block; padding: 1px 6px; background-color: #e6e6e6; "
     "border-top-width: 2px; border-right-width: 2px; "
@@ -31541,7 +31551,7 @@ static const char *kUa =
     "input, select, textarea { color: FieldText; }\n"
     "input::placeholder, textarea::placeholder { color: #757575; }\n"
     "button { color: ButtonText; }\n"
-    "input, button, textarea { letter-spacing: initial; "
+    "input, select, button, textarea { letter-spacing: initial; "
     "word-spacing: initial; line-height: initial; }\n"
     "input, select, button, textarea { text-transform: initial; "
     "text-indent: initial; text-shadow: initial; appearance: auto; }\n"
