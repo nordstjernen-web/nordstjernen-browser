@@ -9,8 +9,8 @@ Changelog:
   "2 nights €820 €684", to fit its content with a gap of
   `calc(var(--bui_stack_spaced_gap--s) * var(--bui_spacing_1x))`. The
   line came out 8px too narrow and wrapped until the current price fell
-  out of the card. The frozen sitebench pages gain
-  295 matching elements (booking.com +287).
+  out of the card. The frozen sitebench pages gain 382 matching
+  elements (booking.com +287, facebook.com +55).
 * `getBoundingClientRect()` and `getClientRects()` on a `<tbody>`,
   `<thead>` or `<tfoot>` return the area of its cells, as in other
   browsers, instead of an empty rectangle at 0,0. Row groups get no

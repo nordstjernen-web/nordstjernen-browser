@@ -11170,13 +11170,7 @@ estimate_natural_width(const ns_box *b, double cap)
                    "column") != 0 &&
             strcmp(flex_direction_of(b->style),
                    "column-reverse") != 0) {
-            const ns_css_value *cg = b->style->values[NS_CSS_COLUMN_GAP];
-            const ns_css_value *gg = b->style->values[NS_CSS_GAP];
-            const ns_css_value *gv =
-                (cg && cg->kind == NS_CSS_V_LENGTH) ? cg :
-                (gg && gg->kind == NS_CSS_V_LENGTH) ? gg : NULL;
-            if (gv && gv->u.length.unit != NS_CSS_UNIT_PERCENT)
-                w += (flow_children - 1) * gv->u.length.v;
+            w += (flow_children - 1) * flex_gap_of(b->style, 0);
         }
     }
     if (b->style) {
