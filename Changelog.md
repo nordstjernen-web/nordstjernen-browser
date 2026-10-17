@@ -102,6 +102,42 @@ Changelog:
 * A `<button>` styled `display: inline` is laid out as an inline-block
   like in other browsers instead of disappearing with its label
   (python.org's search "GO" button).
+* Transitions and animations between lengths in different units
+  (`16px` to `50%`, `1em` to `32px`) now move smoothly through `calc()`
+  instead of jumping at the halfway point, and lists such as several
+  background positions interpolate layer by layer instead of collapsing
+  to the first one.
+* Underlines honour `text-underline-offset` and
+  `text-decoration-thickness` (GitHub's links set an offset), and lines
+  drawn by the engine itself take the link's colour instead of the
+  paragraph's. Table cells with `empty-cells: hide` and no content no
+  longer paint their background and borders.
+* The motion-path properties `offset-path`, `offset-distance`,
+  `offset-rotate`, `offset-position`, `offset-anchor` and the `offset`
+  shorthand are parsed and computed, and animate: `ray()` angles,
+  rotations, positions and distances interpolate, and shapes and paths
+  interpolate as they do for `clip-path`. Elements are not yet moved
+  along the path.
+* About seventy standard CSS properties the engine did not know are now
+  parsed, cascaded and reported by `getComputedStyle()`:
+  `text-underline-offset`, `text-decoration-thickness`,
+  `text-underline-position`, `text-emphasis-*`, `scroll-behavior`,
+  `touch-action`, `color-scheme`, `overscroll-behavior`, the
+  `font-variant-*` and `font-synthesis-*` families, `font-palette`,
+  `font-optical-sizing`, `text-rendering`, `text-size-adjust`, `zoom`,
+  `resize`, `empty-cells`, `line-break`, `hyphenate-character`,
+  `print-color-adjust`, `forced-color-adjust`, `scrollbar-gutter`,
+  `background-blend-mode`, `mask-mode`/`-origin`/`-type`,
+  `box-decoration-break`, the SVG `flood-*`, `lighting-color`, `marker-*`,
+  `baseline-shift` and `alignment-baseline` properties,
+  `view-transition-name`/`-class`, `-webkit-font-smoothing` and more.
+  Their declarations used to be dropped, so `CSS.supports()` and
+  `@supports` said no, and feature-detecting pages took their fallback
+  paths. Invalid values are rejected as the specifications say, and
+  numeric values animate. `white-space` is now the shorthand of
+  `white-space-collapse` and `text-wrap-mode`, so `white-space: pre;
+  text-wrap: wrap` keeps preserving spaces instead of resetting them,
+  and `font-variant` sets all of its longhands.
 * `@font-face` rules keep `src`, `unicode-range`, `font-display` and the
   other descriptors in CSSOM (`rule.cssText`, `rule.style.src`). Pages
   using Modernizr's web-font test concluded fonts were unsupported and
