@@ -9949,7 +9949,175 @@
             return out;
         }
 
-        function normalizeDescriptorValue(value) {
+        var ANGLE_TO_DEG = { deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 };
+        var FONT_STRETCH_KEYWORDS = ['ultra-condensed', 'extra-condensed',
+            'condensed', 'semi-condensed', 'normal', 'semi-expanded',
+            'expanded', 'extra-expanded', 'ultra-expanded'];
+
+        function splitTopLevel(value) {
+            var parts = [], buf = '', depth = 0;
+            for (var i = 0; i < value.length; i++) {
+                var c = value.charAt(i);
+                if (c === '(') depth++;
+                else if (c === ')') depth--;
+                if (/\s/.test(c) && depth === 0) {
+                    if (buf) parts.push(buf);
+                    buf = '';
+                } else {
+                    buf += c;
+                }
+            }
+            if (buf) parts.push(buf);
+            return parts;
+        }
+
+        function evalCalc(text) {
+            var m = /^calc\((.*)\)$/i.exec(text);
+            if (!m) return null;
+            var src = m[1], pos = 0;
+            function ws() { while (/\s/.test(src.charAt(pos))) pos++; }
+            function atom() {
+                ws();
+                if (src.charAt(pos) === '(') {
+                    pos++;
+                    var inner = sum();
+                    ws();
+                    if (!inner || src.charAt(pos) !== ')') return null;
+                    pos++;
+                    return inner;
+                }
+                var n = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?(%|[a-z]+)?/i
+                    .exec(src.slice(pos));
+                if (!n) return null;
+                pos += n[0].length;
+                var unit = (n[3] || '').toLowerCase();
+                return { v: parseFloat(n[0]), unit: unit };
+            }
+            function product() {
+                var a = atom();
+                while (a) {
+                    ws();
+                    var op = src.charAt(pos);
+                    if (op !== '*' && op !== '/') break;
+                    pos++;
+                    var b = atom();
+                    if (!b) return null;
+                    if (op === '*') {
+                        if (a.unit && b.unit) return null;
+                        a = { v: a.v * b.v, unit: a.unit || b.unit };
+                    } else {
+                        if (b.unit) return null;
+                        a = { v: a.v / b.v, unit: a.unit };
+                    }
+                }
+                return a;
+            }
+            function sum() {
+                var a = product();
+                while (a) {
+                    ws();
+                    var op = src.charAt(pos);
+                    if (op !== '+' && op !== '-') break;
+                    pos++;
+                    var b = product();
+                    if (!b || a.unit !== b.unit) return null;
+                    a = { v: op === '+' ? a.v + b.v : a.v - b.v, unit: a.unit };
+                }
+                return a;
+            }
+            var r = sum();
+            ws();
+            return r && pos === src.length && isFinite(r.v) ? r : null;
+        }
+
+        function calcText(r) {
+            return 'calc(' + String(Math.round(r.v * 1e6) / 1e6) + r.unit + ')';
+        }
+
+        function descriptorRange(parts, one, keywords) {
+            if (parts.length === 1 && keywords.indexOf(parts[0].toLowerCase()) >= 0)
+                return parts[0].toLowerCase();
+            if (parts.length < 1 || parts.length > 2) return null;
+            var out = [];
+            for (var i = 0; i < parts.length; i++) {
+                var v = one(parts[i]);
+                if (v === null) return null;
+                out.push(v);
+            }
+            if (out.length === 2 && out[0] === out[1]) out.pop();
+            return out.join(' ');
+        }
+
+        function fontWeightPart(part) {
+            if (/^calc\(/i.test(part)) {
+                var r = evalCalc(part);
+                return r && !r.unit ? calcText(r) : null;
+            }
+            if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(part)) return null;
+            var n = parseFloat(part);
+            return n >= 1 && n <= 1000 ? part : null;
+        }
+
+        function fontStretchPart(part) {
+            if (/^calc\(/i.test(part)) {
+                var r = evalCalc(part);
+                return r && r.unit === '%' ? calcText(r) : null;
+            }
+            if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?%$/i.test(part)) return null;
+            return parseFloat(part) >= 0 ? part : null;
+        }
+
+        function fontStyleAngle(part) {
+            if (/^calc\(/i.test(part)) {
+                var r = evalCalc(part);
+                if (!r || !(r.unit in ANGLE_TO_DEG)) return null;
+                return { text: calcText(r), deg: r.v * ANGLE_TO_DEG[r.unit] };
+            }
+            var m = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(deg|grad|rad|turn)$/i
+                .exec(part);
+            if (!m) return null;
+            var deg = parseFloat(m[1]) * ANGLE_TO_DEG[m[2].toLowerCase()];
+            return deg >= -90 && deg <= 90 ? { text: part, deg: deg } : null;
+        }
+
+        function fontStyleDescriptor(parts) {
+            var first = parts[0].toLowerCase();
+            if (parts.length === 1 &&
+                ['normal', 'italic', 'oblique', 'auto'].indexOf(first) >= 0)
+                return first;
+            if (first !== 'oblique' || parts.length > 3) return null;
+            var angles = [];
+            for (var i = 1; i < parts.length; i++) {
+                var a = fontStyleAngle(parts[i]);
+                if (!a) return null;
+                angles.push(a);
+            }
+            if (angles.length === 2 && angles[0].text === angles[1].text)
+                angles.pop();
+            if (angles.every(function (a) { return a.deg === 0; }))
+                return 'normal';
+            return 'oblique ' + angles.map(function (a) { return a.text; }).join(' ');
+        }
+
+        function normalizeDescriptorValue(name, value) {
+            var parts = splitTopLevel(value);
+            if (!parts.length) return null;
+            switch (name) {
+            case 'font-weight':
+                return descriptorRange(parts, fontWeightPart,
+                                       ['normal', 'bold', 'auto']);
+            case 'font-stretch':
+            case 'font-width':
+                return descriptorRange(parts, fontStretchPart,
+                                       FONT_STRETCH_KEYWORDS.concat(['auto']));
+            case 'font-style':
+                return fontStyleDescriptor(parts);
+            case 'font-display':
+                return parts.length === 1 &&
+                    ['auto', 'block', 'swap', 'fallback', 'optional']
+                        .indexOf(parts[0].toLowerCase()) >= 0
+                    ? parts[0].toLowerCase() : null;
+            }
             return value.replace(/\burl\(\s*([^"'()\s][^()\s]*)\s*\)/gi,
                 function (m, u) {
                     return 'url("' + u.replace(/["\\]/g, '\\$&') + '")';
@@ -9968,7 +10136,8 @@
             var entries = [];
             splitDeclarations(block).forEach(function (pair) {
                 if (FONT_FACE_DESCRIPTORS.indexOf(pair[0]) < 0) return;
-                pair[1] = normalizeDescriptorValue(pair[1]);
+                pair[1] = normalizeDescriptorValue(pair[0], pair[1]);
+                if (pair[1] === null) return;
                 for (var i = 0; i < entries.length; i++) {
                     if (entries[i][0] === pair[0]) { entries.splice(i, 1); break; }
                 }
@@ -10010,8 +10179,9 @@
                 this.removeProperty(name);
                 return;
             }
-            var v = normalizeDescriptorValue(
+            var v = normalizeDescriptorValue(name,
                 String(value).replace(/\s+/g, ' ').replace(/^ | $/g, ''));
+            if (v === null) return;
             for (var i = 0; i < this.__entries.length; i++) {
                 if (this.__entries[i][0] === name) {
                     this.__entries[i][1] = v;
