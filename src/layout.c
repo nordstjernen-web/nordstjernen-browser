@@ -4946,7 +4946,7 @@ srcset_select(const char *srcset, const char *sizes, const char *src,
                 if (!isfinite(source_size))
                     source_size = ns_css_sizes_resolve(NULL);
             }
-            c->density = source_size > 0 ? c->width / source_size : 1.0;
+            c->density = source_size > 0 ? c->width / source_size : INFINITY;
         } else if (c->density < 0) {
             c->density = 1.0;
         }

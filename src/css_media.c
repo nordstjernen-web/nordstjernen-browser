@@ -315,7 +315,6 @@ mq_any_value_ok(const char *p, const char *end)
         else if (c == ']') { if (--bracket < 0) return FALSE; }
         else if (c == '{') brace++;
         else if (c == '}') { if (--brace < 0) return FALSE; }
-        else if (c == ';' || c == '!') return FALSE;
         p++;
     }
     return TRUE;
