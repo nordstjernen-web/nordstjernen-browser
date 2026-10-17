@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* An inline-block (or other atomic inline) next to a float sizes a
+  percentage width against its containing block, as CSS says, not
+  against the line width the float leaves. When it then does not fit
+  beside the float it moves below it, as in other browsers, instead of
+  shrinking to fit. wikipedia.org's "other projects" grid, an
+  `inline-block` of `width: 65%` beside a 35% float, came out 65% of
+  65% wide and wrapped every tagline. The frozen sitebench pages gain
+  152 matching elements (wikipedia.org +61, nytimes.com +53).
 * Security: a `fetch()` or `XMLHttpRequest` started in a web worker no
   longer completes on the page's main thread. When the response arrived
   while the main thread was waiting for a parser-blocking script, the
