@@ -10760,9 +10760,9 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
     ns_box **rs_cell = g_new0(ns_box *, max_cols);
     for (ns_box *row = box->first_child; row; row = row->next_sibling) {
         if (row->kind != NS_BOX_TABLE_ROW) continue;
-        row->x = inner_x;
+        row->x = inner_x + hsp;
         row->y = cursor_y;
-        row->content_width = cw;
+        row->content_width = cw > 2 * hsp ? cw - 2 * hsp : 0;
         double row_height = 0;
         guint col = 0;
         for (ns_box *cell = row->first_child; cell; cell = cell->next_sibling) {
