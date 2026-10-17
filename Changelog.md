@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* A drop-down `<select>` is as wide as its widest option, as in other
+  browsers, and its arrow sits at the right edge (and is not drawn with
+  `appearance: none`).
 * `getClientRects()` on an inline element that wraps returns one
   rectangle per line, as in other browsers, instead of a single bounding
   box.
