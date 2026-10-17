@@ -26796,8 +26796,10 @@ ns_worker_deliver_worker(gpointer data)
                                  NULL, NULL);
     JS_FreeValue(ctx, ns_freeze_array(ctx, ports));
     JS_SetPropertyStr(ctx, ev, "ports", ports);
-    if (host->is_service_worker)
+    if (host->is_service_worker) {
         JS_SetPropertyStr(ctx, ev, "source", ns_sw_owner_client(ctx));
+        ns_bind_fn(ctx, ev, "waitUntil", ns_event_noop, 1);
+    }
     ns_worker_dispatch(ctx, global, type, ev);
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
