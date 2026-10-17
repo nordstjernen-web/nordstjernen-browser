@@ -11,6 +11,8 @@ Changelog:
   `inline-block` of `width: 65%` beside a 35% float, came out 65% of
   65% wide and wrapped every tagline. The frozen sitebench pages gain
   152 matching elements (wikipedia.org +61, nytimes.com +53).
+* An iframe placed inside a shadow root keeps its own styles; MDN's
+  "Try it" demos rendered as unstyled text.
 * Security: a `fetch()` or `XMLHttpRequest` started in a web worker no
   longer completes on the page's main thread. When the response arrived
   while the main thread was waiting for a parser-blocking script, the
