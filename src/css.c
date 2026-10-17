@@ -9,6 +9,7 @@
 #include "css_anchor.h"
 #include "css_shape.h"
 #include "css_filter.h"
+#include "css_grammar.h"
 
 #include "config.h"
 #include "image.h"
@@ -334,7 +335,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_OVERFLOW]             = "overflow",
     [NS_CSS_OVERFLOW_X]           = "overflow-x",
     [NS_CSS_OVERFLOW_Y]           = "overflow-y",
-    [NS_CSS_FONT_VARIANT]         = "font-variant",
+    [NS_CSS_FONT_VARIANT]         = "font-variant-caps",
     [NS_CSS_BORDER_RADIUS]            = "border-radius",
     [NS_CSS_BORDER_TOP_LEFT_RADIUS]     = "border-top-left-radius",
     [NS_CSS_BORDER_TOP_RIGHT_RADIUS]    = "border-top-right-radius",
@@ -550,6 +551,203 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_RY]                   = "ry",
 };
 
+typedef enum {
+    PROP_DEF_KEYWORDS,
+    PROP_DEF_LENGTH,
+    PROP_DEF_COLOR,
+    PROP_DEF_NUMBER,
+} prop_def_kind;
+
+typedef struct {
+    ns_css_prop   prop;
+    const char   *name;
+    prop_def_kind kind;
+    gboolean      inherited;
+    const char   *initial;
+    const char   *grammar;
+} prop_def;
+
+#define BLEND_MODES "normal | multiply | screen | overlay | darken | lighten | " \
+    "color-dodge | color-burn | hard-light | soft-light | difference | " \
+    "exclusion | hue | saturation | color | luminosity"
+
+static const prop_def kPropDefs[] = {
+    { NS_CSS_TEXT_UNDERLINE_OFFSET, "text-underline-offset", PROP_DEF_LENGTH, TRUE,
+      "auto", "auto | <length-percentage>" },
+    { NS_CSS_TEXT_DECORATION_THICKNESS, "text-decoration-thickness", PROP_DEF_LENGTH, FALSE,
+      "auto", "auto | from-font | <length-percentage>" },
+    { NS_CSS_TEXT_UNDERLINE_POSITION, "text-underline-position", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | [from-font under] [left right]" },
+    { NS_CSS_TEXT_DECORATION_SKIP_INK, "text-decoration-skip-ink", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none | all" },
+    { NS_CSS_TEXT_DECORATION_SKIP_SPACES, "text-decoration-skip-spaces", PROP_DEF_KEYWORDS, TRUE,
+      "start end", "none | all | [start] [end]" },
+    { NS_CSS_TEXT_EMPHASIS_STYLE, "text-emphasis-style", PROP_DEF_KEYWORDS, TRUE,
+      "none", "none | <string> | [filled* open] [dot circle double-circle triangle sesame]" },
+    { NS_CSS_TEXT_EMPHASIS_COLOR, "text-emphasis-color", PROP_DEF_COLOR, TRUE,
+      "currentcolor", "currentcolor | <color>" },
+    { NS_CSS_TEXT_EMPHASIS_POSITION, "text-emphasis-position", PROP_DEF_KEYWORDS, TRUE,
+      "over", "auto | ![over under] [right* left]" },
+    { NS_CSS_SCROLL_BEHAVIOR, "scroll-behavior", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | smooth" },
+    { NS_CSS_TOUCH_ACTION, "touch-action", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | none | manipulation | "
+              "[pan-x pan-left pan-right] [pan-y pan-up pan-down] [pinch-zoom]" },
+    { NS_CSS_COLOR_SCHEME, "color-scheme", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal" },
+    { NS_CSS_OVERSCROLL_BEHAVIOR_X, "overscroll-behavior-x", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | contain | none | chain" },
+    { NS_CSS_OVERSCROLL_BEHAVIOR_Y, "overscroll-behavior-y", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | contain | none | chain" },
+    { NS_CSS_FONT_VARIANT_LIGATURES, "font-variant-ligatures", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | none | [common-ligatures no-common-ligatures] "
+                "[discretionary-ligatures no-discretionary-ligatures] "
+                "[historical-ligatures no-historical-ligatures] [contextual no-contextual]" },
+    { NS_CSS_FONT_VARIANT_NUMERIC, "font-variant-numeric", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | [lining-nums oldstyle-nums] [proportional-nums tabular-nums] "
+                "[diagonal-fractions stacked-fractions] [ordinal] [slashed-zero]" },
+    { NS_CSS_FONT_VARIANT_EAST_ASIAN, "font-variant-east-asian", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | [jis78 jis83 jis90 jis04 simplified traditional] "
+                "[full-width proportional-width] [ruby]" },
+    { NS_CSS_FONT_VARIANT_ALTERNATES, "font-variant-alternates", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal" },
+    { NS_CSS_FONT_VARIANT_POSITION, "font-variant-position", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | sub | super" },
+    { NS_CSS_FONT_VARIANT_EMOJI, "font-variant-emoji", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | text | emoji | unicode" },
+    { NS_CSS_FONT_SYNTHESIS_WEIGHT, "font-synthesis-weight", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none" },
+    { NS_CSS_FONT_SYNTHESIS_STYLE, "font-synthesis-style", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none | oblique-only" },
+    { NS_CSS_FONT_SYNTHESIS_SMALL_CAPS, "font-synthesis-small-caps", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none" },
+    { NS_CSS_FONT_SYNTHESIS_POSITION, "font-synthesis-position", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none" },
+    { NS_CSS_FONT_OPTICAL_SIZING, "font-optical-sizing", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none" },
+    { NS_CSS_FONT_PALETTE, "font-palette", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | light | dark | <dashed-ident>" },
+    { NS_CSS_FONT_LANGUAGE_OVERRIDE, "font-language-override", PROP_DEF_KEYWORDS, TRUE,
+      "normal", "normal | <string>" },
+    { NS_CSS_TEXT_RENDERING, "text-rendering", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | optimizespeed | optimizelegibility | geometricprecision" },
+    { NS_CSS_TEXT_SIZE_ADJUST, "text-size-adjust", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none | <percentage [0,inf]>" },
+    { NS_CSS_ZOOM, "zoom", PROP_DEF_NUMBER, FALSE,
+      "1", "normal | <number [0,inf]>" },
+    { NS_CSS_RESIZE, "resize", PROP_DEF_KEYWORDS, FALSE,
+      "none", "none | both | horizontal | vertical | block | inline" },
+    { NS_CSS_EMPTY_CELLS, "empty-cells", PROP_DEF_KEYWORDS, TRUE,
+      "show", "show | hide" },
+    { NS_CSS_LINE_BREAK, "line-break", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | loose | normal | strict | anywhere" },
+    { NS_CSS_HYPHENATE_CHARACTER, "hyphenate-character", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | <string>" },
+    { NS_CSS_HYPHENATE_LIMIT_CHARS, "hyphenate-limit-chars", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "[auto <integer [1,inf]>]{1,3}" },
+    { NS_CSS_TEXT_COMBINE_UPRIGHT, "text-combine-upright", PROP_DEF_KEYWORDS, TRUE,
+      "none", "none | all | ![digits] [<integer [2,4]>]" },
+    { NS_CSS_RUBY_POSITION, "ruby-position", PROP_DEF_KEYWORDS, TRUE,
+      "alternate", "inter-character | [alternate] [over under]" },
+    { NS_CSS_RUBY_ALIGN, "ruby-align", PROP_DEF_KEYWORDS, TRUE,
+      "space-around", "start | center | space-between | space-around" },
+    { NS_CSS_WHITE_SPACE_COLLAPSE, "white-space-collapse", PROP_DEF_KEYWORDS, TRUE,
+      "collapse", "collapse | discard | preserve | preserve-breaks | preserve-spaces | "
+                  "break-spaces" },
+    { NS_CSS_TEXT_WRAP_MODE, "text-wrap-mode", PROP_DEF_KEYWORDS, TRUE,
+      "wrap", "wrap | nowrap" },
+    { NS_CSS_TEXT_WRAP_STYLE, "text-wrap-style", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | balance | stable | pretty | avoid-orphans" },
+    { NS_CSS_PRINT_COLOR_ADJUST, "print-color-adjust", PROP_DEF_KEYWORDS, TRUE,
+      "economy", "economy | exact" },
+    { NS_CSS_FORCED_COLOR_ADJUST, "forced-color-adjust", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none | preserve-parent-color" },
+    { NS_CSS_IMAGE_ORIENTATION, "image-orientation", PROP_DEF_KEYWORDS, TRUE,
+      "from-image", "from-image | none" },
+    { NS_CSS_SCROLLBAR_GUTTER, "scrollbar-gutter", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | ![stable] [both-edges]" },
+    { NS_CSS_OVERFLOW_ANCHOR, "overflow-anchor", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | none" },
+    { NS_CSS_BACKGROUND_BLEND_MODE, "background-blend-mode", PROP_DEF_KEYWORDS, FALSE,
+      "normal", BLEND_MODES " #" },
+    { NS_CSS_MASK_MODE, "mask-mode", PROP_DEF_KEYWORDS, FALSE,
+      "match-source", "alpha | luminance | match-source #" },
+    { NS_CSS_MASK_ORIGIN, "mask-origin", PROP_DEF_KEYWORDS, FALSE,
+      "border-box", "content-box | padding-box | border-box | fill-box | stroke-box | "
+                    "view-box #" },
+    { NS_CSS_MASK_TYPE, "mask-type", PROP_DEF_KEYWORDS, FALSE,
+      "luminance", "luminance | alpha" },
+    { NS_CSS_BOX_DECORATION_BREAK, "box-decoration-break", PROP_DEF_KEYWORDS, FALSE,
+      "slice", "slice | clone" },
+    { NS_CSS_COLOR_INTERPOLATION, "color-interpolation", PROP_DEF_KEYWORDS, TRUE,
+      "srgb", "auto | srgb | linearrgb" },
+    { NS_CSS_COLOR_INTERPOLATION_FILTERS, "color-interpolation-filters", PROP_DEF_KEYWORDS, TRUE,
+      "linearrgb", "auto | srgb | linearrgb" },
+    { NS_CSS_COLOR_RENDERING, "color-rendering", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | optimizespeed | optimizequality" },
+    { NS_CSS_FLOOD_COLOR, "flood-color", PROP_DEF_COLOR, FALSE,
+      "rgb(0, 0, 0)", "currentcolor | <color>" },
+    { NS_CSS_FLOOD_OPACITY, "flood-opacity", PROP_DEF_NUMBER, FALSE,
+      "1", "<number>" },
+    { NS_CSS_LIGHTING_COLOR, "lighting-color", PROP_DEF_COLOR, FALSE,
+      "rgb(255, 255, 255)", "currentcolor | <color>" },
+    { NS_CSS_MARKER_START, "marker-start", PROP_DEF_KEYWORDS, TRUE,
+      "none", "none | <url>" },
+    { NS_CSS_MARKER_MID, "marker-mid", PROP_DEF_KEYWORDS, TRUE,
+      "none", "none | <url>" },
+    { NS_CSS_MARKER_END, "marker-end", PROP_DEF_KEYWORDS, TRUE,
+      "none", "none | <url>" },
+    { NS_CSS_BASELINE_SHIFT, "baseline-shift", PROP_DEF_LENGTH, FALSE,
+      "0px", "sub | super | top | center | bottom | <length-percentage>" },
+    { NS_CSS_ALIGNMENT_BASELINE, "alignment-baseline", PROP_DEF_KEYWORDS, FALSE,
+      "baseline", "baseline | text-bottom | alphabetic | ideographic | middle | central | hanging | "
+                  "mathematical | text-top" },
+    { NS_CSS_BASELINE_SOURCE, "baseline-source", PROP_DEF_KEYWORDS, FALSE,
+      "auto", "auto | first | last" },
+    { NS_CSS_INITIAL_LETTER, "initial-letter", PROP_DEF_KEYWORDS, FALSE,
+      "normal", "normal | ![<number [1,inf]>] [<integer [1,inf]> drop raise]" },
+    { NS_CSS_MARGIN_TRIM, "margin-trim", PROP_DEF_KEYWORDS, FALSE,
+      "none", "none | block | [block-start] [block-end]" },
+    { NS_CSS_FIELD_SIZING, "field-sizing", PROP_DEF_KEYWORDS, FALSE,
+      "fixed", "fixed | content" },
+    { NS_CSS_INTERPOLATE_SIZE, "interpolate-size", PROP_DEF_KEYWORDS, TRUE,
+      "numeric-only", "numeric-only | allow-keywords" },
+    { NS_CSS_VIEW_TRANSITION_NAME, "view-transition-name", PROP_DEF_KEYWORDS, FALSE,
+      "none", "none | auto | match-element | <custom-ident>" },
+    { NS_CSS_VIEW_TRANSITION_CLASS, "view-transition-class", PROP_DEF_KEYWORDS, FALSE,
+      "none", "none | <custom-ident>+" },
+    { NS_CSS_WEBKIT_FONT_SMOOTHING, "-webkit-font-smoothing", PROP_DEF_KEYWORDS, TRUE,
+      "auto", "auto | none | antialiased | subpixel-antialiased" },
+    { NS_CSS_WEBKIT_TAP_HIGHLIGHT_COLOR, "-webkit-tap-highlight-color", PROP_DEF_COLOR, TRUE,
+      "rgba(0, 0, 0, 0.18)", "currentcolor | <color>" },
+    { NS_CSS_WEBKIT_TEXT_STROKE_WIDTH, "-webkit-text-stroke-width", PROP_DEF_LENGTH, TRUE,
+      "0px", "thin | medium | thick | <length [0,inf]>" },
+    { NS_CSS_WEBKIT_TEXT_STROKE_COLOR, "-webkit-text-stroke-color", PROP_DEF_COLOR, TRUE,
+      "currentcolor", "currentcolor | <color>" },
+};
+
+static const prop_def *
+prop_def_of(int prop)
+{
+    static gsize ready;
+    static const prop_def *by_prop[NS_CSS_PROP_COUNT];
+    if (g_once_init_enter(&ready)) {
+        for (gsize i = 0; i < G_N_ELEMENTS(kPropDefs); i++)
+            by_prop[kPropDefs[i].prop] = &kPropDefs[i];
+        g_once_init_leave(&ready, 1);
+    }
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT ? by_prop[prop] : NULL;
+}
+
+static const char *
+prop_name_at(int prop)
+{
+    if (prop < 0 || prop >= NS_CSS_PROP_COUNT) return NULL;
+    if (kProp[prop]) return kProp[prop];
+    const prop_def *def = prop_def_of(prop);
+    return def ? def->name : NULL;
+}
+
 static gboolean
 prop_inherits(ns_css_prop p)
 {
@@ -618,8 +816,10 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_WIDOWS:
     case NS_CSS_DOMINANT_BASELINE:
         return TRUE;
-    default:
-        return FALSE;
+    default: {
+        const prop_def *def = prop_def_of(p);
+        return def && def->inherited;
+    }
     }
 }
 
@@ -9453,7 +9653,6 @@ ns_css_initial_value_text(const char *name)
         { "text-anchor",                "start" },
         { "text-indent",                "0px" },
         { "text-shadow",                "none" },
-        { "text-wrap-mode",             "wrap" },
         { "widows",                     "2" },
         { "word-break",                 "normal" },
         { "writing-mode",               "horizontal-tb" },
@@ -9609,27 +9808,21 @@ ns_css_initial_value_text(const char *name)
         { "mask-border-mode",           "alpha" },
         { "text-decoration",            "none" },
         { "font-variant",               "normal" },
+        { "font-variant-caps",          "normal" },
         { "border-radius",              "0px" },
         { "gap",                        "normal" },
         { "color",                      "rgb(0, 0, 0)" },
         { "font-family",                "serif" },
         { "font-size",                  "16px" },
-        { "text-wrap-style",            "auto" },
-        { "text-decoration-thickness",  "auto" },
-        { "text-underline-offset",      "auto" },
-        { "text-underline-position",    "auto" },
-        { "font-optical-sizing",        "auto" },
         { "isolation",                  "auto" },
-        { "resize",                     "none" },
-        { "empty-cells",                "show" },
         { "border-image-source",        "none" },
         { "will-change",                "auto" },
         { "contain",                    "none" },
         { "backdrop-filter",            "none" },
-        { "touch-action",               "auto" },
-        { "scroll-behavior",            "auto" },
     };
     if (!name) return NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(kPropDefs); i++)
+        if (strcmp(name, kPropDefs[i].name) == 0) return kPropDefs[i].initial;
     for (gsize i = 0; i < G_N_ELEMENTS(initials); i++)
         if (strcmp(name, initials[i].name) == 0) return initials[i].value;
     return NULL;
@@ -10691,9 +10884,33 @@ anchor_fn_list_canonical(const char *value, gboolean allow_anchor)
     return g_string_free(out, FALSE);
 }
 
+static char *def_keyword_canonical(const prop_def *def, const char *t);
+static char *keyword_shorthand_specified(const char *name, const char *value);
+
+static char *
+def_specified_canonical(const prop_def *def, const char *value)
+{
+    char *t = g_strstrip(g_strdup(value));
+    char *out = NULL;
+    if (def->kind == PROP_DEF_KEYWORDS)
+        out = def_keyword_canonical(def, t);
+    else if (def->kind == PROP_DEF_COLOR)
+        out = ns_css_color_specified(t);
+    g_free(t);
+    return out;
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
+    const prop_def *def = prop && value && !strstr(value, "var(") ? prop_def_of(prop_id(prop))
+                                                                  : NULL;
+    if (def) {
+        char *c = def_specified_canonical(def, value);
+        if (c) return c;
+    }
+    char *shorthand = prop && value ? keyword_shorthand_specified(prop, value) : NULL;
+    if (shorthand) return shorthand;
     gboolean allow_anchor = FALSE;
     if (prop && value && ns_css_text_has_anchor_fn(value) &&
         anchor_fn_prop_name(prop, &allow_anchor)) {
@@ -12290,6 +12507,10 @@ prop_accepts_auto(ns_css_prop prop)
     case NS_CSS_LEFT:
     case NS_CSS_FLEX_BASIS:
     case NS_CSS_COLUMN_WIDTH:
+    case NS_CSS_SCROLL_PADDING_TOP:
+    case NS_CSS_SCROLL_PADDING_RIGHT:
+    case NS_CSS_SCROLL_PADDING_BOTTOM:
+    case NS_CSS_SCROLL_PADDING_LEFT:
         return TRUE;
     default:
         return FALSE;
@@ -12341,6 +12562,10 @@ prop_requires_nonnegative(ns_css_prop prop)
     case NS_CSS_OUTLINE_WIDTH:
     case NS_CSS_COLUMN_WIDTH:
     case NS_CSS_COLUMN_RULE_WIDTH:
+    case NS_CSS_SCROLL_PADDING_TOP:
+    case NS_CSS_SCROLL_PADDING_RIGHT:
+    case NS_CSS_SCROLL_PADDING_BOTTOM:
+    case NS_CSS_SCROLL_PADDING_LEFT:
         return TRUE;
     default:
         return FALSE;
@@ -12358,6 +12583,14 @@ static gboolean
 numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
 {
     if (!v) return FALSE;
+    gboolean scroll_margin = prop == NS_CSS_SCROLL_MARGIN_TOP ||
+                             prop == NS_CSS_SCROLL_MARGIN_RIGHT ||
+                             prop == NS_CSS_SCROLL_MARGIN_BOTTOM ||
+                             prop == NS_CSS_SCROLL_MARGIN_LEFT;
+    if (scroll_margin && ((v->kind == NS_CSS_V_LENGTH &&
+                           v->u.length.unit == NS_CSS_UNIT_PERCENT) ||
+                          (v->kind == NS_CSS_V_CALC && v->u.calc.pct != 0)))
+        return FALSE;
     if (v->kind == NS_CSS_V_LENGTH) {
         ns_css_unit unit = v->u.length.unit;
         double num = v->u.length.v;
@@ -13142,10 +13375,29 @@ font_size_adjust_mix(const ns_css_value *a, const ns_css_value *b, double wa, do
     return out;
 }
 
+static gboolean
+keyword_starts_numeric(const char *kw)
+{
+    return kw && (g_ascii_isdigit((guchar)kw[0]) || kw[0] == '-' || kw[0] == '+' ||
+                  kw[0] == '.');
+}
+
+static gboolean
+def_keywords_numeric(int prop, const char *a, const char *b)
+{
+    const prop_def *def = prop_def_of(prop);
+    if (!def || def->kind != PROP_DEF_KEYWORDS) return TRUE;
+    return keyword_starts_numeric(a) && keyword_starts_numeric(b);
+}
+
 ns_css_value *
 ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_value *b,
                               double t)
 {
+    if (a && b && a->kind == NS_CSS_V_KEYWORD && b->kind == NS_CSS_V_KEYWORD &&
+        a->u.keyword && b->u.keyword) {
+        if (!def_keywords_numeric(prop, a->u.keyword, b->u.keyword)) return NULL;
+    }
     if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
     if (prop == NS_CSS_CONTAIN_INTRINSIC_WIDTH || prop == NS_CSS_CONTAIN_INTRINSIC_HEIGHT)
         return contain_intrinsic_mix(a, b, t);
@@ -13317,6 +13569,316 @@ prop_is_anchor_property(ns_css_prop prop)
 }
 
 static ns_css_value *
+parse_color_value(const char *t, gboolean allow_invert)
+{
+    guint8 r, g, b, a;
+    static const guint8 opaque_black[4] = { 0, 0, 0, 255 };
+    guint8 rgba[4];
+    ns_css_value *v = NULL;
+    if (parse_color(t, &r, &g, &b, &a)) {
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_COLOR;
+        v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
+    } else if (strchr(t, '(') && ns_css_color_resolve(t, opaque_black, rgba)) {
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_COLOR;
+        v->u.color.r = rgba[0]; v->u.color.g = rgba[1];
+        v->u.color.b = rgba[2]; v->u.color.a = rgba[3];
+    } else {
+        char *kw = ascii_lower(t, strlen(t));
+        if (kw && (strcmp(kw, "currentcolor") == 0 ||
+                   strcmp(kw, "inherit") == 0 ||
+                   strcmp(kw, "transparent") == 0 ||
+                   (allow_invert && strcmp(kw, "invert") == 0))) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+    }
+    return v;
+}
+
+static ns_css_value *
+parse_def_length(const prop_def *def, const char *t)
+{
+    char *kw = ns_css_grammar_canonical(def->grammar, t);
+    if (kw) {
+        double border_px = strcmp(kw, "thin") == 0 ? 1 : strcmp(kw, "medium") == 0 ? 3
+                         : strcmp(kw, "thick") == 0 ? 5 : -1;
+        if (border_px < 0) return keyword_value(kw);
+        g_free(kw);
+        return calc_px_value(border_px);
+    }
+    gboolean allow_percent = strstr(def->grammar, "<length-percentage") != NULL;
+    gboolean nonnegative = strstr(def->grammar, "[0,") != NULL;
+    ns_css_value *v = parse_calc(t);
+    if (!v) {
+        double num;
+        ns_css_unit unit;
+        if (!parse_length(t, &num, &unit)) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_LENGTH;
+        v->u.length.v = num;
+        v->u.length.unit = unit;
+    }
+    gboolean ok = TRUE;
+    if (v->kind == NS_CSS_V_LENGTH) {
+        if (v->u.length.unit == NS_CSS_UNIT_NUMBER) {
+            ok = v->u.length.v == 0;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+        }
+        if (v->u.length.unit == NS_CSS_UNIT_PERCENT && !allow_percent) ok = FALSE;
+        if (nonnegative && v->u.length.v < 0) ok = FALSE;
+    } else if (v->kind == NS_CSS_V_CALC) {
+        if (!allow_percent && v->u.calc.pct != 0) ok = FALSE;
+    } else {
+        ok = FALSE;
+    }
+    if (!ok) {
+        ns_css_value_free(v);
+        return NULL;
+    }
+    return v;
+}
+
+gboolean
+ns_css_number_value(const char *text, double *out)
+{
+    ns_css_value *v = parse_calc(text);
+    gboolean ok = v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_NUMBER;
+    if (ok) *out = v->u.length.v;
+    ns_css_value_free(v);
+    return ok;
+}
+
+static ns_css_value *
+parse_def_number(const prop_def *def, const char *t)
+{
+    if (keyword_choice_valid(t, "normal") && ns_css_grammar_has_keyword(def->grammar, "normal"))
+        return calc_num_value(1);
+    ns_css_value *v = parse_calc(t);
+    if (!v) {
+        double num;
+        ns_css_unit unit;
+        if (!parse_length(t, &num, &unit)) return NULL;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_LENGTH;
+        v->u.length.v = num;
+        v->u.length.unit = unit;
+    }
+    double num = 0;
+    gboolean percent_calc = v->kind == NS_CSS_V_CALC && !v->u.calc.fn &&
+                            v->u.calc.px == 0 && v->u.calc.em == 0 && v->u.calc.rem == 0;
+    gboolean ok = percent_calc ||
+                  (v->kind == NS_CSS_V_LENGTH &&
+                   (v->u.length.unit == NS_CSS_UNIT_NUMBER ||
+                    v->u.length.unit == NS_CSS_UNIT_PERCENT));
+    if (ok) {
+        num = percent_calc ? v->u.calc.pct : v->u.length.v;
+        if (percent_calc || v->u.length.unit == NS_CSS_UNIT_PERCENT) num /= 100.0;
+        if (strstr(def->grammar, "[0,") && num < 0) ok = FALSE;
+        if (def->prop == NS_CSS_ZOOM && num == 0) num = 1;
+        if (def->prop == NS_CSS_FLOOD_OPACITY) num = CLAMP(num, 0.0, 1.0);
+    }
+    ns_css_value_free(v);
+    return ok ? calc_num_value(num) : NULL;
+}
+
+static char *
+color_scheme_canonical(const char *t)
+{
+    if (keyword_choice_valid(t, "normal")) return g_strdup("normal");
+    char *names = ns_css_grammar_canonical("<custom-ident>+", t);
+    if (!names) return NULL;
+    char **words = g_strsplit(names, " ", -1);
+    guint n = g_strv_length(words);
+    GString *out = g_string_new(NULL);
+    gboolean only = FALSE, ok = TRUE;
+    for (guint i = 0; ok && i < n; i++) {
+        char *lower = g_ascii_strdown(words[i], -1);
+        if (strcmp(lower, "only") == 0) {
+            ok = !only && (i == 0 || i == n - 1) && n > 1;
+            only = TRUE;
+        } else if (strcmp(lower, "normal") == 0) {
+            ok = FALSE;
+        } else {
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, strcmp(lower, "light") == 0 || strcmp(lower, "dark") == 0
+                                     ? lower : words[i]);
+        }
+        g_free(lower);
+    }
+    if (ok && only) g_string_append(out, " only");
+    g_strfreev(words);
+    g_free(names);
+    if (!ok || !out->len) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+alternates_function_canonical(const char *name, const char *args, gboolean list)
+{
+    char **items = g_strsplit(args, ",", -1);
+    GString *out = g_string_new(name);
+    g_string_append_c(out, '(');
+    guint n = 0;
+    gboolean ok = TRUE;
+    for (guint i = 0; ok && items[i]; i++) {
+        char *ident = ns_css_grammar_canonical("<custom-ident>", items[i]);
+        ok = ident != NULL;
+        if (ok) {
+            g_string_append(out, n++ ? ", " : "");
+            g_string_append(out, ident);
+        }
+        g_free(ident);
+    }
+    g_strfreev(items);
+    if (!ok || n == 0 || (!list && n > 1)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
+}
+
+static char *
+font_variant_alternates_canonical(const char *t)
+{
+    static const struct { const char *name; gboolean function; gboolean list; } parts[] = {
+        { "stylistic", TRUE, FALSE }, { "historical-forms", FALSE, FALSE },
+        { "styleset", TRUE, TRUE }, { "character-variant", TRUE, TRUE },
+        { "swash", TRUE, FALSE }, { "ornaments", TRUE, FALSE },
+        { "annotation", TRUE, FALSE },
+    };
+    if (keyword_choice_valid(t, "normal")) return g_strdup("normal");
+    char *slot[G_N_ELEMENTS(parts)] = { 0 };
+    char *tokens[16] = { 0 };
+    int n = split_ws_paren(t, tokens, (int)G_N_ELEMENTS(tokens));
+    gboolean ok = n > 0 && n < (int)G_N_ELEMENTS(tokens);
+    for (int i = 0; ok && i < n; i++) {
+        const char *open = strchr(tokens[i], '(');
+        gsize name_len = open ? (gsize)(open - tokens[i]) : strlen(tokens[i]);
+        gsize k = 0;
+        for (; k < G_N_ELEMENTS(parts); k++)
+            if (strlen(parts[k].name) == name_len &&
+                g_ascii_strncasecmp(tokens[i], parts[k].name, name_len) == 0)
+                break;
+        ok = k < G_N_ELEMENTS(parts) && !slot[k] && (open != NULL) == parts[k].function;
+        if (!ok) break;
+        if (!open) {
+            slot[k] = g_strdup(parts[k].name);
+            continue;
+        }
+        gsize len = strlen(open);
+        ok = len >= 2 && open[len - 1] == ')';
+        if (!ok) break;
+        char *args = g_strndup(open + 1, len - 2);
+        slot[k] = alternates_function_canonical(parts[k].name, args, parts[k].list);
+        g_free(args);
+        ok = slot[k] != NULL;
+    }
+    GString *out = g_string_new(NULL);
+    for (gsize k = 0; k < G_N_ELEMENTS(parts); k++) {
+        if (ok && slot[k]) {
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, slot[k]);
+        }
+        g_free(slot[k]);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    if (!ok) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+hyphenate_limit_chars_trim(char *canon)
+{
+    char **parts = g_strsplit(canon, " ", -1);
+    guint n = g_strv_length(parts);
+    if (n == 3 && strcmp(parts[2], parts[1]) == 0) n = 2;
+    if (n == 2 && strcmp(parts[1], "auto") == 0) n = 1;
+    char *saved = parts[n];
+    parts[n] = NULL;
+    char *out = g_strjoinv(" ", parts);
+    parts[n] = saved;
+    g_strfreev(parts);
+    g_free(canon);
+    return out;
+}
+
+static char *
+font_language_override_trim(char *canon)
+{
+    if (!canon || canon[0] != '"') return canon;
+    gsize len = strlen(canon);
+    gsize end = len - 1;
+    while (end > 1 && canon[end - 1] == ' ') end--;
+    gsize chars = end - 1;
+    gboolean ok = chars >= 1 && len - 2 <= 4;
+    for (gsize i = 1; ok && i < end; i++)
+        ok = (guchar)canon[i] >= 0x20 && (guchar)canon[i] < 0x7f;
+    if (!ok) {
+        g_free(canon);
+        return NULL;
+    }
+    char *out = g_strdup_printf("\"%.*s\"", (int)chars, canon + 1);
+    g_free(canon);
+    return out;
+}
+
+static char *
+def_keyword_canonical(const prop_def *def, const char *t)
+{
+    switch (def->prop) {
+    case NS_CSS_COLOR_SCHEME:
+        return color_scheme_canonical(t);
+    case NS_CSS_FONT_VARIANT_ALTERNATES:
+        return font_variant_alternates_canonical(t);
+    default:
+        break;
+    }
+    char *canon = ns_css_grammar_canonical(def->grammar, t);
+    if (canon && def->prop == NS_CSS_HYPHENATE_LIMIT_CHARS)
+        canon = hyphenate_limit_chars_trim(canon);
+    if (canon && def->prop == NS_CSS_FONT_LANGUAGE_OVERRIDE)
+        canon = font_language_override_trim(canon);
+    if (canon && def->prop == NS_CSS_MARGIN_TRIM && strcmp(canon, "block-start block-end") == 0) {
+        g_free(canon);
+        canon = g_strdup("block");
+    }
+    if (canon && def->prop == NS_CSS_TEXT_COMBINE_UPRIGHT && strcmp(canon, "digits") == 0) {
+        g_free(canon);
+        canon = g_strdup("digits 2");
+    }
+    return canon;
+}
+
+static ns_css_value *
+parse_def_value(const prop_def *def, const char *t)
+{
+    switch (def->kind) {
+    case PROP_DEF_COLOR:
+        return parse_color_value(t, FALSE);
+    case PROP_DEF_LENGTH:
+        return parse_def_length(def, t);
+    case PROP_DEF_NUMBER:
+        return parse_def_number(def, t);
+    case PROP_DEF_KEYWORDS:
+        break;
+    }
+    char *canon = def_keyword_canonical(def, t);
+    return canon ? keyword_value(canon) : NULL;
+}
+
+static ns_css_value *
 parse_value_for(ns_css_prop prop, const char *text)
 {
     while (*text && is_ws(*text)) text++;
@@ -13328,6 +13890,13 @@ parse_value_for(ns_css_prop prop, const char *text)
 
     v = parse_css_wide_keyword(t);
     if (v) {
+        g_free(t);
+        return v;
+    }
+    const prop_def *def = prop_def_of(prop);
+    if (def) {
+        v = parse_def_value(def, t);
+        if (v) value_record_specified_keyword(v, prop, t);
         g_free(t);
         return v;
     }
@@ -13598,7 +14167,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t, "normal italic oblique");
         break;
     case NS_CSS_FONT_VARIANT:
-        v = parse_keyword_choice(t, "normal small-caps");
+        v = parse_keyword_choice(t, "normal small-caps all-small-caps petite-caps "
+                                    "all-petite-caps unicase titling-caps");
         break;
     case NS_CSS_TEXT_ALIGN:
         v = parse_keyword_choice(t,
@@ -13703,35 +14273,9 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_CARET_COLOR:
     case NS_CSS_STOP_COLOR:
     case NS_CSS_WEBKIT_TEXT_FILL_COLOR:
-    case NS_CSS_ACCENT_COLOR: {
-        guint8 r, g, b, a;
-        static const guint8 opaque_black[4] = { 0, 0, 0, 255 };
-        guint8 rgba[4];
-        if (parse_color(t, &r, &g, &b, &a)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_COLOR;
-            v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
-        } else if (strchr(t, '(') && ns_css_color_resolve(t, opaque_black, rgba)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_COLOR;
-            v->u.color.r = rgba[0]; v->u.color.g = rgba[1];
-            v->u.color.b = rgba[2]; v->u.color.a = rgba[3];
-        } else {
-            char *kw = ascii_lower(t, strlen(t));
-            if (kw && (strcmp(kw, "currentcolor") == 0 ||
-                       strcmp(kw, "inherit") == 0 ||
-                       strcmp(kw, "transparent") == 0 ||
-                       (prop == NS_CSS_OUTLINE_COLOR &&
-                        strcmp(kw, "invert") == 0))) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_KEYWORD;
-                v->u.keyword = kw;
-            } else {
-                g_free(kw);
-            }
-        }
+    case NS_CSS_ACCENT_COLOR:
+        v = parse_color_value(t, prop == NS_CSS_OUTLINE_COLOR);
         break;
-    }
     case NS_CSS_FILL:
     case NS_CSS_STROKE: {
         guint8 r, g, b, a;
@@ -14743,6 +15287,18 @@ static const struct { const char *logical; const char *physical; } kLogicalAlias
     { "max-inline-size",           "max-width" },
     { "contain-intrinsic-block-size", "contain-intrinsic-height" },
     { "contain-intrinsic-inline-size", "contain-intrinsic-width" },
+    { "scroll-margin-block-start",    "scroll-margin-top" },
+    { "scroll-margin-block-end",      "scroll-margin-bottom" },
+    { "scroll-margin-inline-start",   "scroll-margin-left" },
+    { "scroll-margin-inline-end",     "scroll-margin-right" },
+    { "scroll-padding-block-start",   "scroll-padding-top" },
+    { "scroll-padding-block-end",     "scroll-padding-bottom" },
+    { "scroll-padding-inline-start",  "scroll-padding-left" },
+    { "scroll-padding-inline-end",    "scroll-padding-right" },
+    { "overflow-block",               "overflow-y" },
+    { "overflow-inline",              "overflow-x" },
+    { "overscroll-behavior-block",    "overscroll-behavior-y" },
+    { "overscroll-behavior-inline",   "overscroll-behavior-x" },
 };
 
 static const char *
@@ -14762,8 +15318,8 @@ prop_id_table(void)
     if (g_once_init_enter(&ready)) {
         GHashTable *t = g_hash_table_new(g_str_hash, g_str_equal);
         for (int i = NS_CSS_PROP_COUNT - 1; i >= 0; i--)
-            if (kProp[i])
-                g_hash_table_insert(t, (gpointer)kProp[i], GINT_TO_POINTER(i + 1));
+            if (prop_name_at(i))
+                g_hash_table_insert(t, (gpointer)prop_name_at(i), GINT_TO_POINTER(i + 1));
         table = t;
         g_once_init_leave(&ready, 1);
     }
@@ -14782,7 +15338,7 @@ prop_id(const char *name)
         if (hit) return GPOINTER_TO_INT(hit) - 1;
     } else {
         for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
-            if (kProp[i] && g_ascii_strcasecmp(name, kProp[i]) == 0) return i;
+            if (prop_name_at(i) && g_ascii_strcasecmp(name, prop_name_at(i)) == 0) return i;
     }
     if (g_ascii_strcasecmp(name, "word-wrap") == 0)
         return NS_CSS_OVERFLOW_WRAP;
@@ -14790,9 +15346,13 @@ prop_id(const char *name)
         return NS_CSS_TEXT_DECORATION;
     if (g_ascii_strcasecmp(name, "line-clamp") == 0)
         return NS_CSS_LINE_CLAMP;
-    if (g_ascii_strcasecmp(name, "text-wrap") == 0 ||
-        g_ascii_strcasecmp(name, "text-wrap-mode") == 0)
-        return NS_CSS_WHITE_SPACE;
+    if (g_ascii_strcasecmp(name, "-webkit-text-size-adjust") == 0)
+        return NS_CSS_TEXT_SIZE_ADJUST;
+    if (g_ascii_strcasecmp(name, "-webkit-print-color-adjust") == 0 ||
+        g_ascii_strcasecmp(name, "color-adjust") == 0)
+        return NS_CSS_PRINT_COLOR_ADJUST;
+    if (g_ascii_strcasecmp(name, "-webkit-box-decoration-break") == 0)
+        return NS_CSS_BOX_DECORATION_BREAK;
     if (g_ascii_strcasecmp(name, "-webkit-mask-image") == 0)
         return NS_CSS_MASK_IMAGE;
     if (g_ascii_strcasecmp(name, "-webkit-mask-clip") == 0)
@@ -14827,9 +15387,16 @@ prop_id(const char *name)
         gpointer hit = g_hash_table_lookup(prop_id_table(), phys);
         if (hit) return GPOINTER_TO_INT(hit) - 1;
         for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
-            if (kProp[i] && g_ascii_strcasecmp(phys, kProp[i]) == 0) return i;
+            if (prop_name_at(i) && g_ascii_strcasecmp(phys, prop_name_at(i)) == 0) return i;
     }
     return -1;
+}
+
+gboolean
+ns_css_prop_initial_currentcolor(int prop)
+{
+    const prop_def *def = prop_def_of(prop);
+    return def && def->kind == PROP_DEF_COLOR && strcmp(def->initial, "currentcolor") == 0;
 }
 
 gboolean
@@ -14842,8 +15409,7 @@ ns_css_prop_inherits(int prop)
 const char *
 ns_css_prop_name(int prop)
 {
-    return prop >= 0 && prop < NS_CSS_PROP_COUNT
-        ? kProp[prop] : NULL;
+    return prop_name_at(prop);
 }
 
 int
@@ -17251,6 +17817,303 @@ border_shorthand_valid(const char *vtext, ns_css_prop style_prop)
     return ok;
 }
 
+#define KEYWORD_SHORTHAND_PARTS_MAX NS_CSS_KEYWORD_SHORTHAND_PARTS_MAX
+#define KEYWORD_SHORTHAND_TOKENS_MAX 32
+
+typedef struct {
+    const char *name;
+    ns_css_prop parts[KEYWORD_SHORTHAND_PARTS_MAX];
+} keyword_shorthand;
+
+static const keyword_shorthand kKeywordShorthands[] = {
+    { "text-emphasis", { NS_CSS_TEXT_EMPHASIS_STYLE, NS_CSS_TEXT_EMPHASIS_COLOR,
+                         NS_CSS_PROP_COUNT } },
+    { "text-wrap", { NS_CSS_TEXT_WRAP_MODE, NS_CSS_TEXT_WRAP_STYLE, NS_CSS_PROP_COUNT } },
+    { "white-space", { NS_CSS_WHITE_SPACE_COLLAPSE, NS_CSS_TEXT_WRAP_MODE,
+                       NS_CSS_PROP_COUNT } },
+    { "-webkit-text-stroke", { NS_CSS_WEBKIT_TEXT_STROKE_WIDTH,
+                               NS_CSS_WEBKIT_TEXT_STROKE_COLOR, NS_CSS_PROP_COUNT } },
+    { "font-variant", { NS_CSS_FONT_VARIANT_LIGATURES, NS_CSS_FONT_VARIANT,
+                        NS_CSS_FONT_VARIANT_ALTERNATES, NS_CSS_FONT_VARIANT_NUMERIC,
+                        NS_CSS_FONT_VARIANT_EAST_ASIAN, NS_CSS_FONT_VARIANT_POSITION,
+                        NS_CSS_FONT_VARIANT_EMOJI, NS_CSS_PROP_COUNT } },
+    { "font-synthesis", { NS_CSS_FONT_SYNTHESIS_WEIGHT, NS_CSS_FONT_SYNTHESIS_STYLE,
+                          NS_CSS_FONT_SYNTHESIS_SMALL_CAPS, NS_CSS_FONT_SYNTHESIS_POSITION,
+                          NS_CSS_PROP_COUNT } },
+    { "overscroll-behavior", { NS_CSS_OVERSCROLL_BEHAVIOR_X, NS_CSS_OVERSCROLL_BEHAVIOR_Y,
+                               NS_CSS_PROP_COUNT } },
+};
+
+static const struct { const char *keyword; const char *collapse; const char *mode; }
+kWhiteSpaceLegacy[] = {
+    { "normal",       "collapse",     "wrap" },
+    { "pre",          "preserve",     "nowrap" },
+    { "nowrap",       "collapse",     "nowrap" },
+    { "pre-wrap",     "preserve",     "wrap" },
+    { "break-spaces", "break-spaces", "wrap" },
+    { "pre-line",     "preserve-breaks", "wrap" },
+};
+
+static int
+keyword_shorthand_count(const keyword_shorthand *sh)
+{
+    int n = 0;
+    while (n < KEYWORD_SHORTHAND_PARTS_MAX && sh->parts[n] != NS_CSS_PROP_COUNT) n++;
+    return n;
+}
+
+static const char *
+initial_text_of(ns_css_prop prop)
+{
+    const char *text = ns_css_initial_value_text(prop_name_at(prop));
+    return text ? text : "initial";
+}
+
+static gboolean
+keyword_shorthand_values(const keyword_shorthand *sh, const char *vtext, char **values)
+{
+    int n = keyword_shorthand_count(sh);
+    gboolean white_space = strcmp(sh->name, "white-space") == 0;
+    if (white_space) {
+        for (gsize i = 0; i < G_N_ELEMENTS(kWhiteSpaceLegacy); i++) {
+            if (!keyword_choice_valid(vtext, kWhiteSpaceLegacy[i].keyword)) continue;
+            values[0] = g_strdup(kWhiteSpaceLegacy[i].collapse);
+            values[1] = g_strdup(kWhiteSpaceLegacy[i].mode);
+            return TRUE;
+        }
+    }
+    if (strcmp(sh->name, "font-variant") == 0 && keyword_choice_valid(vtext, "normal none")) {
+        for (int k = 0; k < n; k++) values[k] = g_strdup("normal");
+        if (keyword_choice_valid(vtext, "none")) {
+            g_free(values[0]);
+            values[0] = g_strdup("none");
+        }
+        return TRUE;
+    }
+    if (strcmp(sh->name, "font-synthesis") == 0) {
+        char *canon = ns_css_grammar_canonical(
+            "none | [weight] [style oblique-only] [small-caps] [position]", vtext);
+        if (!canon) return FALSE;
+        static const char *const words[] = { "weight", "style", "small-caps", "position" };
+        for (int k = 0; k < n; k++) {
+            gboolean listed = ns_css_grammar_has_keyword(canon, words[k]);
+            values[k] = g_strdup(listed ? "auto" : "none");
+        }
+        if (ns_css_grammar_has_keyword(canon, "oblique-only")) {
+            g_free(values[1]);
+            values[1] = g_strdup("oblique-only");
+        }
+        g_free(canon);
+        return TRUE;
+    }
+    char *tokens[KEYWORD_SHORTHAND_TOKENS_MAX] = { 0 };
+    int nt = split_ws_paren(vtext, tokens, KEYWORD_SHORTHAND_TOKENS_MAX);
+    gboolean ok = nt > 0 && nt < KEYWORD_SHORTHAND_TOKENS_MAX;
+    if (strcmp(sh->name, "overscroll-behavior") == 0) {
+        ok = ok && nt <= 2;
+        for (int k = 0; ok && k < n; k++) values[k] = g_strdup(tokens[k < nt ? k : 0]);
+        for (int i = 0; i < nt; i++) g_free(tokens[i]);
+        return ok;
+    }
+    GString *parts[KEYWORD_SHORTHAND_PARTS_MAX] = { 0 };
+    int last = -1;
+    for (int i = 0; ok && i < nt; i++) {
+        ns_css_value *wide = parse_css_wide_keyword(tokens[i]);
+        ok = wide == NULL;
+        ns_css_value_free(wide);
+        if (!ok) break;
+        if (white_space && keyword_choice_valid(tokens[i],
+                                                "discard-before discard-after discard-inner"))
+            continue;
+        if (nt > 1 && strcmp(sh->name, "font-variant") == 0 &&
+            keyword_choice_valid(tokens[i], "normal none")) {
+            ok = FALSE;
+            break;
+        }
+        int k = 0;
+        for (; k < n; k++) {
+            if (parts[k] && k != last) continue;
+            char *candidate = parts[k] ? g_strconcat(parts[k]->str, " ", tokens[i], NULL)
+                                       : g_strdup(tokens[i]);
+            ns_css_value *v = parse_value_for(sh->parts[k], candidate);
+            gboolean accepted = v != NULL;
+            ns_css_value_free(v);
+            g_free(candidate);
+            if (accepted) break;
+        }
+        if (k == n) {
+            ok = FALSE;
+            break;
+        }
+        if (!parts[k]) parts[k] = g_string_new(tokens[i]);
+        else g_string_append_printf(parts[k], " %s", tokens[i]);
+        last = k;
+    }
+    for (int k = 0; k < n; k++) {
+        if (ok) {
+            const char *text = parts[k] ? parts[k]->str : initial_text_of(sh->parts[k]);
+            ns_css_value *v = parse_value_for(sh->parts[k], text);
+            ok = v != NULL;
+            ns_css_value_free(v);
+            values[k] = ok ? g_strdup(text) : NULL;
+        }
+        if (parts[k]) g_string_free(parts[k], TRUE);
+    }
+    for (int i = 0; i < nt; i++) g_free(tokens[i]);
+    return ok;
+}
+
+static const keyword_shorthand *
+keyword_shorthand_named(const char *name)
+{
+    for (gsize i = 0; name && i < G_N_ELEMENTS(kKeywordShorthands); i++)
+        if (g_ascii_strcasecmp(name, kKeywordShorthands[i].name) == 0)
+            return &kKeywordShorthands[i];
+    return NULL;
+}
+
+int
+ns_css_keyword_shorthand_parts(const char *name, int *props)
+{
+    const keyword_shorthand *sh = keyword_shorthand_named(name);
+    if (!sh) return 0;
+    int n = keyword_shorthand_count(sh);
+    for (int k = 0; k < n; k++) props[k] = sh->parts[k];
+    return n;
+}
+
+static char *
+white_space_compose(const char *collapse, const char *mode)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(kWhiteSpaceLegacy); i++)
+        if (strcmp(collapse, kWhiteSpaceLegacy[i].collapse) == 0 &&
+            strcmp(mode, kWhiteSpaceLegacy[i].mode) == 0)
+            return g_strdup(kWhiteSpaceLegacy[i].keyword);
+    if (strcmp(mode, "wrap") == 0) return g_strdup(collapse);
+    if (strcmp(collapse, "collapse") == 0) return g_strdup(mode);
+    return g_strdup_printf("%s %s", collapse, mode);
+}
+
+static char *
+font_variant_compose(char *const *values, int n)
+{
+    GString *out = g_string_new(NULL);
+    gboolean ligatures_none = strcmp(values[0], "none") == 0;
+    for (int k = 0; k < n; k++) {
+        if (!*values[k] || strcmp(values[k], "normal") == 0) continue;
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, values[k]);
+    }
+    if (ligatures_none && strcmp(out->str, "none") != 0) g_string_truncate(out, 0);
+    else if (!out->len) g_string_append(out, "normal");
+    return g_string_free(out, FALSE);
+}
+
+static char *
+font_synthesis_compose(char *const *values, int n)
+{
+    static const char *const words[] = { "weight", "style", "small-caps", "position" };
+    GString *out = g_string_new(NULL);
+    for (int k = 0; k < n && k < (int)G_N_ELEMENTS(words); k++) {
+        if (!*values[k] || strcmp(values[k], "none") == 0) continue;
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, strcmp(values[k], "oblique-only") == 0 ? "oblique-only" : words[k]);
+    }
+    if (!out->len) g_string_append(out, "none");
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_css_keyword_shorthand_compose(const char *name, char *const *values)
+{
+    const keyword_shorthand *sh = keyword_shorthand_named(name);
+    if (!sh) return NULL;
+    int n = keyword_shorthand_count(sh);
+    if (strcmp(sh->name, "white-space") == 0) return white_space_compose(values[0], values[1]);
+    if (strcmp(sh->name, "font-variant") == 0) return font_variant_compose(values, n);
+    if (strcmp(sh->name, "font-synthesis") == 0) return font_synthesis_compose(values, n);
+    if (strcmp(sh->name, "overscroll-behavior") == 0 && strcmp(values[0], values[1]) == 0)
+        return g_strdup(values[0]);
+    if (strcmp(sh->name, "text-wrap") == 0) {
+        if (strcmp(values[1], "auto") == 0) return g_strdup(values[0]);
+        if (strcmp(values[0], "wrap") == 0) return g_strdup(values[1]);
+    }
+    return g_strdup_printf("%s %s", values[0], values[1]);
+}
+
+static char *
+keyword_shorthand_specified(const char *name, const char *value)
+{
+    const keyword_shorthand *sh = keyword_shorthand_named(name);
+    if (!sh || strstr(value, "var(")) return NULL;
+    char *trimmed = g_strstrip(g_strdup(value));
+    ns_css_value *wide = parse_css_wide_keyword(trimmed);
+    if (wide) {
+        ns_css_value_free(wide);
+        return trimmed;
+    }
+    int n = keyword_shorthand_count(sh);
+    char *values[KEYWORD_SHORTHAND_PARTS_MAX] = { 0 };
+    char *out = NULL;
+    if (keyword_shorthand_values(sh, trimmed, values)) {
+        gboolean ok = TRUE;
+        for (int k = 0; k < n && ok; k++) {
+            ns_css_value *v = parse_value_for(sh->parts[k], values[k]);
+            ok = v != NULL;
+            if (ok) {
+                char *canon = ns_css_specified_canonical(prop_name_at(sh->parts[k]), values[k]);
+                if (!canon) canon = ns_css_value_serialize(v);
+                g_free(values[k]);
+                values[k] = canon;
+            }
+            ns_css_value_free(v);
+        }
+        if (ok) out = ns_css_keyword_shorthand_compose(name, values);
+    }
+    for (int k = 0; k < n; k++) g_free(values[k]);
+    g_free(trimmed);
+    return out;
+}
+
+static gboolean
+expand_keyword_shorthand(GArray *decls_out, const char *pname, const char *vtext,
+                         gboolean important)
+{
+    const keyword_shorthand *sh = keyword_shorthand_named(pname);
+    if (!sh) return FALSE;
+    int n = keyword_shorthand_count(sh);
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    if (wide) {
+        for (int k = 0; k < n; k++) {
+            ns_css_decl d = { .prop = sh->parts[k], .value = ns_css_value_dup(wide),
+                              .important = important };
+            g_array_append_val(decls_out, d);
+        }
+        ns_css_value_free(wide);
+        return TRUE;
+    }
+    char *values[KEYWORD_SHORTHAND_PARTS_MAX] = { 0 };
+    char *trimmed = g_strstrip(g_strdup(vtext));
+    gboolean ok = keyword_shorthand_values(sh, trimmed, values);
+    g_free(trimmed);
+    ns_css_value *parsed[KEYWORD_SHORTHAND_PARTS_MAX] = { 0 };
+    for (int k = 0; ok && k < n; k++) {
+        parsed[k] = parse_value_for(sh->parts[k], values[k]);
+        ok = parsed[k] != NULL;
+    }
+    for (int k = 0; k < n; k++) {
+        if (ok) {
+            ns_css_decl d = { .prop = sh->parts[k], .value = parsed[k],
+                              .important = important };
+            g_array_append_val(decls_out, d);
+        } else {
+            ns_css_value_free(parsed[k]);
+        }
+        g_free(values[k]);
+    }
+    return TRUE;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
@@ -18236,6 +19099,13 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_STRETCH,
                     NS_CSS_FONT_KERNING,
                     NS_CSS_FONT_VARIANT_LIGATURES,
+                    NS_CSS_FONT_VARIANT_NUMERIC,
+                    NS_CSS_FONT_VARIANT_EAST_ASIAN,
+                    NS_CSS_FONT_VARIANT_ALTERNATES,
+                    NS_CSS_FONT_VARIANT_POSITION,
+                    NS_CSS_FONT_VARIANT_EMOJI,
+                    NS_CSS_FONT_OPTICAL_SIZING,
+                    NS_CSS_FONT_LANGUAGE_OVERRIDE,
                     NS_CSS_FONT_FEATURE_SETTINGS,
                     NS_CSS_FONT_VARIATION_SETTINGS,
                     NS_CSS_FONT_SIZE,
@@ -18421,6 +19291,13 @@ parse_declaration_block(const char **pp, const char *end,
                 } reset_props[] = {
                     { NS_CSS_FONT_KERNING, "auto" },
                     { NS_CSS_FONT_VARIANT_LIGATURES, "normal" },
+                    { NS_CSS_FONT_VARIANT_NUMERIC, "normal" },
+                    { NS_CSS_FONT_VARIANT_EAST_ASIAN, "normal" },
+                    { NS_CSS_FONT_VARIANT_ALTERNATES, "normal" },
+                    { NS_CSS_FONT_VARIANT_POSITION, "normal" },
+                    { NS_CSS_FONT_VARIANT_EMOJI, "normal" },
+                    { NS_CSS_FONT_OPTICAL_SIZING, "auto" },
+                    { NS_CSS_FONT_LANGUAGE_OVERRIDE, "normal" },
                     { NS_CSS_FONT_FEATURE_SETTINGS, "normal" },
                     { NS_CSS_FONT_VARIATION_SETTINGS, "normal" },
                 };
@@ -18796,26 +19673,7 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
-        if (strcmp(pname, "text-wrap") == 0 ||
-            strcmp(pname, "text-wrap-mode") == 0) {
-            const char *mapped = NULL;
-            char *kw = g_ascii_strdown(vtext, -1);
-            g_strstrip(kw);
-            if (strcmp(kw, "nowrap") == 0)
-                mapped = "nowrap";
-            else if (strcmp(kw, "wrap") == 0 ||
-                     strcmp(kw, "balance") == 0 ||
-                     strcmp(kw, "pretty") == 0 ||
-                     strcmp(kw, "stable") == 0)
-                mapped = "normal";
-            if (mapped) {
-                ns_css_value *vv = parse_value_for(NS_CSS_WHITE_SPACE, mapped);
-                if (vv) {
-                    ns_css_decl d = { .prop = NS_CSS_WHITE_SPACE, .value = vv, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            g_free(kw);
+        if (expand_keyword_shorthand(decls_out, pname, vtext, important)) {
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -27640,6 +28498,7 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
     case NS_CSS_V_KEYWORD: {
         double na, nb;
         gboolean ia, ib;
+        if (!def_keywords_numeric(prop, underlying->u.keyword, v->u.keyword)) return NULL;
         if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(underlying, v, 1, 1);
         if (prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) {
             ns_shape_ctx cx = {
@@ -27725,6 +28584,12 @@ ns_css_value_clamp_animated(int prop, ns_css_value *v)
     case NS_CSS_MAX_LINES:
     case NS_CSS_LINE_CLAMP:
         v->u.length.v = MAX(r, 1.0);
+        break;
+    case NS_CSS_FLOOD_OPACITY:
+        v->u.length.v = CLAMP(v->u.length.v, 0.0, 1.0);
+        break;
+    case NS_CSS_ZOOM:
+        v->u.length.v = MAX(v->u.length.v, 0.0);
         break;
     default:
         break;
@@ -28921,13 +29786,12 @@ var_text_mentions_wide_keyword(const char *text)
     static const char *const words[] = {
         "inherit", "initial", "unset", "revert",
     };
-    for (const char *p = text; *p; p++) {
-        if (!g_ascii_isalpha(*p)) continue;
-        for (gsize w = 0; w < G_N_ELEMENTS(words); w++)
-            if (g_ascii_strncasecmp(p, words[w], strlen(words[w])) == 0)
-                return TRUE;
-    }
-    return FALSE;
+    char *lower = g_ascii_strdown(text, -1);
+    gboolean found = FALSE;
+    for (gsize w = 0; w < G_N_ELEMENTS(words) && !found; w++)
+        found = strstr(lower, words[w]) != NULL;
+    g_free(lower);
+    return found;
 }
 
 static void
@@ -29121,6 +29985,23 @@ style_font_px(const ns_style *s)
     if (v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PX)
         return v->u.length.v;
     return 16;
+}
+
+void
+ns_css_value_absolutize(ns_css_value *v, int prop, const ns_style *st)
+{
+    if (!v || prop == NS_CSS_FONT_SIZE) return;
+    double font_px = style_font_px(st);
+    if (v->kind == NS_CSS_V_LENGTH &&
+        (v->u.length.unit == NS_CSS_UNIT_EM || v->u.length.unit == NS_CSS_UNIT_REM)) {
+        v->u.length.v *= v->u.length.unit == NS_CSS_UNIT_EM ? font_px : 16.0;
+        v->u.length.unit = NS_CSS_UNIT_PX;
+    } else if (v->kind == NS_CSS_V_CALC && !v->u.calc.fn &&
+               (v->u.calc.em != 0 || v->u.calc.rem != 0)) {
+        v->u.calc.px += v->u.calc.em * font_px + v->u.calc.rem * 16.0;
+        v->u.calc.em = 0;
+        v->u.calc.rem = 0;
+    }
 }
 
 static gboolean
@@ -30808,6 +31689,77 @@ color_from_parent(ns_style *out, const ns_style *parent_style)
 }
 
 static void
+resolve_def_colors(ns_style *out)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(kPropDefs); i++) {
+        if (kPropDefs[i].kind != PROP_DEF_COLOR) continue;
+        ns_css_prop prop = kPropDefs[i].prop;
+        ns_css_value *v = out->values[prop];
+        if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) continue;
+        if (strcmp(v->u.keyword, "currentcolor") == 0) {
+            ns_css_value_free(v);
+            out->values[prop] = out->values[NS_CSS_COLOR]
+                ? ns_css_value_dup(out->values[NS_CSS_COLOR]) : NULL;
+        } else if (strcmp(v->u.keyword, "transparent") == 0) {
+            ns_css_value_free(v);
+            out->values[prop] = parse_color_value("rgba(0, 0, 0, 0)", FALSE);
+        }
+    }
+}
+
+static const char *
+style_keyword_or_initial(const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = s->values[prop];
+    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) return v->u.keyword;
+    return initial_text_of(prop);
+}
+
+static void
+derive_white_space(ns_style *out)
+{
+    const char *collapse = style_keyword_or_initial(out, NS_CSS_WHITE_SPACE_COLLAPSE);
+    gboolean nowrap = strcmp(style_keyword_or_initial(out, NS_CSS_TEXT_WRAP_MODE),
+                             "nowrap") == 0;
+    const char *legacy = nowrap ? "nowrap" : "normal";
+    if (strcmp(collapse, "preserve") == 0 || strcmp(collapse, "preserve-spaces") == 0)
+        legacy = nowrap ? "pre" : "pre-wrap";
+    else if (strcmp(collapse, "break-spaces") == 0)
+        legacy = nowrap ? "pre" : "break-spaces";
+    else if (strcmp(collapse, "preserve-breaks") == 0)
+        legacy = "pre-line";
+    const ns_css_value *cur = out->values[NS_CSS_WHITE_SPACE];
+    if (cur && cur->kind == NS_CSS_V_KEYWORD && cur->u.keyword &&
+        strcmp(cur->u.keyword, legacy) == 0)
+        return;
+    ns_css_value_free(out->values[NS_CSS_WHITE_SPACE]);
+    out->values[NS_CSS_WHITE_SPACE] = keyword_value_dup(legacy);
+}
+
+static void
+resolve_text_size_adjust(ns_style *out)
+{
+    if (ns_css_keyword_is(out->values[NS_CSS_TEXT_SIZE_ADJUST], "none")) {
+        ns_css_value_free(out->values[NS_CSS_TEXT_SIZE_ADJUST]);
+        out->values[NS_CSS_TEXT_SIZE_ADJUST] = keyword_value_dup("100%");
+    }
+}
+
+static void
+resolve_emphasis_style(ns_style *out)
+{
+    const ns_css_value *v = out->values[NS_CSS_TEXT_EMPHASIS_STYLE];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    const char *fill = strcmp(v->u.keyword, "filled") == 0 ? ""
+                     : strcmp(v->u.keyword, "open") == 0 ? "open " : NULL;
+    if (!fill) return;
+    const char *shape = ns_css_writing_mode(out) == 0 ? "circle" : "sesame";
+    ns_css_value_free(out->values[NS_CSS_TEXT_EMPHASIS_STYLE]);
+    out->values[NS_CSS_TEXT_EMPHASIS_STYLE] =
+        keyword_value(g_strconcat(fill, shape, NULL));
+}
+
+static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
 {
@@ -30928,6 +31880,10 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             }
         }
     }
+    resolve_def_colors(out);
+    derive_white_space(out);
+    resolve_emphasis_style(out);
+    resolve_text_size_adjust(out);
     {
         const ns_css_value *disp = out->values[NS_CSS_DISPLAY];
         ns_display d = { .outer = NS_DISPLAY_OUTER_INLINE };

@@ -292,12 +292,88 @@ typedef enum ns_css_prop {
     NS_CSS_MASK_BORDER_REPEAT,
     NS_CSS_MASK_BORDER_MODE,
     NS_CSS_WEBKIT_TEXT_FILL_COLOR,
+    NS_CSS_TEXT_UNDERLINE_OFFSET,
+    NS_CSS_TEXT_DECORATION_THICKNESS,
+    NS_CSS_TEXT_UNDERLINE_POSITION,
+    NS_CSS_TEXT_DECORATION_SKIP_INK,
+    NS_CSS_TEXT_DECORATION_SKIP_SPACES,
+    NS_CSS_TEXT_EMPHASIS_STYLE,
+    NS_CSS_TEXT_EMPHASIS_COLOR,
+    NS_CSS_TEXT_EMPHASIS_POSITION,
+    NS_CSS_SCROLL_BEHAVIOR,
+    NS_CSS_TOUCH_ACTION,
+    NS_CSS_COLOR_SCHEME,
+    NS_CSS_OVERSCROLL_BEHAVIOR_X,
+    NS_CSS_OVERSCROLL_BEHAVIOR_Y,
+    NS_CSS_FONT_VARIANT_NUMERIC,
+    NS_CSS_FONT_VARIANT_EAST_ASIAN,
+    NS_CSS_FONT_VARIANT_ALTERNATES,
+    NS_CSS_FONT_VARIANT_POSITION,
+    NS_CSS_FONT_VARIANT_EMOJI,
+    NS_CSS_FONT_SYNTHESIS_WEIGHT,
+    NS_CSS_FONT_SYNTHESIS_STYLE,
+    NS_CSS_FONT_SYNTHESIS_SMALL_CAPS,
+    NS_CSS_FONT_SYNTHESIS_POSITION,
+    NS_CSS_FONT_OPTICAL_SIZING,
+    NS_CSS_FONT_PALETTE,
+    NS_CSS_FONT_LANGUAGE_OVERRIDE,
+    NS_CSS_TEXT_RENDERING,
+    NS_CSS_TEXT_SIZE_ADJUST,
+    NS_CSS_ZOOM,
+    NS_CSS_RESIZE,
+    NS_CSS_EMPTY_CELLS,
+    NS_CSS_LINE_BREAK,
+    NS_CSS_HYPHENATE_CHARACTER,
+    NS_CSS_HYPHENATE_LIMIT_CHARS,
+    NS_CSS_TEXT_COMBINE_UPRIGHT,
+    NS_CSS_RUBY_POSITION,
+    NS_CSS_RUBY_ALIGN,
+    NS_CSS_WHITE_SPACE_COLLAPSE,
+    NS_CSS_TEXT_WRAP_MODE,
+    NS_CSS_TEXT_WRAP_STYLE,
+    NS_CSS_PRINT_COLOR_ADJUST,
+    NS_CSS_FORCED_COLOR_ADJUST,
+    NS_CSS_IMAGE_ORIENTATION,
+    NS_CSS_SCROLLBAR_GUTTER,
+    NS_CSS_OVERFLOW_ANCHOR,
+    NS_CSS_BACKGROUND_BLEND_MODE,
+    NS_CSS_MASK_MODE,
+    NS_CSS_MASK_ORIGIN,
+    NS_CSS_MASK_TYPE,
+    NS_CSS_BOX_DECORATION_BREAK,
+    NS_CSS_COLOR_INTERPOLATION,
+    NS_CSS_COLOR_INTERPOLATION_FILTERS,
+    NS_CSS_COLOR_RENDERING,
+    NS_CSS_FLOOD_COLOR,
+    NS_CSS_FLOOD_OPACITY,
+    NS_CSS_LIGHTING_COLOR,
+    NS_CSS_MARKER_START,
+    NS_CSS_MARKER_MID,
+    NS_CSS_MARKER_END,
+    NS_CSS_BASELINE_SHIFT,
+    NS_CSS_ALIGNMENT_BASELINE,
+    NS_CSS_BASELINE_SOURCE,
+    NS_CSS_INITIAL_LETTER,
+    NS_CSS_MARGIN_TRIM,
+    NS_CSS_FIELD_SIZING,
+    NS_CSS_INTERPOLATE_SIZE,
+    NS_CSS_VIEW_TRANSITION_NAME,
+    NS_CSS_VIEW_TRANSITION_CLASS,
+    NS_CSS_WEBKIT_FONT_SMOOTHING,
+    NS_CSS_WEBKIT_TAP_HIGHLIGHT_COLOR,
+    NS_CSS_WEBKIT_TEXT_STROKE_WIDTH,
+    NS_CSS_WEBKIT_TEXT_STROKE_COLOR,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
 int         ns_css_prop_id(const char *name);
 const char *ns_css_prop_name(int prop);
 gboolean    ns_css_prop_inherits(int prop);
+gboolean    ns_css_prop_initial_currentcolor(int prop);
+
+#define NS_CSS_KEYWORD_SHORTHAND_PARTS_MAX 8
+int         ns_css_keyword_shorthand_parts(const char *name, int *props);
+char       *ns_css_keyword_shorthand_compose(const char *name, char *const *values);
 gboolean    ns_css_declaration_valid(int prop, const char *text);
 gboolean    ns_css_named_property_supported(const char *name);
 gboolean    ns_css_named_declaration_valid(const char *name, const char *text);
@@ -1096,6 +1172,7 @@ typedef struct ns_style {
 
 gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
 gboolean ns_style_prop_inherited(const ns_style *s, int prop);
+void     ns_css_value_absolutize(ns_css_value *v, int prop, const ns_style *st);
 const ns_css_value *ns_style_text_fill_color(const ns_style *s);
 
 void   ns_style_free(ns_style *s);
@@ -1235,6 +1312,7 @@ ns_css_keyframes *ns_css_keyframes_resolve(const ns_css_keyframes *kf,
 void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
 void ns_css_append_unescaped(GString *out, const char **pp);
+gboolean ns_css_number_value(const char *text, double *out);
 
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
