@@ -2272,6 +2272,24 @@ paint_block(cairo_t *cr, const ns_box *b)
     if (legend_gap) cairo_restore(cr);
 }
 
+static void
+paint_table_row(cairo_t *cr, const ns_box *row)
+{
+    cairo_save(cr);
+    cairo_new_path(cr);
+    for (const ns_box *c = row->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_TABLE_CELL) continue;
+        cairo_rectangle(cr, c->x + c->margin.left, c->y + c->margin.top,
+                        c->content_width + c->padding.left + c->padding.right +
+                        c->border.left + c->border.right,
+                        c->content_height + c->padding.top + c->padding.bottom +
+                        c->border.top + c->border.bottom);
+    }
+    cairo_clip(cr);
+    paint_block(cr, row);
+    cairo_restore(cr);
+}
+
 static const ns_style *
 inherited_style(const ns_box *b)
 {
@@ -9555,7 +9573,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
             b->kind == NS_BOX_MATH || b->kind == NS_BOX_SVG) {
             if (g_paint_collect_stats) g_paint_stats.blocks++;
-            paint_block(cr, b);
+            if (b->kind == NS_BOX_TABLE_ROW)
+                paint_table_row(cr, b);
+            else
+                paint_block(cr, b);
             if (g_dbg_paint_x >= 0) {
                 double t0, t1, t2, t3;
                 cairo_clip_extents(cr, &t0, &t1, &t2, &t3);

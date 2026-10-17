@@ -10,6 +10,12 @@ Changelog:
   stick its header or size a scroller saw nothing there. The frozen
   sitebench pages gain 212 matching elements (news.ycombinator.com
   +100, Wikipedia articles +91).
+* A table row's background is painted only under its cells, as CSS
+  says, and the row's box no longer covers the table's outer
+  `border-spacing`. With the default 2px spacing, or any
+  `cellspacing`, a striped or highlighted row filled the gaps between
+  its cells and ran over the table's border, and `getBoundingClientRect()`
+  on a `<tr>` was the spacing too wide.
 * List bullets and numbers sit on the baseline of the first line of
   their item instead of floating above it when line-height is large.
 * An absolutely positioned `::after` without offsets appears right after
