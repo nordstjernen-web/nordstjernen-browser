@@ -3,6 +3,11 @@ Changelog:
 
 1.0.33:
 ======
+* Responsive images pick the same `srcset` candidate as other browsers
+  for any `sizes` value: the attribute is now parsed with the HTML
+  algorithm, so comments, escapes, `0`, unclosed `calc(`, negative
+  `min()`/`clamp()` results and invalid media conditions are handled
+  instead of falling back to the full window width.
 * A page can script an iframe showing a `blob:` URL it created itself,
   as same-origin content, instead of getting `contentDocument === null`.
 * `position: relative` offsets given in percent or `calc()` move the box
