@@ -1719,6 +1719,27 @@ append_generated_after(ns_box *block, ns_box *gen)
     ns_box_free(gen);
 }
 
+static gboolean pseudo_generates_box(const ns_style *ps);
+
+static ns_box *
+abs_pseudo_placeholder_run(const ns_box *block, const ns_style *ps)
+{
+    if (!g_abs_ph_set || !pseudo_generates_box(ps)) return NULL;
+    const ns_box *last = block->first_child;
+    while (last && last->next_sibling) last = last->next_sibling;
+    if (!last || last->kind != NS_BOX_INLINE || !last->text || !*last->text)
+        return NULL;
+    ns_box *ph = box_new(NS_BOX_BLOCK);
+    ns_box *run = box_new_inline();
+    run->text = g_strdup("\xef\xbf\xbc");
+    run->inline_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
+    ns_inline_atomic ia = { .byte_off = 0, .box = ph };
+    ph->parent = run;
+    g_array_append_val(run->inline_atomics, ia);
+    g_hash_table_insert(g_abs_ph_set, ph, (gpointer)ps);
+    return run;
+}
+
 static ns_box *
 cell_pseudo_before(ns_box *cell, const ns_node *n, const ns_style *s)
 {
@@ -6399,6 +6420,11 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             gen = NULL;
         }
         if (gen) append_generated_after(block, gen);
+    } else if (s && s->after && !blockify_children &&
+               style_is_absolute_or_fixed(s->after) &&
+               !keyword_is(s->after->values[NS_CSS_POSITION], "fixed")) {
+        ns_box *ph = abs_pseudo_placeholder_run(block, s->after);
+        if (ph) append_generated_after(block, ph);
     }
     return block;
 }

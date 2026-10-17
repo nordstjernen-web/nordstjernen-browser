@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* An absolutely positioned `::after` without offsets appears right after
+  the text of its element, as in other browsers, instead of at the start
+  of the line (the "/" separators in theverge.com's navigation).
 * `@font-face` descriptors read back through CSSOM are validated and
   normalized like in other browsers (ranges, `calc()`, `oblique 0deg`).
 * Responsive images pick the same `srcset` candidate as other browsers
