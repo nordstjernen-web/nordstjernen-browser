@@ -1056,6 +1056,7 @@ frame_document_host(const ns_node *n)
 }
 
 static GHashTable *g_contains_block_media_cache;
+static GHashTable *g_select_width_cache;
 
 static const ns_node *layout_slot_host(const ns_node *slot);
 static const ns_node *layout_shadow_root(const ns_node *host);
@@ -2701,35 +2702,7 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
     g_array_append_val(attrs, a);
 }
 
-static NsPangoLayout *make_pango_layout(const ns_style *parent_style);
-
-static void
-select_widest_label(const ns_node *n, const ns_style *s, int depth,
-                    double *widest)
-{
-    if (depth > 8) return;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "optgroup") == 0) {
-            select_widest_label(c, s, depth + 1, widest);
-            continue;
-        }
-        if (strcmp(c->name, "option") != 0) continue;
-        char *label = ns_node_collect_text(c);
-        gboolean arrow = !keyword_is(s->values[NS_CSS_APPEARANCE], "none");
-        char *text = g_strdup_printf(arrow ? "\xc2\xa0%s \xe2\x96\xbe\xc2\xa0"
-                                           : "\xc2\xa0%s\xc2\xa0",
-                                     label ? label : "");
-        NsPangoLayout *l = make_pango_layout(s);
-        ns_pango_layout_set_text(l, text, -1);
-        int w = 0;
-        ns_pango_layout_get_pixel_size(l, &w, NULL);
-        g_object_unref(l);
-        if (w > *widest) *widest = w;
-        g_free(text);
-        g_free(label);
-    }
-}
+static double select_widest_label(const ns_node *n, const ns_style *s);
 
 static void
 select_size_to_widest_option(collector_ctx *ctx, const ns_node *n,
@@ -2756,8 +2729,7 @@ select_size_to_widest_option(collector_ctx *ctx, const ns_node *n,
                                ctx->attrs->len - 2);
     }
     if (field->box_w > 0 || !field->style) return;
-    double widest = 0;
-    select_widest_label(n, field->style, 0, &widest);
+    double widest = select_widest_label(n, field->style);
     if (widest > 0) field->box_w = widest;
 }
 
@@ -9907,6 +9879,193 @@ measure_inline_atomics_end(GArray *saved)
     g_array_free(saved, TRUE);
 }
 
+static gboolean node_is_windowed_text_input(const ns_node *n);
+
+static const char *const text_input_unreliable_avg_families[] = {
+    "American Typewriter", "Arial Hebrew", "Chalkboard", "Cochin",
+    "Corsiva Hebrew", "Courier", "Euphemia UCAS", "Geneva", "Gill Sans",
+    "Hei", "Helvetica", "Hoefler Text", "InaiMathi", "Kai",
+    "Lucida Grande", "Marker Felt", "Monaco", "Mshtakan", "New Peninim MT",
+    "Osaka", "Raanana", "STHeiti", "Symbol", "Times", "Apple Braille",
+    "Apple LiGothic", "Apple LiSung", "Apple Symbols", "AppleGothic",
+    "AppleMyungjo", "#GungSeo", "#HeadLineA", "#PCMyungjo", "#PilGi",
+};
+
+static gboolean
+text_input_family_avg_reliable(const ns_style *s)
+{
+    const ns_css_value *fv = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
+    const char *css = fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword
+        ? fv->u.keyword : "sans-serif";
+    char *first = ns_css_font_family_first_name(css);
+    gboolean ok = first && *first;
+    for (gsize i = 0; ok && i < G_N_ELEMENTS(text_input_unreliable_avg_families); i++)
+        ok = strcmp(first, text_input_unreliable_avg_families[i]) != 0;
+    g_free(first);
+    return ok;
+}
+
+static double
+text_glyph_advance_px(NsPangoLayout *layout, const char *ch)
+{
+    ns_pango_layout_set_text(layout, ch, -1);
+    ns_text_measure m;
+    text_measure(layout, &m);
+    return (double)m.logical.width / NS_PANGO_SCALE;
+}
+
+static void
+text_input_char_widths(const ns_style *s, double *avg, double *max)
+{
+    NsPangoLayout *layout = make_pango_layout(s);
+    ns_pango_layout_set_width(layout, -1);
+    double x = text_glyph_advance_px(layout, "x");
+    double zero = text_glyph_advance_px(layout, "0");
+    g_object_unref(layout);
+    *avg = zero;
+    *max = 0;
+    if (!text_input_family_avg_reliable(s) || (zero > 0 && x > zero * 1.7))
+        return;
+    ns_css_font_metrics fm = { 0 };
+    *avg = MAX(x, round(x));
+    if (ns_paint_style_font_metrics(s, &fm)) *max = fm.ascent_px;
+}
+
+typedef struct select_width_entry {
+    const ns_style *style;
+    double widest;
+    double drawn;
+} select_width_entry;
+
+static double
+letter_spacing_slack_px(const ns_style *s)
+{
+    const ns_css_value *v = s->values[NS_CSS_LETTER_SPACING];
+    if (v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PX &&
+        v->u.length.v > 0)
+        return v->u.length.v;
+    return 0;
+}
+
+static double
+select_label_width(NsPangoLayout *l, const ns_style *s, const char *label)
+{
+    gboolean arrow = !keyword_is(s->values[NS_CSS_APPEARANCE], "none");
+    char *text = g_strdup_printf(arrow ? "\xc2\xa0%s \xe2\x96\xbe\xc2\xa0"
+                                       : "\xc2\xa0%s\xc2\xa0", label);
+    ns_pango_layout_set_text(l, text, -1);
+    NsPangoAttrList *attrs = ns_pango_attr_list_new();
+    ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
+    ns_inline_apply_spacing(attrs, s, text);
+    ns_pango_layout_set_attributes(l, attrs);
+    ns_pango_attr_list_unref(attrs);
+    g_free(text);
+    ns_text_measure m;
+    text_measure(l, &m);
+    return ceil((double)m.logical.width / NS_PANGO_SCALE +
+                letter_spacing_slack_px(s));
+}
+
+static void
+select_widest_label_walk(const ns_node *n, const ns_style *s,
+                         NsPangoLayout *l, int depth, double *widest)
+{
+    if (depth > 8) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "optgroup")) {
+            select_widest_label_walk(c, s, l, depth + 1, widest);
+            continue;
+        }
+        if (!ns_node_is_element_named(c, "option")) continue;
+        char *label = ns_node_collect_text(c);
+        double w = select_label_width(l, s, label ? label : "");
+        g_free(label);
+        if (w > *widest) *widest = w;
+    }
+}
+
+static double
+select_widest_label_measure(const ns_node *n, const ns_style *s)
+{
+    NsPangoLayout *l = make_pango_layout(s);
+    double widest = 0;
+    select_widest_label_walk(n, s, l, 0, &widest);
+    g_object_unref(l);
+    return widest;
+}
+
+static select_width_entry *
+select_width_entry_get(const ns_node *n, const ns_style *s)
+{
+    if (!g_select_width_cache) return NULL;
+    select_width_entry *e = g_hash_table_lookup(g_select_width_cache, n);
+    if (!e) {
+        e = g_new0(select_width_entry, 1);
+        g_hash_table_insert(g_select_width_cache, (gpointer)n, e);
+    }
+    if (e->style != s) {
+        e->style = s;
+        e->widest = select_widest_label_measure(n, s);
+        e->drawn = -1;
+    }
+    return e;
+}
+
+static double
+select_widest_label(const ns_node *n, const ns_style *s)
+{
+    select_width_entry *e = select_width_entry_get(n, s);
+    return e ? e->widest : select_widest_label_measure(n, s);
+}
+
+static double
+select_drawn_label_width(const ns_box *box)
+{
+    double w = 0;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_BOX_INLINE)
+            w = MAX(w, measure_natural_width(c, box->style));
+    return w;
+}
+
+static double
+menulist_label_width(const ns_box *box)
+{
+    select_width_entry *e = select_width_entry_get(box->dom, box->style);
+    if (!e)
+        return MAX(select_widest_label_measure(box->dom, box->style),
+                   select_drawn_label_width(box));
+    if (e->drawn < 0) e->drawn = select_drawn_label_width(box);
+    return MAX(e->widest, e->drawn);
+}
+
+static double
+menulist_intrinsic_width(const ns_box *box)
+{
+    const char *size = ns_element_get_attr(box->dom, "size");
+    if (!box->style || ns_css_writing_mode(box->style) != 0 ||
+        ns_element_get_attr(box->dom, "multiple") ||
+        (size && ns_parse_int(size, 0, 0, 1000) > 1))
+        return 0;
+    return menulist_label_width(box);
+}
+
+static double
+text_input_intrinsic_width(const ns_box *box)
+{
+    if (box && ns_node_is_element_named(box->dom, "select"))
+        return menulist_intrinsic_width(box);
+    if (!box || !node_is_windowed_text_input(box->dom)) return 0;
+    int size = ns_parse_int(ns_element_get_attr(box->dom, "size"), 0, 0,
+                            G_MAXINT16);
+    if (size <= 0) size = 20;
+    double avg = 0, max = 0;
+    text_input_char_widths(box->style, &avg, &max);
+    double width = avg * size;
+    if (max > avg) width += max - avg;
+    return ceil(width);
+}
+
 static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
@@ -10078,6 +10237,23 @@ width_contribution_keyword_limits(ns_box *box, double w,
     return w;
 }
 
+static gboolean
+box_content_independent_width(const ns_box *box, double *out)
+{
+    if (style_inline_size_contained(box->style, out)) return TRUE;
+    *out = text_input_intrinsic_width(box);
+    return *out > 0;
+}
+
+static double
+atomic_inline_fit_width(ns_box *box, const ns_style *style, double avail)
+{
+    double input_width = text_input_intrinsic_width(box);
+    if (input_width > 0) return input_width;
+    double natural = measure_natural_width(box, style);
+    return natural < avail ? natural : avail;
+}
+
 static double
 measure_max_content_width(ns_box *box, const ns_style *parent_style)
 {
@@ -10086,7 +10262,7 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
         box->kind == NS_BOX_TEXT)
         return measure_natural_width(box, parent_style);
     double contained_w;
-    if (style_inline_size_contained(box->style, &contained_w)) return contained_w;
+    if (box_content_independent_width(box, &contained_w)) return contained_w;
     const ns_style *child_style = box->style ? box->style : parent_style;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(box, child_style, FALSE);
@@ -10325,7 +10501,7 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         box->kind == NS_BOX_TEXT)
         return min_width_of(box, parent_style);
     double contained_w;
-    if (style_inline_size_contained(box->style, &contained_w)) return contained_w;
+    if (box_content_independent_width(box, &contained_w)) return contained_w;
     if (box->kind == NS_BOX_TABLE)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
@@ -15058,39 +15234,6 @@ empty_block_collapses_through(const ns_box *box, int clear)
 }
 
 static double
-text_input_intrinsic_width(const ns_box *box)
-{
-    if (box && box->dom && box->style &&
-        ns_node_is_element_named(box->dom, "select")) {
-        const char *size = ns_element_get_attr(box->dom, "size");
-        if (ns_element_get_attr(box->dom, "multiple") ||
-            (size && ns_parse_int(size, 0, 0, 1000) > 1))
-            return 0;
-        double widest = 0;
-        select_widest_label(box->dom, box->style, 0, &widest);
-        return widest;
-    }
-    if (!box || !box->dom || !box->dom->name ||
-        strcmp(box->dom->name, "input") != 0)
-        return 0;
-    const char *type = ns_element_get_attr(box->dom, "type");
-    if (type && *type &&
-        g_ascii_strcasecmp(type, "text") != 0 &&
-        g_ascii_strcasecmp(type, "password") != 0 &&
-        g_ascii_strcasecmp(type, "search") != 0 &&
-        g_ascii_strcasecmp(type, "email") != 0 &&
-        g_ascii_strcasecmp(type, "url") != 0 &&
-        g_ascii_strcasecmp(type, "tel") != 0 &&
-        g_ascii_strcasecmp(type, "number") != 0)
-        return 0;
-    const char *size_attr = ns_element_get_attr(box->dom, "size");
-    int size = size_attr ? ns_parse_int(size_attr, 20, 1, 80) : 20;
-    double font_size = length_or(box->style
-        ? box->style->values[NS_CSS_FONT_SIZE] : NULL, 16);
-    return size * font_size * 0.75;
-}
-
-static double
 intrinsic_keyword_width(ns_box *box, const char *kw, const ns_style *mi,
                         double avail)
 {
@@ -15392,6 +15535,78 @@ multicol_balanced_height(const ns_box *host, int n_cols, double total_h)
     return h;
 }
 
+static gboolean
+box_is_menulist_select(const ns_box *box)
+{
+    if (!box || box->kind != NS_BOX_BLOCK ||
+        !ns_node_is_element_named(box->dom, "select") ||
+        ns_element_get_attr(box->dom, "multiple") ||
+        box->dom == g_open_select_for_layout ||
+        ns_css_writing_mode(box->style) != 0)
+        return FALSE;
+    return ns_parse_int(ns_element_get_attr(box->dom, "size"), 0, 0, 1000) <= 1;
+}
+
+static gboolean
+menulist_themed(const ns_style *s)
+{
+    return !keyword_is(s ? s->values[NS_CSS_APPEARANCE] : NULL, "none");
+}
+
+static double
+menulist_content_height(const ns_style *s)
+{
+    const ns_css_value *lh = s ? s->values[NS_CSS_LINE_HEIGHT] : NULL;
+    double line = -1;
+    if (!menulist_themed(s) && lh && !keyword_is(lh, "normal"))
+        line = ns_paint_css_line_height_px(s);
+    ns_css_font_metrics fm = { 0 };
+    if (line < 0)
+        line = ns_paint_style_font_metrics(s, &fm)
+            ? fm.ascent_px + fm.descent_px : 0;
+    return line + (menulist_themed(s) ? 2.0 : 0.0);
+}
+
+static gboolean
+box_content_independent_height(const ns_box *box, double *out)
+{
+    if (style_block_size_contained(box->style, out)) return TRUE;
+    if (!box_is_menulist_select(box)) return FALSE;
+    *out = menulist_content_height(box->style);
+    return TRUE;
+}
+
+static double
+menulist_baseline_target(const ns_box *box)
+{
+    ns_css_font_metrics fm = { 0 };
+    ns_paint_style_font_metrics(box->style, &fm);
+    double inner = menulist_content_height(box->style);
+    double pad = menulist_themed(box->style) ? 1.0 : 0.0;
+    double leading = floor((inner - 2 * pad - fm.ascent_px - fm.descent_px) / 2.0);
+    return box->margin.top + box->border.top + box->padding.top +
+           MAX((box->content_height - inner) / 2.0, 0) + pad + leading +
+           fm.ascent_px;
+}
+
+static void
+center_form_control_content(ns_box *box, double measured)
+{
+    double baseline;
+    if (box_is_menulist_select(box) && box_first_baseline(box, &baseline)) {
+        double dy = menulist_baseline_target(box) - baseline;
+        for (ns_box *c = box->first_child; c; c = c->next_sibling)
+            if (!style_is_absolute_or_fixed(c->style)) shift_box_tree(c, 0, dy);
+        return;
+    }
+    if (!ns_node_is_element_named(box->dom, "input") ||
+        box->content_height <= measured + 0.5)
+        return;
+    double shift = (box->content_height - measured) * 0.5;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling)
+        c->y += shift;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -15496,11 +15711,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             explicit_width = TRUE;
             intrinsic_width = TRUE;
         } else {
-            double natural = measure_natural_width(box,
-                                                   inherited_style ? inherited_style : box->style);
-            double input_width = text_input_intrinsic_width(box);
-            if (natural < input_width) natural = input_width;
-            cw = natural < avail ? natural : avail;
+            cw = atomic_inline_fit_width(box,
+                                         inherited_style ? inherited_style : box->style,
+                                         avail);
         }
         if (cw < 0) cw = 0;
     } else {
@@ -16024,7 +16237,7 @@ flex_done: ;
     double measured = cursor_y - inner_y + legend_extra;
     box->measured_content_height = measured;
     double contained_h;
-    if (style_block_size_contained(box->style, &contained_h)) measured = contained_h;
+    if (box_content_independent_height(box, &contained_h)) measured = contained_h;
     double explicit_h = -1;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         explicit_h = resolve_used_height(box, hv, parent_content_width, -1);
@@ -16094,14 +16307,7 @@ flex_done: ;
                 shift_box_tree(c, 0, align_shift);
         }
     }
-    if (align_shift == 0 &&
-        box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
-        strcmp(box->dom->name, "input") == 0 &&
-        box->content_height > measured + 0.5) {
-        double shift = (box->content_height - measured) * 0.5;
-        for (ns_box *c = box->first_child; c; c = c->next_sibling)
-            c->y += shift;
-    }
+    if (align_shift == 0) center_form_control_content(box, measured);
     if (align_shift == 0 &&
         box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
         strcmp(box->dom->name, "button") == 0 &&
@@ -18798,6 +19004,8 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     g_abs_static = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                          NULL, g_free);
     g_contains_block_media_cache = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_select_width_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                 NULL, g_free);
     g_cq_seen_container = FALSE;
     ns_css_set_container_dims(0, 0);
     ns_box *root = build_block(doc, styles);
@@ -18809,6 +19017,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
         g_clear_pointer(&g_abs_static, g_hash_table_destroy);
         g_hash_table_destroy(g_contains_block_media_cache);
         g_contains_block_media_cache = NULL;
+        g_clear_pointer(&g_select_width_cache, g_hash_table_destroy);
         return NULL;
     }
     root->x = 0;
@@ -18829,6 +19038,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     g_clear_pointer(&g_abs_static, g_hash_table_destroy);
     g_hash_table_destroy(g_contains_block_media_cache);
     g_contains_block_media_cache = NULL;
+    g_clear_pointer(&g_select_width_cache, g_hash_table_destroy);
     return root;
 }
 
