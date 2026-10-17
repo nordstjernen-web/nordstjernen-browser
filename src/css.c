@@ -28253,27 +28253,26 @@ value_lerp_lengths(const ns_css_value *a, const ns_css_value *b, double t,
                    ns_css_value *out)
 {
     if (a->kind == NS_CSS_V_LENGTH && b->kind == NS_CSS_V_LENGTH) {
-        if (a->u.length.unit != b->u.length.unit) {
-            if (a->u.length.v == 0 && a->u.length.unit != NS_CSS_UNIT_PERCENT &&
-                b->u.length.unit != NS_CSS_UNIT_NUMBER && b->u.length.unit != NS_CSS_UNIT_PERCENT) {
-                out->kind = NS_CSS_V_LENGTH;
-                out->u.length.unit = b->u.length.unit;
-                out->u.length.v = b->u.length.v * t;
-                return TRUE;
-            }
-            if (b->u.length.v == 0 && b->u.length.unit != NS_CSS_UNIT_PERCENT &&
-                a->u.length.unit != NS_CSS_UNIT_NUMBER && a->u.length.unit != NS_CSS_UNIT_PERCENT) {
-                out->kind = NS_CSS_V_LENGTH;
-                out->u.length.unit = a->u.length.unit;
-                out->u.length.v = a->u.length.v * (1 - t);
-                return TRUE;
-            }
-            return FALSE;
+        if (a->u.length.unit == b->u.length.unit) {
+            out->kind = NS_CSS_V_LENGTH;
+            out->u.length.unit = a->u.length.unit;
+            out->u.length.v = a->u.length.v + (b->u.length.v - a->u.length.v) * t;
+            return TRUE;
         }
-        out->kind = NS_CSS_V_LENGTH;
-        out->u.length.unit = a->u.length.unit;
-        out->u.length.v = a->u.length.v + (b->u.length.v - a->u.length.v) * t;
-        return TRUE;
+        if (a->u.length.v == 0 && a->u.length.unit != NS_CSS_UNIT_PERCENT &&
+            b->u.length.unit != NS_CSS_UNIT_NUMBER && b->u.length.unit != NS_CSS_UNIT_PERCENT) {
+            out->kind = NS_CSS_V_LENGTH;
+            out->u.length.unit = b->u.length.unit;
+            out->u.length.v = b->u.length.v * t;
+            return TRUE;
+        }
+        if (b->u.length.v == 0 && b->u.length.unit != NS_CSS_UNIT_PERCENT &&
+            a->u.length.unit != NS_CSS_UNIT_NUMBER && a->u.length.unit != NS_CSS_UNIT_PERCENT) {
+            out->kind = NS_CSS_V_LENGTH;
+            out->u.length.unit = a->u.length.unit;
+            out->u.length.v = a->u.length.v * (1 - t);
+            return TRUE;
+        }
     }
     if ((a->kind == NS_CSS_V_LENGTH || a->kind == NS_CSS_V_CALC) &&
         (b->kind == NS_CSS_V_LENGTH || b->kind == NS_CSS_V_CALC)) {
@@ -28663,10 +28662,31 @@ transform_op_interpolate(const ns_css_transform_op *x, const ns_css_transform_op
     }
 }
 
+static ns_css_value *
+interpolate_layers(const ns_css_value *a, const ns_css_value *b, double t)
+{
+    if (ns_css_value_layer_count(a) != ns_css_value_layer_count(b)) return NULL;
+    ns_css_value *head = NULL, *tail = NULL;
+    for (; a && b; a = a->next_layer, b = b->next_layer) {
+        ns_css_value la = *a, lb = *b;
+        la.next_layer = lb.next_layer = NULL;
+        ns_css_value *mixed = ns_css_value_interpolate(&la, &lb, t);
+        if (!mixed) {
+            ns_css_value_free(head);
+            return NULL;
+        }
+        if (tail) tail->next_layer = mixed;
+        else head = mixed;
+        tail = mixed;
+    }
+    return head;
+}
+
 ns_css_value *
 ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
 {
     if (!a || !b) return NULL;
+    if (a->next_layer || b->next_layer) return interpolate_layers(a, b, t);
     if (value_is_none_keyword(a) && b->kind == NS_CSS_V_TRANSFORM) {
         ns_css_value *ida = transform_identity_like(b);
         ns_css_value *r = ida ? ns_css_value_interpolate(ida, b, t) : NULL;

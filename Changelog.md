@@ -102,6 +102,11 @@ Changelog:
 * A `<button>` styled `display: inline` is laid out as an inline-block
   like in other browsers instead of disappearing with its label
   (python.org's search "GO" button).
+* Transitions and animations between lengths in different units
+  (`16px` to `50%`, `1em` to `32px`) now move smoothly through `calc()`
+  instead of jumping at the halfway point, and lists such as several
+  background positions interpolate layer by layer instead of collapsing
+  to the first one.
 * Underlines honour `text-underline-offset` and
   `text-decoration-thickness` (GitHub's links set an offset), and lines
   drawn by the engine itself take the link's colour instead of the
