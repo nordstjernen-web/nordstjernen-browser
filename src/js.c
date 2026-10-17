@@ -41603,6 +41603,28 @@ ns_element_getClientRects(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     JSValue arr = JS_NewArray(ctx);
     if (!ns_box_for_this(ctx, this_val)) {
+        ns_js *js = js_from_ctx(ctx);
+        const ns_node *node = ns_unwrap_element(this_val);
+        if (js && node && node->kind == NS_NODE_ELEMENT &&
+            !ns_svg_foreign_ancestor(node)) {
+            ns_js_flush_layout(js);
+            GArray *rects = js->layout_root
+                ? ns_box_inline_rects_for_dom(js->layout_root, node) : NULL;
+            if (rects && rects->len >= 8) {
+                for (guint i = 0; i + 3 < rects->len; i += 4) {
+                    double rx = g_array_index(rects, double, i);
+                    double ry = g_array_index(rects, double, i + 1);
+                    ns_point_to_client(ctx, node, &rx, &ry);
+                    JS_SetPropertyUint32(ctx, arr, i / 4,
+                        ns_make_dom_rect(ctx, rx, ry,
+                                         g_array_index(rects, double, i + 2),
+                                         g_array_index(rects, double, i + 3)));
+                }
+                g_array_free(rects, TRUE);
+                return arr;
+            }
+            if (rects) g_array_free(rects, TRUE);
+        }
         double x, y, w, h;
         if (!ns_svg_client_rect(ctx, ns_unwrap_element(this_val),
                                 &x, &y, &w, &h) &&
