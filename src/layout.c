@@ -9970,12 +9970,8 @@ measure_max_content_width(ns_box *box, const ns_style *parent_style)
             max_child += w;
         }
     }
-    if (flex_row && flex_items > 1) {
-        const ns_css_value *g = box->style->values[NS_CSS_COLUMN_GAP];
-        if (!g || g->kind != NS_CSS_V_LENGTH) g = box->style->values[NS_CSS_GAP];
-        double gap = (g && g->kind == NS_CSS_V_LENGTH) ? g->u.length.v : 0;
-        row_sum += gap * (flex_items - 1);
-    }
+    if (flex_row && flex_items > 1)
+        row_sum += flex_gap_of(box->style, 0) * (flex_items - 1);
     return flex_row ? row_sum : max_child;
 }
 

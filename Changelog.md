@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* A flex row's max-content width counts its `gap` when the gap is a
+  `calc()` or comes from a custom property, as it already did for a
+  plain length. Booking.com's property cards size their price line,
+  "2 nights €820 €684", to fit its content with a gap of
+  `calc(var(--bui_stack_spaced_gap--s) * var(--bui_spacing_1x))`. The
+  line came out 8px too narrow and wrapped until the current price fell
+  out of the card. The frozen sitebench pages gain
+  295 matching elements (booking.com +287).
 * `getBoundingClientRect()` and `getClientRects()` on a `<tbody>`,
   `<thead>` or `<tfoot>` return the area of its cells, as in other
   browsers, instead of an empty rectangle at 0,0. Row groups get no
