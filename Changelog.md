@@ -3,6 +3,24 @@ Changelog:
 
 1.0.33:
 ======
+* Security: a page title can no longer hide the address of the page it is
+  on. The shell read the renderer's replies with a key lookup that also
+  matched a quoted word inside a string value, and the reply carries the
+  title before the address, so a title ending in `"url` made the shell
+  read no address and keep showing the one it had asked for: after a
+  redirect, the address bar showed the site the user came from while the
+  page came from another. A title ending in `"security` turned "Not
+  secure" into the neutral icon the same way. The lookup now skips string
+  values and takes a name only when a `:` follows it.
+* Security: the Landlock sandbox of the renderer and the shell no longer
+  opens the whole home directory when `$XAUTHORITY` is `~/.Xauthority`,
+  as LightDM sets it on X11 sessions (Linux Mint, Xubuntu). The sandbox
+  granted read access to the directory holding that file, which was then
+  `$HOME`, so `~/.ssh`, `~/.aws` and every other file there were readable
+  from the renderer that runs page content. It now grants read access to
+  the `$XAUTHORITY` file alone. SECURITY.md also says what the renderer
+  can read under `~/.config`, `~/.local/share` and `~/.cache`. Same fix as
+  Northstar's.
 * Security: a local HTML file can no longer read other local files. Every
   `file:` document is now an opaque origin: `fetch()` and
   `XMLHttpRequest` from a `file:` page treated every other `file:` URL as

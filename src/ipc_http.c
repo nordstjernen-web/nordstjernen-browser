@@ -445,18 +445,36 @@ json_escape(const char *s)
 }
 
 static const char *
+json_skip_string(const char *p)
+{
+    for (p++; *p && *p != '"'; p++)
+        if (*p == '\\' && p[1])
+            p++;
+    return *p ? p + 1 : p;
+}
+
+static const char *
+json_skip_space(const char *p)
+{
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+    return p;
+}
+
+static const char *
 json_find_value(const char *body, const char *key)
 {
     if (!body)
         return NULL;
     size_t klen = strlen(key);
-    for (const char *p = body; (p = strchr(p, '"')) != NULL; p++) {
-        if (strncmp(p + 1, key, klen) == 0 && p[1 + klen] == '"') {
-            const char *q = p + 1 + klen + 1;
-            while (*q == ' ' || *q == ':')
-                q++;
-            return q;
-        }
+    for (const char *p = body; (p = strchr(p, '"')) != NULL;) {
+        const char *name = p + 1;
+        const char *end = json_skip_string(p);
+        const char *after = json_skip_space(end);
+        if (*after == ':' && (size_t)(end - 1 - name) == klen &&
+            strncmp(name, key, klen) == 0)
+            return json_skip_space(after + 1);
+        p = end;
     }
     return NULL;
 }
