@@ -3,6 +3,8 @@ Changelog:
 
 1.0.33:
 ======
+* `text-wrap: balance` balances the lines of headings and paragraphs
+  (up to six lines) instead of breaking them greedily.
 * Images and inline-blocks in a line of text sit on the baseline with
   the font's descent below them, as in other browsers, so lines with
   images are no longer a few pixels shorter than in Chrome or Firefox.
