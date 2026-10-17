@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* Inside an iframe, `document.currentScript` stays set while the
+  promise callbacks a script queued run at the end of that script, as it
+  already did in the top document and as other browsers do. It was
+  `null` there, and Next.js chunks built with Turbopack, which read it
+  during module evaluation after an `await`, threw "Expected
+  document.currentScript to be a <script> element" (naver.com's
+  shopping block).
 * Pressing Enter fires a `keypress` event like other browsers, and a page
   that cancels it suppresses the newline. Chat boxes that send on
   keypress, such as duck.ai's prompt, now send when Enter is pressed.
