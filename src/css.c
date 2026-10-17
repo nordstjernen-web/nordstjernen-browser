@@ -31613,6 +31613,8 @@ static const char *kUa =
     "slot { display: contents; }\n"
     "marquee { display: inline-block; text-align: initial; "
     "overflow: hidden; }\n"
+    "blink { animation: -nd-blink 1s step-end infinite; }\n"
+    "@keyframes -nd-blink { 50% { visibility: hidden; } }\n"
     "nobr { white-space: nowrap; }\n"
     "br[clear=\"left\" i] { clear: left; }\n"
     "br[clear=\"right\" i] { clear: right; }\n"
@@ -31649,6 +31651,12 @@ ua_sheet_for(const ns_node *doc)
     }
     if (!standard) standard = ns_css_stylesheet_parse(kUa, -1);
     return standard;
+}
+
+const ns_css_stylesheet *
+ns_css_ua_stylesheet(void)
+{
+    return ua_sheet_for(NULL);
 }
 
 static double

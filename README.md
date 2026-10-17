@@ -19,7 +19,7 @@ Supported platforms:
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope
 WHATWG HTML standard (§1–§16) in
-[docs/HTML-compatibility.md](docs/HTML-compatibility.md) records **140 spec
+[docs/HTML-compatibility.md](docs/HTML-compatibility.md) records **141 spec
 rows fully implemented, 31 partial, 0 absent** (July 2026), besides a handful
 that are non-goals by design: `embed`/`object` plugins, `frame`/`frameset`,
 `applet`/`marquee`, telemetry, and AI-style web APIs.
