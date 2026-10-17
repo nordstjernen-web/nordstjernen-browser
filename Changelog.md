@@ -3,6 +3,17 @@ Changelog:
 
 1.0.33:
 ======
+* Security: a `fetch()` or `XMLHttpRequest` started in a web worker no
+  longer completes on the page's main thread. When the response arrived
+  while the main thread was waiting for a parser-blocking script, the
+  delivery was postponed with a timer on the process-wide default main
+  context, so the main thread then ran the worker's JavaScript runtime
+  while the worker thread could be running it too. That is a data race
+  on the worker's heap. It showed as a false "Maximum call stack size
+  exceeded" rejection on open.spotify.com, because the main thread's
+  stack lies outside the range the worker runtime checks. The retry now
+  stays on the worker's own context, and a worker no longer waits for
+  the page's blocking fetch at all.
 * Spelling mistakes are underlined only in text fields you have clicked
   into, like other browsers, instead of in every prefilled field (search
   result pages showed the query underlined in red).
