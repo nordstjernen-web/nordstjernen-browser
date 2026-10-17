@@ -124,6 +124,7 @@ struct ns_worker_host {
     char         *scope;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
+    gsize         stack_bytes;
 };
 
 typedef struct ns_mut_target {
@@ -27706,18 +27707,16 @@ ns_net_install_interfaces(JSContext *ctx, JSValueConst global)
 }
 
 static size_t
-ns_worker_stack_limit(void)
+ns_worker_stack_limit(const ns_worker_host *host)
 {
-    size_t limit = (size_t)5 * 1024 * 1024;
-    size_t stack = 0;
+    size_t stack = host ? host->stack_bytes : 0;
 #if defined(__APPLE__)
-    stack = pthread_get_stacksize_np(pthread_self());
+    if (!stack) stack = pthread_get_stacksize_np(pthread_self());
 #elif defined(G_OS_WIN32)
-    stack = (size_t)1024 * 1024;
+    if (!stack) stack = (size_t)1024 * 1024;
 #endif
-    if (stack > 0 && stack - stack / 4 < limit)
-        limit = stack - stack / 4;
-    return limit;
+    if (!stack) return (size_t)5 * 1024 * 1024;
+    return stack - stack / 4;
 }
 
 static void
@@ -28078,7 +28077,7 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetInterruptHandler(js->rt, ns_js_interrupt_cb, js);
     JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
     JS_SetHostPromiseRejectionTracker(js->rt, ns_worker_promise_rejection_tracker, NULL);
-    JS_SetMaxStackSize(js->rt, ns_worker_stack_limit());
+    JS_SetMaxStackSize(js->rt, ns_worker_stack_limit(host));
 
     js->ctx = JS_NewContext(js->rt);
     if (js->ctx) ns_js_add_engine_private_names(js->ctx);
@@ -28393,6 +28392,23 @@ ns_worker_thread(gpointer data)
     return NULL;
 }
 
+#define NS_WORKER_STACK_BYTES ((gsize)16 * 1024 * 1024)
+
+static GThread *
+ns_worker_thread_start(ns_worker_host *host, const char *name)
+{
+    host->stack_bytes = NS_WORKER_STACK_BYTES;
+    ns_worker_host_ref(host);
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GThread *thread = g_thread_create_full(ns_worker_thread, host,
+                                           NS_WORKER_STACK_BYTES, TRUE, FALSE,
+                                           G_THREAD_PRIORITY_NORMAL, NULL);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    if (thread) return thread;
+    host->stack_bytes = 0;
+    return g_thread_new(name, ns_worker_thread, host);
+}
+
 static char *
 ns_worker_option_string(JSContext *ctx, JSValueConst options, const char *name)
 {
@@ -28545,8 +28561,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 
     if (!js->workers) js->workers = g_ptr_array_new();
     g_ptr_array_add(js->workers, host);
-    host->thread = g_thread_new("nd-js-worker", ns_worker_thread,
-                                ns_worker_host_ref(host));
+    host->thread = ns_worker_thread_start(host, "nd-js-worker");
     return obj;
 }
 
@@ -28701,8 +28716,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 
     if (!js->workers) js->workers = g_ptr_array_new();
     g_ptr_array_add(js->workers, host);
-    host->thread = g_thread_new("nd-service-worker", ns_worker_thread,
-                                ns_worker_host_ref(host));
+    host->thread = ns_worker_thread_start(host, "nd-service-worker");
 
     ns_target_fire_event(ctx, reg, "updatefound");
 
