@@ -4244,7 +4244,8 @@ paint_spell_underlines(NsPangoAttrList *attrs, const ns_box *b)
     const ns_node *owner = NULL;
     for (const ns_box *bx = b; bx && !owner; bx = bx->parent)
         owner = bx->dom;
-    if (owner && ns_node_spellcheck_host(owner))
+    const ns_node *host = owner ? ns_node_spellcheck_host(owner) : NULL;
+    if (host && ns_node_spellcheck_armed(host))
         spell_underline_range(attrs, b->text, 0, tlen);
 }
 

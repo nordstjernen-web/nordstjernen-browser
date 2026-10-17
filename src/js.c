@@ -44227,6 +44227,7 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     }
     if (!el || !g.node[1]) goto out;
     js->focused_node = el;
+    ns_node_arm_spellcheck((ns_node *)el);
     js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
     ns_js_update_focus_visible(js);
     js->focus_nav_start = NULL;
@@ -44272,6 +44273,7 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
 {
     if (!js || js->focused_node == el) return;
     js->focused_node = el;
+    if (el) ns_node_arm_spellcheck((ns_node *)el);
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
 }
