@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* Multi-column layout balances its columns like other browsers: it
+  looks for the lowest column height at which the content fits in the
+  column count, instead of cutting at the average height and leaving
+  the rest to the last column. `column-gap: normal` is now 1em of the
+  element's font size, not 16px. wikipedia.org's "Read Wikipedia in
+  your language" list put most languages in its last column and was
+  500px taller than in Chrome. The frozen sitebench pages gain 102
+  matching elements (wikipedia.org +73).
 * An inline-block (or other atomic inline) next to a float sizes a
   percentage width against its containing block, as CSS says, not
   against the line width the float leaves. When it then does not fit
