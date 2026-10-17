@@ -38685,6 +38685,45 @@ ns_box_for_this(JSContext *ctx, JSValueConst this_val)
 }
 
 static gboolean
+ns_row_group_rect_for_this(JSContext *ctx, JSValueConst this_val,
+                           double *x, double *y, double *w, double *h)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->layout_root) return FALSE;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name ||
+        (strcmp(n->name, "tbody") != 0 && strcmp(n->name, "thead") != 0 &&
+         strcmp(n->name, "tfoot") != 0))
+        return FALSE;
+    gboolean any = FALSE;
+    double left = 0, top = 0, right = 0, bottom = 0;
+    for (int pass = 0; pass < 2 && !any; pass++) {
+        for (const ns_node *row = n->first_child; row; row = row->next_sibling) {
+            if (row->kind != NS_NODE_ELEMENT) continue;
+            const ns_node *first = pass == 0 ? row->first_child : row;
+            for (const ns_node *c = first; c; c = pass == 0 ? c->next_sibling : NULL) {
+                if (c->kind != NS_NODE_ELEMENT) continue;
+                const ns_box *cb = ns_box_find_by_dom(js->layout_root, c);
+                if (!cb) continue;
+                double rx, ry, rw, rh;
+                ns_box_visual_border_box(cb, &rx, &ry, &rw, &rh);
+                if (!any || rx < left) left = rx;
+                if (!any || ry < top) top = ry;
+                if (!any || rx + rw > right) right = rx + rw;
+                if (!any || ry + rh > bottom) bottom = ry + rh;
+                any = TRUE;
+            }
+        }
+    }
+    if (!any) return FALSE;
+    *x = left;
+    *y = top;
+    *w = right - left;
+    *h = bottom - top;
+    return TRUE;
+}
+
+static gboolean
 ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
                         double *x, double *y, double *w, double *h)
 {
@@ -38992,6 +39031,8 @@ ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
     const ns_box *b = ns_box_for_this(ctx, this_val);
     gboolean got_box = b != NULL;
     if (!b && ns_svg_client_rect(ctx, node, &x, &y, &w, &h))
+        got_box = TRUE;
+    else if (!b && ns_row_group_rect_for_this(ctx, this_val, &x, &y, &w, &h))
         got_box = TRUE;
     else if (!b && ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
         got_box = TRUE;
