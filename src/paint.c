@@ -7576,6 +7576,28 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
     return TRUE;
 }
 
+static gboolean
+marker_first_baseline(const ns_box *b, int depth, double *out)
+{
+    if (!b || depth > 64) return FALSE;
+    if (b->kind == NS_BOX_INLINE) {
+        if (b->first_baseline <= 0) return FALSE;
+        *out = b->y + b->margin.top + b->border.top + b->padding.top +
+               b->first_baseline;
+        return TRUE;
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        const ns_css_value *pos = c->style ? c->style->values[NS_CSS_POSITION]
+                                           : NULL;
+        if (pos && pos->kind == NS_CSS_V_KEYWORD && pos->u.keyword &&
+            (strcmp(pos->u.keyword, "absolute") == 0 ||
+             strcmp(pos->u.keyword, "fixed") == 0))
+            continue;
+        if (marker_first_baseline(c, depth + 1, out)) return TRUE;
+    }
+    return FALSE;
+}
+
 static void
 paint_marker(cairo_t *cr, const ns_box *b)
 {
@@ -7612,6 +7634,10 @@ paint_marker(cairo_t *cr, const ns_box *b)
     if (ms && ms->values[NS_CSS_FONT_SIZE])
         font_size = length_or(ms->values[NS_CSS_FONT_SIZE], font_size);
     double cy = b->y + b->margin.top + b->padding.top + font_size * 0.7;
+    double baseline;
+    if (marker_first_baseline(b, 0, &baseline) &&
+        baseline < cy + font_size * 2)
+        cy = baseline;
     gboolean rtl = strcmp(ns_css_node_dir(b->dom), "rtl") == 0;
     double content_x = b->x + b->margin.left + b->padding.left;
     double edge_x = rtl ? content_x + b->content_width : content_x;
