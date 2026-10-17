@@ -2701,6 +2701,66 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
     g_array_append_val(attrs, a);
 }
 
+static NsPangoLayout *make_pango_layout(const ns_style *parent_style);
+
+static void
+select_widest_label(const ns_node *n, const ns_style *s, int depth,
+                    double *widest)
+{
+    if (depth > 8) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        if (strcmp(c->name, "optgroup") == 0) {
+            select_widest_label(c, s, depth + 1, widest);
+            continue;
+        }
+        if (strcmp(c->name, "option") != 0) continue;
+        char *label = ns_node_collect_text(c);
+        gboolean arrow = !keyword_is(s->values[NS_CSS_APPEARANCE], "none");
+        char *text = g_strdup_printf(arrow ? "\xc2\xa0%s \xe2\x96\xbe\xc2\xa0"
+                                           : "\xc2\xa0%s\xc2\xa0",
+                                     label ? label : "");
+        NsPangoLayout *l = make_pango_layout(s);
+        ns_pango_layout_set_text(l, text, -1);
+        int w = 0;
+        ns_pango_layout_get_pixel_size(l, &w, NULL);
+        g_object_unref(l);
+        if (w > *widest) *widest = w;
+        g_free(text);
+        g_free(label);
+    }
+}
+
+static void
+select_size_to_widest_option(collector_ctx *ctx, const ns_node *n,
+                             gsize start)
+{
+    if (!ctx->attrs || ctx->attrs->len == 0) return;
+    ns_inline_attr *field = &g_array_index(ctx->attrs, ns_inline_attr,
+                                           ctx->attrs->len - 1);
+    if (field->dom != n || field->kind != NS_INLINE_INPUT_FIELD) return;
+    gsize end = ctx->out->len;
+    const char *text = ctx->out->str;
+    gsize arrow = end;
+    for (gsize i = start; i + 3 <= end; i++)
+        if (memcmp(text + i, "\xe2\x96\xbe", 3) == 0 ||
+            memcmp(text + i, "\xe2\x96\xb4", 3) == 0)
+            arrow = i;
+    if (arrow < end) {
+        ns_inline_attr hide = {
+            .kind = NS_INLINE_COLOR, .start = arrow, .len = 3,
+            .r = 0, .g = 0, .b = 0, .a = 0,
+        };
+        g_array_append_val(ctx->attrs, hide);
+        field = &g_array_index(ctx->attrs, ns_inline_attr,
+                               ctx->attrs->len - 2);
+    }
+    if (field->box_w > 0 || !field->style) return;
+    double widest = 0;
+    select_widest_label(n, field->style, 0, &widest);
+    if (widest > 0) field->box_w = widest;
+}
+
 static void
 emit_control_text_style(GArray *attrs, const ns_style *s,
                         gsize field_start, gsize field_end,
@@ -3985,10 +4045,17 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         gsize start = ctx->out->len;
         g_string_append(ctx->out, "\xc2\xa0");
         if (*label) g_string_append(ctx->out, label);
-        g_string_append(ctx->out, n == g_open_select_for_layout
-                                  ? " \xe2\x96\xb4\xc2\xa0" : " \xe2\x96\xbe\xc2\xa0");
+        const ns_style *select_style = g_hash_table_lookup(ctx->styles, n);
+        if (select_style &&
+            keyword_is(select_style->values[NS_CSS_APPEARANCE], "none"))
+            g_string_append(ctx->out, "\xc2\xa0");
+        else
+            g_string_append(ctx->out, n == g_open_select_for_layout
+                                      ? " \xe2\x96\xb4\xc2\xa0"
+                                      : " \xe2\x96\xbe\xc2\xa0");
         emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
                              start, ctx->out->len, n, ctx->styles);
+        select_size_to_widest_option(ctx, n, start);
         g_free(label);
         if (n == g_open_select_for_layout) {
             for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
@@ -14993,6 +15060,16 @@ empty_block_collapses_through(const ns_box *box, int clear)
 static double
 text_input_intrinsic_width(const ns_box *box)
 {
+    if (box && box->dom && box->style &&
+        ns_node_is_element_named(box->dom, "select")) {
+        const char *size = ns_element_get_attr(box->dom, "size");
+        if (ns_element_get_attr(box->dom, "multiple") ||
+            (size && ns_parse_int(size, 0, 0, 1000) > 1))
+            return 0;
+        double widest = 0;
+        select_widest_label(box->dom, box->style, 0, &widest);
+        return widest;
+    }
     if (!box || !box->dom || !box->dom->name ||
         strcmp(box->dom->name, "input") != 0)
         return 0;
