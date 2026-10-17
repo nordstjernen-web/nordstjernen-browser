@@ -3,6 +3,8 @@ Changelog:
 
 1.0.33:
 ======
+* List bullets and numbers sit on the baseline of the first line of
+  their item instead of floating above it when line-height is large.
 * An absolutely positioned `::after` without offsets appears right after
   the text of its element, as in other browsers, instead of at the start
   of the line (the "/" separators in theverge.com's navigation).
