@@ -1580,6 +1580,7 @@ static GArray      *g_abs_pending;
 static gboolean     g_abs_force_build;
 static const ns_node *g_form_control_inline;
 static GHashTable  *g_abs_ph_set;
+static double       g_inline_atomic_cb_w;
 static GHashTable  *g_abs_static;
 static GHashTable  *g_abs_seen;
 
@@ -7493,14 +7494,20 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         return;
     }
 
+    double cb_width = g_inline_atomic_cb_w > content_width
+        ? g_inline_atomic_cb_w : content_width;
+    g_inline_atomic_cb_w = 0;
     for (guint i = 0; box->inline_atomics && i < box->inline_atomics->len; i++) {
         ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
         if (!ab || (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)))
             continue;
+        gboolean replaced = ab->kind == NS_BOX_IMAGE ||
+                            ab->kind == NS_BOX_VIDEO || ab->kind == NS_BOX_SVG;
+        double basis = replaced ? content_width : cb_width;
         double w0 = ab->content_width, h0 = ab->content_height;
-        layout_box(ab, content_width, parent_style);
+        layout_box(ab, basis, parent_style);
         if (ab->content_width != w0 || ab->content_height != h0)
-            layout_box(ab, content_width, parent_style);
+            layout_box(ab, basis, parent_style);
     }
 
     gboolean cacheable = inline_box_measure_cacheable(box);
@@ -8997,6 +9004,54 @@ floats_band_bottom(const GArray *floats, double y)
         if (bottom < 0 || f->bottom < bottom) bottom = f->bottom;
     }
     return bottom;
+}
+
+static double
+inline_run_leading_atomic_outer_width(const ns_box *run)
+{
+    if (!run || run->kind != NS_BOX_INLINE || !run->text ||
+        !run->inline_atomics || run->inline_atomics->len == 0)
+        return 0;
+    const ns_inline_atomic *a =
+        &g_array_index(run->inline_atomics, ns_inline_atomic, 0);
+    const ns_box *ab = a->box;
+    if (!ab || ab->kind == NS_BOX_IMAGE || ab->kind == NS_BOX_VIDEO ||
+        ab->kind == NS_BOX_SVG)
+        return 0;
+    for (gsize i = 0; i < a->byte_off && run->text[i]; i++)
+        if (!g_ascii_isspace(run->text[i])) return 0;
+    return ab->content_width + ab->padding.left + ab->padding.right +
+           ab->border.left + ab->border.right +
+           ab->margin.left + ab->margin.right;
+}
+
+static gboolean
+floats_advance_to_fit(const GArray *floats, double cw, double need,
+                      double *y, double *left_out, double *right_out)
+{
+    gboolean moved = FALSE;
+    for (;;) {
+        double left = 0, right = 0;
+        floats_offsets_at(floats, *y, &left, &right);
+        double next_y = *y;
+        gboolean advanced = FALSE;
+        if (cw - left - right + 0.5 < need) {
+            for (guint i = 0; i < floats->len; i++) {
+                const float_ref *f = &g_array_index(floats, float_ref, i);
+                if (f->bottom > *y && (!advanced || f->bottom < next_y)) {
+                    next_y = f->bottom;
+                    advanced = TRUE;
+                }
+            }
+        }
+        if (!advanced || next_y <= *y) {
+            *left_out = left;
+            *right_out = right;
+            return moved;
+        }
+        *y = next_y;
+        moved = TRUE;
+    }
 }
 
 static gboolean
@@ -15554,7 +15609,21 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
             c->y = line_y;
+            g_inline_atomic_cb_w = c->kind == NS_BOX_INLINE ? cw : 0;
             layout_box(c, cw_avail, child_inherited);
+            if (cw_avail < cw &&
+                inline_run_leading_atomic_outer_width(c) > cw_avail + 0.5 &&
+                floats_advance_to_fit(floats, cw,
+                                      inline_run_leading_atomic_outer_width(c),
+                                      &line_y, &left_off, &right_off)) {
+                cw_avail = cw - left_off - right_off;
+                if (cw_avail < 0) cw_avail = 0;
+                c->x = inner_x + left_off;
+                c->y = line_y;
+                g_inline_atomic_cb_w = cw;
+                layout_box(c, cw_avail, child_inherited);
+            }
+            g_inline_atomic_cb_w = 0;
             if (c->phantom_line) {
                 collect_escaping_floats(c, floats, 0);
                 continue;
@@ -15569,7 +15638,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                                                           band_bottom - c->y);
                     if (split > 0 && split < strlen(c->text)) {
                         inline_run_split(c, split);
+                        g_inline_atomic_cb_w = cw;
                         layout_box(c, cw_avail, child_inherited);
+                        g_inline_atomic_cb_w = 0;
                     }
                 }
             }
