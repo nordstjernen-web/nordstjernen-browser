@@ -42,8 +42,13 @@
 #include <libavutil/avutil.h>
 #endif
 
+#include <fcntl.h>
 #ifdef G_OS_WIN32
 #include <windows.h>
+#include <io.h>
+#else
+#include <sys/file.h>
+#include <unistd.h>
 #endif
 
 #ifdef __APPLE__
@@ -1482,10 +1487,6 @@ ns_net_cookie_path_for_partition(const char *top_origin)
     return path;
 }
 
-/* JS-set (document.cookie) cookies are persisted to a sibling ".js.txt" file
- * that curl reads as an additional CURLOPT_COOKIEFILE source but never writes
- * back to. This keeps them from being clobbered when a concurrent request's
- * curl handle flushes its own (older) in-memory jar to the main cookie file. */
 static char *
 ns_net_cookie_js_path_for_partition(const char *top_origin)
 {
@@ -1638,8 +1639,67 @@ ns_cookie_jar_has_httponly(const char *jar_path, const char *domain,
     return found;
 }
 
+static GMutex ns_cookie_write_mutex;
+static gint ns_cookie_writes;
+
+static int
+ns_cookie_jars_lock(void)
+{
+    g_autofree char *path = g_build_filename(ns_net_cookie_dir(), ".lock", NULL);
+    int fd = g_open(path, O_RDWR | O_CREAT, 0600);
+    if (fd < 0) return -1;
+#ifdef G_OS_WIN32
+    OVERLAPPED whole = {0};
+    if (!LockFileEx((HANDLE)_get_osfhandle(fd), LOCKFILE_EXCLUSIVE_LOCK, 0,
+                    1, 0, &whole)) {
+        close(fd);
+        return -1;
+    }
+#else
+    if (flock(fd, LOCK_EX) != 0) {
+        close(fd);
+        return -1;
+    }
+#endif
+    return fd;
+}
+
 static void
-ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
+ns_cookie_jars_unlock(int fd)
+{
+    if (fd < 0) return;
+#ifdef G_OS_WIN32
+    OVERLAPPED whole = {0};
+    UnlockFileEx((HANDLE)_get_osfhandle(fd), 0, 1, 0, &whole);
+#endif
+    close(fd);
+}
+
+gboolean
+ns_net_cookie_jar_version(const char *url, guint64 *version)
+{
+    g_autofree char *site = url ? ns_url_site_from(url) : NULL;
+    if (!site || !*site) return FALSE;
+    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
+    g_autofree char *js_path = ns_net_cookie_js_path_for_partition(site);
+    guint64 v = (guint64)(guint)g_atomic_int_get(&ns_cookie_writes) + 1;
+    const char *paths[] = { jar_path, js_path };
+    for (gsize i = 0; i < G_N_ELEMENTS(paths); i++) {
+        GStatBuf st;
+        if (g_stat(paths[i], &st) != 0) continue;
+        v = v * 1000003u ^ (guint64)st.st_size;
+        v = v * 1000003u ^ (guint64)st.st_mtime;
+#if defined(__linux__)
+        v = v * 1000003u ^ (guint64)st.st_mtim.tv_nsec;
+#endif
+    }
+    *version = v ? v : 1;
+    return TRUE;
+}
+
+static void
+ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http,
+                     const char *jar_override)
 {
     if (!url || !*url || !cookie) return;
     if (!g_str_has_prefix(url, "http://") && !g_str_has_prefix(url, "https://"))
@@ -1768,14 +1828,18 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
         g_free(file_domain); g_free(domain_attr); g_free(path_attr);
         return;
     }
-    g_autofree char *jar_path = from_http
-        ? ns_net_cookie_path_for_partition(site)
+    g_autofree char *jar_path = jar_override ? g_strdup(jar_override)
+        : from_http ? ns_net_cookie_path_for_partition(site)
         : ns_net_cookie_js_path_for_partition(site);
     g_autofree char *name_dup = g_strndup(name, name_len);
+    g_mutex_lock(&ns_cookie_write_mutex);
+    int jars_lock = ns_cookie_jars_lock();
     if (!from_http) {
         g_autofree char *http_jar_path = ns_net_cookie_path_for_partition(site);
         if (ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
                                        name_dup, now)) {
+            ns_cookie_jars_unlock(jars_lock);
+            g_mutex_unlock(&ns_cookie_write_mutex);
             g_free(file_domain); g_free(domain_attr); g_free(path_attr);
             return;
         }
@@ -1840,6 +1904,9 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
     }
     if (g_file_set_contents(jar_path, out->str, out->len, NULL))
         g_chmod(jar_path, 0600);
+    g_atomic_int_inc(&ns_cookie_writes);
+    ns_cookie_jars_unlock(jars_lock);
+    g_mutex_unlock(&ns_cookie_write_mutex);
     g_string_free(out, TRUE);
     g_free(file_domain);
     g_free(domain_attr);
@@ -1849,13 +1916,13 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http)
 void
 ns_net_cookie_store_from_js(const char *url, const char *cookie)
 {
-    ns_cookie_store_impl(url, cookie, FALSE);
+    ns_cookie_store_impl(url, cookie, FALSE, NULL);
 }
 
 void
 ns_net_store_set_cookie(const char *url, const char *set_cookie_value)
 {
-    ns_cookie_store_impl(url, set_cookie_value, TRUE);
+    ns_cookie_store_impl(url, set_cookie_value, TRUE, NULL);
 }
 
 static const char *
@@ -2804,6 +2871,18 @@ header_append(const char *buffer, size_t bytes,
     return TRUE;
 }
 
+static void
+ns_header_store_cookie(ns_header_ctx *hc, const char *line, size_t len)
+{
+    char *url = NULL;
+    if (!hc->cookie_curl || !hc->cookie_jar_path ||
+        curl_easy_getinfo(hc->cookie_curl, CURLINFO_EFFECTIVE_URL, &url) != CURLE_OK ||
+        !url)
+        return;
+    g_autofree char *value = g_strndup(line + 11, len - 11);
+    ns_cookie_store_impl(url, g_strstrip(value), TRUE, hc->cookie_jar_path);
+}
+
 static size_t
 ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
@@ -2843,8 +2922,10 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     else if (header_capture(buffer, bytes, "Content-Language:", hc->content_language_out))      {}
     else if (header_capture(buffer, bytes, "Refresh:", hc->refresh_out))                       {}
     else if (header_capture(buffer, bytes, "Location:", &hc->location))                        {}
-    else if (header_capture(buffer, bytes, "Set-Cookie:", NULL))
+    else if (header_capture(buffer, bytes, "Set-Cookie:", NULL)) {
         hc->set_cookie_seen = TRUE;
+        ns_header_store_cookie(hc, buffer, bytes);
+    }
 
     return bytes;
 }
@@ -5402,9 +5483,10 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
 
     if (req->cookie_jar_path) {
         curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_jar_path);
-        curl_easy_setopt(curl, CURLOPT_COOKIEJAR,  req->cookie_jar_path);
         if (req->cookie_js_path)
             curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_js_path);
+        hctx->cookie_curl = curl;
+        hctx->cookie_jar_path = req->cookie_jar_path;
     }
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ns_write_cb);
@@ -5463,8 +5545,8 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
             curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
             curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
             curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
-            curl_easy_setopt(curl, CURLOPT_COOKIEJAR,  NULL);
             curl_easy_setopt(curl, CURLOPT_COOKIELIST, "ALL");
+            hctx->cookie_jar_path = NULL;
             rc = ns_net_multi_perform(curl, cancellable);
             if (rc == CURLE_OK)
                 out->tls_warning = warn;
@@ -5473,6 +5555,9 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
         }
         g_free(fb_host);
     }
+
+    hctx->cookie_curl = NULL;
+    hctx->cookie_jar_path = NULL;
 
     if (rc == CURLE_ABORTED_BY_CALLBACK && cancellable &&
         g_cancellable_is_cancelled(cancellable)) {

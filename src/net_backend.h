@@ -33,6 +33,8 @@ typedef struct ns_header_ctx {
     char    *location;
     GString *raw;
     gboolean set_cookie_seen;
+    CURL    *cookie_curl;
+    const char *cookie_jar_path;
 } ns_header_ctx;
 
 typedef struct ns_hop_req {
