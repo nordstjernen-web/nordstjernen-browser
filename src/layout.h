@@ -196,6 +196,7 @@ typedef struct ns_box {
     GArray *attrs;
     GArray *inline_atomics;
     GArray *atomic_line_heights;
+    GArray *atomic_line_offsets;
     GArray *table_col_hints;
     GArray *grid_col_tracks;
     GArray *grid_row_tracks;

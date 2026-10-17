@@ -908,6 +908,8 @@ ns_box_free(ns_box *box)
         if (cur->atomic_line_heights) {
             g_array_free(cur->atomic_line_heights, TRUE);
         }
+        if (cur->atomic_line_offsets)
+            g_array_free(cur->atomic_line_offsets, TRUE);
         g_free(cur->text);
         if (cur->media) {
             g_free(cur->media->image_src);
@@ -7262,6 +7264,77 @@ static gboolean flex_box_is_border_box(const ns_box *c);
 static void legacy_align_block_child(ns_box *c, double avail_x, double avail_w,
                                      const ns_style *inherited);
 
+static gboolean
+inline_box_in_quirks_document(const ns_box *box)
+{
+    for (const ns_box *b = box; b; b = b->parent) {
+        if (!b->dom) continue;
+        const ns_node *n = b->dom;
+        while (n->parent) n = n->parent;
+        return n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_QUIRKS);
+    }
+    return FALSE;
+}
+
+static double *
+inline_atomic_line_offsets(const ns_box *box, NsPangoLayout *layout,
+                           const ns_style *parent_style, double line_height,
+                           double *line_heights, int line_count)
+{
+    if (!box->inline_atomics || box->inline_atomics->len == 0 ||
+        line_count < 1 || inline_box_in_quirks_document(box))
+        return NULL;
+    NsPangoLayout *strut = make_pango_layout(parent_style);
+    ns_pango_layout_set_text(strut, " ", -1);
+    NsPangoLayoutIter *strut_iter = ns_pango_layout_get_iter(strut);
+    NsPangoRectangle strut_rect;
+    ns_pango_layout_iter_get_line_extents(strut_iter, NULL, &strut_rect);
+    double font_ascent = (double)(ns_pango_layout_iter_get_baseline(strut_iter) -
+                                  strut_rect.y) / NS_PANGO_SCALE;
+    double font_height = (double)strut_rect.height / NS_PANGO_SCALE;
+    ns_pango_layout_iter_free(strut_iter);
+    g_object_unref(strut);
+    if (font_height <= 0) return NULL;
+    double strut_ascent = font_ascent + (line_height - font_height) / 2.0;
+    double strut_descent = line_height - strut_ascent;
+    gboolean *has_atomic = g_new0(gboolean, line_count);
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+        if (!a->box || (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, a->box)))
+            continue;
+        const char *va = a->box->style
+            ? ns_style_keyword(a->box->style, NS_CSS_VERTICAL_ALIGN) : NULL;
+        if (va && (strcmp(va, "top") == 0 || strcmp(va, "bottom") == 0))
+            continue;
+        int line = 0;
+        ns_pango_layout_index_to_line_x(layout, (int)a->byte_off, FALSE,
+                                        &line, NULL);
+        if (line >= 0 && line < line_count) has_atomic[line] = TRUE;
+    }
+    double *offsets = g_new0(double, line_count);
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    for (int j = 0; j < line_count; j++) {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+        double pango_h = (double)logical.height / NS_PANGO_SCALE;
+        double ascent = (double)(ns_pango_layout_iter_get_baseline(iter) -
+                                 logical.y) / NS_PANGO_SCALE;
+        if (has_atomic[j]) {
+            double above = MAX(strut_ascent, ascent);
+            double below = MAX(strut_descent, pango_h - ascent);
+            if (above + below > line_heights[j]) line_heights[j] = above + below;
+            offsets[j] = above - ascent;
+        } else {
+            offsets[j] = (line_heights[j] - pango_h) / 2.0;
+        }
+        if (!ns_pango_layout_iter_next_line(iter)) break;
+    }
+    ns_pango_layout_iter_free(iter);
+    g_free(has_atomic);
+    return offsets;
+}
+
 static double
 inline_atomic_outer_height(const ns_box *b)
 {
@@ -7623,6 +7696,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (outer > line_heights[line]) line_heights[line] = outer;
         }
     }
+    double *line_offsets = inline_atomic_line_offsets(box, layout, parent_style,
+                                                      lh_control, line_heights,
+                                                      line_count);
     if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
         double indent = ns_inline_text_indent_px(box, parent_style, content_width);
         for (guint i = 0; i < box->inline_atomics->len; i++) {
@@ -7656,12 +7732,24 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         g_array_append_vals(box->atomic_line_heights, line_heights,
                             (guint)line_count);
     }
+    if (line_offsets) {
+        if (!box->atomic_line_offsets)
+            box->atomic_line_offsets = g_array_new(FALSE, FALSE, sizeof(double));
+        g_array_set_size(box->atomic_line_offsets, 0);
+        g_array_append_vals(box->atomic_line_offsets, line_offsets,
+                            (guint)line_count);
+    } else if (box->atomic_line_offsets) {
+        g_array_free(box->atomic_line_offsets, TRUE);
+        box->atomic_line_offsets = NULL;
+    }
     box->content_width  = content_width;
     box->content_height = expected;
     double ta_h = inline_textarea_total_height(box, parent_style);
     if (ta_h > box->content_height) box->content_height = ta_h;
     box->first_baseline = (double)measured.baseline / NS_PANGO_SCALE;
-    if (line_heights[0] > measured_h)
+    if (line_offsets)
+        box->first_baseline += line_offsets[0];
+    else if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
     if (inline_run_holds_only_abs_placeholders(box, parent_style)) {
         box->phantom_line = TRUE;
@@ -7714,7 +7802,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             double within = 0;
             if (line >= 0 && line < line_count)
                 within = (double)pos.y / NS_PANGO_SCALE - line_tops[line]
-                       + (line_heights[line] - line_pango_h[line]) / 2.0;
+                       + (line_offsets ? line_offsets[line]
+                          : (line_heights[line] - line_pango_h[line]) / 2.0);
             double slack = (line >= 0 && line < line_count)
                 ? line_heights[line] - inline_atomic_outer_height(a->box) : 0;
             if (slack < 0) slack = 0;
@@ -7729,6 +7818,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
 
     g_free(line_heights);
+    g_free(line_offsets);
     g_object_unref(layout);
 }
 
