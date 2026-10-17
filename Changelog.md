@@ -3,6 +3,8 @@ Changelog:
 
 1.0.33:
 ======
+* A page can script an iframe showing a `blob:` URL it created itself,
+  as same-origin content, instead of getting `contentDocument === null`.
 * `position: relative` offsets given in percent or `calc()` move the box
   even when its parent's height comes from its content or from `top` and
   `bottom`, as in other browsers. bing.com's homepage photo fills the
