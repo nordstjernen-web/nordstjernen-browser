@@ -3840,6 +3840,8 @@ ns_paint_inline_y_offset_for_layout(const ns_box *b, NsPangoLayout *layout)
     int ph;
     ns_pango_layout_get_size(layout, NULL, &ph);
     double y_offset = (b->content_height - (double)ph / NS_PANGO_SCALE) * 0.5;
+    if (b->atomic_line_offsets && b->atomic_line_offsets->len == 1)
+        y_offset = g_array_index(b->atomic_line_offsets, double, 0);
     if (inline_has_form_controls(b)) y_offset = 0;
     if (y_offset < 0 &&
         ns_paint_css_line_height_px(inherited_style(b)) <= 0)
@@ -4690,6 +4692,14 @@ paint_selection_foreground(cairo_t *cr, const ns_box *b,
     g_array_free(rects, TRUE);
 }
 
+static double
+inline_line_offset(const ns_box *b, guint i, double line_h, double pango_h)
+{
+    if (b->atomic_line_offsets && i < b->atomic_line_offsets->len)
+        return g_array_index(b->atomic_line_offsets, double, i);
+    return (line_h - pango_h) / 2.0;
+}
+
 static gboolean
 paint_inline_lines_at_layout_heights(cairo_t *cr, const ns_box *b,
                                      NsPangoLayout *layout, double text_x)
@@ -4710,7 +4720,8 @@ paint_inline_lines_at_layout_heights(cairo_t *cr, const ns_box *b,
         double baseline = (double)(ns_pango_layout_iter_get_baseline(it) -
                                    logical.y) / NS_PANGO_SCALE;
         cairo_move_to(cr, text_x + (double)logical.x / NS_PANGO_SCALE,
-                      line_top + (line_h - pango_h) / 2.0 + baseline);
+                      line_top + inline_line_offset(b, i, line_h, pango_h) +
+                      baseline);
         ns_pango_cairo_show_layout_line(cr, line);
         line_top += line_h;
         i++;
@@ -4738,7 +4749,8 @@ paint_inline_line_baselines(const ns_box *b, NsPangoLayout *layout,
         if (by_layout) {
             double line_h = g_array_index(heights, double, i);
             out[i] = line_top +
-                (line_h - (double)logical.height / NS_PANGO_SCALE) / 2.0 +
+                inline_line_offset(b, (guint)i, line_h,
+                                   (double)logical.height / NS_PANGO_SCALE) +
                 (double)(baseline - logical.y) / NS_PANGO_SCALE;
             line_top += line_h;
         } else {
@@ -4986,7 +4998,8 @@ inline_layer_baselines(const ns_box *b, const inline_layers *L)
         const inline_layer_line *g =
             &g_array_index(L->lines, inline_layer_line, i);
         double line_h = g_array_index(heights, double, i);
-        out[i] = top + (line_h - (double)g->height / NS_PANGO_SCALE) / 2.0 +
+        out[i] = top + inline_line_offset(b, i, line_h,
+                                          (double)g->height / NS_PANGO_SCALE) +
                  (double)(g->baseline - g->top) / NS_PANGO_SCALE;
         top += line_h;
     }
