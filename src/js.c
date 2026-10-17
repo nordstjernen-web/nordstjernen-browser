@@ -9453,9 +9453,6 @@ cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
                      g_str_has_prefix(resp_url, "blob:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
-    if (resp_url && doc_url &&
-        g_str_has_prefix(resp_url, "file:") &&
-        g_str_has_prefix(doc_url, "file:")) return TRUE;
     if (ns_url_same_origin(doc_url, resp_url)) return TRUE;
     if (!cors_header || !*cors_header) return FALSE;
     char *trimmed = g_strdup(cors_header);
@@ -48090,6 +48087,9 @@ ns_js_urls_same_origin(const char *a, const char *b)
     if (ns_js_urls_share_http_authority(a, b)) return TRUE;
     if (ns_url_is_http_or_https(a) || ns_url_is_http_or_https(b))
         return ns_url_same_origin(a, b);
+    if (g_ascii_strncasecmp(a, "file:", 5) == 0 ||
+        g_ascii_strncasecmp(b, "file:", 5) == 0)
+        return FALSE;
     const char *ca = strchr(a, ':'), *cb = strchr(b, ':');
     return ca && cb && ca - a == cb - b &&
            g_ascii_strncasecmp(a, b, (gsize)(ca - a)) == 0;
