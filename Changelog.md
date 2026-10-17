@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* `@font-face` rules keep `src`, `unicode-range`, `font-display` and the
+  other descriptors in CSSOM (`rule.cssText`, `rule.style.src`). Pages
+  using Modernizr's web-font test concluded fonts were unsupported and
+  hid their icon fonts; python.org's icons are back.
 * Floats whose percentage widths add up to their container's width (six
   tabs of `16.6667%`) stay on one line instead of the last one dropping
   to a new row over a rounding error. python.org's top bar is one row
