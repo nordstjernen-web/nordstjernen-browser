@@ -5418,6 +5418,24 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 cairo_stroke(cr);
                 cairo_restore(cr);
             }
+            if (r->dom && ns_node_is_element_named(r->dom, "select") &&
+                !keyword_is(r->style ? r->style->values[NS_CSS_APPEARANCE]
+                                     : NULL, "none")) {
+                const ns_css_value *cv = r->style
+                    ? r->style->values[NS_CSS_COLOR] : NULL;
+                rgba arrow = rgba_of(cv, 0.1, 0.1, 0.1, 1);
+                double sz = MIN(5.0, (y1 - y0) / 5.0);
+                double ax = x1 - 6.0 - sz;
+                double ay = (y0 + y1) / 2.0;
+                cairo_save(cr);
+                set_source_rgba(cr, arrow);
+                cairo_set_line_width(cr, 1.5);
+                cairo_move_to(cr, ax - sz, ay - sz / 2.0);
+                cairo_line_to(cr, ax, ay + sz / 2.0);
+                cairo_line_to(cr, ax + sz, ay - sz / 2.0);
+                cairo_stroke(cr);
+                cairo_restore(cr);
+            }
             if (r->kind == NS_INLINE_INPUT_FIELD_FOCUSED &&
                 draw_native_chrome) {
                 cairo_save(cr);
