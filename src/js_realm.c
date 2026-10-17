@@ -6,8 +6,6 @@
 #include <string.h>
 #include <glib.h>
 
-/* ---- ShadowRealm -------------------------------------------------------- */
-
 static JSClassID ns_shadowrealm_class_id;
 
 typedef struct {
@@ -138,8 +136,6 @@ ns_shadowrealm_importValue(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, resolving[1]);
     return promise;
 }
-
-/* ---- install ------------------------------------------------------------ */
 
 static void
 realm_bind(JSContext *ctx, JSValueConst obj, const char *name,

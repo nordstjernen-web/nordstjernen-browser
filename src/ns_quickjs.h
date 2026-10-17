@@ -218,4 +218,4 @@ typedef JSContext ns_js_interrupt_arg;
 
 #endif
 
-#endif /* NS_QUICKJS_H */
+#endif

@@ -154,7 +154,7 @@ ns_engine_navigate_post_blocking(const char *url, const char *top_url,
 static gboolean
 content_type_is_css(const char *ct)
 {
-    if (!ct || !*ct) return TRUE; /* missing type: be lenient */
+    if (!ct || !*ct) return TRUE;
     while (*ct == ' ' || *ct == '\t') ct++;
     return g_ascii_strncasecmp(ct, "text/css", 8) == 0 &&
            (ct[8] == '\0' || ct[8] == ';' || ct[8] == ' ' || ct[8] == '\t');
@@ -573,13 +573,11 @@ typedef struct {
     const char *top_url;
     gboolean    strict_css_mime;
     gboolean    media_seen;
-    int         frame_depth;   /* inside a frame's document when > 0 */
-    GPtrArray  *docs;          /* the document of each sheet in out, or NULL */
-    ns_node    *doc;           /* the document whose sheets are collected */
+    int         frame_depth;
+    GPtrArray  *docs;
+    ns_node    *doc;
 } sheet_collect_ctx;
 
-/* Whether a <style> or <link> sits in its document's <head>, which makes
- * the sheet render-blocking for resource timing. */
 static gboolean
 engine_node_in_head(const ns_node *n)
 {
@@ -730,8 +728,6 @@ sheet_run_flush(sheet_collect_ctx *cc)
     cc->run_base = NULL;
 }
 
-/* The sheets added since the last call are those of the document being
- * walked. */
 static void
 sheet_docs_sync(sheet_collect_ctx *cc)
 {
@@ -930,8 +926,6 @@ link_sheet_enabled(const ns_node *link)
 static void collect_stylesheets_walk(ns_node *n, const char *base_url,
                                      sheet_collect_ctx *cc, int depth);
 
-/* A frame's document has sheets of its own, which style its elements only
- * (CSSOM: a CSS style sheet belongs to the document of its owner node). */
 static void
 collect_frame_children(ns_node *frame, const char *base_url,
                        sheet_collect_ctx *cc, int depth)

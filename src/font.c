@@ -430,7 +430,7 @@ out:
     FT_Done_FreeType(lib);
     return buf;
 }
-#endif /* NS_HAVE_FREETYPE */
+#endif
 
 static char *
 ns_font_cache_path_for(const char *family, const char *url,

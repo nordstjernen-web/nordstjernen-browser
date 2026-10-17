@@ -1996,7 +1996,7 @@
                 };
             }
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) { }
 
     if (!global.NodeFilter || typeof global.NodeFilter.SHOW_ALL !== 'number') {
         var NF = global.NodeFilter || {};
@@ -2177,7 +2177,7 @@
                 }
             }
         }
-    } catch (e) { /* prototype may be locked; tolerate */ }
+    } catch (e) { }
 
     var streamNoop = function () {};
     var StreamAbortController = global.AbortController;
@@ -4005,7 +4005,7 @@
                 try {
                     var rest = dec.decode();
                     if (rest) controller.enqueue(rest);
-                } catch (e) { /* ignore */ }
+                } catch (e) { }
             }
         });
         Object.defineProperty(this, 'encoding', {
@@ -4016,7 +4016,6 @@
     TextDecoderStream.__ndRealmProto = true;
     defineCtor('TextDecoderStream', TextDecoderStream);
 
-    // Intl (ECMA-402) is part of the QuickJS engine; see src/quickjs/quickjs-intl*.c.
 
     var zlibCreate = global.__ns_zlib_create;
     var zlibPush   = global.__ns_zlib_push;
@@ -4025,7 +4024,7 @@
         delete global.__ns_zlib_create;
         delete global.__ns_zlib_push;
         delete global.__ns_zlib_finish;
-    } catch (e) { /* ignore */ }
+    } catch (e) { }
 
     var ZLIB_FORMATS = { 'gzip': 1, 'deflate': 1, 'deflate-raw': 1 };
 
@@ -5945,8 +5944,6 @@
         defineCtor('indexedDB', Object.create(IDBFactory.prototype));
     })();
 
-    // Workers need DOMException too; QuickJS-ng has it built in, the
-    // original QuickJS does not.
     if (typeof DOMException !== 'function') {
         var DOM_EXCEPTION_CODES = {
             IndexSizeError:               1,
@@ -6749,10 +6746,6 @@
         idlExpose(Observable, 'Observable', null);
     }
 
-    /* WHATWG Geometry: DOMRect, DOMPoint, DOMQuad and the 3D DOMMatrix with CSS
-     * transform-list parsing, as classes whose state lives in WeakMaps the page
-     * cannot reach. CSS-3D pages (PolyCSS, cssQuake) project vertices through
-     * new DOMPoint(...).matrixTransform(new DOMMatrix(str)). */
     (function () {
         var isWindow = !ndWorkerScope;
         var rectState = new WeakMap(), pointState = new WeakMap();
@@ -8335,7 +8328,6 @@
         replaceCtor('TrustedTypePolicy', TrustedTypePolicy);
 
         var defaultPolicy = null;
-        /* A private name, which a frame's copy of the factory keeps (ns_realm_clone_instance). */
         var FactoryBrand = class extends (function (o) { return o; }) { #factory = true;
             static require(o) { try { return o.#factory; } catch { throw new TypeError('Illegal invocation'); } } };
         function requireFactory(value) { FactoryBrand.require(value); }
@@ -8950,13 +8942,6 @@
         }
     })();
 
-    /* CSSOM rule model: document.styleSheets, HTMLStyleElement/LinkElement
-     * .sheet, and a real CSSRule / CSSStyleRule / CSSGroupingRule tree backed
-     * by the owner <style> node. The native bindings exposed an empty
-     * styleSheets list and a null .sheet; the rules are parsed from the node's
-     * text once, then insertRule/deleteRule/replace mutate the tree in place
-     * and rebuild the node's text content, which the engine re-cascades.
-     * Each CSSStyleRule's .style is a live native CSSStyleDeclaration. */
     (function () {
         if (typeof document === 'undefined') return;
 
@@ -10789,12 +10774,6 @@
         } catch (e) {}
     })();
 
-    /* Advertise the spec-required IntersectionObserverEntry/ResizeObserverEntry
-     * prototype members so feature-detecting polyfills (e.g. the
-     * "intersection-observer" npm package, which checks 'intersectionRatio' in
-     * IntersectionObserverEntry.prototype) detect native support and do NOT
-     * replace our working native observers with a JS polyfill that breaks in
-     * this engine (Reddit's feed loader relies on a working observer). */
     (function () {
         function ensureProto(ctorName, props) {
             var C = global[ctorName];
@@ -11788,12 +11767,6 @@
         if (doc) { try { doc.getSelection = getSelectionImpl; } catch (e) {} }
     })();
 
-    /* HTMLImageElement.decode(): the native binding always resolved. Per the
-     * HTML spec the promise rejects with an "EncodingError" when the image
-     * has no usable source, fails to load, or its document is not fully
-     * active, and resolves once a usable source has been decoded. The
-     * active-document check is deferred one microtask so a synchronous adopt
-     * into an inactive document after the call is observed. */
     (function () {
         if (typeof global.HTMLImageElement !== 'function' ||
             !global.HTMLImageElement.prototype) return;
@@ -11851,13 +11824,6 @@
             }
         });
     })();
-    /* Text tracks: addTextTrack() was a no-op and textTracks returned a fresh
-     * empty array. Provide a working TextTrack / TextTrackList / TextTrackCue
-     * model: addTextTrack, a media element's live textTracks list with an async
-     * 'addtrack' TrackEvent, a <track> element's .track and readyState, mode
-     * validation, cue add/remove, and WebVTT loading of a <track src> (fetch +
-     * a minimal cue parser, firing load/error). Cue timing/rendering is not
-     * implemented. */
     (function () {
         if (typeof document === 'undefined') return;
 
@@ -12191,11 +12157,6 @@
             } catch (e) {}
         }
 
-        /* The spec's track processing model runs on connection, not on JS
-         * access, so a <track> appended to a media element (without anyone
-         * touching .track) must still load. A document-wide observer would tax
-         * every page, so it is started lazily only once a track/audio/video
-         * element is created. */
         var observing = false;
         function considerTrack(el) {
             if (!isTrack(el)) return;

@@ -4745,4 +4745,4 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
     return c->surf;
 }
 
-#endif /* ND_HAVE_WEBGPU */
+#endif

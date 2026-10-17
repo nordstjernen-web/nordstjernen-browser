@@ -97,7 +97,7 @@ typedef struct ns_response {
     char *error;
     char *tls_warning;
     char *remote_ip;
-    char *next_hop_protocol;   /* ALPN id of the connection, "" from cache */
+    char *next_hop_protocol;
     gint64 request_start_us;
     double request_start_real_ms;
     double domain_lookup_ms;
@@ -109,7 +109,6 @@ typedef struct ns_response {
     int   security;
     int   redirect_count;
 } ns_response;
-
 
 void ns_response_free(ns_response *resp);
 
@@ -188,8 +187,6 @@ char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 char    *ns_net_https_first_upgrade(const char *url);
 gboolean ns_net_header_is_nosniff(const char *value);
-/* The referrer a request for url made by the document at referrer_url
- * carries under policy, or NULL for none. */
 char    *ns_net_referer_for(const char *url, const char *referrer_url,
                             ns_referer_policy policy);
 
@@ -199,8 +196,6 @@ char *ns_net_log_dump(void);
 char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
-/* The values of every "name:" line in a raw header block, comma-joined,
- * or NULL when there is none. */
 char *ns_net_raw_header_values(const char *raw, const char *name);
 gboolean ns_url_is_http_or_https(const char *url);
 
@@ -215,7 +210,6 @@ char    *ns_url_resolve(const char *base, const char *href);
 char    *ns_url_resolve_len(const char *base, const char *href, size_t href_len);
 char    *ns_url_set_component_len(const char *href, const char *component,
                                   const char *value, size_t value_len);
-
 
 typedef struct ns_url_parts {
     char *href;

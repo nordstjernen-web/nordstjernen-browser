@@ -2424,8 +2424,6 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     int dw = (int)rw, dh = (int)rh;
     uint8_t *out = g_try_malloc0((size_t)dw * (size_t)dh * 4u);
     if (!out) return JS_ThrowRangeError(ctx, "getImageData allocation failed");
-    /* A canvas with no backing surface (never drawn to) reads as
-       transparent black, not null. */
     cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
     const uint8_t *cd = NULL;
     int cw = 0, ch = 0, cs = 0;

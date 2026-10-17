@@ -20,8 +20,6 @@ typedef struct ns_perf_entry {
     double duration;
     gint64 transfer_size;
     gint64 encoded_size;
-    /* Resource timing taken from the network layer; when has_timing is
-     * FALSE the phases collapse onto start_time and the end. */
     gboolean has_timing;
     char  *next_hop_protocol;
     int    response_status;
@@ -30,8 +28,6 @@ typedef struct ns_perf_entry {
     double request_start, response_start, response_end;
     gboolean render_blocking;
     gboolean preload_unclaimed;
-    /* The realm of the document whose performance timeline holds the
-     * entry; frames have timelines of their own. */
     gconstpointer realm;
 } ns_perf_entry;
 
@@ -76,8 +72,6 @@ ns_perf_entry_clone(const ns_perf_entry *e)
     return copy;
 }
 
-/* The timeline an entry or a reader belongs to; NULL and the main realm
- * both stand for the page's own. */
 static gconstpointer
 ns_perf_realm_key(const ns_js *js, gconstpointer timeline)
 {
@@ -87,10 +81,6 @@ ns_perf_realm_key(const ns_js *js, gconstpointer timeline)
 
 static JSClassID ns_performance_class_id;
 
-/* A window's performance object.  It remembers its realm, because frames
- * share the Performance interface (and so its methods) with the page while
- * each document keeps a timeline and a time origin of its own, and it holds
- * the timing, navigation and eventCounts objects its getters return. */
 typedef struct ns_performance_data {
     gconstpointer realm;
     JSValue timing;
@@ -144,8 +134,6 @@ ns_perf_new_performance_object(JSContext *ctx)
     return o;
 }
 
-/* Hands the performance object perf its timing, navigation and
- * eventCounts objects; takes the references. */
 void
 ns_perf_set_performance_objects(JSContext *ctx, JSValueConst perf,
                                 JSValue timing, JSValue navigation,
@@ -174,7 +162,6 @@ ns_perf_data_of(JSValueConst this_val)
         ? JS_GetOpaque(this_val, ns_performance_class_id) : NULL;
 }
 
-/* The timeline a performance method called on this_val reads. */
 static gconstpointer
 ns_perf_this_realm(const ns_js *js, JSValueConst this_val)
 {
@@ -223,9 +210,6 @@ ns_perf_now_ms(const ns_js *js)
     return ns_perf_relative_ms(g_get_monotonic_time(), origin);
 }
 
-/* The time origin of a realm: a frame realm's or, while a frame's new
- * document has no realm yet, its frame element's navigation start; the
- * page's for every other realm. */
 gint64
 ns_js_time_origin_us(const ns_js *js, gconstpointer realm)
 {
@@ -244,8 +228,6 @@ ns_js_time_origin_real_ms(const ns_js *js, gconstpointer realm)
     return o ? o->origin_real_ms : js->time_origin_real_ms;
 }
 
-/* The current high resolution time of the realm ctx, as performance.now()
- * and the event and frame timestamps there give it. */
 double
 ns_perf_realm_now_ms(JSContext *ctx)
 {
@@ -254,7 +236,6 @@ ns_perf_realm_now_ms(JSContext *ctx)
                                ns_js_time_origin_us(js, ctx));
 }
 
-/* A frame starts navigating: its next document's clock starts now. */
 void
 ns_js_start_frame_clock(ns_js *js, gconstpointer frame)
 {
@@ -270,8 +251,6 @@ ns_js_start_frame_clock(ns_js *js, gconstpointer frame)
     g_hash_table_replace(js->realm_origins, (gpointer)frame, o);
 }
 
-/* A frame's document gets the realm ctx, which keeps the time origin of
- * the navigation that brought the document, or starts its clock now. */
 void
 ns_js_adopt_frame_clock(ns_js *js, gconstpointer frame, JSContext *ctx)
 {
@@ -298,8 +277,6 @@ ns_js_clear_frame_clocks(ns_js *js, gboolean destroy)
     }
 }
 
-/* The current high resolution time of the window whose performance object
- * this_val is. */
 JSValue
 ns_window_performance_now(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
@@ -440,9 +417,6 @@ ns_perf_build_paint_entry(JSContext *ctx, const char *name, double start)
 
 static void ns_perf_observer_queue(ns_js *js, const ns_perf_entry *entry);
 
-/* The timing allow check: a document sees a resource's timing details,
- * sizes and protocol when the resource is same-origin with it or answers
- * with a Timing-Allow-Origin header naming the document's origin or "*". */
 static gboolean
 ns_perf_timing_allowed(const char *document_url, const char *url,
                        const char *tao)
@@ -462,9 +436,6 @@ ns_perf_timing_allowed(const char *document_url, const char *url,
     return allowed;
 }
 
-/* The responseStatus a document sees: the status for a same-origin
- * response, a CORS response the document's origin may read, or a frame's
- * navigation, and 0 for a no-CORS cross-origin response. */
 static int
 ns_perf_visible_status(const ns_perf_resource_info *info,
                        const struct ns_response *resp, const char *url,
@@ -485,10 +456,6 @@ ns_perf_visible_status(const ns_perf_resource_info *info,
     return cors_ok ? (int)status : 0;
 }
 
-/* The phase attributes of an entry whose timing details the document may
- * see.  curl reports each phase as time since the request started; a
- * reused connection has no lookup or connect phase, and then all of them,
- * secureConnectionStart included, sit at fetchStart. */
 static void
 ns_perf_set_phases(ns_perf_entry *e, const struct ns_response *resp,
                    const char *url, gint64 origin, double end)
@@ -516,9 +483,6 @@ ns_perf_set_phases(ns_perf_entry *e, const struct ns_response *resp,
 #undef NS_PHASE
 }
 
-/* The protocol and sizes of an entry whose details the document may see.
- * The Resource Timing standard counts 300 bytes of header for a response
- * that came over the network and none for a cached one. */
 static void
 ns_perf_set_sizes(ns_perf_entry *e, const ns_perf_resource_info *info,
                   const struct ns_response *resp)
@@ -551,10 +515,6 @@ ns_perf_resource_timing_allowed(const ns_perf_resource_info *info,
     return allowed;
 }
 
-/* A resource entry from monotonic start and end times and, when the
- * resource came over the network, the response's own phase timings.  A
- * cross-origin resource that fails the timing allow check keeps only its
- * start and end, as other browsers do. */
 static gboolean
 ns_perf_resource_skipped(ns_js *js, const ns_perf_resource_info *info,
                          const char *url)
@@ -611,7 +571,6 @@ ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
     ns_perf_observer_queue(js, e);
 }
 
-/* Whether a timeline already has a resource entry for url. */
 gboolean
 ns_perf_has_resource(ns_js *js, gconstpointer timeline, const char *url,
                      const char *initiator)
@@ -628,8 +587,6 @@ ns_perf_has_resource(ns_js *js, gconstpointer timeline, const char *url,
     return FALSE;
 }
 
-/* Moves the entries recorded for a frame before it had a realm, under the
- * frame element's key, to that realm's timeline. */
 void
 ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to)
 {
@@ -849,8 +806,6 @@ ns_perf_observer_add_type(ns_perf_observer *o, const char *type)
 static void
 ns_perf_schedule_drain(ns_js *js);
 
-/* Whether an observer is connected, watches entry's timeline and wants
- * its type. */
 static gboolean
 ns_perf_observer_takes(ns_js *js, const ns_perf_observer *o,
                        const ns_perf_entry *entry)
@@ -1064,8 +1019,6 @@ ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, proto);
     ns_perf_observer *o = g_new0(ns_perf_observer, 1);
-    /* The observer watches the timeline of the document its callback comes
-     * from: frames share this constructor with the page. */
     JSContext *cb_realm = argc >= 1 && JS_IsFunction(ctx, argv[0])
         ? JS_GetFunctionRealm(ctx, argv[0]) : NULL;
     if (!cb_realm && JS_HasException(ctx))
@@ -1094,7 +1047,6 @@ ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_perf_supported_entry_types(JSContext *ctx)
 {
-    /* In alphabetical order, as the Performance Timeline standard asks. */
     static const char *types[] = { "mark", "measure", "navigation", "paint", "resource" };
     JSValue arr = JS_NewArray(ctx);
     for (guint i = 0; i < G_N_ELEMENTS(types); i++)

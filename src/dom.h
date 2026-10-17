@@ -103,9 +103,6 @@ struct ns_node {
 
     guint32 flags;
 
-    /* 1-based source line/column of this element's content in the parsed
-       document (0 = unknown). Used so inline <script> stack traces report
-       document-relative positions like a real browser. */
     int src_line;
     int src_col;
 
@@ -163,8 +160,6 @@ guint64     ns_attr_name_bloom_bit(const char *name);
 guint64     ns_node_attr_bloom(const ns_node *el);
 gboolean    ns_node_has_class(const ns_node *el, const char *name, gsize len);
 gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
-/* < 0 when a comes before b in tree order, > 0 when after, 0 when they
-   are the same node or in no common tree */
 int         ns_node_document_order_cmp(const ns_node *a, const ns_node *b);
 gboolean    ns_input_is_one_line_text(const ns_node *n);
 

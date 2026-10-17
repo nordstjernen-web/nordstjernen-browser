@@ -42,11 +42,6 @@
 #endif
 
 #if defined(_WIN32) && defined(NS_HAVE_FONTCONFIG)
-/* Force pango's fontconfig backend and point fontconfig at the bundled
- * config, mirroring the GTK shell's startup. The GTK app sets these and the
- * renderer it spawns inherits them, but a renderer spawned by the Java
- * shell (or run standalone) would otherwise use the win32 pango backend and
- * render CJK / many scripts as tofu. Must run before any pango/font use. */
 static void
 renderer_win32_fontconfig(void)
 {
@@ -161,10 +156,6 @@ main(int argc, char **argv)
     int ctrl_r, ctrl_w;
 
     if (stdio_mode) {
-        /* Control channel over stdin/stdout (fd 0/1), pixels in the body.
-         * This is the transport used by JVM / Android clients, which can
-         * give a child only its standard streams, not an inherited fd 3
-         * or a named pipe. */
 #ifdef _WIN32
         _setmode(0, _O_BINARY);
         _setmode(1, _O_BINARY);

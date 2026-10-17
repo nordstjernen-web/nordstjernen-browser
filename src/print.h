@@ -31,11 +31,8 @@ void ns_print_setup_default(ns_print_setup *setup);
 void ns_print_setup_apply_page_rule(ns_print_setup *setup,
                                     const ns_css_page_rule *rule);
 
-/* Y offsets in root coordinates where each sheet starts; always at least one
-   entry, the first being 0. */
 GArray *ns_print_page_offsets(const ns_box *root, double page_content_height);
 
-/* Where sheet i stops: the next sheet's offset, or a full sheet for the last. */
 double ns_print_page_bottom(const GArray *offsets, guint i,
                             double page_content_height);
 
@@ -43,23 +40,14 @@ void ns_print_draw_page(cairo_t *cr, const ns_box *root,
                         const ns_print_setup *setup, double scale,
                         double page_top, double page_bottom);
 
-/* Lays the page out for paper, renders one recording surface per sheet and
-   restores the on-screen layout. The caller destroys every surface. */
 GPtrArray *ns_browser_print_pages(struct ns_browser *browser,
                                   ns_print_setup *out_setup);
 
-/* One cairo recording surface per sheet of paper. The caller destroys them. */
 GPtrArray *ns_renderer_session_print(struct ns_renderer_session *s,
                                      ns_print_setup *out_setup);
 
-/* How many device pixels a sheet gets per CSS pixel when the sheets have to
-   cross a process boundary and are rasterised to do it. */
 #define NS_PRINT_RASTER_SCALE 3.0
 
-/* Renders the open page onto sheets of paper. Single-process mode hands back
-   cairo recording surfaces directly; out of process the renderer rasterises
-   each sheet, which no recording surface survives, and *out_scale carries the
-   device pixels per CSS pixel the caller must divide out. */
 typedef GPtrArray *(*ns_rproc_inproc_print_fn)(void *conn,
                                                ns_print_setup *out_setup);
 void ns_rproc_http_set_inproc_print(ns_rproc_inproc_print_fn print);

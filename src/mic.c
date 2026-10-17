@@ -123,7 +123,7 @@ ns_mic_fill_frequency(guint8 *out, int n)
     }
 }
 
-#else /* !NS_HAVE_SDL */
+#else
 
 gboolean ns_mic_acquire(void) { return FALSE; }
 void     ns_mic_release(void) {}

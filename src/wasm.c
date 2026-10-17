@@ -2416,8 +2416,6 @@ ns_wasm_module_imports_static(JSContext *ctx, JSValueConst this_val, int argc,
 static const char ns_wasm_bootstrap_js[] =
     "(() => {"
     "  const W = WebAssembly, dp = Object.defineProperty;"
-    /* The error types are native error constructors: length 1, with name
-     * and message on their prototypes, not enumerable. */
     "  const error = (name) => {"
     "    const C = ({ [name]: class extends Error {"
     "      constructor(message) { super(message, arguments[1]); } } })[name];"
@@ -2512,10 +2510,6 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
                                       "imports", 1));
     JS_SetPropertyStr(ctx, module_ctor, "prototype", module_proto);
     JS_SetPropertyStr(ctx, instance_ctor, "prototype", instance_proto);
-    /* The namespace's interfaces are not enumerable, its operations are
-     * (WebIDL namespaces); Instance(module, importObject) and
-     * instantiate(bytes, importObject) have one required argument, though
-     * the C functions keep taking two. */
     const int iface = JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE;
     JS_DefinePropertyValueStr(ctx, instance_ctor, "length", JS_NewInt32(ctx, 1),
                               JS_PROP_CONFIGURABLE);
@@ -2556,4 +2550,4 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, boot);
 }
 
-#endif /* NS_HAVE_WAMR */
+#endif

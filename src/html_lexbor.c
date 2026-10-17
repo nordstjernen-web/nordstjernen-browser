@@ -677,10 +677,6 @@ ns_collect_script_elems(ns_node *n, GPtrArray *out, int depth)
     }
 }
 
-/* Assign each inline <script>'s document line/column (where its code begins,
-   just after the start tag's '>') by scanning the raw HTML for <script> tags
-   in source order and matching them to script elements in tree order. Lets
-   inline-script stack traces use document-relative positions like Chrome. */
 static void
 ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
 {
@@ -700,7 +696,7 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
                 j++;
             }
             if (j < len) {
-                c++; j++;               /* step past '>' to the code start */
+                c++; j++;
                 g_array_append_val(lines, l);
                 g_array_append_val(cols, c);
                 line = l; col = c; i = j;

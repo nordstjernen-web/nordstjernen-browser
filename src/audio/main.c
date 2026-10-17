@@ -1127,7 +1127,7 @@ ain_pump(ns_audio_player *p)
     }
     ain_drain_stream(p);
 }
-#endif /* NS_HAVE_LIBAV */
+#endif
 
 static int
 resample_to_device(const float *src, size_t src_frames, int src_rate, int src_ch,

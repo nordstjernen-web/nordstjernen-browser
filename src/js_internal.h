@@ -53,7 +53,7 @@ typedef struct ns_image_bitmap {
 typedef struct ns_perf_observer {
     JSValue   cb;
     JSValue   wrapper;
-    gconstpointer realm;   /* the realm whose timeline the observer watches */
+    gconstpointer realm;
     gboolean  disconnected;
     gboolean  pinned;
     GPtrArray *entry_types;
@@ -140,8 +140,6 @@ struct ns_js {
     GHashTable    *frame_urls;
     GHashTable    *frame_referrers;
     gpointer       realm_scope_base;
-    /* While a frame's code runs, current_url is the frame's URL and the
-     * top-level document's URL is held in the slot this points at. */
     char         **top_url_slot;
     ns_node       *current_script;
     char         *early_inject_src;
@@ -170,13 +168,8 @@ struct ns_js {
     const ns_node *focused_node;
     const ns_node *change_pending;
     char          *change_baseline;
-    /* The document that has focus; NULL means the top-level document. */
     const ns_node *focused_doc;
-    /* The innermost focus change in progress (ns_focus_guard in js.c); the
-     * node-free hook clears freed nodes from every one. */
     gpointer       focus_guard;
-    /* The innermost parser-blocking script run's held-back nodes
-     * (ns_parser_hold in js.c); the node-free hook clears freed ones. */
     gpointer       parser_hold;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
@@ -239,12 +232,8 @@ struct ns_js {
     GHashTable   *window_outwards;
     GQueue       *message_tasks;
     GHashTable   *realm_cloners;
-    /* Frame realms' time origins, by JSContext, and the navigation start
-     * of a frame element whose new document has no realm yet. */
     GHashTable   *realm_origins;
-    JSValue       navigator_brand;   /* WeakSet of the frame realms'
-                                        navigators the Navigator getters
-                                        accept */
+    JSValue       navigator_brand;
     guint         message_task_source;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
@@ -276,7 +265,6 @@ struct ns_js {
     gboolean      storage_events_draining;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
-    /* listener lists copied for a dispatch in progress (kept from sweeps) */
     int           listener_snapshots;
     guint         listener_tombstones;
     int           callback_depth;
@@ -402,7 +390,6 @@ typedef struct ns_draw_path_ud {
     cairo_fill_rule_t fill_rule;
 } ns_draw_path_ud;
 
-/* Helpers defined in js.c, used by js_canvas.c */
 double ns_arg_d(JSContext *ctx, JSValueConst v);
 void ns_bind_fn(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc);
 const ns_box *ns_box_find_by_dom(const ns_box *root, const ns_node *target);
@@ -422,7 +409,6 @@ JSValue ns_make_element(JSContext *ctx, const ns_node *cnode);
 JSValue ns_js_realm_event(JSContext *ctx, JSValueConst target, const char *type);
 const ns_node *ns_unwrap_element(JSValueConst val);
 
-/* Canvas API implemented in js_canvas.c */
 void
 ns_path2d_finalizer(JSRuntime *rt, JSValue val);
 void
@@ -716,7 +702,6 @@ void ns_canvas_register_image_bitmap_class(JSRuntime *rt);
 void ns_canvas_register_path2d_class(JSRuntime *rt);
 void ns_image_bitmap_define_members(JSContext *ctx, JSValueConst global);
 
-/* The canvas objects' WebIDL surface (js_canvas_api.c). */
 enum {
     NS_HK_CTX2D,
     NS_HK_OFFSCREEN_CTX2D,
@@ -767,7 +752,6 @@ JSValue ns_offscreen_construct(JSContext *ctx, JSValueConst new_target, int argc
                                JSValueConst *argv);
 void ns_canvas_install(JSContext *ctx, JSValueConst global, gboolean window);
 
-/* Performance API (js_perf.c) and the js.c helpers it shares. */
 void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
                                 JSCFunction *fn, int argc);
 JSValue ns_own_data_props_toJSON(JSContext *ctx, JSValueConst this_val,
@@ -777,8 +761,6 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
 
 void ns_perf_observer_release(JSContext *ctx, ns_perf_observer *o);
 double ns_perf_now_ms(const ns_js *js);
-/* A frame realm's own time origin (its document's start), the page's for
- * every other realm. */
 typedef struct ns_realm_origin {
     gint64 origin_us;
     double origin_real_ms;
@@ -790,13 +772,6 @@ void   ns_js_start_frame_clock(ns_js *js, gconstpointer frame);
 void   ns_js_adopt_frame_clock(ns_js *js, gconstpointer frame, JSContext *ctx);
 void   ns_js_clear_frame_clocks(ns_js *js, gboolean destroy);
 double ns_perf_relative_ms(gint64 now_us, gint64 origin_us);
-/* What a resource timing entry needs beyond its times and response.
- * timeline names the performance timeline that gets the entry: a frame
- * realm's JSContext, an opaque key for a frame without a realm, or NULL
- * for the page's own.  document_url is that document's URL, for the
- * same-origin and Timing-Allow-Origin checks.  Without a response (an
- * image the image cache fetched) the protocol, the Timing-Allow-Origin
- * value, the status and the size come from here. */
 typedef struct ns_perf_resource_info {
     gconstpointer timeline;
     const char   *document_url;

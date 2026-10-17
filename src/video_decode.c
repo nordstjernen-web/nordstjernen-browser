@@ -669,7 +669,7 @@ ns_lav_next(ns_video_player *player, ns_texture **out_tex, double *out_pts)
         }
     }
 }
-#endif /* NS_HAVE_LIBAV */
+#endif
 
 ns_video_player *
 ns_video_player_new(const guint8 *bytes, gsize len)

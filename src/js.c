@@ -120,7 +120,7 @@ struct ns_worker_host {
     gboolean      is_module;
     gboolean      is_service_worker;
     gint          sw_active;
-    gint          terminated;       /* terminate() was called by the owner */
+    gint          terminated;
     char         *scope;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
@@ -145,8 +145,6 @@ typedef struct ns_mut_observer {
     GArray   *targets;
     GPtrArray *records;
 } ns_mut_observer;
-
-
 
 struct ns_js_drag_session {
     ns_js  *js;
@@ -491,10 +489,6 @@ static gboolean ns_dom_hidden_child(const ns_node *c);
 #define NS_SANDBOX_ALLOW_PRESENTATION  (1u << 11)
 #define NS_SANDBOX_ALLOW_ORIENTATION   (1u << 12)
 #define NS_SANDBOX_ALLOW_STORAGE_ACCESS (1u << 14)
-/* Internal flag, never produced by the sandbox-attribute parser: set when the
-   frame is cross-origin to its embedder, to deny it the embedding origin's
-   localStorage/sessionStorage/cookies (the runtime's storage is keyed to the
-   top origin). Must match the (sandbox & 8192) checks in the realm bootstraps. */
 #define NS_FRAME_CROSS_ORIGIN          (1u << 13)
 
 static const struct { const char *token; unsigned flag; } ns_sandbox_tokens[] = {
@@ -710,9 +704,6 @@ ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
     return pf.resp;
 }
 
-/* ns_js_fetch_resource for one of a document's own subresources, recorded
- * as a PerformanceResourceTiming entry with the given initiator type in the
- * timeline info names. */
 static ns_response *
 ns_js_fetch_subresource(ns_js *js, const char *url, const char *top_url,
                         const char *const *headers, GError **error,
@@ -726,8 +717,6 @@ ns_js_fetch_subresource(ns_js *js, const char *url, const char *top_url,
     return resp;
 }
 
-/* The URL of the document whose global is realm: a frame's own URL for a
- * frame realm, the page's otherwise. */
 static const char *
 ns_js_realm_document_url(ns_js *js, JSContext *realm)
 {
@@ -839,17 +828,6 @@ ns_js_context_frame(ns_js *js, JSContext *ctx)
     }
     return js->raf_frame_ctx;
 }
-
-
-
-
-
-
-
-
-
-
-
 
 uint32_t
 ns_js_array_length(JSContext *ctx, JSValueConst arr)
@@ -1343,8 +1321,6 @@ typedef struct {
     gboolean   is_base;
 } ns_realm_scope;
 
-/* The top-level document's URL, even while a frame's code has replaced
- * current_url with the frame's own URL. */
 static const char *
 ns_js_top_url(ns_js *js)
 {
@@ -1361,8 +1337,6 @@ ns_js_set_top_url(ns_js *js, const char *url)
     *slot = copy;
 }
 
-/* Makes url the current URL for a frame's script or event.  The outermost
- * entry keeps the top-level URL where ns_js_top_url can find it. */
 typedef struct {
     char *saved;
     gboolean owns_slot;
@@ -1396,9 +1370,6 @@ ns_js_top_document(ns_node *doc)
     return doc;
 }
 
-/* Whether node is in the page: in its document or in one of its frames'.
-   The engine's current document says which of them code is running for,
-   and parent code can run while a frame's document is current. */
 static gboolean
 ns_js_node_in_page(ns_js *js, const ns_node *node)
 {
@@ -1574,8 +1545,6 @@ static gboolean ns_timer_fire(gpointer data);
 static void
 ns_js_run_due_timers(ns_js *js)
 {
-    /* A timer is a task of its own: never run one inside another task's
-       work, such as a frame being loaded, a script or a callback. */
     if (!js || !js->ctx || js->halted || js->in_pump ||
         js->dispatch_depth > 0 || js->running_due_timers ||
         js->iframe_load_depth > 0 || js->callback_depth > 0 ||
@@ -1701,9 +1670,6 @@ ns_nav_screen_metrics(int *width, int *height,
 #endif
 }
 
-/* IdleDeadline: the end of the idle period an idle callback runs in.  A
- * period lasts at most 50 ms and ends early when a timer or an animation
- * frame is due; a callback run because its timeout passed gets none. */
 static JSClassID ns_idle_deadline_class_id;
 
 typedef struct ns_idle_deadline {
@@ -1857,11 +1823,6 @@ ns_timer_fire(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
 
-    /* The callback can clear its own timer (clearInterval(myId)) — or, via a
-       re-entrant relayout/fetch, another timer that shares state — which would
-       drop the last reference and free the function while it is still running.
-       Hold owned copies of the callback, its code and its extra args for the
-       duration of the call so the engine never executes freed memory. */
     JSValue cb = JS_IsUndefined(t->cb) ? JS_UNDEFINED
                                        : JS_DupValue(callback_ctx, t->cb);
     char *code = t->code ? g_strdup(t->code) : NULL;
@@ -1951,9 +1912,6 @@ ns_timer_this_is_detached_window(ns_js *js, JSContext *ctx,
     if (!doc || doc == js->current_doc) return FALSE;
     if (doc->kind != NS_NODE_DOCUMENT || (doc->flags & NS_NODE_FRAGMENT))
         return FALSE;
-    /* Attached means in the page's frame tree, whichever of its documents
-       the engine is running code for (a parent's listener can run while a
-       frame's document is current). */
     ns_node *top = ns_js_top_document(js->current_doc);
     return top && ns_js_top_document((ns_node *)doc) != top;
 }
@@ -2046,13 +2004,6 @@ static JSClassID ns_live_class_id;
 static JSClassID ns_dataset_class_id;
 static JSClassID ns_window_named_class_id;
 
-/* Events.  What the engine sets on an event lives in a state object of its
- * own that page scripts do not see: the attributes are getters on the event
- * interfaces' prototypes, as WebIDL has them, and isTrusted is the one own
- * property, as in other browsers.  The engine itself (its C functions and
- * hidden-source scripts, see JS_IsHostAccess) reads and writes the state
- * as if it were the event's own properties, so the code that builds and
- * dispatches events keeps using plain property access. */
 static JSClassID ns_event_class_id;
 
 typedef struct ns_event_data {
@@ -2082,8 +2033,6 @@ ns_event_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
     if (d) JS_MarkValue(rt, d->state, mark_func);
 }
 
-/* Whether the engine's own definition of prop belongs on the event
- * itself: only isTrusted, which is [LegacyUnforgeable]. */
 static gboolean
 ns_event_keeps_own(JSContext *ctx, JSValueConst obj, JSAtom prop,
                    JSValueConst val)
@@ -2103,8 +2052,6 @@ ns_event_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
     if (!d) return 0;
     if (JS_IsHostAccess(ctx))
         return JS_GetOwnProperty(ctx, desc, d->state, prop);
-    /* A method the engine gave an event whose interfaces lack it (such as
-     * a navigation event's intercept()) stays reachable for the page. */
     JSPropertyDescriptor own;
     int has = JS_GetOwnProperty(ctx, &own, d->state, prop);
     if (has <= 0) return has;
@@ -2239,8 +2186,6 @@ static JSClassDef ns_event_class = {
     .exotic = &ns_event_exotic,
 };
 
-/* A new event object of ctx's realm, with proto as its prototype or
- * Object.prototype, which the event's interface replaces later. */
 static JSValue
 ns_event_new_proto(JSContext *ctx, JSValueConst proto)
 {
@@ -2264,7 +2209,6 @@ ns_event_new_proto(JSContext *ctx, JSValueConst proto)
     return ev;
 }
 
-/* Whether objects with prototype proto are events of ctx's realm. */
 static gboolean
 ns_proto_is_event(JSContext *ctx, JSValueConst proto)
 {
@@ -2303,8 +2247,6 @@ typedef struct ns_event_attr {
     gboolean writable;
 } ns_event_attr;
 
-/* The attributes of the event interfaces, as Chrome has them on their
- * prototypes, with the value a fresh event of the interface gives. */
 static const ns_event_attr ns_event_attrs[] = {
     { "AnimationEvent", "animation", NS_EV_NULL, FALSE },
     { "AnimationEvent", "animationName", NS_EV_STRING, FALSE },
@@ -2601,9 +2543,6 @@ ns_event_attr_default(JSContext *ctx, ns_event_attr_kind kind)
 static JSValue
 ns_event_attr_plain_receiver(JSContext *ctx, JSValueConst this_val)
 {
-    /* Events some engine paths still make as plain objects carry their
-     * attributes themselves; reaching here, they lack this one.  The
-     * interface's prototype is not an event. */
     if (!JS_IsObject(this_val))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     JSAtom ctor_atom = JS_NewAtom(ctx, "constructor");
@@ -2630,8 +2569,6 @@ ns_event_attr_from_descriptor(JSContext *ctx, JSValueConst this_val,
     return desc->value;
 }
 
-/* The getter of an event attribute: the event's own state, or what a fresh
- * event of the interface has. */
 static JSValue
 ns_event_attr_get(JSContext *ctx, JSValueConst this_val, int argc,
                   JSValueConst *argv, int magic)
@@ -2675,8 +2612,6 @@ ns_event_attr_set(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_UNDEFINED;
 }
 
-/* Gives the event interfaces of the realm whose global is global the
- * getters their attributes are missing. */
 static void
 ns_install_event_attribute_getters(JSContext *ctx, JSValueConst global)
 {
@@ -4615,8 +4550,6 @@ ns_html_tag_has_plain_interface(const char *lower_name)
                    ns_cmp_tag_name) != NULL;
 }
 
-/* The prototype of an element of a namespace other than HTML and SVG:
- * MathMLElement's for MathML, Element's for the rest. */
 static JSValue
 ns_foreign_kind_proto(ns_js *js, const ns_node *node)
 {
@@ -4783,8 +4716,6 @@ ns_install_body_reflected_handlers(JSContext *ctx, JSValueConst wrapper)
     }
 }
 
-/* The page's own document object, the main realm's document: every realm
- * sees that one object for the page's document node. */
 static JSValue
 ns_page_document_object(ns_js *js)
 {
@@ -5111,7 +5042,6 @@ static const ns_instof_def ns_instof_table[] = {
     { "ShadowRoot",               NULL,                 NS_INSTOF_SHADOW },
 };
 
-/* NodeList and HTMLCollection are told apart by the kind of live collection. */
 static JSValue
 ns_instof_collection(JSContext *ctx, const ns_instof_def *d, JSValueConst v)
 {
@@ -5127,7 +5057,6 @@ ns_instof_collection(JSContext *ctx, const ns_instof_def *d, JSValueConst v)
     return JS_NewBool(ctx, hit == 1);
 }
 
-/* Whether tag is one of the space-separated names in list. */
 static gboolean
 ns_instof_list_has(const char *list, const char *tag)
 {
@@ -5142,7 +5071,6 @@ ns_instof_list_has(const char *list, const char *tag)
     return FALSE;
 }
 
-/* Whether node n is an element with one of the tags of the table entry. */
 static gboolean
 ns_instof_tag_match(const ns_instof_def *d, const ns_node *n)
 {
@@ -5160,7 +5088,6 @@ ns_instof_is_shadow_host_attr(const ns_node *n)
            ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
 }
 
-/* The entries decided by the kind of the node alone. */
 static gboolean
 ns_instof_leaf_match(int special, const ns_node *n)
 {
@@ -5178,7 +5105,6 @@ ns_instof_leaf_match(int special, const ns_node *n)
     }
 }
 
-/* The entries for elements, documents and document fragments. */
 static gboolean
 ns_instof_container_match(int special, const ns_node *n)
 {
@@ -5200,12 +5126,9 @@ ns_instof_container_match(int special, const ns_node *n)
     }
 }
 
-/* Whether node n, the wrapper of an instance, is of the kind of the table
- * entry d. */
 static gboolean
 ns_instof_node_match(const ns_instof_def *d, const ns_node *n)
 {
-    /* A shadow root is stored as an element but is a DocumentFragment. */
     if (ns_node_is_shadow_root(n))
         return d->special == NS_INSTOF_NODE ||
                d->special == NS_INSTOF_FRAGMENT ||
@@ -5218,10 +5141,6 @@ ns_instof_node_match(const ns_instof_def *d, const ns_node *n)
            ns_instof_container_match(d->special, n);
 }
 
-/* Whether ctor is the interface object the table entry belongs to. The
- * [Symbol.hasInstance] of an interface object is inherited by the interfaces
- * that extend it, and those are not told apart by node kind: Attr extends
- * Node, HTMLUnknownElement extends HTMLElement, XMLDocument extends Document. */
 static gboolean
 ns_instof_is_entry_ctor(JSContext *ctx, JSValueConst ctor,
                         const ns_instof_def *d)
@@ -5238,8 +5157,6 @@ ns_instof_is_entry_ctor(JSContext *ctx, JSValueConst ctor,
     return same;
 }
 
-/* OrdinaryHasInstance: whether the prototype of ctor is on the prototype
- * chain of v. */
 static JSValue
 ns_instof_ordinary(JSContext *ctx, JSValueConst ctor, JSValueConst v)
 {
@@ -5283,9 +5200,6 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
         magic >= (int)G_N_ELEMENTS(ns_instof_table))
         return JS_FALSE;
     const ns_instof_def *d = &ns_instof_table[magic];
-    /* A built-in interface that extends the entry's is told by its prototype
-     * chain; a class of the page that extends one keeps matching by node
-     * kind. */
     if (JS_IsEngineFunction(this_val) &&
         !ns_instof_is_entry_ctor(ctx, this_val, d))
         return ns_instof_ordinary(ctx, this_val, argv[0]);
@@ -8742,7 +8656,6 @@ ns_element_get_outerHTML(JSContext *ctx, JSValueConst this_val)
     return v;
 }
 
-
 static JSValue
 ns_xml_serializeToString(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -9318,7 +9231,7 @@ ns_header_name_is_forbidden(const char *name)
 
 typedef struct ns_js_fetch_state {
     JSContext     *ctx;
-    JSContext     *timeline;   /* realm of the calling script, for timing */
+    JSContext     *timeline;
     ns_js         *js;
     JSValue        promise;
     JSValue        resolve;
@@ -9582,7 +9495,6 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             .document_url = ns_js_realm_document_url(st->js, st->timeline),
             .cors_mode = !st->no_cors,
         };
-        /* The entry is named by the request's URL, resolved. */
         char *abs = st->origin_url
             ? ns_url_resolve(st->origin_url, st->requested_url) : NULL;
         ns_perf_add_resource_timed(st->js, &info,
@@ -10144,8 +10056,6 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     ns_js_fetch_state *st = g_new0(ns_js_fetch_state, 1);
     st->ctx = ctx;
     st->js = js_from_ctx(ctx);
-    /* Frames share fetch() with the page, so the function's own realm is
-     * the page's; the realm running the calling script is js->ctx. */
     st->timeline = st->js ? st->js->ctx : ctx;
     st->promise = JS_DupValue(ctx, promise);
     st->resolve = resolving[0];
@@ -10314,13 +10224,6 @@ ns_audio_analysis_throw(JSContext *ctx, JSValueConst this_val,
     return JS_Throw(ctx, err);
 }
 
-/* Platform objects whose state the page must not see.  What the engine
- * stores on one (its C functions and hidden-source scripts, see
- * JS_IsHostAccess) lives in a state object of its own, as if it were the
- * object's own properties, so the code that builds and drives these
- * objects keeps using plain property access.  The page sees the interface's
- * prototype accessors and nothing else; what the page defines on the object
- * is the object's own. */
 static JSClassID ns_hostobj_class_id;
 
 #define NS_HO_BIT(kind) (1u << (kind))
@@ -10512,9 +10415,6 @@ typedef struct ns_ho_attr {
     gboolean        writable;
 } ns_ho_attr;
 
-/* The attributes of these interfaces, as accessors on their prototypes;
- * the value is the object's state of that name, or what a fresh object of
- * the interface has. */
 static const ns_ho_attr ns_ho_attrs[] = {
     { "AbortController", NS_HO_BIT(NS_HO_ABORT_CONTROLLER), "signal", NS_HA_NULL, FALSE },
     { "AbortSignal", NS_HO_BIT(NS_HO_ABORT_SIGNAL), "aborted", NS_HA_BOOL, FALSE },
@@ -10853,7 +10753,6 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     const ns_node *n = ns_unwrap_element(target);
     JS_FreeValue(ctx, target);
     if (!n) {
-        /* A window, port, worker or request: the path is the target. */
         JSValue current = JS_GetPropertyStr(ctx, this_val, "currentTarget");
         if (JS_IsObject(current))
             JS_SetPropertyUint32(ctx, arr, 0, current);
@@ -11783,7 +11682,6 @@ ns_geolocation_watch_position(JSContext *ctx, JSValueConst this_val,
     ns_geolocation_get_current_position(ctx, this_val, argc, argv);
     return JS_NewInt32(ctx, 1);
 }
-
 
 static JSValue
 ns_window_queue_microtask(JSContext *ctx, JSValueConst this_val,
@@ -14116,10 +14014,6 @@ ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
     return ns_target_handler_realm(ctx, port, "message", "fn");
 }
 
-/* An event dispatched at a target outside the node tree is at its target
- * while the listeners run; afterwards it has no current target and no
- * phase, as after any dispatch. A dispatch that was already running when
- * this one started gets its state back. */
 typedef struct {
     JSValue phase;
     JSValue current;
@@ -14164,8 +14058,6 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 
     JSValue shipped_to = JS_GetPropertyStr(ctx, port, "_shipped_to");
     if (JS_IsObject(shipped_to)) {
-        /* The port moved to another realm while this message was queued;
-         * its messages move with it. */
         JSValue started = JS_GetPropertyStr(ctx, shipped_to, "_started");
         gboolean is_started = JS_ToBool(ctx, started);
         JS_FreeValue(ctx, started);
@@ -14625,10 +14517,6 @@ ns_port_ship(JSContext *ctx, JSValueConst port, JSValueConst shipped)
                               JS_DupValue(ctx, shipped), 0);
 }
 
-/* Checks the MessagePorts in a postMessage transfer list and makes the
- * receiving realm's replacement for each one.  Nothing is detached yet, so a
- * failed clone leaves the sender's ports usable; ns_port_transfer_commit then
- * moves each port's entanglement and queued messages to its replacement. */
 static int
 ns_port_transfer_prepare(JSContext *ctx, JSValueConst transfer,
                          JSValueConst source_port, JSContext *realm,
@@ -14909,9 +14797,6 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValueConst target = argv[0];
     JSValueConst ev = argv[1];
     ns_js *js = js_from_ctx(ctx);
-    /* The message event is created when the posted task runs, in the
-     * receiving window's realm: it is that window's MessageEvent and its
-     * time stamp is the delivery time on that window's clock. */
     JSContext *realm = ns_window_message_realm(ctx, target);
     JSValue realm_proto = ns_realm_proto(realm, "MessageEvent");
     if (JS_IsObject(realm_proto)) JS_SetPrototype(ctx, ev, realm_proto);
@@ -14994,7 +14879,6 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
-/* The realm that ns_window_post_message_deliver_job will deliver into. */
 static JSContext *
 ns_window_message_realm(JSContext *ctx, JSValueConst target)
 {
@@ -15020,9 +14904,6 @@ ns_window_message_realm(JSContext *ctx, JSValueConst target)
     return realm;
 }
 
-/* Posts a message to target in the realm ctx, which throws the exceptions;
- * caller is the realm of the code that called postMessage, the one the
- * message's source window comes from. */
 static JSValue
 ns_post_message_to_target_in(JSContext *ctx, JSContext *caller, JSValue target,
                              JSValueConst source_override,
@@ -15089,8 +14970,6 @@ ns_post_message_to_target_in(JSContext *ctx, JSContext *caller, JSValue target,
         }
     }
 
-    /* Serializing and transferring happen before the origin check, so a
-     * message to the wrong origin still detaches its transferred ports. */
     JSValue old_ports, ports;
     if (ns_port_transfer_prepare(ctx, transfer, JS_UNDEFINED,
                                  ns_window_message_realm(ctx, target),
@@ -15161,7 +15040,6 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                                         source_override, argc, argv);
 }
 
-/* The realm of a window: the one of its frame, or the main one. */
 static JSContext *
 ns_window_realm_context(JSContext *ctx, JSValueConst window)
 {
@@ -15174,8 +15052,6 @@ ns_window_realm_context(JSContext *ctx, JSValueConst window)
     return js->main_realm_ctx ? js->main_realm_ctx : ctx;
 }
 
-/* A C function with data runs in the realm of its caller, but postMessage
- * throws the exceptions of the realm of the window it belongs to. */
 static JSValue
 ns_window_post_message_data(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv,
@@ -15695,9 +15571,6 @@ ns_proto_own_constructor(JSContext *ctx, JSValueConst proto)
     return ctor;
 }
 
-/* Whether v is an instance of one of the realm's interfaces: its prototype
-   is the prototype of an engine-made constructor that the global object
-   exposes under its name. Such objects are cloned only when serializable. */
 static gboolean
 ns_sc_is_platform_instance(JSContext *ctx, JSValueConst v)
 {
@@ -15744,8 +15617,6 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return JS_DupValue(ctx, v);
     }
 
-    /* Platform objects that are not serializable: nodes, and the engine's
-       host objects (ports must be transferred, not cloned). */
     if (ns_ho_data(v) || ns_unwrap_element(v)) return ns_sc_fail(ctx);
 
     if (JS_IsArrayBuffer(v)) {
@@ -16805,8 +16676,6 @@ ns_history_replaceState(JSContext *ctx, JSValueConst this_val,
     return ns_history_set_state_impl(ctx, argc, argv, TRUE);
 }
 
-/* hashchange, popstate and similar events are fired at the window: the
- * window is their target, and they neither bubble nor can be cancelled. */
 static JSValue
 ns_make_window_event(JSContext *ctx, const char *type)
 {
@@ -17444,7 +17313,6 @@ ns_make_navigation(JSContext *ctx, ns_js *js)
     }
     return nav;
 }
-
 
 static const char *
 ns_computed_initial_value(const char *name)
@@ -19643,7 +19511,6 @@ ns_window_prompt(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, "");
 }
 
-
 static JSValue ns_event_prevent_default(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static JSValue ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val,
@@ -19654,7 +19521,6 @@ static JSValue ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
 static void ns_event_link_proto(JSContext *ctx, JSValueConst global,
                                 const char *child, const char *parent);
-
 
 static JSValue
 ns_window_btoa(JSContext *ctx, JSValueConst this_val,
@@ -20223,33 +20089,6 @@ ns_window_comment_ctor(JSContext *ctx, JSValueConst this_val,
     return ns_char_data_ctor(ctx, argc, argv, ns_node_new_comment_len);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static JSValue
 ns_window_image_ctor(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -20428,12 +20267,12 @@ ns_window_dom_parser_ctor(JSContext *ctx, JSValueConst this_val,
 
 typedef struct ns_xhr_state {
     JSContext *ctx;
-    JSContext *timeline;   /* realm of the calling script, for timing */
+    JSContext *timeline;
     ns_js     *js;
     JSValue    obj;
     char      *method;
     char      *url;
-    char      *origin_url; /* URL of the document that sent the request */
+    char      *origin_url;
     double     start_ms;
     GPtrArray *request_headers;
     gint64     gen;
@@ -20668,8 +20507,6 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                             &scope);
     ns_event_at_target at_target;
     ns_event_at_target_begin(ctx, ev, obj, &at_target);
-    /* The listeners are those registered when the dispatch starts: one the
-       event handler adds runs from the next dispatch on. */
     JSValue listeners = JS_GetPropertyStr(ctx, obj, "_listeners");
     uint32_t n = 0;
     if (JS_IsArray(listeners)) {
@@ -20829,9 +20666,6 @@ ns_target_fire_event(JSContext *ctx, JSValueConst obj, const char *type)
     JS_FreeValue(ctx, ev);
 }
 
-/* EventTarget.prototype's methods reach nodes as well (the node interfaces
- * no longer carry copies of them): a document keeps its listeners with the
- * document's, any other node with the element listener list. */
 static gboolean
 ns_target_is_document_node(const ns_node *n)
 {
@@ -20929,8 +20763,6 @@ ns_event_dispatch_guard(JSContext *ctx, JSValueConst event)
     return JS_UNDEFINED;
 }
 
-/* The event the engine itself is dispatching through a target's
- * dispatchEvent() (worker messages and errors): it stays trusted. */
 static __thread void *ns_engine_dispatch_event;
 
 static JSValue
@@ -21627,7 +21459,6 @@ ns_xhr_method_allowed(const char *method)
            g_ascii_strcasecmp(method, "TRACK") != 0;
 }
 
-/* The type of a Blob body, or NULL for an untyped Blob or a buffer. */
 static char *
 ns_xhr_blob_type(JSContext *ctx, JSValueConst body)
 {
@@ -21672,9 +21503,6 @@ ns_mime_is_quoted_token(const char *s)
     return TRUE;
 }
 
-/* Collects an HTTP quoted string at *p (which is at a '"') and returns its
- * value, leaving *p after it (Fetch, "collect an HTTP quoted string" with
- * the extract-value flag). */
 static char *
 ns_mime_quoted(const char **p)
 {
@@ -21697,10 +21525,6 @@ ns_mime_quoted(const char **p)
     return g_string_free(v, FALSE);
 }
 
-/* An author Content-Type for a text body with a charset parameter that is
- * not UTF-8: the type parsed as a MIME type, charset set to UTF-8 and the
- * result serialized (XHR send() step 4.4). NULL when the value is not a
- * MIME type, has no charset or already says UTF-8; then it stays as is. */
 static char *
 ns_xhr_content_type_utf8(const char *value)
 {
@@ -21718,7 +21542,7 @@ ns_xhr_content_type_utf8(const char *value)
     GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
     gboolean changed = FALSE;
     for (p = sub_end; *p; ) {
-        p++; /* the ';' */
+        p++;
         while (ns_mime_is_ws(*p)) p++;
         const char *n0 = p;
         while (*p && *p != ';' && *p != '=') p++;
@@ -21727,7 +21551,7 @@ ns_xhr_content_type_utf8(const char *value)
             g_free(name);
             continue;
         }
-        p++; /* the '=' */
+        p++;
         char *val;
         if (*p == '"') {
             val = ns_mime_quoted(&p);
@@ -21851,10 +21675,6 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     char *resolved = (_js && _js->current_url)
         ? ns_url_resolve(_js->current_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
-    /* The response is checked against the sending document's origin; by the
-     * time an asynchronous response arrives, js->current_url is whatever
-     * document the event loop is in, often the page rather than the frame
-     * that sent the request. */
     st->origin_url = g_strdup(_js ? _js->current_url : NULL);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
@@ -21910,8 +21730,6 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     }
     g_ptr_array_add(hdr_terminated, NULL);
 
-    /* The body's own type when the author set none; an ArrayBuffer or an
-     * untyped Blob has none, and then no Content-Type is sent. */
     const char *effective_ct = NULL;
     if (send_body && body && !user_set_content_type)
         effective_ct = auto_content_type;
@@ -22960,9 +22778,6 @@ ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
 
 static uint8_t ns_text_encoder_no_bytes[1];
 
-/* The bytes a Uint8Array destination covers, or NULL when view is not one.
- * A view of a detached buffer, or out of the bounds of its resizable one, has
- * a byte length of 0: encodeInto() writes nothing into it and reports 0. */
 static uint8_t *
 ns_text_encoder_target(JSContext *ctx, JSValueConst view, JSValue *buf,
                        size_t *off, size_t *blen, size_t *total)
@@ -25324,7 +25139,7 @@ typedef struct ns_worker_message {
     char           *message;
     char           *filename;
     int             lineno, colno;
-    gboolean        is_load_error;  /* the script could not be fetched */
+    gboolean        is_load_error;
     char           *sw_state;
     guint64         port_id;
     guint64        *xfer_ids;
@@ -25518,8 +25333,6 @@ ns_worker_transfer_port(JSContext *ctx, JSValueConst port, JSValueConst pair,
         uint32_t qlen = ns_js_array_length(ctx, q);
         for (uint32_t j = 0; j < qlen; j++) {
             JSValue qi = JS_GetPropertyUint32(ctx, q, j);
-            /* Messages queued by ns_port_post_message carry their data in a
-             * wrapper; bridged ones are the data itself. */
             JSValue wrapped = JS_IsObject(qi)
                 ? JS_GetPropertyStr(ctx, qi, "_portMessage") : JS_UNDEFINED;
             if (JS_ToBool(ctx, wrapped) > 0) {
@@ -25549,9 +25362,6 @@ ns_worker_transfer_port(JSContext *ctx, JSValueConst port, JSValueConst pair,
     msg->xfer_ids[msg->n_xfer++] = id;
 }
 
-/* A bridged port has its other end in another runtime: a worker's bridged
- * ports all lead to its owner, and an owner's to the worker recorded on the
- * port.  Sending such a port to that runtime brings both ends together. */
 static gboolean
 ns_port_bridge_goes_home(JSContext *ctx, JSValueConst port,
                          JSValueConst target_worker)
@@ -25566,8 +25376,6 @@ ns_port_bridge_goes_home(JSContext *ctx, JSValueConst port,
     return home;
 }
 
-/* Sends a bridged port back under its bridge id; the receiving side pairs
- * it with the other end there.  This side's port is left closed. */
 static void
 ns_worker_return_port(JSContext *ctx, JSValueConst port, ns_worker_message *msg)
 {
@@ -25612,8 +25420,6 @@ ns_worker_walk_transfers(JSContext *ctx, int argc, JSValueConst *argv,
     GPtrArray *seen = g_ptr_array_new();
     for (uint32_t i = 0; i < len; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
-        /* Listing an object twice, or a buffer already detached, makes the
-         * whole transfer fail with DataCloneError. */
         if (!detach && JS_IsObject(item)) {
             if (g_ptr_array_find(seen, JS_VALUE_GET_PTR(item), NULL) ||
                 (JS_IsArrayBuffer(item) && ns_sc_buffer_detached(ctx, item))) {
@@ -25647,8 +25453,6 @@ ns_worker_walk_transfers(JSContext *ctx, int argc, JSValueConst *argv,
     return all_ok;
 }
 
-/* The MessagePorts in a postMessage transfer list, in list order, which is
- * the order ns_worker_walk_transfers gives them bridge ids in. */
 static JSValue
 ns_worker_transfer_ports(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -25668,19 +25472,10 @@ ns_worker_transfer_ports(JSContext *ctx, int argc, JSValueConst *argv)
     return ports;
 }
 
-/* Worker messages cross into another JS runtime, so they travel as bytes.
- * JS_WriteObject on its own is not structured serialization: it rejects
- * Error objects, drops non-index array properties and knows nothing of
- * Blobs or transferred ports.  The value is first encoded, with the rules
- * ns_sc_clone applies to window messages, into a graph JS_WriteObject
- * carries faithfully: every object becomes an array whose first element
- * names its kind, and one object always becomes the same array, so
- * JS_WRITE_OBJ_REFERENCE keeps shared references and cycles.  The receiving
- * runtime reads the graph back and rebuilds the objects in its own realm. */
 typedef struct {
     JSContext   *ctx;
-    GHashTable  *memo;              /* object -> JSValue * of its node */
-    JSValueConst ports;             /* MessagePorts being transferred */
+    GHashTable  *memo;
+    JSValueConst ports;
     JSValue      blob_ctor, file_ctor, dom_exception_ctor;
     int          depth;
 } ns_wire_enc;
@@ -25723,8 +25518,6 @@ ns_wire_memo_free(GHashTable *memo, JSContext *ctx)
     g_hash_table_destroy(memo);
 }
 
-/* Appends a key and an encoded value for each own enumerable string-keyed
- * property of v, reading them with [[Get]] as structured serialization does. */
 static gboolean
 ns_wire_encode_props(ns_wire_enc *e, JSValueConst v, JSValueConst node)
 {
@@ -25852,7 +25645,6 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
             ns_wire_push(ctx, node, JS_NewUint32(ctx, i));
             return node;
         }
-        /* A MessagePort can only be transferred, never copied. */
         return ns_sc_fail(ctx);
     }
 
@@ -26019,8 +25811,6 @@ ns_wire_encode(ns_wire_enc *e, JSValueConst v)
     return node;
 }
 
-/* Encodes value for a worker message; ports lists the MessagePorts being
- * transferred, which the message refers to by position. */
 static JSValue
 ns_wire_encode_value(JSContext *ctx, JSValueConst value, JSValueConst ports)
 {
@@ -26041,7 +25831,7 @@ ns_wire_encode_value(JSContext *ctx, JSValueConst value, JSValueConst ports)
 
 typedef struct {
     JSContext   *ctx;
-    GHashTable  *memo;              /* node -> JSValue * of rebuilt value */
+    GHashTable  *memo;
     JSValueConst ports;
     JSValue      global;
     int          depth;
@@ -26059,8 +25849,6 @@ ns_wire_construct(ns_wire_dec *d, const char *name, int argc, JSValueConst *argv
     return out;
 }
 
-/* Calls method on target with the decoded items of node from index first,
- * taking per items at a time (Map.set, Set.add). */
 static gboolean
 ns_wire_decode_calls(ns_wire_dec *d, JSValueConst node, uint32_t first,
                      int per, JSValueConst target, const char *method)
@@ -26296,9 +26084,6 @@ ns_wire_decode_value(JSContext *ctx, JSValueConst wire, JSValueConst ports)
     return out;
 }
 
-/* Serializes value for another runtime.  Returns NULL with an exception
- * pending: DataCloneError for what cannot be cloned, or whatever a getter
- * threw while the value was read. */
 static ns_worker_message *
 ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value,
                       JSValueConst ports)
@@ -26388,9 +26173,6 @@ ns_port_bridge_receive(JSContext *ctx, guint64 id, JSValueConst worker_obj)
 {
     JSValue other = ns_port_bridge_lookup(ctx, id);
     if (JS_IsObject(other)) {
-        /* The port came back to the runtime holding its other end: the two
-         * are a local pair again, and messages queued for the port, which
-         * follow under the same id, are delivered to it. */
         JSValue p = ns_port_new(ctx);
         JS_SetPropertyStr(ctx, p, "_pair", JS_DupValue(ctx, other));
         JS_SetPropertyStr(ctx, other, "_pair", JS_DupValue(ctx, p));
@@ -26409,7 +26191,6 @@ ns_port_bridge_receive(JSContext *ctx, guint64 id, JSValueConst worker_obj)
     return p;
 }
 
-/* The ports a message transfers, as port objects of the receiving side. */
 static JSValue
 ns_worker_message_ports(JSContext *ctx, const ns_worker_message *msg,
                         JSValueConst worker_obj)
@@ -26517,8 +26298,6 @@ ns_sw_apply_state(JSContext *ctx, ns_worker_host *host, const char *state)
     JS_FreeValue(ctx, reg);
 }
 
-/* A Worker's error event: a plain Event when its script could not be
- * fetched, otherwise a cancelable ErrorEvent with the error's position. */
 static void
 ns_worker_shape_error_event(JSContext *ctx, JSValueConst ev,
                             const ns_worker_message *msg)
@@ -26555,7 +26334,6 @@ ns_worker_deliver_owner(gpointer data)
 {
     ns_worker_message *msg = data;
     ns_worker_host *host = msg->host;
-    /* After terminate(), whatever the worker had already sent is dropped. */
     if (!host || !g_atomic_int_get(&host->owner_alive) ||
         !host->owner_ctx || JS_IsUndefined(host->owner_obj) ||
         (g_atomic_int_get(&host->terminated) && !msg->is_sw_state)) {
@@ -26599,8 +26377,6 @@ ns_worker_deliver_owner(gpointer data)
         ns_worker_message_free(msg);
         return G_SOURCE_REMOVE;
     }
-    /* A dedicated worker's messages come through its implicit port, so
-     * their origin is empty, as for any MessagePort message. */
     JSValue ev = ns_worker_event(ctx, type, data_v,
                                  host->is_service_worker ? host->origin : "",
                                  msg->message, msg->filename);
@@ -26623,8 +26399,6 @@ ns_worker_deliver_owner(gpointer data)
     }
     ns_worker_dispatch(ctx, target, type, ev);
     if (msg->is_error && !msg->is_load_error) {
-        /* An uncaught worker error nobody cancelled at the Worker object is
-         * reported at the owner's window too. */
         JSValue dp = JS_GetPropertyStr(ctx, ev, "defaultPrevented");
         gboolean cancelled = JS_ToBool(ctx, dp) > 0;
         JS_FreeValue(ctx, dp);
@@ -26656,9 +26430,6 @@ ns_worker_post_owner_message(ns_worker_host *host, ns_worker_message *msg)
                                ns_worker_deliver_owner, msg, NULL);
 }
 
-/* An error for the Worker object: a script that could not be fetched
- * (load_error, a plain error event) or an uncaught exception (an ErrorEvent
- * that reaches the owner's window unless it is cancelled). */
 static void
 ns_worker_post_owner_error(ns_worker_host *host, const char *message,
                            const char *filename, int lineno, int colno,
@@ -26747,9 +26518,6 @@ ns_worker_script_url_allowed(ns_worker_host *host, const char *url,
     return ns_url_is_http_or_https(url) || g_str_has_prefix(url, "file:");
 }
 
-/* Decodes worker script bytes as the HTML standard's "UTF-8 decode" does:
- * a UTF-8 byte order mark is dropped, invalid sequences become U+FFFD, and
- * no other encoding is ever used, so a UTF-16 script fails to compile. */
 static char *
 ns_worker_script_text(const guint8 *data, gsize len, gsize *out_len)
 {
@@ -26775,8 +26543,6 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
     }
 
     GError *err = NULL;
-    /* importScripts() fetches a script; the worker's own script is fetched
-     * with the worker's destination and mode "same-origin". */
     static const char *const import_headers[] = {
         "X-ND-Fetch-Dest: script", NULL };
     static const char *const worker_headers[] = {
@@ -26814,13 +26580,12 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
 }
 
 typedef struct {
-    char    *message;   /* "Uncaught " and the exception, as in Chrome */
+    char    *message;
     int      lineno, colno;
-    gboolean parse_error;   /* the script did not compile */
-    gboolean reported;      /* a runtime error already went to onerror */
+    gboolean parse_error;
+    gboolean reported;
 } ns_worker_error_info;
 
-/* The file, line and column of the innermost frame in ex's stack. */
 static void
 ns_js_exception_position(JSContext *ctx, JSValueConst ex, char **file,
                          int *line, int *col)
@@ -26876,11 +26641,6 @@ ns_worker_make_error_event(JSContext *ctx, JSValueConst global,
     return ev;
 }
 
-/* Reports an uncaught exception in a worker as the HTML standard does: an
- * ErrorEvent at the worker's global, which self.onerror or a listener can
- * cancel, and otherwise an ErrorEvent at the Worker object in the owner,
- * which goes on to the owner's window unless that is cancelled too.
- * Returns TRUE when the worker itself handled the error. */
 static gboolean
 ns_worker_report_exception(ns_js *js, JSValueConst ex)
 {
@@ -26950,8 +26710,6 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
             v = JS_Throw(js->ctx, reason);
         }
     } else {
-        /* Compiled first, so a script that does not parse can be told
-         * apart from one that throws while it runs. */
         v = JS_Eval(js->ctx, src ? src : "", len, url ? url : "<worker>",
                     JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
         if (JS_IsException(v)) {
@@ -27962,8 +27720,6 @@ ns_worker_stack_limit(void)
     return limit;
 }
 
-/* The names the engine keeps on platform objects for itself, which page
- * scripts must neither see nor clash with (JS_AddEnginePrivateName). */
 static void
 ns_js_add_engine_private_names(JSContext *ctx)
 {
@@ -27986,9 +27742,6 @@ static void ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst obj);
 static JSValue ns_message_event_init(JSContext *ctx, JSValueConst this_val,
                                      int argc, JSValueConst *argv);
 
-/* An interface object's [[Prototype]] is its parent interface object, as
- * its prototype object's is the parent's prototype object (WebIDL); many
- * were left at Function.prototype. */
 static const char ns_interface_ctor_links_src[] =
     "(function(G){"
     "  var FP = Function.prototype, OP = Object.prototype, gp = Object.getPrototypeOf,"
@@ -28001,8 +27754,6 @@ static const char ns_interface_ctor_links_src[] =
     "    var PP = gp(P); if (!PP || PP === OP) return;"
     "    var c = gopd(PP, 'constructor');"
     "    if (!c || typeof c.value !== 'function' || c.value.prototype !== PP) return;"
-    /* DOMException's prototype inherits Error.prototype, but as an interface
-     * without a parent its interface object inherits Function.prototype. */
     "    if (c.value === G.Error) return;"
     "    try { Object.setPrototypeOf(F, c.value); } catch (e) {}"
     "  });"
@@ -28019,8 +27770,6 @@ ns_js_link_interface_ctors(JSContext *ctx)
     JS_FreeValue(ctx, r);
 }
 
-/* The global object and the prototypes it inherits are immutable prototype
- * exotic objects for page scripts (WebIDL [Global]). */
 static void
 ns_js_lock_global_prototypes(JSContext *ctx)
 {
@@ -28034,10 +27783,6 @@ ns_js_lock_global_prototypes(JSContext *ctx)
     JS_FreeValue(ctx, o);
 }
 
-/* The window's prototype chain as WebIDL has a [Global] interface's:
- * Window.prototype > WindowProperties > EventTarget.prototype; Window's
- * members are the window's own, so Window.prototype keeps only its tag, and
- * EventTarget's methods serve windows through the registry et_src keeps. */
 static const char ns_window_global_shape_src[] =
     "(function(G){"
     "  var gp = Object.getPrototypeOf, sp = Object.setPrototypeOf,"
@@ -28077,10 +27822,6 @@ ns_js_shape_window_global(JSContext *ctx)
     JS_FreeValue(ctx, r);
 }
 
-/* A frame window's listener operations join the page's registry (see
- * et_src), and its tag is its Window.prototype's. */
-/* A frame window's prototype chain, copied from the page's, runs through the
- * frame's own Window and EventTarget prototypes. */
 static const char ns_frame_window_chain_src[] =
     "(function(G){"
     "  var gp = Object.getPrototypeOf, sp = Object.setPrototypeOf;"
@@ -28131,12 +27872,6 @@ ns_is_engine_function(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_NewBool(ctx, argc > 0 && JS_IsEngineFunction(argv[0]));
 }
 
-/* A worker's global object as WebIDL shapes a [Global] interface: its
- * prototype chain is DedicatedWorkerGlobalScope (or ServiceWorkerGlobalScope),
- * WorkerGlobalScope and EventTarget; the members of WorkerGlobalScope and
- * EventTarget are on those prototypes, the scope interface's own members on
- * the global itself; attributes are accessors, event handlers among them;
- * location and navigator are a WorkerLocation and a WorkerNavigator. */
 static const char ns_worker_global_shape_src[] =
     "(function(G, scopeName){"
     "  'use strict';"
@@ -28152,7 +27887,6 @@ static const char ns_worker_global_shape_src[] =
     "  function accessor(name, get, set){"
     "    var o = {}; def(o, name, { get: get, set: set, configurable: true });"
     "    return gopd(o, name); }"
-    /* named getter and setter functions ("get x", "set x") */
     "  function getter(name, fn){ return gopd({ get [name](){ return fn.call(this); } }, name).get; }"
     "  function setter(name, fn){ return gopd({ set [name](v){ fn.call(this, v); } }, name).set; }"
     "  setProto(WGS.prototype, ET.prototype); setProto(WGS, ET);"
@@ -28188,8 +27922,6 @@ static const char ns_worker_global_shape_src[] =
     "    if (L) { def(G.WorkerLocation.prototype, 'toString', { value: function toString(){"
     "        if (this !== L) throw illegal(); return lf.href; }, writable: true, enumerable: true, configurable: true });"
     "      def(G, 'location', { value: L, writable: true, enumerable: true, configurable: true }); } }"
-    /* navigator.userAgentData is a NavigatorUAData: attributes as getters,
-     * operations on the prototype */
     "  var uad = nav && nav.value && gopd(nav.value, 'userAgentData');"
     "  if (uad && uad.value && typeof G.NavigatorUAData === 'function') {"
     "    var uf = uad.value, UP = G.NavigatorUAData.prototype, U = Object.create(UP);"
@@ -28281,8 +28013,6 @@ ns_worker_shape_global(JSContext *ctx, gboolean service_worker)
     ns_js_lock_global_prototypes(ctx);
 }
 
-/* reportError() in a worker: the worker reports the exception as it would
- * an uncaught one, to its error handlers and then to the Worker object. */
 static JSValue
 ns_worker_report_error(JSContext *ctx, JSValueConst this_val, int argc,
                        JSValueConst *argv)
@@ -28521,7 +28251,6 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetPropertyStr(ctx, navigator, "globalPrivacyControl",
                       JS_NewBool(ctx, !c || c->global_privacy_control));
     if (ns_compat_has_client_hints(wkr_ua)) {
-        /* the same User-Agent Client Hints as the window's navigator */
         JSValue ua_data = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, ua_data, "brands",
                           ns_ua_client_hint_brands(ctx, FALSE));
@@ -28553,8 +28282,6 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetPropertyStr(ctx, global, "name",
                       JS_NewString(ctx, host->name ? host->name : ""));
     if (host->origin && strcmp(host->origin, "null") == 0) {
-        /* A worker with an opaque origin, such as a data: worker, has no
-         * storage of its own: opening a database throws SecurityError. */
         static const char deny_idb[] =
             "(function(){var f=self.indexedDB;if(!f)return;"
             "function deny(){throw new DOMException("
@@ -28633,9 +28360,6 @@ ns_worker_thread(gpointer data)
             info.message ? info.message : error ? error : "Worker script failed",
             js->current_url ? js->current_url : host->url,
             info.lineno, info.colno, info.parse_error);
-        /* A script that does not compile never runs; one that throws while
-         * running leaves a worker whose event loop goes on, so handlers it
-         * set up before throwing still receive messages. */
         if (info.parse_error) g_atomic_int_set(&host->closing, 1);
     }
     gboolean runs = ok || !info.parse_error;
@@ -28686,7 +28410,6 @@ ns_worker_option_string(JSContext *ctx, JSValueConst options, const char *name)
     return out;
 }
 
-/* The error event of a Worker whose script could not be obtained. */
 static JSValue
 ns_worker_fail_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -28708,10 +28431,6 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     char *abs_url = NULL;
     char *inline_script = NULL;
     gsize inline_script_len = 0;
-    /* A URL that does not parse throws; any other failure to get the
-     * script, such as a missing blob, a cross-origin or unsupported URL,
-     * leaves a Worker that reports an error event, as the HTML standard
-     * specifies. */
     gboolean fails = FALSE;
     gboolean opaque = FALSE;
     if (g_str_has_prefix(raw, "blob:")) {
@@ -28735,7 +28454,6 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_throw_dom_exception(ctx, "SyntaxError", 12,
             "Failed to construct 'Worker': the script URL is invalid.");
     if (g_str_has_prefix(abs_url, "data:")) {
-        /* A data: worker runs with an opaque origin. */
         gsize raw_len = 0;
         g_autofree char *raw_script = ns_js_decode_data_url(abs_url, &raw_len);
         inline_script = raw_script
@@ -29247,8 +28965,6 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         JSValue cb = JS_DupValue(ctx, o->cb);
         JSValue self = JS_DupValue(ctx, o->wrapper);
         JSValueConst call_args[2] = { arr, self };
-        /* Each observer's callback runs against its own frame's document
-         * and URL, whichever realm queued this drain. */
         JSContext *cb_realm = ns_function_realm(ctx, cb);
         ns_realm_scope scope;
         ns_js_realm_scope_enter(js, cb_realm, &scope);
@@ -29475,8 +29191,6 @@ ns_node_scope_document(ns_node *node)
     return NULL;
 }
 
-/* The parent of n within its own node tree: a shadow root and a frame's
- * document are roots there, whatever node holds them in the engine. */
 static const ns_node *
 ns_dom_tree_parent(const ns_node *n)
 {
@@ -29485,7 +29199,6 @@ ns_dom_tree_parent(const ns_node *n)
     return n->parent;
 }
 
-/* True when n belongs to a shadow tree rather than its document's tree. */
 static gboolean
 ns_node_in_shadow_tree(const ns_node *n)
 {
@@ -29502,8 +29215,6 @@ ns_js_index_child_change(ns_js *js, ns_node *parent,
 {
     ns_qcache_invalidate(js);
     ns_node *doc = ns_node_scope_document(parent);
-    /* The document's id, class and tag indexes cover its own tree only;
-     * nodes inserted into a shadow tree stay out of them. */
     if (js && doc && !ns_node_in_shadow_tree(parent)) {
         if (removed) {
             ns_doc_id_index_subtree_removed   (doc, removed);
@@ -30022,7 +29733,6 @@ ns_window_observer_ctor(JSContext *ctx, JSValueConst this_val,
     }
     return obj;
 }
-
 
 static JSValue
 ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
@@ -31593,8 +31303,6 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
     ns_event_define_legacy_accessors(ctx, ev);
-    /* Every event records when it was created, relative to the time origin
-     * like performance.now(); the constructors set it themselves. */
     JSAtom ts = JS_NewAtom(ctx, "timeStamp");
     int has_ts = JS_GetOwnProperty(ctx, NULL, ev, ts);
     if (has_ts == 0)
@@ -32681,8 +32389,6 @@ ns_fire_inline_on_handler_in_realm(ns_js *js, const ns_node *target,
         return FALSE;
     }
 
-    /* <body onload> and the other window-reflecting attributes are the
-     * window's handlers: they run with the window as this and currentTarget. */
     gboolean window_handler = ns_node_is_window_handler_holder(target) &&
                               ns_event_type_is_window_reflected(type);
     JSValue this_val = window_handler ? JS_GetGlobalObject(js->ctx)
@@ -32996,8 +32702,6 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
             JS_FreeValue(js->ctx, basev);
         }
     }
-    /* The listeners are those registered when the dispatch reaches this
-     * target: one an event handler adds runs from the next dispatch on. */
     js->listener_snapshots++;
     gboolean has_listeners = (cur->kind == NS_NODE_DOCUMENT) ||
                              ((cur->flags & NS_NODE_HAS_LISTENERS) != 0);
@@ -33050,7 +32754,6 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
     ns_listeners_sweep(js);
     return stopped;
 }
-
 
 static gboolean
 ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
@@ -33186,8 +32889,6 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
     return stopped;
 }
 
-/* Only the outermost dispatch drains mutations and microtasks; a dispatch
- * from inside a script or a microtask leaves that to its caller. */
 static void
 ns_dispatch_finish_mutations(ns_js *js)
 {
@@ -33309,8 +33010,6 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
 
     gboolean stopped = ns_event_propagation_is_stopped(js, event);
     if (window_is_target) {
-        /* The window's load and unload events are fired at the window with
-         * the document as their target; document listeners never see them. */
         if (!stopped)
             stopped = ns_invoke_window_listeners_full(js, target, type, event,
                                                       TRUE, TRUE, &fired);
@@ -34040,9 +33739,6 @@ ns_js_purge_subtree_rafs(ns_js *js, ns_node *root)
     }
 }
 
-/* The bubbles and cancelable flags the HTML, DOM and UI Events standards
- * give the events the browser itself fires.  Anything not listed bubbles
- * and can be cancelled, like click, submit, reset and beforeinput. */
 static void
 ns_event_type_init_flags(const char *type, gboolean at_document,
                          gboolean *bubbles, gboolean *cancelable)
@@ -34065,7 +33761,6 @@ ns_event_type_init_flags(const char *type, gboolean at_document,
     *bubbles = TRUE;
     *cancelable = TRUE;
     if (strcmp(type, "scroll") == 0 || strcmp(type, "scrollend") == 0) {
-        /* Only the document's scroll event bubbles, up to the window. */
         *bubbles = at_document;
         *cancelable = FALSE;
         return;
@@ -34401,9 +34096,6 @@ ns_js_dispatch_resource_event(ns_js *js, const ns_node *target, const char *type
     return ns_js_dispatch_built_event(js, target, type, event, NULL);
 }
 
-/* The resource timing entry of an image, from the times the image cache
- * started and finished fetching it.  An image served from memory without
- * a fetch for this page takes its load time instead. */
 static void
 ns_js_record_image_timing(ns_js *js, const ns_node *node, const char *url,
                           const ns_image *img)
@@ -34411,8 +34103,6 @@ ns_js_record_image_timing(ns_js *js, const ns_node *node, const char *url,
     if (!js || !url || !img) return;
     ns_perf_resource_info info = { 0 };
     ns_js_element_perf_info(js, node, &info);
-    /* A second image with the same URL comes from the memory cache and,
-     * as in other browsers, gets no entry of its own. */
     if (ns_perf_has_resource(js, info.timeline, url, "img")) return;
     info.next_hop_protocol = img->next_hop_protocol;
     info.timing_allow_origin = img->timing_allow_origin;
@@ -35850,11 +35540,6 @@ ns_args_node_sequence(JSContext *ctx, ns_js *js, int argc, JSValueConst *argv,
     return seq;
 }
 
-/* The steps that follow inserting nodes into parent, as appendChild() and
- * the other insertion methods run them: scripts among the nodes run first,
- * then custom elements get their upgrade and connectedCallback reactions,
- * which the DOM standard runs as the inserting method returns.  Nodes
- * inserted into template contents stay inert. */
 static void
 ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes)
 {
@@ -36255,9 +35940,6 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
     }
     GPtrArray *seq = ns_args_node_sequence(ctx, _j, argc, argv, parent, NULL,
                                            FALSE);
-    /* The first child once the nodes have left their old places: taken
-     * before, it is the node itself when prepend() moves the first child,
-     * and inserting a node before itself makes it its own sibling. */
     ns_node *ref = parent->first_child;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
@@ -40603,7 +40285,6 @@ ns_floordiv(long a, long b)
     return q;
 }
 
-
 static gboolean
 ns_input_value_to_ms(ns_input_kind kind, const char *v, gboolean as_date, double *out)
 {
@@ -41629,7 +41310,6 @@ ns_element_getRootNode(JSContext *ctx, JSValueConst this_val,
     while (n->parent) n = n->parent;
     return ns_make_element(ctx, n);
 }
-
 
 static const char *
 ns_node_element_namespace(const ns_node *n)
@@ -44442,7 +44122,7 @@ ns_js_note_pointer_input(ns_js *js, gboolean pointer)
 }
 
 typedef struct ns_focus_guard {
-    const ns_node *node[4];     /* old element, new element, old and new document */
+    const ns_node *node[4];
     struct ns_focus_guard *prev;
 } ns_focus_guard;
 
@@ -44485,7 +44165,6 @@ ns_js_dispatch_focus_event(ns_js *js, const ns_node *target, const char *type,
     ns_js_dispatch_built_event(js, target, type, event, NULL);
 }
 
-/* focus or blur at the window of doc, in that window's realm. */
 static void
 ns_js_fire_window_focus_event(ns_js *js, ns_node *doc, const char *type)
 {
@@ -44509,11 +44188,6 @@ ns_js_fire_window_focus_event(ns_js *js, ns_node *doc, const char *type)
     ns_js_realm_scope_leave(js, &scope);
 }
 
-/* Moves focus to el, or with el NULL to no element of doc, following the
- * HTML focus update steps: blur and focusout on the old element while no
- * element has focus, blur and focus at the windows once focus has changed
- * document, then focus and focusin on the new element.  relatedTarget is
- * the other element when both are in one document. */
 static void
 ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
 {
@@ -44524,8 +44198,6 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     const ns_node *old = js->focused_node;
     gboolean same_doc = new_doc == old_doc;
 
-    /* Handlers run between the steps below and may free any of these
-     * nodes; the free hook clears them and the update stops. */
     ns_focus_guard g = { { old, el, old_doc, new_doc }, js->focus_guard };
     for (gsize i = 0; i < G_N_ELEMENTS(g.node); i++)
         if (g.node[i]) ns_node_arm_js_invalidate((ns_node *)g.node[i]);
@@ -44546,8 +44218,6 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
         if (js->focused_node) goto out;
     }
     if (!same_doc) {
-        /* The windows hear about the move after the focused document has
-         * changed, so the old window's blur already sees it. */
         if (!g.node[3]) goto out;
         js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
         if (g.node[2]) ns_js_fire_window_focus_event(js, old_doc, "blur");
@@ -44611,9 +44281,6 @@ ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
 {
     if (!js) return;
     const ns_node *focus = NULL;
-    /* Look for a focusable ancestor only within the clicked document: a
-     * click on plain content in a frame focuses the frame's document, not
-     * the iframe element around it. */
     for (const ns_node *a = target; a && !focus; a = a->parent) {
         if (a->kind == NS_NODE_DOCUMENT) break;
         if (ns_node_is_focusable(a)) focus = a;
@@ -44755,8 +44422,6 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!el || !js) return JS_UNDEFINED;
-    /* Only a focusable element in this browser's document tree can take
-     * focus; focus() on anything else does nothing. */
     if (!ns_node_is_focusable(el)) return JS_UNDEFINED;
     if (!ns_node_ancestor_or_self(el, ns_js_top_document(js->current_doc)))
         return JS_UNDEFINED;
@@ -46650,7 +46315,6 @@ ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value)
     ns_dialog_close(js, dialog, return_value, NULL);
 }
 
-
 typedef enum {
     NS_COMMAND_UNKNOWN,
     NS_COMMAND_CUSTOM,
@@ -47649,10 +47313,6 @@ ns_element_form_reset(JSContext *ctx, JSValueConst this_val,
     return ns_js_reset_form(ctx, el);
 }
 
-
-
-
-
 void
 ns_js_request_repaint(ns_js *js)
 {
@@ -47773,8 +47433,6 @@ ns_js_computed_text(JSContext *ctx, const ns_node *node, const char *name)
     return ns_computed_lookup(ctx, node, name);
 }
 
-/* The frame element whose content document holds node, or NULL for the
- * page's own document (fallback content inside an <object> included). */
 static ns_node *
 ns_js_node_content_frame(const ns_node *node)
 {
@@ -47806,11 +47464,6 @@ ns_js_attr_has_token(const ns_node *el, const char *attr, const char *token)
     return ns_token_list_has(ns_element_get_attr(el, attr), token);
 }
 
-/* Whether a script or stylesheet link blocks rendering, as
- * PerformanceResourceTiming.renderBlockingStatus reports it: the element
- * is in its document's <head> and has blocking="render", or is a
- * parser-inserted classic script without async or defer, or a stylesheet
- * link the parser created for media that applies to the screen. */
 static gboolean
 ns_js_element_render_blocking(const ns_node *el)
 {
@@ -47836,10 +47489,6 @@ ns_js_element_render_blocking(const ns_node *el)
     return FALSE;
 }
 
-/* The resource timing details that come from the element a resource is
- * loaded for: the timeline of its document (the frame's realm, the frame
- * element for a frame without one yet, NULL for the page's own), that
- * document's URL, its render-blocking status and its CORS mode. */
 static void
 ns_js_element_perf_info(ns_js *js, const ns_node *el,
                         ns_perf_resource_info *info)
@@ -48125,110 +47774,11 @@ ns_js_resource_origin_clean(ns_js *js, JSContext *ctx, const char *url,
     return cors_allow_origin && cors_allows(doc_url, url, cors_allow_origin);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 double
 ns_arg_d(JSContext *ctx, JSValueConst v)
 {
     double d = 0; JS_ToFloat64(ctx, &d, v); return d;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 static JSValue
 ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
@@ -48314,7 +47864,6 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, cb);
     return JS_UNDEFINED;
 }
-
 
 static JSValue
 ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
@@ -49222,7 +48771,6 @@ ns_media_source_is_type_supported(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, raw);
     return JS_NewBool(ctx, ok);
 }
-
 
 static JSValue
 ns_media_get_paused(JSContext *ctx, JSValueConst this_val)
@@ -50402,9 +49950,6 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 static const char ns_iframe_global_bootstrap[] =
     "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch){"
     "  var url = initialURL || 'about:blank';"
-    /* An initial about:blank or srcdoc document shows about:blank or
-     * about:srcdoc as its URL while url, the creator's, stays its base URL
-     * and gives it its origin. */
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
@@ -50505,8 +50050,6 @@ static const char ns_iframe_global_bootstrap[] =
     "    def('sessionStorage', { get: function(){ throw denyStore(); } });"
     "    def('indexedDB',      { get: function(){ throw denyStore(); } });"
     "  }"
-    /* A sandboxed document may ask for storage access only with
-     * allow-storage-access-by-user-activation. */
     "  if ((sandbox & 1) && !(sandbox & 16384) && iframeDoc) {"
     "    try { Object.defineProperty(iframeDoc, 'requestStorageAccess', {"
     "      configurable: true, writable: true, enumerable: true,"
@@ -50554,16 +50097,9 @@ static const char ns_iframe_global_bootstrap[] =
     "    for (var pi = 0; pi < pnames.length; pi++) {"
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
-    /* Only names the platform defines are carried over: the page's own
-     * globals (its var and function declarations, window.x = ...) belong
-     * to the page's window, and a same-origin frame must not see them as
-     * its own, as it did while every own property was copied. */
     "      if (platformNames ? !Object.prototype.hasOwnProperty.call(platformNames, pk)"
     "                        : crossOrigin) continue;"
     "      if (crossOrigin && parentOnly[pk]) continue;"
-    /* Engine keys written as "\xff..." in C read back starting with
-     * U+FFFD; they hold a window's own state, such as its on<event>
-     * handlers, and a frame must not start with its parent's. */
     "      if (pk.charCodeAt(0) === 0xfffd) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
@@ -50595,9 +50131,6 @@ static JSValue
 ns_iframe_platform_names(JSContext *fctx, ns_js *js)
 {
     if (!js->platform_globals) {
-        /* A frame made while the document is still being installed, before
-         * any of the page's scripts ran: every name the window has is the
-         * platform's. */
         JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx
                                                  : js->ctx;
         JSContext *saved = js->ctx;
@@ -50637,8 +50170,6 @@ ns_realm_cloner_put(ns_realm_cloner *rc, JSValueConst from, JSValueConst to)
 {
     if (!JS_IsObject(from) || !JS_IsObject(to)) return;
     if (g_hash_table_contains(rc->memo, JS_VALUE_GET_PTR(from))) return;
-    /* Both are held: an entry keyed by a freed object's address would map
-     * whatever object reuses the address to this copy. */
     JSValue held_from = JS_DupValue(rc->src, from);
     JSValue held = JS_DupValue(rc->dst, to);
     g_hash_table_insert(rc->memo, JS_VALUE_GET_PTR(held_from),
@@ -50788,8 +50319,6 @@ ns_realm_cloner_for(ns_js *js, JSContext *dst)
     if (rc) return rc;
     if (!js->realm_cloners)
         js->realm_cloners = g_hash_table_new(g_direct_hash, g_direct_equal);
-    /* Every frame realm copies the page realm's platform objects, whichever
-     * realm is running when the frame is made. */
     JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     rc = ns_realm_cloner_new(main_ctx, main_ctx, dst);
     g_hash_table_insert(js->realm_cloners, dst, rc);
@@ -50947,9 +50476,6 @@ ns_realm_adopt_in_place(ns_realm_cloner *rc, JSValueConst obj)
     JS_FreePropertyEnum(rc->src, tab, len);
 }
 
-/* Whether a JS-implemented function is an interface object: one with an
- * interface prototype of its own, or a capitalised name. A method or an
- * accessor function is not one, whatever its [[Construct]] says. */
 static gboolean
 ns_realm_fn_is_interface(ns_realm_cloner *rc, JSValueConst fn)
 {
@@ -50994,9 +50520,6 @@ ns_realm_forwarder_for(ns_realm_cloner *rc, JSValueConst v, gboolean ctor)
     return out;
 }
 
-/* Whether the JS layer made constructor ctor so that the copies of it in the
- * frames get a prototype of their own: its instances are not tested against
- * the prototype of the realm that made them (__ndRealmProto). */
 static gboolean
 ns_realm_ctor_owns_proto(ns_realm_cloner *rc, JSValueConst ctor)
 {
@@ -51025,10 +50548,6 @@ ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst ou
         flags |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
     } else if (is_proto && JS_IsObject(desc.value) &&
                !ns_realm_ctor_owns_proto(rc, v)) {
-        /* The JS layer's own checks (instanceof against its closure's
-         * interface) only accept its own prototype, so an interface the
-         * JS layer implements keeps it: the frame's constructor is new,
-         * the instances it makes are the JS layer's. */
         ns_realm_cloner_put(rc, desc.value, desc.value);
         value = JS_DupValue(rc->dst, desc.value);
         flags |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
@@ -51042,9 +50561,6 @@ ns_realm_forwarder_property(ns_realm_cloner *rc, JSValueConst v, JSValueConst ou
     ns_realm_free_descriptor(rc, &desc);
 }
 
-/* A JS-implemented platform function becomes a native forwarder in the
- * frame's realm: its own identity, Function.prototype, name and length,
- * constructible only when it is an interface object. */
 static JSValue
 ns_realm_clone_js_function(ns_realm_cloner *rc, JSValueConst v, int depth)
 {
@@ -51094,10 +50610,6 @@ ns_realm_clone_prototype(ns_realm_cloner *rc, JSValueConst v, JSValueConst out,
     JS_FreeValue(rc->src, proto);
 }
 
-/* The empty object that becomes the realm's copy of v when v is a namespace
- * object or the named properties object of the window, whose prototype chain
- * must run through the realm's own prototypes; JS_UNDEFINED for the objects
- * that stay shared. */
 static JSValue
 ns_realm_new_shell(ns_realm_cloner *rc, JSValueConst v)
 {
@@ -51229,9 +50741,6 @@ static void
 ns_realm_clone_instance_properties(ns_realm_cloner *rc, JSValueConst v,
                                    JSValueConst out, int depth)
 {
-    /* Private names come along too: a script-implemented interface keeps
-     * its brand there, and the realm's copy is an instance as much as the
-     * original. */
     JSPropertyEnum *tab = NULL;
     uint32_t n = 0;
     if (JS_GetOwnPropertyNames(rc->src, &tab, &n, v,
@@ -51263,12 +50772,6 @@ ns_realm_clone_plain_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
     return out;
 }
 
-/* A window's own instance of one of the parent's singleton objects: a new
- * object with the realm's copy of its prototype and its own properties
- * copied, functions as the realm's functions and plain sub-objects (such as
- * navigator.connection) as the realm's own too. A Storage object is a new
- * Storage over the same storage area. Objects of other native classes stay
- * shared. */
 static JSValue
 ns_realm_clone_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
 {
@@ -51284,8 +50787,6 @@ ns_realm_clone_instance(ns_realm_cloner *rc, JSValueConst v, int depth)
     return ns_realm_clone_plain_instance(rc, v, depth);
 }
 
-/* The window objects every realm has its own of, which the realm bootstrap
- * copies from the parent window. */
 static const char *const ns_realm_singleton_names[] = {
     "navigator", "screen", "crypto", "localStorage", "sessionStorage",
     "caches", "indexedDB", "cookieStore", "trustedTypes", "visualViewport",
@@ -51313,9 +50814,6 @@ ns_realm_adopt_navigator_value(ns_realm_cloner *rc, JSValueConst mine, JSAtom at
     JS_FreeValue(rc->src, v);
 }
 
-/* A frame's navigator gets its own realm's copies of the page navigator's
- * object attributes (plugins, mediaDevices, ...), which its getters, shared
- * with the page's, return for it. */
 static void
 ns_realm_adopt_navigator_objects(ns_realm_cloner *rc, JSValueConst brand,
                                  JSValueConst frame_nav)
@@ -51371,8 +50869,6 @@ ns_realm_install_singleton(ns_realm_cloner *rc, JSValueConst parent_global,
     if (has > 0 && !(desc.flags & JS_PROP_GETSET) &&
         JS_IsObject(desc.value)) {
         JSValue parent_v = JS_GetPropertyStr(rc->src, parent_global, name);
-        /* Only what the frame took over from its parent: a frame's own
-         * object, such as a sandbox's throwing localStorage, stays. */
         if (JS_IsObject(parent_v) &&
             JS_VALUE_GET_PTR(parent_v) == JS_VALUE_GET_PTR(desc.value))
             ns_realm_replace_singleton(rc, frame_global, atom, &desc);
@@ -51424,7 +50920,6 @@ ns_realm_install_singletons(ns_realm_cloner *rc, JSValueConst parent_global,
     for (gsize i = 0; i < G_N_ELEMENTS(ns_realm_singleton_names); i++)
         ns_realm_install_singleton(rc, parent_global, frame_global,
                                    ns_realm_singleton_names[i]);
-    /* clientInformation is the window's navigator. */
     JSValue nav = JS_GetPropertyStr(rc->dst, frame_global, "navigator");
     ns_realm_register_navigator(rc, nav);
     ns_realm_client_information(rc, frame_global, nav);
@@ -51488,8 +50983,6 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     ns_realm_adopt_in_place(cloner, iframe_doc);
 
     JSValue fg = JS_GetGlobalObject(fctx);
-    /* The parent is the window whose document holds the iframe, which for
-     * a nested frame is another frame's window, not the top-level one. */
     JSContext *parent_ctx = iframe && iframe->parent
         ? ns_js_node_realm_context(js, iframe->parent) : NULL;
     if (!parent_ctx) parent_ctx = js->main_realm_ctx ? js->main_realm_ctx
@@ -51675,10 +51168,6 @@ ns_document_define_implementation_getter(JSContext *ctx, JSValueConst obj)
     JS_FreeAtom(ctx, atom);
 }
 
-/* The URL a frame's document shows when it differs from the URL it was
- * loaded under: "about:blank" for a frame without a source and
- * "about:srcdoc" for a srcdoc frame, whose base URL and origin come from
- * the document that holds the frame (data-nd-frame-url). */
 static void ns_js_set_doc_ready_state(ns_js *js, const ns_node *doc, int state);
 
 static const char *
@@ -51712,8 +51201,6 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
         ? ns_element_get_attr(iframe, "data-nd-frame-url") : NULL;
     const char *shown = ns_iframe_doc_url(iframe);
     if (!url || !*url) {
-        /* The frame's initial about:blank document: its base URL and origin
-         * are its creator's, and it is complete from the start. */
         url = ns_js_node_doc_base(js_from_ctx(ctx), iframe);
         shown = "about:blank";
         ns_js_set_doc_ready_state(js_from_ctx(ctx), doc, 2);
@@ -51758,17 +51245,10 @@ ns_iframe_content_document(JSContext *ctx, JSValueConst this_val, ns_node *n)
     return ns_iframe_build_content_document(ctx, n);
 }
 
-/* A frame element has a content navigable only while it is connected to a
- * document that has a browsing context: the page's document or, through
- * frames, a document nested in it. A frame created by createElement() and
- * not inserted yet, or one in a document from createHTMLDocument(), has
- * none, so its contentWindow and contentDocument are null. */
 static gboolean
 ns_frame_owner_has_browsing_context(ns_js *js, const ns_node *frame)
 {
     if (!js || !frame) return FALSE;
-    /* The page's document, whichever document is current while a frame's
-     * script runs; a frame's document hangs below its frame element. */
     const ns_node *page = js->ce_main_doc ? js->ce_main_doc : js->current_doc;
     const ns_node *root = frame;
     while (root->parent) root = root->parent;
@@ -52061,8 +51541,6 @@ ns_count_child_frames(const ns_node *n, int depth)
     return count;
 }
 
-/* window.length counts the child frames; it does not make their windows,
- * which reading it while the document is installed used to do. */
 static JSValue
 ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
                      JSValueConst *argv)
@@ -52877,9 +52355,6 @@ ns_document_get_head(JSContext *ctx, JSValueConst this_val)
     return ns_make_element(ctx, head);
 }
 
-/* The element of doc that is or contains the focused area: the focused
- * element itself, the iframe whose document holds focus, or the shadow host
- * whose shadow tree does.  NULL when focus is outside doc. */
 static const ns_node *
 ns_js_active_element_in(ns_js *js, const ns_node *doc)
 {
@@ -53201,8 +52676,6 @@ ns_document_has_focus(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_document_root_for(ctx, this_val);
     if (!js || !doc) return JS_FALSE;
-    /* A document has focus when the focused document is it or is nested
-     * inside it through frames. */
     return JS_NewBool(ctx, ns_node_ancestor_or_self(ns_js_focused_document(js),
                                                     doc) != NULL);
 }
@@ -53272,8 +52745,6 @@ ns_hit_layout_point(JSContext *ctx, ns_js *js, const ns_node *doc, double *x, do
 static const ns_node *
 ns_hit_owner_node(const ns_box *hit, const ns_node *doc)
 {
-    /* Content of a nested document is not part of this document's hit
-     * test: a point over a frame hits the frame element. */
     const ns_node *node = hit->dom;
     const ns_node *p = hit->dom;
     for (; p && p != doc; p = p->parent)
@@ -53282,10 +52753,6 @@ ns_hit_owner_node(const ns_box *hit, const ns_node *doc)
     return p ? node : NULL;
 }
 
-/* The node a point hits in the document this_val is, or NULL: the point is
- * in that document's viewport coordinates, and for a frame's document it is
- * translated into the frame's content box first. local_x and local_y get the
- * point inside the hit box. */
 static const ns_node *
 ns_document_hit_node(JSContext *ctx, JSValueConst this_val, double x, double y,
                      const ns_node **doc_out, const ns_box **box_out,
@@ -55672,8 +55139,6 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
         return;
     }
     js->in_scroll_dispatch = TRUE;
-    /* Viewport scrolling fires one scroll event at the document, which
-     * bubbles to the window. */
     if (js->current_doc) {
         ns_js_dispatch_event(js, js->current_doc, "scroll", NULL);
     } else {
@@ -55706,7 +55171,6 @@ ns_js_fire_page_transition(ns_js *js, const char *type, gboolean persisted)
 {
     if (!js || !js->ctx || !type) return;
     JSContext *ctx = js->ctx;
-    /* Fired at the window, but with the document as the event's target. */
     JSValue ev = ns_make_event(ctx, type, js->current_doc);
     JS_SetPropertyStr(ctx, ev, "persisted", persisted ? JS_TRUE : JS_FALSE);
     ns_js_dispatch_window_only_event(js, js->current_doc, type, ev, NULL);
@@ -56074,10 +55538,6 @@ ns_install_event_handler_accessors(JSContext *ctx, JSValueConst proto)
     }
 }
 
-/* No document or worker here is cross-origin isolated (crossOriginIsolated
- * is always false), and the HTML standard removes SharedArrayBuffer from
- * the global object of every realm that is not. Shared memory a
- * WebAssembly.Memory creates still works. */
 static void
 ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global)
 {
@@ -56423,8 +55883,6 @@ ns_install_performance_prototype(JSContext *ctx, JSValueConst global)
                ns_window_performance_clearResourceTimings, 0);
     ns_bind_fn(ctx, proto, "setResourceTimingBufferSize", ns_event_noop, 1);
     ns_bind_fn(ctx, proto, "toJSON", ns_window_performance_toJSON, 0);
-    /* Each window's performance object answers with its own document's
-     * time origin and timing objects. */
     JSAtom atom = JS_NewAtom(ctx, "timeOrigin");
     JS_DefinePropertyGetSet(ctx, proto, atom,
         JS_NewCFunction2(ctx, ns_window_performance_time_origin_get,
@@ -56563,14 +56021,6 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
     JS_FreeAtom(ctx, tag_atom);
 }
 
-/* The members each non-element node interface defines (WebIDL, as Chrome
- * ships them). The element member table used to be installed on Node,
- * Document, HTMLDocument and DocumentFragment as well, so a document, a
- * text node or a fragment had click(), style, tagName and the rest;
- * ns_install_node_shapes keeps only these names on those prototypes. A
- * name a character-data node, a doctype or a shadow root should have but
- * only found through Node.prototype (or DocumentFragment.prototype) is
- * moved down first. The __shady_ shims stay. */
 static const char ns_node_shapes_src[] =
     "(function(G){"
     "  var W = {"
@@ -56715,13 +56165,6 @@ ns_install_node_shapes(JSContext *ctx)
     JS_FreeValue(ctx, r);
 }
 
-/* The same for elements: the element member table sits on Element.prototype
- * only, but it holds what HTMLElement and each HTML element interface define
- * as well (value, href, checked, click(), style...). Each HTML element
- * interface and HTMLElement take their members from it, SVGElement takes
- * the members of the SVG element interfaces this engine does not have yet
- * (getBBox() and the rest; an <svg> or <circle> is an SVGElement here), and
- * Element and HTMLElement then keep only their own. */
 #define NS_GLOBAL_EVENT_HANDLER_NAMES \
     "onabort onanimationcancel onanimationend " \
     "onanimationiteration onanimationstart onauxclick onbeforeinput " \
@@ -57160,10 +56603,6 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
     (void)global;
 }
 
-/* HTML's PDF viewer plugins: when the user agent views PDFs itself
- * (pdfViewerEnabled), navigator.plugins holds the five PDF viewer plugin
- * objects and navigator.mimeTypes the two PDF MIME types, as the standard
- * prescribes for every browser. */
 static const char ns_pdf_plugins_src[] =
     "(function(){"
     " if (typeof PluginArray !== 'function' || typeof Plugin !== 'function' ||"
@@ -57233,16 +56672,11 @@ ns_install_pdf_plugins(JSContext *ctx)
 static void
 ns_install_navigator_shape(JSContext *ctx)
 {
-    /* The getters accept the window's navigator and the navigators in the
-     * engine's set (see <navigator-iface>), each frame realm's own. */
     static const char *const source =
         "(function(others){"
         " if(typeof Navigator!=='function'||typeof navigator!=='object'||!navigator)return;"
         " var nav=navigator,P=Navigator.prototype;"
         " if(!(others instanceof WeakSet))others=new WeakSet();"
-        /* An attribute whose value is an object ([SameObject] in WebIDL) is
-         * each navigator's own: a frame's navigator gets objects of its own
-         * realm (ns_realm_install_singletons hands them over). */
         " var slots=new WeakMap(),mine=Object.create(null);slots.set(nav,mine);"
         " function objectGetter(name){"
         "  var holder={get [name](){var m=slots.get(this);if(!m)throw new TypeError('Illegal invocation');return m[name];}};"
@@ -57361,8 +56795,6 @@ ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
     JS_FreeAtom(ctx, atom);
 }
 
-/* MathMLElement extends Element and has the dataset of HTMLOrSVGElement; the
- * rest of its members are moved down from Element by the element shapes. */
 static JSValue
 ns_install_mathml_proto(JSContext *ctx, JSValueConst global,
                         JSValueConst elem_proto)
@@ -58731,8 +58163,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             JSValue carrier = JS_GetPropertyStr(ctx, global, node_carriers[c]);
             if (!JS_IsObject(carrier)) { JS_FreeValue(ctx, carrier); continue; }
             JSValue proto = JS_GetPropertyStr(ctx, carrier, "prototype");
-            /* The constants belong to Node.prototype, which the document
-             * and fragment prototypes inherit from. */
             gboolean doc_like_carrier = c >= 3;
             for (gsize i = 0; i < G_N_ELEMENTS(node_constants); i++) {
                 JS_DefinePropertyValueStr(ctx, carrier, node_constants[i].name,
@@ -58812,9 +58242,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  var nDisp = NP && Object.prototype.hasOwnProperty.call(NP,'dispatchEvent') ? NP.dispatchEvent : null;"
             "  function isNode(o){ return o && typeof o.nodeType === 'number'; }"
             "  var K = '__nd_et_listeners';"
-            /* A window's addEventListener and friends are EventTarget's, as in
-             * WebIDL; each window's own implementation (the C one for the page,
-             * the frame bootstrap's for a frame) is kept here by window. */
             "  var G = globalThis, WINDOW_OPS = new WeakMap();"
             "  Object.defineProperty(G, '__ndAdoptWindowEventOps', { value: function(w){"
             "    var gopd = Object.getOwnPropertyDescriptor;"
@@ -58826,8 +58253,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  } });"
             "  function windowOps(o){ return WINDOW_OPS.get(o === undefined || o === null ? G : o); }"
             "  var isEngineFn = G.__ndIsEngineFunction;"
-            /* An event handler IDL attribute is an accessor; a page's own data
-             * property named like one is not a handler. */
             "  function handlerOf(o, type){"
             "    var k = 'on' + type;"
             "    for(var p = o; p; p = Object.getPrototypeOf(p)){"
@@ -58872,11 +58297,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    var list = m[String(type)]; if(!list) return;"
             "    for(var i=0;i<list.length;i++){ if(list[i].cb===cb && list[i].capture===capture){ list[i].removed = true; list.splice(i,1); return; } }"
             "  };"
-            /* DOM dispatch over a path of targets that are neither nodes nor
-             * windows (an IndexedDB request, its transaction and database):
-             * the target stays path[0]; capture listeners run from the far
-             * end inwards, then the target's, then, if the event bubbles,
-             * the others outwards. */
             "  function define(ev, k, v){ try { Object.defineProperty(ev, k, {value:v, configurable:true, writable:true}); } catch(e){} }"
             "  function invoke(obj, ev, phase, capture){"
             "    define(ev, 'currentTarget', obj); define(ev, 'eventPhase', phase);"
@@ -59173,7 +58593,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_NewClass(js->rt, ns_es_class_id, &ns_es_class);
     ns_bind_ctor(ctx, global, "EventSource",    ns_window_eventsource_ctor,  2);
 
-
     JSValue css_obj = JS_NewObject(ctx);
     ns_bind_fn(ctx, css_obj, "supports", ns_css_supports, 2);
     ns_bind_fn(ctx, css_obj, "escape",   ns_css_escape,   1);
@@ -59231,9 +58650,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "   { value:'Navigator', configurable:true }); } catch(e) {}"
             " return others;"
             "})();";
-        /* The set of navigators the getters accept besides the window's:
-         * the engine adds each frame realm's own (see
-         * ns_realm_install_singletons); pages never see it. */
         JSValue nr = JS_Eval(ctx, nav_iface_src, strlen(nav_iface_src),
                              "<navigator-iface>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (JS_IsException(nr)) {
@@ -60029,7 +59445,6 @@ ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* initCompositionEvent() and initTextEvent(): initUIEvent() and data. */
 static JSValue
 ns_event_init_ui_event_data(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
@@ -60190,7 +59605,6 @@ ns_document_createDocumentFragment(JSContext *ctx, JSValueConst this_val,
 
 static JSValue ns_synthdoc_get_doctype(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
-
 
 static JSValue
 ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
@@ -61159,10 +60573,6 @@ ns_node_is_frame_element(const ns_node *n)
 static JSValue
 ns_document_get_defaultView(JSContext *ctx, JSValueConst this_val)
 {
-    /* The window of the document's browsing context: the page's window, or
-     * a frame's window for the frame's document, whichever realm asks. A
-     * document without a browsing context (createHTMLDocument(), DOMParser,
-     * an XHR response) has none. */
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_unwrap_element_mut(this_val);
     if (!js || !doc || doc->kind != NS_NODE_DOCUMENT || doc == js->current_doc)
@@ -61292,7 +60702,6 @@ ns_js_flush_document_write(ns_js *js)
         ctx_tag, html, -1, scripting);
     g_free(html);
     if (!fragment) return;
-    /* Unlike innerHTML, markup from document.write runs its scripts. */
     GPtrArray *inserted = g_ptr_array_new();
     js->throw_on_dynamic_markup++;
     ns_node *c = fragment->first_child;
@@ -61392,12 +60801,6 @@ ns_document_close(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-/* True when markup written so far closes every element it opens and ends
- * outside any tag, comment or raw-text element, so parsing it now gives
- * the nodes the HTML parser would have inserted by the end of the write.
- * Writes that leave an element open, such as write("<div>") followed by
- * write("</div>"), are parsed once the script ends instead.  Markup with an
- * external script is held too, so that script runs before parsing goes on. */
 static gboolean
 ns_written_markup_is_complete(const char *s)
 {
@@ -61876,8 +61279,6 @@ ns_location_get_href(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, ns_js_top_url(js_from_ctx(ctx)));
 }
 
-/* The window's own location: the top-level document's URL, also when a
- * frame's code reads parent.location or top.location. */
 static const char *
 ns_loc_url(JSContext *ctx)
 {
@@ -63350,8 +62751,6 @@ ns_js_exception_message(JSContext *ctx, JSValueConst ex)
     return out;
 }
 
-/* Fires the ErrorEvent of an uncaught error at the current window; returns
- * TRUE when a handler cancelled it. */
 static gboolean
 ns_js_report_error_event(ns_js *js, const char *message, const char *filename,
                          int lineno, int colno, JSValueConst error)
@@ -63405,8 +62804,6 @@ ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
     ns_js_report_exception_at(js, ex, origin, 0, 0);
 }
 
-/* The location of a stack line: "at name (file:line:column)", or "at
- * file:line:column" for a function without a name. */
 static char *
 ns_js_stack_line_location(const char *line, gsize n)
 {
@@ -63680,7 +63077,6 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         }
         if (JS_IsException(fn)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
         JS_FreeValue(js->ctx, fn);
-        /* fall through: run unwrapped so a script that can't be wrapped still runs */
     }
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
@@ -63689,8 +63085,6 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 
     JSValue v = JS_UNDEFINED;
     gboolean cache_hit = FALSE;
-    /* An inline script's positions count from where its text starts in the
-     * document; an external script's from the start of its own file. */
     const ns_node *inline_script = js->current_script &&
         !ns_element_get_attr(js->current_script, "src") ? js->current_script
                                                          : NULL;
@@ -65056,25 +64450,15 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     }
 }
 
-/* Nordstjernen parses a whole document before running its scripts, but a
- * parser-blocking script runs while the HTML parser has only reached its
- * end tag: nothing after it exists yet, so document.body is null in <head>
- * and the script is the last <script> in the document.  Before the first
- * such script, every node after it is taken out of the tree, each one on
- * its own, and before each later script the nodes up to and including it
- * are put back one at a time in document order, the way the parser inserts
- * them: at the end of their parent, after anything scripts inserted, and
- * each with the childList record a parser insertion produces.  The rest is
- * put back once the last parser-blocking script has run. */
 typedef struct ns_parser_held {
     ns_node *parent;
     ns_node *node;
 } ns_parser_held;
 
 typedef struct ns_parser_hold {
-    GArray *held;                   /* ns_parser_held, in document order */
-    guint next;                     /* first one not yet put back */
-    GHashTable *members;            /* every held node and parent */
+    GArray *held;
+    guint next;
+    GHashTable *members;
     struct ns_parser_hold *prev;
 } ns_parser_hold;
 
@@ -65142,8 +64526,6 @@ ns_js_parser_put_back(ns_js *js, ns_parser_hold *hold, guint upto)
     for (; hold->next < upto && hold->next < hold->held->len; hold->next++) {
         ns_parser_held *e = &g_array_index(hold->held, ns_parser_held,
                                            hold->next);
-        /* A freed parent keeps its content out, like markup the parser
-         * goes on inserting into an element no longer in the tree. */
         if (!e->parent || !e->node || e->node->parent) continue;
         ns_node *prev = e->parent->last_child;
         ns_node_append_child(e->parent, e->node);
@@ -65152,7 +64534,6 @@ ns_js_parser_put_back(ns_js *js, ns_parser_hold *hold, guint upto)
     }
 }
 
-/* Puts back the held nodes up to script and its text. */
 static void
 ns_js_parser_reach(ns_js *js, ns_parser_hold *hold, const ns_node *script)
 {
@@ -65177,8 +64558,6 @@ ns_js_parser_release(ns_js *js, ns_parser_hold *hold)
     g_array_free(hold->held, TRUE);
 }
 
-/* The parser-blocking scripts of a document's initial parse, in order,
- * each seeing only the part of the document parsed before it. */
 static void
 ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
 {
@@ -65895,8 +65274,6 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     gboolean have_external = FALSE;
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *t = &g_array_index(tasks, ns_script_task, i);
-        /* While the initial parse is held at a script, a blocking script it
-         * writes runs before the parser goes on, even an external one. */
         gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
                                  js->callback_depth == 0 &&
                                  !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
@@ -65982,8 +65359,6 @@ ns_js_drain_load_event_scripts(ns_js *js)
     }
 }
 
-/* The document.referrer of the document loading into iframe: the URL of
- * the document holding the iframe, cut down by the referrer policy. */
 static char *
 ns_js_frame_referrer(ns_js *js, ns_node *iframe, const char *frame_url)
 {
@@ -66004,7 +65379,6 @@ ns_js_frame_referrer(ns_js *js, ns_node *iframe, const char *frame_url)
         policy = NS_REFERER_UNSAFE_URL;
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
     if (srcdoc && *srcdoc && policy != NS_REFERER_UNSAFE_URL) {
-        /* about:srcdoc is never same-origin with its holder's URL. */
         char *origin = policy == NS_REFERER_STRICT_ORIGIN_WHEN_CROSS &&
                        ns_url_is_http_or_https(holder_url)
             ? ns_url_origin_from(holder_url) : NULL;
@@ -66656,8 +66030,6 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
         JS_FreeValue(ctx, proto);
         JS_FreeValue(ctx, ctor);
     }
-    /* EventTarget's methods are the ones et_src made, which also serve
-     * windows; a frame script that ran in this realm may have replaced them. */
     static const char src[] =
         "(function(){"
         "var ET=typeof EventTarget!=='undefined'&&EventTarget.prototype;"
@@ -66956,9 +66328,6 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(js->ctx, outward_window);
         gint64 iframe_deadline_us =
             g_get_monotonic_time() + ns_js_eval_budget_us();
-        /* The frame's scripts run in its realm scope, as its timers and
-         * event handlers do, so work they start (a fetch, an XHR) belongs
-         * to the frame's document. */
         ns_realm_scope frame_scope;
         gboolean in_frame_scope = iframe != NULL;
         if (in_frame_scope)
@@ -67120,8 +66489,6 @@ ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
     return FALSE;
 }
 
-/* Whether a frame's response is one a browser downloads instead of
- * showing: one sent as an attachment, or of a type it does not display. */
 static gboolean
 ns_frame_response_is_download(const ns_response *resp)
 {
@@ -67238,8 +66605,6 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 : (iframe->name && g_ascii_strcasecmp(iframe->name, "frame") == 0
                    ? frame_dest : iframe_dest);
             resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
-            /* A response the frame would hand to the download manager
-             * gets no resource timing entry, as in other browsers. */
             if (!ns_frame_response_is_download(resp)) {
                 ns_perf_resource_info info = { 0 };
                 ns_js_element_perf_info(js, iframe, &info);
@@ -67434,8 +66799,6 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_node_is_element_named(iframe, "iframe")) {
         content_root = ns_iframe_ensure_content_root(iframe);
         if (content_root) content_doc = content_root->parent;
-        /* A frame without a source keeps about:blank as its URL; the
-         * creator's URL stands in for its base URL and origin. */
         if (!abs_url) {
             abs_url = g_strdup(origin);
             blank_frame = TRUE;
@@ -67773,11 +67136,6 @@ ns_js_lifecycle_tick(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-/* Starts tracking the document's own <img> elements the way script-made
- * images are tracked, so each gets its load or error event, and its
- * resource timing entry, when the image cache finishes with it, and the
- * window's load event waits for them.  Images whose source depends on
- * layout (srcset, <picture>) or that load lazily are left to layout. */
 static void
 ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
 {
@@ -67844,12 +67202,9 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     ns_js_schedule_static_iframes(js, doc);
     ns_js_track_document_images(js, doc, 0);
     {
-        /* Stylesheets the engine fetched before this document's realm
-         * existed go into its resource timing now. */
         GPtrArray *sheets = ns_engine_take_resource_timings(base_url);
         for (guint i = 0; i < sheets->len; i++) {
             const ns_engine_resource_timing *t = g_ptr_array_index(sheets, i);
-            /* A frame's sheets belong to the frame's own timeline. */
             if (t->in_frame) continue;
             ns_perf_resource_info info = { 0 };
             ns_js_element_perf_info(js, doc, &info);
@@ -68391,7 +67746,6 @@ ns_js_flush_style(ns_js *js)
     js->in_layout_flush = FALSE;
 }
 
-
 const char *
 ns_js_current_url(const ns_js *js)
 {
@@ -68410,8 +67764,6 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     if (!js || !js->ctx) return;
     if (js->halted || js->in_pump || js->in_hashchange) return;
     js->in_hashchange = TRUE;
-    /* The top-level window's hash changed, possibly through a frame's
-     * parent.location, so the event goes to the top-level window. */
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js, js->main_realm_ctx, &scope);
     JSContext *ctx = js->ctx;
