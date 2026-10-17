@@ -49617,6 +49617,10 @@ ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val, ns_node *el)
                               JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, this_val, "videoHeight",
                               JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
+    if (ns_element_get_attr(el, NS_MEDIA_SIZE_ATTR)) {
+        ns_element_remove_attr(el, NS_MEDIA_SIZE_ATTR);
+        if (js) js->mutated = TRUE;
+    }
     if (!js) return;
     if (network_state == 1 || network_state == 2)
         ns_js_dispatch_event(js, el, "abort", NULL);
@@ -68226,6 +68230,16 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
     } else if (strcmp(kind, "vheight") == 0) {
         JS_DefinePropertyValueStr(ctx, el, "videoHeight",
                                   JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
+        int video_width = 0;
+        JSValue vw = JS_GetPropertyStr(ctx, el, "videoWidth");
+        JS_ToInt32(ctx, &video_width, vw);
+        JS_FreeValue(ctx, vw);
+        if (video_width > 0 && value > 0) {
+            char size[48];
+            g_snprintf(size, sizeof size, "%dx%d", video_width, (int)value);
+            ns_element_set_attr((ns_node *)n, NS_MEDIA_SIZE_ATTR, size);
+            js->mutated = TRUE;
+        }
         ns_js_dispatch_event(js, n, "resize", NULL);
     } else if (strcmp(kind, "waiting") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
