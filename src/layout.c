@@ -9054,7 +9054,12 @@ layout_image(ns_box *box, double parent_content_width)
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
     double w = -1, h = -1;
-    if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
+    gboolean svg_flex_main = box->kind == NS_BOX_SVG && box->has_flex_main &&
+                             flex_row_item;
+    box->has_flex_main = FALSE;
+    if (svg_flex_main)
+        w = box->flex_main_size > 0 ? box->flex_main_size : 0;
+    else if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
         w = length_resolve(wv, pct_width_base, -1);
     else if (height_keyword_stretches(wv)) {
         w = parent_content_width
@@ -11133,8 +11138,12 @@ estimate_natural_width(const ns_box *b, double cap)
 }
 
 static double
-flex_content_basis_from_natural(ns_box *b, const ns_style *inherited)
+flex_content_basis_from_natural(ns_box *b, double cw, const ns_style *inherited)
 {
+    if (b->kind == NS_BOX_SVG) {
+        layout_image(b, cw);
+        return b->content_width > 0 ? b->content_width : 0;
+    }
     double w = measure_natural_width(b, inherited ? inherited : b->style);
     return w > 0 ? w : 0;
 }
@@ -11181,7 +11190,7 @@ flex_item_min_main(ns_box *c, double cw, const ns_style *inherited)
         double mn = flex_item_keyword_width(c, mnw, cw, inherited);
         return mn > 0 ? mn : 0;
     }
-    if (box_is_scroll_container(c)) return 0;
+    if (box_is_scroll_container(c) || c->kind == NS_BOX_SVG) return 0;
     double mn = min_content_width_of(c, inherited ? inherited : c->style);
     if (mn < 0) mn = 0;
     const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
@@ -11601,7 +11610,7 @@ layout_flex_row(ns_box *box, double cw,
                         c->border.left + c->border.right;
         double b = 0;
         if (!flex_main_basis_explicit(c, cw, child_inherited, &b))
-            b = flex_content_basis_from_natural(c, child_inherited);
+            b = flex_content_basis_from_natural(c, cw, child_inherited);
         lens[i].basis = b;
         lens[i].min = flex_item_min_main(c, cw, child_inherited);
         lens[i].max = flex_item_max_main(c, cw, child_inherited);
@@ -11860,7 +11869,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->border.left + c->border.right;
         double b = 0;
         if (!flex_main_basis_explicit(c, cw, child_inherited, &b))
-            b = flex_content_basis_from_natural(c, child_inherited);
+            b = flex_content_basis_from_natural(c, cw, child_inherited);
         lens[n].basis = b;
         lens[n].min = flex_item_min_main(c, cw, child_inherited);
         lens[n].max = flex_item_max_main(c, cw, child_inherited);
@@ -12162,7 +12171,7 @@ flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
         double stretch = flex_item_stretch_main_height(c, pct_basis);
         return stretch > 0 ? stretch : 0;
     }
-    if (box_is_scroll_container(c)) return 0;
+    if (box_is_scroll_container(c) || c->kind == NS_BOX_SVG) return 0;
     const ns_css_value *hv = c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
         !(value_is_percent(hv) && pct_basis < 0)) {
