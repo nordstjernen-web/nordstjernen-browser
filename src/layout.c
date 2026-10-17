@@ -1003,6 +1003,19 @@ is_inline_level_replaced(const ns_node *n, GHashTable *styles)
 }
 
 static gboolean
+video_natural_size(const ns_box *box, double *w, double *h)
+{
+    if (!box || box->kind != NS_BOX_VIDEO || !box->dom) return FALSE;
+    const char *size = ns_element_get_attr(box->dom, NS_MEDIA_SIZE_ATTR);
+    int vw = 0, vh = 0;
+    if (!size || sscanf(size, "%dx%d", &vw, &vh) != 2 || vw <= 0 || vh <= 0)
+        return FALSE;
+    *w = vw;
+    *h = vh;
+    return TRUE;
+}
+
+static gboolean
 node_has_media_metadata(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT &&
@@ -9080,6 +9093,11 @@ layout_image(ns_box *box, double parent_content_width)
                    ? (double)img->natural_width / density : -1;
     double nat_h = (img && img->loaded && img->natural_height > 0)
                    ? (double)img->natural_height / density : -1;
+    double video_w, video_h;
+    if (video_natural_size(box, &video_w, &video_h)) {
+        nat_w = video_w;
+        nat_h = video_h;
+    }
     if (declared_size) {
         if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
         if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
@@ -9539,6 +9557,11 @@ replaced_auto_width(const ns_box *box)
     if (img && img->loaded && img->natural_width > 0 && img->natural_height > 0)
         return loaded_image_auto_width(box, img);
     if (box->kind == NS_BOX_SVG && box->dom) return svg_auto_width(box);
+    double video_w, video_h;
+    if (video_natural_size(box, &video_w, &video_h)) {
+        double h = replaced_height_for_width(box);
+        return h > 0 ? h * video_w / video_h : video_w;
+    }
     double attr = width_attribute_px(box->dom);
     if (attr > 0) return attr;
     if (box->kind == NS_BOX_VIDEO) return 300;
