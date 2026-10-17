@@ -876,6 +876,9 @@ char *
 ns_url_origin_from(const char *url)
 {
     if (!url || !*url) return NULL;
+    if (g_ascii_strncasecmp(url, "blob:", 5) == 0 &&
+        ns_url_is_http_or_https(url + 5))
+        return ns_url_origin_from(url + 5);
     if (!ns_url_is_http_or_https(url))
         return NULL;
 
