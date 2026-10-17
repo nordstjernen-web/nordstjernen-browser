@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* `getBoundingClientRect()` and `getClientRects()` on a `<tbody>`,
+  `<thead>` or `<tfoot>` return the area of its cells, as in other
+  browsers, instead of an empty rectangle at 0,0. Row groups get no
+  layout box of their own, so scripts that measure a table's body to
+  stick its header or size a scroller saw nothing there. The frozen
+  sitebench pages gain 212 matching elements (news.ycombinator.com
+  +100, Wikipedia articles +91).
 * List bullets and numbers sit on the baseline of the first line of
   their item instead of floating above it when line-height is large.
 * An absolutely positioned `::after` without offsets appears right after
