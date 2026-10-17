@@ -21,6 +21,13 @@ Changelog:
   cookie dialog treats an array argument differently from a `NodeList`,
   threw while it built its preference center, and its "Learn more" /
   "Cookie settings" button did nothing (netflix.com).
+* Web and service workers run on a thread with a 16 MB stack, so their
+  scripts can recurse about as deep as in other browsers. Workers started
+  on the platform's default thread stack, 512 KB on macOS and 1 MB on
+  Windows, and the engine stopped a worker's recursion at three quarters
+  of it: about 380 nested calls on macOS, against about 7,700 in Chrome,
+  so a recursive parser or tree walk in a worker threw "Maximum call
+  stack size exceeded". A worker now reaches about 12,000 nested calls.
 * Pressing Enter fires a `keypress` event like other browsers, and a page
   that cancels it suppresses the newline. Chat boxes that send on
   keypress, such as duck.ai's prompt, now send when Enter is pressed.
