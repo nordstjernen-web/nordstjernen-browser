@@ -153,7 +153,6 @@ ns_form_parse_finite_double(const char *v, double *out)
     return TRUE;
 }
 
-
 gboolean
 ns_input_value_to_number(const char *type, const char *value, double *out)
 {
@@ -761,7 +760,6 @@ ns_numeric_filter_insert(const char *insert, gsize len, gsize *out_len)
     if (out_len) *out_len = s->len;
     return g_string_free(s, FALSE);
 }
-
 
 static ns_node *
 ns_node_new(ns_node_kind kind)
@@ -2090,8 +2088,6 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             g_hash_table_remove(root->id_index, id);
         return found;
     }
-    /* The document's index covers its own tree; below a shadow root the
-     * lookup walks instead of reading or filling it. */
     const ns_node *doc = root;
     while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT &&
            !ns_dom_tree_scope_boundary(doc))

@@ -321,8 +321,6 @@ set_accessible_label(GtkWidget *w, const char *label)
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
-/* Closed silhouette of both glass bulbs, drawn around centre (16,16) so the
-   whole glyph fits a compact 32px cursor with rounded bulbs. */
 static void
 hourglass_bulbs_path(cairo_t *cr, double ox, double oy)
 {
@@ -584,10 +582,6 @@ pv_free(NsProcView *v)
 
 static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
 
-/* Atomically install a new renderer handle (worker thread only) and return the
-   previous one for the caller to close outside the lock. The lock serialises
-   the worker's reassignments against the main thread's close-time interrupt so
-   it can never touch a freed handle. */
 static ns_rproc_http *
 pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 {
@@ -1404,7 +1398,6 @@ css_viewport_h(NsProcView *v)
     int h = (int)lround(viewport_h(v) / cur_scale(v));
     return h > 0 ? h : 1;
 }
-
 
 static void
 configure_adjustments(NsProcView *v)
@@ -4014,9 +4007,6 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     Req *req = g_new0(Req, 1);
     req->type = REQ_QUIT;
     push_req(v, req);
-    /* Unblock the worker if it is mid-request to a wedged renderer, so the join
-     * below can't stall the main loop for up to the 30 s IPC read timeout (which
-     * would also trip the watchdog heartbeat and restart the whole shell). */
     g_mutex_lock(&v->proc_lock);
     if (v->proc)
         ns_rproc_http_interrupt(v->proc);

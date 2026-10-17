@@ -845,7 +845,6 @@ typedef enum ns_css_pseudo_element {
 } ns_css_pseudo_element;
 
 typedef struct ns_css_selector {
-
     GPtrArray *compounds;
     GArray    *combinators;
 
@@ -1237,9 +1236,6 @@ void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
 void ns_css_append_unescaped(GString *out, const char **pp);
 
-/* sheet_docs, when not NULL, holds the document of each author sheet, or
-   the shadow host of a sheet from a shadow tree; a sheet then styles the
-   elements of its own document, or of its host's subtree, only. */
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            const ns_node *const    *sheet_docs,

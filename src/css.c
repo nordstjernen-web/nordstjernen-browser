@@ -2390,7 +2390,6 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
     const char *p = *pp;
 
     while (p < end) {
-
         gboolean had_ws = FALSE;
         const char *before_ws = p;
         p = css_skip_ws_comments(p, end);
@@ -11554,7 +11553,6 @@ grid_placement_canonical(const char *text, gboolean area)
     return g_string_free(out, FALSE);
 }
 
-
 typedef enum {
     GRID_TOK_OTHER,
     GRID_TOK_STRING,
@@ -13317,7 +13315,6 @@ prop_is_anchor_property(ns_css_prop prop)
 static ns_css_value *
 parse_value_for(ns_css_prop prop, const char *text)
 {
-
     while (*text && is_ws(*text)) text++;
     gsize n = strlen(text);
     while (n > 0 && is_ws(text[n - 1])) n--;
@@ -13928,7 +13925,6 @@ parse_value_for(ns_css_prop prop, const char *text)
             v->kind = NS_CSS_V_KEYWORD;
             v->u.keyword = ascii_lower(t, strlen(t));
         } else if ((v = parse_calc(t))) {
-
         } else {
             double num;
             ns_css_unit u;
@@ -17255,7 +17251,6 @@ static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
 {
-
     const char *p = *pp;
     while (p < end && *p != '}') {
         p = css_skip_ws_comments(p, end);
@@ -19910,24 +19905,22 @@ ns_css_supports_condition(const char *condition,
     return result;
 }
 
-/* Container query context: a stack of ancestor query containers, innermost
- * last, plus a node->info map populated from the laid-out box tree. */
 #define NS_CQ_TYPE_INLINE 1
 #define NS_CQ_TYPE_SIZE   2
 
 typedef struct {
-    char  *names;   /* space-separated container-name list, verbatim */
+    char  *names;
     double width;
     double height;
-    int    type;    /* NS_CQ_TYPE_* */
+    int    type;
     gboolean vertical;
     int    sibling_index;
     int    sibling_count;
 } ns_cq_container;
 
-static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
-static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
-static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
+static __thread GHashTable *g_cq_map;
+static __thread GArray     *g_cq_stack;
+static __thread GHashTable *g_var_adjust_cache;
 static __thread GHashTable *g_reg_reset_cache;
 static __thread GHashTable *g_var_build_cache;
 static __thread GPtrArray  *g_var_build_parents;
@@ -20069,7 +20062,6 @@ cq_names_contain(const char *names, const char *name, gsize nlen)
     return FALSE;
 }
 
-/* Resolve a length token (px/em/rem/% of container axis) to px; -1 on failure. */
 static char *
 cq_spacify(const char *s)
 {
@@ -20090,8 +20082,6 @@ cq_spacify(const char *s)
     return g_string_free(o, FALSE);
 }
 
-/* Pick the query container for a query: nearest ancestor (innermost) that
- * matches the requested name (or any container, if unnamed). */
 static const ns_cq_container *
 cq_select_container(const char *name, gsize nlen)
 {
@@ -34682,8 +34672,6 @@ frame_viewport_from_style(const ns_style *s, double *w, double *h)
     return TRUE;
 }
 
-/* The sheets of each document, when the caller of ns_css_compute() says
- * whose each sheet is. */
 static __thread GHashTable *g_doc_sheets;
 
 static GHashTable *
@@ -34720,9 +34708,6 @@ host_scoped_sheets(const ns_node *node, const ns_css_stylesheet *const *author,
     return all;
 }
 
-/* The elements of a document are styled by its own sheets only, not by
- * those of the document its frame is in, nor by those of its frames'
- * documents. */
 static void
 doc_own_sheets(const ns_node *node, const ns_css_stylesheet *const **author,
                gsize *n_author)

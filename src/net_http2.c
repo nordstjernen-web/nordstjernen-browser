@@ -2685,7 +2685,7 @@ ns_h3_should_try(const char *origin)
     return yes;
 }
 
-#endif /* NS_HTTP_HAVE_HTTP3 */
+#endif
 
 gboolean
 ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,

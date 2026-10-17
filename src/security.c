@@ -374,8 +374,6 @@ static void
 add_path_rw(int rfd, guint64 allowed, const char *path)
 {
     if (!path) return;
-    /* Open directly (no prior stat) to avoid a TOCTOU race; O_PATH fails for a
-     * nonexistent path, which is all the previous stat() checked for. */
     int pfd = open(path, O_PATH | O_CLOEXEC);
     if (pfd < 0) return;
     struct landlock_path_beneath_attr pb = {

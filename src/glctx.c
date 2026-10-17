@@ -357,7 +357,7 @@ gboolean ns_gl_context_make_current(ns_gl_context *c) { (void)c; return FALSE; }
 void ns_gl_context_release(ns_gl_context *c) { (void)c; }
 void ns_gl_context_destroy(ns_gl_context *c) { (void)c; }
 
-#endif /* NS_ENABLE_WEBGL */
+#endif
 
 #ifndef NS_GLCTX_BACKEND_EGL
 void

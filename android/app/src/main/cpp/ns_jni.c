@@ -1112,8 +1112,6 @@ Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeEval(JNIEnv *env,
     return jstring_take(env, out);
 }
 
-/* The favicon as {width, height, ARGB_8888 pixels…}, or null when the page
-   has none — Bitmap.createBitmap() takes that array directly. */
 JNIEXPORT jintArray JNICALL
 Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeFavicon(JNIEnv *env,
                                                             jclass clazz,

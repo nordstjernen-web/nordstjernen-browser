@@ -1345,7 +1345,6 @@ wgl_pixelStorei(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     } else if (pname == NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL) {
         g->premultiply = param ? TRUE : FALSE;
     } else if (pname == NS_UNPACK_COLORSPACE_CONVERSION_WEBGL) {
-        /* no-op */
     } else if (g->version < 2 &&
                pname != GL_PACK_ALIGNMENT && pname != GL_UNPACK_ALIGNMENT) {
         glPixelStorei(0, 0);
@@ -5888,7 +5887,7 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     return g->surf;
 }
 
-#else /* !NS_ENABLE_WEBGL */
+#else
 
 static JSValue
 wgl_stub_constructor(JSContext *ctx, JSValueConst this_val, int argc,

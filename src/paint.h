@@ -85,7 +85,6 @@ gboolean ns_paint_box_clip_hides(const ns_box *b);
 gboolean ns_paint_box_establishes_3d(const ns_box *b);
 const ns_box *ns_paint_3d_pick(const ns_box *root3d, double x, double y);
 
-
 void ns_paint_set_search(gboolean case_sensitive, const ns_box *active);
 
 gboolean ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
@@ -121,9 +120,6 @@ NsPangoAttribute *ns_paint_inline_font_attr(const ns_inline_attr *r);
 gboolean ns_paint_inline_attr_nowrap(const ns_inline_attr *r);
 int ns_paint_pango_font_size(double size_px);
 
-/* The shared Pango context for measuring and painting page text: unhinted
- * metrics and fractional glyph positions, so text is as wide as in other
- * browsers and the measured and painted widths agree. */
 NsPangoContext *ns_paint_text_context(void);
 
 void ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,

@@ -363,9 +363,6 @@ ns_apply_gsk_renderer(const char *pref)
               "(expected one of: auto, gl, ngl, vulkan, cairo)", pref);
 }
 
-/* The GTK GUI runs the process-per-tab IPC renderer (a thin shell spawning
- * sandboxed nordstjernen-renderer processes). Headless / dump / eval / inspect
- * modes run the in-process engine without a display. */
 static gboolean
 ns_proc_mode_wanted(int argc, char **argv)
 {
@@ -555,10 +552,6 @@ main(int argc, char **argv)
         }
     }
 
-    /* The GUI shell is supervised: a normal launch becomes a tiny watchdog
-     * that spawns the real (thin, engine-free) shell as a child and restarts
-     * it on crash or hang. The supervisor inits no network, sandbox, or UI;
-     * those belong to the child. Headless/tooling modes are never supervised. */
     if (proc_mode) {
         const ns_config *cfg = ns_config_get();
         if (ns_watchdog_should_supervise(argc, argv,
@@ -580,15 +573,6 @@ main(int argc, char **argv)
         ns_rproc_single_process_enable();
 
     if (proc_mode) {
-        /* The proc-mode shell processes no untrusted bytes (it only blits
-         * renderer framebuffers and forwards input), but it must fork/execv
-         * renderer processes and create POSIX shm — which the no-execve seccomp
-         * filter and the read-only /dev/shm Landlock rule would block. Apply
-         * Landlock only (with /dev/shm writable and the renderer directory
-         * executable) and skip seccomp; the real syscall confinement lives in
-         * the sandboxed renderer processes. In single-process mode there is
-         * no renderer to exec, so the exec-dir widening is skipped and the
-         * engine runs in this process under the same Landlock. */
         ns_security_add_writable_dir("/dev/shm");
         if (!single_process) {
             char *rpath = ns_proc_renderer_path();
@@ -657,7 +641,6 @@ main(int argc, char **argv)
             ns_config_shutdown();
             return 0;
         } else if (g_strcmp0(argv[i], "--headless") == 0) {
-            /* headless dispatch is driven by proc_mode below */
         } else if (g_str_has_prefix(argv[i], "--dump=")) {
             const char *v = argv[i] + 7;
             dump_set = TRUE;
@@ -737,11 +720,6 @@ main(int argc, char **argv)
     if (proc_mode) {
         if (ns_watchdog_is_child(argc, argv)) {
             ns_watchdog_child_guard_parent_death();
-            /* The multiprocess shell runs no page JS, so any prolonged
-             * unresponsiveness means a wedged UI loop (blit/IPC deadlock). In
-             * single-process mode the shell does run page JS on its main
-             * loop, so extend the hang budget by the configured JS eval
-             * budget, exactly as an in-process engine requires. */
             const ns_config *wcfg = ns_config_get();
             ns_watchdog_child_arm_hang_monitor(
                 single_process && wcfg ? wcfg->js_eval_budget_ms : 0);

@@ -532,7 +532,6 @@ text_is_ws_only(const char *text)
     return TRUE;
 }
 
-
 static double
 border_side_width(const ns_style *s, ns_css_prop width_prop,
                   ns_css_prop style_prop)
@@ -4191,12 +4190,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                              !ns_element_get_attr(n, "dir"));
         if (bidi_isolate || bidi_plaintext)
             g_string_append(ctx->out,
-                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"   /* FSI */
-                : rtl                        ? "\xe2\x81\xa7"   /* RLI */
-                                             : "\xe2\x81\xa6"); /* LRI */
+                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"
+                : rtl                        ? "\xe2\x81\xa7"
+                                             : "\xe2\x81\xa6");
         if (bidi_override)
-            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"   /* RLO */
-                                           : "\xe2\x80\xad"); /* LRO */
+            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"
+                                           : "\xe2\x80\xad");
     }
 
     double outer_rise = ctx->rise;
@@ -4311,9 +4310,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
     if (bidi_override)
-        g_string_append(ctx->out, "\xe2\x80\xac");   /* PDF */
+        g_string_append(ctx->out, "\xe2\x80\xac");
     if (bidi_isolate || bidi_plaintext)
-        g_string_append(ctx->out, "\xe2\x81\xa9");   /* PDI */
+        g_string_append(ctx->out, "\xe2\x81\xa9");
     if (is_q) {
         ctx->q_depth--;
         char *close_q = quotes_string_for(s, ctx->q_depth, TRUE);
@@ -8155,8 +8154,6 @@ typedef struct {
     guint        order;
 } hit_stack_entry;
 
-/* Boxes of one stack level are stacked in tree order, which the box tree
-   does not keep: it puts out-of-flow boxes after their in-flow siblings. */
 static int
 hit_tree_order_cmp(const ns_box *a, const ns_box *b, guint order_a,
                    guint order_b)
@@ -16060,9 +16057,6 @@ relative_pct_cb_height(const ns_box *box)
     return -1;
 }
 
-/* The vertical offset of a relatively positioned box.  A percentage is of
-   the containing block's height when that is definite (the parent of
-   pct_of holds it) and is 0 otherwise. */
 static double
 relative_offset_y(const ns_style *s, double parent_h, const ns_box *pct_of)
 {
@@ -16304,11 +16298,6 @@ apply_inline_relative_offsets(ns_box *box, double cb_w, double cb_h)
     g_hash_table_destroy(set.index);
 }
 
-
-/* Inline-level atomic boxes (images, inline blocks) hang off the text box
-   of their line; their containing block is that box's parent, whose
-   content size the text box was given.  Painting places such a box where
-   the text puts it, so its offset is also kept apart. */
 static void
 apply_atomic_position_offsets(ns_box *box, double cb_w, double cb_h)
 {
@@ -18115,7 +18104,6 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (anc && box_can_host_fixed(anc))
                 paint_parent = anc;
         }
-
 
         int pp_depth = 0;
         for (const ns_box *p = paint_parent; p; p = p->parent)

@@ -115,7 +115,6 @@ ns_rproc_http_set_inproc_print(ns_rproc_inproc_print_fn print)
     g_inproc_print = print;
 }
 
-
 #ifndef _WIN32
 static void
 wait_child(pid_t pid)
@@ -247,7 +246,7 @@ fail:
 }
 #endif
 
-#else /* _WIN32 */
+#else
 
 static char *
 win_dirname_dup(const char *path)

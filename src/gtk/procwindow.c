@@ -977,7 +977,6 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
     if (t) g_thread_unref(t);
 }
 
-
 static void
 pw_render_status(ProcWindow *pw)
 {
@@ -1821,8 +1820,6 @@ static void act_save_image(GSimpleAction *action, GVariant *parameter,
 static void act_fullscreen(GSimpleAction *action, GVariant *parameter,
                            gpointer user_data);
 static void on_bookmarks_clicked(GtkButton *button, gpointer user_data);
-
-/* ---- Task manager: lists each tab's sandboxed renderer process ---- */
 
 typedef struct {
     ProcWindow *pw;

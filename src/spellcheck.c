@@ -60,9 +60,6 @@ ns_spell_init(void)
     try_load("en_GB");
     try_load("en");
 
-    /* Force any lazy backend initialisation (dictionary mmap, affix tables,
-     * plugin dlopen) to happen now, before the renderer seals its sandbox —
-     * after which the filesystem and extra syscalls are unavailable. */
     for (guint i = 0; i < g_dicts->len; i++) {
         EnchantDict *d = g_ptr_array_index(g_dicts, i);
         enchant_dict_check(d, "test", 4);
@@ -116,7 +113,7 @@ ns_spell_word_ok(const char *word, gssize len, const char *lang)
     return enchant_dict_check(d, word, len) <= 0;
 }
 
-#else /* !NS_HAVE_ENCHANT */
+#else
 
 void ns_spell_init(void) {}
 

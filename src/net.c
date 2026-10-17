@@ -80,9 +80,6 @@ static GMutex      g_conn_stats_lock;
 static GHashTable *g_conn_stats;
 
 #define NS_DEAD_HOST_TTL_US ((gint64)120 * G_USEC_PER_SEC)
-/* Origins (scheme, host and port) a connection recently failed to.  A
- * refused port says nothing about the host's other ports, so the key is
- * the origin, not the host. */
 static GHashTable *g_dead_hosts;
 static GMutex      g_dead_hosts_lock;
 
@@ -926,8 +923,6 @@ ns_net_raw_header_values(const char *raw, const char *name)
     return out ? g_string_free(out, FALSE) : NULL;
 }
 
-/* The origin of any URL with a host, also outside http(s), with the port
- * written out: "ftp://host:21". */
 static char *
 ns_url_origin_from_any(const char *url)
 {
@@ -5465,10 +5460,6 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req->body);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)req->body_len);
     } else if (method_is_post) {
-        /* A POST without data: libcurl would otherwise read the body from
-         * stdin and send it chunked, which a server that does not take
-         * chunked requests reads as the start of the next request on the
-         * connection. */
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
     }
@@ -5700,8 +5691,6 @@ ns_net_fetch_destination(GPtrArray *extra_headers)
     return "empty";
 }
 
-/* A request for a nested browsing context's document is a navigation too:
- * Fetch gives it mode "navigate" and the document Accept header. */
 static gboolean
 ns_net_dest_is_nested_navigation(const char *dest)
 {
@@ -5709,7 +5698,6 @@ ns_net_dest_is_nested_navigation(const char *dest)
            strcmp(dest, "object") == 0 || strcmp(dest, "embed") == 0;
 }
 
-/* Worker scripts are fetched with mode "same-origin". */
 static gboolean
 ns_net_dest_is_worker(const char *dest)
 {
@@ -6068,9 +6056,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
     if (!extra_has_ct && (method_is_post || (has_body && !method_is_get && method))) {
-        /* A form navigation without a type posts as a form; a script's
-         * request sends the type its body has, if any. "Content-Type:"
-         * keeps libcurl from adding its own form type. */
         char *ct_hdr = content_type && *content_type
             ? g_strdup_printf("Content-Type: %s", content_type)
             : g_strdup(is_navigation && has_body
@@ -6086,8 +6071,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             if (!h || !*h) continue;
             if (g_ascii_strncasecmp(h, "X-ND-", 5) == 0) continue;
             if (strpbrk(h, "\r\n")) continue;
-            /* libcurl drops a header written "Name:" with nothing after the
-             * colon; "Name;" is how it sends one with an empty value. */
             const char *colon = strchr(h, ':');
             const char *v = colon ? colon + 1 : NULL;
             while (v && (*v == ' ' || *v == '\t')) v++;
@@ -6427,9 +6410,6 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(from_origin);
             g_free(to_origin);
         }
-        /* Fetch's HTTP-redirect fetch: 301 and 302 turn a POST into a GET,
-         * 303 turns anything but GET and HEAD into one, and the request
-         * then loses its body and the headers that describe it. */
         gboolean was_post = g_ascii_strcasecmp(cur_method, "POST") == 0;
         gboolean get_or_head = g_ascii_strcasecmp(cur_method, "GET") == 0 ||
                                g_ascii_strcasecmp(cur_method, "HEAD") == 0;

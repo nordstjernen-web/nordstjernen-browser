@@ -33,7 +33,6 @@ ns_response *ns_engine_navigate_post_blocking(
     const void *body, gsize body_len,
     const char *content_type, gboolean user_activated, GError **error);
 
-/* out_docs, when not NULL, gets the document of each sheet in out. */
 void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                                    GPtrArray *out, GPtrArray *out_docs,
                                    GHashTable *css_cache);
@@ -51,16 +50,14 @@ gboolean ns_engine_preload_result_for(const char *url,
 ns_fetch_destination ns_engine_preload_destination(const char *rel,
                                                   const char *as);
 
-/* Resource timing of the stylesheets the engine fetched for a page, held
- * until that page's JavaScript takes them for its performance timeline. */
 typedef struct ns_engine_resource_timing {
     char               *top_url;
     char               *url;
-    const char         *initiator;   /* "link" or "css" */
+    const char         *initiator;
     gint64              start_us, end_us;
     struct ns_response *resp;
-    gboolean            render_blocking;  /* a <head> sheet, or imported by one */
-    gboolean            in_frame;         /* for a frame's document */
+    gboolean            render_blocking;
+    gboolean            in_frame;
 } ns_engine_resource_timing;
 
 GPtrArray *ns_engine_take_resource_timings(const char *top_url);
@@ -118,8 +115,6 @@ int ns_engine_write_pdf(const ns_box *root, const char *path);
 int ns_engine_write_pdf_paged(const ns_box *root, const char *path,
                               const struct ns_print_setup *setup);
 
-/* Renders each sheet into its own cairo recording surface, in CSS pixels.
-   The caller owns the array and must destroy every surface in it. */
 GPtrArray *ns_engine_print_recordings(const ns_box *root,
                                       const struct ns_print_setup *setup);
 

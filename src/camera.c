@@ -380,7 +380,7 @@ ns_camera_enumerate(void)
     return out;
 }
 
-#else /* !__linux__ */
+#else
 
 struct ns_camera { int unused; };
 
