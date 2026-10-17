@@ -23,6 +23,13 @@ Changelog:
   of the line (the "/" separators in theverge.com's navigation).
 * `@font-face` descriptors read back through CSSOM are validated and
   normalized like in other browsers (ranges, `calc()`, `oblique 0deg`).
+* `<blink>` blinks: its contents are shown for half of each second and
+  hidden for the other half, as in the browsers that introduced the
+  element. It is a built-in CSS animation (`animation: -nd-blink 1s
+  step-end infinite` toggling `visibility`), so a page can stop it with
+  `blink { animation: none }`, and it stops under reduced motion like
+  every other animation. The element stays an inline
+  `HTMLUnknownElement`, as the HTML standard requires.
 * Security: a web page can no longer read or overwrite the storage of
   installed extensions. Content scripts got their storage, manifest and
   install-path functions as properties of the page's global object, and

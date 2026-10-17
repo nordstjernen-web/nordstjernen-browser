@@ -279,6 +279,7 @@ ns_anim_new(void)
     a->scroll_sources = g_hash_table_new(g_direct_hash, g_direct_equal);
     a->scroll_known = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, g_free);
+    ns_anim_load_from_stylesheet(a, ns_css_ua_stylesheet());
     return a;
 }
 
