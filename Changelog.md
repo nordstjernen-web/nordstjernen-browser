@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* Spelling mistakes are underlined only in text fields you have clicked
+  into, like other browsers, instead of in every prefilled field (search
+  result pages showed the query underlined in red).
 * Pressing Enter fires a `keypress` event like other browsers, and a page
   that cancels it suppresses the newline. Chat boxes that send on
   keypress, such as duck.ai's prompt, now send when Enter is pressed.

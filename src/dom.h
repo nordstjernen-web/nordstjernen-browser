@@ -30,6 +30,7 @@ typedef enum ns_node_kind {
 #define NS_MEDIA_POSTER_ATTR "data-nd-media-poster"
 #define NS_MEDIA_STREAM_ATTR "data-nd-media-stream"
 #define NS_MEDIA_SIZE_ATTR "data-nd-media-size"
+#define NS_SPELLCHECK_ARMED_ATTR "data-nd-spellchecked"
 #define NS_DOM_MAX_DEPTH 512
 
 typedef struct ns_attr {
@@ -255,6 +256,8 @@ gboolean    ns_node_is_contenteditable_host(const ns_node *n);
 gboolean    ns_node_is_editable(const ns_node *n);
 gboolean    ns_node_spellcheck_used(const ns_node *n);
 const ns_node *ns_node_spellcheck_host(const ns_node *n);
+void        ns_node_arm_spellcheck(ns_node *n);
+gboolean    ns_node_spellcheck_armed(const ns_node *n);
 const char *ns_node_editable_value(const ns_node *n);
 const char *ns_input_used_value(const ns_node *n);
 const char *ns_media_type_support(const char *type);

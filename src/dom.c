@@ -582,6 +582,29 @@ ns_node_spellcheck_used(const ns_node *n)
     return TRUE;
 }
 
+void
+ns_node_arm_spellcheck(ns_node *n)
+{
+    for (ns_node *cur = n; cur; cur = cur->parent) {
+        if (ns_node_is_editable(cur) || ns_node_is_element_named(cur, "input") ||
+            ns_node_is_element_named(cur, "textarea")) {
+            if (!ns_element_get_attr(cur, NS_SPELLCHECK_ARMED_ATTR))
+                ns_element_set_attr(cur, NS_SPELLCHECK_ARMED_ATTR, "");
+            return;
+        }
+    }
+}
+
+gboolean
+ns_node_spellcheck_armed(const ns_node *n)
+{
+    for (const ns_node *cur = n; cur; cur = cur->parent)
+        if (cur->kind == NS_NODE_ELEMENT &&
+            ns_element_get_attr(cur, NS_SPELLCHECK_ARMED_ATTR))
+            return TRUE;
+    return FALSE;
+}
+
 const ns_node *
 ns_node_spellcheck_host(const ns_node *n)
 {
