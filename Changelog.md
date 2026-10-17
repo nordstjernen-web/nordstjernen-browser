@@ -3,6 +3,11 @@ Changelog:
 
 1.0.33:
 ======
+* A `<video>` now takes its natural size from the decoded video once
+  its metadata arrives, as the spec says, instead of staying at the
+  300x150 default. A video sized only on one axis (`height: 100%;
+  width: auto`, as apple.com's hero animation is) now gets the other
+  side from the video's aspect ratio rather than coming out 300px wide.
 * Security: a page title can no longer hide the address of the page it is
   on. The shell read the renderer's replies with a key lookup that also
   matched a quoted word inside a string value, and the reply carries the
