@@ -67151,23 +67151,29 @@ ns_js_lifecycle_has_blockers(ns_js *js)
 }
 
 static void
-ns_js_run_content_script(ns_js *js, const char *src)
+ns_js_run_content_scripts(ns_js *js, const char *url, gboolean at_start)
 {
-    static const char *const natives[] = {
-        "__nd_ext_manifest", "__nd_ext_base", "__nd_ext_sread",
-        "__nd_ext_swrite", "__nd_ext_platform", "__nd_ext_uilang",
-    };
-    char *result = ns_js_eval_source(js, src, "content-script");
-    g_free(result);
-    if (!js || !js->ctx) return;
-    JSValue global = JS_GetGlobalObject(js->ctx);
-    for (gsize i = 0; i < G_N_ELEMENTS(natives); i++) {
-        JSAtom atom = JS_NewAtom(js->ctx, natives[i]);
-        if (JS_DeleteProperty(js->ctx, global, atom, 0) < 0)
-            JS_FreeValue(js->ctx, JS_GetException(js->ctx));
-        JS_FreeAtom(js->ctx, atom);
+    JSValue bridges = JS_UNDEFINED;
+    g_autofree char *src =
+        ns_ext_content_scripts_for_url(js->ctx, url, at_start, &bridges);
+    if (!src || js->halted || js->in_pump) {
+        JS_FreeValue(js->ctx, bridges);
+        return;
     }
-    JS_FreeValue(js->ctx, global);
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(js, &bg);
+    JSValue shim = JS_Eval(js->ctx, src, strlen(src), "content-script",
+                           JS_EVAL_TYPE_GLOBAL);
+    JSValue r = JS_IsFunction(js->ctx, shim)
+        ? JS_Call(js->ctx, shim, JS_UNDEFINED, 1, &bridges)
+        : JS_DupValue(js->ctx, shim);
+    if (JS_IsException(r))
+        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+    JS_FreeValue(js->ctx, shim);
+    JS_FreeValue(js->ctx, bridges);
+    ns_js_microtask_checkpoint(js);
+    ns_js_budget_pop(js, &bg);
 }
 
 static gboolean
@@ -67261,13 +67267,7 @@ ns_js_lifecycle_tick(gpointer data)
         &js->navigation_timing.load_event_end_ms, "loadEventEnd");
     ns_js_fire_page_transition(js, "pageshow", FALSE);
     ns_ce_upgrade_subtree_all(js, doc);
-    JSValue global = JS_GetGlobalObject(js->ctx);
-    g_autofree char *content_script =
-        ns_ext_content_scripts_for_url(js->ctx, global,
-                                       js->lifecycle_origin, FALSE);
-    JS_FreeValue(js->ctx, global);
-    if (content_script)
-        ns_js_run_content_script(js, content_script);
+    ns_js_run_content_scripts(js, js->lifecycle_origin, FALSE);
     if (ns_js_profile_enabled())
         g_printerr("[profile] js lifecycle total=%.1fms\n",
                    (g_get_monotonic_time() - js->lifecycle_start_us) / 1000.0);
@@ -67329,15 +67329,8 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         char *r = ns_js_eval_source(js, js->early_inject_src, "early-inject");
         g_free(r);
     }
-    {
-        JSValue global = JS_GetGlobalObject(js->ctx);
-        g_autofree char *cs =
-            ns_ext_content_scripts_for_url(js->ctx, global,
-                                           base_url && *base_url ? base_url : NULL,
-                                           TRUE);
-        JS_FreeValue(js->ctx, global);
-        if (cs) ns_js_run_content_script(js, cs);
-    }
+    ns_js_run_content_scripts(js, base_url && *base_url ? base_url : NULL,
+                              TRUE);
     ns_js_schedule_static_iframes(js, doc);
     ns_js_track_document_images(js, doc, 0);
     {
