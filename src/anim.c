@@ -1163,9 +1163,11 @@ apply_animated_value(GHashTable *styles, ns_anim_state *s, ns_style *st,
     if (!g_hash_table_contains(s->base_values, GINT_TO_POINTER(prop)))
         g_hash_table_insert(s->base_values, GINT_TO_POINTER(prop),
                             base ? ns_css_value_dup(base) : g_new0(ns_css_value, 1));
-    st->values[prop] = ns_css_value_dup(current);
+    ns_css_value *resolved = ns_css_value_dup(current);
+    ns_css_value_absolutize(resolved, prop, st);
+    st->values[prop] = resolved;
     if (base && ns_css_prop_inherits(prop))
-        apply_propagate(styles, s->node, prop, base, current);
+        apply_propagate(styles, s->node, prop, base, resolved);
     ns_css_value_free(base);
     return TRUE;
 }

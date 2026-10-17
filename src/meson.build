@@ -58,6 +58,7 @@ nordstjernen_engine_sources = files(
   'css_filter.c',
   'css_media.c',
   'css_prop_syntax.c',
+  'css_grammar.c',
   'css_syntax.c',
   'datetime.c',
   'debuglog.c',
