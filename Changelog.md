@@ -3,6 +3,15 @@ Changelog:
 
 1.0.33:
 ======
+* Security: the Landlock sandbox of the renderer and the shell no longer
+  opens the whole home directory when `$XAUTHORITY` is `~/.Xauthority`,
+  as LightDM sets it on X11 sessions (Linux Mint, Xubuntu). The sandbox
+  granted read access to the directory holding that file, which was then
+  `$HOME`, so `~/.ssh`, `~/.aws` and every other file there were readable
+  from the renderer that runs page content. It now grants read access to
+  the `$XAUTHORITY` file alone. SECURITY.md also says what the renderer
+  can read under `~/.config`, `~/.local/share` and `~/.cache`. Same fix as
+  Northstar's.
 * Security: a local HTML file can no longer read other local files. Every
   `file:` document is now an opaque origin: `fetch()` and
   `XMLHttpRequest` from a `file:` page treated every other `file:` URL as

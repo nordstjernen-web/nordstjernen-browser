@@ -99,13 +99,15 @@ socket, so it normally needs no `/dev/shm` name at all.
 
 - **Landlock (filesystem).** Read-only access to system libraries
   (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font caches,
-  `/dev/urandom`, and the X11 / Wayland sockets. Read+write access to
-  the per-user XDG config, data, and cache directories under
+  `/dev/urandom`, the X11 / Wayland sockets, the `$XAUTHORITY` file
+  itself, and the XDG config, data and cache directories (`~/.config`,
+  `~/.local/share`, `~/.cache`). Read+write access to
   `~/.config/nordstjernen`, `~/.local/share/nordstjernen`,
   `~/.cache/nordstjernen`. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
-  `~/.netrc`, other browsers' state, shell history — is **not**
-  reachable. No directory the renderer can write to is also
-  executable.
+  `~/.netrc`, shell history — is **not** reachable, also when
+  `$XAUTHORITY` is `~/.Xauthority`; other applications' state kept under
+  the XDG directories (other browsers' profiles among it) is readable.
+  No directory the renderer can write to is also executable.
 - **seccomp-bpf (syscalls).** Default-deny allow-list: the filter is
   built with `SCMP_ACT_ERRNO(EPERM)` as the default action and then
   permits only the ~266 syscalls the browser actually needs
