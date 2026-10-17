@@ -35225,7 +35225,7 @@ shadow_root_host_scope_id(ns_node *root)
 static char *
 style_host_scope_id(ns_node *style_el)
 {
-    for (ns_node *a = style_el; a; a = a->parent)
+    for (ns_node *a = style_el; a && a->kind != NS_NODE_DOCUMENT; a = a->parent)
         if (a->kind == NS_NODE_ELEMENT &&
             ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL)
             return shadow_root_host_scope_id(a);
