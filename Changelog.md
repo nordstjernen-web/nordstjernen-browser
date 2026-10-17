@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* An inline-block or button with `margin: auto` no longer stretches the
+  shrink-to-fit box around it to full width; cookie banners built with
+  OneTrust show their close button in the right place again.
 * A drop-down `<select>` is as wide as its widest option, as in other
   browsers, and its arrow sits at the right edge (and is not drawn with
   `appearance: none`).
