@@ -1279,6 +1279,31 @@ node_is_table_internal(const ns_node *n, GHashTable *styles)
            is_table_caption(n, styles);
 }
 
+enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
+
+static int white_space_mode(const ns_node *node, GHashTable *styles);
+
+static gboolean
+node_is_table_run_gap(const ns_node *n, GHashTable *styles)
+{
+    if (n->kind == NS_NODE_TEXT)
+        return text_is_ws_only(n->text) &&
+               white_space_mode(n, styles) == NS_WS_COLLAPSE;
+    if (n->kind == NS_NODE_ELEMENT && n->name &&
+        tag_is_non_rendering(n->name))
+        return TRUE;
+    return node_leaves_inline_run_open(n, styles);
+}
+
+static const ns_node *
+table_internal_run_end(const ns_node *c, GHashTable *styles)
+{
+    while (c && (node_is_table_internal(c, styles) ||
+                 node_is_table_run_gap(c, styles)))
+        c = c->next_sibling;
+    return c;
+}
+
 static void queue_absolute_node(const ns_node *n, const ns_style *s);
 
 static void
@@ -2029,6 +2054,30 @@ build_table(const ns_node *n, GHashTable *styles)
     return table;
 }
 
+static void
+flush_anonymous_cell_run(ns_box *table, const ns_node **cells,
+                         const ns_node *end, GHashTable *styles)
+{
+    if (!*cells) return;
+    ns_box *row = build_row_from_cell_run(*cells, end, NULL, styles);
+    if (row) box_append_child(table, row);
+    *cells = NULL;
+}
+
+static void
+append_anonymous_table_rows(ns_box *table, const ns_node *c,
+                            GHashTable *styles)
+{
+    if (is_table_row(c, styles)) {
+        box_append_child(table, build_table_row(c, styles));
+        return;
+    }
+    if (!node_is_row_group(c, styles)) return;
+    for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+        if (is_table_row(r, styles))
+            box_append_child(table, build_table_row(r, styles));
+}
+
 static ns_box *
 build_anonymous_table(const ns_node *start, const ns_node *end,
                       GHashTable *styles)
@@ -2044,22 +2093,11 @@ build_anonymous_table(const ns_node *start, const ns_node *end,
             if (!cells) cells = c;
             continue;
         }
-        if (cells) {
-            ns_box *row = build_row_from_cell_run(cells, c, NULL, styles);
-            if (row) box_append_child(table, row);
-            cells = NULL;
-        }
-        if (is_table_row(c, styles))
-            box_append_child(table, build_table_row(c, styles));
-        else if (node_is_row_group(c, styles))
-            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-                if (is_table_row(r, styles))
-                    box_append_child(table, build_table_row(r, styles));
+        if (node_is_table_run_gap(c, styles)) continue;
+        flush_anonymous_cell_run(table, &cells, c, styles);
+        append_anonymous_table_rows(table, c, styles);
     }
-    if (cells) {
-        ns_box *row = build_row_from_cell_run(cells, end, NULL, styles);
-        if (row) box_append_child(table, row);
-    }
+    flush_anonymous_cell_run(table, &cells, end, styles);
 
     if (table->first_child) return table;
     ns_box_free(table);
@@ -2106,8 +2144,6 @@ typedef struct ns_atomic_raw {
     ns_box *box;
     double rise;
 } ns_atomic_raw;
-
-static int white_space_mode(const ns_node *node, GHashTable *styles);
 
 static void
 collector_note_ws(collector_ctx *ctx, const ns_node *parent, gsize start)
@@ -4428,8 +4464,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     ctx->active_link_node = prev_link_node;
 }
 
-enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
-
 static gsize
 bidi_control_len(const char *s, gsize avail)
 {
@@ -6416,9 +6450,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         }
         if (node_is_table_internal(c, styles)) {
             const ns_node *start = c;
-            while (c && (node_is_table_internal(c, styles) ||
-                         (c->kind == NS_NODE_TEXT && text_is_ws_only(c->text))))
-                c = c->next_sibling;
+            c = table_internal_run_end(c, styles);
             if (pending_before) {
                 box_append_child(block, pending_before);
                 pending_before = NULL;
