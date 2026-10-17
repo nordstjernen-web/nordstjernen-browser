@@ -11097,16 +11097,21 @@ ns_window_fontface_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, f, "loaded", loaded);
     ns_bind_fn(ctx, f, "load", ns_fontface_load, 0);
 
+    gboolean binary_source = argc >= 2 && !JS_IsString(argv[1]);
+    g_autofree char *fam = NULL;
+    ns_font_descriptors desc = { 0, NS_FONT_SLANT_AUTO };
+    if (binary_source) {
+        fam = ns_fontface_family(ctx, f);
+        desc = ns_fontface_descriptors(ctx, f);
+    }
     const uint8_t *bytes = NULL;
     size_t len = 0;
     JSValue holder = JS_UNDEFINED;
-    if (argc >= 2 && !JS_IsString(argv[1]) &&
+    if (binary_source &&
         ns_js_bytes_view(ctx, argv[1], &bytes, &len, &holder)) {
-        g_autofree char *fam = ns_fontface_family(ctx, f);
         JS_SetPropertyStr(ctx, f, "status", JS_NewString(ctx, "loading"));
         ns_fontface_settle(ctx, f,
-            ns_font_install_bytes(fam, bytes, len,
-                                  ns_fontface_descriptors(ctx, f)));
+                           ns_font_install_bytes(fam, bytes, len, desc));
         JS_FreeValue(ctx, holder);
     } else if (argc >= 2) {
         const char *src = JS_ToCString(ctx, argv[1]);
