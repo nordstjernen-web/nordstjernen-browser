@@ -10674,6 +10674,21 @@ table_collapse_borders(ns_box *box, guint max_cols)
     g_free(grid);
 }
 
+static double
+table_initial_content_width(ns_box *box, gboolean explicit_width,
+                            double cb_basis, double available,
+                            double sizing_extras)
+{
+    if (box->has_flex_main) {
+        box->has_flex_main = FALSE;
+        return box->flex_main_size;
+    }
+    if (explicit_width)
+        return length_resolve(box->style->values[NS_CSS_WIDTH], cb_basis, 0) -
+               sizing_extras;
+    return available;
+}
+
 static void
 layout_table(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -10690,12 +10705,9 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         ? box->padding.left + box->padding.right +
           box->border.left + box->border.right
         : 0;
-    double cw;
-    if (explicit_width) {
-        cw = length_resolve(wv, cb_basis, 0) - sizing_extras;
-    } else {
-        cw = parent_content_width - horiz_total;
-    }
+    double cw = table_initial_content_width(box, explicit_width, cb_basis,
+                                            parent_content_width - horiz_total,
+                                            sizing_extras);
     const ns_css_value *mxw = box->style ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
     if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
         double m = length_resolve(mxw, cb_basis, -1);
@@ -11811,6 +11823,14 @@ flex_item_keep_auto_margins(ns_box *c, double share)
 }
 
 static void
+flex_row_item_edges(ns_box *c, double cw)
+{
+    edges_from_style(c->style, cw, &c->margin, &c->padding, &c->border);
+    c->cb_width_override = cw;
+    c->cb_width_set = TRUE;
+}
+
+static void
 layout_flex_row(ns_box *box, double cw,
                 double inner_x, double inner_y,
                 const ns_style *child_inherited,
@@ -11870,8 +11890,7 @@ layout_flex_row(ns_box *box, double cw,
     ns_flex_len *lens = g_new0(ns_flex_len, items->len + 1);
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
-        edges_from_style(c->style, cw,
-                         &c->margin, &c->padding, &c->border);
+        flex_row_item_edges(c, cw);
         total_extras += c->margin.left + c->margin.right +
                         c->padding.left + c->padding.right +
                         c->border.left + c->border.right;
@@ -12129,7 +12148,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
     ns_flex_len *lens = g_new0(ns_flex_len, items->len + 1);
     for (guint n = 0; n < items->len; n++) {
         ns_box *c = items->pdata[n];
-        edges_from_style(c->style, cw, &c->margin, &c->padding, &c->border);
+        flex_row_item_edges(c, cw);
         g_array_index(extras_arr, double, n) =
             c->margin.left + c->margin.right +
             c->padding.left + c->padding.right +
