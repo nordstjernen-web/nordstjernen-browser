@@ -756,7 +756,7 @@ typedef struct ns_css_value {
             guint8 fn;
             guint8 n_args;
             guint8 arg_none;
-            struct { double px, pct; } args[4];
+            struct { double px, pct, em, rem; } args[4];
         } calc;
         ns_css_shadow_list shadow;
         ns_css_gradient  gradient;
