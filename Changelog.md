@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* `querySelectorAll()`, `getElementsByName()` and the other calls that
+  return a static `NodeList` now return a real `NodeList` object, like
+  other browsers, instead of a decorated `Array`: `Array.isArray()` is
+  false for it, it has no `map`/`filter`, its prototype is
+  `NodeList.prototype` and `JSON.stringify` gives an object. OneTrust's
+  cookie dialog treats an array argument differently from a `NodeList`,
+  threw while it built its preference center, and its "Learn more" /
+  "Cookie settings" button did nothing (netflix.com).
 * Pressing Enter fires a `keypress` event like other browsers, and a page
   that cancels it suppresses the newline. Chat boxes that send on
   keypress, such as duck.ai's prompt, now send when Enter is pressed.

@@ -37375,6 +37375,9 @@ ns_nodelist_decorate(JSContext *ctx, JSValueConst arr)
 static JSValue
 ns_nodelist_new(JSContext *ctx)
 {
+    ns_js *jsx = js_from_ctx(ctx);
+    if (jsx && jsx->live_protos_set)
+        return JS_NewObjectProto(ctx, jsx->live_node_proto);
     return JS_NewArray(ctx);
 }
 
@@ -37386,6 +37389,7 @@ ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len)
         JS_NewInt32(ctx, (int32_t)len),
         JS_PROP_CONFIGURABLE);
     ns_nodelist_decorate(ctx, nl);
+    if (!JS_IsArray(nl)) return nl;
     JS_DefinePropertyValueStr(ctx, nl, "forEach",
         JS_NewCFunction(ctx, ns_nodelist_forEach, "forEach", 1),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
