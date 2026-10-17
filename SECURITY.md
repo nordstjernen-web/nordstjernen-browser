@@ -281,6 +281,12 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
   the same registrable domain share one cookie jar and one cache
   partition; everything else is isolated. Third-party cookies are
   blocked by default.
+- Every `file:` document is an opaque origin. A local page still loads
+  its own scripts, style sheets and images, but `fetch()` and
+  `XMLHttpRequest` cannot read another `file:` URL or a directory
+  listing, a `file:` frame is cross-origin to its embedder, and a
+  `file:` image drawn into a canvas taints it, so an HTML file opened
+  from the downloads folder cannot read the rest of the disk.
 - CSP (`default-src`, `script-src`, `style-src`, `img-src`,
   `media-src`, `connect-src`, `font-src`, `frame-src`,
   `frame-ancestors`) is parsed and enforced for both inline and
