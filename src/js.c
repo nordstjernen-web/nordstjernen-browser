@@ -66346,7 +66346,6 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                                 JS_EVAL_TYPE_GLOBAL);
             js->eval_depth--;
             js->eval_deadline_us = 0;
-            js->current_script = previous_script;
             if (js->eval_depth == 0) {
                 ns_js_flush_document_write(js);
                 ns_js_schedule_pending_script_drain(js);
@@ -66370,6 +66369,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             }
             JS_FreeValue(fctx, v);
             ns_js_microtask_checkpoint(js);
+            js->current_script = previous_script;
         }
         if (in_frame_scope) ns_js_realm_scope_leave(js, &frame_scope);
     } else if (concat->len > 0) {
