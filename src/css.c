@@ -1187,7 +1187,8 @@ ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
     if (n > 4) n = 4;
     double k[4] = {0, 0, 0, 0};
     for (int i = 0; i < n; i++)
-        k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis;
+        k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis +
+               (v->u.calc.args[i].em + v->u.calc.args[i].rem) * 16.0;
     if (v->u.calc.fn >= NS_CALC_FN_ROUND)
         return calc_stepped_eval(v->u.calc.fn, k);
     if (v->u.calc.fn == 3) return calc_clamp_eval(v, k);
@@ -3519,7 +3520,8 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
                 out->n_args = v->u.calc.n_args;
                 out->arg_none = v->u.calc.arg_none;
                 for (int k = 0; k < out->n_args; k++) {
-                    out->args[k].px = v->u.calc.args[k].px;
+                    out->args[k].px = v->u.calc.args[k].px +
+                        (v->u.calc.args[k].em + v->u.calc.args[k].rem) * 16.0;
                     out->args[k].pct = v->u.calc.args[k].pct;
                 }
             }
@@ -4509,6 +4511,8 @@ parse_calc_inner(const char *text)
     if (fn != 0) {
         double values_px[8] = {0};
         double values_pct[8] = {0};
+        double values_em[8] = {0};
+        double values_rem[8] = {0};
         gboolean is_none[8] = {0};
         int num_count = 0;
         int none_count = 0;
@@ -4527,9 +4531,11 @@ parse_calc_inner(const char *text)
                     is_none[slot] = TRUE;
                     none_count++;
                     if (fn != 3) ok = FALSE;
-                } else if (!resolve_to_px_pct(part, strlen(part),
-                                              &values_px[slot],
-                                              &values_pct[slot])) {
+                } else if (!resolve_to_px_pct_font(part, strlen(part),
+                                                   &values_px[slot],
+                                                   &values_pct[slot],
+                                                   &values_em[slot],
+                                                   &values_rem[slot])) {
                     ok = FALSE;
                 } else if (calc_arg_is_number(part)) {
                     num_count++;
@@ -4546,8 +4552,12 @@ parse_calc_inner(const char *text)
         gboolean all_numbers = non_none > 0 && num_count == non_none;
         if (n > 8) n = 8;
         double keys[8] = {0};
-        for (int i = 0; i < n; i++)
-            keys[i] = values_px[i] + values_pct[i] * 0.01 * g_viewport_w;
+        gboolean font_relative = FALSE;
+        for (int i = 0; i < n; i++) {
+            keys[i] = values_px[i] + (values_em[i] + values_rem[i]) * 16.0 +
+                      values_pct[i] * 0.01 * g_viewport_w;
+            if (values_em[i] != 0 || values_rem[i] != 0) font_relative = TRUE;
+        }
         double out_px;
         if (fn == 3) {
             double min_v = is_none[0] ? -HUGE_VAL : keys[0];
@@ -4573,7 +4583,7 @@ parse_calc_inner(const char *text)
         if (all_numbers) return calc_num_value(out_px);
         gboolean basis_dependent = n <= 4;
         if (basis_dependent) {
-            basis_dependent = FALSE;
+            basis_dependent = font_relative;
             for (int i = 0; i < n; i++)
                 if (values_pct[i] != 0) basis_dependent = TRUE;
         }
@@ -4586,6 +4596,8 @@ parse_calc_inner(const char *text)
         for (int i = 0; i < n; i++) {
             mv->u.calc.args[i].px  = values_px[i];
             mv->u.calc.args[i].pct = values_pct[i];
+            mv->u.calc.args[i].em  = values_em[i];
+            mv->u.calc.args[i].rem = values_rem[i];
             if (is_none[i]) mv->u.calc.arg_none |= (guint8)(1u << i);
         }
         return mv;
@@ -31835,6 +31847,37 @@ calc_fold_percent(ns_css_value *v, double basis)
     v->u.calc.pct = 0;
 }
 
+static gboolean
+calc_args_have_font_units(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_CALC || !v->u.calc.fn) return FALSE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (v->u.calc.args[i].em != 0 || v->u.calc.args[i].rem != 0)
+            return TRUE;
+    return FALSE;
+}
+
+static void
+calc_fold_arg_font_units(ns_css_value *v, double em_px, double rem_px)
+{
+    gboolean has_pct = FALSE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+        v->u.calc.args[i].px += v->u.calc.args[i].em * em_px +
+                                v->u.calc.args[i].rem * rem_px;
+        v->u.calc.args[i].em = 0;
+        v->u.calc.args[i].rem = 0;
+        if (v->u.calc.args[i].pct != 0) has_pct = TRUE;
+    }
+    double px = ns_css_calc_math_fn_px(v, 0);
+    if (has_pct) {
+        v->u.calc.px = px;
+        return;
+    }
+    v->kind = NS_CSS_V_LENGTH;
+    v->u.length.v = px;
+    v->u.length.unit = NS_CSS_UNIT_PX;
+}
+
 static void
 resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
@@ -31859,6 +31902,17 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                      fsv->u.calc.rem * font_rem_px +
                      fsv->u.calc.pct * parent_px / 100.0 +
                      calc_viewport_refresh_px(fsv);
+    } else if (calc_args_have_font_units(out->values[NS_CSS_FONT_SIZE])) {
+        double parent_px = 16;
+        if (parent_style && parent_style->values[NS_CSS_FONT_SIZE] &&
+            parent_style->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
+            parent_style->values[NS_CSS_FONT_SIZE]->u.length.unit ==
+                NS_CSS_UNIT_PX)
+            parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
+        ns_css_value *fsv = ns_css_value_cow(out, NS_CSS_FONT_SIZE);
+        calc_fold_arg_font_units(fsv, parent_px, font_rem_px);
+        my_font_px = fsv->kind == NS_CSS_V_LENGTH
+            ? fsv->u.length.v : ns_css_calc_math_fn_px(fsv, parent_px);
     }
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
     if (root_px <= 0) root_px = my_font_px;
@@ -31944,6 +31998,11 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                 }
             }
             continue;
+        }
+        if (calc_args_have_font_units(v)) {
+            v = ns_css_value_cow(out, i);
+            calc_fold_arg_font_units(v, my_font_px, root_px);
+            if (v->kind != NS_CSS_V_CALC) continue;
         }
         if (v->kind == NS_CSS_V_CALC) {
             double viewport_refresh = calc_viewport_refresh_px(v);
