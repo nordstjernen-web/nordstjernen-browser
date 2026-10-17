@@ -389,17 +389,24 @@ document `postMessage` between a frame and its parent is currently limited
 
 ### Cookies and the `document.cookie` surface
 
-Network cookies live in libcurl's per-site cookie jar on disk. They
-are parsed, scoped, and re-sent by libcurl, honouring `HttpOnly`,
-`Secure`, `SameSite`, `Path`, `Domain`, and expiry. At navigation the
-non-`HttpOnly` cookies for the document's origin are read back out of
-the jar (`ns_net_cookies_for_js`) and seeded into `document.cookie`,
-and the `document.cookie` setter writes back into that same per-site
-jar (`ns_net_cookie_store_from_js`) — so a cookie set from JS is sent
-on the next request, and a cookie set over the network is visible to a
-later `document.cookie` read. `HttpOnly` cookies are written by libcurl
-with a `#HttpOnly_` line prefix that the JS read path skips, so they
-stay invisible to script.
+Network cookies live in a per-site, Netscape-format cookie jar on disk.
+libcurl reads the jar when a transfer starts and sends its cookies,
+honouring `Secure`, `Path`, `Domain`, and expiry; each `Set-Cookie`
+header is stored by the engine (`ns_cookie_store_impl`, from the curl
+header callback or the HTTP/2 backend) into the request's partition jar.
+libcurl never writes the jar itself. Every jar write holds a
+process-wide mutex and an exclusive lock on `cookies/.lock`, so
+concurrent responses and renderer processes cannot overwrite each
+other's cookies. At navigation the non-`HttpOnly` cookies for the
+document's origin are read back out of the jar (`ns_net_cookies_for_js`)
+and seeded into `document.cookie`, and the `document.cookie` setter
+writes back into that same per-site jar (`ns_net_cookie_store_from_js`)
+— so a cookie set from JS is sent on the next request. A
+`document.cookie` read re-reads the jar whenever
+`ns_net_cookie_jar_version` says it changed, so a cookie set or deleted
+over the network is visible to the next read. `HttpOnly` cookies are
+written with a `#HttpOnly_` line prefix that the JS read path skips, so
+they stay invisible to script.
 
 The `document.cookie` setter:
 
@@ -432,12 +439,6 @@ The `document.cookie` setter:
   this; both require additional integration work (manifest /
   capability declarations / re-routed config paths) and are
   tracked as future work.
-- **`document.cookie` writes to the jar without file locking.** A
-  JS cookie write and a concurrent libcurl jar flush from an
-  in-flight transfer are not serialised against each other, so a
-  write can occasionally be lost to a racing flush. A shared,
-  locked cookie store is the long-term fix; in practice script
-  cookie writes happen between transfers, so the window is small.
 - **`HttpOnly` name collisions from JS are not rejected.** Setting
   `document.cookie` with the same name as an existing `HttpOnly`
   cookie adds a second entry rather than being refused; the

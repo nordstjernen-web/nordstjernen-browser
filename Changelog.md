@@ -11,6 +11,20 @@ Changelog:
   local image from another folder drawn into a canvas did not taint it. A
   local page still loads its own scripts, style sheets and images. The
   same fix lands in Southstar and Northstar.
+* Cookies set by responses that arrive at the same time are all kept.
+  Every libcurl transfer loaded the jar when it started and wrote its
+  whole in-memory copy back when it ended, so concurrent responses
+  overwrote each other: of eight cookies set by eight parallel `fetch()`
+  calls, the next request carried one or two. libcurl now only reads the
+  jar; each `Set-Cookie` header is stored by the engine into the
+  request's partition jar under a process-wide mutex and an exclusive
+  lock on `cookies/.lock`, which also covers the other renderer
+  processes. `document.cookie` also follows the jar: it was a copy taken
+  when the page loaded, so a cookie set or deleted by a `fetch()` or XHR
+  response never appeared, which broke sites that copy a CSRF token from
+  a cookie into a request header. A read now takes the jar again when its
+  version (the process's write count and the jar files' size and
+  modification time) has changed. Same fix as Southstar's.
 * README: brought up to date with the source — per-platform renderer
   sandboxing (Seatbelt on macOS, mitigation policies on Windows),
   OS-decoded H.264/AAC, Web Audio and camera/microphone capture, WOFF2,

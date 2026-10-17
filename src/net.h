@@ -236,6 +236,7 @@ void          ns_url_parts_free(ns_url_parts *parts);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(ns_url_parts, ns_url_parts_free)
 
 char *ns_net_cookies_for_js(const char *url);
+gboolean ns_net_cookie_jar_version(const char *url, guint64 *version);
 void  ns_net_cookie_store_from_js(const char *url, const char *cookie);
 void  ns_net_cookies_clear(void);
 void  ns_net_site_storage_clear(void);
