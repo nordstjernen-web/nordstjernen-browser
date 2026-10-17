@@ -8,6 +8,12 @@ Changelog:
   algorithm, so comments, escapes, `0`, unclosed `calc(`, negative
   `min()`/`clamp()` results and invalid media conditions are handled
   instead of falling back to the full window width.
+* Security: `new FontFace(family, bytes, descriptors)` no longer reads
+  freed memory. The constructor took a pointer to the font bytes and
+  then converted the descriptors to strings, so a descriptor whose
+  `toString()` detached the bytes' `ArrayBuffer` (with `transfer()`)
+  freed them before the font was installed from them. The descriptors
+  are now converted first.
 * A page can script an iframe showing a `blob:` URL it created itself,
   as same-origin content, instead of getting `contentDocument === null`.
 * `position: relative` offsets given in percent or `calc()` move the box
