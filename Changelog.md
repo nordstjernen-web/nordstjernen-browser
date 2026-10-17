@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* Layout: percentage padding and margins on an item of a row flex
+  container resolve against the container's width, as for any other
+  box. The item's own width was used instead, so `padding-left: 5%` on
+  an item in a 1000px flex row came out 7.58px instead of 50px, and
+  locale switchers and cookie banners sat too tight. A table with a set
+  width that is a flex item now takes the width the flex layout gives
+  it: `width: 10%; flex: 1` in a 600px row grows to 500px instead of
+  staying 50px.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
