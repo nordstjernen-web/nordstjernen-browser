@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* Images and inline-blocks in a line of text sit on the baseline with
+  the font's descent below them, as in other browsers, so lines with
+  images are no longer a few pixels shorter than in Chrome or Firefox.
 * `em` and `rem` inside `min()`, `max()` and `clamp()` resolve against
   the element's real font size and the root's, as in other browsers,
   not against 16px. AP News sets the root to 62.5% and sizes its footer
