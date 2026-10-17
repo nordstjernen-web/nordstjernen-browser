@@ -23,6 +23,16 @@ Changelog:
   of the line (the "/" separators in theverge.com's navigation).
 * `@font-face` descriptors read back through CSSOM are validated and
   normalized like in other browsers (ranges, `calc()`, `oblique 0deg`).
+* Security: a web page can no longer read or overwrite the storage of
+  installed extensions. Content scripts got their storage, manifest and
+  install-path functions as properties of the page's global object, and
+  the functions took the extension id as an argument. A page that
+  trapped one of those names before a `document_idle` content script
+  ran could read and rewrite every extension's `storage.local`, `sync`
+  and `managed` data and learn each extension's install directory. The
+  functions are now handed to the content-script wrapper as a call
+  argument, never through the global object, and each one is bound to
+  its own extension's id in C.
 * Responsive images pick the same `srcset` candidate as other browsers
   for any `sizes` value: the attribute is now parsed with the HTML
   algorithm, so comments, escapes, `0`, unclosed `calc(`, negative
