@@ -1024,6 +1024,7 @@ node_has_media_metadata(const ns_node *n)
 }
 
 #define NS_LAYOUT_MAX_DEPTH 512
+#define NS_LAYOUT_UNIT (1.0 / 64.0)
 #define NS_TABLE_MAX_COLS 4096
 
 static gboolean tag_is_non_rendering(const char *name);
@@ -15389,7 +15390,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             double left_off = 0, right_off = 0;
             floats_offsets_at(floats, float_y, &left_off, &right_off);
-            while ((avail > cw - left_off - right_off) && floats->len > 0) {
+            while ((avail > cw - left_off - right_off + NS_LAYOUT_UNIT) &&
+                   floats->len > 0) {
                 double next_y = float_y;
                 gboolean advanced = FALSE;
                 for (guint i = 0; i < floats->len; i++) {
