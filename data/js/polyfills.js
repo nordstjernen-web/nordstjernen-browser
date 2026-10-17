@@ -9925,6 +9925,143 @@
             return rules;
         }
 
+        var FONT_FACE_DESCRIPTORS = ['font-family', 'src', 'font-style',
+            'font-weight', 'font-stretch', 'font-width', 'font-display',
+            'unicode-range', 'font-feature-settings', 'font-variation-settings',
+            'font-named-instance', 'font-language-override', 'ascent-override',
+            'descent-override', 'line-gap-override', 'size-adjust'];
+        var fontFaceDescriptorsProto = Object.create(
+            typeof CSSStyleDeclaration === 'function'
+                ? CSSStyleDeclaration.prototype : Object.prototype);
+
+        function splitDeclarations(block) {
+            var s = String(block), out = [], buf = '', depth = 0, quote = 0;
+            for (var i = 0; i <= s.length; i++) {
+                var c = i < s.length ? s.charAt(i) : ';';
+                if (quote) {
+                    buf += c;
+                    if (c === quote && s.charAt(i - 1) !== '\\') quote = 0;
+                    continue;
+                }
+                if (c === '"' || c === "'") { quote = c; buf += c; continue; }
+                if (c === '(') { depth++; buf += c; continue; }
+                if (c === ')') { if (depth) depth--; buf += c; continue; }
+                if (c === ';' && depth === 0) {
+                    var colon = buf.indexOf(':');
+                    if (colon > 0) {
+                        var name = buf.slice(0, colon).replace(/^\s+|\s+$/g, '')
+                                      .toLowerCase();
+                        var value = buf.slice(colon + 1).replace(/\s+/g, ' ')
+                                       .replace(/^ | $/g, '')
+                                       .replace(/\s*!important$/i, '');
+                        if (name && value) out.push([name, value]);
+                    }
+                    buf = '';
+                    continue;
+                }
+                buf += c;
+            }
+            return out;
+        }
+
+        function normalizeDescriptorValue(value) {
+            return value.replace(/\burl\(\s*([^"'()\s][^()\s]*)\s*\)/gi,
+                function (m, u) {
+                    return 'url("' + u.replace(/["\\]/g, '\\$&') + '")';
+                });
+        }
+
+        function fontFaceDescriptors(block, rule) {
+            var decl = Object.create(fontFaceDescriptorsProto);
+            decl.__rule = rule;
+            decl.__entries = [];
+            decl.__parse(block);
+            return decl;
+        }
+
+        method(fontFaceDescriptorsProto, '__parse', function (block) {
+            var entries = [];
+            splitDeclarations(block).forEach(function (pair) {
+                if (FONT_FACE_DESCRIPTORS.indexOf(pair[0]) < 0) return;
+                pair[1] = normalizeDescriptorValue(pair[1]);
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i][0] === pair[0]) { entries.splice(i, 1); break; }
+                }
+                entries.push(pair);
+            });
+            this.__entries = entries;
+        });
+        accessor(fontFaceDescriptorsProto, 'cssText',
+            function () {
+                return this.__entries.map(function (e) {
+                    return e[0] + ': ' + e[1] + ';';
+                }).join(' ');
+            },
+            function (v) {
+                this.__parse(v == null ? '' : String(v));
+                if (this.__rule) notify(this.__rule);
+            });
+        accessor(fontFaceDescriptorsProto, 'length',
+            function () { return this.__entries.length; });
+        accessor(fontFaceDescriptorsProto, 'parentRule',
+            function () { return this.__rule || null; });
+        method(fontFaceDescriptorsProto, 'item', function (i) {
+            var e = this.__entries[i >>> 0];
+            return e ? e[0] : '';
+        });
+        method(fontFaceDescriptorsProto, 'getPropertyValue', function (name) {
+            name = String(name).toLowerCase();
+            for (var i = 0; i < this.__entries.length; i++)
+                if (this.__entries[i][0] === name) return this.__entries[i][1];
+            return '';
+        });
+        method(fontFaceDescriptorsProto, 'getPropertyPriority', function () {
+            return '';
+        });
+        method(fontFaceDescriptorsProto, 'setProperty', function (name, value) {
+            name = String(name).toLowerCase();
+            if (FONT_FACE_DESCRIPTORS.indexOf(name) < 0) return;
+            if (value == null || String(value) === '') {
+                this.removeProperty(name);
+                return;
+            }
+            var v = normalizeDescriptorValue(
+                String(value).replace(/\s+/g, ' ').replace(/^ | $/g, ''));
+            for (var i = 0; i < this.__entries.length; i++) {
+                if (this.__entries[i][0] === name) {
+                    this.__entries[i][1] = v;
+                    if (this.__rule) notify(this.__rule);
+                    return;
+                }
+            }
+            this.__entries.push([name, v]);
+            if (this.__rule) notify(this.__rule);
+        });
+        method(fontFaceDescriptorsProto, 'removeProperty', function (name) {
+            name = String(name).toLowerCase();
+            for (var i = 0; i < this.__entries.length; i++) {
+                if (this.__entries[i][0] === name) {
+                    var old = this.__entries[i][1];
+                    this.__entries.splice(i, 1);
+                    if (this.__rule) notify(this.__rule);
+                    return old;
+                }
+            }
+            return '';
+        });
+        FONT_FACE_DESCRIPTORS.forEach(function (name) {
+            var camel = name.replace(/-([a-z])/g, function (m, ch) {
+                return ch.toUpperCase();
+            });
+            accessor(fontFaceDescriptorsProto, camel,
+                function () { return this.getPropertyValue(name); },
+                function (v) { this.setProperty(name, v); });
+            if (camel !== name)
+                accessor(fontFaceDescriptorsProto, name,
+                    function () { return this.getPropertyValue(name); },
+                    function (v) { this.setProperty(name, v); });
+        });
+
         function serializeDeclBlock(block) {
             var s = String(block), out = [], buf = '', depth = 0, quote = 0;
             for (var i = 0; i < s.length; i++) {
@@ -10094,7 +10231,9 @@
                 ar.__parentRule = parentRule || null;
                 ar.__at = kw;
                 ar.__type = atType;
-                if (kw === 'font-face' || kw === 'page') {
+                if (kw === 'font-face') {
+                    ar.__style = fontFaceDescriptors(block, ar);
+                } else if (kw === 'page') {
                     var holder = document.createElement('span');
                     try { holder.style.cssText = block; } catch (e) {}
                     ar.__holder = holder;
