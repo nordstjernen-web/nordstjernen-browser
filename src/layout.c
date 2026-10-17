@@ -20276,6 +20276,56 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
         }
 }
 
+static void
+box_inline_rects_for_dom(const ns_box *root, const ns_node *target,
+                         double dx, double dy, GArray *out)
+{
+    if (!root) return;
+    if (root->kind == NS_BOX_INLINE && root->attrs && root->text) {
+        for (guint i = 0; i < root->attrs->len; i++) {
+            const ns_inline_attr *r =
+                &g_array_index(root->attrs, ns_inline_attr, i);
+            if (r->dom != target || r->kind != NS_INLINE_ELEMENT || r->len == 0)
+                continue;
+            guint before = out->len;
+            if (!ns_paint_inline_range_rects(root, r->start, r->len, r, out))
+                continue;
+            for (guint k = before; k + 3 < out->len; k += 4) {
+                g_array_index(out, double, k) += root->x + dx;
+                g_array_index(out, double, k + 1) += root->y + dy;
+            }
+        }
+    }
+    double cdx = dx - root->scroll_x;
+    double cdy = dy - root->scroll_y;
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
+        box_inline_rects_for_dom(c, target, cdx, cdy, out);
+    if (root->inline_atomics)
+        for (guint i = 0; i < root->inline_atomics->len; i++) {
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double adx = cdx + root->x + atomic->owner_offset_x +
+                         atomic->box->rel_dx - atomic->box->x;
+            double ady = cdy + root->y + atomic->owner_offset_y +
+                         atomic->box->rel_dy - atomic->box->y;
+            box_inline_rects_for_dom(atomic->box, target, adx, ady, out);
+        }
+}
+
+GArray *
+ns_box_inline_rects_for_dom(const ns_box *root, const ns_node *target)
+{
+    if (!root || !target) return NULL;
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(double));
+    box_inline_rects_for_dom(root, target, 0, 0, out);
+    if (out->len == 0) {
+        g_array_free(out, TRUE);
+        return NULL;
+    }
+    return out;
+}
+
 gboolean
 ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                            double *x, double *y, double *w, double *h)

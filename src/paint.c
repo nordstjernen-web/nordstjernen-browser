@@ -5945,6 +5945,39 @@ inline_union_add(const inline_fragment *f, gpointer data)
     if (f->y1 > u->y1) u->y1 = f->y1;
 }
 
+static void
+inline_rects_add(const inline_fragment *f, gpointer data)
+{
+    GArray *out = data;
+    double rect[4] = { f->x0, f->y0, f->x1 - f->x0, f->y1 - f->y0 };
+    g_array_append_vals(out, rect, 4);
+}
+
+gboolean
+ns_paint_inline_range_rects(const ns_box *b, gsize start, gsize len,
+                            const ns_inline_attr *element, GArray *out)
+{
+    if (!b || !b->text || !*b->text || len == 0 || !out) return FALSE;
+    gsize text_len = strlen(b->text);
+    if (start >= text_len) return FALSE;
+    if (start + len > text_len) len = text_len - start;
+    const ns_style *box_style =
+        element && !b->vertical_wm ? element->style : NULL;
+    NsPangoLayout *layout = box_style
+        ? paint_inline_make_layout(b, inherited_style(b), NULL)
+        : ns_paint_build_inline_layout(NULL, b);
+    if (!layout) return FALSE;
+    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+    guint before = out->len;
+    inline_range range =
+        inline_range_for(b, start, len, box_style ? element : NULL);
+    inline_range_fragments(b, layout, y_origin, &range, inline_rects_add, out);
+    g_object_unref(layout);
+    for (guint i = before; i + 3 < out->len; i += 4)
+        g_array_index(out, double, i + 1) -= b->y;
+    return out->len > before;
+}
+
 gboolean
 ns_paint_inline_range_extents(const ns_box *b, gsize start, gsize len,
                               const ns_inline_attr *element,

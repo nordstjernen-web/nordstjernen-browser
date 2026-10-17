@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* `getClientRects()` on an inline element that wraps returns one
+  rectangle per line, as in other browsers, instead of a single bounding
+  box.
 * `text-wrap: balance` balances the lines of headings and paragraphs
   (up to six lines) instead of breaking them greedily.
 * Images and inline-blocks in a line of text sit on the baseline with
