@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* A service worker's `message` event has `waitUntil()`, as an
+  `ExtendableMessageEvent` does. TikTok's service worker calls it for
+  every config message from the page and threw three TypeErrors on each
+  visit, so it never stored its A/B and consent settings.
 * Spelling mistakes are underlined only in text fields you have clicked
   into, like other browsers, instead of in every prefilled field (search
   result pages showed the query underlined in red).
