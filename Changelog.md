@@ -4,7 +4,7 @@ Changelog:
 1.0.35:
 ======
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
-  for crashes and double frees fixed sixteen bugs that a page, or an
+  for crashes and double frees fixed nineteen bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a
   `Security-Fix:` trailer.
 * HTML parsing: a named character reference whose value is longer than
@@ -31,6 +31,11 @@ Changelog:
   renderer instead of throwing `RangeError`; Temporal objects were
   declared 16-byte aligned on QuickJS's 8-byte allocator; Intl number
   formatting freed the same memory twice when an allocation failed.
+* Rendering: painting SVG path data with a number after closepath grew
+  the path until memory ran out; a page nested about 100k elements deep
+  overflowed the stack when it later added a stylesheet or defined a
+  custom element, and so did a slotted element under a shadow root
+  nested about 170k levels deep.
 * Media: an MP4 box using the 64-bit size form in a buffer shorter than
   16 bytes was read past its end.
 * Task Manager: "End task" used the view of a tab that had closed since
