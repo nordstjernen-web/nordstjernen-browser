@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* The in-tree HTML parser, lexbor, is refreshed to upstream master
+  (f4cbbcd). The object arrays its tokenizer and tree builder keep were
+  allocated eight times larger than needed on 64-bit systems, and removing
+  entries moved eight times too many bytes; both now use the exact size.
 * JavaScript: QuickJS is at quickjs-ng master 5271a40, the latest
   upstream commit. It changes only upstream's CI runners, so the engine
   itself is the same as at 9b06171.
