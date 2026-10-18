@@ -4807,6 +4807,10 @@ SETTINGS_SWITCH("strip_tracking_params",
 SETTINGS_SWITCH("https_first",
     "HTTPS first",
     "Try a secure connection before plain HTTP on every site.")
+SETTINGS_SWITCH("remote_control",
+    "Allow remote control",
+    "Let local tools such as Claude Code drive this browser through "
+    "nordstjernen --mcp. Only programs on this computer can connect.")
 "</div></section>\n"
 "<section id=\"content\"><h2>Content</h2><div class=\"card\">\n"
 SETTINGS_SWITCH("images_enabled",
@@ -4847,7 +4851,7 @@ SETTINGS_SWITCH("cache_enabled",
 "{n:'Brave',u:'https://search.brave.com/search?q=%s'},"
 "{n:'Wikipedia',u:'https://en.wikipedia.org/w/index.php?search=%s'}];\n"
 "var toggles=['do_not_track','global_privacy_control',"
-"'strip_tracking_params','https_first','images_enabled',"
+"'strip_tracking_params','https_first','remote_control','images_enabled',"
 "'javascript_enabled','webgl_enabled','webgpu_enabled','local_storage_enabled',"
 "'cache_enabled'];\n"
 "var loaded=false,toastTimer=0;\n"
@@ -4940,7 +4944,8 @@ about_settings_json(void)
         "\"strip_tracking_params\":%s,\"https_first\":%s,"
         "\"images_enabled\":%s,\"javascript_enabled\":%s,"
         "\"webgl_enabled\":%s,\"webgpu_enabled\":%s,"
-        "\"local_storage_enabled\":%s,\"cache_enabled\":%s}",
+        "\"local_storage_enabled\":%s,\"cache_enabled\":%s,"
+        "\"remote_control\":%s}",
         home, eng, c ? (int)c->cookie_policy : 1,
         (c && c->do_not_track) ? "true" : "false",
         (c && c->global_privacy_control) ? "true" : "false",
@@ -4951,7 +4956,8 @@ about_settings_json(void)
         (c && c->webgl_enabled) ? "true" : "false",
         (c && c->webgpu_enabled) ? "true" : "false",
         (c && c->local_storage_enabled) ? "true" : "false",
-        (c && c->cache_enabled) ? "true" : "false");
+        (c && c->cache_enabled) ? "true" : "false",
+        (c && c->remote_control) ? "true" : "false");
     ns_config_unlock();
     g_free(home);
     g_free(eng);
@@ -4997,6 +5003,8 @@ about_settings_save(const char *form)
         c->local_storage_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "cache_enabled")))
         c->cache_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "remote_control")))
+        c->remote_control = atoi(v) != 0;
     ns_config_save(NULL);
     ns_config_unlock();
     g_hash_table_destroy(q);

@@ -8,12 +8,30 @@
 
 #include <gtk/gtk.h>
 
+#include "procview.h"
+
 G_BEGIN_DECLS
 
 int ns_procapp_run(const char *startup_url, const char *session_path,
                    gboolean recover, gboolean private_mode);
 
 void ns_procapp_set_window_size(int width, int height);
+
+typedef struct {
+    int         id;
+    int         window;
+    gboolean    active;
+    NsProcView *view;
+} NsProcTab;
+
+GArray     *ns_procapp_tabs(void);
+NsProcView *ns_procapp_tab_view(int id);
+int         ns_procapp_tab_id(NsProcView *view);
+int         ns_procapp_tab_new(const char *url);
+gboolean    ns_procapp_tab_close(int id);
+gboolean    ns_procapp_tab_select(int id, gboolean present);
+gboolean    ns_procapp_tab_load(int id, const char *url);
+void        ns_procapp_set_remote_status(const char *controller);
 
 G_END_DECLS
 

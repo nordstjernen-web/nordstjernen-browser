@@ -16,6 +16,7 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [media.md](media.md) — how `<video>`/`<audio>` play (MPEG-1, WebM via FFmpeg, the audio and video helper processes, WebVTT `<track>` captions).
 - [Proxy.md](Proxy.md) — proxies and VPNs.
 - [privacy-policy.md](privacy-policy.md) — what the browser does and does not collect.
+- [remote-control.md](remote-control.md) — let a local agent such as Claude Code drive the browser through the built-in MCP server (`nordstjernen --mcp`).
 
 ## Install, build & packaging
 
