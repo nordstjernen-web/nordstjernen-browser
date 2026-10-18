@@ -389,7 +389,8 @@ parse_moov(ns_mp4 *m, ns_span moov)
     uint32_t type;
     ns_span b;
     while (child_next(moov, &off, &type, &b)) {
-        if (type == FOURCC('m', 'v', 'h', 'd') && b.len >= 24) {
+        if (type == FOURCC('m', 'v', 'h', 'd') && b.len >= 24 &&
+            (b.p[0] != 1 || b.len >= 32)) {
             int v1 = b.p[0] == 1;
             m->movie_timescale = rd32(b.p + (v1 ? 20 : 12));
             m->movie_duration = v1 ? rd64(b.p + 24) : rd32(b.p + 16);

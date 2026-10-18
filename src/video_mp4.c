@@ -131,7 +131,7 @@ ns_mp4_player_next(ns_mp4_player *p, ns_texture **out_tex, double *out_pts)
         ns_mp4_track *v = player_track(p);
         if (p->next < v->count) {
             ns_mp4_sample *s = &v->samples[p->next];
-            if (s->offset + s->size <= p->len) {
+            if (s->offset <= p->len && s->size <= p->len - s->offset) {
                 int r = ns_os_vdec_send(p->dec, p->data + s->offset, s->size,
                                         (gint64)(ns_mp4_sample_time(v, s) * 1e6));
                 if (r < 0) {
