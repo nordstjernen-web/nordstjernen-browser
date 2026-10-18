@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.33" date="2026-10-18">
+      <description>
+        <p>Rendering, performance and security release.</p>
+        <ul>
+          <li>WebGL canvases that redraw every frame are read back asynchronously and converted on the GPU, so painting is about three times faster and translucent canvases blend correctly.</li>
+          <li>The browser can be driven remotely over the Model Context Protocol with nordstjernen --mcp.</li>
+          <li>Many CSS table, flexbox, float, multi-column, fixed positioning and SVG layout fixes, and faster painting of invisible and translucent subtrees.</li>
+          <li>Security fixes for storage isolation, local file access, web worker requests, FontFace, the clipboard, the MP4 demuxer and renderer-requested downloads.</li>
+          <li>Alpine and Debian packages carry JPEG XL, H.264/AAC playback, spell-checking and WOFF2 like the other Linux builds.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.32" date="2026-10-16">
       <description>
         <p>JavaScript, CSS and media release.</p>
