@@ -12904,6 +12904,11 @@ ns_clipboard_writeText(JSContext *ctx, JSValueConst this_val,
             "NotAllowedError: clipboard write not available");
         return promise;
     }
+    if (!ns_js_has_transient_activation(js)) {
+        ns_js_promise_reject(ctx, resolvers,
+            "NotAllowedError: clipboard write requires user activation");
+        return promise;
+    }
     const char *text = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     gboolean ok = js->clipboard_write_cb(text ? text : "",
                                           js->clipboard_write_user_data);
@@ -12965,7 +12970,9 @@ ns_document_command_run(ns_js *js, const char *cmd)
     if (!js || !cmd) return FALSE;
     if (g_ascii_strcasecmp(cmd, "copy") == 0 ||
         g_ascii_strcasecmp(cmd, "cut") == 0) {
-        if (!js->selection_has_range || !js->clipboard_write_cb) return FALSE;
+        if (!js->selection_has_range || !js->clipboard_write_cb ||
+            !ns_js_has_transient_activation(js))
+            return FALSE;
         return js->clipboard_write_cb(
             js->selection_text ? js->selection_text : "",
             js->clipboard_write_user_data);
