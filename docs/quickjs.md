@@ -16,7 +16,7 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.17.0 (master `5271a40`) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | release 2026-06-04, pinned by commit, plus one sort patch |
+| Version | quickjs-ng 0.17.0 (master `5271a40`) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `84e723f` (2026-10-13), pinned by commit, plus one sort patch |
 | About page | `QuickJS 0.17.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
@@ -26,13 +26,18 @@ engine gets that API through a small adapter instead of a second binding.
 
 ## How the original engine is built
 
-`subprojects/quickjs.wrap` pins the upstream repository at the commit that
-made the 2026-06-04 release. Upstream ships only a Makefile, so the wrap's
+`subprojects/quickjs.wrap` pins a commit on the upstream `master` branch,
+currently `84e723f` (2026-10-13), sixty commits past the 2026-06-04 release.
+Upstream has not changed `VERSION` since, so the About page still reads
+`QuickJS 2026-06-04`. Upstream ships only a Makefile, so the wrap's
 `patch_directory` overlays `subprojects/packagefiles/quickjs/meson.build`,
 which compiles the library objects the Makefile builds (`quickjs.c`,
 `dtoa.c`, `libregexp.c`, `libunicode.c`, `cutils.c`) with the same defines
 (`_GNU_SOURCE`, `CONFIG_VERSION`, `-fwrapv`) into a static library with
-hidden symbols. Nothing is installed. A build with
+hidden symbols. Master's experimental Temporal and Intl
+(`CONFIG_TEMPORAL_INTL`, the `intl/` and `temporal/` directories) are not
+compiled; the browser never calls `JS_AddIntrinsicTemporal` or
+`JS_AddIntrinsicIntl`. Nothing is installed. A build with
 `--wrap-mode=nodownload` needs the checkout already in
 `subprojects/quickjs/`.
 
@@ -43,9 +48,10 @@ SpiderMonkey and JavaScriptCore never do. jQuery 4's `uniqueSort` counts on
 that call to spot duplicates, so on the unpatched engine `$(a).add(a)` and
 `.closest()` return the same element twice.
 
-To move to a newer release, point `revision` in the wrap at the new release
-commit, delete `subprojects/quickjs/`, reconfigure, regenerate the patch if
-it no longer applies, and rerun the checks below.
+To move forward, point `revision` in the wrap at a newer `master` commit,
+delete `subprojects/quickjs/`, reconfigure, regenerate the patch if it no
+longer applies, drop any adapter shim for a call upstream now exports (as
+`JS_ToObject` was dropped at `84e723f`), and rerun the checks below.
 
 ## The adapter: `src/ns_quickjs.h`
 
@@ -111,8 +117,8 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
   memory. Re-reading `memory.buffer` gives a working buffer, as it does
   after `grow()` on both engines.
 - **Language behaviour.** The fork's compatibility changes are absent:
-  `RegExp.$1`–`$9`, `Function.prototype.caller`, `Error.captureStackTrace`,
-  `Array.fromAsync` and `using` declarations are missing, and `error.stack`
+  `RegExp.$1`–`$9`, `Function.prototype.caller`, `Error.captureStackTrace`
+  and `using` declarations are missing, and `error.stack`
   has no leading `Name: message` line.
 - **Promise jobs in frames.** The original engine does not expose its job
   queue, so `JS_GetPendingJobRealm` is NULL and a promise reaction from a

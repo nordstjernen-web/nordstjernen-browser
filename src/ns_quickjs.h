@@ -94,7 +94,6 @@ int JS_GetTypedArrayType(JSValueConst val);
 bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom);
 JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
                      size_t input_len, JSEvalOptions *options);
-JSValue JS_ToObject(JSContext *ctx, JSValueConst val);
 JSValue JS_NewStringUTF16(JSContext *ctx, const uint16_t *buf, size_t len);
 JSValue __js_printf_like(3, 4) JS_ThrowDOMException(JSContext *ctx,
                                                     const char *name,
