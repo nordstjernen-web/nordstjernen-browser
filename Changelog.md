@@ -3,6 +3,11 @@ Changelog:
 
 1.0.33:
 ======
+* Floats: a line of `white-space: nowrap` or `pre` text stays beside a
+  float and overflows, as in Chrome, instead of dropping below the
+  float when less than about 120px is left beside it. Gmail's inbox
+  floats the " - " before each message snippet, and a row whose
+  subject left the snippet little room grew to two lines.
 * CSS tables: a `<table>`, `<tr>`, `<td>` or `<th>` whose `display` is
   changed by CSS is laid out with that display, as in Chrome, instead of
   as a table part by its tag. A row group's children that are not rows
