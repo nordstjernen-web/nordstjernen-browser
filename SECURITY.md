@@ -105,7 +105,10 @@ socket, so it normally needs no `/dev/shm` name at all.
   itself, and the XDG config, data and cache directories (`~/.config`,
   `~/.local/share`, `~/.cache`). Read+write access to
   `~/.config/nordstjernen`, `~/.local/share/nordstjernen`,
-  `~/.cache/nordstjernen`. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
+  `~/.cache/nordstjernen`. While WebGL or WebGPU is enabled, also
+  read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*`, which
+  the driver behind those APIs opens to render on the GPU; with both off
+  in Settings the renderer gets no access to them. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
   `~/.netrc`, shell history — is **not** reachable, also when
   `$XAUTHORITY` is `~/.Xauthority`; other applications' state kept under
   the XDG directories (other browsers' profiles among it) is readable.
