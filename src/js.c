@@ -36717,10 +36717,15 @@ ns_element_getAttributeNames(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(this_val);
     JSValue arr = JS_NewArray(ctx);
     if (!n || n->kind != NS_NODE_ELEMENT) return arr;
-    uint32_t i = 0;
+    GArray *names = g_array_new(FALSE, FALSE, sizeof(JSValue));
     for (const ns_attr *a = n->attrs; a; a = a->next)
-        if (a->name && !ns_attr_name_is_internal(a->name))
-            JS_SetPropertyUint32(ctx, arr, i++, JS_NewString(ctx, a->name));
+        if (a->name && !ns_attr_name_is_internal(a->name)) {
+            JSValue name = JS_NewString(ctx, a->name);
+            g_array_append_val(names, name);
+        }
+    for (guint k = 0; k < names->len; k++)
+        JS_SetPropertyUint32(ctx, arr, k, g_array_index(names, JSValue, k));
+    g_array_free(names, TRUE);
     return arr;
 }
 
