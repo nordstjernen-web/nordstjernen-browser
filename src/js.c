@@ -16806,15 +16806,18 @@ ns_nav_make_entry(JSContext *ctx, ns_js *js, ns_history_entry *e, int index)
     if (!e) return JS_NULL;
     if (!e->key) e->key = ns_nav_key_new(js);
     if (!e->id)  e->id  = ns_nav_key_new(js);
+    JSValue url = JS_NewString(ctx, e->url ? e->url : "");
+    JSValue key = JS_NewString(ctx, e->key);
+    JSValue id = JS_NewString(ctx, e->id);
+    JSValue state = JS_IsUndefined(e->state) ? JS_NULL
+                                             : JS_DupValue(ctx, e->state);
     JSValue w = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, w, "url",  JS_NewString(ctx, e->url ? e->url : ""));
-    JS_SetPropertyStr(ctx, w, "key",  JS_NewString(ctx, e->key));
-    JS_SetPropertyStr(ctx, w, "id",   JS_NewString(ctx, e->id));
+    JS_SetPropertyStr(ctx, w, "url",  url);
+    JS_SetPropertyStr(ctx, w, "key",  key);
+    JS_SetPropertyStr(ctx, w, "id",   id);
     JS_SetPropertyStr(ctx, w, "index", JS_NewInt32(ctx, index));
     JS_SetPropertyStr(ctx, w, "sameDocument", JS_TRUE);
-    JS_SetPropertyStr(ctx, w, "_state",
-                      JS_IsUndefined(e->state) ? JS_NULL
-                                               : JS_DupValue(ctx, e->state));
+    JS_SetPropertyStr(ctx, w, "_state", state);
     ns_bind_fn(ctx, w, "getState", ns_nav_entry_getState, 0);
     JS_SetPropertyStr(ctx, w, "_listeners", JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, w);
