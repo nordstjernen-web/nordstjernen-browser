@@ -47728,9 +47728,20 @@ ns_js_tagged_owner_doc(ns_js *js, const ns_node *n)
 {
     if (!js || !js->ctx || !n || !n->js_wrapper) return NULL;
     JSValue w = JS_MKPTR(JS_TAG_OBJECT, n->js_wrapper);
-    JSValue d = JS_GetPropertyStr(js->ctx, w, "__ndOwnerDoc");
-    const ns_node *doc = JS_IsObject(d) ? ns_unwrap_element(d) : NULL;
-    JS_FreeValue(js->ctx, d);
+    JSAtom atom = JS_NewAtom(js->ctx, "__ndOwnerDoc");
+    JSPropertyDescriptor desc;
+    int own = JS_GetOwnProperty(js->ctx, &desc, w, atom);
+    JS_FreeAtom(js->ctx, atom);
+    if (own < 0) {
+        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+        return NULL;
+    }
+    if (own == 0) return NULL;
+    const ns_node *doc = JS_IsObject(desc.value)
+        ? ns_unwrap_element(desc.value) : NULL;
+    JS_FreeValue(js->ctx, desc.value);
+    JS_FreeValue(js->ctx, desc.getter);
+    JS_FreeValue(js->ctx, desc.setter);
     return doc;
 }
 
