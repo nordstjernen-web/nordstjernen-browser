@@ -3,6 +3,16 @@ Changelog:
 
 1.0.33:
 ======
+* CSS: a `calc()` with `anchor()` and three or more terms, where a
+  later term cannot be read as part of the anchor expression, no longer
+  aborts the browser. The anchor value parser freed the first term
+  twice when it gave up, so a page like GitHub with
+  `@position-try --f { bottom: calc(100vh - anchor(top) +
+  var(--b, .25rem)) }` died as soon as a script read
+  `document.styleSheets[0].cssRules`. The parser now drops the
+  expression once, the rule shows up in `cssRules` as in Chrome, and
+  an invalid value such as `calc(1px + anchor(top) + 2)` in a longhand
+  such as `top` is simply rejected.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
