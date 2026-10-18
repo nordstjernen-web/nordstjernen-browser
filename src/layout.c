@@ -19156,8 +19156,13 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (e.fixed && !cb_dom) {
             const ns_node *anc_dom = abs_entry_cb_dom(&e, styles);
             ns_box *anc = anc_dom ? g_hash_table_lookup(box_map, anc_dom) : NULL;
-            if (anc && box_can_host_fixed(anc))
-                paint_parent = anc;
+            for (ns_box *h = anc; h && h != root; h = h->parent) {
+                if (h != anc && !style_is_positioned(h->style)) continue;
+                if (box_can_host_fixed(h)) {
+                    paint_parent = h;
+                    break;
+                }
+            }
         }
 
         int pp_depth = 0;
