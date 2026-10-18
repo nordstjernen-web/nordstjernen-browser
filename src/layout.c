@@ -195,22 +195,28 @@ flex_wrap_clamp_height(const ns_box *box, double h, double width_basis)
 }
 
 static double
-clamp_height_minmax_px(const ns_style *s, double h)
+height_limit_in(const ns_css_value *v, double basis)
+{
+    if (!v || v->kind != NS_CSS_V_LENGTH) return -1;
+    if (v->u.length.unit != NS_CSS_UNIT_PERCENT) return length_resolve(v, 0, -1);
+    return basis >= 0 ? v->u.length.v * basis / 100.0 : -1;
+}
+
+static double
+clamp_height_minmax_in(const ns_style *s, double h, double basis)
 {
     if (!s || h < 0) return h;
-    const ns_css_value *mx = s->values[NS_CSS_MAX_HEIGHT];
-    if (mx && mx->kind == NS_CSS_V_LENGTH &&
-        mx->u.length.unit != NS_CSS_UNIT_PERCENT) {
-        double m = length_resolve(mx, 0, -1);
-        if (m >= 0 && h > m) h = m;
-    }
-    const ns_css_value *mn = s->values[NS_CSS_MIN_HEIGHT];
-    if (mn && mn->kind == NS_CSS_V_LENGTH &&
-        mn->u.length.unit != NS_CSS_UNIT_PERCENT) {
-        double m = length_resolve(mn, 0, -1);
-        if (m >= 0 && h < m) h = m;
-    }
+    double mx = height_limit_in(s->values[NS_CSS_MAX_HEIGHT], basis);
+    if (mx >= 0 && h > mx) h = mx;
+    double mn = height_limit_in(s->values[NS_CSS_MIN_HEIGHT], basis);
+    if (mn >= 0 && h < mn) h = mn;
     return h;
+}
+
+static double
+clamp_height_minmax_px(const ns_style *s, double h)
+{
+    return clamp_height_minmax_in(s, h, -1);
 }
 
 static double
@@ -249,13 +255,30 @@ box_read_definite_height(const ns_box *box)
 }
 
 static double
+box_cb_height_known(const ns_box *box)
+{
+    if (!box) return 0;
+    if (box->block_size_indefinite) return -1;
+    return box->cb_height_override > 0 ? box->cb_height_override : 0;
+}
+
+static double
+box_height_known_for_children(const ns_box *p)
+{
+    if (box_read_definite_height(p) > 0) return p->definite_height;
+    return p->block_size_indefinite ? -1 : 0;
+}
+
+static double
 containing_block_definite_height(const ns_box *box)
 {
-    if (box && box->cb_height_override > 0) return box->cb_height_override;
+    double known = box_cb_height_known(box);
+    if (known != 0) return known;
     const ns_box *p = box ? box->parent : NULL;
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
-    if (box_read_definite_height(p) > 0) return p->definite_height;
+    known = box_height_known_for_children(p);
+    if (known != 0) return known;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
     if (height_keyword_stretches(h)) {
         double base = containing_block_definite_height(p);
@@ -263,7 +286,7 @@ containing_block_definite_height(const ns_box *box)
         double inner = base - p->margin.top - p->margin.bottom
                      - p->border.top - p->border.bottom
                      - p->padding.top - p->padding.bottom;
-        return clamp_height_minmax_px(p->style, inner > 0 ? inner : 0);
+        return clamp_height_minmax_in(p->style, inner > 0 ? inner : 0, base);
     }
     if (h && h->kind == NS_CSS_V_KEYWORD) h = NULL;
     if (!h) {
@@ -286,7 +309,7 @@ containing_block_definite_height(const ns_box *box)
         double ch = h->kind == NS_CSS_V_CALC
             ? h->u.calc.pct / 100.0 * base + h->u.calc.px
             : h->u.length.v * base / 100.0;
-        return specified_height_to_content(p, clamp_height_minmax_px(p->style, ch));
+        return specified_height_to_content(p, clamp_height_minmax_in(p->style, ch, base));
     }
     if (p->content_height > 0) return p->content_height;
     return specified_height_to_content(
@@ -11516,6 +11539,8 @@ typedef struct {
     double target;
     double violation;
     gboolean frozen;
+    gboolean deferred;
+    gboolean remeasured;
 } ns_flex_len;
 
 static double
@@ -11737,6 +11762,34 @@ flex_basis_main_height(const ns_box *c, double cross_size,
     return 0;
 }
 
+static gboolean
+box_height_flexed_in_column(const ns_box *box)
+{
+    const ns_box *p = box->parent;
+    if (!p || !box_is_flex_container(p) || style_is_absolute_or_fixed(box->style))
+        return FALSE;
+    if (strncmp(flex_direction_of(p->style), "column", 6) != 0) return FALSE;
+    return box_read_definite_height(box) > 0;
+}
+
+static double
+box_style_definite_height(const ns_box *box, double width_basis)
+{
+    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    if (!hv || box->block_size_indefinite) return -1;
+    if (hv->kind != NS_CSS_V_LENGTH && hv->kind != NS_CSS_V_CALC) return -1;
+    return resolve_used_height(box, hv, width_basis, -1);
+}
+
+static double
+flex_row_definite_cross(const ns_box *box, double explicit_cross)
+{
+    if (explicit_cross > 0 && !box_height_flexed_in_column(box))
+        return explicit_cross;
+    return box_read_definite_height(box) > 0 ? box->definite_height
+                                             : explicit_cross;
+}
+
 static void
 relayout_at_definite_height(ns_box *c, double layout_width, double target_h,
                             const ns_style *child_inherited)
@@ -11832,6 +11885,36 @@ flex_preset_cross_size(ns_box *c, double line_cross_size, double width_basis)
     return TRUE;
 }
 
+static double
+flex_row_cross_size(double base, double min_cross, double max_cross_limit)
+{
+    double cross = base;
+    if (min_cross > cross) cross = min_cross;
+    if (max_cross_limit >= 0 && cross > max_cross_limit)
+        cross = max_cross_limit < min_cross ? min_cross : max_cross_limit;
+    return cross;
+}
+
+static gboolean
+flex_row_item_stretches(const ns_box *c, const char *align)
+{
+    if (c->style && (keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto") ||
+                     keyword_is(c->style->values[NS_CSS_MARGIN_BOTTOM], "auto")))
+        return FALSE;
+    return flex_align_stretches(flex_item_align(c, align)) &&
+           flex_item_cross_size_auto(c);
+}
+
+static void
+flex_row_first_pass_height(ns_box *c, const char *align, double cross,
+                           double width_basis)
+{
+    c->definite_height = 0;
+    if (cross > 0 && flex_row_item_stretches(c, align))
+        flex_preset_cross_size(c, cross, width_basis);
+    c->definite_height_before_flex = c->definite_height;
+}
+
 static void
 flex_item_keep_auto_margins(ns_box *c, double share)
 {
@@ -11853,12 +11936,9 @@ layout_flex_row(ns_box *box, double cw,
     const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     const ns_css_value *mnh_box = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
     const ns_css_value *mxh_box = box->style ? box->style->values[NS_CSS_MAX_HEIGHT] : NULL;
-    double explicit_cross = 0;
-    gboolean definite_cross = FALSE;
-    if (hv_box && (hv_box->kind == NS_CSS_V_LENGTH || hv_box->kind == NS_CSS_V_CALC)) {
-        explicit_cross = resolve_used_height(box, hv_box, parent_content_width, 0);
-        definite_cross = explicit_cross > 0;
-    }
+    double explicit_cross = box_style_definite_height(box, parent_content_width);
+    gboolean definite_cross = explicit_cross > 0;
+    if (explicit_cross < 0) explicit_cross = 0;
     double min_cross = resolve_used_height(box, mnh_box, parent_content_width, -1);
     double max_cross_limit = resolve_used_height(box, mxh_box,
                                                  parent_content_width, -1);
@@ -11887,8 +11967,7 @@ layout_flex_row(ns_box *box, double cw,
         (hv_box || (box->style->values[NS_CSS_TOP] &&
                     box->style->values[NS_CSS_BOTTOM])))
         explicit_cross = box->content_height;
-    if (explicit_cross <= 0 && box_read_definite_height(box) > 0)
-        explicit_cross = box->definite_height;
+    explicit_cross = flex_row_definite_cross(box, explicit_cross);
     if (!definite_cross && explicit_cross > 0 && box->definite_height > 0)
         definite_cross = TRUE;
 
@@ -11957,6 +12036,9 @@ layout_flex_row(ns_box *box, double cw,
         flex_justify_offsets(box, justify, free_main, items->len, reverse,
                              &leading, &between);
 
+    const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
+    double preset_cross = definite_cross
+        ? flex_row_cross_size(explicit_cross, min_cross, max_cross_limit) : -1;
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
         double a = g_array_index(assigned_main, double, i);
@@ -11964,8 +12046,7 @@ layout_flex_row(ns_box *box, double cw,
         c->y = inner_y;
         c->flex_main_size = a;
         c->has_flex_main = TRUE;
-        c->definite_height = 0;
-        c->definite_height_before_flex = 0;
+        flex_row_first_pass_height(c, align, preset_cross, cw);
         layout_box(c, a + c->margin.left + c->margin.right
                        + c->border.left + c->border.right
                        + c->padding.left + c->padding.right, child_inherited);
@@ -11984,14 +12065,9 @@ layout_flex_row(ns_box *box, double cw,
                           "rtl") == 0;
     gboolean main_reversed = reverse != rtl;
     double cursor_x = main_reversed ? inner_x + cw - leading : inner_x + leading;
-    const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
-    double cross_size = definite_cross || max_cross < explicit_cross
-                      ? explicit_cross : max_cross;
-    if (min_cross > cross_size) cross_size = min_cross;
-    if (max_cross_limit >= 0 && cross_size > max_cross_limit) {
-        cross_size = max_cross_limit;
-        if (cross_size < min_cross) cross_size = min_cross;
-    }
+    double cross_size = flex_row_cross_size(
+        definite_cross || max_cross < explicit_cross ? explicit_cross : max_cross,
+        min_cross, max_cross_limit);
 
     double cross_baseline = 0;
     double cross_below_baseline = 0;
@@ -12596,6 +12672,289 @@ flex_border_box_content_height(double h, double vex, gboolean is_content)
     return h > 0 && !is_content ? MAX(h - vex, 0) : h;
 }
 
+static gboolean
+flex_item_min_height_is_content_based(const ns_box *c)
+{
+    const ns_css_value *mnh = c->style->values[NS_CSS_MIN_HEIGHT];
+    if (mnh && (mnh->kind == NS_CSS_V_LENGTH || mnh->kind == NS_CSS_V_CALC))
+        return FALSE;
+    if (mnh && mnh->kind == NS_CSS_V_KEYWORD && !keyword_is(mnh, "auto"))
+        return size_keyword_is_intrinsic(mnh);
+    return !box_is_scroll_container(c);
+}
+
+static gboolean
+flex_item_height_is_definite(const ns_box *c, double pct_basis)
+{
+    const ns_css_value *hv = c->style->values[NS_CSS_HEIGHT];
+    if (height_keyword_stretches(hv)) return pct_basis >= 0;
+    if (!hv || !(hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        return FALSE;
+    return !value_is_percent(hv) || pct_basis >= 0;
+}
+
+static gboolean
+box_inside_indefinite_measure(const ns_box *c)
+{
+    for (const ns_box *p = c->parent; p; p = p->parent)
+        if (p->block_size_indefinite) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+flex_column_item_layout_deferrable(const ns_box *c, double pct_basis)
+{
+    if (c->kind != NS_BOX_BLOCK || !c->first_child || !c->style) return FALSE;
+    if (!flex_item_height_is_definite(c, pct_basis)) return FALSE;
+    if (size_keyword_is_intrinsic(c->style->values[NS_CSS_MAX_HEIGHT]))
+        return FALSE;
+    return !box_inside_indefinite_measure(c);
+}
+
+static double
+flex_column_specified_outer(const ns_box *c, double cw, double pct_basis)
+{
+    const ns_css_value *hv = c->style->values[NS_CSS_HEIGHT];
+    if (height_keyword_stretches(hv))
+        return flex_item_stretch_main_height(c, pct_basis);
+    return flex_main_height_outer(c, hv, cw, pct_basis);
+}
+
+static double
+flex_column_deferred_basis(const ns_box *c, double cw, double pct_basis)
+{
+    gboolean exp = FALSE;
+    double b = flex_basis_main_height(c, cw, pct_basis, &exp);
+    if (exp) return b;
+    if (height_keyword_stretches(c->style->values[NS_CSS_HEIGHT]))
+        return flex_item_stretch_main_height(c, pct_basis);
+    return -1;
+}
+
+static gboolean
+flex_column_defer_item(ns_box *c, double cw, double pct_basis, ns_flex_len *l)
+{
+    if (!flex_column_item_layout_deferrable(c, pct_basis)) return FALSE;
+    l->basis = flex_column_deferred_basis(c, cw, pct_basis);
+    if (l->basis < 0) return FALSE;
+    l->min = flex_item_min_height_is_content_based(c)
+        ? 0 : flex_item_min_main_height(c, cw, pct_basis);
+    l->max = flex_item_max_main_height(c, cw, pct_basis);
+    l->grow = flex_grow_of(c);
+    l->shrink = flex_shrink_of(c);
+    l->deferred = TRUE;
+    return TRUE;
+}
+
+static gboolean
+flex_column_min_needs_content(const ns_box *c, const ns_flex_len *l,
+                              double cw, double pct_basis)
+{
+    if (!flex_item_min_height_is_content_based(c)) return FALSE;
+    return l->basis < flex_column_specified_outer(c, cw, pct_basis) - 0.01;
+}
+
+static double
+flex_item_auto_min_within_max(const ns_box *c, double mn, double mx)
+{
+    if (mx < 0 || mn <= mx || !c->style) return mn;
+    const ns_css_value *mnh = c->style->values[NS_CSS_MIN_HEIGHT];
+    return !mnh || keyword_is(mnh, "auto") ? mx : mn;
+}
+
+static double
+flex_column_item_lens(ns_box *c, double cw, double pct_basis, ns_flex_len *l)
+{
+    double vex = c->padding.top + c->padding.bottom +
+                 c->border.top + c->border.bottom;
+    gboolean exp = FALSE;
+    double b = flex_basis_main_height(c, cw, pct_basis, &exp);
+    if (!exp) b = c->content_height + vex;
+    l->basis = b;
+    l->max = flex_item_max_main_height(c, cw, pct_basis);
+    l->min = flex_item_auto_min_within_max(
+        c, flex_item_min_main_height(c, cw, pct_basis), l->max);
+    l->grow = flex_grow_of(c);
+    l->shrink = flex_shrink_of(c);
+    double contrib = c->content_height + vex;
+    return contrib < b && exp ? b : contrib;
+}
+
+static double
+flex_column_items_used(const GPtrArray *items, const ns_flex_len *lens,
+                       double row_gap)
+{
+    if (items->len == 0) return 0;
+    double used = row_gap * (items->len - 1);
+    for (guint i = 0; i < items->len; i++) {
+        const ns_box *c = items->pdata[i];
+        used += flex_clamp_main(lens[i].basis, lens[i].min, lens[i].max) +
+                c->margin.top + c->margin.bottom;
+    }
+    return used;
+}
+
+static gboolean
+flex_column_items_overflow(const GPtrArray *items, const ns_flex_len *lens,
+                           double limit, double row_gap)
+{
+    if (limit < 0 || items->len == 0) return FALSE;
+    return flex_column_items_used(items, lens, row_gap) > limit + 0.5;
+}
+
+static void
+box_tree_forget_definite_heights(ns_box *b)
+{
+    for (ns_box *c = b->first_child; c; c = c->next_sibling) {
+        c->definite_height = 0;
+        box_tree_forget_definite_heights(c);
+    }
+    if (!b->inline_atomics) return;
+    for (guint i = 0; i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (!ab) continue;
+        ab->definite_height = 0;
+        box_tree_forget_definite_heights(ab);
+    }
+}
+
+static void
+flex_column_layout_indefinite(ns_box *c, double cw, gboolean fit,
+                              const ns_style *child_inherited)
+{
+    box_tree_forget_definite_heights(c);
+    c->block_size_indefinite = TRUE;
+    flex_column_layout_item(c, cw, cw, fit, child_inherited);
+    c->block_size_indefinite = FALSE;
+    c->definite_height = -1;
+    c->definite_height_read = TRUE;
+}
+
+typedef struct {
+    double cw;
+    double pct_basis;
+    double limit;
+    double row_gap;
+    gboolean multi_line;
+    const char *align;
+    const ns_style *child_inherited;
+} ns_flex_column_pass;
+
+static void
+flex_column_lay_out_deferred(ns_box *c, ns_flex_len *l, double *contrib,
+                             gboolean indefinite, const ns_flex_column_pass *x)
+{
+    gboolean fit = x->multi_line || flex_column_item_shrinks_to_fit(c, x->align);
+    if (indefinite)
+        flex_column_layout_indefinite(c, x->cw, fit, x->child_inherited);
+    else
+        flex_column_layout_item(c, x->cw, x->cw, fit, x->child_inherited);
+    double basis = l->basis;
+    *contrib = flex_column_item_lens(c, x->cw, x->pct_basis, l);
+    if (indefinite) l->basis = basis;
+    l->deferred = FALSE;
+    l->remeasured = indefinite;
+}
+
+static void
+flex_column_lay_out_deferred_items(GPtrArray *items, ns_flex_len *lens,
+                                   GArray *contribs,
+                                   const ns_flex_column_pass *x)
+{
+    for (guint i = 0; i < items->len; i++) {
+        ns_box *c = items->pdata[i];
+        if (lens[i].deferred &&
+            flex_column_min_needs_content(c, &lens[i], x->cw, x->pct_basis))
+            flex_column_lay_out_deferred(c, &lens[i],
+                                         &g_array_index(contribs, double, i),
+                                         TRUE, x);
+    }
+    gboolean overflow = flex_column_items_overflow(items, lens, x->limit,
+                                                   x->row_gap);
+    for (guint i = 0; i < items->len; i++) {
+        if (!lens[i].deferred) continue;
+        flex_column_lay_out_deferred(items->pdata[i], &lens[i],
+                                     &g_array_index(contribs, double, i),
+                                     overflow && lens[i].shrink > 0, x);
+    }
+}
+
+static double
+flex_column_inset_height(const ns_box *box)
+{
+    const ns_style *s = box->style;
+    if (!s || !style_is_absolute_or_fixed(s) || box->content_height <= 0)
+        return -1;
+    if (s->values[NS_CSS_HEIGHT] ||
+        (s->values[NS_CSS_TOP] && s->values[NS_CSS_BOTTOM]))
+        return box->content_height;
+    return -1;
+}
+
+static double
+box_aspect_ratio_height(const ns_box *box, double cw)
+{
+    if (!box->style || cw <= 0) return -1;
+    double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO],
+                                       NULL);
+    return ratio > 0 ? cw / ratio : -1;
+}
+
+static double
+flex_column_own_height(ns_box *box, double cw, gboolean *is_content,
+                       gboolean *from_ratio)
+{
+    *is_content = TRUE;
+    *from_ratio = FALSE;
+    if (box_height_flexed_in_column(box)) return box->definite_height;
+    double h = box_style_definite_height(box, cw);
+    if (h < 0) h = flex_column_inset_height(box);
+    if (h < 0) {
+        h = box_aspect_ratio_height(box, cw);
+        *from_ratio = h >= 0;
+    }
+    if (h < 0 && box_read_definite_height(box) > 0) return box->definite_height;
+    *is_content = FALSE;
+    return h;
+}
+
+static gboolean
+box_ratio_height_floors_at_content(const ns_box *box)
+{
+    const ns_css_value *mnh = box->style->values[NS_CSS_MIN_HEIGHT];
+    if (mnh && (mnh->kind == NS_CSS_V_LENGTH || mnh->kind == NS_CSS_V_CALC))
+        return FALSE;
+    if (overflow_kw_scrolls(overflow_axis_keyword(box->style, NS_CSS_OVERFLOW_Y)))
+        return FALSE;
+    return !keyword_is(box->style->values[NS_CSS_OVERFLOW_Y], "hidden");
+}
+
+static double
+flex_column_ratio_min_height(const ns_box *box, const GPtrArray *items,
+                             const ns_flex_len *lens, double row_gap,
+                             double min_h, double max_h)
+{
+    if (flex_wraps(box->style) || !box_ratio_height_floors_at_content(box))
+        return min_h;
+    double used = flex_column_items_used(items, lens, row_gap);
+    if (max_h >= 0 && used > max_h) used = max_h;
+    return used > min_h ? used : min_h;
+}
+
+static void
+flex_column_relayout_remeasured(GPtrArray *items, const ns_flex_len *lens,
+                                const ns_style *child_inherited)
+{
+    for (guint i = 0; i < items->len; i++) {
+        ns_box *c = items->pdata[i];
+        if (!lens[i].remeasured || c->definite_height >= 0) continue;
+        double target_h = lens[i].target - c->padding.top -
+                          c->padding.bottom - c->border.top - c->border.bottom;
+        relayout_at_definite_height(c, flex_item_outer_width(c),
+                                    MAX(target_h, 0), child_inherited);
+    }
+}
+
 static void
 layout_flex_column(ns_box *box, double cw,
                    double inner_x, double inner_y,
@@ -12612,27 +12971,12 @@ layout_flex_column(ns_box *box, double cw,
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
     const char *justify = keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT, "flex-start");
 
-    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     const ns_css_value *mnh = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
     const ns_css_value *mxh = box->style ? box->style->values[NS_CSS_MAX_HEIGHT] : NULL;
-    double explicit_h = -1;
-    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
-        explicit_h = resolve_used_height(box, hv, cw, -1);
-    if (explicit_h < 0 && box->style &&
-        style_is_absolute_or_fixed(box->style) &&
-        box->content_height > 0 &&
-        (hv || (box->style->values[NS_CSS_TOP] && box->style->values[NS_CSS_BOTTOM])))
-        explicit_h = box->content_height;
-    if (explicit_h < 0 && box->style) {
-        double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL);
-        if (ratio > 0 && cw > 0)
-            explicit_h = cw / ratio;
-    }
     gboolean explicit_is_content = FALSE;
-    if (explicit_h < 0 && box_read_definite_height(box) > 0) {
-        explicit_h = box->definite_height;
-        explicit_is_content = TRUE;
-    }
+    gboolean explicit_from_ratio = FALSE;
+    double explicit_h = flex_column_own_height(box, cw, &explicit_is_content,
+                                               &explicit_from_ratio);
     double row_gap = flex_gap_row_of(box->style,
                                      explicit_h > 0 ? explicit_h : 0);
     double col_gap = flex_gap_of(box->style, cw);
@@ -12663,33 +13007,31 @@ layout_flex_column(ns_box *box, double cw,
     gboolean cross_start_right = wrap_reverse != rtl;
 
     ns_flex_len *lens = g_new0(ns_flex_len, items->len + 1);
-    GArray *contribs = g_array_new(FALSE, FALSE, sizeof(double));
+    GArray *contribs = g_array_new(FALSE, TRUE, sizeof(double));
+    g_array_set_size(contribs, items->len);
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
         edges_from_style(c->style, cw, &c->margin, &c->padding, &c->border);
         c->x = inner_x;
         c->y = inner_y;
+        if (flex_column_defer_item(c, cw, percentage_basis_h, &lens[i]))
+            continue;
         flex_column_layout_item(c, cw, cw,
                                 multi_line ||
                                 flex_column_item_shrinks_to_fit(c, align),
                                 child_inherited);
-        gboolean exp = FALSE;
-        double b = flex_basis_main_height(c, cw, percentage_basis_h, &exp);
-        if (!exp)
-            b = c->content_height +
-                c->padding.top + c->padding.bottom +
-                c->border.top + c->border.bottom;
-        lens[i].basis = b;
-        lens[i].min = flex_item_min_main_height(c, cw, percentage_basis_h);
-        lens[i].max = flex_item_max_main_height(c, cw, percentage_basis_h);
-        lens[i].grow = flex_grow_of(c);
-        lens[i].shrink = flex_shrink_of(c);
-        double contrib = c->content_height +
-                         c->padding.top + c->padding.bottom +
-                         c->border.top + c->border.bottom;
-        if (contrib < b && exp) contrib = b;
-        g_array_append_val(contribs, contrib);
+        g_array_index(contribs, double, i) =
+            flex_column_item_lens(c, cw, percentage_basis_h, &lens[i]);
     }
+    ns_flex_column_pass pass = {
+        .cw = cw, .pct_basis = percentage_basis_h, .limit = line_limit,
+        .row_gap = row_gap, .multi_line = multi_line, .align = align,
+        .child_inherited = child_inherited,
+    };
+    flex_column_lay_out_deferred_items(items, lens, contribs, &pass);
+    if (explicit_from_ratio)
+        min_h = flex_column_ratio_min_height(box, items, lens, row_gap,
+                                             min_h, max_h);
 
     typedef struct { guint start, count; double cross, x; } col_line;
     GArray *lines = g_array_new(FALSE, FALSE, sizeof(col_line));
@@ -12891,6 +13233,7 @@ layout_flex_column(ns_box *box, double cw,
         }
     }
 
+    flex_column_relayout_remeasured(items, lens, child_inherited);
     *cursor_y_out = inner_y + main_extent;
     g_free(lens);
     g_array_free(contribs, TRUE);
@@ -13999,13 +14342,28 @@ box_inset_definite_height(const ns_box *box)
 static double
 grid_row_basis(const ns_box *box, double cw)
 {
+    if (box_height_flexed_in_column(box)) return box->definite_height;
     const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
-    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+    if (hv && !box->block_size_indefinite &&
+        (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         return clamp_height_minmax_px(box->style,
                                       resolve_used_height(box, hv, cw, -1));
     double inset = box_inset_definite_height(box);
     if (inset > 0) return inset;
     return box_read_definite_height(box) > 0 ? box->definite_height : -1;
+}
+
+static double
+grid_used_content_height(const ns_box *box, double cw)
+{
+    if (box_height_flexed_in_column(box)) return box->definite_height;
+    double eh = box_style_definite_height(box, cw);
+    if (eh < 0) return -1;
+    eh = clamp_height_minmax_px(box->style, eh);
+    if (keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
+        eh -= box->padding.top + box->padding.bottom +
+              box->border.top + box->border.bottom;
+    return eh;
 }
 
 static gboolean
@@ -14908,20 +15266,9 @@ layout_grid(ns_box *box, double cw,
     }
     double total_extra = 0;
     {
-        const ns_css_value *hv = box->style
-            ? box->style->values[NS_CSS_HEIGHT] : NULL;
-        if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
-            grid_rows->len > 0) {
-            double eh = clamp_height_minmax_px(box->style,
-                                               resolve_used_height(box, hv, cw,
-                                                                   -1));
-            if (box->style &&
-                keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
-                eh -= box->padding.top + box->padding.bottom +
-                      box->border.top + box->border.bottom;
-            if (eh > measured)
-                total_extra = eh - measured;
-        }
+        double eh = grid_rows->len > 0 ? grid_used_content_height(box, cw) : -1;
+        if (eh > measured)
+            total_extra = eh - measured;
     }
     const char *acont = keyword_or(box->style, NS_CSS_ALIGN_CONTENT, "stretch");
     gboolean ac_stretch = !acont || strcmp(acont, "stretch") == 0 ||
