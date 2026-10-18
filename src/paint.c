@@ -5295,6 +5295,7 @@ paint_inline_atomics(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
 static rgba
 paint_inline_color(const ns_box *b, const ns_style *s)
 {
+    if (inline_box_is_hidden(s)) return (rgba){ 0, 0, 0, 0 };
     const ns_css_value *fill = s ? s->values[NS_CSS_WEBKIT_TEXT_FILL_COLOR] : NULL;
     if (fill && fill->kind == NS_CSS_V_COLOR)
         return rgba_of(fill, 0.07, 0.07, 0.07, 1);
@@ -8039,14 +8040,36 @@ paint_hr(cairo_t *cr, const ns_box *b)
 static gboolean
 box_is_hidden(const ns_box *b)
 {
-    const ns_style *s = b ? b->style : NULL;
-    if (!s) return FALSE;
-    const ns_css_value *v = s->values[NS_CSS_VISIBILITY];
-    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
-        (strcmp(v->u.keyword, "hidden") == 0 ||
-         strcmp(v->u.keyword, "collapse") == 0))
-        return TRUE;
+    if (b && !b->style && b->kind == NS_BOX_INLINE) return FALSE;
+    for (; b; b = b->parent) {
+        const ns_style *s = b->style;
+        if (!s) continue;
+        const ns_css_value *v = s->values[NS_CSS_VISIBILITY];
+        return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+               (strcmp(v->u.keyword, "hidden") == 0 ||
+                strcmp(v->u.keyword, "collapse") == 0);
+    }
     return FALSE;
+}
+
+static gboolean
+box_has_visible_descendant(const ns_box *b)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!box_is_hidden(c) || box_has_visible_descendant(c)) return TRUE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_box *ab = g_array_index(b->inline_atomics,
+                                         ns_inline_atomic, i).box;
+        if (ab && (!box_is_hidden(ab) || box_has_visible_descendant(ab)))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+box_hides_subtree(const ns_box *b)
+{
+    return box_is_hidden(b) && !box_has_visible_descendant(b);
 }
 
 static gboolean
@@ -8925,11 +8948,13 @@ box_has_own_decor(const ns_box *b)
 static gboolean
 box_subtree_paints(const ns_box *b)
 {
-    if (box_is_hidden(b)) return FALSE;
-    if (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
-        b->kind == NS_BOX_INLINE || b->kind == NS_BOX_TEXT)
+    if (box_hides_subtree(b)) return FALSE;
+    gboolean self_hidden = box_is_hidden(b);
+    if (!self_hidden &&
+        (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
+         b->kind == NS_BOX_INLINE || b->kind == NS_BOX_TEXT))
         return TRUE;
-    if (box_has_own_decor(b)) return TRUE;
+    if (!self_hidden && box_has_own_decor(b)) return TRUE;
     if (box_skips_contents(b)) return FALSE;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         if (box_subtree_paints(c)) return TRUE;
@@ -8957,7 +8982,7 @@ box_transform_origin(const ns_box *b, double bx, double by, double bw,
 static void
 collect_3d_quads(const ns_box *b, const ns_mat4 *pm, GArray *quads)
 {
-    if (box_is_hidden(b) || b == g_paint_skip_box) return;
+    if (box_hides_subtree(b) || b == g_paint_skip_box) return;
     double bx, by, bw, bh;
     box_border_rect(b, &bx, &by, &bw, &bh);
     ns_mat4 m = *pm;
@@ -9306,7 +9331,8 @@ ns_paint_box_clip_hides(const ns_box *b)
 gboolean
 ns_paint_box_paints_children(const ns_box *b)
 {
-    return !box_is_hidden(b) && !box_clip_hides(b) && !box_skips_contents(b);
+    return !box_hides_subtree(b) && !box_clip_hides(b) &&
+           !box_skips_contents(b);
 }
 
 gboolean
@@ -9645,10 +9671,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b) return;
     if (g_paint_collect_stats) g_paint_stats.boxes_seen++;
-    if (box_is_hidden(b)) {
+    if (box_hides_subtree(b)) {
         if (g_paint_collect_stats) g_paint_stats.hidden++;
         return;
     }
+    gboolean self_hidden = box_is_hidden(b);
     ns_dbg_paint_probe(cr, b);
     if (box_clip_hides(b)) {
         if (g_paint_collect_stats) g_paint_stats.hidden++;
@@ -9836,7 +9863,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (apply_box_content_clip(cr, b)) has_path_clip = TRUE;
         else                                cairo_restore(cr);
     }
-    if (!box_offscreen) {
+    if (!box_offscreen && !self_hidden) {
         double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
         if (g_dbg_paint_x >= 0)
             cairo_clip_extents(cr, &s0, &s1, &s2, &s3);
@@ -9893,8 +9920,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (b->kind == NS_BOX_SVG)
             paint_svg(cr, b);
     }
-    if (!skip_contents && ns_node_is_element_named(b->dom, "canvas") &&
-        g_paint_js) {
+    if (!skip_contents && !self_hidden &&
+        ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
         if (g_paint_collect_stats) g_paint_stats.canvases++;
         cairo_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
         if (surf) {
@@ -10444,7 +10471,7 @@ static gboolean
 layers_scan(const ns_box *b, int under, gboolean in_atomic, GHashTable *kinds,
             int *roots)
 {
-    if (box_is_hidden(b) || box_clip_hides(b)) return TRUE;
+    if (box_hides_subtree(b) || box_clip_hides(b)) return TRUE;
     int kind = layers_scan_kind(b, under, in_atomic);
     if (kind < 0) return FALSE;
     if (kind > 0) {
