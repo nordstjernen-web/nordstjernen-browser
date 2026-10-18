@@ -1,9 +1,12 @@
 nordstjernen_gtk_sources = files(
   'appmain.c',
   'icons.c',
+  'mcp.c',
   'pagelayers.c',
   'procview.c',
   'procwindow.c',
+  'remotectl.c',
+  'rjson.c',
   'titlerow.c',
   '../libnordstjernen.c',
   '../renderer_serve.c',
@@ -40,7 +43,7 @@ executable(
   nordstjernen_engine_sources + nordstjernen_app_sources +
     nordstjernen_gtk_sources + nordstjernen_gtk_platform_sources +
     nordstjernen_icon_resources +
-    nordstjernen_win_resources + [polyfills_h, wpt_hook_h],
+    nordstjernen_win_resources + [polyfills_h, wpt_hook_h, remote_page_h],
   dependencies: nordstjernen_gtk_deps,
   c_args: ['-DNS_HAVE_GTK=1'],
   include_directories: include_directories('..', '.'),

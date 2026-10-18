@@ -137,6 +137,12 @@ scripts for AppImage, RPM, Alpine, the BSDs and MSIX are in `scripts/`.
   SHA-256 blocklist before it is fetched, entirely on-device; a match shows a
   full-page warning. Overridable via
   `~/.config/nordstjernen/safebrowsing.list`.
+- **Remote control for agents** — `nordstjernen --mcp` is a built-in MCP
+  server that lets a local agent such as Claude Code read and drive the
+  browser window (tabs, page outline with element refs, clicks, typing,
+  screenshots, JavaScript). Off until allowed in Settings or with
+  `--remote-control`; loopback only, token-authenticated, with a toolbar
+  badge while connected ([docs/remote-control.md](docs/remote-control.md)).
 - **Process-per-tab** — each tab's engine runs in its own sandboxed
   `nordstjernen-renderer` process; the GTK app is a thin shell that composites
   the shared-memory tiles the renderer paints and forwards input over an
