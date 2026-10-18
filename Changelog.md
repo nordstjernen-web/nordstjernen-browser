@@ -51,6 +51,20 @@ Changelog:
   width that is a flex item now takes the width the flex layout gives
   it: `width: 10%; flex: 1` in a 600px row grows to 500px instead of
   staying 50px.
+* SVG: an SVG used as an image applies its own `<style>` sheets and
+  draws `<pattern>` fills and `<image>` elements. A logo loaded through
+  `<img>` or `background-image` whose colours come from class rules such
+  as `.c{fill:#ff4500}` drew every shape black, and reddit's robot
+  avatar (a rect filled with a pattern that shows an embedded PNG) was
+  blank. The sheets cascade with specificity, `@layer`, `!important`
+  and the `style` attribute; `@media`, `vw`, `em` and `rem` follow the
+  image's own size and fonts, and nothing in them reaches the page. The
+  image is drawn where its CSS animations settle, so a logo that fades
+  in with `animation: show .3s forwards` shows; links and `:hover` never
+  match inside it, and a pattern tile shrunk below a pixel is filled
+  with its average colour. CSS also accepts the plain numbers SVG
+  allows, in pages too: `fill-opacity: .5` and `stroke-width: 2` were
+  dropped as invalid.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
