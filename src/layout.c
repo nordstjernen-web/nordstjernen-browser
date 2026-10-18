@@ -3778,7 +3778,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (n == g_inline_skip_node) return;
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
-    if (s && style_is_absolute_or_fixed(s)) {
+    if (s && style_is_absolute_or_fixed(s) && n != g_form_control_inline) {
         const ns_css_value *pv = s->values[NS_CSS_POSITION];
         gboolean fixed = pv && pv->kind == NS_CSS_V_KEYWORD && pv->u.keyword &&
                          strcmp(pv->u.keyword, "fixed") == 0;
