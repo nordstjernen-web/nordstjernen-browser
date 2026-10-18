@@ -344,6 +344,14 @@ parse_value(an_cursor *c, an_ctx *cx, an_type *type)
 }
 
 static an_node *
+an_drop(an_node *first, an_node *group, an_node *rhs)
+{
+    an_free(rhs);
+    an_free(group ? group : first);
+    return NULL;
+}
+
+static an_node *
 parse_product(an_cursor *c, an_ctx *cx, an_type *type)
 {
     an_node *first = parse_value(c, cx, type);
@@ -358,26 +366,12 @@ parse_product(an_cursor *c, an_ctx *cx, an_type *type)
         c->pos++;
         an_type rt;
         an_node *rhs = parse_value(c, cx, &rt);
-        if (!rhs) {
-            an_free(first);
-            an_free(prod);
-            return NULL;
-        }
+        if (!rhs) return an_drop(first, prod, NULL);
         if (div) {
-            if (rt != AT_NUMBER) {
-                an_free(rhs);
-                an_free(first);
-                an_free(prod);
-                return NULL;
-            }
+            if (rt != AT_NUMBER) return an_drop(first, prod, rhs);
             rhs->inv = TRUE;
         } else if (rt == AT_LENGTH) {
-            if (*type == AT_LENGTH) {
-                an_free(rhs);
-                an_free(first);
-                an_free(prod);
-                return NULL;
-            }
+            if (*type == AT_LENGTH) return an_drop(first, prod, rhs);
             *type = AT_LENGTH;
         }
         if (!prod) {
@@ -400,21 +394,12 @@ parse_sum(an_cursor *c, an_ctx *cx, an_type *type)
         if (!t || t->type != NS_CSS_COMPONENT_DELIM ||
             (t->delimiter != '+' && t->delimiter != '-'))
             break;
-        if (!cur_ws_before(c) || !cur_ws_after(c)) {
-            an_free(first);
-            an_free(sum);
-            return NULL;
-        }
+        if (!cur_ws_before(c) || !cur_ws_after(c)) return an_drop(first, sum, NULL);
         gboolean minus = t->delimiter == '-';
         c->pos++;
         an_type rt;
         an_node *rhs = parse_product(c, cx, &rt);
-        if (!rhs || rt != *type) {
-            an_free(rhs);
-            an_free(first);
-            an_free(sum);
-            return NULL;
-        }
+        if (!rhs || rt != *type) return an_drop(first, sum, rhs);
         rhs->neg = minus;
         if (!sum) {
             sum = an_new(AN_SUM);
