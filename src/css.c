@@ -10928,6 +10928,8 @@ def_specified_canonical(const prop_def *def, const char *value)
         out = def_keyword_canonical(def, t);
     else if (def->kind == PROP_DEF_COLOR)
         out = ns_css_color_specified(t);
+    else if (def->kind == PROP_DEF_LENGTH)
+        out = ns_css_grammar_canonical(def->grammar, t);
     g_free(t);
     return out;
 }
@@ -12692,7 +12694,8 @@ prop_is_border_width(ns_css_prop prop)
            prop == NS_CSS_BORDER_BOTTOM_WIDTH ||
            prop == NS_CSS_BORDER_LEFT_WIDTH ||
            prop == NS_CSS_OUTLINE_WIDTH ||
-           prop == NS_CSS_COLUMN_RULE_WIDTH;
+           prop == NS_CSS_COLUMN_RULE_WIDTH ||
+           prop == NS_CSS_WEBKIT_TEXT_STROKE_WIDTH;
 }
 
 static void
@@ -13452,6 +13455,12 @@ def_keywords_numeric(int prop, const char *a, const char *b)
     return keyword_starts_numeric(a) && keyword_starts_numeric(b);
 }
 
+static gboolean
+prop_is_contain_intrinsic(int prop)
+{
+    return prop == NS_CSS_CONTAIN_INTRINSIC_WIDTH || prop == NS_CSS_CONTAIN_INTRINSIC_HEIGHT;
+}
+
 ns_css_value *
 ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_value *b,
                               double t)
@@ -13463,9 +13472,9 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
             return mixed ? keyword_value(mixed) : NULL;
         if (!def_keywords_numeric(prop, a->u.keyword, b->u.keyword)) return NULL;
     }
+    if (prop == NS_CSS_WEBKIT_TEXT_STROKE_WIDTH) return NULL;
     if (prop == NS_CSS_FONT_SIZE_ADJUST) return font_size_adjust_mix(a, b, 1 - t, t);
-    if (prop == NS_CSS_CONTAIN_INTRINSIC_WIDTH || prop == NS_CSS_CONTAIN_INTRINSIC_HEIGHT)
-        return contain_intrinsic_mix(a, b, t);
+    if (prop_is_contain_intrinsic(prop)) return contain_intrinsic_mix(a, b, t);
     if ((prop == NS_CSS_FILTER || prop == NS_CSS_BACKDROP_FILTER) && a && b &&
         a->kind == NS_CSS_V_KEYWORD && b->kind == NS_CSS_V_KEYWORD) {
         ns_shape_ctx cx = {
@@ -14002,15 +14011,28 @@ parse_color_value(const char *t, gboolean allow_invert)
 }
 
 static ns_css_value *
+line_width_keyword_value(const prop_def *def, const char *kw)
+{
+    double border_px = strcmp(kw, "thin") == 0 ? 1 : strcmp(kw, "medium") == 0 ? 3
+                     : strcmp(kw, "thick") == 0 ? 5 : -1;
+    if (border_px < 0) return NULL;
+    if (def->prop != NS_CSS_WEBKIT_TEXT_STROKE_WIDTH) return calc_px_value(border_px);
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_LENGTH;
+    v->u.length.v = border_px / 48.0;
+    v->u.length.unit = NS_CSS_UNIT_EM;
+    return v;
+}
+
+static ns_css_value *
 parse_def_length(const prop_def *def, const char *t)
 {
     char *kw = ns_css_grammar_canonical(def->grammar, t);
     if (kw) {
-        double border_px = strcmp(kw, "thin") == 0 ? 1 : strcmp(kw, "medium") == 0 ? 3
-                         : strcmp(kw, "thick") == 0 ? 5 : -1;
-        if (border_px < 0) return keyword_value(kw);
+        ns_css_value *width = line_width_keyword_value(def, kw);
+        if (!width) return keyword_value(kw);
         g_free(kw);
-        return calc_px_value(border_px);
+        return width;
     }
     gboolean allow_percent = strstr(def->grammar, "<length-percentage") != NULL;
     gboolean nonnegative = strstr(def->grammar, "[0,") != NULL;
@@ -32385,22 +32407,25 @@ color_from_parent(ns_style *out, const ns_style *parent_style)
 }
 
 static void
+resolve_def_color(ns_style *out, const prop_def *def)
+{
+    ns_css_value *v = out->values[def->prop];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    if (strcmp(v->u.keyword, "currentcolor") == 0 && !def->inherited) {
+        ns_css_value_free(v);
+        out->values[def->prop] = out->values[NS_CSS_COLOR]
+            ? ns_css_value_dup(out->values[NS_CSS_COLOR]) : NULL;
+    } else if (strcmp(v->u.keyword, "transparent") == 0) {
+        ns_css_value_free(v);
+        out->values[def->prop] = parse_color_value("rgba(0, 0, 0, 0)", FALSE);
+    }
+}
+
+static void
 resolve_def_colors(ns_style *out)
 {
-    for (gsize i = 0; i < G_N_ELEMENTS(kPropDefs); i++) {
-        if (kPropDefs[i].kind != PROP_DEF_COLOR) continue;
-        ns_css_prop prop = kPropDefs[i].prop;
-        ns_css_value *v = out->values[prop];
-        if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) continue;
-        if (strcmp(v->u.keyword, "currentcolor") == 0) {
-            ns_css_value_free(v);
-            out->values[prop] = out->values[NS_CSS_COLOR]
-                ? ns_css_value_dup(out->values[NS_CSS_COLOR]) : NULL;
-        } else if (strcmp(v->u.keyword, "transparent") == 0) {
-            ns_css_value_free(v);
-            out->values[prop] = parse_color_value("rgba(0, 0, 0, 0)", FALSE);
-        }
-    }
+    for (gsize i = 0; i < G_N_ELEMENTS(kPropDefs); i++)
+        if (kPropDefs[i].kind == PROP_DEF_COLOR) resolve_def_color(out, &kPropDefs[i]);
 }
 
 static const char *

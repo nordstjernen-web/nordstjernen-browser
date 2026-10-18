@@ -65,6 +65,32 @@ Changelog:
   with its average colour. CSS also accepts the plain numbers SVG
   allows, in pages too: `fill-opacity: .5` and `stroke-width: 2` were
   dropped as invalid.
+* CSS: `-webkit-text-stroke` outlines text. The shorthand and its
+  `-webkit-text-stroke-width` and `-webkit-text-stroke-color` longhands
+  were parsed but never painted, so outlined headings showed as plain
+  filled text and `color: transparent` outline text vanished. Inline
+  text now paints the stroke over its fill, centred on the glyph
+  outlines, per element of the line, on relatively positioned inlines
+  and on lines raised by inline blocks. `::before` and `::after` text
+  takes its own stroke rather than its host's, and colour emoji are
+  left unstroked as in Chrome. `thin`, `medium` and `thick` scale with
+  the font size as in Chromium (1/48, 3/48 and 5/48 em) instead of
+  being fixed at 1, 3 and 5px, `element.style` keeps them as keywords
+  in lower case (as it now does for the keywords of
+  `text-underline-offset`, `text-decoration-thickness` and
+  `baseline-shift`), and the width animates in one step at the halfway
+  point, as in Chrome. A `currentcolor` stroke (likewise
+  `text-emphasis-color` and `-webkit-tap-highlight-color`) inherited by
+  a child follows the child's own colour instead of its parent's, and
+  transitions and animations to or from `currentcolor` blend through the
+  element's colour instead of jumping to the end value.
+  `getComputedStyle()` reads an unset `-webkit-text-fill-color` as the
+  text colour instead of an empty string, and on `::before` and
+  `::after` reports colours that are `currentcolor` (borders, outline,
+  caret, fill and stroke) as the pseudo-element's own colour instead of
+  an empty string. Netflix's "Top 10" numbers, grey digits with
+  `-webkit-text-stroke: 0.25rem white` under a black copy, now show
+  their white outline.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the

@@ -74,6 +74,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_SPACER,
     NS_INLINE_SPELLCHECK,
     NS_INLINE_EMPTY_ELEMENT,
+    NS_INLINE_GENERATED,
 } ns_inline_attr_kind;
 
 typedef struct ns_inline_attr {
