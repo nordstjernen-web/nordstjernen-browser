@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* Paint performance: a subtree under `opacity: 0` is no longer painted
+  into an offscreen group only to be composited fully transparent, and
+  the group for a translucent box is clipped to the box's ink bounds
+  instead of the whole visible area. Painting a Gmail screen took
+  300-400ms and now takes about 100ms; Gmail has hundreds of icons at
+  `opacity: 0.32`-`0.54` and many invisible hover layers, and each
+  allocated and composited a viewport-sized surface.
 * XMLHttpRequest no longer adds an `X-Requested-With: XMLHttpRequest`
   header to every request. Chrome never sends it (libraries such as
   jQuery add it themselves for same-origin requests), and servers that
