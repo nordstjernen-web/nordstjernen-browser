@@ -4,7 +4,7 @@ Changelog:
 1.0.35:
 ======
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
-  for crashes and double frees fixed nineteen bugs that a page, or an
+  for crashes and double frees fixed twenty-four bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a
   `Security-Fix:` trailer.
 * HTML parsing: a named character reference whose value is longer than
@@ -19,6 +19,13 @@ Changelog:
   image-load handling ran an `Object.prototype` getter that could free
   the load record still in use; `select.add(option)` left the option
   registered as an orphan node while the select owned it.
+* DOM: `getAttributeNames()` and `querySelectorAll()` (on its class, tag
+  and key index paths) stored results into the returned array while
+  still walking the attribute list or index bucket, so a setter the page
+  defined on `Array.prototype` could remove the attribute or call
+  `document.open()` and free what the walk was reading; reading an SVG
+  length such as `rect.width` let an `Object.prototype` setter free the
+  attribute value it was still using.
 * DOM: the `document.body` setter could append a node under its own
   descendant, linking a cycle into the tree that overflowed the stack on
   the next tree walk; a MessagePort whose forwarding target pointed back
