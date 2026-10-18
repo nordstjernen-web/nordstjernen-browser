@@ -28,6 +28,10 @@ Changelog:
   Chrome's baseline. A bare `<input>` was 208px wide and is 153px now,
   and a default select is 19px tall instead of 18.7px, or 33.7px with
   `line-height: 30px`.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
