@@ -51,6 +51,13 @@ typedef struct ns_webgl {
     size_t         readback_len;
     GLuint         flip_fbo, flip_rb;
     int            flip_w, flip_h;
+    GLuint         pbo[2];
+    GLsync         pbo_fence[2];
+    gboolean       pbo_pending[2];
+    int            pbo_next;
+    size_t         pbo_size;
+    gint64         last_readback_us;
+    GSource       *pbo_timer;
     gboolean       dirty;
     gboolean       repaint_queued;
     GLenum         injected_error;
@@ -342,6 +349,19 @@ ns_webgl_attr(JSContext *ctx, JSValueConst attrs, const char *name, gboolean def
 static void ns_webgl_free(ns_webgl *g);
 
 static void
+wgl_pbo_release(ns_webgl *g)
+{
+    for (int i = 0; i < 2; i++) {
+        if (g->pbo_fence[i]) glDeleteSync(g->pbo_fence[i]);
+        g->pbo_fence[i] = NULL;
+        g->pbo_pending[i] = FALSE;
+    }
+    if (g->pbo[0]) glDeleteBuffers(2, g->pbo);
+    g->pbo[0] = g->pbo[1] = 0;
+    g->pbo_size = 0;
+}
+
+static void
 wgl_enable_shader_point_size(void)
 {
     if (!epoxy_is_desktop_gl()) return;
@@ -424,6 +444,7 @@ ns_webgl_free(ns_webgl *g)
         if (g->msaa_depth_rb) glDeleteRenderbuffers(1, &g->msaa_depth_rb);
         if (g->flip_fbo) glDeleteFramebuffers(1, &g->flip_fbo);
         if (g->flip_rb) glDeleteRenderbuffers(1, &g->flip_rb);
+        wgl_pbo_release(g);
         if (g->syncs) {
             GHashTableIter it;
             gpointer k, v;
@@ -444,6 +465,10 @@ ns_webgl_free(ns_webgl *g)
     if (g->attrib_masks) g_hash_table_destroy(g->attrib_masks);
     if (g->elem_data) g_hash_table_destroy(g->elem_data);
     if (g->uncleared_rbs) g_hash_table_destroy(g->uncleared_rbs);
+    if (g->pbo_timer) {
+        g_source_destroy(g->pbo_timer);
+        g_source_unref(g->pbo_timer);
+    }
     if (g->surf) cairo_surface_destroy(g->surf);
     g_free(g->readback);
     g_free(g);
@@ -5860,6 +5885,152 @@ wgl_readback_bgra(ns_webgl *g, int w, int h, unsigned char *dst, int stride)
     return TRUE;
 }
 
+#define NS_WEBGL_STREAM_GAP_US 50000
+
+static gboolean
+wgl_readback_streams(ns_webgl *g, int stride)
+{
+    return epoxy_is_desktop_gl() && epoxy_gl_version() >= 30 &&
+           stride % 4 == 0 && (!g->alpha || g->premultiplied_alpha);
+}
+
+static gboolean
+wgl_pbo_ensure(ns_webgl *g, size_t size)
+{
+    if (g->pbo[0] && g->pbo_size == size) return TRUE;
+    wgl_pbo_release(g);
+    GLint saved = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &saved);
+    glGenBuffers(2, g->pbo);
+    for (int i = 0; i < 2; i++) {
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, g->pbo[i]);
+        glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)size, NULL,
+                     GL_STREAM_READ);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)saved);
+    g->pbo_size = size;
+    g->pbo_next = 0;
+    return glGetError() == GL_NO_ERROR;
+}
+
+static gboolean
+wgl_pbo_issue(ns_webgl *g, int w, int h, int stride)
+{
+    if (!wgl_flip_target(g, w, h)) return FALSE;
+    if (!wgl_pbo_ensure(g, (size_t)stride * (size_t)h)) return FALSE;
+    int slot = g->pbo_next;
+    if (g->pbo_pending[slot]) {
+        glDeleteSync(g->pbo_fence[slot]);
+        g->pbo_fence[slot] = NULL;
+        g->pbo_pending[slot] = FALSE;
+    }
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->fbo);
+    wgl_bind_framebuffer(g, GL_DRAW_FRAMEBUFFER, g->flip_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (!g->alpha) {
+        GLboolean mask[4];
+        GLfloat clear[4];
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(clear[0], clear[1], clear[2], clear[3]);
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+    }
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->flip_fbo);
+    wgl_pack_state pack;
+    wgl_pack_tight(&pack);
+    glPixelStorei(GL_PACK_ROW_LENGTH, stride / 4);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, g->pbo[slot]);
+    glReadPixels(0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    wgl_pack_restore(&pack);
+    wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->fbo);
+    g->pbo_fence[slot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    g->pbo_pending[slot] = g->pbo_fence[slot] != NULL;
+    g->pbo_next = slot ^ 1;
+    glFlush();
+    return g->pbo_pending[slot];
+}
+
+static gboolean
+wgl_pbo_collect(ns_webgl *g, int slot, unsigned char *dst, gboolean wait)
+{
+    if (!g->pbo_pending[slot]) return FALSE;
+    GLenum st = glClientWaitSync(g->pbo_fence[slot], GL_SYNC_FLUSH_COMMANDS_BIT,
+                                 wait ? (GLuint64)1000000000 : 0);
+    if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
+        return FALSE;
+    glDeleteSync(g->pbo_fence[slot]);
+    g->pbo_fence[slot] = NULL;
+    g->pbo_pending[slot] = FALSE;
+    GLint saved = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &saved);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, g->pbo[slot]);
+    const void *src = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0,
+                                       (GLsizeiptr)g->pbo_size,
+                                       GL_MAP_READ_BIT);
+    if (src) {
+        memcpy(dst, src, g->pbo_size);
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)saved);
+    return src != NULL;
+}
+
+static gboolean
+wgl_pbo_timer_cb(gpointer user_data)
+{
+    ns_webgl *g = user_data;
+    g_source_unref(g->pbo_timer);
+    g->pbo_timer = NULL;
+    ns_js_request_repaint(g->js);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+wgl_pbo_schedule_collect(ns_webgl *g)
+{
+    if (g->pbo_timer) return;
+    g->pbo_timer = g_timeout_source_new(4);
+    g_source_set_callback(g->pbo_timer, wgl_pbo_timer_cb, g, NULL);
+    g_source_attach(g->pbo_timer, g_main_context_get_thread_default());
+}
+
+static gboolean
+wgl_readback_streaming(ns_webgl *g, int w, int h, unsigned char *dst,
+                       int stride)
+{
+    gint64 now = g_get_monotonic_time();
+    gboolean streaming = g->dirty && g->last_readback_us > 0 &&
+                         now - g->last_readback_us < NS_WEBGL_STREAM_GAP_US;
+    if (g->dirty) g->last_readback_us = now;
+    if (!g->pbo_pending[0] && !g->pbo_pending[1] && !streaming)
+        return FALSE;
+    gboolean issued = FALSE;
+    if (g->dirty) {
+        if (!streaming) {
+            for (int i = 0; i < 2; i++) wgl_pbo_collect(g, i, dst, TRUE);
+            return FALSE;
+        }
+        issued = wgl_pbo_issue(g, w, h, stride);
+        if (!issued) return FALSE;
+        g->dirty = FALSE;
+        g->repaint_queued = FALSE;
+    }
+    int newest = g->pbo_next ^ 1;
+    int oldest = g->pbo_next;
+    gboolean copied = wgl_pbo_collect(g, oldest, dst, FALSE);
+    copied = wgl_pbo_collect(g, newest, dst, FALSE) || copied;
+    if (g->pbo_pending[0] || g->pbo_pending[1])
+        wgl_pbo_schedule_collect(g);
+    return copied || issued;
+}
+
 cairo_surface_t *
 ns_webgl_canvas_surface(const ns_node *canvas)
 {
@@ -5873,10 +6044,10 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     int w = g->w, h = g->h;
     if (w <= 0 || h <= 0) return NULL;
 
-    if (!g->dirty && g->surf)
+    if (!g->dirty && g->surf && !g->pbo_pending[0] && !g->pbo_pending[1])
         return g->surf;
 
-    if (g->samples > 1) {
+    if (g->samples > 1 && g->dirty) {
         wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->draw_fbo);
         wgl_bind_framebuffer(g, GL_DRAW_FRAMEBUFFER, g->fbo);
         wgl_resolve_blit(w, h);
@@ -5895,6 +6066,13 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     cairo_surface_flush(g->surf);
     int stride = cairo_image_surface_get_stride(g->surf);
     unsigned char *dst = cairo_image_surface_get_data(g->surf);
+
+    if (wgl_readback_streams(g, stride) &&
+        wgl_readback_streaming(g, w, h, dst, stride)) {
+        cairo_surface_mark_dirty(g->surf);
+        return g->surf;
+    }
+    if (!g->dirty) return g->surf;
 
     if (wgl_readback_bgra(g, w, h, dst, stride)) {
         cairo_surface_mark_dirty(g->surf);
