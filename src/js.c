@@ -55143,8 +55143,9 @@ ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
     if (js->ce_defer_upgrades > 0) return;
     if (ns_node_in_template_content(root)) return;
     if (root->kind == NS_NODE_ELEMENT && root->name) {
-        JSValue *tslot = g_hash_table_lookup(js->ce_registry, target_name);
         JSValue klass = ns_ce_class_for_node(js, root);
+        JSValue *tslot = js->ce_registry
+            ? g_hash_table_lookup(js->ce_registry, target_name) : NULL;
         if (tslot && JS_IsObject(klass) &&
             JS_VALUE_GET_PTR(klass) == JS_VALUE_GET_PTR(*tslot))
             ns_ce_upgrade_element_with(js, root, klass, depth);
