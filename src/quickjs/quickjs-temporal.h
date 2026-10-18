@@ -216,7 +216,7 @@ typedef struct TPCalendarDate {
 typedef struct TPObject {
     int kind;
     TPCalendar cal;
-    tp_i128 ns;
+    tp_i128 ns __attribute__((packed, aligned(8)));
     TPTimeZone tz;
     TPDateTime dt;
     TPDuration dur;
