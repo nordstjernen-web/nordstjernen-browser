@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* XMLHttpRequest no longer adds an `X-Requested-With: XMLHttpRequest`
+  header to every request. Chrome never sends it (libraries such as
+  jQuery add it themselves for same-origin requests), and servers that
+  key on it answered our requests differently.
 * CSS: a `position: fixed` box whose nearest positioned ancestor sits
   inside an `overflow: hidden` box is painted in the stacking context of
   the closest positioned ancestor that can hold it, instead of at the
