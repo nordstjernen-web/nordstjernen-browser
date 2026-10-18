@@ -14067,6 +14067,8 @@ ns_event_at_target_end(JSContext *ctx, JSValueConst ev, ns_event_at_target *st)
     JS_SetPropertyStr(ctx, ev, "_dispatching", JS_FALSE);
 }
 
+static _Thread_local int ns_port_forward_depth;
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -14080,9 +14082,14 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         gboolean is_started = JS_ToBool(ctx, started);
         JS_FreeValue(ctx, started);
         if (is_started) {
-            JSValueConst job_args[3] = { shipped_to, data_in,
-                                         argc >= 3 ? argv[2] : JS_UNDEFINED };
-            JSValue r = ns_port_deliver_job(ctx, 3, job_args);
+            JSValue r = JS_UNDEFINED;
+            if (ns_port_forward_depth < 64) {
+                JSValueConst job_args[3] = { shipped_to, data_in,
+                                             argc >= 3 ? argv[2] : JS_UNDEFINED };
+                ns_port_forward_depth++;
+                r = ns_port_deliver_job(ctx, 3, job_args);
+                ns_port_forward_depth--;
+            }
             JS_FreeValue(ctx, shipped_to);
             return r;
         }
