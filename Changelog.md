@@ -17,6 +17,10 @@ Changelog:
   with its average colour. CSS also accepts the plain numbers SVG
   allows, in pages too: `fill-opacity: .5` and `stroke-width: 2` were
   dropped as invalid.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
