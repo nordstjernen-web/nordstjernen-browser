@@ -2668,6 +2668,10 @@ typedef enum {
     NS_LIVE_RADIO_NODE_LIST,
     NS_LIVE_ATTRIBUTES,
     NS_LIVE_LABELS,
+    NS_LIVE_TABLE_ROWS,
+    NS_LIVE_TABLE_TBODIES,
+    NS_LIVE_ROW_CELLS,
+    NS_LIVE_MAP_AREAS,
 } ns_live_kind;
 
 typedef struct {
@@ -42810,6 +42814,51 @@ ns_collect_links(const ns_node *n, JSContext *ctx, JSValue arr, uint32_t *idx,
     }
 }
 
+static void
+ns_collect_children_named(const ns_node *parent, const char *a, const char *b,
+                          JSContext *ctx, JSValue arr, uint32_t *idx)
+{
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, a) ||
+            (b && ns_node_is_element_named(c, b)))
+            JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
+}
+
+static void
+ns_collect_table_rows(const ns_node *tbl, JSContext *ctx, JSValue arr,
+                      uint32_t *idx)
+{
+    if (!ns_node_is_element_named(tbl, "table")) {
+        ns_collect_children_named(tbl, "tr", NULL, ctx, arr, idx);
+        return;
+    }
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "thead"))
+            ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "tr"))
+            JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
+        else if (ns_node_is_element_named(c, "tbody"))
+            ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
+    }
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "tfoot"))
+            ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
+}
+
+static void
+ns_live_collect_descendants(const ns_node *n, const char *tag, JSContext *ctx,
+                             JSValue arr, uint32_t *idx, int depth)
+{
+    if (!n || depth >= 512) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_dom_hidden_child(c)) continue;
+        if (ns_node_is_element_named(c, tag))
+            JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
+        ns_live_collect_descendants(c, tag, ctx, arr, idx, depth + 1);
+    }
+}
+
 static JSValue
 ns_live_build(JSContext *ctx, ns_live_back *b)
 {
@@ -42905,6 +42954,18 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     }
     case NS_LIVE_LABELS:
         ns_collect_labels_for(ctx, ns_node_root(root), root, arr, &i, 0);
+        break;
+    case NS_LIVE_TABLE_ROWS:
+        ns_collect_table_rows(root, ctx, arr, &i);
+        break;
+    case NS_LIVE_TABLE_TBODIES:
+        ns_collect_children_named(root, "tbody", NULL, ctx, arr, &i);
+        break;
+    case NS_LIVE_ROW_CELLS:
+        ns_collect_children_named(root, "td", "th", ctx, arr, &i);
+        break;
+    case NS_LIVE_MAP_AREAS:
+        ns_live_collect_descendants(root, "area", ctx, arr, &i, 0);
         break;
     }
     return arr;
@@ -43640,31 +43701,8 @@ ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
     if (ns_element_reflects_rows(tbl))
         return ns_element_int_attr_getter(ctx, this_val,
                                           ns_int_attr_index("rows"));
-    JSValue arr = JS_NewArray(ctx);
-    if (!tbl) return arr;
-    uint32_t idx = 0;
-    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "thead"))
-            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-                if (ns_node_is_element_named(r, "tr"))
-                    JS_SetPropertyUint32(ctx, arr, idx++,
-                                         ns_make_element(ctx, r));
-    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "tr"))
-            JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
-        else if (ns_node_is_element_named(c, "tbody"))
-            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-                if (ns_node_is_element_named(r, "tr"))
-                    JS_SetPropertyUint32(ctx, arr, idx++,
-                                         ns_make_element(ctx, r));
-    }
-    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "tfoot"))
-            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-                if (ns_node_is_element_named(r, "tr"))
-                    JS_SetPropertyUint32(ctx, arr, idx++,
-                                         ns_make_element(ctx, r));
-    return arr;
+    if (!tbl) return JS_NewArray(ctx);
+    return ns_make_live(ctx, this_val, NS_LIVE_TABLE_ROWS, NULL);
 }
 
 static JSValue
@@ -43693,28 +43731,23 @@ ns_element_table_tfoot(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_table_tbodies(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_node *tbl = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!tbl) return arr;
-    uint32_t i = 0;
-    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "tbody"))
-            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-    return arr;
+    if (!ns_unwrap_element(this_val)) return JS_NewArray(ctx);
+    return ns_make_live(ctx, this_val, NS_LIVE_TABLE_TBODIES, NULL);
 }
 
 static JSValue
 ns_element_tr_cells(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_node *tr = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!tr) return arr;
-    uint32_t i = 0;
-    for (const ns_node *c = tr->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "td") ||
-            ns_node_is_element_named(c, "th"))
-            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-    return arr;
+    if (!ns_unwrap_element(this_val)) return JS_NewArray(ctx);
+    return ns_make_live(ctx, this_val, NS_LIVE_ROW_CELLS, NULL);
+}
+
+static JSValue
+ns_element_map_areas(JSContext *ctx, JSValueConst this_val)
+{
+    if (!ns_node_is_element_named(ns_unwrap_element(this_val), "map"))
+        return JS_UNDEFINED;
+    return ns_make_live(ctx, this_val, NS_LIVE_MAP_AREAS, NULL);
 }
 
 static JSValue
@@ -52058,6 +52091,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("tFoot",           ns_element_table_tfoot,        ns_element_noop_set),
     JS_CGETSET_DEF("tBodies",         ns_element_table_tbodies,      ns_element_noop_set),
     JS_CGETSET_DEF("cells",           ns_element_tr_cells,           ns_element_noop_set),
+    JS_CGETSET_DEF("areas",           ns_element_map_areas,          ns_element_noop_set),
     JS_CGETSET_DEF("rowIndex",        ns_element_get_zero_int,       ns_element_noop_set),
     JS_CGETSET_DEF("sectionRowIndex", ns_element_get_zero_int,       ns_element_noop_set),
     JS_CGETSET_DEF("cellIndex",       ns_element_get_zero_int,       ns_element_noop_set),
