@@ -40,7 +40,7 @@ box_at(const uint8_t *p, size_t len, size_t off, uint32_t *type, size_t *hdr,
     *type = rd32(p + off + 4);
     *hdr = 8;
     if (sz == 1) {
-        if (off > len - 16) return 0;
+        if (len - off < 16) return 0;
         sz = rd64(p + off + 8);
         *hdr = 16;
     } else if (sz == 0) {
