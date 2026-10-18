@@ -49,6 +49,8 @@ typedef struct ns_webgl {
     cairo_surface_t *surf;
     uint8_t       *readback;
     size_t         readback_len;
+    GLuint         flip_fbo, flip_rb;
+    int            flip_w, flip_h;
     gboolean       dirty;
     gboolean       repaint_queued;
     GLenum         injected_error;
@@ -420,6 +422,8 @@ ns_webgl_free(ns_webgl *g)
         if (g->draw_fbo) glDeleteFramebuffers(1, &g->draw_fbo);
         if (g->msaa_color_rb) glDeleteRenderbuffers(1, &g->msaa_color_rb);
         if (g->msaa_depth_rb) glDeleteRenderbuffers(1, &g->msaa_depth_rb);
+        if (g->flip_fbo) glDeleteFramebuffers(1, &g->flip_fbo);
+        if (g->flip_rb) glDeleteRenderbuffers(1, &g->flip_rb);
         if (g->syncs) {
             GHashTableIter it;
             gpointer k, v;
@@ -5801,6 +5805,61 @@ wgl_pack_restore(const wgl_pack_state *s)
     if (s->pack_buffer) glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)s->pack_buffer);
 }
 
+static gboolean
+wgl_flip_target(ns_webgl *g, int w, int h)
+{
+    if (g->flip_fbo && g->flip_w == w && g->flip_h == h) return TRUE;
+    GLint saved_rb = 0;
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &saved_rb);
+    if (!g->flip_rb) glGenRenderbuffers(1, &g->flip_rb);
+    if (!g->flip_fbo) glGenFramebuffers(1, &g->flip_fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, g->flip_rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, w, h);
+    glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)saved_rb);
+    wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->flip_fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              GL_RENDERBUFFER, g->flip_rb);
+    gboolean ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
+                  GL_FRAMEBUFFER_COMPLETE;
+    g->flip_w = ok ? w : 0;
+    g->flip_h = ok ? h : 0;
+    return ok;
+}
+
+static gboolean
+wgl_readback_bgra(ns_webgl *g, int w, int h, unsigned char *dst, int stride)
+{
+    if (!epoxy_is_desktop_gl() || epoxy_gl_version() < 30) return FALSE;
+    if (stride % 4 != 0) return FALSE;
+    if (g->alpha && !g->premultiplied_alpha) return FALSE;
+    if (!wgl_flip_target(g, w, h)) return FALSE;
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->fbo);
+    wgl_bind_framebuffer(g, GL_DRAW_FRAMEBUFFER, g->flip_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (!g->alpha) {
+        GLboolean mask[4];
+        GLfloat clear[4];
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(clear[0], clear[1], clear[2], clear[3]);
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+    }
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    wgl_bind_framebuffer(g, GL_READ_FRAMEBUFFER, g->flip_fbo);
+    wgl_pack_state pack;
+    wgl_pack_tight(&pack);
+    glPixelStorei(GL_PACK_ROW_LENGTH, stride / 4);
+    glReadPixels(0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, dst);
+    wgl_pack_restore(&pack);
+    wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->fbo);
+    return TRUE;
+}
+
 cairo_surface_t *
 ns_webgl_canvas_surface(const ns_node *canvas)
 {
@@ -5837,6 +5896,13 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     int stride = cairo_image_surface_get_stride(g->surf);
     unsigned char *dst = cairo_image_surface_get_data(g->surf);
 
+    if (wgl_readback_bgra(g, w, h, dst, stride)) {
+        cairo_surface_mark_dirty(g->surf);
+        g->dirty = FALSE;
+        g->repaint_queued = FALSE;
+        return g->surf;
+    }
+
     uint8_t *rgba = wgl_readback_buffer(g, (size_t)w * (size_t)h * 4);
     if (!rgba) return g->surf;
     wgl_pack_state pack;
@@ -5869,7 +5935,7 @@ ns_webgl_canvas_surface(const ns_node *canvas)
             unsigned gg = src[x * 4 + 1];
             unsigned b = src[x * 4 + 2];
             unsigned a = src[x * 4 + 3];
-            if (a == 255u) {
+            if (a == 255u || g->premultiplied_alpha) {
                 row[x * 4 + 0] = (uint8_t)b;
                 row[x * 4 + 1] = (uint8_t)gg;
                 row[x * 4 + 2] = (uint8_t)r;
