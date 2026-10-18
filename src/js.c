@@ -20363,6 +20363,11 @@ typedef struct ns_xhr_state {
     double     start_ms;
     GPtrArray *request_headers;
     gint64     gen;
+    GCancellable *cancellable;
+    GByteArray   *partial;
+    gsize         signalled_len;
+    gint64        last_signal_us;
+    gboolean      headers_signalled;
 } ns_xhr_state;
 
 static gint64
@@ -20522,6 +20527,8 @@ ns_xhr_state_free(ns_xhr_state *st)
     g_free(st->url);
     g_free(st->origin_url);
     if (st->request_headers) g_ptr_array_free(st->request_headers, TRUE);
+    g_clear_object(&st->cancellable);
+    if (st->partial) g_byte_array_free(st->partial, TRUE);
     g_free(st);
 }
 
@@ -20912,6 +20919,19 @@ ns_xhr_fire_progress_event(JSContext *ctx, JSValueConst target,
     JS_FreeValue(ctx, event);
 }
 
+static void
+ns_xhr_cancel_request(JSContext *ctx, JSValueConst this_val)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->pending_xhrs) return;
+    for (guint i = 0; i < js->pending_xhrs->len; i++) {
+        ns_xhr_state *st = g_ptr_array_index(js->pending_xhrs, i);
+        if (st->cancellable &&
+            JS_VALUE_GET_PTR(st->obj) == JS_VALUE_GET_PTR(this_val))
+            g_cancellable_cancel(st->cancellable);
+    }
+}
+
 static JSValue
 ns_xhr_abort(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
@@ -20927,6 +20947,7 @@ ns_xhr_abort(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, sent_v);
     gboolean in_flight = (state == 1 && sent) || state == 2 || state == 3;
     if (in_flight) {
+        ns_xhr_cancel_request(ctx, this_val);
         ns_xhr_bump_gen(ctx, this_val);
         JS_SetPropertyStr(ctx, this_val, "_aborted", JS_TRUE);
         JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_FALSE);
@@ -21225,12 +21246,18 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
             ? resp->body->len : 0;
         if (!network_error) {
             gsize blen = delivery_len;
-            JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 2));
-            ns_target_fire_event(ctx, st->obj, "readystatechange");
-            JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 3));
-            ns_target_fire_event(ctx, st->obj, "readystatechange");
-            ns_xhr_fire_progress_event(ctx, st->obj, "progress",
-                                       (double)blen, (double)blen, TRUE);
+            if (!st->headers_signalled) {
+                JS_SetPropertyStr(ctx, st->obj, "_readyState",
+                                  JS_NewInt32(ctx, 2));
+                ns_target_fire_event(ctx, st->obj, "readystatechange");
+            }
+            if (!st->headers_signalled || blen > st->signalled_len) {
+                JS_SetPropertyStr(ctx, st->obj, "_readyState",
+                                  JS_NewInt32(ctx, 3));
+                ns_target_fire_event(ctx, st->obj, "readystatechange");
+                ns_xhr_fire_progress_event(ctx, st->obj, "progress",
+                                           (double)blen, (double)blen, TRUE);
+            }
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
         } else {
             JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 4));
@@ -21258,6 +21285,102 @@ typedef struct {
     ns_response  *resp;
     GError       *err;
 } ns_xhr_delivery;
+
+#define NS_XHR_STREAM_EAGER_BYTES (1024 * 1024)
+#define NS_XHR_STREAM_INTERVAL_US 50000
+
+static char *
+ns_xhr_raw_header_value(const char *raw, const char *name)
+{
+    gsize nlen = strlen(name);
+    for (const char *line = raw; line && *line;) {
+        const char *end = strchr(line, '\n');
+        if (g_ascii_strncasecmp(line, name, nlen) == 0 && line[nlen] == ':') {
+            const char *v = line + nlen + 1;
+            const char *stop = end ? end : v + strlen(v);
+            while (v < stop && (*v == ' ' || *v == '\t')) v++;
+            while (stop > v && (stop[-1] == '\r' || stop[-1] == ' ')) stop--;
+            return g_strndup(v, stop - v);
+        }
+        line = end ? end + 1 : NULL;
+    }
+    return NULL;
+}
+
+static gboolean
+ns_xhr_response_type_is_text(JSContext *ctx, JSValueConst obj)
+{
+    JSValue rt_v = JS_GetPropertyStr(ctx, obj, "responseType");
+    const char *rt = JS_ToCString(ctx, rt_v);
+    JS_FreeValue(ctx, rt_v);
+    gboolean text = !rt || !*rt || strcmp(rt, "text") == 0;
+    if (rt) JS_FreeCString(ctx, rt);
+    return text;
+}
+
+static void
+ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
+                const guint8 *data, gsize len)
+{
+    ns_xhr_state *st = user_data;
+    if (!st->ctx || !st->js) return;
+    JSContext *ctx = st->ctx;
+    if (ns_xhr_gen(ctx, st->obj) != st->gen) return;
+    if (!st->partial) st->partial = g_byte_array_new();
+    g_byte_array_append(st->partial, data, (guint)len);
+    if (ns_js_page_tasks_held(st->js)) return;
+    gint64 now = g_get_monotonic_time();
+    if (st->partial->len > NS_XHR_STREAM_EAGER_BYTES &&
+        now - st->last_signal_us < NS_XHR_STREAM_INTERVAL_US)
+        return;
+    char *allow_origin = ns_xhr_raw_header_value(raw_headers,
+                                                 "access-control-allow-origin");
+    gboolean allowed = cors_allows(st->origin_url, st->url, allow_origin);
+    g_free(allow_origin);
+    if (!allowed) return;
+    st->last_signal_us = now;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(st->js, &bg);
+    if (!st->headers_signalled) {
+        st->headers_signalled = TRUE;
+        int code = (int)status;
+        JS_SetPropertyStr(ctx, st->obj, "status", JS_NewInt32(ctx, code));
+        JS_SetPropertyStr(ctx, st->obj, "statusText",
+                          JS_NewString(ctx, ns_http_status_text(code)));
+        JS_SetPropertyStr(ctx, st->obj, "responseURL",
+                          JS_NewString(ctx, st->url));
+        if (ns_url_same_origin(st->origin_url, st->url))
+            JS_SetPropertyStr(ctx, st->obj, "_responseHeaders",
+                              JS_NewString(ctx, raw_headers));
+        JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 2));
+        ns_target_fire_event(ctx, st->obj, "readystatechange");
+        if (ns_xhr_gen(ctx, st->obj) != st->gen || !st->ctx) {
+            ns_js_budget_pop(st->js, &bg);
+            return;
+        }
+    }
+    if (ns_xhr_response_type_is_text(ctx, st->obj)) {
+        char *content_type = ns_xhr_raw_header_value(raw_headers,
+                                                     "content-type");
+        JSValue text = ns_xhr_response_text_value(ctx, st->obj,
+                                                  st->partial->data,
+                                                  st->partial->len,
+                                                  content_type);
+        g_free(content_type);
+        if (JS_IsException(text))
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        else
+            JS_SetPropertyStr(ctx, st->obj, "responseText", text);
+    }
+    st->signalled_len = st->partial->len;
+    JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 3));
+    ns_target_fire_event(ctx, st->obj, "readystatechange");
+    if (ns_xhr_gen(ctx, st->obj) == st->gen && st->ctx)
+        ns_xhr_fire_progress_event(ctx, st->obj, "progress",
+                                   (double)st->partial->len, 0, FALSE);
+    ns_drain_mutations(st->js);
+    ns_js_budget_pop(st->js, &bg);
+}
 
 static gboolean
 ns_on_xhr_deliver_idle(gpointer user_data)
@@ -21850,13 +21973,25 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         return JS_UNDEFINED;
     }
 
-    ns_net_request_async(st->url,
-                         st->js ? st->js->current_url : NULL,
-                         st->method ? st->method : "GET",
-                         body, body_len,
-                         effective_ct,
-                         (const char *const *)hdr_terminated->pdata,
-                         NULL, ns_on_xhr_done, st);
+    if (ns_xhr_is_sync(ctx, this_val)) {
+        ns_net_request_async(st->url,
+                             st->js ? st->js->current_url : NULL,
+                             st->method ? st->method : "GET",
+                             body, body_len,
+                             effective_ct,
+                             (const char *const *)hdr_terminated->pdata,
+                             NULL, ns_on_xhr_done, st);
+    } else {
+        st->cancellable = g_cancellable_new();
+        ns_net_request_async_streaming(st->url,
+                                       st->js ? st->js->current_url : NULL,
+                                       st->method ? st->method : "GET",
+                                       body, body_len,
+                                       effective_ct,
+                                       (const char *const *)hdr_terminated->pdata,
+                                       st->cancellable, ns_xhr_on_chunk, st,
+                                       ns_on_xhr_done, st);
+    }
     g_ptr_array_free(hdr_terminated, TRUE);
     g_free(body);
     g_free(auto_content_type);
