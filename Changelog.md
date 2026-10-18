@@ -13,6 +13,10 @@ Changelog:
   expression once, the rule shows up in `cssRules` as in Chrome, and
   an invalid value such as `calc(1px + anchor(top) + 2)` in a longhand
   such as `top` is simply rejected.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
