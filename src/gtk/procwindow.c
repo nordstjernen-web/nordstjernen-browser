@@ -2104,6 +2104,17 @@ task_mgr_tick(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
+static gboolean
+task_mgr_view_open(NsTaskMgr *tm, NsProcView *v)
+{
+    GtkNotebook *nb = GTK_NOTEBOOK(tm->pw->notebook);
+    int n = gtk_notebook_get_n_pages(nb);
+    for (int i = 0; i < n; i++)
+        if (view_for_page(gtk_notebook_get_nth_page(nb, i)) == v)
+            return TRUE;
+    return FALSE;
+}
+
 static void
 task_mgr_end_task(GtkButton *button, gpointer data)
 {
@@ -2113,7 +2124,7 @@ task_mgr_end_task(GtkButton *button, gpointer data)
     NsProcView *v = row ? g_object_get_data(G_OBJECT(row), "ns-view") : NULL;
     int pid = row ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "ns-pid"))
                   : 0;
-    if (v) {
+    if (v && task_mgr_view_open(tm, v)) {
         if (pid > 0 && pid == ns_proc_view_audio_pid(v))
             ns_proc_view_stop_audio(v);
         else
