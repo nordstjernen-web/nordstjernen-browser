@@ -316,12 +316,16 @@ ns_security_refuse_root(void)
 
 static GPtrArray *ns_extra_writable_dirs = NULL;
 static GPtrArray *ns_extra_exec_dirs = NULL;
+#ifdef __linux__
 static gboolean ns_gpu_devices_allowed = FALSE;
+#endif
 
 void
 ns_security_allow_gpu_devices(void)
 {
+#ifdef __linux__
     ns_gpu_devices_allowed = TRUE;
+#endif
 }
 
 void
