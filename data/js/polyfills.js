@@ -12679,7 +12679,7 @@
             get: function () { return this.__anim.__el; }, configurable: true
         });
         Object.defineProperty(AnimationEffect.prototype, 'pseudoElement', {
-            get: function () { return null; }, configurable: true
+            get: function () { return this.__pseudo || null; }, configurable: true
         });
         function kebab(name) {
             if (name === 'cssFloat') return 'float';
@@ -13045,7 +13045,7 @@
         Animation.prototype.__startScript = function () {
             var effect = this.__effectObj;
             if (!effect || !(effect instanceof KeyframeEffect) || !effect.__target ||
-                typeof global.__ns_anim_animate !== 'function') return false;
+                effect.__pseudo || typeof global.__ns_anim_animate !== 'function') return false;
             var stops = effect.__frames.map(function (f) { return { offset: f.offset, css: frameToCss(f) }; });
             var o = effect.__options || {};
             var timing = {
@@ -13203,11 +13203,28 @@
                 else if (kind === 'cancel' && !anim.__cancelling) anim.__settle(false);
             }
         };
+        function pseudoAnimationEnd(options) {
+            if (typeof options === 'number') return options;
+            var o = options || {};
+            var iterations = o.iterations === undefined ? 1 : Number(o.iterations);
+            if (!isFinite(iterations)) return Infinity;
+            var duration = typeof o.duration === 'number' ? o.duration : 0;
+            return Math.max(0, (o.delay || 0) + duration * iterations + (o.endDelay || 0));
+        }
         function elementAnimate(keyframes, options) {
             var effect = new KeyframeEffect(this, keyframes, options);
+            var pseudo = options && typeof options === 'object' &&
+                typeof options.pseudoElement === 'string' && options.pseudoElement
+                ? options.pseudoElement : null;
+            if (pseudo) effect.__pseudo = pseudo;
             var anim = new Animation(effect, typeof document !== 'undefined' ? document.timeline : null);
             if (options && typeof options === 'object' && options.id !== undefined) anim.id = String(options.id);
             anim.play();
+            if (pseudo) {
+                var end = pseudoAnimationEnd(options);
+                if (isFinite(end))
+                    setTimeout(function () { anim.__settle(true); }, end);
+            }
             return anim;
         }
         try {

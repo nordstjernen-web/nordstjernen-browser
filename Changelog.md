@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* Web Animations: `element.animate(keyframes, { pseudoElement:
+  "::after" })` no longer animates the element itself. Animations of
+  pseudo-elements are not rendered yet; such an animation now reports
+  its `pseudoElement`, leaves the host untouched and fires `finish` when
+  its duration ends. Google's Material buttons (Calendar, Gmail)
+  animate their ripple on `::after`; the whole button layer was scaled
+  up about twelve times and a large grey disc stayed on screen after
+  every click.
 * Scrolling: a row flex or grid container with `overflow: auto` or
   `scroll` scrolls when its items are taller than it, and an element
   with `overflow: hidden` accepts `scrollTop`/`scrollLeft` from script,
