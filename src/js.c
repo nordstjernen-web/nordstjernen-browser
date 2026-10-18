@@ -37877,15 +37877,19 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
             JSValue cached2 = ns_qcache_get(jsx2, root, 'c', sel + 1);
             if (!JS_IsUndefined(cached2)) return cached2;
             JSValue arr = JS_NewArray(ctx);
-            uint32_t i = 0;
+            GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
             if (list) {
                 for (guint k = 0; k < list->len; k++) {
                     const ns_node *n = g_ptr_array_index(list, k);
                     if (root != doc && !ns_node_ancestor_or_self(n, root)) continue;
                     if (!include_self && n == root) continue;
-                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, n));
+                    JSValue item = ns_make_element(ctx, n);
+                    g_array_append_val(items, item);
                 }
             }
+            for (guint k = 0; k < items->len; k++)
+                JS_SetPropertyUint32(ctx, arr, k, g_array_index(items, JSValue, k));
+            g_array_free(items, TRUE);
             JSValue result2 = ns_nodelist_from_array(ctx, arr);
             ns_qcache_put(jsx2, root, 'c', sel + 1, result2);
             return result2;
@@ -37926,13 +37930,17 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
             JSValue cached = ns_qcache_get(jsx, root, 'q', sel);
             if (!JS_IsUndefined(cached)) return cached;
             JSValue arr = JS_NewArray(ctx);
-            uint32_t i = 0;
+            GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
             for (guint k = 0; k < list->len; k++) {
                 const ns_node *n = g_ptr_array_index(list, k);
                 if (root != doc && !ns_node_ancestor_or_self(n, root)) continue;
                 if (!include_self && n == root) continue;
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, n));
+                JSValue item = ns_make_element(ctx, n);
+                g_array_append_val(items, item);
             }
+            for (guint k = 0; k < items->len; k++)
+                JS_SetPropertyUint32(ctx, arr, k, g_array_index(items, JSValue, k));
+            g_array_free(items, TRUE);
             JSValue result = ns_nodelist_from_array(ctx, arr);
             ns_qcache_put(jsx, root, 'q', sel, result);
             return result;
@@ -38139,12 +38147,17 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
         return TRUE;
     }
     JSValue arr = JS_NewArray(ctx);
-    uint32_t i = 0;
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
     for (guint k = 0; k < cands->len; k++) {
         const ns_node *n = g_ptr_array_index(cands, k);
-        if (ns_css_selector_matches(sel, n))
-            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, n));
+        if (ns_css_selector_matches(sel, n)) {
+            JSValue item = ns_make_element(ctx, n);
+            g_array_append_val(items, item);
+        }
     }
+    for (guint k = 0; k < items->len; k++)
+        JS_SetPropertyUint32(ctx, arr, k, g_array_index(items, JSValue, k));
+    g_array_free(items, TRUE);
     *out = ns_nodelist_from_array(ctx, arr);
     return TRUE;
 }
