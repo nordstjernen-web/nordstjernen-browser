@@ -6049,11 +6049,11 @@ ns_make_svg_length(JSContext *ctx, const char *str)
 static JSValue
 ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
 {
-    const char *base = ns_element_get_attr(n, attr);
-    if (!base) base = "0";
+    const char *base_attr = ns_element_get_attr(n, attr);
+    g_autofree char *base = g_strdup(base_attr ? base_attr : "0");
     char anim_attr[64];
     g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
-    const char *anim = ns_element_get_attr(n, anim_attr);
+    g_autofree char *anim = g_strdup(ns_element_get_attr(n, anim_attr));
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "baseVal", ns_make_svg_length(ctx, base));
     JS_SetPropertyStr(ctx, o, "animVal",
