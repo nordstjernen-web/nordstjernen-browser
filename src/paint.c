@@ -8767,6 +8767,29 @@ box_ink_extents_x(const ns_box *b, double *x0, double *x1, int depth)
         box_ink_extents_x(c, x0, x1, depth + 1);
 }
 
+#define NS_PAINT_GROUP_INK_MARGIN 64.0
+
+static gboolean
+paint_group_clip(cairo_t *cr, const ns_box *b)
+{
+    if (!(b->paint_bottom > b->paint_top) ||
+        b->paint_top <= -G_MAXDOUBLE / 2 || b->paint_bottom >= G_MAXDOUBLE / 2)
+        return FALSE;
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double x0 = bx, x1 = bx + bw;
+    box_ink_extents_x(b, &x0, &x1, 0);
+    double y0 = MIN(by, b->paint_top), y1 = MAX(by + bh, b->paint_bottom);
+    if (!isfinite(x0) || !isfinite(x1)) return FALSE;
+    cairo_save(cr);
+    cairo_rectangle(cr, x0 - NS_PAINT_GROUP_INK_MARGIN,
+                    y0 - NS_PAINT_GROUP_INK_MARGIN,
+                    x1 - x0 + 2 * NS_PAINT_GROUP_INK_MARGIN,
+                    y1 - y0 + 2 * NS_PAINT_GROUP_INK_MARGIN);
+    cairo_clip(cr);
+    return TRUE;
+}
+
 typedef enum {
     FILTER_LAYER_NONE,
     FILTER_LAYER_OPEN,
@@ -9719,6 +9742,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     const ns_style *style = b->style;
     gboolean skip_contents = box_skips_contents(b);
     double op = box_opacity(b);
+    if (op <= 0.0) {
+        if (g_paint_collect_stats) g_paint_stats.hidden++;
+        return;
+    }
     cairo_operator_t blend = blend_mode_operator(style);
     gboolean mask_grad = mask_layers_paintable(style);
     const char *filter_kw = box_filter_layer_keyword(b);
@@ -9809,8 +9836,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (box_offscreen && g_paint_collect_stats) g_paint_stats.offscreen++;
 
+    gboolean group_clipped = FALSE;
     if (grouped) {
         if (g_paint_collect_stats) g_paint_stats.grouped++;
+        if (!has_transform && !has_sticky && !filter_kw)
+            group_clipped = paint_group_clip(cr, b);
         cairo_push_group(cr);
     }
     cairo_matrix_t box_tf;
@@ -9837,6 +9867,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_restore(cr);
             if (grouped)
                 cairo_pattern_destroy(cairo_pop_group(cr));
+            if (group_clipped) cairo_restore(cr);
             if (fl.cr) {
                 g_paint_no_cull--;
                 cr = fl.outer;
@@ -10247,6 +10278,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, saved_op);
         if (mp) cairo_pattern_destroy(mp);
         cairo_pattern_destroy(group_source);
+        if (group_clipped) cairo_restore(cr);
     }
     if (fl.cr) {
         g_paint_no_cull--;
