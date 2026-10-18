@@ -170,7 +170,7 @@ a declared dependency directly in the parent scope.
 The `quickjs` meson option picks the engine under the QuickJS binding:
 `quickjs-ng` (default) is the in-tree fork above; `quickjs` is Fabrice
 Bellard's original [QuickJS](https://github.com/bellard/quickjs), fetched at
-configure time by `subprojects/quickjs.wrap` (pinned to a release commit,
+configure time by `subprojects/quickjs.wrap` (pinned to a `master` commit,
 built by the overlay in `subprojects/packagefiles/quickjs/`, never vendored).
 See `docs/quickjs.md`.
 

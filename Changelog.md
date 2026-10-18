@@ -3,6 +3,11 @@ Changelog:
 
 1.0.33:
 ======
+* Build: `-Dquickjs=quickjs` builds Fabrice Bellard's QuickJS from its
+  `master` branch (84e723f) instead of the 2026-06-04 release, so that
+  engine gains `Array.fromAsync`, `Iterator.zip`, iterator `join`,
+  `includes` and chunking, `Promise.allKeyed`, and the fixes since the
+  release. Its experimental Temporal and Intl are left out.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (f4cbbcd). The object arrays its tokenizer and tree builder keep were
   allocated eight times larger than needed on 64-bit systems, and removing

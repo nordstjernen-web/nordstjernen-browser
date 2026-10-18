@@ -336,21 +336,6 @@ JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
     return result;
 }
 
-JSValue
-JS_ToObject(JSContext *ctx, JSValueConst val)
-{
-    if (JS_IsObject(val))
-        return JS_DupValue(ctx, val);
-    if (JS_IsNull(val) || JS_IsUndefined(val))
-        return JS_ThrowTypeError(ctx, "Cannot convert undefined or null to object");
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue object_ctor = JS_GetPropertyStr(ctx, global, "Object");
-    JS_FreeValue(ctx, global);
-    JSValue obj = JS_Call(ctx, object_ctor, JS_UNDEFINED, 1, &val);
-    JS_FreeValue(ctx, object_ctor);
-    return obj;
-}
-
 static size_t
 ns_quickjs_put_wtf8(char *out, uint32_t c)
 {
