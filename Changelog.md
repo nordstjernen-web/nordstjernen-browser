@@ -1,6 +1,42 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.35:
+======
+* Security: a review of the engine, its QuickJS fork and its lexbor fork
+  for crashes and double frees fixed sixteen bugs that a page, or an
+  ordinary action in the shell, could trigger. Each commit carries a
+  `Security-Fix:` trailer.
+* HTML parsing: a named character reference whose value is longer than
+  its name (`&nGt;`, `&nLt;`) ending exactly at the end of lexbor's
+  16 KiB tokenizer buffer was written past the buffer. The bug is also
+  in upstream lexbor.
+* DOM: reading `element.attributes` followed a freed attribute when page
+  script run during the walk removed it; the custom element upgrade walk
+  read a registry slot that `customElements.define()` from a class
+  getter had freed; `navigation.entries()` read a freed history entry
+  when an `Object.prototype` setter called `history.pushState()`;
+  image-load handling ran an `Object.prototype` getter that could free
+  the load record still in use; `select.add(option)` left the option
+  registered as an orphan node while the select owned it.
+* DOM: the `document.body` setter could append a node under its own
+  descendant, linking a cycle into the tree that overflowed the stack on
+  the next tree walk; a MessagePort whose forwarding target pointed back
+  at itself recursed until the stack overflowed; SVG path data with a
+  number after closepath (`M0 0Z1`) made `getTotalLength()` loop until
+  memory ran out.
+* JavaScript: `ShadowRealm.prototype.importValue` dereferenced a
+  primitive as an object when the module's exported `then` resolved
+  with one; Temporal date arithmetic past calendar year ±300000 hung the
+  renderer instead of throwing `RangeError`; Temporal objects were
+  declared 16-byte aligned on QuickJS's 8-byte allocator; Intl number
+  formatting freed the same memory twice when an allocation failed.
+* Media: an MP4 box using the 64-bit size form in a buffer shorter than
+  16 bytes was read past its end.
+* Task Manager: "End task" used the view of a tab that had closed since
+  the last refresh, and the window outlived the browser window that
+  opened it.
+
 1.0.34:
 ======
 * Linux: WebGL and WebGPU render on the GPU again inside the sandboxed
