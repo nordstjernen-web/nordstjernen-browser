@@ -2,9 +2,8 @@
 # Build a portable Nordstjernen Alpine package (.apk) by repackaging the
 # bundle that pack-linux.sh produces. The binary is statically linked
 # against the in-tree engine (lexbor, quickjs). tracedeps is disabled
-# (the APKBUILD has no source=), so every shared library the binary
-# links against (see `objdump -p | grep NEEDED`) must be declared
-# manually in depends= below — keep that list in sync with the binary.
+# (the APKBUILD has no source=), so depends= is derived below by mapping
+# every library the staged binaries load to its owning Alpine package.
 set -euo pipefail
 
 log() { printf '[pack-apk] %s\n' "$*" >&2; }
@@ -57,17 +56,17 @@ mkdir -p "$BUILDTOP"
 export REPODEST="$ROOT/dist/apkrepo"
 rm -rf "$REPODEST"
 
-# Audio playback helper, when SDL2 was available at build time. tracedeps is
-# off, so its sdl2 runtime dependency must be listed manually below.
-AUDIO_DEP=""
-[ -x "$STAGE/nordstjernen-audio" ] && AUDIO_DEP=" sdl2"
-
-# Inline WebM (VP9/Opus) links FFmpeg's libav* when present at build time; with
-# tracedeps off, its runtime package (ffmpeg-libs) must be listed manually.
-WEBM_DEP=""
-if ldd "$STAGE/nordstjernen-renderer" 2>/dev/null | grep -q 'libavformat'; then
-    WEBM_DEP=" ffmpeg-libs"
-fi
+# tracedeps is off, so resolve every shared library the staged binaries load to
+# the Alpine package that owns it; auto-detected features (SDL2 audio, libjxl,
+# GStreamer, enchant, …) then appear in depends= exactly when they were built.
+LIB_DEPS=$(for bin in nordstjernen nordstjernen-renderer nordstjernen-audio; do
+        if [ -x "$STAGE/$bin" ]; then ldd "$STAGE/$bin" 2>/dev/null || true; fi
+    done | awk '$2 == "=>" && $3 ~ /^\// { print $3 }' | sort -u \
+    | while read -r lib; do
+        { apk info -W "$lib" 2>/dev/null || true; } | sed -n 's/.* is owned by //p'
+    done | sed -E 's/-[0-9][^-]*-r[0-9]+$//' | sort -u | tr '\n' ' ')
+[ -n "$LIB_DEPS" ] || { log "ERROR: could not resolve runtime packages"; exit 1; }
+log "runtime packages: $LIB_DEPS"
 
 cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
 # Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
@@ -78,7 +77,7 @@ pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
 license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
-depends="gtk4.0 libepoxy libcurl uchardet sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3${AUDIO_DEP}${WEBM_DEP}"
+depends="${LIB_DEPS}ca-certificates fontconfig font-dejavu"
 options="!check !tracedeps !strip"
 source=""
 

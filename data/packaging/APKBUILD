@@ -25,7 +25,15 @@ makedepends="
 	ffmpeg-dev
 	poppler-dev
 	fontconfig-dev
+	freetype-dev
 	pango-dev
+	brotli-dev
+	libjxl-dev
+	gstreamer-dev
+	gst-plugins-base-dev
+	enchant2-dev
+	libvorbis-dev
+	opusfile-dev
 	sdl2-dev
 	"
 source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/$pkgver.tar.gz"
