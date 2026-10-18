@@ -3,6 +3,9 @@ Changelog:
 
 1.0.33:
 ======
+* JavaScript: QuickJS is at quickjs-ng master 5271a40, the latest
+  upstream commit. It changes only upstream's CI runners, so the engine
+  itself is the same as at 9b06171.
 * Build: the GCC build of `src/webgl.c` no longer warns about a null
   pointer dereference in `wgl_elem_shadow_load`, which read the
   context's WebGL version before checking that the element buffer had

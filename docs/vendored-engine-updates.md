@@ -33,6 +33,20 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-10-18 — QuickJS 9b06171 → 5271a40
+
+| | value |
+|---|---|
+| Fork base | `9b06171` |
+| Updated to | `5271a40` (master, "Upgrade macos-14 runners to macos-15 (#1830)") |
+| Reported version | `0.17.0` (unchanged) |
+
+One upstream commit. It moves upstream's macOS CI jobs to `macos-15` runners
+and touches only `.github/workflows/ci.yml`, which `src/quickjs/` carries
+unmodified and never runs, so that file is copied and no engine source
+changes. Every other carried file is identical to `5271a40` apart from the
+fork's own modifications.
+
 ## 2026-10-15 — QuickJS 60984dc → 9b06171
 
 | | value |
