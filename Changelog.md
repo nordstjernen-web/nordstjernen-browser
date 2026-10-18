@@ -25,6 +25,24 @@ Changelog:
   `pre-line`, `break-spaces` or a `<pre>`) is real text: it now ends the
   anonymous table and takes its own line, as in Chrome, where it used to
   be swallowed into the table.
+* Flexbox: a column flex item with a percentage or fixed height now
+  shrinks to make room for its siblings when its content only fills it
+  through percentage heights. The item's automatic minimum height was
+  measured with its children's `height: 100%` resolved against the
+  item's own height, so the minimum equalled that height and the item
+  never shrank: on Trendyol a product image wrapper with `height: 100%`
+  pushed the promotion strip below the image and the card's text block
+  grew 300px taller than its content. An item that will shrink is now
+  laid out first as if its height were auto, as Chrome does, and then
+  once at its flexed height, which a flex or grid item now also uses for
+  its own content (a `1fr` row or a stretched child ends with the item
+  instead of 30px below it). The automatic minimum is capped by
+  `max-height`, a percentage `max-height` or `min-height` limits the
+  height children resolve percentages against, an `aspect-ratio` column
+  container grows to fit its items, and a row flex container with a
+  definite height lays out a stretched item once instead of twice, so an
+  app shell of nested `height: 100%` rows and columns no longer takes
+  seconds to lay out.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
