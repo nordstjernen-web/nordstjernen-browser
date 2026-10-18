@@ -21912,12 +21912,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         }
     }
     JS_FreeValue(ctx, headers_arr);
-    if (hdrs) {
-        g_ptr_array_add(hdrs, g_strdup("X-Requested-With: XMLHttpRequest"));
-    } else {
-        hdrs = g_ptr_array_new_with_free_func(g_free);
-        g_ptr_array_add(hdrs, g_strdup("X-Requested-With: XMLHttpRequest"));
-    }
+    if (!hdrs) hdrs = g_ptr_array_new_with_free_func(g_free);
     st->request_headers = hdrs;
 
     if (st->js && st->js->pending_xhrs)
