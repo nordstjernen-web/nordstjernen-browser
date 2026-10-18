@@ -77,7 +77,8 @@ install_apk() {
         libseccomp-dev libwebp-dev sdl2-dev
     apk add --no-cache \
         poppler-dev \
-        fontconfig-dev pango-dev libavif-dev || true
+        fontconfig-dev freetype-dev pango-dev brotli-dev libavif-dev libjxl-dev \
+        gstreamer-dev gst-plugins-base-dev enchant2-dev libvorbis-dev opusfile-dev || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). ffmpeg-dev provides
     # all of libavformat/libavcodec/libavutil/libswscale/libswresample, and
     # meson requires them on Linux.

@@ -18,9 +18,19 @@ during Alpine's network-isolated `build()` phase. `build()` also passes
 `-Dwebgpu=disabled`: wgpu-native publishes no musl release. The APKBUILD
 declares `arch="x86_64 aarch64"`.
 
+`makedepends` also lists every auto-detected optional library, so the
+package gets the full feature set: libjxl (JPEG XL), GStreamer with
+gst-plugins-base (H.264/AAC through the OS decoder), enchant2
+(spell-checking), libvorbis/opusfile (native Ogg audio), brotli (WOFF2)
+and freetype. GStreamer still needs a decoder at runtime to play H.264 —
+`apk add gst-libav` or `gst-plugins-bad` — which the package does not
+pull in.
+
 This is separate from the nightly Alpine `.apk`, which
 `scripts/pack-apk.sh` produces by repackaging the `scripts/pack-linux.sh`
-bundle with a hand-maintained `depends=` list (see `Nightly.md`).
+bundle. Its APKBUILD has `!tracedeps`, so the script derives `depends=` by
+asking `apk info -W` which package owns each library the staged binaries
+load (see `Nightly.md`).
 
 GitHub names the archive root after the repository, so the tarball unpacks
 to `nordstjernen-browser-$pkgver` rather than `$pkgname-$pkgver`; the

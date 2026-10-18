@@ -104,7 +104,7 @@ fi
 if [ "$LIBC" = musl ]; then
     LIBC_REQ='- musl libc (Alpine 3.19+ era and later)'
     RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet poppler-glib libavif libwebp \
-        libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 # Alpine (musl)'
+        libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 ffmpeg-libs # Alpine (musl)'
 else
     # Don't guess the glibc floor — read it from the binary we just built.
     GLIBC_MIN=$(objdump -T "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \

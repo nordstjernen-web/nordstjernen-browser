@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* Alpine packaging: the APKBUILD, the musl CI job and the nightly Alpine
+  build now install libjxl, GStreamer, enchant2, libvorbis, opusfile,
+  brotli and freetype, so the Alpine package carries JPEG XL, H.264/AAC
+  playback, spell-checking and WOFF2 like the other Linux builds. The
+  nightly `.apk` derives its runtime `depends=` from the libraries the
+  binaries actually load instead of a hand-kept list that had fallen
+  behind.
 * WebGL performance: a canvas that redraws every frame (a map being
   panned, a game, an animation) is read back asynchronously through
   pixel-buffer objects on desktop OpenGL, so painting no longer waits for
