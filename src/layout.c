@@ -9207,6 +9207,12 @@ floats_max_bottom(const GArray *floats)
 }
 
 static gboolean
+keyword_is_hidden_overflow(const char *kw)
+{
+    return kw && g_ascii_strcasecmp(kw, "hidden") == 0;
+}
+
+static gboolean
 style_lines_never_wrap(const ns_style *s)
 {
     const ns_css_value *ws = s ? s->values[NS_CSS_WHITE_SPACE] : NULL;
@@ -16850,12 +16856,29 @@ flex_done: ;
                 shift_box_tree(c, 0, shift);
         }
     }
-    if (overflow_scrolls) {
-        box->scrolls = TRUE;
+    gboolean overflow_hidden_y = keyword_is_hidden_overflow(ovy);
+    gboolean overflow_hidden_x = keyword_is_hidden_overflow(ovx);
+    if (overflow_scrolls || overflow_hidden_y) {
+        if (overflow_scrolls) box->scrolls = TRUE;
         if (box->measured_content_height > box->content_height)
             box->scroll_max_y = box->measured_content_height - box->content_height;
+        if (box_is_flex_container(box) || box_is_grid_container(box)) {
+            double content_bottom = inner_y + box->content_height;
+            double max_bottom = content_bottom;
+            for (const ns_box *c = box->first_child; c; c = c->next_sibling) {
+                if (style_is_absolute_or_fixed(c->style)) continue;
+                double bottom = c->y + c->margin.top + c->content_height +
+                                c->padding.top + c->padding.bottom +
+                                c->border.top + c->border.bottom +
+                                c->margin.bottom;
+                if (bottom > max_bottom) max_bottom = bottom;
+            }
+            double overflow = max_bottom - content_bottom;
+            if (overflow > 0.5 && overflow > box->scroll_max_y)
+                box->scroll_max_y = overflow;
+        }
     }
-    if (overflow_scrolls_x) {
+    if (overflow_scrolls_x || overflow_hidden_x) {
         double content_right = inner_x + box->content_width;
         double padding_right = content_right + box->padding.right;
         double max_right = padding_right;
@@ -16871,7 +16894,7 @@ flex_done: ;
             if (flow_right > max_right) max_right = flow_right;
         }
         if (max_right > padding_right + 1.0) {
-            box->scrolls = TRUE;
+            if (overflow_scrolls_x) box->scrolls = TRUE;
             box->scroll_max_x = max_right - padding_right;
         }
     }
