@@ -37684,8 +37684,10 @@ incr_node_hits_sheet_deps(const ns_node *n, GPtrArray *deps)
 }
 
 static gboolean
-incr_mark_sheet_deps_walk(ns_node *n, GPtrArray *deps, guint *marked)
+incr_mark_sheet_deps_walk(ns_node *n, GPtrArray *deps, guint *marked,
+                          int depth)
 {
+    if (depth >= NS_CSS_MAX_CASCADE_DEPTH) return TRUE;
     if (n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_QUIRKS))
         return FALSE;
     if (n->kind == NS_NODE_ELEMENT && incr_node_hits_sheet_deps(n, deps)) {
@@ -37693,7 +37695,8 @@ incr_mark_sheet_deps_walk(ns_node *n, GPtrArray *deps, guint *marked)
         (*marked)++;
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        if (!incr_mark_sheet_deps_walk(c, deps, marked)) return FALSE;
+        if (!incr_mark_sheet_deps_walk(c, deps, marked, depth + 1))
+            return FALSE;
     return TRUE;
 }
 
@@ -37758,7 +37761,7 @@ incr_apply_sheet_change(ns_node *doc, const ns_css_stylesheet *ua,
     GPtrArray *deps = g_ptr_array_new();
     gboolean ok = incr_collect_changed_sheet_deps(author, g_incr_prev_serials,
                                                   now, deps) &&
-                  incr_mark_sheet_deps_walk(doc, deps, marked);
+                  incr_mark_sheet_deps_walk(doc, deps, marked, 0);
     g_ptr_array_free(deps, TRUE);
     g_array_free(now, TRUE);
     return ok;
@@ -37778,8 +37781,9 @@ incr_remember_sheets(const ns_css_stylesheet *ua,
 }
 
 static void
-incr_mark_newly_defined_walk(ns_node *n)
+incr_mark_newly_defined_walk(ns_node *n, int depth)
 {
+    if (depth >= NS_CSS_MAX_CASCADE_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT && n->name && strchr(n->name, '-')) {
         char *lower = g_ascii_strdown(n->name, -1);
         gboolean hit = g_hash_table_contains(g_defined_since_restyle, lower);
@@ -37790,7 +37794,7 @@ incr_mark_newly_defined_walk(ns_node *n)
         }
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        incr_mark_newly_defined_walk(c);
+        incr_mark_newly_defined_walk(c, depth + 1);
 }
 
 static void
@@ -37799,7 +37803,7 @@ incr_mark_newly_defined(ns_node *doc)
     if (!g_defined_since_restyle ||
         g_hash_table_size(g_defined_since_restyle) == 0)
         return;
-    if (g_incr_pass_active) incr_mark_newly_defined_walk(doc);
+    if (g_incr_pass_active) incr_mark_newly_defined_walk(doc, 0);
     g_hash_table_remove_all(g_defined_since_restyle);
 }
 
