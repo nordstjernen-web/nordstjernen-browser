@@ -42957,8 +42957,10 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         GArray *attrs = g_array_new(FALSE, FALSE, sizeof(JSValue));
         for (const ns_attr *a = root->attrs; a; a = a->next)
             if (!ns_attr_name_is_internal(a->name)) {
+                guint32 attr_gen = root->attr_gen;
                 JSValue attr = ns_attr_to_js(ctx, b->owner, a, FALSE);
                 g_array_append_val(attrs, attr);
+                if (root->attr_gen != attr_gen) break;
             }
         for (guint k = 0; k < attrs->len; k++)
             JS_SetPropertyUint32(ctx, arr, i++,
