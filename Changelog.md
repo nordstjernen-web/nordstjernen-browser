@@ -3,6 +3,12 @@ Changelog:
 
 1.0.33:
 ======
+* DOM: `table.rows`, a table section's `rows`, `table.tBodies` and
+  `tr.cells` are live `HTMLCollection`s with `item()` and `namedItem()`,
+  as in Chrome, instead of plain arrays copied when read, and
+  `map.areas` exists. Gmail looks a clicked message up with
+  `tbody.rows.item(i)`; the call threw "not a function", so clicking a
+  message in the inbox did not open it.
 * XMLHttpRequest: an asynchronous request now delivers its response as
   it arrives, as in Chrome: `readyState` 3, a growing `responseText` and
   `progress` events follow each chunk instead of all firing when the
