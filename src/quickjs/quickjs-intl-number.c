@@ -1350,8 +1350,10 @@ int intl_nf_partition(JSContext *ctx, const IntlNumberFormat *nf, const IntlDeci
     free(num_pattern_alloc);
     free(outer_pattern);
     intl_raw_result_free(&res);
-    if (parts->error)
-        goto oom;
+    if (parts->error) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
     return 0;
 oom:
     free(outer_pattern);
