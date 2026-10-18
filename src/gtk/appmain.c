@@ -594,6 +594,7 @@ main(int argc, char **argv)
                 g_free(rpath);
             }
         }
+        ns_security_allow_gpu_devices();
         ns_security_sandbox_init(g_self_exe);
     } else {
         ns_os_media_preinit();

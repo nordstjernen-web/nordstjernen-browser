@@ -316,6 +316,13 @@ ns_security_refuse_root(void)
 
 static GPtrArray *ns_extra_writable_dirs = NULL;
 static GPtrArray *ns_extra_exec_dirs = NULL;
+static gboolean ns_gpu_devices_allowed = FALSE;
+
+void
+ns_security_allow_gpu_devices(void)
+{
+    ns_gpu_devices_allowed = TRUE;
+}
 
 void
 ns_security_add_writable_dir(const char *dir)
@@ -401,6 +408,24 @@ add_regular_file_read(int rfd, const char *path)
 }
 
 static void
+add_gpu_devices(int rfd, guint64 fs_read)
+{
+    guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
+    add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/dri");
+    GDir *dev = g_dir_open("/dev", 0, NULL);
+    if (!dev) return;
+    const char *name;
+    while ((name = g_dir_read_name(dev))) {
+        if (!g_str_has_prefix(name, "nvidia")) continue;
+        g_autofree char *path = g_build_filename("/dev", name, NULL);
+        gboolean is_dir = g_file_test(path, G_FILE_TEST_IS_DIR);
+        add_path_rw(rfd, is_dir ? fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE : fs_dev,
+                    path);
+    }
+    g_dir_close(dev);
+}
+
+static void
 ns_sandbox_require_or_die(const char *what)
 {
     const char *req = g_getenv("NS_REQUIRE_SANDBOX");
@@ -478,6 +503,8 @@ ns_security_sandbox_init(const char *self_exe)
         if (g_file_test(vdev, G_FILE_TEST_EXISTS))
             add_path_rw(rfd, fs_dev, vdev);
     }
+    if (ns_gpu_devices_allowed)
+        add_gpu_devices(rfd, fs_read);
     if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
         add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/snd");
 
