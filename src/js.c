@@ -18062,7 +18062,16 @@ ns_computed_defaults_to_currentcolor(int pid)
            pid == NS_CSS_BORDER_BOTTOM_COLOR || pid == NS_CSS_BORDER_LEFT_COLOR ||
            pid == NS_CSS_OUTLINE_COLOR || pid == NS_CSS_COLUMN_RULE_COLOR ||
            pid == NS_CSS_TEXT_DECORATION_COLOR || pid == NS_CSS_CARET_COLOR ||
-           ns_css_prop_initial_currentcolor(pid);
+           pid == NS_CSS_WEBKIT_TEXT_FILL_COLOR || ns_css_prop_initial_currentcolor(pid);
+}
+
+static gboolean
+ns_computed_names_currentcolor(ns_js *js, const ns_node *n, int pid)
+{
+    if (ns_computed_defaults_to_currentcolor(pid)) return TRUE;
+    const ns_style *s = pid >= 0 && js && js->style_table
+        ? g_hash_table_lookup(js->style_table, n) : NULL;
+    return s && ns_css_keyword_is(s->values[pid], "currentcolor");
 }
 
 static char *
@@ -18522,7 +18531,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         }
         return g_strdup("none");
     }
-    if (ns_computed_defaults_to_currentcolor(pid)) {
+    if (ns_computed_names_currentcolor(js, n, pid)) {
         const ns_style *s = js && js->style_table
             ? g_hash_table_lookup(js->style_table, n) : NULL;
         char *text = s && s->values[pid]
@@ -18606,6 +18615,15 @@ ns_pseudo_substyle(const ns_style *s, const char *pseudo)
     return NULL;
 }
 
+static const ns_css_value *
+ns_computed_pseudo_value(const ns_style *ps, int pid)
+{
+    const ns_css_value *v = ps->values[pid];
+    if (ns_css_keyword_is(v, "currentcolor")) return ps->values[NS_CSS_COLOR];
+    if (v || !ns_computed_defaults_to_currentcolor(pid)) return v;
+    return ps->values[NS_CSS_COLOR];
+}
+
 static char *
 ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
                           const char *pseudo, const char *name)
@@ -18670,8 +18688,9 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
             return g_strdup_printf("%gpx", value);
         }
     }
-    if (pid >= 0 && ps->values[pid]) {
-        char *value = ns_css_value_serialize(ps->values[pid]);
+    const ns_css_value *own = pid >= 0 ? ns_computed_pseudo_value(ps, pid) : NULL;
+    if (own) {
+        char *value = ns_css_value_serialize(own);
         if (pid == NS_CSS_CONTENT && value && *value &&
             value[0] != '\'' && value[0] != '"' &&
             strcmp(value, "none") != 0 && strcmp(value, "normal") != 0) {

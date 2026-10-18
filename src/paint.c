@@ -5006,6 +5006,214 @@ inline_layer_baselines(const ns_box *b, const inline_layers *L)
     return out;
 }
 
+typedef struct text_stroke {
+    double width;
+    rgba color;
+} text_stroke;
+
+static gboolean
+style_text_stroke(const ns_style *s, text_stroke *out)
+{
+    double w = s ? length_or(s->values[NS_CSS_WEBKIT_TEXT_STROKE_WIDTH], 0) : 0;
+    if (w <= 0 || inline_box_is_hidden(s)) return FALSE;
+    const ns_css_value *c = s->values[NS_CSS_WEBKIT_TEXT_STROKE_COLOR];
+    if (!c || c->kind != NS_CSS_V_COLOR) c = s->values[NS_CSS_COLOR];
+    out->width = w;
+    out->color = rgba_of(c, 0, 0, 0, 1);
+    return out->color.a > 0;
+}
+
+static gsize
+text_style_attr_rank(const ns_inline_attr *r)
+{
+    if (!r->style) return G_MAXSIZE;
+    if (r->kind == NS_INLINE_GENERATED) return r->len * 2;
+    return r->kind == NS_INLINE_ELEMENT ? r->len * 2 + 1 : G_MAXSIZE;
+}
+
+static gboolean
+inline_text_has_stroke(const ns_box *b, const ns_style *base)
+{
+    text_stroke st;
+    if (style_text_stroke(base, &st)) return TRUE;
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
+        if (text_style_attr_rank(r) != G_MAXSIZE &&
+            style_text_stroke(r->style, &st))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static const ns_style **
+inline_byte_styles(const ns_box *b, const ns_style *base, gsize n)
+{
+    const ns_style **owner = g_new(const ns_style *, n + 1);
+    gsize *span = g_new(gsize, n + 1);
+    for (gsize k = 0; k <= n; k++) {
+        owner[k] = base;
+        span[k] = G_MAXSIZE;
+    }
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
+        gsize rank = text_style_attr_rank(r);
+        if (rank == G_MAXSIZE) continue;
+        gsize end = MIN(n, r->start + r->len);
+        for (gsize k = r->start; k < end; k++) {
+            if (rank >= span[k]) continue;
+            owner[k] = r->style;
+            span[k] = rank;
+        }
+    }
+    g_free(span);
+    return owner;
+}
+
+typedef struct text_stroke_walk {
+    cairo_t *cr;
+    const ns_style **owner;
+    gsize n;
+    NsPangoGlyphString *one;
+    const ns_style *style;
+    gboolean active;
+    text_stroke cur;
+} text_stroke_walk;
+
+static void
+text_stroke_flush(text_stroke_walk *w)
+{
+    if (!w->active) return;
+    set_source_rgba(w->cr, w->cur.color);
+    cairo_set_line_width(w->cr, w->cur.width);
+    cairo_set_line_join(w->cr, CAIRO_LINE_JOIN_MITER);
+    cairo_set_miter_limit(w->cr, 4.0);
+    cairo_stroke(w->cr);
+}
+
+static gboolean
+glyph_has_outline(const NsPangoGlyphInfo *gi)
+{
+    if (gi->attr.is_color || gi->glyph == NS_PANGO_GLYPH_EMPTY) return FALSE;
+    return (gi->glyph & NS_PANGO_GLYPH_UNKNOWN_FLAG) == 0;
+}
+
+static void
+text_stroke_glyph(text_stroke_walk *w, const NsPangoLayoutRun *run, int g,
+                  double x, double y)
+{
+    if (!glyph_has_outline(&run->glyphs->glyphs[g])) return;
+    gsize byte = (gsize)(run->item->offset + run->glyphs->log_clusters[g]);
+    const ns_style *s = w->owner[MIN(byte, w->n)];
+    if (s != w->style) {
+        text_stroke_flush(w);
+        w->style = s;
+        w->active = style_text_stroke(s, &w->cur);
+    }
+    if (!w->active) return;
+    w->one->glyphs[0] = run->glyphs->glyphs[g];
+    w->one->log_clusters[0] = 0;
+    cairo_move_to(w->cr, x, y);
+    ns_pango_cairo_glyph_string_path(w->cr, run->item->analysis.font, w->one);
+}
+
+static void
+text_stroke_run(const NsPangoLayoutRun *run, double x, double y,
+                gpointer data)
+{
+    const NsPangoGlyphString *gs = run->glyphs;
+    for (int g = 0; g < gs->num_glyphs; g++) {
+        text_stroke_glyph(data, run, g, x, y);
+        x += (double)gs->glyphs[g].geometry.width / NS_PANGO_SCALE;
+    }
+}
+
+typedef void (*inline_run_visit)(const NsPangoLayoutRun *run, double x,
+                                 double y, gpointer data);
+
+static void
+inline_runs_visit(GSList *first, const GSList *stop, double x, double y,
+                  inline_run_visit fn, gpointer data)
+{
+    int off = 0;
+    for (GSList *l = first; l && l != stop; l = l->next) {
+        const NsPangoLayoutRun *run = l->data;
+        fn(run, x + (double)(off + run->start_x_offset) / NS_PANGO_SCALE,
+           y - (double)run->y_offset / NS_PANGO_SCALE, data);
+        off += inline_run_advance(run);
+    }
+}
+
+static void
+inline_layer_runs_visit(const ns_box *b, const inline_text_src *src,
+                        double ox, double oy, inline_run_visit fn,
+                        gpointer data)
+{
+    const inline_layers *L = src->layers;
+    double *baselines = inline_layer_baselines(b, L);
+    const inline_bucket *bk = &L->seg_order;
+    for (guint k = bk->start[src->layer]; k < bk->start[src->layer + 1]; k++) {
+        const inline_layer_seg *seg =
+            &g_array_index(L->segs, inline_layer_seg, bk->order[k]);
+        const inline_layer_line *g =
+            &g_array_index(L->lines, inline_layer_line, seg->line);
+        double y = baselines ? baselines[seg->line]
+                             : oy + (double)g->baseline / NS_PANGO_SCALE;
+        inline_runs_visit(seg->first, seg->last->next,
+                          ox + (double)(g->x + seg->x) / NS_PANGO_SCALE, y,
+                          fn, data);
+    }
+    g_free(baselines);
+}
+
+static void
+inline_lines_runs_visit(const ns_box *b, NsPangoLayout *layout,
+                        double text_x, double y_origin, inline_run_visit fn,
+                        gpointer data)
+{
+    double *baselines = paint_inline_line_baselines(b, layout, y_origin);
+    int n = ns_pango_layout_get_line_count(layout);
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    int i = 0;
+    do {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+        if (line)
+            inline_runs_visit(line->runs, NULL,
+                              text_x + (double)logical.x / NS_PANGO_SCALE,
+                              baselines[i], fn, data);
+        i++;
+    } while (i < n && ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    g_free(baselines);
+}
+
+static void
+paint_inline_text_strokes(cairo_t *cr, const ns_box *b,
+                          const inline_text_src *src, double text_x,
+                          double y_origin)
+{
+    const ns_style *base = inherited_style(b);
+    if (!inline_text_has_stroke(b, base)) return;
+    gsize n = strlen(ns_pango_layout_get_text(src->layout));
+    text_stroke_walk w = {
+        .cr = cr, .owner = inline_byte_styles(b, base, n), .n = n,
+        .one = ns_pango_glyph_string_new(),
+    };
+    ns_pango_glyph_string_set_size(w.one, 1);
+    cairo_save(cr);
+    cairo_new_path(cr);
+    if (src->layers)
+        inline_layer_runs_visit(b, src, text_x, y_origin, text_stroke_run, &w);
+    else
+        inline_lines_runs_visit(b, src->layout, text_x, y_origin,
+                                text_stroke_run, &w);
+    text_stroke_flush(&w);
+    cairo_restore(cr);
+    ns_pango_glyph_string_free(w.one);
+    g_free(w.owner);
+}
+
 static void
 paint_inline_text(cairo_t *cr, const ns_box *b, const inline_text_src *src,
                   double text_x, double y_origin, rgba color)
@@ -5023,6 +5231,7 @@ paint_inline_text(cairo_t *cr, const ns_box *b, const inline_text_src *src,
         ns_pango_cairo_show_layout(cr, src->layout);
     }
     cairo_restore(cr);
+    paint_inline_text_strokes(cr, b, src, text_x, y_origin);
 }
 
 static void
