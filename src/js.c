@@ -49086,10 +49086,12 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
     if (before == opt) return JS_UNDEFINED;
     ns_node *parent = before ? before->parent : sel;
     if (opt->parent) ns_node_remove(opt);
-    if (before)
+    if (before) {
         ns_element_insert_before_single(_j, parent, opt, before);
-    else
+    } else {
+        if (_j) g_hash_table_remove(_j->orphan_nodes, opt);
         ns_node_append_child(sel, opt);
+    }
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
