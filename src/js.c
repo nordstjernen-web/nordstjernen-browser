@@ -52674,6 +52674,9 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
                                       "Document has no document element");
     ns_node *old_body = ns_document_body_node(ctx, this_val);
     if (old_body == new_body) return JS_UNDEFINED;
+    if (ns_node_is_shadow_including_inclusive_ancestor(new_body, root))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                                      "Document.body cannot be inserted");
     ns_js *js = js_from_ctx(ctx);
     if (new_body->parent) ns_js_record_move_removal(js, new_body);
     if (old_body && old_body != root) {
