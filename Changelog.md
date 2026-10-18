@@ -16,6 +16,10 @@ Changelog:
   did in the middle of a paragraph: the `#` and the text share one line
   as in Chrome, the triangle sits before the title beside the float,
   and the summary no longer loses its marker when a float comes first.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
