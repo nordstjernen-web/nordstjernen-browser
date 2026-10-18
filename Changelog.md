@@ -3,6 +3,12 @@ Changelog:
 
 1.0.33:
 ======
+* CSS: a `position: fixed` box whose nearest positioned ancestor sits
+  inside an `overflow: hidden` box is painted in the stacking context of
+  the closest positioned ancestor that can hold it, instead of at the
+  root under every `z-index`ed layer. Gmail's compose toolbar and Send
+  button are such a fixed bar inside the `z-index: 3` compose layer and
+  disappeared behind the message window.
 * CSS: an element with `visibility: visible` inside a `visibility:
   hidden` ancestor is painted, as in Chrome. The painter dropped a hidden
   box's whole subtree; it now skips only the hidden box's own
