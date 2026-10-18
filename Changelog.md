@@ -532,6 +532,29 @@ Changelog:
   the bytecode cache, watchdog, tiled renderer IPC, macOS `.dmg` and
   Debian/Ubuntu `.deb` downloads, the full optional-dependency list and
   the BSD/musl CI badges.
+* Security: `new FontFace(family, arrayBuffer)` copies the font bytes
+  before it runs any page script. A setter on `Object.prototype.status`
+  could transfer the buffer while the constructor was still reading it,
+  and the font loader then read freed memory.
+* Security: `navigator.clipboard.writeText()` and
+  `document.execCommand('copy'/'cut')` need a recent click, key press or
+  touch, as in Firefox and Safari. A page or an ad frame could replace
+  the clipboard on a timer, e.g. swap a copied command or wallet
+  address.
+* Security: the in-tree MP4 demuxer (builds without FFmpeg: macOS
+  without libav, Android, iOS) no longer lets a sample whose offset plus
+  size wraps past 2^64 pass its bounds check, and no longer reads 8
+  bytes past a truncated version-1 `mvhd` box.
+* Security: the browser window downloads only `http:`, `https:`,
+  `ftp:`, `data:` and `blob:` URLs (and `file:` from a `file:` page) on a
+  renderer's request, so a compromised renderer can no longer have it
+  save `about:` or `view-source:` pages.
+* Debian packaging: build dependencies follow the current build
+  (version floors, GStreamer, JPEG XL, WOFF2, PDF), the GStreamer
+  H.264/AAC plugins are recommended instead of mpv, the build date comes
+  from the changelog for reproducible builds, the unversioned embedding
+  library is no longer shipped, and `debian/copyright` lists every
+  bundled license.
 
 1.0.32:
 ======
