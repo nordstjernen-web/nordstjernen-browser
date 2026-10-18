@@ -107,6 +107,8 @@ typedef struct {
     ns_rproc_http_tiles_req tiles;
     char   *have;
     char   *hold;
+    NsProcViewTextFn remote_cb;
+    gpointer remote_ud;
 } Req;
 
 typedef enum {
@@ -163,6 +165,8 @@ typedef struct {
     GPtrArray       *print_pages;
     ns_print_setup   print_setup;
     double           print_scale;
+    NsProcViewTextFn remote_cb;
+    gpointer         remote_ud;
 } Res;
 
 struct NsProcView {
@@ -1265,6 +1269,8 @@ worker_main(gpointer data)
             res->seq = req->seq;
             res->dump_tab = req->dump_tab;
             res->inspect = req->inspect;
+            res->remote_cb = req->remote_cb;
+            res->remote_ud = req->remote_ud;
             res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
             post(res);
         } else if (req->type == REQ_DUMP) {
@@ -2599,6 +2605,13 @@ on_result(gpointer data)
 {
     Res *res = data;
     NsProcView *v = res->view;
+
+    if (res->type == RES_EVAL && res->remote_cb) {
+        res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
+        if (!v->closed)
+            request_render(v);
+        goto done;
+    }
 
     if (v->closed)
         goto done;
@@ -4551,4 +4564,186 @@ gboolean
 ns_proc_view_is_private(NsProcView *v)
 {
     return v && v->private_mode;
+}
+
+void
+ns_proc_view_remote_eval(NsProcView *v, const char *js, NsProcViewTextFn cb,
+                         gpointer user_data)
+{
+    if (!v || v->closed) {
+        cb(NULL, user_data);
+        return;
+    }
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_EVAL;
+    req->query = g_strdup(js ? js : "");
+    req->remote_cb = cb;
+    req->remote_ud = user_data;
+    push_req(v, req);
+}
+
+static void
+remote_to_page(NsProcView *v, double x, double y, gboolean page_coords,
+               int *px, int *py)
+{
+    *px = page_coords ? (int)x : v->scroll_x + (int)x;
+    *py = page_coords ? (int)y : v->scroll_y + (int)y;
+}
+
+gboolean
+ns_proc_view_remote_click(NsProcView *v, double x, double y,
+                          gboolean page_coords, int count, int mods)
+{
+    if (!v || v->closed || !v->opened)
+        return FALSE;
+    int px, py;
+    remote_to_page(v, x, y, page_coords, &px, &py);
+    double s = cur_scale(v);
+    v->pointer_x = (px - v->scroll_x) * s;
+    v->pointer_y = (py - v->scroll_y) * s;
+    gtk_widget_grab_focus(v->area);
+    if (count < 1)
+        count = 1;
+    for (int n = 1; n <= count && n <= 3; n++) {
+        if (!(mods & 1))
+            v->has_selection = FALSE;
+        start_click(v, px, py, mods);
+        v->multi_click = n >= 2;
+        if (n == 2 || n == 3) {
+            start_select(v, n == 2 ? 5 : 6, px, py);
+            v->has_selection = TRUE;
+        }
+        start_release(v, px, py);
+    }
+    return TRUE;
+}
+
+gboolean
+ns_proc_view_remote_hover(NsProcView *v, double x, double y,
+                          gboolean page_coords)
+{
+    if (!v || v->closed || !v->opened)
+        return FALSE;
+    int px, py;
+    remote_to_page(v, x, y, page_coords, &px, &py);
+    double s = cur_scale(v);
+    v->pointer_x = (px - v->scroll_x) * s;
+    v->pointer_y = (py - v->scroll_y) * s;
+    request_hover(v, px, py);
+    return TRUE;
+}
+
+gboolean
+ns_proc_view_remote_key(NsProcView *v, guint keyval, GdkModifierType state)
+{
+    if (!v || v->closed || !v->opened)
+        return FALSE;
+    gtk_widget_grab_focus(v->area);
+    gboolean handled = on_key(NULL, keyval, 0, state, v);
+    gunichar uc = gdk_keyval_to_unicode(keyval);
+    if (!handled && uc >= 0x20 && uc != 0x7f &&
+        !(state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_META_MASK))) {
+        char buf[8];
+        buf[g_unichar_to_utf8(uc, buf)] = '\0';
+        start_key_text(v, 2, buf);
+    }
+    on_key_released(NULL, keyval, 0, state, v);
+    return TRUE;
+}
+
+gboolean
+ns_proc_view_remote_text(NsProcView *v, const char *text)
+{
+    if (!v || v->closed || !v->opened || !text)
+        return FALSE;
+    gtk_widget_grab_focus(v->area);
+    char **lines = g_strsplit(text, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        if (i > 0)
+            ns_proc_view_remote_key(v, GDK_KEY_Return, 0);
+        char *line = lines[i];
+        gsize len = strlen(line);
+        if (len > 0 && line[len - 1] == '\r')
+            line[len - 1] = '\0';
+        if (*line)
+            start_key_text(v, 2, line);
+    }
+    g_strfreev(lines);
+    return TRUE;
+}
+
+gboolean
+ns_proc_view_remote_scroll(NsProcView *v, double x, double y, double dx,
+                           double dy)
+{
+    if (!v || v->closed || !v->opened)
+        return FALSE;
+    double s = cur_scale(v);
+    v->pointer_x = x * s;
+    v->pointer_y = y * s;
+    v->fling_vx = v->fling_vy = 0;
+    v->wheel_viewport = FALSE;
+    if (!pv_queue_wheel_event(v, dx, dy, 0))
+        queue_wheel_scroll(v, dx, dy);
+    return TRUE;
+}
+
+gboolean
+ns_proc_view_remote_rendering(NsProcView *v)
+{
+    return v && (v->render_inflight || v->render_pending ||
+                 v->wheel_tick_id != 0);
+}
+
+void
+ns_proc_view_remote_refresh(NsProcView *v)
+{
+    if (v && !v->closed && v->opened)
+        request_render(v);
+}
+
+void
+ns_proc_view_remote_geometry(NsProcView *v, int *width, int *height,
+                             int *scroll_x, int *scroll_y, double *scale)
+{
+    double s = cur_scale(v);
+    *width = (int)(viewport_w(v) / s + 0.5);
+    *height = (int)(viewport_h(v) / s + 0.5);
+    *scroll_x = v->scroll_x;
+    *scroll_y = v->scroll_y;
+    *scale = s;
+}
+
+GBytes *
+ns_proc_view_remote_screenshot(NsProcView *v, int *out_w, int *out_h)
+{
+    if (!v || v->closed || !v->area || !gtk_widget_get_mapped(v->area))
+        return NULL;
+    int w = gtk_widget_get_width(v->area);
+    int h = gtk_widget_get_height(v->area);
+    GtkNative *native = gtk_widget_get_native(v->area);
+    GskRenderer *renderer = native ? gtk_native_get_renderer(native) : NULL;
+    if (w <= 1 || h <= 1 || !renderer)
+        return NULL;
+    double s = cur_scale(v);
+    int cw = MAX(1, (int)(w / s + 0.5));
+    int ch = MAX(1, (int)(h / s + 0.5));
+    GdkPaintable *paintable = gtk_widget_paintable_new(v->area);
+    GtkSnapshot *snap = gtk_snapshot_new();
+    gtk_snapshot_scale(snap, (float)cw / (float)w, (float)ch / (float)h);
+    gdk_paintable_snapshot(paintable, GDK_SNAPSHOT(snap), w, h);
+    GskRenderNode *node = gtk_snapshot_free_to_node(snap);
+    g_object_unref(paintable);
+    if (!node)
+        return NULL;
+    graphene_rect_t bounds = GRAPHENE_RECT_INIT(0, 0, (float)cw, (float)ch);
+    GdkTexture *tex = gsk_renderer_render_texture(renderer, node, &bounds);
+    gsk_render_node_unref(node);
+    if (!tex)
+        return NULL;
+    GBytes *png = gdk_texture_save_to_png_bytes(tex);
+    *out_w = gdk_texture_get_width(tex);
+    *out_h = gdk_texture_get_height(tex);
+    g_object_unref(tex);
+    return png;
 }

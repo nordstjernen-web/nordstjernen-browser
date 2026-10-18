@@ -35,6 +35,14 @@ streaming_h = custom_target(
             'ns_js_streaming_src'],
 )
 
+remote_page_h = custom_target(
+  'remote_page.h',
+  input: ['../scripts/embed-text.py', '../data/js/remote-page.js'],
+  output: 'remote_page.h',
+  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
+            'ns_remote_page_src'],
+)
+
 wpt_hook_h = custom_target(
   'wpt_hook.h',
   input: ['../scripts/embed-text.py', '../data/js/wpt-hook.js'],

@@ -81,6 +81,27 @@ void   ns_proc_view_find_open(NsProcView *view);
 gboolean ns_proc_view_find_close(NsProcView *view);
 void   ns_proc_view_set_color_scheme(NsProcView *view, gboolean dark);
 
+typedef void (*NsProcViewTextFn)(const char *text, gpointer user_data);
+
+void     ns_proc_view_remote_eval(NsProcView *view, const char *js,
+                                  NsProcViewTextFn cb, gpointer user_data);
+gboolean ns_proc_view_remote_click(NsProcView *view, double x, double y,
+                                   gboolean page_coords, int count, int mods);
+gboolean ns_proc_view_remote_hover(NsProcView *view, double x, double y,
+                                   gboolean page_coords);
+gboolean ns_proc_view_remote_key(NsProcView *view, guint keyval,
+                                 GdkModifierType state);
+gboolean ns_proc_view_remote_text(NsProcView *view, const char *text);
+gboolean ns_proc_view_remote_scroll(NsProcView *view, double x, double y,
+                                    double dx, double dy);
+gboolean ns_proc_view_remote_rendering(NsProcView *view);
+void     ns_proc_view_remote_refresh(NsProcView *view);
+void     ns_proc_view_remote_geometry(NsProcView *view, int *width,
+                                      int *height, int *scroll_x,
+                                      int *scroll_y, double *scale);
+GBytes  *ns_proc_view_remote_screenshot(NsProcView *view, int *out_w,
+                                        int *out_h);
+
 G_END_DECLS
 
 #endif

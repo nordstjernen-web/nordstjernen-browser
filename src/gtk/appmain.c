@@ -37,10 +37,12 @@
 #include "spellcheck.h"
 #include "history.h"
 #include "i18n.h"
+#include "mcp.h"
 #include "net.h"
 #include "proc_limits.h"
 #include "procview.h"
 #include "procwindow.h"
+#include "remotectl.h"
 #include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
@@ -537,6 +539,13 @@ main(int argc, char **argv)
     if (ns_private_mode_wanted(argc, argv))
         g_setenv("NS_PRIVATE", "1", TRUE);
     ns_config_init();
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--mcp") == 0) {
+            int rc = ns_mcp_run(g_self_exe);
+            ns_config_shutdown();
+            return rc;
+        }
+    }
     ns_thread_dump_install_signal("nordstjernen");
 
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
@@ -624,6 +633,8 @@ main(int argc, char **argv)
             gsk_renderer_override = argv[i] + 15;
         } else if (g_strcmp0(argv[i], "--private") == 0) {
             private_window = TRUE;
+        } else if (g_strcmp0(argv[i], "--remote-control") == 0) {
+            ns_remote_control_request();
         } else if (g_str_has_prefix(argv[i], "--window-size=")) {
             char *end = NULL;
             gint64 w = g_ascii_strtoll(argv[i] + 14, &end, 10);
