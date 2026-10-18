@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* Web fonts: a face's optical size no longer takes part in choosing
+  between the faces of an `@font-face` family, since CSS font matching
+  never considers it. Google Sans's upright faces are a variable font
+  whose optical-size axis spans 17-18pt, so fontconfig preferred the
+  static italic face for any smaller text, and Gmail and other Google
+  pages were drawn entirely in italics. An italic face that arrives
+  before the family's upright faces also waits for them, so normal text
+  uses the fallback font meanwhile, as in Chrome, instead of the italic.
 * DOM: `table.rows`, a table section's `rows`, `table.tBodies` and
   `tr.cells` are live `HTMLCollection`s with `item()` and `namedItem()`,
   as in Chrome, instead of plain arrays copied when read, and

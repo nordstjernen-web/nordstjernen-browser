@@ -38,6 +38,7 @@ typedef struct ns_font_entry {
     gboolean loaded;
     gboolean inflight;
     GCancellable *cancel;
+    char *deferred_path;
 } ns_font_entry;
 
 typedef struct ns_font_pending {
@@ -153,6 +154,7 @@ ns_font_shutdown(void)
         }
         g_free(e->family);
         g_free(e->url);
+        g_free(e->deferred_path);
         g_free(e);
     }
     g_hash_table_destroy(g_entries);
@@ -527,6 +529,7 @@ ns_font_describe_face(FcPattern *pat, const ns_font_entry *face)
         FcPatternAddInteger(pat, FC_SLANT,
                             ns_font_fc_slant(face->descriptors.slant));
     }
+    FcPatternDel(pat, FC_SIZE);
     ns_font_set_order(pat, NS_FONT_FACE_VERSION_BASE + face->declared);
 }
 
@@ -636,6 +639,60 @@ ns_font_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
 }
 
 static gboolean
+ns_font_slant_is_upright(ns_font_slant slant)
+{
+    return slant == NS_FONT_SLANT_AUTO || slant == NS_FONT_SLANT_ROMAN;
+}
+
+static gboolean
+ns_font_upright_face_loading(const ns_font_entry *face)
+{
+    if (ns_font_slant_is_upright(face->descriptors.slant) || !g_entries)
+        return FALSE;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, g_entries);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        const ns_font_entry *other = v;
+        if (other->inflight && !other->loaded &&
+            ns_font_slant_is_upright(other->descriptors.slant) &&
+            g_strcmp0(other->family, face->family) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+ns_font_activate(ns_font_entry *e, const char *path)
+{
+#ifdef NS_HAVE_FONTCONFIG
+    ns_font_install_file(path, e);
+#else
+    (void)path;
+#endif
+    e->loaded = TRUE;
+    g_font_generation++;
+    if (g_loaded_cb) g_loaded_cb(e->family, g_loaded_ud);
+}
+
+static void
+ns_font_activate_deferred(void)
+{
+    if (!g_entries) return;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, g_entries);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        ns_font_entry *e = v;
+        if (!e->deferred_path || ns_font_upright_face_loading(e)) continue;
+        char *path = e->deferred_path;
+        e->deferred_path = NULL;
+        ns_font_activate(e, path);
+        g_free(path);
+    }
+}
+
+static gboolean
 ns_font_store_entry(ns_font_entry *e, const guint8 *data, gsize len)
 {
     gsize sfnt_len = 0;
@@ -650,12 +707,12 @@ ns_font_store_entry(ns_font_entry *e, const guint8 *data, gsize len)
     gboolean stored = path &&
         g_file_set_contents(path, (const char *)data, (gssize)len, &werr);
     if (stored) {
-#ifdef NS_HAVE_FONTCONFIG
-        ns_font_install_file(path, e);
-#endif
-        e->loaded = TRUE;
-        g_font_generation++;
-        if (g_loaded_cb) g_loaded_cb(e->family, g_loaded_ud);
+        g_free(e->deferred_path);
+        e->deferred_path = NULL;
+        if (ns_font_upright_face_loading(e))
+            e->deferred_path = g_strdup(path);
+        else
+            ns_font_activate(e, path);
     }
     g_clear_error(&werr);
     g_free(path);
@@ -726,6 +783,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
         }
     }
     if (g_pending_by_url) g_hash_table_remove(g_pending_by_url, ctx->url);
+    ns_font_activate_deferred();
     ns_response_free(resp);
     g_clear_error(&err);
     g_free(ctx->url);
@@ -747,7 +805,7 @@ ns_font_request(const char *family, const char *src_url, const char *base_url,
     char *key = ns_font_entry_key(family, abs, descriptors);
     ns_font_entry *existing = g_hash_table_lookup(g_entries, key);
     if (existing) {
-        if (existing->loaded || existing->inflight) {
+        if (existing->loaded || existing->inflight || existing->deferred_path) {
             g_free(key);
             g_free(abs);
             return;
