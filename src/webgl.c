@@ -2779,7 +2779,7 @@ wgl_elem_shadow_load(ns_webgl *g, GLuint name)
 {
     wgl_elem_shadow_clear(g, name);
     size_t size = wgl_buffer_size(g, name);
-    if (g->version < 2 || size == 0) return NULL;
+    if (size == 0 || g->version < 2) return NULL;
     const uint8_t *p = glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, 0,
                                         (GLsizeiptr)size, GL_MAP_READ_BIT);
     if (!p) return NULL;

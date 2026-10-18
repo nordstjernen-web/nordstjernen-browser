@@ -3,6 +3,10 @@ Changelog:
 
 1.0.33:
 ======
+* Build: the GCC build of `src/webgl.c` no longer warns about a null
+  pointer dereference in `wgl_elem_shadow_load`, which read the
+  context's WebGL version before checking that the element buffer had
+  a size.
 * CSS: a `calc()` with `anchor()` and three or more terms, where a
   later term cannot be read as part of the anchor expression, no longer
   aborts the browser. The anchor value parser freed the first term
