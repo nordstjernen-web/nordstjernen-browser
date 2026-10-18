@@ -2255,14 +2255,14 @@ done:
     size = tkz->pos - start;
     tail_size = tkz->pos - &tkz->start[tkz->entity_end] - 1;
 
-    if (tail_size != 0) {
-        if ((size + tail_size) + start > tkz->end) {
-            if (lxb_html_tokenizer_temp_realloc(tkz, size) != LXB_STATUS_OK) {
-                return end;
-            }
-            start = &tkz->start[tkz->entity_start];
+    if ((tkz->entity_match->value_len + tail_size) + start > tkz->end) {
+        if (lxb_html_tokenizer_temp_realloc(tkz, size) != LXB_STATUS_OK) {
+            return end;
         }
+        start = &tkz->start[tkz->entity_start];
+    }
 
+    if (tail_size != 0) {
         memmove(start + tkz->entity_match->value_len,
                 tkz->pos - tail_size, tail_size);
     }
