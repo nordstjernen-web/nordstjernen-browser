@@ -43,6 +43,14 @@ Changelog:
   definite height lays out a stretched item once instead of twice, so an
   app shell of nested `height: 100%` rows and columns no longer takes
   seconds to lay out.
+* Layout: percentage padding and margins on an item of a row flex
+  container resolve against the container's width, as for any other
+  box. The item's own width was used instead, so `padding-left: 5%` on
+  an item in a 1000px flex row came out 7.58px instead of 50px, and
+  locale switchers and cookie banners sat too tight. A table with a set
+  width that is a flex item now takes the width the flex layout gives
+  it: `width: 10%; flex: 1` in a 600px row grows to 500px instead of
+  staying 50px.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
