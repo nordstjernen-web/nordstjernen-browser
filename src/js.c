@@ -11113,10 +11113,11 @@ ns_window_fontface_ctor(JSContext *ctx, JSValueConst this_val,
     JSValue holder = JS_UNDEFINED;
     if (binary_source &&
         ns_js_bytes_view(ctx, argv[1], &bytes, &len, &holder)) {
+        g_autofree guint8 *font_bytes = g_memdup2(bytes, len);
+        JS_FreeValue(ctx, holder);
         JS_SetPropertyStr(ctx, f, "status", JS_NewString(ctx, "loading"));
         ns_fontface_settle(ctx, f,
-                           ns_font_install_bytes(fam, bytes, len, desc));
-        JS_FreeValue(ctx, holder);
+                           ns_font_install_bytes(fam, font_bytes, len, desc));
     } else if (argc >= 2) {
         const char *src = JS_ToCString(ctx, argv[1]);
         ns_fontface_define_hidden(ctx, f, "__nsSource",
