@@ -3,6 +3,12 @@ Changelog:
 
 1.0.33:
 ======
+* CSS: an element with `visibility: visible` inside a `visibility:
+  hidden` ancestor is painted, as in Chrome. The painter dropped a hidden
+  box's whole subtree; it now skips only the hidden box's own
+  background, border and text. Gmail keeps its compose layer hidden and
+  makes the open message window visible, so a new message showed no
+  window, header, To or Subject field.
 * CSS tables: a `table-layout: fixed` table with a percentage width has
   an unbounded max-content width, as in Chrome, so the float,
   inline-block, flex item, grid item or table cell holding it fills the
