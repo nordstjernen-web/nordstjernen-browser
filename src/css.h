@@ -783,6 +783,7 @@ gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 gboolean ns_css_filter_list_valid(const char *s);
 char    *ns_css_font_family_for_pango(const char *css_family);
 char    *ns_css_font_family_first_for_pango(const char *css_family);
+char    *ns_css_font_family_first_name(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
 void     ns_css_set_font_alias_cb(char *(*cb)(const char *family));
 void     ns_css_set_font_family_name_cb(char *(*cb)(const char *family));
