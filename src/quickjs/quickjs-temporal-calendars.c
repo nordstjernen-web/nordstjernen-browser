@@ -405,12 +405,15 @@ static void cal_year_containing(TPCalendar cal, int64_t days, TPCalYear *y)
     int64_t year = cal_estimate_year(cal, days);
     TPCalYear next;
 
+    if (year > TP_CAL_YEAR_LIMIT)
+        year = TP_CAL_YEAR_LIMIT;
+    if (year < -TP_CAL_YEAR_LIMIT)
+        year = -TP_CAL_YEAR_LIMIT;
     cal_year(cal, year, y);
-    while (y->start > days)
-        cal_year(cal, y->year - 1, y);
+    while (y->start > days && cal_year(cal, y->year - 1, y))
+        ;
     for (;;) {
-        cal_year(cal, y->year + 1, &next);
-        if (next.start > days)
+        if (!cal_year(cal, y->year + 1, &next) || next.start > days)
             break;
         *y = next;
     }
