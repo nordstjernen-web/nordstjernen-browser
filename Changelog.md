@@ -3,6 +3,12 @@ Changelog:
 
 1.0.34:
 ======
+* Linux: WebGL and WebGPU render on the GPU again inside the sandboxed
+  renderer. Its Landlock ruleset let it read `/dev/dri` but not open the
+  render nodes read-write, so Mesa printed "Permission denied" for every
+  `/dev/dri` node and fell back to software rendering. The renderer now
+  opens `/dev/dri` and `/dev/nvidia*` read-write while WebGL or WebGPU is
+  enabled; with both turned off in Settings it still gets no access.
 * Linux: the browser starts again on NVIDIA's proprietary driver under
   X11. The UI shell's Landlock sandbox let it read `/dev/dri` but not open
   the render nodes read-write, and gave no access to `/dev/nvidia*` at all,
