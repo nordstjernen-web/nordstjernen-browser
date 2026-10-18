@@ -1309,26 +1309,28 @@ static gboolean
 is_table_row(const ns_node *n, GHashTable *styles)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    if (n->name && strcmp(n->name, "tr") == 0) return TRUE;
-    return style_display_is_table_row(g_hash_table_lookup(styles, n));
+    const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
+    if (s) return style_display_is_table_row(s);
+    return n->name && strcmp(n->name, "tr") == 0;
 }
 
 static gboolean
 is_table_box(const ns_node *n, GHashTable *styles)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    if (n->name && strcmp(n->name, "table") == 0) return TRUE;
-    return style_display_is_table(g_hash_table_lookup(styles, n));
+    const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
+    if (s) return style_display_is_table(s);
+    return n->name && strcmp(n->name, "table") == 0;
 }
 
 static gboolean
 is_cell_element(const ns_node *n, GHashTable *styles)
 {
-    if (ns_node_is_element_named(n, "td") ||
-        ns_node_is_element_named(n, "th"))
-        return TRUE;
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    return style_display_is_table_cell(g_hash_table_lookup(styles, n));
+    const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
+    if (s) return style_display_is_table_cell(s);
+    return ns_node_is_element_named(n, "td") ||
+           ns_node_is_element_named(n, "th");
 }
 
 static gboolean
@@ -1370,6 +1372,17 @@ table_internal_run_end(const ns_node *c, GHashTable *styles)
 
 static void queue_absolute_node(const ns_node *n, const ns_style *s);
 
+static gboolean
+row_group_child_needs_anonymous_row(const ns_node *c, GHashTable *styles)
+{
+    if (!c || c->kind != NS_NODE_ELEMENT || !c->name) return FALSE;
+    if (tag_is_non_rendering(c->name)) return FALSE;
+    const ns_style *cs = g_hash_table_lookup(styles, c);
+    if (!cs || style_is_none(cs) || style_is_contents(cs)) return FALSE;
+    if (style_is_absolute_or_fixed(cs)) return FALSE;
+    return !node_is_table_internal(c, styles);
+}
+
 static void
 collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int depth)
 {
@@ -1389,6 +1402,15 @@ collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int d
                           style_display_is_table_caption(g_hash_table_lookup(styles, n)) ||
                           style_display_is_table(g_hash_table_lookup(styles, n))))
             return;
+        if (node_is_row_group(n, styles)) {
+            for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+                if (row_group_child_needs_anonymous_row(c, styles))
+                    g_ptr_array_add(out, (gpointer)c);
+                else
+                    collect_rows_recurse(c, styles, out, depth + 1);
+            }
+            return;
+        }
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_rows_recurse(c, styles, out, depth + 1);
@@ -2052,6 +2074,15 @@ static ns_box *
 build_table_row(const ns_node *tr, GHashTable *styles)
 {
     ns_box *row = box_new(NS_BOX_TABLE_ROW);
+    if (!is_table_row(tr, styles)) {
+        ns_box *child = build_block(tr, styles);
+        if (child) {
+            ns_box *cell = box_new(NS_BOX_TABLE_CELL);
+            box_append_child(cell, child);
+            box_append_child(row, cell);
+        }
+        return row;
+    }
     row->dom = tr;
     row->style = g_hash_table_lookup(styles, tr);
     for (const ns_node *c = tr->first_child; c; c = c->next_sibling) {
@@ -2139,7 +2170,8 @@ append_anonymous_table_rows(ns_box *table, const ns_node *c,
     }
     if (!node_is_row_group(c, styles)) return;
     for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-        if (is_table_row(r, styles))
+        if (is_table_row(r, styles) ||
+            row_group_child_needs_anonymous_row(r, styles))
             box_append_child(table, build_table_row(r, styles));
 }
 
