@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* WebGL performance: a canvas that redraws every frame (a map being
+  panned, a game, an animation) is read back asynchronously through
+  pixel-buffer objects on desktop OpenGL, so painting no longer waits for
+  the GPU to finish each frame; the page shows the previous completed
+  frame, as compositors in other browsers do, and the last frame is
+  always shown once drawing stops. Painting a full-window WebGL canvas
+  that redraws each frame went from about 11.6ms to 3.2ms.
 * WebGL: on desktop OpenGL (Windows, macOS) a frame is flipped and
   converted to the page painter's pixel format on the GPU and read
   straight into the canvas surface, instead of read as RGBA and
