@@ -11,6 +11,10 @@ Changelog:
   width that is a flex item now takes the width the flex layout gives
   it: `width: 10%; flex: 1` in a 600px row grows to 500px instead of
   staying 50px.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
