@@ -3,6 +3,11 @@ Changelog:
 
 1.0.33:
 ======
+* CSS tables: a table row's children that are not cells, such as a
+  `<td>` restyled `display: flex` or loose text, are wrapped in an
+  anonymous cell instead of being dropped. Gmail's message header puts
+  the sender in a `display: flex` `<td>`, so an opened message showed no
+  sender name, address or "to me" line.
 * Web fonts: a face's optical size no longer takes part in choosing
   between the faces of an `@font-face` family, since CSS font matching
   never considers it. Google Sans's upright faces are a variable font

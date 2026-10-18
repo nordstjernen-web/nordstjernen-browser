@@ -1999,12 +1999,13 @@ build_table_caption(const ns_node *n, GHashTable *styles)
 }
 
 static ns_box *
-build_anonymous_table_cell(const ns_node *n, GHashTable *styles)
+build_anonymous_table_cell_range(const ns_node *first, const ns_node *end,
+                                 GHashTable *styles)
 {
     ns_box *cell = box_new(NS_BOX_TABLE_CELL);
     gboolean any = FALSE;
-    const ns_node *c = n ? n->first_child : NULL;
-    while (c) {
+    const ns_node *c = first;
+    while (c && c != end) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             tag_is_non_rendering(c->name)) {
             c = c->next_sibling;
@@ -2034,7 +2035,7 @@ build_anonymous_table_cell(const ns_node *n, GHashTable *styles)
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
             c = c->next_sibling;
-            while (c && !is_table_caption(c, styles)) {
+            while (c && c != end && !is_table_caption(c, styles)) {
                 if (c->kind == NS_NODE_ELEMENT && c->name &&
                     tag_is_non_rendering(c->name)) {
                     c = c->next_sibling;
@@ -2071,6 +2072,27 @@ build_anonymous_table_cell(const ns_node *n, GHashTable *styles)
 }
 
 static ns_box *
+build_anonymous_table_cell(const ns_node *n, GHashTable *styles)
+{
+    return build_anonymous_table_cell_range(n ? n->first_child : NULL, NULL,
+                                            styles);
+}
+
+static gboolean
+row_children_need_anonymous_cell(const ns_node *first, const ns_node *end,
+                                 GHashTable *styles)
+{
+    for (const ns_node *c = first; c && c != end; c = c->next_sibling) {
+        if (c->kind == NS_NODE_TEXT) {
+            if (!text_is_ws_only(c->text)) return TRUE;
+            continue;
+        }
+        if (row_group_child_needs_anonymous_row(c, styles)) return TRUE;
+    }
+    return FALSE;
+}
+
+static ns_box *
 build_table_row(const ns_node *tr, GHashTable *styles)
 {
     ns_box *row = box_new(NS_BOX_TABLE_ROW);
@@ -2085,10 +2107,20 @@ build_table_row(const ns_node *tr, GHashTable *styles)
     }
     row->dom = tr;
     row->style = g_hash_table_lookup(styles, tr);
-    for (const ns_node *c = tr->first_child; c; c = c->next_sibling) {
-        if (!is_cell_element(c, styles)) continue;
-        if (style_is_none(g_hash_table_lookup(styles, c))) continue;
-        box_append_child(row, build_cell(c, styles));
+    const ns_node *c = tr->first_child;
+    while (c) {
+        if (is_cell_element(c, styles)) {
+            if (!style_is_none(g_hash_table_lookup(styles, c)))
+                box_append_child(row, build_cell(c, styles));
+            c = c->next_sibling;
+            continue;
+        }
+        const ns_node *start = c;
+        while (c && !is_cell_element(c, styles)) c = c->next_sibling;
+        if (row_children_need_anonymous_cell(start, c, styles)) {
+            ns_box *cell = build_anonymous_table_cell_range(start, c, styles);
+            if (cell) box_append_child(row, cell);
+        }
     }
     return row;
 }
