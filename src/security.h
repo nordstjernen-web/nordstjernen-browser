@@ -18,6 +18,8 @@ void ns_security_add_writable_dir(const char *dir);
 
 void ns_security_add_exec_dir(const char *dir);
 
+void ns_security_allow_gpu_devices(void);
+
 void ns_security_seccomp_init(void);
 
 void ns_security_seccomp_deny_unix_sockets(void);

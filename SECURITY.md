@@ -91,8 +91,10 @@ is parsed. They describe the **per-tab renderer process**
 in `src/renderer_http.c`), which parses all untrusted
 content and therefore holds the strongest confinement. The thin UI shell
 parses no untrusted bytes but must `fork`/`execve` the renderer processes,
-so it runs under a **widened Landlock** (executable renderer directory, with
-`/dev/shm` writable to cover the non-`memfd` shared-memory fallback) and
+so it runs under a **widened Landlock** (executable renderer directory,
+`/dev/shm` writable to cover the non-`memfd` shared-memory fallback, and
+read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*` that GTK's
+OpenGL / Vulkan drivers open to draw the window) and
 **no seccomp** — the real syscall confinement lives in the renderers. The
 renderer framebuffer itself is an anonymous `memfd` passed over the control
 socket, so it normally needs no `/dev/shm` name at all.
