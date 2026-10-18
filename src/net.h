@@ -17,6 +17,7 @@ G_BEGIN_DECLS
 #define NS_MAX_REDIRECTS 10
 #define NS_DEFAULT_TIMEOUT_S 30
 #define NS_MAX_TIMEOUT_S 60
+#define NS_STREAM_TIMEOUT_S 600
 #define NS_CHROME_MAJOR   "150"
 #define NS_CHROME_VERSION NS_CHROME_MAJOR ".0.0.0"
 
@@ -147,6 +148,23 @@ void ns_net_request_async(const char         *url,
                           GCancellable       *cancellable,
                           GAsyncReadyCallback callback,
                           gpointer            user_data);
+
+typedef void (*ns_net_chunk_fn)(gpointer user_data, long status,
+                                const char *raw_headers,
+                                const guint8 *data, gsize len);
+
+void ns_net_request_async_streaming(const char         *url,
+                                    const char         *top_url,
+                                    const char         *method,
+                                    const void         *body,
+                                    gsize               body_len,
+                                    const char         *content_type,
+                                    const char *const  *extra_headers,
+                                    GCancellable       *cancellable,
+                                    ns_net_chunk_fn     on_chunk,
+                                    gpointer            chunk_data,
+                                    GAsyncReadyCallback callback,
+                                    gpointer            user_data);
 
 ns_response *ns_net_fetch_finish(GAsyncResult *result, GError **error);
 

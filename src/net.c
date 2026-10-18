@@ -2770,6 +2770,56 @@ ns_net_response_budget(void)
     return half < NS_NET_RESPONSE_MIN_BUDGET ? NS_NET_RESPONSE_MIN_BUDGET : half;
 }
 
+struct ns_net_stream {
+    ns_net_chunk_fn fn;
+    gpointer        user_data;
+    GMainContext   *main_ctx;
+};
+
+typedef struct {
+    const struct ns_net_stream *stream;
+    long    status;
+    char   *raw_headers;
+    GBytes *data;
+} ns_net_stream_chunk;
+
+static __thread const struct ns_net_stream *g_hop_stream;
+
+static gboolean
+ns_net_stream_chunk_dispatch(gpointer user_data)
+{
+    ns_net_stream_chunk *c = user_data;
+    gsize len = 0;
+    const guint8 *data = g_bytes_get_data(c->data, &len);
+    c->stream->fn(c->stream->user_data, c->status, c->raw_headers, data, len);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_net_stream_chunk_free(gpointer user_data)
+{
+    ns_net_stream_chunk *c = user_data;
+    g_free(c->raw_headers);
+    g_bytes_unref(c->data);
+    g_free(c);
+}
+
+static void
+ns_net_stream_emit(const ns_write_ctx *ctx, const guint8 *data, gsize len)
+{
+    const struct ns_header_ctx *hc = ctx->stream_headers;
+    long status = hc ? hc->status : 0;
+    if (status < 200 || status >= 300) return;
+    ns_net_stream_chunk *c = g_new0(ns_net_stream_chunk, 1);
+    c->stream = ctx->stream;
+    c->status = status;
+    c->raw_headers = g_strdup(hc->raw ? hc->raw->str : "");
+    c->data = g_bytes_new(data, len);
+    g_main_context_invoke_full(ctx->stream->main_ctx, G_PRIORITY_DEFAULT,
+                               ns_net_stream_chunk_dispatch, c,
+                               ns_net_stream_chunk_free);
+}
+
 static size_t
 ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
 {
@@ -2796,6 +2846,7 @@ ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
     }
     g_byte_array_append(ctx->body, (const guint8 *)data, bytes);
     ctx->total += bytes;
+    if (ctx->stream) ns_net_stream_emit(ctx, (const guint8 *)data, bytes);
     return bytes;
 }
 
@@ -2891,6 +2942,8 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 
     if (bytes >= 5 && g_ascii_strncasecmp(buffer, "HTTP/", 5) == 0) {
         if (hc->raw) g_string_set_size(hc->raw, 0);
+        const char *sp = memchr(buffer, ' ', bytes);
+        hc->status = sp ? (long)g_ascii_strtoll(sp + 1, NULL, 10) : 0;
     } else if (bytes > 2) {
         gboolean set_cookie =
             (bytes >= 11 && g_ascii_strncasecmp(buffer, "Set-Cookie:", 11) == 0) ||
@@ -5938,6 +5991,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
     if (fetch_timeout < 1) fetch_timeout = 1;
     if (fetch_timeout > (long)NS_MAX_TIMEOUT_S) fetch_timeout = (long)NS_MAX_TIMEOUT_S;
+    if (g_hop_stream) fetch_timeout = (long)NS_STREAM_TIMEOUT_S;
 
     gboolean caller_set_accept = FALSE;
     if (extra_headers) {
@@ -6091,6 +6145,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_body_sink_init(&write_ctx, resp->body);
 
     ns_header_ctx header_ctx = {0};
+    write_ctx.stream = g_hop_stream;
+    write_ctx.stream_headers = &header_ctx;
     header_ctx.content_type_out = &resp->content_type;
     header_ctx.content_disposition_out = &resp->content_disposition;
     header_ctx.csp_out          = &resp->csp_header;
@@ -6471,6 +6527,7 @@ typedef struct ns_fetch_ctx {
     gsize body_len;
     GPtrArray *extra_headers;
     char *coalesce_key;
+    struct ns_net_stream *stream;
 } ns_fetch_ctx;
 
 static void
@@ -6484,6 +6541,10 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx->body);
     if (ctx->extra_headers) g_ptr_array_free(ctx->extra_headers, TRUE);
     g_free(ctx->coalesce_key);
+    if (ctx->stream) {
+        g_main_context_unref(ctx->stream->main_ctx);
+        g_free(ctx->stream);
+    }
     g_free(ctx);
 }
 
@@ -6828,10 +6889,12 @@ ns_fetch_thread(GTask        *task,
     (void)source_object;
     ns_fetch_ctx *ctx = task_data;
     GError *err = NULL;
+    g_hop_stream = ctx->stream;
     ns_response *resp = ns_fetch_sync(ctx->url, ctx->top_url, ctx->method,
                                       ctx->body, ctx->body_len, ctx->content_type,
                                       ctx->extra_headers,
                                       cancellable, &err);
+    g_hop_stream = NULL;
     if (ctx->coalesce_key)
         ns_fetch_coalesce_deliver(ctx->coalesce_key, resp, err);
     if (!resp) {
@@ -6967,11 +7030,30 @@ ns_net_request_async(const char         *url,
                      GAsyncReadyCallback callback,
                      gpointer            user_data)
 {
+    ns_net_request_async_streaming(url, top_url, method, body, body_len,
+                                   content_type, extra_headers, cancellable,
+                                   NULL, NULL, callback, user_data);
+}
+
+void
+ns_net_request_async_streaming(const char         *url,
+                               const char         *top_url,
+                               const char         *method,
+                               const void         *body,
+                               gsize               body_len,
+                               const char         *content_type,
+                               const char *const  *extra_headers,
+                               GCancellable       *cancellable,
+                               ns_net_chunk_fn     on_chunk,
+                               gpointer            chunk_data,
+                               GAsyncReadyCallback callback,
+                               gpointer            user_data)
+{
     g_return_if_fail(url != NULL);
 
     if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
 
-    char *key = (!cancellable && !body)
+    char *key = (!cancellable && !body && !on_chunk)
         ? ns_net_request_key(url, top_url, method, extra_headers) : NULL;
     if (key) {
         gboolean joined = FALSE;
@@ -7006,6 +7088,13 @@ ns_net_request_async(const char         *url,
         ctx->extra_headers = g_ptr_array_new_with_free_func(g_free);
         for (int i = 0; extra_headers[i]; i++)
             g_ptr_array_add(ctx->extra_headers, g_strdup(extra_headers[i]));
+    }
+
+    if (on_chunk) {
+        ctx->stream = g_new0(struct ns_net_stream, 1);
+        ctx->stream->fn = on_chunk;
+        ctx->stream->user_data = chunk_data;
+        ctx->stream->main_ctx = g_main_context_ref_thread_default();
     }
 
     GTask *task = g_task_new(NULL, cancellable, callback, user_data);

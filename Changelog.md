@@ -3,6 +3,15 @@ Changelog:
 
 1.0.33:
 ======
+* XMLHttpRequest: an asynchronous request now delivers its response as
+  it arrives, as in Chrome: `readyState` 3, a growing `responseText` and
+  `progress` events follow each chunk instead of all firing when the
+  response ends. Streaming requests are no longer cut off after 30
+  seconds, and `abort()` now cancels the network request. Gmail's chat
+  and calling channel (`signaler-pa.clients6.google.com`) streams on a
+  hanging GET; it saw no data, aborted after seven seconds and
+  reconnected forever, and the inbox showed "A system problem might not
+  let you make or get calls here".
 * Floats: a line of `white-space: nowrap` or `pre` text stays beside a
   float and overflows, as in Chrome, instead of dropping below the
   float when less than about 120px is left beside it. Gmail's inbox

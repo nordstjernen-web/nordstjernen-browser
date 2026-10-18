@@ -8,12 +8,17 @@
 
 G_BEGIN_DECLS
 
+struct ns_header_ctx;
+struct ns_net_stream;
+
 typedef struct ns_write_ctx {
     GByteArray *body;
     guint64     total;
     guint64     budget;
     guint64     next_recheck;
     gboolean    exceeded;
+    const struct ns_net_stream *stream;
+    const struct ns_header_ctx *stream_headers;
 } ns_write_ctx;
 
 typedef struct ns_header_ctx {
@@ -32,6 +37,7 @@ typedef struct ns_header_ctx {
     char    *expires;
     char    *location;
     GString *raw;
+    long     status;
     gboolean set_cookie_seen;
     CURL    *cookie_curl;
     const char *cookie_jar_path;
