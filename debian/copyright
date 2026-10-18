@@ -2,6 +2,8 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Nordstjernen
 Upstream-Contact: Andreas Røsdal <andreas.rosdal@gmail.com>
 Source: https://github.com/nordstjernen-web/nordstjernen-browser
+Files-Excluded:
+ android/gradle/wrapper/gradle-wrapper.jar
 Comment:
  The Nordstjernen source code is dual-licensed: each recipient may use it
  under either the GNU General Public License version 3 or later (GPL-3+) or
@@ -10,9 +12,13 @@ Comment:
  in Debian's main component. The NSL-1.0 alternative is documented below for
  completeness; it is not DFSG-free on its own.
  .
- The in-tree third-party engines (lexbor, QuickJS, WAMR) and vendored
- single-file libraries (Wuffs, pl_mpeg, miniaudio) carry their own free
- licenses, reproduced from THIRD-PARTY-LICENSES.md below.
+ The in-tree third-party engines (lexbor, QuickJS, WAMR), vendored
+ single-file libraries (Wuffs, pl_mpeg, minimp3), the wgpu-native headers and
+ the Unicode-derived data tables carry their own free licenses, reproduced
+ from THIRD-PARTY-LICENSES.md below.
+ .
+ The prebuilt Gradle wrapper of the Android port is excluded from the source
+ package; it is not used by the Debian build.
 
 Files: *
 Copyright: 2026 Andreas Røsdal
@@ -23,22 +29,45 @@ Copyright: 2018-2025 Alexander Borisov
 License: Apache-2.0
 
 Files: subprojects/wuffs/*
-Copyright: 2019 The Wuffs Authors
+Copyright: 2017 The Wuffs Authors
 License: Apache-2.0
 
 Files: src/quickjs/*
-Copyright: 2017-2024 Fabrice Bellard
+Copyright: 2017-2026 Fabrice Bellard
            2017-2024 Charlie Gordon
-           2023-2025 quickjs-ng contributors
+           2023-2026 Ben Noordhuis
+           2023-2026 Saúl Ibarra Corretgé
+           2023-2026 quickjs-ng contributors
 License: Expat
+
+Files: src/quickjs/quickjs-intl-cldr-data.h
+       src/quickjs/quickjs-intl-locale-data.h
+       src/quickjs/quickjs-temporal-caldata.h
+       src/quickjs/quickjs-temporal-winzones.h
+Copyright: 2016-2025 Unicode, Inc.
+License: Unicode-3.0
 
 Files: src/wamr/*
 Copyright: 2019 Intel Corporation
-License: Apache-2.0
+           The WebAssembly Micro Runtime contributors
+License: Apache-2.0 with LLVM exception
 
 Files: subprojects/plmpeg/*
 Copyright: 2019 Dominic Szablewski
 License: Expat
+
+Files: src/audio/minimp3.h
+       src/audio/minimp3_impl.c
+Copyright: none
+License: CC0-1.0
+
+Files: third_party/wgpu-native/include/webgpu/webgpu.h
+Copyright: 2019-2023 WebGPU-Native developers
+License: BSD-3-Clause
+
+Files: third_party/wgpu-native/include/webgpu/wgpu.h
+Copyright: The wgpu-native developers
+License: Expat or Apache-2.0
 
 License: NSL-1.0
  Nordstjernen Source License v1.0. The full text is shipped as
@@ -95,3 +124,88 @@ License: Expat
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
+
+License: Apache-2.0 with LLVM exception
+ On Debian systems the full text of the Apache License version 2.0 can be
+ found in /usr/share/common-licenses/Apache-2.0.
+ .
+ ---- LLVM Exceptions to the Apache 2.0 License ----
+ .
+ As an exception, if, as a result of your compiling your source code, portions
+ of this Software are embedded into an Object form of such source code, you
+ may redistribute such embedded portions in such Object form without complying
+ with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+ .
+ In addition, if you combine or link compiled forms of this Software with
+ software that is licensed under the GPLv2 ("Combined Software") and if a
+ court of competent jurisdiction determines that the patent provision (Section
+ 3), the indemnity provision (Section 9) or other Section of the License
+ conflicts with the conditions of the GPLv2, you may retroactively and
+ prospectively choose to deem waived or otherwise exclude such Section(s) of
+ the License, but only in their entirety and only with respect to the Combined
+ Software.
+
+License: CC0-1.0
+ To the extent possible under law, the author(s) have dedicated all copyright
+ and related and neighboring rights to this software to the public domain
+ worldwide. This software is distributed without any warranty.
+ .
+ On Debian systems the full text of the CC0 1.0 Universal license can be
+ found in /usr/share/common-licenses/CC0-1.0.
+
+License: BSD-3-Clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ .
+ 1. Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+ .
+ 2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+ .
+ 3. Neither the name of the copyright holder nor the names of its
+    contributors may be used to endorse or promote products derived from this
+    software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+
+License: Unicode-3.0
+ UNICODE LICENSE V3
+ .
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of data files and any associated documentation (the "Data Files") or
+ software and any associated documentation (the "Software") to deal in the
+ Data Files or Software without restriction, including without limitation the
+ rights to use, copy, modify, merge, publish, distribute, and/or sell copies
+ of the Data Files or Software, and to permit persons to whom the Data Files
+ or Software are furnished to do so, provided that either (a) this copyright
+ and permission notice appear with all copies of the Data Files or Software,
+ or (b) this copyright and permission notice appear in associated
+ Documentation.
+ .
+ THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+ KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+ THIRD PARTY RIGHTS.
+ .
+ IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE BE
+ LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR
+ ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+ IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA FILES OR SOFTWARE.
+ .
+ Except as contained in this notice, the name of a copyright holder shall not
+ be used in advertising or otherwise to promote the sale, use or other
+ dealings in these Data Files or Software without prior written authorization
+ of the copyright holder.

@@ -7,9 +7,10 @@ Build-Depends:
  meson (>= 1.0),
  ninja-build,
  pkg-config,
- libgtk-4-dev,
+ libglib2.0-dev,
+ libgtk-4-dev (>= 4.14),
  libepoxy-dev,
- libcurl4-openssl-dev,
+ libcurl4-openssl-dev (>= 8.5),
  libssl-dev,
  libuchardet-dev,
  libpsl-dev,
@@ -17,16 +18,23 @@ Build-Depends:
  libseccomp-dev [linux-any],
  libwebp-dev,
  libavif-dev,
- libavformat-dev,
- libavcodec-dev,
- libavutil-dev,
- libswscale-dev,
- libswresample-dev,
+ libjxl-dev,
+ libavformat-dev (>= 7:6.0),
+ libavcodec-dev (>= 7:6.0),
+ libavutil-dev (>= 7:6.0),
+ libswscale-dev (>= 7:6.0),
+ libswresample-dev (>= 7:6.0),
+ libgstreamer1.0-dev (>= 1.20),
+ libgstreamer-plugins-base1.0-dev (>= 1.20),
  libsdl2-dev,
  libenchant-2-dev,
  libpango1.0-dev,
  libfontconfig-dev,
-Standards-Version: 4.7.0
+ libfreetype-dev,
+ libbrotli-dev,
+ libpoppler-glib-dev,
+ zlib1g-dev,
+Standards-Version: 4.7.2
 Homepage: https://nordstjernen.org
 Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen-browser
 Vcs-Git: https://github.com/nordstjernen-web/nordstjernen-browser.git
@@ -38,8 +46,12 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
 Recommends:
- mpv | ffmpeg,
- hunspell-en-us,
+ ca-certificates,
+ gstreamer1.0-plugins-base,
+ gstreamer1.0-plugins-good,
+ gstreamer1.0-plugins-bad,
+ gstreamer1.0-libav,
+ hunspell-en-us | hunspell-dictionary,
 Description: small, hand-written web browser
  Nordstjernen is a clean-room web browser written from scratch in C, with a
  GTK 4 user interface and a libcurl network stack. It is built to be small,
@@ -50,6 +62,8 @@ Description: small, hand-written web browser
     Linux) behind an IPC and shared-memory framebuffer boundary.
   * No JIT, which keeps the JavaScript attack surface small.
   * WebGL 1/2 over OpenGL ES, switchable off in Settings.
+  * Inline MPEG-1, MP3 and WebM (VP8/VP9, Opus/Vorbis) playback; H.264 and
+    AAC are decoded through the system GStreamer plugins.
   * No telemetry: it does not phone home and does not track the user.
  .
  Nordstjernen is dual-licensed under the GNU General Public License version 3

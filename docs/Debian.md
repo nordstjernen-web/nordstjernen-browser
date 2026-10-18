@@ -55,48 +55,65 @@ through paths (1) and (2).
 
 ```
 debian/
-├── changelog       # version history; top entry sets the package version
-├── control         # Section: web (main), build-deps, binary package
-├── copyright       # DEP-5; GPL-3+ or NSL-1.0, plus bundled-engine licenses
-├── rules           # dh sequencer; disables ns-pango and webgpu
-├── source/format   # 3.0 (quilt)
-└── watch           # tracks upstream GitHub tags
+├── changelog          # version history; top entry sets the package version
+├── control            # Section: web (main), build-deps, binary package
+├── copyright          # DEP-5; GPL-3+ or NSL-1.0, plus bundled-code licenses
+├── rules              # dh sequencer; feature switches, reproducible date
+├── source/format      # 3.0 (quilt)
+├── upstream/metadata  # DEP-12: repository, bug tracker, security contact
+└── watch              # tracks upstream tags through the GitHub API
 ```
 
 Key choices:
 
 * **`Section: web`** — the package targets `main`, distributed under the
   GPL option of the dual license.
-* **`debian/rules`** is a minimal `dh` file. Hardening is on via
+* **`debian/rules`** is a small `dh` file. Hardening is on via
   `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
   meson build already enables PIE, stack protector, and FORTIFY itself.
-  Its one `dh_auto_configure` override passes `-Dns-pango=disabled`
+  The `dh_auto_configure` override passes `-Dns-pango=disabled`
   (sbuild/pbuilder chroots have no network, so the ns-pango subproject
-  cannot be cloned — text shapes through the system Pango instead) and
-  `-Dwebgpu=disabled` (wgpu-native is not packaged).
+  cannot be cloned — text shapes through the system Pango instead),
+  `-Dwebgpu=disabled` (wgpu-native is not packaged), `-Davif=enabled
+  -Djxl=enabled -Dgstreamer=enabled -Daudio=enabled` (so a missing build
+  dependency fails the build instead of silently dropping a codec) and
+  `-Dbuild_date` derived from `SOURCE_DATE_EPOCH`, so the About dialog's
+  date comes from `debian/changelog` and the build is reproducible.
+  The `dh_auto_install` override drops `libnordstjernen.so` and its
+  header: that is the embedding API for other applications, nothing in the
+  package links it, and it carries no SONAME version.
 * **`debian/copyright`** is DEP-5. `Files: *` declares
   `License: GPL-3+ or NSL-1.0`, with a `GPL-3+` stanza pointing at
   `/usr/share/common-licenses/GPL-3` and an `NSL-1.0` stanza for the
   alternative. It also spells out the free licenses of the in-tree
-  engines (lexbor — Apache-2.0; QuickJS — Expat; WAMR — Apache-2.0) and
-  vendored single-file libraries (Wuffs — Apache-2.0; pl_mpeg — Expat).
+  engines (lexbor — Apache-2.0; QuickJS — Expat; WAMR — Apache-2.0 with
+  LLVM exception), the vendored single-file libraries (Wuffs —
+  Apache-2.0; pl_mpeg — Expat; minimp3 — CC0-1.0), the wgpu-native
+  headers (BSD-3-Clause; Expat or Apache-2.0) and the CLDR/ICU4X data
+  tables in `src/quickjs/` (Unicode-3.0). `Files-Excluded` drops the
+  Android port's prebuilt `gradle-wrapper.jar` when `uscan` repacks the
+  upstream tarball.
 
 ## Build dependencies
 
 The Debian build needs the `Build-Depends` of `debian/control` plus the
-packaging tools:
+packaging tools. From the checkout, `apt-get build-dep` reads them
+directly:
 
-    sudo apt install build-essential debhelper devscripts meson ninja-build \
-        pkg-config libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
-        libuchardet-dev libpsl-dev libsqlite3-dev libseccomp-dev \
-        libwebp-dev libavif-dev libsdl2-dev libenchant-2-dev \
-        libpango1.0-dev libfontconfig-dev \
-        libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
-        libswresample-dev
+    sudo apt install build-essential debhelper devscripts
+    sudo apt build-dep ./
+
+The version floors in `debian/control` mirror the ones `meson setup`
+enforces: GTK ≥ 4.14, libcurl ≥ 8.5, FFmpeg ≥ 6.0 (`7:6.0` with Debian's
+epoch) and GStreamer ≥ 1.20, so Debian 13 (trixie) and Ubuntu 24.04 are
+the oldest releases the package builds on.
 
 The FFmpeg `libav*` packages are **not** optional here: `meson setup` fails
 without them on Linux (inline WebM — VP9/VP8 video, Opus/Vorbis audio).
-`libpango1.0-dev` and `libfontconfig-dev` cover the system-Pango path that
+GStreamer decodes H.264/AAC, `libbrotli-dev` enables WOFF2 web fonts,
+`libjxl-dev`/`libavif-dev` add JPEG XL and AVIF images and
+`libpoppler-glib-dev` the built-in PDF viewer. `libpango1.0-dev`,
+`libfontconfig-dev` and `libfreetype-dev` cover the system-Pango path that
 `debian/rules` selects.
 
 `libseccomp-dev` is marked `[linux-any]` in `debian/control`; all Debian
@@ -106,8 +123,11 @@ a build dependency: lexbor, QuickJS, and WAMR build in-tree via meson
 
 Runtime dependencies are computed automatically by `dh_shlibdeps`
 (`${shlibs:Depends}`) from the linked shared libraries — nothing is
-hand-listed or bundled. `mpv | ffmpeg` and `hunspell-en-us` are
-`Recommends` (external media playback and spell-check dictionary).
+hand-listed or bundled. The GStreamer plugin packages
+(`gstreamer1.0-plugins-base`/`-good`/`-bad`, `gstreamer1.0-libav`) are
+`Recommends`: they hold the H.264/AAC parsers and decoders that
+`decodebin` picks at runtime. `ca-certificates` and a hunspell dictionary
+are `Recommends` too.
 
 ## Build the package
 
@@ -209,8 +229,9 @@ With a Debian Developer willing to sponsor it:
    after NEW-queue review the package enters `unstable` in `main`,
    migrates to `testing`, and is mirrored by Debian.
 
-`debian/watch` lets `uscan` track upstream GitHub tags so the sponsor
-can spot new releases.
+`debian/watch` lets `uscan` track upstream GitHub tags (through the
+GitHub API, which the tags HTML page no longer serves reliably) so the
+sponsor can spot new releases.
 
 ## Updating the package
 

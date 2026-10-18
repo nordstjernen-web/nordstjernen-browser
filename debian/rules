@@ -2,10 +2,35 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
+include /usr/share/dpkg/architecture.mk
+include /usr/share/dpkg/pkg-info.mk
+
+# The About dialog shows the build date; take it from the changelog so the
+# build is reproducible.
+BUILD_DATE := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y-%m-%d)
+
 %:
 	dh $@
 
 # Source builds run in a network-isolated chroot (sbuild/pbuilder), where the
-# ns-pango subproject cannot be cloned, so shape text through the system Pango.
+# ns-pango subproject cannot be cloned, so shape text through the system Pango;
+# wgpu-native is not packaged, so WebGPU is left out. The optional codecs are
+# required explicitly so a missing build dependency fails the build instead of
+# silently dropping a feature.
 override_dh_auto_configure:
-	dh_auto_configure -- -Dns-pango=disabled -Dwebgpu=disabled
+	dh_auto_configure -- \
+		-Dns-pango=disabled \
+		-Dwebgpu=disabled \
+		-Davif=enabled \
+		-Djxl=enabled \
+		-Dgstreamer=enabled \
+		-Daudio=enabled \
+		-Dbuild_date=$(BUILD_DATE)
+
+# libnordstjernen.so and its header are the embedding API for other
+# applications. Nothing in this package links them and the library carries no
+# SONAME version, so they are not shipped.
+override_dh_auto_install:
+	dh_auto_install
+	rm -f debian/nordstjernen/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
+	rm -rf debian/nordstjernen/usr/include
