@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* Scrolling: a row flex or grid container with `overflow: auto` or
+  `scroll` scrolls when its items are taller than it, and an element
+  with `overflow: hidden` accepts `scrollTop`/`scrollLeft` from script,
+  as in Chrome (it still shows no scrollbar and ignores the wheel).
+  Google Calendar's week view scrolls the hour grid in a row flex
+  container and keeps the hour labels in step by setting `scrollTop` on
+  an `overflow: hidden` column; the grid could not be scrolled past
+  16:00 and the labels did not follow it.
 * Forms: an absolutely or fixed positioned `<input>` or `<textarea>`
   shows its value or placeholder and is one line tall, as in Chrome.
   The inline collector took the control for an out-of-flow child of
