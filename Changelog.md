@@ -3,6 +3,12 @@ Changelog:
 
 1.0.33:
 ======
+* Forms: an absolutely or fixed positioned `<input>` or `<textarea>`
+  shows its value or placeholder and is one line tall, as in Chrome.
+  The inline collector took the control for an out-of-flow child of
+  itself, so the box held only a static-position placeholder and was
+  0px tall. Gmail's search field is such an input and showed no "Search
+  mail" placeholder.
 * Paint performance: a subtree under `opacity: 0` is no longer painted
   into an offscreen group only to be composited fully transparent, and
   the group for a translucent box is clipped to the box's ink bounds
