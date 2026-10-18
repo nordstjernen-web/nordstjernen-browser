@@ -818,6 +818,18 @@ download_finish_idle(gpointer ud)
     return G_SOURCE_REMOVE;
 }
 
+static gboolean
+pw_download_scheme_allowed(const char *url)
+{
+    static const char *const schemes[] = {
+        "http:", "https:", "ftp:", "data:", "blob:",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(schemes); i++)
+        if (g_ascii_strncasecmp(url, schemes[i], strlen(schemes[i])) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 static gpointer
 download_worker(gpointer ud)
 {
@@ -1206,7 +1218,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                 g_ascii_strncasecmp(parts[0], "file:", 5) == 0;
             gboolean local_page =
                 page_url && g_ascii_strncasecmp(page_url, "file:", 5) == 0;
-            if (!local_target || local_page)
+            if (local_target ? local_page : pw_download_scheme_allowed(parts[0]))
                 pw_start_download(pw, parts[0],
                                   parts[1] && *parts[1] ? parts[1] : NULL);
             g_strfreev(parts);
