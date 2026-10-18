@@ -15,6 +15,10 @@ Changelog:
   `pre-line`, `break-spaces` or a `<pre>`) is real text: it now ends the
   anonymous table and takes its own line, as in Chrome, where it used to
   be swallowed into the table.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
