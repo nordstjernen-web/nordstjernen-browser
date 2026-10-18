@@ -68025,6 +68025,8 @@ static JSValue js_shadow_realm_export_getter(JSContext *ctx, JSValueConst this_v
     JSValue value;
     int has;
 
+    if (!JS_IsObject(exports))
+        return JS_ThrowTypeError(ctx, "the module has no such export");
     name = JS_ValueToAtom(ctx, argv[0]);
     if (name == JS_ATOM_NULL)
         return JS_EXCEPTION;
