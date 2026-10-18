@@ -1,3 +1,31 @@
+nordstjernen (1.0.33-1) UNRELEASED; urgency=medium
+
+  * New upstream release 1.0.33.
+  * debian/control:
+    - Add the version floors meson enforces (GTK >= 4.14, libcurl >= 8.5,
+      FFmpeg >= 6.0, GStreamer >= 1.20).
+    - Build-depend on libjxl-dev, libgstreamer1.0-dev,
+      libgstreamer-plugins-base1.0-dev, libbrotli-dev (WOFF2 web fonts),
+      libfreetype-dev, libpoppler-glib-dev, libglib2.0-dev and zlib1g-dev.
+    - Recommend the GStreamer plugins that decode H.264/AAC and
+      ca-certificates instead of mpv | ffmpeg; the browser no longer
+      launches an external player.
+    - Bump Standards-Version to 4.7.2.
+  * debian/rules:
+    - Pass a build date derived from SOURCE_DATE_EPOCH for reproducible
+      builds.
+    - Require AVIF, JPEG XL, GStreamer and the audio helper explicitly.
+    - Do not ship the unversioned libnordstjernen.so embedding library and
+      its header; nothing in the package uses them.
+  * debian/copyright: document minimp3 (CC0-1.0), the wgpu-native headers
+    (BSD-3-Clause, Expat or Apache-2.0), the Unicode-3.0 CLDR/ICU4X tables
+    and WAMR's LLVM exception; drop the stale miniaudio reference; exclude
+    the prebuilt Gradle wrapper jar.
+  * debian/watch: track tags through the GitHub API.
+  * Add debian/upstream/metadata.
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Sun, 18 Oct 2026 14:10:14 +0200
+
 nordstjernen (1.0.23-1) unstable; urgency=medium
 
   * New upstream release 1.0.23.
