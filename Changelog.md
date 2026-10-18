@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* WebGL: on desktop OpenGL (Windows, macOS) a frame is flipped and
+  converted to the page painter's pixel format on the GPU and read
+  straight into the canvas surface, instead of read as RGBA and
+  flipped, swizzled and alpha-forced per pixel on the CPU. Translucent
+  pixels of a `premultipliedAlpha` context (the default) are no longer
+  premultiplied a second time, so a half-transparent WebGL background
+  over a page now blends as in Chrome instead of coming out darker.
 * Web Animations: `element.animate(keyframes, { pseudoElement:
   "::after" })` no longer animates the element itself. Animations of
   pseudo-elements are not rendered yet; such an animation now reports
