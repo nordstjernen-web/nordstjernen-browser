@@ -3,6 +3,14 @@ Changelog:
 
 1.0.33:
 ======
+* CSS tables: a `<table>`, `<tr>`, `<td>` or `<th>` whose `display` is
+  changed by CSS is laid out with that display, as in Chrome, instead of
+  as a table part by its tag. A row group's children that are not rows
+  (say a `<tr>` with `display: flex`) are wrapped in an anonymous row
+  and cell rather than dropped. Gmail styles its inbox table
+  `display: block` and each message row `display: flex` with 10px
+  vertical padding; the rows were 20px tall and cramped, and are now
+  Chrome's 40px.
 * Build: `-Dquickjs=quickjs` builds Fabrice Bellard's QuickJS from its
   `master` branch (84e723f) instead of the 2026-06-04 release, so that
   engine gains `Array.fromAsync`, `Iterator.zip`, iterator `join`,
