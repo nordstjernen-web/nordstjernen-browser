@@ -39310,6 +39310,7 @@ ns_svg_flatten_path(const char *d)
         if (g_ascii_isalpha(*p)) { cmd = *p; p++; }
         else if (cmd == 'M') cmd = 'L';
         else if (cmd == 'm') cmd = 'l';
+        else if (cmd == 'Z' || cmd == 'z') break;
         gboolean rel = g_ascii_islower(cmd);
         char c = g_ascii_toupper(cmd);
         double a, b, e, f, g, h;
