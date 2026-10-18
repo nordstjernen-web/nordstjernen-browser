@@ -21,6 +21,10 @@ Changelog:
   definite height lays out a stretched item once instead of twice, so an
   app shell of nested `height: 100%` rows and columns no longer takes
   seconds to lay out.
+* Elements and documents carry the `onfullscreenchange` and
+  `onfullscreenerror` handler attributes, so players that check for them
+  before listening react to fullscreen; a YouTube video now fills the
+  screen in fullscreen instead of staying at its page size.
 * An inline-block or button with `margin: auto` no longer stretches the
   shrink-to-fit box around it to full width; cookie banners built with
   OneTrust show their close button in the right place again.
