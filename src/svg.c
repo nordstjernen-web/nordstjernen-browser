@@ -904,7 +904,7 @@ svg_path_data(cairo_t *cr, const char *d)
             cmd = 'L';
         } else if (cmd == 'm') {
             cmd = 'l';
-        } else if (!cmd) {
+        } else if (!cmd || cmd == 'Z' || cmd == 'z') {
             break;
         }
 
