@@ -9175,6 +9175,13 @@ floats_max_bottom(const GArray *floats)
 }
 
 static gboolean
+style_lines_never_wrap(const ns_style *s)
+{
+    const ns_css_value *ws = s ? s->values[NS_CSS_WHITE_SPACE] : NULL;
+    return keyword_is(ws, "nowrap") || keyword_is(ws, "pre");
+}
+
+static gboolean
 floats_advance_to_readable_width(const GArray *floats, double cw,
                                  double *y, double *left_out,
                                  double *right_out)
@@ -16556,8 +16563,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
             floats_offsets_at(floats, line_y, &left_off, &right_off);
-            floats_advance_to_readable_width(floats, cw, &line_y,
-                                             &left_off, &right_off);
+            if (!style_lines_never_wrap(box->style))
+                floats_advance_to_readable_width(floats, cw, &line_y,
+                                                 &left_off, &right_off);
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
