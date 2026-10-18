@@ -1184,7 +1184,11 @@ abs_joins_inline_run(const ns_node *n, const ns_style *s, GHashTable *styles)
     return FALSE;
 }
 
+enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
+
 static int clear_kind_of(const ns_style *s);
+static int float_side_of(const ns_style *s);
+static int white_space_mode(const ns_node *node, GHashTable *styles);
 
 static gboolean
 is_inline_dom(const ns_node *n, GHashTable *styles)
@@ -1240,6 +1244,46 @@ static gboolean
 continues_inline_run(const ns_node *n, GHashTable *styles)
 {
     return is_inline_dom(n, styles) || node_leaves_inline_run_open(n, styles);
+}
+
+static gboolean
+node_is_out_of_flow(const ns_node *n, GHashTable *styles)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    const ns_style *s = g_hash_table_lookup(styles, n);
+    if (!s || style_is_none(s)) return FALSE;
+    return float_side_of(s) >= 0 || style_is_absolute_or_fixed(s);
+}
+
+static gboolean
+node_renders_nothing_inline(const ns_node *n, GHashTable *styles)
+{
+    if (n->kind == NS_NODE_TEXT)
+        return text_is_ws_only(n->text) &&
+               white_space_mode(n, styles) == NS_WS_COLLAPSE;
+    return node_leaves_inline_run_open(n, styles) || node_is_non_rendering(n);
+}
+
+static gboolean
+inline_range_waits_for_next(const ns_node *start, const ns_node *end,
+                            GHashTable *styles)
+{
+    if (!node_is_out_of_flow(end, styles) &&
+        !(end && style_is_contents(g_hash_table_lookup(styles, end))))
+        return FALSE;
+    for (const ns_node *n = start; n && n != end; n = n->next_sibling)
+        if (!node_renders_nothing_inline(n, styles)) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+inline_run_opens_parent(const ns_node *first, GHashTable *styles)
+{
+    for (const ns_node *p = first->prev_sibling; p; p = p->prev_sibling)
+        if (!node_is_out_of_flow(p, styles) &&
+            !node_renders_nothing_inline(p, styles))
+            return FALSE;
+    return TRUE;
 }
 
 static ns_display_internal
@@ -1302,10 +1346,6 @@ node_is_table_internal(const ns_node *n, GHashTable *styles)
            is_cell_element(n, styles) || is_table_row(n, styles) ||
            is_table_caption(n, styles);
 }
-
-enum { NS_WS_COLLAPSE = 0, NS_WS_PRESERVE = 1, NS_WS_PRE_LINE = 2 };
-
-static int white_space_mode(const ns_node *node, GHashTable *styles);
 
 static gboolean
 node_is_table_run_gap(const ns_node *n, GHashTable *styles)
@@ -1819,12 +1859,13 @@ cell_pseudo_after(ns_box *cell, const ns_node *n, const ns_style *s)
 }
 
 static void
-cell_append_run(ns_box *cell, ns_box *run, ns_box **pending_before)
+cell_append_run(ns_box *cell, const ns_node *start, const ns_node *end,
+                GHashTable *styles, ns_box **pending_before)
 {
-    if (*pending_before) {
-        run = inline_merge_prefix(*pending_before, run);
-        *pending_before = NULL;
-    }
+    if (inline_range_waits_for_next(start, end, styles)) return;
+    ns_box *run = inline_merge_prefix(*pending_before,
+                                      build_inline_run(start, end, styles));
+    *pending_before = NULL;
     if (run->text && run->text[0] != '\0')
         box_append_child(cell, run);
     else
@@ -1832,10 +1873,11 @@ cell_append_run(ns_box *cell, ns_box *run, ns_box **pending_before)
 }
 
 static void
-cell_flush_pending(ns_box *cell, ns_box **pending_before)
+flush_pending_before(ns_box *parent, ns_box **pending_before,
+                     const ns_node *next, GHashTable *styles)
 {
-    if (!*pending_before) return;
-    box_append_child(cell, *pending_before);
+    if (!*pending_before || node_is_out_of_flow(next, styles)) return;
+    box_append_child(parent, *pending_before);
     *pending_before = NULL;
 }
 
@@ -1858,19 +1900,18 @@ build_cell(const ns_node *n, GHashTable *styles)
     ns_box *pending_before = cell_pseudo_before(cell, n, s);
     const ns_node *c = n->first_child;
     while (c) {
-        if (is_inline_dom(c, styles)) {
+        if (continues_inline_run(c, styles)) {
             const ns_node *start = c;
             while (c && continues_inline_run(c, styles)) c = c->next_sibling;
-            cell_append_run(cell, build_inline_run(start, c, styles),
-                            &pending_before);
+            cell_append_run(cell, start, c, styles, &pending_before);
         } else {
-            cell_flush_pending(cell, &pending_before);
+            flush_pending_before(cell, &pending_before, c, styles);
             ns_box *child = build_block(c, styles);
             if (child) box_append_child(cell, child);
             if (c) c = c->next_sibling;
         }
     }
-    cell_flush_pending(cell, &pending_before);
+    flush_pending_before(cell, &pending_before, NULL, styles);
     cell_pseudo_after(cell, n, s);
     return cell;
 }
@@ -4507,8 +4548,6 @@ white_space_mode(const ns_node *node, GHashTable *styles)
     return NS_WS_COLLAPSE;
 }
 
-static int float_side_of(const ns_style *s);
-
 static void
 append_decoration_attrs(GArray *attrs, const ns_style *ps, gsize len)
 {
@@ -4561,10 +4600,10 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
             if (kw && strcmp(kw, "none") != 0) ctx.text_transform = kw;
         }
     }
-    if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT &&
-        first == first->parent->first_child) {
+    if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT) {
         const ns_style *li_style = g_hash_table_lookup(styles, first->parent);
-        if (ns_paint_li_is_inside(li_style)) {
+        if (ns_paint_li_is_inside(li_style) &&
+            inline_run_opens_parent(first, styles)) {
             char marker[64];
             if (ns_paint_li_marker_text(first->parent, li_style,
                                         marker, sizeof marker))
@@ -6466,7 +6505,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             if (anon) box_append_child(block, anon);
             continue;
         }
-        if (is_inline_dom(c, styles)) {
+        if (continues_inline_run(c, styles)) {
             const ns_node *start = c;
             c = c->next_sibling;
             while (c) {
@@ -6489,21 +6528,16 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 if (!continues_inline_run(c, styles)) break;
                 c = c->next_sibling;
             }
-            ns_box *run = build_inline_run(start, c, styles);
-            if (pending_before) {
-                run = inline_merge_prefix(pending_before, run);
-                pending_before = NULL;
-            }
-
+            if (inline_range_waits_for_next(start, c, styles)) continue;
+            ns_box *run = inline_merge_prefix(
+                pending_before, build_inline_run(start, c, styles));
+            pending_before = NULL;
             if (inline_run_worth_keeping(run))
                 box_append_child(block, run);
             else
                 ns_box_free(run);
         } else {
-            if (pending_before) {
-                box_append_child(block, pending_before);
-                pending_before = NULL;
-            }
+            flush_pending_before(block, &pending_before, c, styles);
             ns_box *child = build_block(c, styles);
             if (child) box_append_child(block, child);
             if (c) c = c->next_sibling;
