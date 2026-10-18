@@ -33,6 +33,22 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-10-18 — Lexbor 327a8b6 → f4cbbcd
+
+| | value |
+|---|---|
+| Fork base | `327a8b6` |
+| Updated to | `f4cbbcd` (master, "Core: fixed allocation and move sizes in lexbor_array_obj_t. (#428)") |
+| Version | `3.1.0` (unchanged) |
+
+One upstream commit. `lexbor_array_obj_init()` and `lexbor_array_obj_expand()`
+multiplied the bytes they need by `sizeof(uint8_t *)`, so every object array
+the HTML tokenizer, tree builder and parse-error log keep was eight times
+larger than needed on 64-bit hosts, and `lexbor_array_obj_delete()` moved
+eight times the bytes of the remaining entries, staying in bounds only
+because of that oversized allocation. `core/array_obj.c` carries no local
+modification, so upstream's file is copied. Its new tests are not carried.
+
 ## 2026-10-18 — QuickJS 9b06171 → 5271a40
 
 | | value |
