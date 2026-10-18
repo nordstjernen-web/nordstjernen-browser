@@ -9769,9 +9769,23 @@ table_caption_min_content_width(ns_box *box, const ns_style *inherited)
     return MAX(widest - pd.left - pd.right - bd.left - bd.right, 0);
 }
 
+#define NS_TABLE_MAX_INLINE_SIZE 1000000.0
+
+static gboolean
+table_is_fixed_with_percent_width(const ns_box *box)
+{
+    const ns_style *s = box->style;
+    if (!s || !keyword_is(s->values[NS_CSS_TABLE_LAYOUT], "fixed"))
+        return FALSE;
+    const ns_css_value *wv = s->values[NS_CSS_WIDTH];
+    return wv && value_is_percent(wv) && length_resolve(wv, 100, -1) > 0;
+}
+
 static double
 table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
 {
+    if (!min && table_is_fixed_with_percent_width(box))
+        return NS_TABLE_MAX_INLINE_SIZE;
     double captions = table_caption_min_content_width(box, inherited);
     guint max_cols = table_column_count(box);
     if (max_cols == 0) return captions;
