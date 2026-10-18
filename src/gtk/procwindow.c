@@ -4,6 +4,7 @@
 #include <glib/gstdio.h>
 #include "icons.h"
 #include "procview.h"
+#include "remotectl.h"
 #include "titlerow.h"
 #include "i18n.h"
 #include "rproc_http.h"
@@ -32,6 +33,9 @@
 
 static int g_initial_win_w;
 static int g_initial_win_h;
+static GtkApplication *g_procapp;
+static int g_next_tab_id;
+static char *g_remote_status;
 
 void
 ns_procapp_set_window_size(int width, int height)
@@ -51,6 +55,7 @@ typedef struct {
     GtkWidget      *address;
     gboolean        address_click_focuses;
     GtkWidget      *zoom_button;
+    GtkWidget      *remote_badge;
     GtkWidget      *back;
     GtkWidget      *forward;
     GtkWidget      *reload;
@@ -352,6 +357,22 @@ install_chrome_css(void)
         "}"
         ".ns-toolbar button.ns-zoom:hover {"
         "  background-color: alpha(@ns_accent, 0.22);"
+        "}"
+        ".ns-toolbar button.ns-remote-badge {"
+        "  min-height: 26px;"
+        "  min-width: 0;"
+        "  padding: 0 12px;"
+        "  margin: 0 4px;"
+        "  border: none;"
+        "  border-radius: 999px;"
+        "  background-color: #d97706;"
+        "  box-shadow: none;"
+        "  color: white;"
+        "  font-size: 12px;"
+        "  font-weight: bold;"
+        "}"
+        ".ns-toolbar button.ns-remote-badge:hover {"
+        "  background-color: #b45309;"
         "}"
         ".ns-procstatus {"
         "  margin: 0 0 8px 8px;"
@@ -1286,6 +1307,8 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     ns_proc_view_set_notify(v, on_view_notify, pw);
     GtkWidget *page = ns_proc_view_widget(v);
     g_object_set_data(G_OBJECT(page), "ns-proc-view", v);
+    g_object_set_data(G_OBJECT(page), "ns-tab-id",
+                      GINT_TO_POINTER(++g_next_tab_id));
 
     GtkWidget *wrapper = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(wrapper, "ns-tab");
@@ -2393,6 +2416,33 @@ menu_append_accel(GMenu *menu, const char *label, const char *action,
     g_object_unref(item);
 }
 
+static void
+pw_apply_remote_status(ProcWindow *pw)
+{
+    if (!pw->remote_badge)
+        return;
+    if (!g_remote_status) {
+        gtk_widget_set_visible(pw->remote_badge, FALSE);
+        return;
+    }
+    char *text = *g_remote_status
+        ? g_strdup_printf("%s %s", ns_i18n("Controlled by"), g_remote_status)
+        : g_strdup(ns_i18n("Remote control"));
+    gtk_button_set_label(GTK_BUTTON(pw->remote_badge), text);
+    set_accessible_label(pw->remote_badge, text);
+    g_free(text);
+    gtk_widget_set_visible(pw->remote_badge, TRUE);
+}
+
+static void
+on_remote_badge_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    ProcWindow *pw = ud;
+    ns_remote_control_stop();
+    pw_set_status(pw, ns_i18n("Remote control stopped"));
+}
+
 static ProcWindow *
 proc_window_new(GtkApplication *app)
 {
@@ -2502,6 +2552,16 @@ proc_window_new(GtkApplication *app)
     g_signal_connect(pw->zoom_button, "clicked",
                      G_CALLBACK(on_zoom_indicator_clicked), pw);
 
+    pw->remote_badge = gtk_button_new_with_label("");
+    gtk_button_set_has_frame(GTK_BUTTON(pw->remote_badge), FALSE);
+    gtk_widget_add_css_class(pw->remote_badge, "ns-remote-badge");
+    gtk_widget_set_valign(pw->remote_badge, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(pw->remote_badge,
+                                ns_i18n("Stop remote control"));
+    g_signal_connect(pw->remote_badge, "clicked",
+                     G_CALLBACK(on_remote_badge_clicked), pw);
+    pw_apply_remote_status(pw);
+
     pw->bookmarks_button = toolbar_button("nordstjernen-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
@@ -2572,6 +2632,7 @@ proc_window_new(GtkApplication *app)
     gtk_box_append(GTK_BOX(pw->toolbar), pw->reload);
     gtk_box_append(GTK_BOX(pw->toolbar), home);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->address);
+    gtk_box_append(GTK_BOX(pw->toolbar), pw->remote_badge);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->zoom_button);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(pw->toolbar), downloads);
@@ -2923,6 +2984,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 
     if (pw->session_path)
         pw->session_timer = g_timeout_add_seconds(4, write_session_cb, pw);
+    ns_remote_control_init();
 }
 
 static void
@@ -2992,12 +3054,194 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     };
     GtkApplication *app =
         gtk_application_new(NS_PROC_APP_ID, G_APPLICATION_NON_UNIQUE);
+    g_procapp = app;
     g_signal_connect(app, "activate", G_CALLBACK(on_proc_activate), &ctx);
     int status = g_application_run(G_APPLICATION(app), 0, NULL);
+    ns_remote_control_shutdown();
+    g_procapp = NULL;
     g_object_unref(app);
     ns_history_shutdown();
     procapp_clear_http_caches(TRUE);
     g_free(ctx.url);
     g_free(ctx.session_path);
     return status;
+}
+
+static ProcWindow *
+procwindow_of(GtkWindow *win)
+{
+    return win ? g_object_get_data(G_OBJECT(win), "ns-procwindow") : NULL;
+}
+
+static ProcWindow *
+active_procwindow(void)
+{
+    if (!g_procapp)
+        return NULL;
+    ProcWindow *pw = procwindow_of(gtk_application_get_active_window(g_procapp));
+    if (pw)
+        return pw;
+    for (GList *l = gtk_application_get_windows(g_procapp); l; l = l->next)
+        if ((pw = procwindow_of(l->data)))
+            return pw;
+    return NULL;
+}
+
+static int
+page_tab_id(GtkWidget *page)
+{
+    return page ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(page),
+                                                    "ns-tab-id")) : 0;
+}
+
+static gboolean
+find_tab(int id, ProcWindow **out_pw, GtkWidget **out_page)
+{
+    if (!g_procapp)
+        return FALSE;
+    if (id <= 0) {
+        ProcWindow *pw = active_procwindow();
+        if (!pw)
+            return FALSE;
+        int idx = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
+        GtkWidget *page = idx >= 0
+            ? gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx) : NULL;
+        if (!page)
+            return FALSE;
+        *out_pw = pw;
+        *out_page = page;
+        return TRUE;
+    }
+    for (GList *l = gtk_application_get_windows(g_procapp); l; l = l->next) {
+        ProcWindow *pw = procwindow_of(l->data);
+        if (!pw)
+            continue;
+        int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
+        for (int i = 0; i < n; i++) {
+            GtkWidget *page =
+                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i);
+            if (page_tab_id(page) == id) {
+                *out_pw = pw;
+                *out_page = page;
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+GArray *
+ns_procapp_tabs(void)
+{
+    GArray *tabs = g_array_new(FALSE, TRUE, sizeof(NsProcTab));
+    if (!g_procapp)
+        return tabs;
+    ProcWindow *active = active_procwindow();
+    int window = 0;
+    for (GList *l = gtk_application_get_windows(g_procapp); l; l = l->next) {
+        ProcWindow *pw = procwindow_of(l->data);
+        if (!pw)
+            continue;
+        window++;
+        int cur = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
+        int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
+        for (int i = 0; i < n; i++) {
+            GtkWidget *page =
+                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i);
+            NsProcView *v = view_for_page(page);
+            if (!v)
+                continue;
+            NsProcTab t = {
+                .id = page_tab_id(page),
+                .window = window,
+                .active = pw == active && i == cur,
+                .view = v,
+            };
+            g_array_append_val(tabs, t);
+        }
+    }
+    return tabs;
+}
+
+NsProcView *
+ns_procapp_tab_view(int id)
+{
+    ProcWindow *pw = NULL;
+    GtkWidget *page = NULL;
+    return find_tab(id, &pw, &page) ? view_for_page(page) : NULL;
+}
+
+int
+ns_procapp_tab_id(NsProcView *view)
+{
+    return view ? page_tab_id(ns_proc_view_widget(view)) : 0;
+}
+
+int
+ns_procapp_tab_new(const char *url)
+{
+    ProcWindow *pw = active_procwindow();
+    if (!pw)
+        return 0;
+    proc_window_add_tab(pw, url, TRUE);
+    return ns_procapp_tab_id(current_view(pw));
+}
+
+gboolean
+ns_procapp_tab_close(int id)
+{
+    ProcWindow *pw = NULL;
+    GtkWidget *page = NULL;
+    if (!find_tab(id, &pw, &page))
+        return FALSE;
+    if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) <= 1 &&
+        g_list_length(gtk_application_get_windows(g_procapp)) <= 1)
+        return FALSE;
+    proc_window_close_page(pw, page);
+    return TRUE;
+}
+
+gboolean
+ns_procapp_tab_select(int id, gboolean present)
+{
+    ProcWindow *pw = NULL;
+    GtkWidget *page = NULL;
+    if (!find_tab(id, &pw, &page))
+        return FALSE;
+    int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
+    if (idx >= 0 &&
+        idx != gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook)))
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
+    if (present)
+        gtk_window_present(GTK_WINDOW(pw->window));
+    return TRUE;
+}
+
+gboolean
+ns_procapp_tab_load(int id, const char *url)
+{
+    ProcWindow *pw = NULL;
+    GtkWidget *page = NULL;
+    if (!find_tab(id, &pw, &page) || !url)
+        return FALSE;
+    char *resolved = normalize_url(url);
+    if (view_for_page(page) == current_view(pw))
+        gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
+    ns_proc_view_load(view_for_page(page), resolved);
+    g_free(resolved);
+    return TRUE;
+}
+
+void
+ns_procapp_set_remote_status(const char *controller)
+{
+    g_free(g_remote_status);
+    g_remote_status = controller ? g_strdup(controller) : NULL;
+    if (!g_procapp)
+        return;
+    for (GList *l = gtk_application_get_windows(g_procapp); l; l = l->next) {
+        ProcWindow *pw = procwindow_of(l->data);
+        if (pw)
+            pw_apply_remote_status(pw);
+    }
 }

@@ -68,6 +68,7 @@ typedef struct ns_config {
     gboolean cache_enabled;
     gboolean tls_allow_insecure_override;
     gboolean watchdog_enabled;
+    gboolean remote_control;
     gboolean private_mode;
     int      cache_cap_mb;
     int      js_eval_budget_ms;

@@ -164,6 +164,7 @@ static const cfg_field cfg_fields[] = {
     FB(cache_enabled,         TRUE),
     FB(tls_allow_insecure_override, FALSE),
     FB(watchdog_enabled,      TRUE),
+    FB(remote_control,        FALSE),
     FI(cache_cap_mb,          256),
     FI(js_eval_budget_ms,     60000),
     FI(js_memory_cap_mb,      2048),
@@ -559,6 +560,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "cache_enabled         = %s\n", c->cache_enabled ? "true" : "false");
     g_string_append_printf(s, "tls_allow_insecure_override = %s\n", c->tls_allow_insecure_override ? "true" : "false");
     g_string_append_printf(s, "watchdog_enabled      = %s\n", c->watchdog_enabled ? "true" : "false");
+    g_string_append_printf(s, "remote_control        = %s\n", c->remote_control ? "true" : "false");
     g_string_append_printf(s, "private_mode          = %s\n", c->private_mode ? "true" : "false");
     g_string_append_printf(s, "cache_cap_mb          = %d\n", c->cache_cap_mb);
     g_string_append_printf(s, "js_eval_budget_ms     = %d\n", c->js_eval_budget_ms);

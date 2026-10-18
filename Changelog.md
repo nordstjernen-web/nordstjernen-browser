@@ -26,6 +26,22 @@ Changelog:
   container and keeps the hour labels in step by setting `scrollTop` on
   an `overflow: hidden` column; the grid could not be scrolled past
   16:00 and the labels did not follow it.
+* Remote control over MCP: `nordstjernen --mcp` is a built-in Model
+  Context Protocol server (stdio, protocol 2025-06-18), so an agent such
+  as Claude Code can drive the browser window you have open, much as
+  Claude in Chrome drives Chrome (`claude mcp add nordstjernen --
+  <path>/nordstjernen --mcp`). Its tools list, open, select and close
+  tabs, navigate, read the page as an accessibility-style outline with
+  element refs, find elements, click, double-click, hover, type, press
+  keys, scroll, fill form fields, take viewport screenshots, run
+  JavaScript and return page text. Input goes through the same path as
+  the mouse and keyboard. The browser only accepts control when
+  Settings → Privacy → "Allow remote control" is on or it was started
+  with `--remote-control`: it then listens on 127.0.0.1 alone and every
+  request must present a random per-session token kept in a user-only
+  file. A "Controlled by …" toolbar badge shows while a client is
+  connected; clicking it stops remote control. See
+  `docs/remote-control.md`.
 * Forms: an absolutely or fixed positioned `<input>` or `<textarea>`
   shows its value or placeholder and is one line tall, as in Chrome.
   The inline collector took the control for an out-of-flow child of
