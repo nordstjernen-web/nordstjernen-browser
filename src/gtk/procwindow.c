@@ -2248,6 +2248,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_window_set_title(GTK_WINDOW(win), tm_title);
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(win), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(win), 720, 380);
 
     NsTaskMgr *tm = g_new0(NsTaskMgr, 1);
