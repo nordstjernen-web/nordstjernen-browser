@@ -13,6 +13,18 @@ Changelog:
   expression once, the rule shows up in `cssRules` as in Chrome, and
   an invalid value such as `calc(1px + anchor(top) + 2)` in a longhand
   such as `top` is simply rejected.
+* Layout: an HTML comment, collapsible white space, a `display: none`
+  element or a `<script>`/`<style>` between two `display: table-cell`
+  siblings no longer splits the anonymous table that wraps them. Such a
+  gap ended the table, or the anonymous row inside it, so the second
+  cell started a new table or row below the first: a cookie banner with
+  an icon cell, `<!-- -->` and a text cell grew from 80 to 133 pixels
+  because its text dropped under the icon. These nodes generate no box,
+  so the cells now stay side by side in one row, as they do in Chrome.
+  White space that the parent keeps (`white-space: pre`, `pre-wrap`,
+  `pre-line`, `break-spaces` or a `<pre>`) is real text: it now ends the
+  anonymous table and takes its own line, as in Chrome, where it used to
+  be swallowed into the table.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
