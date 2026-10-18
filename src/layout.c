@@ -5730,8 +5730,9 @@ layout_slot_host(const ns_node *slot)
 }
 
 static const ns_node *
-layout_find_slot(const ns_node *scope, const char *name)
+layout_find_slot(const ns_node *scope, const char *name, int depth)
 {
+    if (depth >= NS_LAYOUT_MAX_DEPTH) return NULL;
     for (const ns_node *c = scope ? scope->first_child : NULL; c;
          c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
@@ -5740,7 +5741,7 @@ layout_find_slot(const ns_node *scope, const char *name)
             const char *slot_name = ns_element_get_attr(c, "name");
             if (g_strcmp0(slot_name ? slot_name : "", name) == 0) return c;
         }
-        const ns_node *found = layout_find_slot(c, name);
+        const ns_node *found = layout_find_slot(c, name, depth + 1);
         if (found) return found;
     }
     return NULL;
@@ -5754,7 +5755,7 @@ layout_flat_parent(const ns_node *n)
     const ns_node *sr = layout_shadow_root(p);
     if (!sr || sr == n) return p;
     const char *name = ns_element_get_attr(n, "slot");
-    const ns_node *slot = layout_find_slot(sr, name ? name : "");
+    const ns_node *slot = layout_find_slot(sr, name ? name : "", 0);
     return slot ? slot : p;
 }
 
