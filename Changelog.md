@@ -91,6 +91,31 @@ Changelog:
   an empty string. Netflix's "Top 10" numbers, grey digits with
   `-webkit-text-stroke: 0.25rem white` under a black copy, now show
   their white outline.
+* Forms: a text field without a CSS width is as wide as in Chrome, and a
+  drop-down `<select>` is as tall. Text inputs, selects and buttons now
+  use Arial at 13.33px like Chrome's form-control font instead of the
+  system UI font, and the default width follows the HTML rule for `size`
+  (20 by default): size times the font's average character width plus
+  the difference to its maximum character width, measured on the field's
+  own font, instead of a fixed 0.75em per character. The same width is
+  now the field's min-content and max-content size, so a field in a flex
+  row, an `inline-flex` search bar, a grid `auto` column, a float or an
+  absolutely positioned box no longer shrinks to its padding or grows
+  with its value. A drop-down select's width from its widest option
+  counts the same way, so in a flex row or a narrow box it keeps that
+  width instead of shrinking under its own arrow (65px before, 190px
+  now, Chrome 187). The options are measured once per layout with the
+  select's own letter- and word-spacing, and the box is never narrower
+  than the label it draws. As in Chrome, a select no longer inherits
+  `letter-spacing`, `word-spacing` or `line-height` from the page. A
+  drop-down select takes its height from its font, ascent plus descent
+  plus 1px inside above and below, instead of from the line box of its
+  label and arrow glyph, which came out 1px short with Arial; it ignores
+  `line-height` like Chrome's drop-down, and with `appearance: none` it
+  drops the inner 1px and follows `line-height`. Its text sits on
+  Chrome's baseline. A bare `<input>` was 208px wide and is 153px now,
+  and a default select is 19px tall instead of 18.7px, or 33.7px with
+  `line-height: 30px`.
 * Elements and documents carry the `onfullscreenchange` and
   `onfullscreenerror` handler attributes, so players that check for them
   before listening react to fullscreen; a YouTube video now fills the
