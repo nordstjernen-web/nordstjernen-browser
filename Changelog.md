@@ -3,6 +3,13 @@ Changelog:
 
 1.0.33:
 ======
+* CSS tables: a `table-layout: fixed` table with a percentage width has
+  an unbounded max-content width, as in Chrome, so the float,
+  inline-block, flex item, grid item or table cell holding it fills the
+  space available instead of shrinking to its contents. Gmail's opened
+  message is a flex item holding such a table; it was about half the
+  width of the reading pane, with the time and reply buttons stranded
+  in the middle.
 * CSS tables: a table row's children that are not cells, such as a
   `<td>` restyled `display: flex` or loose text, are wrapped in an
   anonymous cell instead of being dropped. Gmail's message header puts
