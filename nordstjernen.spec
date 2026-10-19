@@ -48,6 +48,8 @@ BuildRequires:  pkgconfig(pangoft2)
 Requires:       hicolor-icon-theme
 Recommends:     mpv
 Recommends:     myspell-en_US
+Requires(post): update-alternatives
+Requires(postun): update-alternatives
 
 %description
 Nordstjernen is a clean-room web browser written from scratch in C, with a
@@ -87,6 +89,9 @@ test -f meson.build
 
 %install
 %meson_install
+mkdir -p %{buildroot}%{_sysconfdir}/alternatives
+ln -sf %{_sysconfdir}/alternatives/internet-browser %{buildroot}%{_bindir}/internet-browser
+touch %{buildroot}%{_sysconfdir}/alternatives/internet-browser
 
 # The GTK browser statically compiles the engine; the embedding shared
 # library and its development header are only needed by external embedders,
@@ -98,11 +103,22 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 
 %suse_update_desktop_file org.nordstjernen.WebBrowser
 
+%post
+%{_sbindir}/update-alternatives --install %{_bindir}/internet-browser \
+    internet-browser %{_bindir}/nordstjernen 60
+
+%postun
+if [ ! -f %{_bindir}/nordstjernen ]; then
+    %{_sbindir}/update-alternatives --remove internet-browser %{_bindir}/nordstjernen
+fi
+
 %files
 %doc README.md
 %license %{_datadir}/nordstjernen/License.md
 %license %{_datadir}/nordstjernen/COPYING
 %{_bindir}/nordstjernen
+%{_bindir}/internet-browser
+%ghost %{_sysconfdir}/alternatives/internet-browser
 %{_bindir}/nordstjernen-renderer
 %{_bindir}/nordstjernen-audio
 %{_datadir}/applications/org.nordstjernen.WebBrowser.desktop

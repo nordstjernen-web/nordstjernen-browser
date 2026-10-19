@@ -108,6 +108,7 @@ meson compile -C builddir
 %install
 rm -rf %{buildroot}
 DESTDIR=%{buildroot} meson install --no-rebuild -C builddir
+rm %{buildroot}%{_bindir}/internet-browser
 
 # The browser statically compiles the engine; the embedding shared library
 # and its header serve external embedders only.
@@ -135,8 +136,15 @@ fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q %{_datadir}/applications || :
 fi
+if command -v update-alternatives >/dev/null 2>&1; then
+    update-alternatives --install %{_bindir}/internet-browser internet-browser \\
+        %{_bindir}/nordstjernen 60 || :
+fi
 
 %postun
+if [ "\$1" = 0 ] && command -v update-alternatives >/dev/null 2>&1; then
+    update-alternatives --remove internet-browser %{_bindir}/nordstjernen || :
+fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t %{_datadir}/icons/hicolor || :
 fi

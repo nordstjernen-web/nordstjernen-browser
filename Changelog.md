@@ -111,6 +111,13 @@ Changelog:
 * Text selection: a selection is no longer lost whenever the page
   changes its content, such as a ticking clock or a click handler that
   updates a counter.
+* `internet-browser` is a second name for the browser. `meson install`
+  links it to `nordstjernen` in the binary directory; the `.deb` and `.rpm`
+  packages register it with `update-alternatives`, so Nordstjernen installs
+  beside Northstar and Southstar and `update-alternatives --config
+  internet-browser` picks which one the name starts; the Alpine package
+  creates the link when the name is free; the Windows installer adds it
+  as an App Paths alias and the MSIX package as an app execution alias.
 
 1.0.34:
 ======

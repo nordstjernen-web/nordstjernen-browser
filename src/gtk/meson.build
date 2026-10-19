@@ -51,3 +51,11 @@ executable(
   link_args: nordstjernen_exe_link_args + nordstjernen_gtk_platform_link_args,
   install: true,
 )
+
+if host_machine.system() != 'windows'
+  install_symlink(
+    'internet-browser',
+    pointing_to: 'nordstjernen',
+    install_dir: get_option('bindir'),
+  )
+endif

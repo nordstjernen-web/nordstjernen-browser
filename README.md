@@ -186,6 +186,20 @@ Windows, Fedora, openSUSE and macOS instructions are in
 [docs/](docs/README.md); keyboard, mouse and touch controls are in
 [docs/Controls.md](docs/Controls.md).
 
+### The `internet-browser` command
+
+`meson install` puts `internet-browser` beside `nordstjernen` in the binary
+directory, a symbolic link to it, so `internet-browser https://example.com`
+starts Nordstjernen. Northstar and Southstar install the same name, so the
+command opens whichever of the browsers is installed. The `.deb` and `.rpm`
+packages register it with `update-alternatives` instead of shipping the
+link, so the browsers install side by side and
+`sudo update-alternatives --config internet-browser` chooses the one it
+runs. The Alpine package creates the link when no other browser holds
+the name. On Windows the installer registers `internet-browser` as an App
+Paths alias (the Run dialog and `start internet-browser` find it) and the
+MSIX package declares it as an app execution alias.
+
 ## Dependencies
 
 Nordstjernen is an independent engine — no upstream browser code.
