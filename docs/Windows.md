@@ -54,8 +54,9 @@ GPL-configured, which is fine for a local developer build; the
 redistributable packages instead link the minimal LGPL FFmpeg that
 `scripts/build-ffmpeg-lgpl.sh` builds, as CI does.
 
-`git` is needed because the first `meson setup` clones the ns-pango
-subproject (`subprojects/ns-pango.wrap`). MSYS2's stock `gtk4` must be
+`git` is only needed for `-Dquickjs=quickjs`, whose wrap clones the
+original QuickJS; the text-shaping Pango fork, web-text-lib, is vendored
+in-tree at `src/web-text-lib/`. MSYS2's stock `gtk4` must be
 4.22.1 or newer — meson enforces that floor on Windows.
 `mingw-w64-ucrt-x86_64-libavif` and `mingw-w64-ucrt-x86_64-libjxl` are optional and
 add AVIF and JPEG XL decoding (CI installs both).
@@ -98,10 +99,10 @@ The QuickJS JS engine (forked from
 [quickjs-ng](https://github.com/quickjs-ng/quickjs)) and the lexbor
 HTML / WHATWG-URL parser are both vendored in-tree at
 `src/quickjs/` and `src/lexbor/` respectively, and Wuffs and pl_mpeg
-ship as single-file sources under `subprojects/`. The first
-`meson setup` still needs the network for two subprojects: it clones
-ns-pango (the text-shaping Pango fork) with git, and downloads the
-pinned wgpu-native MinGW release for WebGPU
+ship as single-file sources under `subprojects/`; web-text-lib (the
+text-shaping Pango fork) is vendored in-tree at `src/web-text-lib/`. The
+first `meson setup` still needs the network for one subproject: it
+downloads the pinned wgpu-native MinGW release for WebGPU
 (`subprojects/wgpu-native-windows-x86_64-gnu.wrap`), which is linked
 statically.
 

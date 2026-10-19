@@ -10,12 +10,11 @@ is resolved from Alpine system packages, and `abuild`'s `tracedeps` derives
 the `depends=` automatically from the linked shared objects, so the
 dependency list is always exactly what the binary needs.
 
-The build is fully offline: Wuffs and pl_mpeg are vendored in the source
-tarball, and `build()` passes `-Dns-pango=disabled` so the one remaining
-subproject — ns-pango, which meson clones with git — is never reached.
-Text shapes through Alpine's `pango-dev` instead, and nothing is fetched
-during Alpine's network-isolated `build()` phase. `build()` also passes
-`-Dwebgpu=disabled`: wgpu-native publishes no musl release. The APKBUILD
+The build is fully offline: Wuffs, pl_mpeg and web-text-lib (the
+text-shaping Pango fork, `src/web-text-lib/`) are vendored in the source
+tarball and built from it, so nothing is fetched during Alpine's
+network-isolated `build()` phase. `build()` passes `-Dwebgpu=disabled`:
+wgpu-native publishes no musl release. The APKBUILD
 declares `arch="x86_64 aarch64"`.
 
 `makedepends` also lists every auto-detected optional library, so the

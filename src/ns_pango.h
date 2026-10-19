@@ -6,7 +6,7 @@
 #ifndef NS_PANGO_H
 #define NS_PANGO_H
 
-#ifdef NS_USE_NS_PANGO
+#ifdef NS_USE_WEB_TEXT_LIB
 #include <ns-pango/pangocairo.h>
 #ifdef NS_HAVE_PANGOFT2
 #include <ns-pango/pangofc-fontmap.h>

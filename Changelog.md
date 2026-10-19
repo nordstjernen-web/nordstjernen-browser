@@ -3,6 +3,11 @@ Changelog:
 
 1.0.35:
 ======
+* Text layout: the ns-pango Pango fork is now vendored in-tree as
+  web-text-lib (src/web-text-lib/) and built with subdir() like lexbor and
+  QuickJS, instead of being cloned from git at setup time. Offline and
+  distribution builds now shape text through it too. The meson option is
+  renamed -Dweb-text-lib (was -Dns-pango).
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
   for crashes and double frees fixed twenty-five bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a

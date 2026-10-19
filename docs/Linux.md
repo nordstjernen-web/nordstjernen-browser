@@ -54,18 +54,18 @@ Optional, auto-detected: `libpoppler-glib-dev` (PDF rendering),
 `libjxl-dev` (JPEG XL; `-Djxl=disabled` drops it).
 
 `meson setup` checks version floors up front: libcurl 8.5+, GTK 4.14+,
-and — for the default ns-pango text stack — GLib 2.80+, cairo 1.18+,
+and — for the default web-text-lib text stack — GLib 2.80+, cairo 1.18+,
 HarfBuzz 8.3+, FriBiDi 1.0.6+ and fontconfig 2.15+. Ubuntu 24.04, Debian 13 and Fedora
 40 are the oldest releases that ship all of them;
-`-Dns-pango=disabled` drops the text-stack floors by shaping through the
+`-Dweb-text-lib=disabled` drops the text-stack floors by shaping through the
 system Pango.
 
-The first `meson setup` also fetches two subprojects, so it needs network
-access and `git`: ns-pango (cloned from git, `subprojects/ns-pango.wrap`)
-and, on glibc `x86_64`/`aarch64`, the pinned wgpu-native release for
-WebGPU (`subprojects/wgpu-native-linux-*.wrap`) unless a system
-`wgpu_native` pkg-config file or `-Dwgpu_native_root` supplies it. For an
-offline build pass `-Dns-pango=disabled -Dwebgpu=disabled`, as the distro
+web-text-lib, the Pango fork that shapes text, is vendored in-tree at
+`src/web-text-lib/` and builds with no network. On glibc
+`x86_64`/`aarch64` the first `meson setup` does fetch the pinned
+wgpu-native release for WebGPU (`subprojects/wgpu-native-linux-*.wrap`)
+unless a system `wgpu_native` pkg-config file or `-Dwgpu_native_root`
+supplies it. For an offline build pass `-Dwebgpu=disabled`, as the distro
 packages do.
 
 `ccache` is the biggest build-time win — `meson` picks it up
