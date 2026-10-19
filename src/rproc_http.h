@@ -90,6 +90,9 @@ int  ns_rproc_http_open_ex(ns_rproc_http *r, const char *url,
                            int viewport_width, int viewport_height,
                            int settle_ms, int history, int user_activated,
                            ns_rproc_http_page *out);
+int  ns_rproc_http_reload(ns_rproc_http *r, const char *url,
+                          int viewport_width, int viewport_height,
+                          int settle_ms, ns_rproc_http_page *out);
 int  ns_rproc_http_render(ns_rproc_http *r, int width, int height,
                           int scroll_x, int scroll_y, double scale,
                           int caret_active, ns_rproc_http_frame *out);

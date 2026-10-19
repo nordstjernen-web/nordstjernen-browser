@@ -22,6 +22,7 @@
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
 #define NS_PROC_FRAME_WAKE_MS  16
+#define NS_PROC_RELOAD_RESTART_US (1000 * 1000)
 #define NS_PV_WHEEL_STEP_PX    100.0
 #define NS_PV_WHEEL_TAU_MS     45.0
 #define NS_PV_FLING_TAU_MS     400.0
@@ -104,6 +105,7 @@ typedef struct {
     gboolean inspect;
     gboolean history;
     gboolean user_activated;
+    gboolean reload;
     gboolean caret_active;
     ns_rproc_http_tiles_req tiles;
     char   *have;
@@ -187,6 +189,8 @@ struct NsProcView {
     GAsyncQueue *queue;
     ns_rproc_http *proc;
     GMutex      proc_lock;
+    gint64      busy_since_us;
+    ReqType     busy_type;
     char       *renderer_path;
     gboolean    private_mode;
 
@@ -951,6 +955,47 @@ post(Res *res)
     g_idle_add(on_result, res);
 }
 
+static void
+req_free(Req *req)
+{
+    g_free(req->url);
+    g_free(req->key);
+    g_free(req->code);
+    g_free(req->query);
+    g_free(req->export_dest);
+    g_free(req->paths);
+    g_free(req->have);
+    g_free(req->hold);
+    g_free(req);
+}
+
+static gboolean
+pv_load_superseded(NsProcView *v, const Req *req)
+{
+    return req->seq != g_atomic_int_get(&v->load_seq);
+}
+
+static void
+pv_note_busy(NsProcView *v, const Req *req)
+{
+    g_mutex_lock(&v->proc_lock);
+    v->busy_since_us = req ? g_get_monotonic_time() : 0;
+    v->busy_type = req ? req->type : REQ_QUIT;
+    g_mutex_unlock(&v->proc_lock);
+}
+
+static int
+pv_open(NsProcView *v, const Req *req, int settle, ns_rproc_http_page *pg)
+{
+    if (!v->proc)
+        return -1;
+    if (req->reload)
+        return ns_rproc_http_reload(v->proc, req->url, req->vw, req->vh,
+                                    settle, pg);
+    return ns_rproc_http_open_ex(v->proc, req->url, req->vw, req->vh, settle,
+                                 req->history, req->user_activated, pg);
+}
+
 static gpointer
 worker_main(gpointer data)
 {
@@ -958,10 +1003,14 @@ worker_main(gpointer data)
     for (;;) {
         Req *req = g_async_queue_pop(v->queue);
         if (req->type == REQ_QUIT) {
-            g_free(req->url);
-            g_free(req);
+            req_free(req);
             break;
         }
+        if (req->type == REQ_LOAD && pv_load_superseded(v, req)) {
+            req_free(req);
+            continue;
+        }
+        pv_note_busy(v, req);
         if (!v->proc && !v->closed) {
             pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                      NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
@@ -980,21 +1029,18 @@ worker_main(gpointer data)
             res->seq = req->seq;
             ns_rproc_http_page pg;
             int settle = pv_settle_ms();
-            int rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
+            int rc = pv_open(v, req, settle, &pg);
             if (rc != 0 && v->proc && !v->closed) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
-                pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
-                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
-                                         v->private_mode));
-                if (v->proc)
-                    ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
-                rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
+                if (!pv_load_superseded(v, req)) {
+                    pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(
+                                        v->renderer_path, NS_PROC_MAX_WIDTH,
+                                        NS_PROC_MAX_HEIGHT, v->private_mode));
+                    if (v->proc)
+                        ns_rproc_http_set_device_pixel_ratio(v->proc,
+                                                             req->dpr);
+                    rc = pv_open(v, req, settle, &pg);
+                }
             }
             if (rc == 0 && pg.ok) {
                 res->ok = TRUE;
@@ -1320,15 +1366,8 @@ worker_main(gpointer data)
                     &res->favicon_stride);
             post(res);
         }
-        g_free(req->url);
-        g_free(req->key);
-        g_free(req->code);
-        g_free(req->query);
-        g_free(req->export_dest);
-        g_free(req->paths);
-        g_free(req->have);
-        g_free(req->hold);
-        g_free(req);
+        pv_note_busy(v, NULL);
+        req_free(req);
     }
     if (v->proc)
         ns_rproc_http_close(pv_swap_proc(v, NULL));
@@ -2423,16 +2462,47 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
 
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
 
+static gboolean
+req_outlived_by_load(const Req *req)
+{
+    switch (req->type) {
+    case REQ_LOAD: case REQ_RENDER: case REQ_TICK: case REQ_LINK:
+    case REQ_CLICK: case REQ_VIEWPORT: case REQ_KEY: case REQ_HOVER:
+    case REQ_RELEASE: case REQ_FIND: case REQ_FAVICON:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 static void
-do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
-        gboolean user_activated)
+drop_stale_requests(NsProcView *v)
+{
+    GQueue keep = G_QUEUE_INIT;
+    g_async_queue_lock(v->queue);
+    Req *req;
+    while ((req = g_async_queue_try_pop_unlocked(v->queue))) {
+        if (req_outlived_by_load(req))
+            req_free(req);
+        else
+            g_queue_push_tail(&keep, req);
+    }
+    while ((req = g_queue_pop_head(&keep)))
+        g_async_queue_push_unlocked(v->queue, req);
+    g_async_queue_unlock(v->queue);
+}
+
+static void
+do_load_full(NsProcView *v, const char *url, gboolean record,
+             gboolean history, gboolean user_activated, gboolean reload)
 {
     if (!url || !*url)
         return;
     pv_perm_resolve(v, FALSE);
     pv_audio_shutdown(v);
+    drop_stale_requests(v);
     v->pending_record = record;
-    int seq = ++v->load_seq;
+    int seq = g_atomic_int_add(&v->load_seq, 1) + 1;
     ++v->render_seq;
     ++v->link_seq;
     ++v->click_seq;
@@ -2498,7 +2568,15 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     req->dpr = v->last_vp_dpr;
     req->history = history;
     req->user_activated = user_activated;
+    req->reload = reload;
     push_req(v, req);
+}
+
+static void
+do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
+        gboolean user_activated)
+{
+    do_load_full(v, url, record, history, user_activated, FALSE);
 }
 
 void
@@ -2538,15 +2616,37 @@ ns_proc_view_forward(NsProcView *v)
     do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
 }
 
+static void
+restart_wedged_renderer(NsProcView *v)
+{
+    g_mutex_lock(&v->proc_lock);
+    if (v->proc && v->busy_since_us > 0 && v->busy_type != REQ_PRINT &&
+        v->busy_type != REQ_EXPORT &&
+        g_get_monotonic_time() - v->busy_since_us >=
+            NS_PROC_RELOAD_RESTART_US) {
+        ns_rproc_http_interrupt(v->proc);
+        ns_rproc_http_terminate(v->proc);
+    }
+    g_mutex_unlock(&v->proc_lock);
+}
+
 void
 ns_proc_view_reload(NsProcView *v)
 {
     v->render_restarts = 0;
-    if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
-        do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, FALSE,
-                TRUE);
+    char *url = NULL;
+    if (v->pending_url)
+        url = g_strdup(v->pending_url);
+    else if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
+        url = g_strdup(g_ptr_array_index(v->history, v->hist_index));
     else if (v->current_url)
-        do_load(v, v->current_url, FALSE, FALSE, TRUE);
+        url = g_strdup(v->current_url);
+    if (!url)
+        return;
+    gboolean record = v->pending_url != NULL && v->pending_record;
+    do_load_full(v, url, record, FALSE, TRUE, TRUE);
+    g_free(url);
+    restart_wedged_renderer(v);
 }
 
 void

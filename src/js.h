@@ -194,6 +194,7 @@ gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_has_pending_work(const ns_js *js);
 gboolean ns_js_needs_tick(const ns_js *js);
 gboolean ns_js_needs_frame_tick(const ns_js *js);
+gboolean ns_js_has_work_before(const ns_js *js, gint64 deadline_us);
 
 void ns_js_dump_stats(ns_js *js, GString *out);
 

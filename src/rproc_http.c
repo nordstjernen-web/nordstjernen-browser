@@ -508,11 +508,10 @@ ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                                  settle_ms, 0, 1, out);
 }
 
-int
-ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
-                      int viewport_height, int settle_ms, int history,
-                      int user_activated,
-                      ns_rproc_http_page *out)
+static int
+rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
+           int viewport_height, int settle_ms, int history,
+           int user_activated, int reload, ns_rproc_http_page *out)
 {
     if (!r || !url || !out)
         return -1;
@@ -525,10 +524,11 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
-                      "\"user_activated\":%d,\"dpr\":%d.%03d}",
+                      "\"user_activated\":%d,\"reload\":%d,"
+                      "\"dpr\":%d.%03d}",
                       ue, viewport_width, viewport_height, settle_ms,
                       history ? 1 : 0, user_activated ? 1 : 0,
-                      dpr / 1000, dpr % 1000);
+                      reload ? 1 : 0, dpr / 1000, dpr % 1000);
     free(ue);
     if (jn < 0)
         return -1;
@@ -576,6 +576,24 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     }
     free(body);
     return 0;
+}
+
+int
+ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
+                      int viewport_height, int settle_ms, int history,
+                      int user_activated, ns_rproc_http_page *out)
+{
+    return rproc_open(r, url, viewport_width, viewport_height, settle_ms,
+                      history, user_activated, 0, out);
+}
+
+int
+ns_rproc_http_reload(ns_rproc_http *r, const char *url, int viewport_width,
+                     int viewport_height, int settle_ms,
+                     ns_rproc_http_page *out)
+{
+    return rproc_open(r, url, viewport_width, viewport_height, settle_ms, 0,
+                      1, 1, out);
 }
 
 int

@@ -771,12 +771,10 @@ typedef struct settle_ctx {
 #define NS_SETTLE_QUIET_TICKS 3
 
 static gboolean
-browser_settle_quiet(ns_browser *b)
+browser_settle_quiet(ns_browser *b, gint64 deadline_us)
 {
     if (b->dirty) return FALSE;
-    if (b->anim && ns_anim_has_active(b->anim)) return FALSE;
-    if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
-    if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
+    if (b->js && ns_js_has_work_before(b->js, deadline_us)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
     if (b->videos && ns_video_cache_has_pending(b->videos)) return FALSE;
     if (g_main_context_pending(NULL)) return FALSE;
@@ -823,7 +821,7 @@ settle_tick_cb(gpointer user_data)
         if (browser_relayout_from_mutation(b))
             b->dirty = FALSE;
     }
-    if (browser_settle_quiet(b)) {
+    if (browser_settle_quiet(b, ctx->deadline_us)) {
         if (++ctx->quiet_ticks >= NS_SETTLE_QUIET_TICKS) {
             g_main_loop_quit(ctx->loop);
             return G_SOURCE_CONTINUE;
@@ -842,13 +840,13 @@ browser_settle(ns_browser *b, int settle_ms)
         ns_video_cache_discover(b->videos, b->layout, b->doc, g_get_monotonic_time());
         ns_video_cache_note_layout(b->videos, b->layout);
     }
-    if (browser_settle_quiet(b)) return;
+    gint64 deadline_us = g_get_monotonic_time() + (gint64)settle_ms * 1000;
+    if (browser_settle_quiet(b, deadline_us)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     settle_ctx ctx = {
         .b = b,
         .loop = loop,
-        .deadline_us = g_get_monotonic_time() +
-                       (gint64)settle_ms * 1000,
+        .deadline_us = deadline_us,
     };
     guint quit = g_timeout_add(settle_ms, settle_quit_cb, loop);
     guint tick = g_timeout_add(16, settle_tick_cb, &ctx);
@@ -1478,6 +1476,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 
 static char *g_pending_referrer;
 static int g_pending_user_activated = -1;
+static gboolean g_pending_reload;
 
 void
 ns_browser_set_next_referrer(const char *url)
@@ -1490,6 +1489,12 @@ void
 ns_browser_set_next_user_activated(int user_activated)
 {
     g_pending_user_activated = user_activated ? 1 : 0;
+}
+
+void
+ns_browser_set_next_reload(int reload)
+{
+    g_pending_reload = reload != 0;
 }
 
 void
@@ -1517,6 +1522,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_pending_referrer = NULL;
     int pending_user_activated = g_pending_user_activated;
     g_pending_user_activated = -1;
+    gboolean reload = g_pending_reload;
+    g_pending_reload = FALSE;
 
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
         const char *rest = url;
@@ -1565,8 +1572,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     gboolean user_activated = pending_user_activated >= 0
         ? pending_user_activated != 0 : referrer == NULL;
     if (https_url) {
-        resp = ns_engine_navigate_blocking(https_url, referrer,
-                                           user_activated, &err);
+        resp = reload ? ns_engine_reload_blocking(https_url, referrer, &err)
+                      : ns_engine_navigate_blocking(https_url, referrer,
+                                                    user_activated, &err);
         if (resp && !resp->error && resp->body) {
             fetch_url = https_url;
         } else {
@@ -1575,13 +1583,15 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             g_clear_error(&err);
         }
     }
-    if (!resp)
-        resp = body
-            ? ns_engine_navigate_post_blocking(
-                  fetch_url, referrer, body, body_len, content_type,
-                  user_activated, &err)
-            : ns_engine_navigate_blocking(fetch_url, referrer,
-                                          user_activated, &err);
+    if (!resp && body)
+        resp = ns_engine_navigate_post_blocking(fetch_url, referrer, body,
+                                                body_len, content_type,
+                                                user_activated, &err);
+    else if (!resp && reload)
+        resp = ns_engine_reload_blocking(fetch_url, referrer, &err);
+    else if (!resp)
+        resp = ns_engine_navigate_blocking(fetch_url, referrer,
+                                           user_activated, &err);
     if (resp && !body && (resp->error || resp->status >= 400) &&
         (!resp->body || resp->body->len == 0)) {
         gboolean tls_failure = resp->error &&

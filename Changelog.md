@@ -71,6 +71,22 @@ Changelog:
 * Text fields: the caret stops blinking after ten seconds without
   moving and stays visible, as GTK's own fields do, instead of waking
   the browser twice a second for as long as a field has focus.
+* Reload: pages appear sooner after a reload or any navigation. The
+  first frame no longer waits out the whole 400 ms settle window for a
+  JavaScript timer that cannot fire inside it, a `requestAnimationFrame`
+  loop or a CSS animation; a 90 KB page with a five-second
+  `setInterval` now opens in about 120 ms instead of 480 ms.
+* Reload: the page is fetched again with `Cache-Control: max-age=0`
+  and revalidated instead of being shown from a still-fresh cache
+  entry, so it shows the server's current content as in other
+  browsers. The replaced page is discarded rather than kept in the
+  back-forward cache.
+* Reload: a renderer stuck on one request for over a second (a page
+  spinning in a script, or a load that never finishes) is restarted
+  when you press Reload, so the page always comes back. Navigating
+  drops queued work for the page being left, a load superseded before
+  it starts is skipped, and Reload retries a page that is still loading
+  or failed to load instead of the previous history entry.
 
 1.0.34:
 ======

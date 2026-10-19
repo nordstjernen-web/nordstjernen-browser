@@ -667,26 +667,31 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/open") == 0) {
         char *url = json_get_str(body, "url");
         long w = 0, h = 0, settle = 0, history = 0, user_activated = 0;
+        long reload = 0;
         json_get_long(body, "width", &w);
         json_get_long(body, "height", &h);
         json_get_long(body, "settle_ms", &settle);
         json_get_long(body, "history", &history);
         json_get_long(body, "user_activated", &user_activated);
+        json_get_long(body, "reload", &reload);
         int vw = css_viewport_extent(w, s->max_w);
         int vh = css_viewport_extent(h, s->max_h);
         double dpr = request_device_pixel_ratio(body);
         if (dpr > 0)
             ns_browser_set_device_pixel_ratio(NULL, dpr);
-        ns_browser *restored = (history && url)
+        ns_browser *restored = (history && !reload && url)
             ? session_bfcache_take(s, url) : NULL;
-        char *referrer = (!history && s->cur) ? ns_browser_url(s->cur) : NULL;
-        if (s->cur) {
+        char *referrer = (!history && !reload && s->cur)
+            ? ns_browser_url(s->cur) : NULL;
+        if (s->cur && reload)
+            ns_browser_close(s->cur);
+        else if (s->cur)
             session_bfcache_park_or_close(s, s->cur);
-            s->cur = NULL;
-        }
+        s->cur = NULL;
         if (referrer && !restored && url && ns_url_same_origin(referrer, url))
             ns_browser_set_next_referrer(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
+        ns_browser_set_next_reload(reload != 0);
         g_free(referrer);
         s->frame_valid = 0;
         ns_net_log_clear();
