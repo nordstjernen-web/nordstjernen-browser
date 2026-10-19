@@ -122,7 +122,13 @@ focused, typing and editing keys go to that field instead.
 
 Moving the pointer updates the cursor (a hand over links) and shows a
 link's target URL in the status bar while hovered, and `:hover` styling
-and `mouseover`/`mousemove` JS events fire. Clicking an `<audio>` or
+and `mouseover`/`mousemove` JS events fire. Every button reaches the
+page as `pointerdown`/`mousedown` and `pointerup`/`mouseup` followed by
+`click` (left) or `auxclick` (middle, right), with the click count in
+`detail` and a `dblclick` on the second click; a page that cancels the
+`click` or `auxclick` keeps a `Ctrl`+click or middle click from opening
+a new tab. `setPointerCapture()` and pointer lock send the pointer's
+events to the capturing element. Clicking an `<audio>` or
 `<video>` in a format the engine cannot play does not launch an external
 player (see [media.md](media.md#other-media)).
 

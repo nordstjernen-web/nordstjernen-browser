@@ -512,13 +512,6 @@ do_click(const RjValue *args, McpResult *r, int count)
         g_free(error);
         return;
     }
-    if (count == 2) {
-        char *call = g_strdup_printf("dblclick(%d,%d)", (int)t.vx, (int)t.vy);
-        char *ignored = page_call(tab, call, &error);
-        g_free(ignored);
-        g_free(call);
-        g_clear_pointer(&error, g_free);
-    }
     res_add(r, "\n%s.", count == 2 ? "Double-clicked" : "Clicked");
     add_state(r, resp_result(resp));
     rj_free(resp);

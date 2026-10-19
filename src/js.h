@@ -263,6 +263,17 @@ gboolean ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target,
                                     gboolean alt,   gboolean meta,
                                     const ns_node *related,
                                     gboolean *default_prevented);
+gboolean ns_js_dispatch_mouse_event_detail(ns_js *js, const ns_node *target,
+                                           const char *type,
+                                           double client_x, double client_y,
+                                           double page_x, double page_y,
+                                           int button, int buttons, int detail,
+                                           gboolean shift, gboolean ctrl,
+                                           gboolean alt, gboolean meta,
+                                           const ns_node *related,
+                                           gboolean *default_prevented);
+const ns_node *ns_js_pointer_event_target(ns_js *js, const ns_node *hit);
+void           ns_js_release_pointer_capture(ns_js *js);
 
 ns_js_drag_session *ns_js_drag_session_new(ns_js *js);
 void                ns_js_drag_session_free(ns_js_drag_session *session);

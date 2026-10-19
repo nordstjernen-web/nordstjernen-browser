@@ -21,7 +21,23 @@ typedef struct ns_selection {
     gboolean      active;
 } ns_selection;
 
+typedef struct ns_selection_end_mark {
+    const ns_node *dom;
+    int            nth;
+    gsize          byte;
+} ns_selection_end_mark;
+
+typedef struct ns_selection_mark {
+    ns_selection_end_mark anchor;
+    ns_selection_end_mark focus;
+    gboolean              active;
+} ns_selection_mark;
+
 void ns_selection_clear(ns_selection *sel);
+void ns_selection_save(const ns_box *root, const ns_selection *sel,
+                       ns_selection_mark *out);
+void ns_selection_restore(const ns_box *root, const ns_selection_mark *mark,
+                          ns_selection *sel);
 gboolean ns_selection_has_range(const ns_selection *sel);
 
 gboolean ns_selection_text_at(const ns_box *root, double x, double y);
