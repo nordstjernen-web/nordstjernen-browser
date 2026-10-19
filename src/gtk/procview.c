@@ -63,7 +63,7 @@ typedef enum {
     REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON,
     REQ_TICK, REQ_PRINT, REQ_QUIT
 } ReqType;
-typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
+typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
 enum {
     DEV_TAB_CONSOLE = 0,
@@ -87,6 +87,9 @@ typedef struct {
     int     x, y;
     int     dx, dy;
     int     mods;
+    int     button;
+    int     buttons;
+    int     clicks;
     int     kind;
     int     keycode;
     int     fallback_scroll;
@@ -147,6 +150,7 @@ typedef struct {
     LinkAct          action;
     int              kind;
     int              prevented;
+    int              newtab;
     int              edit;
     int              fallback_scroll;
     double           fallback_x;
@@ -307,6 +311,9 @@ struct NsProcView {
     guint       hover_after_scroll_id;
     double      drag_start_x, drag_start_y;
     double      pointer_x, pointer_y;
+    int         pointer_mods;
+    int         pointer_buttons;
+    int         buttons_pressed;
     gboolean    drag_anchored;
     gboolean    sb_probe, sb_dragging, sb_have_last;
     double      sb_last_x, sb_last_y;
@@ -1182,7 +1189,8 @@ worker_main(gpointer data)
             res->type = RES_CLICK;
             res->seq = req->seq;
             res->href = v->proc
-                ? ns_rproc_http_click(v->proc, req->x, req->y, req->mods)
+                ? ns_rproc_http_press(v->proc, req->x, req->y, req->mods,
+                                      req->button, req->clicks)
                 : NULL;
             post(res);
         } else if (req->type == REQ_VIEWPORT) {
@@ -1230,10 +1238,13 @@ worker_main(gpointer data)
             res->view = pv_ref(v);
             res->type = RES_HOVER;
             res->seq = req->seq;
-            if (v->proc)
-                res->ok = ns_rproc_http_hover_full(v->proc, req->x, req->y,
-                                                   &res->href,
-                                                   &res->cursor) == 1;
+            if (v->proc) {
+                int rc = ns_rproc_http_hover_buttons(v->proc, req->x, req->y,
+                                                     req->mods, req->buttons,
+                                                     &res->href, &res->cursor);
+                res->ok = rc == 1;
+                res->animating = rc == 2;
+            }
             post(res);
         } else if (req->type == REQ_SCROLLBAR) {
             Res *res = g_new0(Res, 1);
@@ -1266,9 +1277,11 @@ worker_main(gpointer data)
             res->type = RES_RELEASE;
             res->seq = req->seq;
             res->href = v->proc
-                ? ns_rproc_http_release_at(v->proc, req->x, req->y, &res->ok)
+                ? ns_rproc_http_release_button(v->proc, req->x, req->y,
+                                               req->button, req->clicks,
+                                               &res->ok, &res->newtab)
                 : NULL;
-            if (v->proc && (!res->href || !*res->href))
+            if (v->proc && req->button == 0 && (!res->href || !*res->href))
                 res->media_url = ns_rproc_http_media_at(v->proc, req->x, req->y,
                                                    &res->media_is_video,
                                                    &res->media_stream);
@@ -2090,6 +2103,8 @@ start_hover(NsProcView *v, int x, int y)
     req->seq = ++v->hover_seq;
     req->x = x;
     req->y = y;
+    req->mods = v->pointer_mods;
+    req->buttons = v->pointer_buttons;
     push_req(v, req);
 }
 
@@ -2327,7 +2342,7 @@ on_im_commit(GtkIMContext *im, const char *text, gpointer data)
 }
 
 static void
-start_release(NsProcView *v, int x, int y)
+start_release(NsProcView *v, int x, int y, int button, int clicks)
 {
     if (!v->opened)
         return;
@@ -2335,6 +2350,8 @@ start_release(NsProcView *v, int x, int y)
     req->type = REQ_RELEASE;
     req->x = x;
     req->y = y;
+    req->button = button;
+    req->clicks = clicks;
     push_req(v, req);
 }
 
@@ -2353,7 +2370,7 @@ start_select(NsProcView *v, int kind, int x, int y)
 }
 
 static void
-start_click(NsProcView *v, int x, int y, int mods)
+start_click(NsProcView *v, int x, int y, int mods, int button, int clicks)
 {
     if (!v->opened)
         return;
@@ -2363,6 +2380,8 @@ start_click(NsProcView *v, int x, int y, int mods)
     req->x = x;
     req->y = y;
     req->mods = mods;
+    req->button = button;
+    req->clicks = clicks;
     push_req(v, req);
 }
 
@@ -3093,8 +3112,6 @@ on_result(gpointer data)
             if (res->action == ACT_NAVIGATE) {
                 navigated = TRUE;
                 ns_proc_view_load(v, res->href);
-            } else if (res->action == ACT_NEWTAB) {
-                post_emit(v, NS_PROC_EVT_NEWTAB, res->href);
             }
         } else {
             post_emit(v, NS_PROC_EVT_STATUS, "");
@@ -3122,6 +3139,8 @@ on_result(gpointer data)
         }
         if (res->ok)
             request_render(v);
+        else if (res->animating && !v->page_animating)
+            request_tick(v);
         if (v->hover_pending) {
             v->hover_pending = FALSE;
             start_hover(v, v->hover_pending_x, v->hover_pending_y);
@@ -3164,7 +3183,11 @@ on_result(gpointer data)
                 request_render(v);
         }
     } else if (res->type == RES_RELEASE) {
-        if (res->href && *res->href) {
+        if (res->href && *res->href && res->newtab) {
+            post_emit(v, NS_PROC_EVT_NEWTAB, res->href);
+            if (res->ok)
+                request_render(v);
+        } else if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             ns_proc_view_load(v, res->href);
         } else if (res->ok) {
@@ -3869,11 +3892,78 @@ show_context_menu(NsProcView *v, const char *href, int edit)
     gtk_popover_popup(GTK_POPOVER(v->ctx_popover));
 }
 
+static int
+pv_dom_mods(GdkModifierType state)
+{
+    return ((state & GDK_SHIFT_MASK)   ? 1 : 0) |
+           ((state & GDK_CONTROL_MASK) ? 2 : 0) |
+           ((state & GDK_ALT_MASK)     ? 4 : 0) |
+           ((state & GDK_META_MASK)    ? 8 : 0);
+}
+
+static int
+pv_dom_buttons(GdkModifierType state)
+{
+    return ((state & GDK_BUTTON1_MASK) ? 1 : 0) |
+           ((state & GDK_BUTTON3_MASK) ? 2 : 0) |
+           ((state & GDK_BUTTON2_MASK) ? 4 : 0);
+}
+
+static int
+pv_gesture_dom_button(GtkGestureClick *gesture)
+{
+    switch (gtk_gesture_single_get_button(GTK_GESTURE_SINGLE(gesture))) {
+    case GDK_BUTTON_MIDDLE:    return 1;
+    case GDK_BUTTON_SECONDARY: return 2;
+    default:                   return 0;
+    }
+}
+
+static int
+pv_dom_button_bit(int button)
+{
+    return button == 1 ? 4 : button == 2 ? 2 : 1;
+}
+
+static void
+pv_press_button(NsProcView *v, GtkGestureClick *gesture, int n_press,
+                int px, int py)
+{
+    GdkModifierType state = gtk_event_controller_get_current_event_state(
+        GTK_EVENT_CONTROLLER(gesture));
+    int button = pv_gesture_dom_button(gesture);
+    v->buttons_pressed |= pv_dom_button_bit(button);
+    start_click(v, px, py, pv_dom_mods(state), button, n_press);
+}
+
+static void
+pv_release_button(NsProcView *v, int button, double x, double y, int clicks)
+{
+    int bit = pv_dom_button_bit(button);
+    if (!(v->buttons_pressed & bit))
+        return;
+    v->buttons_pressed &= ~bit;
+    if (!v->opened)
+        return;
+    double s = cur_scale(v);
+    start_release(v, v->scroll_x + (int)(x / s), v->scroll_y + (int)(y / s),
+                  button, clicks);
+}
+
+static void
+on_button_cancel(GtkGesture *gesture, GdkEventSequence *sequence,
+                 gpointer data)
+{
+    (void)sequence;
+    NsProcView *v = data;
+    pv_release_button(v, pv_gesture_dom_button(GTK_GESTURE_CLICK(gesture)),
+                      v->pointer_x, v->pointer_y, 1);
+}
+
 static void
 on_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
                      gpointer data)
 {
-    (void)n_press;
     NsProcView *v = data;
     if (!v->opened)
         return;
@@ -3883,6 +3973,7 @@ on_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     double s = cur_scale(v);
     int px = v->scroll_x + (int)(x / s);
     int py = v->scroll_y + (int)(y / s);
+    pv_press_button(v, gesture, n_press, px, py);
     request_link(v, px, py, ACT_CONTEXT);
 }
 
@@ -3987,23 +4078,17 @@ on_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     GdkModifierType mods =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
-    guint button = gtk_gesture_single_get_current_button(
-        GTK_GESTURE_SINGLE(gesture));
     gtk_widget_grab_focus(v->area);
     double s = cur_scale(v);
     int px = v->scroll_x + (int)(x / s);
     int py = v->scroll_y + (int)(y / s);
-    if (button == GDK_BUTTON_MIDDLE || (mods & GDK_CONTROL_MASK)) {
-        request_link(v, px, py, ACT_NEWTAB);
+    if (pv_gesture_dom_button(gesture) != 0) {
+        pv_press_button(v, gesture, n_press, px, py);
         return;
     }
-    int kmods = ((mods & GDK_SHIFT_MASK)   ? 1 : 0) |
-                ((mods & GDK_CONTROL_MASK) ? 2 : 0) |
-                ((mods & GDK_ALT_MASK)     ? 4 : 0) |
-                ((mods & GDK_META_MASK)    ? 8 : 0);
     if (!(mods & GDK_SHIFT_MASK))
         v->has_selection = FALSE;
-    start_click(v, px, py, kmods);
+    pv_press_button(v, gesture, n_press, px, py);
     v->multi_click = n_press >= 2;
     if (mods & GDK_SHIFT_MASK) {
         start_select(v, 1, px, py);
@@ -4021,21 +4106,22 @@ static void
 on_released(GtkGestureClick *gesture, int n_press, double x, double y,
             gpointer data)
 {
-    (void)gesture; (void)n_press;
-    NsProcView *v = data;
-    if (v->opened) {
-        double s = cur_scale(v);
-        start_release(v, v->scroll_x + (int)(x / s),
-                      v->scroll_y + (int)(y / s));
-    }
+    pv_release_button(data, pv_gesture_dom_button(gesture), x, y, n_press);
 }
 
 static void
 on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
 {
-    (void)ctrl;
     NsProcView *v = data;
-    if (fabs(x - v->pointer_x) < 0.01 && fabs(y - v->pointer_y) < 0.01)
+    GdkModifierType state = gtk_event_controller_get_current_event_state(
+        GTK_EVENT_CONTROLLER(ctrl));
+    int mods = pv_dom_mods(state), buttons = pv_dom_buttons(state);
+    gboolean state_changed = mods != v->pointer_mods ||
+                             buttons != v->pointer_buttons;
+    v->pointer_mods = mods;
+    v->pointer_buttons = buttons;
+    if (!state_changed &&
+        fabs(x - v->pointer_x) < 0.01 && fabs(y - v->pointer_y) < 0.01)
         return;
     v->pointer_x = x;
     v->pointer_y = y;
@@ -4760,6 +4846,8 @@ ns_proc_view_new(void)
     GtkGesture *middle = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle), GDK_BUTTON_MIDDLE);
     g_signal_connect(middle, "pressed", G_CALLBACK(on_pressed), v);
+    g_signal_connect(middle, "released", G_CALLBACK(on_released), v);
+    g_signal_connect(middle, "cancel", G_CALLBACK(on_button_cancel), v);
     gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(middle));
 
     ctx_install_actions(v);
@@ -4767,6 +4855,8 @@ ns_proc_view_new(void)
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(secondary),
                                   GDK_BUTTON_SECONDARY);
     g_signal_connect(secondary, "pressed", G_CALLBACK(on_secondary_pressed), v);
+    g_signal_connect(secondary, "released", G_CALLBACK(on_released), v);
+    g_signal_connect(secondary, "cancel", G_CALLBACK(on_button_cancel), v);
     gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(secondary));
 
     GtkEventController *motion = gtk_event_controller_motion_new();
@@ -4862,13 +4952,13 @@ ns_proc_view_remote_click(NsProcView *v, double x, double y,
     for (int n = 1; n <= count && n <= 3; n++) {
         if (!(mods & 1))
             v->has_selection = FALSE;
-        start_click(v, px, py, mods);
+        start_click(v, px, py, mods, 0, n);
         v->multi_click = n >= 2;
         if (n == 2 || n == 3) {
             start_select(v, n == 2 ? 5 : 6, px, py);
             v->has_selection = TRUE;
         }
-        start_release(v, px, py);
+        start_release(v, px, py, 0, n);
     }
     return TRUE;
 }

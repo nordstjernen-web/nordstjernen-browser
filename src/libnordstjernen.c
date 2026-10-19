@@ -119,6 +119,10 @@ struct ns_browser {
     int             press_y;
     int             press_mods;
     gboolean        press_active;
+    int             buttons_down;
+    const ns_node  *aux_press_node;
+    int             aux_press_button;
+    int             aux_press_mods;
     gboolean        keydown_prevented;
     gboolean        key_text_suppressed;
     char           *search_query;
@@ -179,6 +183,9 @@ browser_prune_cached_nodes(ns_browser *browser)
         browser->press_node = NULL;
     if (browser->hover_node && !browser_node_alive(browser, browser->hover_node))
         browser->hover_node = NULL;
+    if (browser->aux_press_node &&
+        !browser_node_alive(browser, browser->aux_press_node))
+        browser->aux_press_node = NULL;
     if (browser->open_select && !browser_node_alive(browser, browser->open_select))
         browser->open_select = NULL;
     if (browser->range_drag && !browser_node_alive(browser, browser->range_drag)) {
@@ -244,6 +251,8 @@ browser_relayout(ns_browser *b)
     ns_css_set_doc_language(b->doc_language);
     if (b->js) ns_js_sync_window_metrics(b->js);
     b->search_active = NULL;
+    ns_selection_mark selection_mark;
+    ns_selection_save(b->layout, &b->selection, &selection_mark);
     ns_selection_clear(&b->selection);
     if (b->js && b->layout) ns_js_set_layout_root(b->js, NULL);
     if (b->layout) {
@@ -279,6 +288,7 @@ browser_relayout(ns_browser *b)
     b->relaying = FALSE;
     b->styles_serial = b->js ? ns_js_mutation_serial(b->js) : 0;
     ns_box_scroll_restore(b->layout, scroll_save);
+    ns_selection_restore(b->layout, &selection_mark, &b->selection);
     b->images_fetched = FALSE;
     b->has_deferred_lazy = FALSE;
     b->images_arrived_since_layout = FALSE;
@@ -3090,31 +3100,61 @@ ns_browser_select(ns_browser *browser, int kind, int x, int y)
     return NULL;
 }
 
+static int
+browser_button_bit(int button)
+{
+    switch (button) {
+    case 0:  return 1;
+    case 1:  return 4;
+    case 2:  return 2;
+    case 3:  return 8;
+    case 4:  return 16;
+    default: return 0;
+    }
+}
+
+static void
+browser_mouse_dispatch(ns_browser *b, const ns_node *target, const char *type,
+                       int x, int y, int button, int detail, int mods,
+                       const ns_node *related, gboolean *prevented)
+{
+    ns_js_dispatch_mouse_event_detail(b->js, target, type,
+                                      (double)x - b->cur_scroll_x,
+                                      (double)y - b->cur_scroll_y,
+                                      (double)x, (double)y, button,
+                                      b->buttons_down, detail,
+                                      (mods & 1) != 0, (mods & 2) != 0,
+                                      (mods & 4) != 0, (mods & 8) != 0,
+                                      related, prevented);
+}
+
 static void
 browser_hover_dispatch(ns_browser *b, const ns_node *target, int x, int y,
                        const char *ptr_type, const char *mouse_type,
-                       const ns_node *related)
+                       const ns_node *related, int mods)
 {
     if (!b->js || !target) return;
-    int buttons = b->press_active ? 1 : 0;
-    ns_js_dispatch_mouse_event(b->js, target, ptr_type,
-                               (double)x - b->cur_scroll_x,
-                               (double)y - b->cur_scroll_y,
-                               (double)x, (double)y, 0, buttons,
-                               FALSE, FALSE, FALSE, FALSE, related, NULL);
-    ns_js_dispatch_mouse_event(b->js, target, mouse_type,
-                               (double)x - b->cur_scroll_x,
-                               (double)y - b->cur_scroll_y,
-                               (double)x, (double)y, 0, buttons,
-                               FALSE, FALSE, FALSE, FALSE, related, NULL);
+    browser_mouse_dispatch(b, target, ptr_type, x, y, 0, -1, mods, related,
+                           NULL);
+    browser_mouse_dispatch(b, target, mouse_type, x, y, 0, -1, mods, related,
+                           NULL);
 }
 
 int
 ns_browser_hover(ns_browser *browser, int x, int y)
 {
+    return ns_browser_hover_full(browser, x, y, 0, -1);
+}
+
+int
+ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
+                      int buttons)
+{
     if (!browser || !browser->layout) return -1;
+    if (buttons >= 0) browser->buttons_down = buttons;
 
     const ns_node *node = browser_hit_node(browser, x, y);
+    if (browser->js) node = ns_js_pointer_event_target(browser->js, node);
 
     browser_prune_cached_nodes(browser);
     if (browser->range_drag) {
@@ -3131,19 +3171,21 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 
     gboolean dirty = FALSE;
     if (browser->js) {
+        gboolean was_dirty = browser->dirty;
         if (changed) {
             browser_hover_dispatch(browser, prev, x, y, "pointerout",
-                                   "mouseout", node);
+                                   "mouseout", node, mods);
             browser_hover_dispatch(browser, prev, x, y, "pointerleave",
-                                   "mouseleave", node);
+                                   "mouseleave", node, mods);
             browser_hover_dispatch(browser, node, x, y, "pointerover",
-                                   "mouseover", prev);
+                                   "mouseover", prev, mods);
             browser_hover_dispatch(browser, node, x, y, "pointerenter",
-                                   "mouseenter", prev);
+                                   "mouseenter", prev, mods);
         }
         browser_hover_dispatch(browser, node, x, y, "pointermove",
-                               "mousemove", NULL);
+                               "mousemove", NULL, mods);
         if (ns_js_consume_mutated(browser->js)) dirty = TRUE;
+        if (browser->dirty && !was_dirty) dirty = TRUE;
     }
 
     gboolean hover_restyle = changed && ns_render_page_uses_hover() &&
@@ -3430,12 +3472,8 @@ ns_browser_contextmenu_full(ns_browser *browser, int x, int y, int *out_edit)
     const ns_node *node = browser_hit_node(browser, x, y);
     if (!node) return 0;
     gboolean prevented = FALSE;
-    ns_js_dispatch_mouse_event(browser->js, node, "contextmenu",
-                               (double)x - browser->cur_scroll_x,
-                               (double)y - browser->cur_scroll_y,
-                               (double)x, (double)y,
-                               2, 0, FALSE, FALSE, FALSE, FALSE, NULL,
-                               &prevented);
+    browser_mouse_dispatch(browser, node, "contextmenu", x, y, 2, -1,
+                           browser->aux_press_mods, NULL, &prevented);
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     if (browser->dirty) {
         browser_relayout(browser);
@@ -3740,10 +3778,61 @@ browser_hit_node(ns_browser *browser, int x, int y)
     return ns_box_hit_node(browser->layout, (double)x, (double)y);
 }
 
+static char *
+browser_finish_pointer_input(ns_browser *browser, int *out_changed)
+{
+    if (browser->js) {
+        if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    }
+    if (browser->dirty) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+        if (out_changed) *out_changed = 1;
+    }
+    char *nav = browser->pending_nav;
+    browser->pending_nav = NULL;
+    return nav;
+}
+
+static char *
+browser_press_aux(ns_browser *browser, int x, int y, int mods, int button,
+                  int clicks)
+{
+    ns_js_note_pointer_input(browser->js, TRUE);
+    browser_damp_reset(browser);
+    g_clear_pointer(&browser->pending_nav, g_free);
+    const ns_node *node = browser_hit_node(browser, x, y);
+    if (browser->js) node = ns_js_pointer_event_target(browser->js, node);
+    gboolean first = browser->buttons_down == 0;
+    browser->buttons_down |= browser_button_bit(button);
+    browser->aux_press_node = node;
+    browser->aux_press_button = button;
+    browser->aux_press_mods = mods;
+    if (browser->js && node) {
+        if (first)
+            browser_mouse_dispatch(browser, node, "pointerdown", x, y, button,
+                                   -1, mods, NULL, NULL);
+        browser_mouse_dispatch(browser, node, "mousedown", x, y, button,
+                               clicks, mods, NULL, NULL);
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    }
+    return browser_finish_pointer_input(browser, NULL);
+}
+
 char *
 ns_browser_press(ns_browser *browser, int x, int y, int mods)
 {
+    return ns_browser_press_full(browser, x, y, mods, 0, 1);
+}
+
+char *
+ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
+                      int clicks)
+{
     if (!browser || !browser->layout) return NULL;
+    if (button != 0)
+        return browser_press_aux(browser, x, y, mods, button, clicks);
     ns_js_note_pointer_input(browser->js, TRUE);
     browser_damp_reset(browser);
     g_clear_pointer(&browser->pending_nav, g_free);
@@ -3768,19 +3857,16 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         browser->dirty = FALSE;
     }
 
-    if (browser->js && node) {
-        gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
-        gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
-        ns_js_dispatch_mouse_event(browser->js, node, "pointerdown",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 1, sh, ct, al, me, NULL, NULL);
-        ns_js_dispatch_mouse_event(browser->js, node, "mousedown",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 1, sh, ct, al, me, NULL, NULL);
+    gboolean first = browser->buttons_down == 0;
+    browser->buttons_down |= browser_button_bit(0);
+    const ns_node *target = browser->js
+        ? ns_js_pointer_event_target(browser->js, node) : node;
+    if (browser->js && target) {
+        if (first)
+            browser_mouse_dispatch(browser, target, "pointerdown", x, y, 0,
+                                   -1, mods, NULL, NULL);
+        browser_mouse_dispatch(browser, target, "mousedown", x, y, 0,
+                               clicks, mods, NULL, NULL);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
@@ -3930,11 +4016,85 @@ char *
 ns_browser_release_click_at(ns_browser *browser, int x, int y,
                             int *out_changed)
 {
+    return ns_browser_release_full(browser, x, y, 0, 1, out_changed, NULL);
+}
+
+static const char *
+browser_link_href(ns_browser *browser, const ns_node *node, int x, int y,
+                  const char **out_download)
+{
+    *out_download = NULL;
+    for (const ns_node *a = node; a; a = a->parent) {
+        if (!browser_node_is_hyperlink(a)) continue;
+        const char *h = ns_element_get_attr(a, "href");
+        if (h && *h) {
+            *out_download = ns_element_get_attr(a, "download");
+            return h;
+        }
+    }
+    return browser->layout
+        ? ns_box_hit_link(browser->layout, (double)x, (double)y) : NULL;
+}
+
+static char *
+browser_release_aux(ns_browser *browser, int x, int y, int button, int clicks,
+                    int *out_changed, int *out_newtab)
+{
+    browser_damp_reset(browser);
+    g_clear_pointer(&browser->pending_nav, g_free);
+    browser_prune_cached_nodes(browser);
+    int bit = browser_button_bit(button);
+    gboolean held = (browser->buttons_down & bit) != 0;
+    browser->buttons_down &= ~bit;
+    const ns_node *hit = browser->layout ? browser_hit_node(browser, x, y)
+                                         : NULL;
+    const ns_node *up = browser->js
+        ? ns_js_pointer_event_target(browser->js, hit) : hit;
+    const ns_node *press = browser->aux_press_button == button
+        ? browser->aux_press_node : NULL;
+    if (press) browser->aux_press_node = NULL;
+    int mods = browser->aux_press_mods;
+    gboolean prevented = FALSE;
+    if (browser->js && up) {
+        if (!browser->buttons_down)
+            browser_mouse_dispatch(browser, up, "pointerup", x, y, button, -1,
+                                   mods, NULL, NULL);
+        browser_mouse_dispatch(browser, up, "mouseup", x, y, button, clicks,
+                               mods, NULL, NULL);
+    }
+    const ns_node *node = held && press && up
+        ? browser_common_ancestor(press, up) : NULL;
+    if (browser->js && node)
+        browser_mouse_dispatch(browser, node, "auxclick", x, y, button, clicks,
+                               mods, NULL, &prevented);
+    if (browser->js && !browser->buttons_down)
+        ns_js_release_pointer_capture(browser->js);
+    if (browser->js && ns_js_consume_mutated(browser->js))
+        browser->dirty = TRUE;
+    if (!prevented && node && button == 1 && !browser->pending_nav) {
+        const char *download = NULL;
+        const char *href = browser_link_href(browser, node, x, y, &download);
+        if (href && *href && !download) {
+            browser->pending_nav = browser_resolve_navigation(browser, href);
+            if (out_newtab && browser->pending_nav) *out_newtab = 1;
+        }
+    }
+    return browser_finish_pointer_input(browser, out_changed);
+}
+
+char *
+ns_browser_release_full(ns_browser *browser, int x, int y, int button,
+                        int clicks, int *out_changed, int *out_newtab)
+{
     if (out_changed) *out_changed = 0;
+    if (out_newtab) *out_newtab = 0;
     if (!browser) {
         if (out_changed) *out_changed = -1;
         return NULL;
     }
+    if (button != 0)
+        return browser_release_aux(browser, x, y, button, clicks, out_changed,
+                                   out_newtab);
     browser_damp_reset(browser);
     g_clear_pointer(&browser->pending_nav, g_free);
 
@@ -3946,42 +4106,43 @@ ns_browser_release_click_at(ns_browser *browser, int x, int y,
         const ns_node *hit = browser_hit_node(browser, x, y);
         if (hit) up = hit;
     }
+    if (browser->js)
+        up = ns_js_pointer_event_target(browser->js, up);
     const ns_node *node = up == press ? press
                                       : browser_common_ancestor(press, up);
     int mods = browser->press_mods;
     browser->press_node = NULL;
     browser->press_active = FALSE;
+    browser->buttons_down &= ~browser_button_bit(0);
 
-    gboolean drag_selected = browser->selection_dragged &&
-                             ns_selection_has_range(&browser->selection);
+    gboolean selected = browser->selection_dragged &&
+                        ns_selection_has_range(&browser->selection);
+    gboolean drag_selected = selected && clicks < 2;
     browser->selection_dragged = FALSE;
     browser_range_drag_end(browser);
 
     gboolean prevented = FALSE;
-    gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
-    gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
+    gboolean newtab = FALSE;
     if (browser->js && up) {
-        ns_js_dispatch_mouse_event(browser->js, up, "pointerup",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 0, sh, ct, al, me, NULL, NULL);
-        ns_js_dispatch_mouse_event(browser->js, up, "mouseup",
-                                   (double)x - browser->cur_scroll_x,
-                                   (double)y - browser->cur_scroll_y,
-                                   (double)x, (double)y,
-                                   0, 0, sh, ct, al, me, NULL, NULL);
+        if (!browser->buttons_down)
+            browser_mouse_dispatch(browser, up, "pointerup", x, y, 0, -1,
+                                   mods, NULL, NULL);
+        browser_mouse_dispatch(browser, up, "mouseup", x, y, 0, clicks, mods,
+                               NULL, NULL);
     }
     if (browser->js && node) {
-        if (!drag_selected)
-            ns_js_dispatch_mouse_event(browser->js, node, "click",
-                                       (double)x - browser->cur_scroll_x,
-                                       (double)y - browser->cur_scroll_y,
-                                       (double)x, (double)y,
-                                       0, 0, sh, ct, al, me, NULL, &prevented);
+        if (!drag_selected) {
+            browser_mouse_dispatch(browser, node, "click", x, y, 0, clicks,
+                                   mods, NULL, &prevented);
+            if (clicks == 2)
+                browser_mouse_dispatch(browser, node, "dblclick", x, y, 0,
+                                       clicks, mods, NULL, NULL);
+        }
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
-    if (drag_selected) prevented = TRUE;
+    if (browser->js && !browser->buttons_down)
+        ns_js_release_pointer_capture(browser->js);
+    if (selected) prevented = TRUE;
 
     gboolean select_consumed =
         !prevented && node && browser_dropdown_click(browser, node);
@@ -4005,23 +4166,14 @@ ns_browser_release_click_at(ns_browser *browser, int x, int y,
             if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
         }
     } else if (!prevented && !browser->pending_nav) {
-        const char *href = NULL;
         const char *download = NULL;
-        for (const ns_node *a = node; a && !href; a = a->parent) {
-            if (browser_node_is_hyperlink(a)) {
-                const char *h = ns_element_get_attr(a, "href");
-                if (h && *h) {
-                    href = h;
-                    download = ns_element_get_attr(a, "download");
-                }
-            }
-        }
-        if (!href)
-            href = ns_box_hit_link(browser->layout, (double)x, (double)y);
+        const char *href = browser_link_href(browser, node, x, y, &download);
         if (href && *href && download)
             browser_js_download(href, download, browser);
-        else if (href && *href)
+        else if (href && *href) {
             browser->pending_nav = browser_resolve_navigation(browser, href);
+            newtab = (mods & (2 | 8)) != 0;
+        }
     }
     }
 
@@ -4029,18 +4181,8 @@ ns_browser_release_click_at(ns_browser *browser, int x, int y,
     if (prev && ns_render_page_uses_active())
         browser->dirty = TRUE;
 
-    if (browser->js) {
-        if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
-        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
-    }
-    if (browser->dirty) {
-        browser_relayout(browser);
-        browser->dirty = FALSE;
-        if (out_changed) *out_changed = 1;
-    }
-
-    char *nav = browser->pending_nav;
-    browser->pending_nav = NULL;
+    char *nav = browser_finish_pointer_input(browser, out_changed);
+    if (out_newtab && newtab && nav) *out_newtab = 1;
     return nav;
 }
 
