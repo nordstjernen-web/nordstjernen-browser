@@ -19,8 +19,8 @@ the source tarball. It needs GLib >= 2.80, cairo >= 1.18 with FreeType and
 fontconfig, HarfBuzz >= 8.3, FriBiDi >= 1.0.6, fontconfig >= 2.15 and
 `glib-mkenums`. `-Dweb-text-lib=disabled` skips it and links the system
 Pango instead, which Android and iOS always do; the engine then compiles
-with `NS_USE_WEB_TEXT_LIB` undefined. The sources are under `ns-pango/` and
-are included as `<ns-pango/...>`; the engine reaches them only through
+with `NS_USE_WEB_TEXT_LIB` undefined. The sources sit directly in
+`src/web-text-lib/` and are included as `<web-text-lib/...>`; the engine reaches them only through
 `src/ns_pango.h`. The modifications stay under upstream Pango's LGPL
 terms; see `COPYING`.
 
@@ -51,7 +51,7 @@ each run from the cache, shape it again, and warn on any difference;
 `ns_pango_cache_get_skips` reports why runs were not cached.
 
 **Every symbol is renamed** — `ns_pango_*`, `NsPango*`, `NS_PANGO_*`,
-`NS_TYPE_PANGO_*`, and headers under `ns-pango/`. GTK loads the system
+`NS_TYPE_PANGO_*`, and headers included as `<web-text-lib/...>`. GTK loads the system
 Pango into the same process, and GObject aborts when a second library
 registers a type name it already holds. `ns-rename.py` performs the whole
 rewrite and is idempotent, so run it after merging upstream instead of

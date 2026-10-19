@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 EXT = ('.c', '.h', '.cpp', '.hpp', '.build', '.in', '.template', '.meson',
        '.options', '.py')
 SKIP_DIRS = {'.git', 'build', 'subprojects', '.tmp'}
-SKIP_FILES = {os.path.basename(__file__)}
+SKIP_FILES = {os.path.basename(__file__), 'meson.build'}
 
 P = 'p' + 'ango'
 RULES = (
@@ -30,8 +30,8 @@ RULES = (
     # underscore.
     (re.compile(r'(?<![A-Za-z0-9_])__%s([A-Z0-9_]*__)' % P.upper()),
      '__NS_%s\\1' % P.upper()),
-    (re.compile(r'#include\s*<%s/' % P), '#include <ns-pango/'),
-    (re.compile(r'#include\s*"%s/' % P), '#include "ns-pango/'),
+    (re.compile(r'#include\s*<%s/' % P), '#include <web-text-lib/'),
+    (re.compile(r'#include\s*"%s/' % P), '#include "web-text-lib/'),
     (re.compile(r'(?<![A-Za-z0-9_])%sCAIRO_BACKEND' % P.upper()),
      'NS_PANGOCAIRO_BACKEND'),
     (re.compile(r'(?<![A-Za-z0-9_])%s_TYPE_' % P.upper()), 'NS_TYPE_PANGO_'),
@@ -41,34 +41,12 @@ RULES = (
     (re.compile(r'(?<![A-Za-z0-9_])%s_' % P.upper()), 'NS_PANGO_'),
 )
 
-MESON_RULES = (
-    (re.compile(r"^project\('%s'" % P), "project('ns-pango'"),
-    (re.compile(r"ns_pango_api_name = '%s-" % P), "ns_pango_api_name = 'ns-pango-"),
-    (re.compile(r"join_paths\(ns_pango_api_name, '%s'\)" % P),
-     "join_paths(ns_pango_api_name, 'ns-pango')"),
-    (re.compile(r"subdir\('%s'\)" % P), "subdir('ns-pango')"),
-    (re.compile(r"include_directories\('%s'\)" % P),
-     "include_directories('ns-pango')"),
-    (re.compile(r"override_dependency\('%s" % P), "override_dependency('ns-pango"),
-    (re.compile(r"'%scairo-@0@'" % P), "'ns-pangocairo-@0@'"),
-    (re.compile(r"'%sft2-@0@'" % P), "'ns-pangoft2-@0@'"),
-    (re.compile(r'G_LOG_DOMAIN=\\?"%s\\?"' % P.capitalize()),
-     'G_LOG_DOMAIN="NsPango"'),
-    (re.compile(r"filebase: '%s" % P), "filebase: 'ns-pango"),
-    (re.compile(r"header: '%s/" % P), "header: 'ns-pango/"),
-    (re.compile(r"-D%s_" % P.upper()), "-DNS_PANGO_"),
-)
-
-
 def rewrite(path):
     with io.open(path, encoding='utf-8', errors='surrogateescape') as f:
         src = f.read()
     out = src
     for rx, rep in RULES:
         out = rx.sub(rep, out)
-    if os.path.basename(path) == 'meson.build' or path.endswith('.options'):
-        for rx, rep in MESON_RULES:
-            out = rx.sub(rep, out)
     if out != src:
         with io.open(path, 'w', encoding='utf-8', errors='surrogateescape',
                      newline='') as f:
@@ -78,8 +56,12 @@ def rewrite(path):
 
 
 def main():
-    if os.path.isdir(os.path.join(ROOT, P)):
-        subprocess.check_call(['git', 'mv', P, 'ns-pango'], cwd=ROOT)
+    upstream = os.path.join(ROOT, P)
+    if os.path.isdir(upstream):
+        for name in sorted(os.listdir(upstream)):
+            if name != 'meson.build':
+                subprocess.check_call(['git', 'mv', '-f', os.path.join(P, name),
+                                       name], cwd=ROOT)
     changed = 0
     for base, dirs, files in os.walk(ROOT):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]

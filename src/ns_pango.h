@@ -7,9 +7,9 @@
 #define NS_PANGO_H
 
 #ifdef NS_USE_WEB_TEXT_LIB
-#include <ns-pango/pangocairo.h>
+#include <web-text-lib/pangocairo.h>
 #ifdef NS_HAVE_PANGOFT2
-#include <ns-pango/pangofc-fontmap.h>
+#include <web-text-lib/pangofc-fontmap.h>
 #endif
 #else
 #include <pango/pangocairo.h>

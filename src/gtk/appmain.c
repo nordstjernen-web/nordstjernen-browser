@@ -23,7 +23,7 @@
 #endif
 
 #ifdef NS_USE_WEB_TEXT_LIB
-#include <ns-pango/ns-pango-cache.h>
+#include <web-text-lib/ns-pango-cache.h>
 #endif
 
 #include "bytecode_cache.h"
