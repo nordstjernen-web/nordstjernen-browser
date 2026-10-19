@@ -4,7 +4,7 @@ Changelog:
 1.0.35:
 ======
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
-  for crashes and double frees fixed twenty-four bugs that a page, or an
+  for crashes and double frees fixed twenty-five bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a
   `Security-Fix:` trailer.
 * HTML parsing: a named character reference whose value is longer than
@@ -43,6 +43,9 @@ Changelog:
   overflowed the stack when it later added a stylesheet or defined a
   custom element, and so did a slotted element under a shadow root
   nested about 170k levels deep.
+* WebAssembly: calling an export with an `externref` argument followed
+  by a numeric one whose `valueOf` made a nested call could free the
+  externref's box before the outer call used it.
 * Media: an MP4 box using the 64-bit size form in a buffer shorter than
   16 bytes was read past its end.
 * Task Manager: "End task" used the view of a tab that had closed since
