@@ -474,12 +474,16 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
 
     wasm_val_t args[NS_WASM_MAX_PARAMS], results[NS_WASM_MAX_RESULTS];
     memset(results, 0, sizeof(results));
-    for (guint i = 0; i < n_params; i++) {
-        JSValueConst src = (int)i < argc ? argv[i] : JS_UNDEFINED;
-        if (ns_wasm_js_to_val(ctx, wi, src, param_kinds[i], &args[i])) {
-            if (wi->call_depth == 0)
-                ns_wamr_externref_reclaim(wi->inst);
-            return JS_EXCEPTION;
+    for (guint pass = 0; pass < 2; pass++) {
+        for (guint i = 0; i < n_params; i++) {
+            if ((param_kinds[i] == WASM_EXTERNREF) != (pass == 1))
+                continue;
+            JSValueConst src = (int)i < argc ? argv[i] : JS_UNDEFINED;
+            if (ns_wasm_js_to_val(ctx, wi, src, param_kinds[i], &args[i])) {
+                if (wi->call_depth == 0)
+                    ns_wamr_externref_reclaim(wi->inst);
+                return JS_EXCEPTION;
+            }
         }
     }
 
