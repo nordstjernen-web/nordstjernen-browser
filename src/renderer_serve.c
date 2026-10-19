@@ -691,7 +691,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (referrer && !restored && url && ns_url_same_origin(referrer, url))
             ns_browser_set_next_referrer(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
-        ns_browser_set_next_reload(reload != 0);
+        ns_browser_set_next_reload(reload != 0 && url && *url);
         g_free(referrer);
         s->frame_valid = 0;
         ns_net_log_clear();
