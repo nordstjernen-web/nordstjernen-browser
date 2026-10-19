@@ -142,6 +142,7 @@ char *ns_browser_url(ns_browser *browser);
 
 void ns_browser_set_next_referrer(const char *url);
 void ns_browser_set_next_user_activated(int user_activated);
+void ns_browser_set_next_reload(int reload);
 
 void ns_browser_set_color_scheme(int dark);
 void ns_browser_set_reduced_motion(int reduce);

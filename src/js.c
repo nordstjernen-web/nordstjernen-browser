@@ -1896,9 +1896,11 @@ ns_timer_fire(gpointer data)
     }
     if (t->interval_ms < 4) {
         t->interval_ms = 4;
+        t->due_us = g_get_monotonic_time() + 4 * 1000;
         t->glib_source = ns_js_attach_timeout(js, 4, ns_timer_fire, t);
         return G_SOURCE_REMOVE;
     }
+    t->due_us = g_get_monotonic_time() + (gint64)t->interval_ms * 1000;
     return G_SOURCE_CONTINUE;
 }
 
@@ -33784,7 +33786,6 @@ ns_js_has_pending_animation_frame(const ns_js *js)
 static gboolean
 ns_js_has_pending_tasks(const ns_js *js)
 {
-    if (ns_raf_has_runnable(js)) return TRUE;
     if (js->pending_fetches && js->pending_fetches->len > 0) return TRUE;
     if (ns_js_net_requests_pending(js)) return TRUE;
     if (js->pending_ws && js->pending_ws->len > 0) return TRUE;
@@ -33821,6 +33822,24 @@ ns_js_has_pending_work(const ns_js *js)
             if (!t->is_idle) return TRUE;
         }
     }
+    return ns_raf_has_runnable(js) || ns_js_has_pending_tasks(js);
+}
+
+gboolean
+ns_js_has_work_before(const ns_js *js, gint64 deadline_us)
+{
+    if (!js) return FALSE;
+    if (js->timers && g_hash_table_size(js->timers) > 0) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, js->timers);
+        while (g_hash_table_iter_next(&it, &k, &v)) {
+            const ns_timer *t = v;
+            if (!t->is_idle && (t->firing ||
+                                (t->glib_source && t->due_us < deadline_us)))
+                return TRUE;
+        }
+    }
     return ns_js_has_pending_tasks(js);
 }
 
@@ -33828,7 +33847,7 @@ gboolean
 ns_js_needs_frame_tick(const ns_js *js)
 {
     if (!js) return FALSE;
-    if (ns_js_has_pending_tasks(js)) return TRUE;
+    if (ns_raf_has_runnable(js) || ns_js_has_pending_tasks(js)) return TRUE;
     if (js->message_tasks && !g_queue_is_empty(js->message_tasks))
         return TRUE;
     if (ns_js_subresource_loads_pending(js))

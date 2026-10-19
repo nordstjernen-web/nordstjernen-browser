@@ -141,6 +141,16 @@ ns_engine_navigate_blocking(const char *url, const char *top_url,
 }
 
 ns_response *
+ns_engine_reload_blocking(const char *url, const char *top_url, GError **error)
+{
+    static const char *const reload_headers[] = {
+        "X-ND-Navigate: 1", "X-ND-User-Activated: 1", "X-ND-Reload: 1", NULL
+    };
+    return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
+                                   FALSE, FALSE, reload_headers, error);
+}
+
+ns_response *
 ns_engine_navigate_post_blocking(const char *url, const char *top_url,
                                  const void *body, gsize body_len,
                                  const char *content_type,
