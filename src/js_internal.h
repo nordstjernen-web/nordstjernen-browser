@@ -187,6 +187,8 @@ struct ns_js {
     int            popover_hiding_count;
     GArray        *attr_element_refs;
     const ns_node *pointer_lock_element;
+    const ns_node *pointer_capture_element;
+    int            mouse_buttons;
     double         last_mouse_x[2];
     double         last_mouse_y[2];
     gboolean       has_last_mouse[2];

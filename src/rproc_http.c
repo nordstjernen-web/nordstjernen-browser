@@ -1025,6 +1025,24 @@ ns_rproc_http_click(ns_rproc_http *r, int x, int y, int mods)
 }
 
 char *
+ns_rproc_http_press(ns_rproc_http *r, int x, int y, int mods, int button,
+                    int clicks)
+{
+    if (!r)
+        return NULL;
+    char json[112];
+    snprintf(json, sizeof json,
+             "{\"x\":%d,\"y\":%d,\"mods\":%d,\"button\":%d,\"clicks\":%d}",
+             x, y, mods, button, clicks);
+    char *body = request(r, "/click", json);
+    if (!body)
+        return NULL;
+    char *href = json_get_str(body, "href");
+    free(body);
+    return href;
+}
+
+char *
 ns_rproc_http_select(ns_rproc_http *r, int kind, int x, int y)
 {
     return r ? request_xy_str(r, "/select", x, y, 2, kind, "href") : NULL;
@@ -1087,19 +1105,31 @@ ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed)
 char *
 ns_rproc_http_release_at(ns_rproc_http *r, int x, int y, int *out_changed)
 {
+    return ns_rproc_http_release_button(r, x, y, 0, 1, out_changed, NULL);
+}
+
+char *
+ns_rproc_http_release_button(ns_rproc_http *r, int x, int y, int button,
+                             int clicks, int *out_changed, int *out_newtab)
+{
     if (out_changed) *out_changed = 0;
+    if (out_newtab) *out_newtab = 0;
     if (!r)
         return NULL;
-    char json[48];
-    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char json[96];
+    snprintf(json, sizeof json,
+             "{\"x\":%d,\"y\":%d,\"button\":%d,\"clicks\":%d}", x, y,
+             button, clicks);
     char *body = request(r, "/release", json);
     if (!body)
         return NULL;
-    long changed = 0;
+    long changed = 0, newtab = 0;
     json_get_long(body, "changed", &changed);
+    json_get_long(body, "newtab", &newtab);
     char *href = json_get_str(body, "href");
     free(body);
     if (out_changed) *out_changed = changed != 0 ? 1 : 0;
+    if (out_newtab) *out_newtab = newtab != 0 ? 1 : 0;
     return href;
 }
 
@@ -1169,19 +1199,30 @@ int
 ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
                          char **out_cursor)
 {
+    int rc = ns_rproc_http_hover_buttons(r, x, y, 0, -1, out_href, out_cursor);
+    return rc == 2 ? 0 : rc;
+}
+
+int
+ns_rproc_http_hover_buttons(ns_rproc_http *r, int x, int y, int mods,
+                            int buttons, char **out_href, char **out_cursor)
+{
     if (out_href)
         *out_href = NULL;
     if (out_cursor)
         *out_cursor = NULL;
     if (!r)
         return -1;
-    char json[48];
-    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char json[96];
+    snprintf(json, sizeof json,
+             "{\"x\":%d,\"y\":%d,\"mods\":%d,\"buttons\":%d}", x, y,
+             mods, buttons);
     char *body = request(r, "/hover", json);
     if (!body)
         return -1;
-    long changed = 0;
+    long changed = 0, animating = 0;
     json_get_long(body, "changed", &changed);
+    json_get_long(body, "animating", &animating);
     if (out_href) {
         char *href = json_get_str(body, "href");
         if (href && !*href) {
@@ -1199,7 +1240,7 @@ ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
         *out_cursor = cursor;
     }
     free(body);
-    return changed != 0 ? 1 : 0;
+    return changed != 0 ? 1 : animating != 0 ? 2 : 0;
 }
 
 int

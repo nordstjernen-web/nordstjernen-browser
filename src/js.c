@@ -169,6 +169,7 @@ ns_set_active_js(ns_js *js)
 }
 
 #define NS_TRANSIENT_ACTIVATION_US (5 * G_USEC_PER_SEC)
+#define NS_MOUSE_POINTER_ID 1
 
 static void
 ns_js_note_user_activation(ns_js *js)
@@ -31472,6 +31473,8 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "pointermove", "PointerEvent" }, { "pointerover", "PointerEvent" },
         { "pointerout", "PointerEvent" }, { "pointerenter", "PointerEvent" },
         { "pointerleave", "PointerEvent" }, { "pointercancel", "PointerEvent" },
+        { "gotpointercapture", "PointerEvent" },
+        { "lostpointercapture", "PointerEvent" },
         { "mousedown", "MouseEvent" }, { "mouseup", "MouseEvent" },
         { "mousemove", "MouseEvent" }, { "mouseover", "MouseEvent" },
         { "mouseout", "MouseEvent" }, { "mouseenter", "MouseEvent" },
@@ -34643,7 +34646,8 @@ ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
                           strcmp(type, "auxclick") == 0 ||
                           strcmp(type, "contextmenu") == 0;
     if (is_pointer || click_like) {
-        ns_event_put(ctx, event, "pointerId",   JS_NewInt32(ctx, 1));
+        ns_event_put(ctx, event, "pointerId",
+                     JS_NewInt32(ctx, NS_MOUSE_POINTER_ID));
         ns_event_put(ctx, event, "pointerType", JS_NewString(ctx, "mouse"));
         ns_event_put(ctx, event, "isPrimary",   is_pointer ? JS_TRUE : JS_FALSE);
         ns_event_put(ctx, event, "pressure",
@@ -34662,12 +34666,14 @@ ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
 }
 
 gboolean
-ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
-                           double client_x, double client_y,
-                           double page_x, double page_y,
-                           int button, int buttons,
-                           gboolean shift, gboolean ctrl, gboolean alt, gboolean meta,
-                           const ns_node *related, gboolean *default_prevented)
+ns_js_dispatch_mouse_event_detail(ns_js *js, const ns_node *target,
+                                  const char *type,
+                                  double client_x, double client_y,
+                                  double page_x, double page_y,
+                                  int button, int buttons, int detail,
+                                  gboolean shift, gboolean ctrl, gboolean alt,
+                                  gboolean meta, const ns_node *related,
+                                  gboolean *default_prevented)
 {
     if (default_prevented) *default_prevented = FALSE;
     if (!js || !target || !type) return FALSE;
@@ -34676,17 +34682,51 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
         strcmp(type, "mouseup") == 0 || strcmp(type, "pointerup") == 0 ||
         strcmp(type, "click") == 0 || strcmp(type, "dblclick") == 0)
         ns_js_note_user_activation(js);
+    if (g_str_has_prefix(type, "pointer") || g_str_has_prefix(type, "mouse"))
+        js->mouse_buttons = buttons;
     JSContext *ctx = NULL;
     JSValue event = ns_js_build_mouse_event(js, target, type, client_x,
                                             client_y, page_x, page_y, button,
                                             buttons, shift, ctrl, alt, meta,
                                             related, &ctx);
+    if (detail >= 0)
+        ns_event_put(ctx, event, "detail", JS_NewInt32(ctx, detail));
     if (strcmp(type, "pointerdown") == 0 || strcmp(type, "pointerup") == 0) {
         ns_js_popover_light_dismiss(js, target, type[7] == 'u');
         ns_js_dialog_light_dismiss(js, target, type[7] == 'u');
     }
     return ns_js_dispatch_built_event(js, target, type, event,
                                       default_prevented);
+}
+
+gboolean
+ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
+                           double client_x, double client_y,
+                           double page_x, double page_y,
+                           int button, int buttons,
+                           gboolean shift, gboolean ctrl, gboolean alt, gboolean meta,
+                           const ns_node *related, gboolean *default_prevented)
+{
+    return ns_js_dispatch_mouse_event_detail(js, target, type, client_x,
+                                             client_y, page_x, page_y, button,
+                                             buttons, -1, shift, ctrl, alt,
+                                             meta, related, default_prevented);
+}
+
+static void
+ns_js_fire_capture_event(ns_js *js, const ns_node *target, const char *type)
+{
+    if (js->halted || js->in_pump) return;
+    JSContext *ctx = NULL;
+    JSValue event = ns_js_build_mouse_event(js, target, type, 0, 0, 0, 0, -1,
+                                            js->mouse_buttons, FALSE, FALSE,
+                                            FALSE, FALSE, NULL, &ctx);
+    ns_event_put(ctx, event, "cancelable", JS_FALSE);
+    ns_event_put(ctx, event, "pointerId",
+                 JS_NewInt32(ctx, NS_MOUSE_POINTER_ID));
+    ns_event_put(ctx, event, "pointerType", JS_NewString(ctx, "mouse"));
+    ns_event_put(ctx, event, "isPrimary", JS_TRUE);
+    ns_js_dispatch_built_event(js, target, type, event, NULL);
 }
 
 static gboolean
@@ -45041,19 +45081,26 @@ ns_element_checkVisibility(JSContext *ctx, JSValueConst this_val,
     return visible ? JS_TRUE : JS_FALSE;
 }
 
-static int
-ns_pointer_capture_index(JSContext *ctx, JSValueConst set, int32_t id)
+static gboolean
+ns_js_doc_contains(const ns_js *js, const ns_node *node)
 {
-    if (!JS_IsArray(set)) return -1;
-    uint32_t len = ns_js_array_length(ctx, set);
-    for (uint32_t i = 0; i < len; i++) {
-        JSValue v = JS_GetPropertyUint32(ctx, set, i);
-        int32_t e = 0;
-        JS_ToInt32(ctx, &e, v);
-        JS_FreeValue(ctx, v);
-        if (e == id) return (int)i;
-    }
-    return -1;
+    if (!js || !node || !js->current_doc) return FALSE;
+    const ns_node *root = ns_node_root(js->current_doc);
+    for (const ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE))
+        if (n == node) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_js_set_pointer_capture(ns_js *js, const ns_node *el)
+{
+    const ns_node *prev = js->pointer_capture_element;
+    if (prev == el) return;
+    js->pointer_capture_element = el;
+    if (prev && ns_js_doc_contains(js, prev))
+        ns_js_fire_capture_event(js, prev, "lostpointercapture");
+    if (el)
+        ns_js_fire_capture_event(js, el, "gotpointercapture");
 }
 
 static JSValue
@@ -45063,17 +45110,11 @@ ns_element_setPointerCapture(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_UNDEFINED;
     int32_t id = 0;
     JS_ToInt32(ctx, &id, argv[0]);
-    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
-    if (!JS_IsArray(set)) {
-        JS_FreeValue(ctx, set);
-        set = JS_NewArray(ctx);
-        JS_SetPropertyStr(ctx, this_val, "_pointerCaptures",
-                          JS_DupValue(ctx, set));
-    }
-    if (ns_pointer_capture_index(ctx, set, id) < 0)
-        JS_SetPropertyUint32(ctx, set, ns_js_array_length(ctx, set),
-                             JS_NewInt32(ctx, id));
-    JS_FreeValue(ctx, set);
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *el = ns_unwrap_element(this_val);
+    if (js && el && id == NS_MOUSE_POINTER_ID && js->mouse_buttons &&
+        ns_js_doc_contains(js, el))
+        ns_js_set_pointer_capture(js, el);
     return JS_UNDEFINED;
 }
 
@@ -45084,10 +45125,10 @@ ns_element_hasPointerCapture(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_FALSE;
     int32_t id = 0;
     JS_ToInt32(ctx, &id, argv[0]);
-    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
-    gboolean found = ns_pointer_capture_index(ctx, set, id) >= 0;
-    JS_FreeValue(ctx, set);
-    return found ? JS_TRUE : JS_FALSE;
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *el = ns_unwrap_element(this_val);
+    return js && el && id == NS_MOUSE_POINTER_ID &&
+           js->pointer_capture_element == el ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
@@ -45097,19 +45138,36 @@ ns_element_releasePointerCapture(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_UNDEFINED;
     int32_t id = 0;
     JS_ToInt32(ctx, &id, argv[0]);
-    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
-    int idx = ns_pointer_capture_index(ctx, set, id);
-    if (idx >= 0) {
-        JSValue splice = JS_GetPropertyStr(ctx, set, "splice");
-        JSValueConst sargs[2] = { JS_NewInt32(ctx, idx), JS_NewInt32(ctx, 1) };
-        JSValue r = JS_Call(ctx, splice, set, 2, sargs);
-        JS_FreeValue(ctx, r);
-        JS_FreeValue(ctx, sargs[0]);
-        JS_FreeValue(ctx, sargs[1]);
-        JS_FreeValue(ctx, splice);
-    }
-    JS_FreeValue(ctx, set);
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *el = ns_unwrap_element(this_val);
+    if (js && el && id == NS_MOUSE_POINTER_ID &&
+        js->pointer_capture_element == el)
+        ns_js_set_pointer_capture(js, NULL);
     return JS_UNDEFINED;
+}
+
+const ns_node *
+ns_js_pointer_event_target(ns_js *js, const ns_node *hit)
+{
+    if (!js) return hit;
+    if (js->pointer_lock_element) {
+        if (ns_js_doc_contains(js, js->pointer_lock_element))
+            return js->pointer_lock_element;
+        js->pointer_lock_element = NULL;
+    }
+    if (js->pointer_capture_element) {
+        if (ns_js_doc_contains(js, js->pointer_capture_element))
+            return js->pointer_capture_element;
+        js->pointer_capture_element = NULL;
+    }
+    return hit;
+}
+
+void
+ns_js_release_pointer_capture(ns_js *js)
+{
+    if (js && js->pointer_capture_element)
+        ns_js_set_pointer_capture(js, NULL);
 }
 
 #define NS_DIALOG_RV_KEY    "__nd_dialogReturnValue"

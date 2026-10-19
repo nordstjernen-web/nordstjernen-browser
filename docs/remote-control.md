@@ -129,8 +129,6 @@ navigation call `read_page` or `find` again.
 
 - `screenshot` captures the viewport of a tab that is visible in its
   window; a minimised window cannot be captured.
-- `double_click` dispatches `dblclick` from script after two real clicks,
-  so `event.isTrusted` is false for it.
 - `type` inserts text the way an input method does: `input` events fire
   but no `keydown` per character. Use `key` for key events.
 - File uploads, downloads dialogs, native popups and permission prompts

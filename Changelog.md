@@ -90,6 +90,27 @@ Changelog:
   drops queued work for the page being left, a load superseded before
   it starts is skipped, and Reload retries a page that is still loading
   or failed to load instead of the previous history entry.
+* Mouse: the middle and right buttons now reach pages. Pages only got
+  the left button's `mousedown`/`mouseup`/`click`; a right click sent
+  just `contextmenu` and a middle click or `Ctrl`+click sent nothing, so
+  games and drag tools that use other buttons did not respond. Every
+  button now fires `pointerdown`/`mousedown`, `pointerup`/`mouseup` and
+  `click` or `auxclick` with the right `button` and `buttons`, and
+  `contextmenu` follows the right button's `mousedown`. `Ctrl`+click and
+  middle click open a link in a new tab through the normal activation,
+  so a page that cancels the click keeps the tab from opening.
+* Mouse: `detail` carries the click count, a double click fires
+  `dblclick`, and `mousemove` carries the modifier keys and every held
+  button. A `mousemove` handler that changes the page is drawn at once;
+  it used to wait for the next unrelated repaint.
+* Pointer events: `setPointerCapture()` sends the pointer's later events
+  to the capturing element, so a drag that leaves the element keeps
+  moving it and its `pointerup` reaches it, followed by
+  `lostpointercapture`. Pointer lock sends mouse events to the locked
+  element.
+* Text selection: a selection is no longer lost whenever the page
+  changes its content, such as a ticking clock or a click handler that
+  updates a counter.
 
 1.0.34:
 ======

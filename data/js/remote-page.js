@@ -478,16 +478,9 @@
     return JSON.stringify(p);
   }
 
-  function dblclick(x, y) {
-    var el = document.elementFromPoint(x, y);
-    if (!el) return 'none';
-    el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 2, view: window }));
-    return 'ok';
-  }
-
   var api = {
     readPage: readPage, find: find, point: point, setValue: setValue,
-    pageText: pageText, run: run, poll: poll, dblclick: dblclick
+    pageText: pageText, run: run, poll: poll
   };
   try {
     Object.defineProperty(globalThis, KEY, { value: api, configurable: true });
