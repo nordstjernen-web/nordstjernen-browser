@@ -120,6 +120,7 @@ struct ns_browser {
     int             press_mods;
     gboolean        press_active;
     gboolean        keydown_prevented;
+    gboolean        key_text_suppressed;
     char           *search_query;
     gboolean        search_case;
     const ns_box   *search_active;
@@ -4151,7 +4152,8 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
     }
     if (g_utf8_strlen(key, -1) == 1 &&
         !g_unichar_iscntrl(g_utf8_get_char(key))) {
-        browser_input_replace(b, node, sel_lo, sel_hi, key, "insertText");
+        if (!(mods & NS_KEY_MOD_TEXT_SEPARATE))
+            browser_input_replace(b, node, sel_lo, sel_hi, key, "insertText");
         return TRUE;
     }
     return FALSE;
@@ -4308,7 +4310,9 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
 
     if (kind == 2) {
         const ns_node *f = ns_js_focused_node(browser->js);
-        if (f && ns_node_editable_value(f) && key && *key &&
+        gboolean suppressed = browser->key_text_suppressed;
+        browser->key_text_suppressed = FALSE;
+        if (!suppressed && f && ns_node_editable_value(f) && key && *key &&
             g_utf8_validate(key, -1, NULL)) {
             const char *cur = ns_node_editable_value(f);
             gsize cur_len = cur ? strlen(cur) : 0;
@@ -4338,8 +4342,10 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                                           keycode, char_code,
                                           (mods & 1) != 0, FALSE, FALSE, FALSE,
                                           &press_prevented);
-            if (out_prevented && press_prevented)
-                *out_prevented = 1;
+            if (press_prevented) {
+                browser->key_text_suppressed = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
             if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
         }
         browser->keydown_prevented = FALSE;
@@ -4355,6 +4361,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
         if (out_prevented && prevented)
             *out_prevented = 1;
         browser->keydown_prevented = kind == 0 && prevented;
+        browser->key_text_suppressed = kind == 0 && prevented;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
 
         if (kind == 0 && !prevented && key && strcmp(key, "Enter") == 0 &&
@@ -4419,6 +4426,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
             } else if (key && strcmp(key, "Escape") == 0 &&
                        ns_js_process_close_request(browser->js)) {
                 browser->dirty = TRUE;

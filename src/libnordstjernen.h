@@ -76,6 +76,8 @@ char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 char *ns_browser_click(ns_browser *browser, int x, int y, int mods);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);
 
+#define NS_KEY_MOD_TEXT_SEPARATE 16
+
 char *ns_browser_key(ns_browser *browser, int kind, const char *key,
                      const char *code, int keycode, int mods);
 char *ns_browser_key_full(ns_browser *browser, int kind, const char *key,
