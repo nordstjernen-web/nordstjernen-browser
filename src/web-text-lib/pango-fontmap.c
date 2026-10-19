@@ -372,27 +372,6 @@ ns_pango_font_map_real_load_fontset (NsPangoFontMap               *fontmap,
 }
 
 /**
- * ns_pango_font_map_get_shape_engine_type:
- * @fontmap: a `NsPangoFontMap`
- *
- * Returns the render ID for shape engines for this fontmap.
- * See the `render_type` field of `NsPangoEngineInfo`.
-  *
- * Return value (transfer none): the ID string for shape engines
- *   for this fontmap
- *
- * Since: 1.4
- * Deprecated: 1.38
- */
-const char *
-ns_pango_font_map_get_shape_engine_type (NsPangoFontMap *fontmap)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONT_MAP (fontmap), NULL);
-
-  return NS_PANGO_FONT_MAP_GET_CLASS (fontmap)->shape_engine_type;
-}
-
-/**
  * ns_pango_font_map_get_serial:
  * @fontmap: a `NsPangoFontMap`
  *
@@ -488,26 +467,6 @@ ns_pango_font_map_real_get_family (NsPangoFontMap *fontmap,
   return family;
 }
 
-/**
- * ns_pango_font_map_get_family:
- * @fontmap: a `NsPangoFontMap`
- * @name: a family name
- *
- * Gets a font family by name.
- *
- * Returns: (transfer none) (nullable): the `NsPangoFontFamily`
- *
- * Since: 1.46
- */
-NsPangoFontFamily *
-ns_pango_font_map_get_family (NsPangoFontMap *fontmap,
-                           const char   *name)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONT_MAP (fontmap), NULL);
-
-  return NS_PANGO_FONT_MAP_GET_CLASS (fontmap)->get_family (fontmap, name);
-}
-
 static NsPangoFont *
 ns_pango_font_map_real_reload_font (NsPangoFontMap *fontmap,
                                  NsPangoFont    *font,
@@ -543,47 +502,6 @@ ns_pango_font_map_real_reload_font (NsPangoFontMap *fontmap,
   return scaled;
 }
 
-/**
- * ns_pango_font_map_reload_font:
- * @fontmap: a `NsPangoFontMap`
- * @font: a font in @fontmap
- * @scale: the scale factor to apply
- * @context: (nullable): a `NsPangoContext`
- * @variations: (nullable): font variations to use
- *
- * Returns a new font that is like @font, except that it is scaled
- * by @scale, its backend-dependent configuration (e.g. cairo font options)
- * is replaced by the one in @context, and its variations are replaced
- * by @variations.
- *
- * Note that the scaling here is meant to be linear, so this
- * scaling can be used to render a font on a hi-dpi display
- * without changing its optical size.
- *
- * Returns: (transfer full): the modified font
- *
- * Since: 1.52
- */
-NsPangoFont *
-ns_pango_font_map_reload_font (NsPangoFontMap *fontmap,
-                            NsPangoFont    *font,
-                            double        scale,
-                            NsPangoContext *context,
-                            const char   *variations)
-{
-  NsPangoFontMapClassPrivate *pclass;
-
-  g_return_val_if_fail (NS_PANGO_IS_FONT (font), NULL);
-  g_return_val_if_fail (fontmap == ns_pango_font_get_font_map (font), NULL);
-  g_return_val_if_fail (scale > 0, NULL);
-  g_return_val_if_fail (context == NULL || NS_PANGO_IS_CONTEXT (context), NULL);
-
-  pclass = g_type_class_get_private ((GTypeClass *) NS_PANGO_FONT_MAP_GET_CLASS (fontmap),
-                                     NS_TYPE_PANGO_FONT_MAP);
-
-  return pclass->reload_font (fontmap, font, scale, context, variations);
-}
-
 static gboolean
 ns_pango_font_map_real_add_font_file (NsPangoFontMap  *fontmap,
                                    const char    *filename,
@@ -594,38 +512,6 @@ ns_pango_font_map_real_add_font_file (NsPangoFontMap  *fontmap,
                G_OBJECT_TYPE_NAME (fontmap));
 
   return FALSE;
-}
-
-/**
- * ns_pango_font_map_add_font_file:
- * @fontmap: a `NsPangoFontMap`
- * @filename: (type filename): Path to the font file
- * @error: return location for an error
- *
- * Loads a font file with one or more fonts into the `NsPangoFontMap`.
- *
- * The added fonts will take precedence over preexisting
- * fonts with the same name.
- *
- * Return value: True if the font file is successfully loaded
- *     into the fontmap, false if an error occurred.
- *
- * Since: 1.56
- */
-gboolean
-ns_pango_font_map_add_font_file (NsPangoFontMap  *fontmap,
-                              const char    *filename,
-                              GError       **error)
-{
-  NsPangoFontMapClassPrivate *pclass;
-
-  g_return_val_if_fail (NS_PANGO_IS_FONT_MAP (fontmap), FALSE);
-  g_return_val_if_fail (filename != NULL, FALSE);
-
-  pclass = g_type_class_get_private ((GTypeClass *) NS_PANGO_FONT_MAP_GET_CLASS (fontmap),
-                                     NS_TYPE_PANGO_FONT_MAP);
-
-  return pclass->add_font_file (fontmap, filename, error);
 }
 
 static GType

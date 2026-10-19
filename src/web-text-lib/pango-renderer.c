@@ -1611,29 +1611,6 @@ ns_pango_renderer_set_matrix (NsPangoRenderer     *renderer,
 }
 
 /**
- * ns_pango_renderer_get_matrix:
- * @renderer: a `NsPangoRenderer`
- *
- * Gets the transformation matrix that will be applied when
- * rendering.
- *
- * See [method@Pango.Renderer.set_matrix].
- *
- * Return value: (nullable): the matrix, or %NULL if no matrix has
- *   been set (which is the same as the identity matrix). The returned
- *   matrix is owned by Pango and must not be modified or freed.
- *
- * Since: 1.8
- */
-const NsPangoMatrix *
-ns_pango_renderer_get_matrix (NsPangoRenderer *renderer)
-{
-  g_return_val_if_fail (NS_PANGO_IS_RENDERER (renderer), NULL);
-
-  return renderer->matrix;
-}
-
-/**
  * ns_pango_renderer_get_layout:
  * @renderer: a `NsPangoRenderer`
  *
@@ -1657,29 +1634,6 @@ ns_pango_renderer_get_layout (NsPangoRenderer *renderer)
     return NULL;
 
   return renderer->priv->line->layout;
-}
-
-/**
- * ns_pango_renderer_get_layout_line:
- * @renderer: a `NsPangoRenderer`
- *
- * Gets the layout line currently being rendered using @renderer.
- *
- * Calling this function only makes sense from inside a subclass's
- * methods, like in its draw_shape vfunc, for example.
- *
- * The returned layout line should not be modified while still being
- * rendered.
- *
- * Return value: (transfer none) (nullable): the layout line, or %NULL
- *   if no layout line is being rendered using @renderer at this time.
- *
- * Since: 1.20
- */
-NsPangoLayoutLine *
-ns_pango_renderer_get_layout_line (NsPangoRenderer *renderer)
-{
-  return renderer->priv->line;
 }
 
 /**

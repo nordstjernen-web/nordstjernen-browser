@@ -10,13 +10,20 @@ The top-level `meson.build` loads this directory with
 rendering) and `web_text_fc_dep` (fontconfig/FreeType fonts). No clone or
 network access is needed, so offline and distro builds get it straight from
 the source tarball. It needs GLib >= 2.80, cairo >= 1.18 with FreeType and
-fontconfig, HarfBuzz >= 8.3, FriBiDi >= 1.0.6, fontconfig >= 2.15 and
-`glib-mkenums`. `-Dweb-text-lib=disabled` skips it and links the system
+fontconfig, HarfBuzz >= 8.3, FriBiDi >= 1.0.6 and fontconfig >= 2.15. `-Dweb-text-lib=disabled` skips it and links the system
 Pango instead, which Android and iOS always do; the engine then compiles
 with `NS_USE_WEB_TEXT_LIB` undefined. The sources sit directly in
 `src/web-text-lib/` and are included as `<web-text-lib/...>`; the engine reaches them only through
 `src/ns_pango.h`. The modifications stay under upstream Pango's LGPL
 terms; see `COPYING`.
+
+The library is trimmed to what the browser calls. Every function that no
+path from the engine reaches was removed, together with the files left
+empty (markup parsing, colour parsing, the engine/module registry, the
+reorder and trace helpers) and the generated enum GTypes, of which only
+`NsPangoGravity`'s is used and is now written out in `pango-gravity.c`.
+A new caller in the engine may therefore need a function restored from
+upstream Pango (renamed with `ns-rename.py`).
 
 Dependencies
 ------------

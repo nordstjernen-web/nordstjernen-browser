@@ -43,8 +43,6 @@ void   ns_pango_item_cache_insert (NsPangoContext   *context,
                                    NsPangoAttrList  *attrs,
                                    GList            *items);
 
-void   ns_pango_item_cache_trim   (void);
-
 void   ns_pango_item_cache_clear  (void);
 
 G_END_DECLS

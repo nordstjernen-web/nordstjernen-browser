@@ -40,7 +40,6 @@ struct _PangoAttrList
 
 void     _ns_pango_attr_list_init         (NsPangoAttrList     *list);
 void     _ns_pango_attr_list_destroy      (NsPangoAttrList     *list);
-gboolean _ns_pango_attr_list_has_attributes (const NsPangoAttrList *list);
 
 void     _ns_pango_attr_list_get_iterator (NsPangoAttrList     *list,
                                         NsPangoAttrIterator *iterator);

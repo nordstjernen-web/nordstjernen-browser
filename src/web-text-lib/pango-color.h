@@ -46,30 +46,7 @@ struct _PangoColor
   guint16 blue;
 };
 
-#define NS_TYPE_PANGO_COLOR (ns_pango_color_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType       ns_pango_color_get_type         (void) G_GNUC_CONST;
-
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoColor *ns_pango_color_copy             (const NsPangoColor *src);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void        ns_pango_color_free             (NsPangoColor       *color);
-
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean    ns_pango_color_parse            (NsPangoColor       *color,
-                                          const char       *spec);
-
-NS_PANGO_AVAILABLE_IN_1_46
-gboolean    ns_pango_color_parse_with_alpha (NsPangoColor       *color,
-                                          guint16          *alpha,
-                                          const char       *spec);
-
-NS_PANGO_AVAILABLE_IN_1_16
-char       *ns_pango_color_to_string        (const NsPangoColor *color);
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoColor, ns_pango_color_free)
 
 G_END_DECLS
 

@@ -101,21 +101,6 @@ struct _PangoLogAttr
   guint reserved                    : 17;
 };
 
-NS_PANGO_DEPRECATED_IN_1_44
-void                    ns_pango_break             (const char    *text,
-                                                 int            length,
-                                                 NsPangoAnalysis *analysis,
-                                                 NsPangoLogAttr  *attrs,
-                                                 int            attrs_len);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_get_log_attrs     (const char    *text,
-                                                 int            length,
-                                                 int            level,
-                                                 NsPangoLanguage *language,
-                                                 NsPangoLogAttr  *attrs,
-                                                 int            attrs_len);
-
 NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_default_break     (const char    *text,
                                                  int            length,

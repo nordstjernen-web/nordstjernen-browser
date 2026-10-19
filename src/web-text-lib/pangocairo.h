@@ -104,23 +104,10 @@ GType         ns_pango_cairo_font_map_get_type          (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_1_10
 NsPangoFontMap *ns_pango_cairo_font_map_new               (void);
-NS_PANGO_AVAILABLE_IN_1_18
-NsPangoFontMap *ns_pango_cairo_font_map_new_for_font_type (cairo_font_type_t fonttype);
 NS_PANGO_AVAILABLE_IN_1_10
 NsPangoFontMap *ns_pango_cairo_font_map_get_default       (void);
-NS_PANGO_AVAILABLE_IN_1_22
-void          ns_pango_cairo_font_map_set_default       (NsPangoCairoFontMap *fontmap);
-NS_PANGO_AVAILABLE_IN_1_18
-cairo_font_type_t ns_pango_cairo_font_map_get_font_type (NsPangoCairoFontMap *fontmap);
 
-NS_PANGO_AVAILABLE_IN_1_10
-void          ns_pango_cairo_font_map_set_resolution (NsPangoCairoFontMap *fontmap,
-						   double             dpi);
-NS_PANGO_AVAILABLE_IN_1_10
-double        ns_pango_cairo_font_map_get_resolution (NsPangoCairoFontMap *fontmap);
 #ifndef NS_PANGO_DISABLE_DEPRECATED
-NS_PANGO_DEPRECATED_IN_1_22_FOR(ns_pango_font_map_create_context)
-NsPangoContext *ns_pango_cairo_font_map_create_context (NsPangoCairoFontMap *fontmap);
 #endif
 
 /*
@@ -151,11 +138,6 @@ NS_PANGO_AVAILABLE_IN_1_10
 double             ns_pango_cairo_context_get_resolution     (NsPangoContext       *context);
 
 NS_PANGO_AVAILABLE_IN_1_18
-void                        ns_pango_cairo_context_set_shape_renderer (NsPangoContext                *context,
-								    NsPangoCairoShapeRendererFunc  func,
-								    gpointer                     data,
-								    GDestroyNotify               dnotify);
-NS_PANGO_AVAILABLE_IN_1_18
 NsPangoCairoShapeRendererFunc ns_pango_cairo_context_get_shape_renderer (NsPangoContext                *context,
 								    gpointer                    *data);
 
@@ -165,34 +147,16 @@ NS_PANGO_AVAILABLE_IN_1_22
 NsPangoContext *ns_pango_cairo_create_context (cairo_t   *cr);
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoLayout *ns_pango_cairo_create_layout (cairo_t     *cr);
-NS_PANGO_AVAILABLE_IN_1_10
-void         ns_pango_cairo_update_layout (cairo_t     *cr,
-					NsPangoLayout *layout);
 
 /*
  * Rendering
  */
-NS_PANGO_AVAILABLE_IN_1_10
-void ns_pango_cairo_show_glyph_string (cairo_t          *cr,
-				    NsPangoFont        *font,
-				    NsPangoGlyphString *glyphs);
-NS_PANGO_AVAILABLE_IN_1_22
-void ns_pango_cairo_show_glyph_item   (cairo_t          *cr,
-				    const char       *text,
-				    NsPangoGlyphItem   *glyph_item);
 NS_PANGO_AVAILABLE_IN_1_10
 void ns_pango_cairo_show_layout_line  (cairo_t          *cr,
 				    NsPangoLayoutLine  *line);
 NS_PANGO_AVAILABLE_IN_1_10
 void ns_pango_cairo_show_layout       (cairo_t          *cr,
 				    NsPangoLayout      *layout);
-
-NS_PANGO_AVAILABLE_IN_1_14
-void ns_pango_cairo_show_error_underline (cairo_t       *cr,
-				       double         x,
-				       double         y,
-				       double         width,
-				       double         height);
 
 /*
  * Rendering to a path
@@ -202,22 +166,8 @@ void ns_pango_cairo_glyph_string_path (cairo_t          *cr,
 				    NsPangoFont        *font,
 				    NsPangoGlyphString *glyphs);
 NS_PANGO_AVAILABLE_IN_1_10
-void ns_pango_cairo_layout_line_path  (cairo_t          *cr,
-				    NsPangoLayoutLine  *line);
-NS_PANGO_AVAILABLE_IN_1_10
 void ns_pango_cairo_layout_path       (cairo_t          *cr,
 				    NsPangoLayout      *layout);
-NS_PANGO_AVAILABLE_IN_1_58
-void ns_pango_cairo_layout_path_for_components (cairo_t              *cr,
-                                             NsPangoLayout          *layout,
-                                             NsPangoRenderComponent  components);
-
-NS_PANGO_AVAILABLE_IN_1_14
-void ns_pango_cairo_error_underline_path (cairo_t       *cr,
-				       double         x,
-				       double         y,
-				       double         width,
-				       double         height);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoCairoFont, g_object_unref)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoCairoFontMap, g_object_unref)

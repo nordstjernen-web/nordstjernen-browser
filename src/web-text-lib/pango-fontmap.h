@@ -120,22 +120,6 @@ guint         ns_pango_font_map_get_serial    (NsPangoFontMap                 *f
 NS_PANGO_AVAILABLE_IN_1_34
 void          ns_pango_font_map_changed       (NsPangoFontMap                 *fontmap);
 
-NS_PANGO_AVAILABLE_IN_1_46
-NsPangoFontFamily *ns_pango_font_map_get_family (NsPangoFontMap                 *fontmap,
-                                            const char                   *name);
-
-NS_PANGO_AVAILABLE_IN_1_52
-NsPangoFont *   ns_pango_font_map_reload_font   (NsPangoFontMap                 *fontmap,
-                                            NsPangoFont                    *font,
-                                            double                        scale,
-                                            NsPangoContext                 *context,
-                                            const char                   *variations);
-
-NS_PANGO_AVAILABLE_IN_1_56
-gboolean      ns_pango_font_map_add_font_file (NsPangoFontMap                 *fontmap,
-                                            const char                   *filename,
-                                            GError                      **error);
-
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(NsPangoFontMap, g_object_unref)
 
 G_END_DECLS

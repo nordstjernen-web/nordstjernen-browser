@@ -60,42 +60,7 @@
 #include "pango-script.h"
 #include "pango-script-private.h"
 
-/**
- * ns_pango_script_for_unichar:
- * @ch: a Unicode character
- *
- * Looks up the script for a particular character.
- *
- * The script of a character is defined by
- * [Unicode Standard Annex 24: Script names](http://www.unicode.org/reports/tr24/).
- *
- * No check is made for @ch being a valid Unicode character; if you pass
- * in invalid character, the result is undefined.
- *
- * Note that while the return type of this function is declared
- * as `NsPangoScript`, as of Pango 1.18, this function simply returns
- * the return value of [func@GLib.unichar_get_script]. Callers must be
- * prepared to handle unknown values.
- *
- * Return value: the `NsPangoScript` for the character.
- *
- * Since: 1.4
- * Deprecated: 1.44. Use g_unichar_get_script()
- **/
-NsPangoScript
-ns_pango_script_for_unichar (gunichar ch)
-{
-  return (NsPangoScript)g_unichar_get_script (ch);
-}
-
 /**********************************************************************/
-
-static NsPangoScriptIter *ns_pango_script_iter_copy (NsPangoScriptIter *iter);
-
-G_DEFINE_BOXED_TYPE (NsPangoScriptIter,
-                     ns_pango_script_iter,
-                     ns_pango_script_iter_copy,
-                     ns_pango_script_iter_free)
 
 NsPangoScriptIter *
 _ns_pango_script_iter_init (NsPangoScriptIter *iter,
@@ -119,56 +84,9 @@ _ns_pango_script_iter_init (NsPangoScriptIter *iter,
   return iter;
 }
 
-/**
- * ns_pango_script_iter_new:
- * @text: a UTF-8 string
- * @length: length of @text, or -1 if @text is nul-terminated
- *
- * Create a new `NsPangoScriptIter`, used to break a string of
- * Unicode text into runs by Unicode script.
- *
- * No copy is made of @text, so the caller needs to make
- * sure it remains valid until the iterator is freed with
- * [method@Pango.ScriptIter.free].
- *
- * Return value: the new script iterator, initialized
- *  to point at the first range in the text, which should be
- *  freed with [method@Pango.ScriptIter.free]. If the string is
- *  empty, it will point at an empty range.
- *
- * Since: 1.4
- **/
-NsPangoScriptIter *
-ns_pango_script_iter_new (const char *text,
-		       int         length)
-{
-  return _ns_pango_script_iter_init (g_slice_new (NsPangoScriptIter), text, length);
-}
-
-static NsPangoScriptIter *
-ns_pango_script_iter_copy (NsPangoScriptIter *iter)
-{
-  return g_slice_dup (NsPangoScriptIter, iter);
-}
-
 void
 _ns_pango_script_iter_fini (NsPangoScriptIter *iter)
 {
-}
-
-/**
- * ns_pango_script_iter_free:
- * @iter: a `NsPangoScriptIter`
- *
- * Frees a `NsPangoScriptIter`.
- *
- * Since: 1.4
- */
-void
-ns_pango_script_iter_free (NsPangoScriptIter *iter)
-{
-  _ns_pango_script_iter_fini (iter);
-  g_slice_free (NsPangoScriptIter, iter);
 }
 
 /**
@@ -302,9 +220,6 @@ is_cluster_extender (gunichar ch)
 /* duplicated in pango-language.c */
 #define REAL_SCRIPT(script) \
   ((script) > NS_PANGO_SCRIPT_INHERITED && (script) != NS_PANGO_SCRIPT_UNKNOWN)
-
-#define IS_CLUSTER_EXTENDER(ch) \
-  g_unichar_type (ch)
 
 /* TODO: Use Unicode ScriptExtensions */
 #define SAME_SCRIPT(script1, script2, ch) \

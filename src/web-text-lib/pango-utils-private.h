@@ -27,32 +27,6 @@
 #include <web-text-lib/pango-font.h>
 #include <web-text-lib/pango-utils.h>
 
-G_BEGIN_DECLS
-
-NS_PANGO_DEPRECATED_IN_1_38
-char *   ns_pango_config_key_get_system (const char *key);
-NS_PANGO_DEPRECATED_IN_1_38
-char *   ns_pango_config_key_get (const char  *key);
-NS_PANGO_DEPRECATED_IN_1_32
-void     ns_pango_lookup_aliases (const char   *fontname,
-			       char       ***families,
-			       int          *n_families);
-
-/* On Unix, return the name of the "pango" subdirectory of SYSCONFDIR
- * (which is set at compile time). On Win32, return the Pango
- * installation directory (which is set at installation time, and
- * stored in the registry). The returned string should not be
- * g_free'd.
- */
-NS_PANGO_DEPRECATED
-const char *   ns_pango_get_sysconf_subdirectory (void) G_GNUC_PURE;
-
-/* Ditto for LIBDIR/pango. On Win32, use the same Pango
- * installation directory. This returned string should not be
- * g_free'd either.
- */
-NS_PANGO_DEPRECATED
-const char *   ns_pango_get_lib_subdirectory (void) G_GNUC_PURE;
 
 void ns_pango_log2vis_fill_embedding_levels (const char     *text,
                                           int             length,

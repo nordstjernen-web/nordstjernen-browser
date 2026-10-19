@@ -244,59 +244,6 @@ ns_pango_context_set_font_map (NsPangoContext *context,
 }
 
 /**
- * ns_pango_context_get_font_map:
- * @context: a `NsPangoContext`
- *
- * Gets the `NsPangoFontMap` used to look up fonts for this context.
- *
- * Returns: (transfer none) (nullable): the font map for the.
- *   `NsPangoContext` This value is owned by Pango and should not be
- *   unreferenced.
- *
- * Since: 1.6
- */
-NsPangoFontMap *
-ns_pango_context_get_font_map (NsPangoContext *context)
-{
-  g_return_val_if_fail (NS_PANGO_IS_CONTEXT (context), NULL);
-
-  return context->font_map;
-}
-
-/**
- * ns_pango_context_list_families:
- * @context: a `NsPangoContext`
- * @families: (out) (array length=n_families) (transfer container): location
- *   to store a pointer to an array of `NsPangoFontFamily`. This array should
- *   be freed with g_free().
- * @n_families: (out): location to store the number of elements in @descs
- *
- * List all families for a context.
- */
-void
-ns_pango_context_list_families (NsPangoContext      *context,
-                             NsPangoFontFamily ***families,
-                             int               *n_families)
-{
-  g_return_if_fail (context != NULL);
-  g_return_if_fail (families == NULL || n_families != NULL);
-
-  if (n_families == NULL)
-    return;
-
-  if (context->font_map == NULL)
-    {
-      *n_families = 0;
-      if (families)
-        *families = NULL;
-
-      return;
-    }
-  else
-    ns_pango_font_map_list_families (context->font_map, families, n_families);
-}
-
-/**
  * ns_pango_context_load_font:
  * @context: a `NsPangoContext`
  * @desc: a `NsPangoFontDescription` describing the font to load
@@ -315,52 +262,6 @@ ns_pango_context_load_font (NsPangoContext               *context,
   g_return_val_if_fail (context->font_map != NULL, NULL);
 
   return ns_pango_font_map_load_font (context->font_map, context, desc);
-}
-
-/**
- * ns_pango_context_load_fontset:
- * @context: a `NsPangoContext`
- * @desc: a `NsPangoFontDescription` describing the fonts to load
- * @language: a `NsPangoLanguage` the fonts will be used for
- *
- * Load a set of fonts in the context that can be used to render
- * a font matching @desc.
- *
- * Returns: (transfer full) (nullable): the newly allocated
- *   `NsPangoFontset` loaded, or %NULL if no font matched.
- */
-NsPangoFontset *
-ns_pango_context_load_fontset (NsPangoContext               *context,
-                            const NsPangoFontDescription *desc,
-                            NsPangoLanguage             *language)
-{
-  g_return_val_if_fail (context != NULL, NULL);
-
-  return ns_pango_font_map_load_fontset (context->font_map, context, desc, language);
-}
-
-/**
- * ns_pango_context_set_font_description:
- * @context: a `NsPangoContext`
- * @desc: the new pango font description
- *
- * Set the default font description for the context
- */
-void
-ns_pango_context_set_font_description (NsPangoContext               *context,
-                                    const NsPangoFontDescription *desc)
-{
-  g_return_if_fail (context != NULL);
-  g_return_if_fail (desc != NULL);
-
-  if (desc != context->font_desc &&
-      (!desc || !context->font_desc || !ns_pango_font_description_equal(desc, context->font_desc)))
-    {
-      context_changed (context);
-
-      ns_pango_font_description_free (context->font_desc);
-      context->font_desc = ns_pango_font_description_copy (desc);
-    }
 }
 
 /**
@@ -467,51 +368,6 @@ ns_pango_context_get_base_dir (NsPangoContext *context)
 }
 
 /**
- * ns_pango_context_set_base_gravity:
- * @context: a `NsPangoContext`
- * @gravity: the new base gravity
- *
- * Sets the base gravity for the context.
- *
- * The base gravity is used in laying vertical text out.
- *
- * Since: 1.16
- */
-void
-ns_pango_context_set_base_gravity (NsPangoContext *context,
-                                NsPangoGravity  gravity)
-{
-  g_return_if_fail (context != NULL);
-
-  if (gravity != context->base_gravity)
-    context_changed (context);
-
-  context->base_gravity = gravity;
-
-  update_resolved_gravity (context);
-}
-
-/**
- * ns_pango_context_get_base_gravity:
- * @context: a `NsPangoContext`
- *
- * Retrieves the base gravity for the context.
- *
- * See [method@Pango.Context.set_base_gravity].
- *
- * Returns: the base gravity for the context.
- *
- * Since: 1.16
- */
-NsPangoGravity
-ns_pango_context_get_base_gravity (NsPangoContext *context)
-{
-  g_return_val_if_fail (context != NULL, NS_PANGO_GRAVITY_SOUTH);
-
-  return context->base_gravity;
-}
-
-/**
  * ns_pango_context_get_gravity:
  * @context: a `NsPangoContext`
  *
@@ -532,52 +388,6 @@ ns_pango_context_get_gravity (NsPangoContext *context)
   g_return_val_if_fail (context != NULL, NS_PANGO_GRAVITY_SOUTH);
 
   return context->resolved_gravity;
-}
-
-/**
- * ns_pango_context_set_gravity_hint:
- * @context: a `NsPangoContext`
- * @hint: the new gravity hint
- *
- * Sets the gravity hint for the context.
- *
- * The gravity hint is used in laying vertical text out, and
- * is only relevant if gravity of the context as returned by
- * [method@Pango.Context.get_gravity] is set to %NS_PANGO_GRAVITY_EAST
- * or %NS_PANGO_GRAVITY_WEST.
- *
- * Since: 1.16
- */
-void
-ns_pango_context_set_gravity_hint (NsPangoContext     *context,
-                                NsPangoGravityHint  hint)
-{
-  g_return_if_fail (context != NULL);
-
-  if (hint != context->gravity_hint)
-    context_changed (context);
-
-  context->gravity_hint = hint;
-}
-
-/**
- * ns_pango_context_get_gravity_hint:
- * @context: a `NsPangoContext`
- *
- * Retrieves the gravity hint for the context.
- *
- * See [method@Pango.Context.set_gravity_hint] for details.
- *
- * Returns: the gravity hint for the context.
- *
- * Since: 1.16
- */
-NsPangoGravityHint
-ns_pango_context_get_gravity_hint (NsPangoContext *context)
-{
-  g_return_val_if_fail (context != NULL, NS_PANGO_GRAVITY_HINT_NATURAL);
-
-  return context->gravity_hint;
 }
 
 

@@ -115,10 +115,7 @@ struct _PangoItem
   NsPangoAnalysis analysis;
 };
 
-#define NS_TYPE_PANGO_ITEM (ns_pango_item_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                   ns_pango_item_get_type          (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoItem *             ns_pango_item_new               (void);
@@ -128,9 +125,6 @@ NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_item_free              (NsPangoItem         *item);
 
 
-NS_PANGO_AVAILABLE_IN_1_54
-int                     ns_pango_item_get_char_offset   (NsPangoItem         *item);
-
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoItem *             ns_pango_item_split             (NsPangoItem         *orig,
                                                       int                split_index,
@@ -139,9 +133,6 @@ NsPangoItem *             ns_pango_item_split             (NsPangoItem         *
 NS_PANGO_AVAILABLE_IN_1_44
 void                    ns_pango_item_apply_attrs       (NsPangoItem         *item,
                                                       NsPangoAttrIterator *iter);
-
-NS_PANGO_AVAILABLE_IN_ALL
-GList *                 ns_pango_reorder_items          (GList             *items);
 
 /* Itemization */
 

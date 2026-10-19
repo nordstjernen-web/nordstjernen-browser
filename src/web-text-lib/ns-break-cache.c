@@ -312,33 +312,6 @@ ns_pango_break_cache_store (const char           *text,
 }
 
 void
-ns_pango_break_cache_trim (void)
-{
-  for (guint i = 0; i < NS_BREAK_CACHE_SHARDS; i++)
-    {
-      g_rw_lock_writer_lock (&shards[i].lock);
-      if (shards[i].table != NULL)
-        drop_unread_entries (&shards[i]);
-      g_rw_lock_writer_unlock (&shards[i].lock);
-    }
-}
-
-void
-ns_pango_break_cache_clear (void)
-{
-  for (guint i = 0; i < NS_BREAK_CACHE_SHARDS; i++)
-    {
-      g_rw_lock_writer_lock (&shards[i].lock);
-
-      if (shards[i].table != NULL)
-        g_hash_table_remove_all (shards[i].table);
-      shards[i].bytes = 0;
-
-      g_rw_lock_writer_unlock (&shards[i].lock);
-    }
-}
-
-void
 ns_pango_break_cache_stats (guint64 *hits,
                             guint64 *misses,
                             guint64 *skipped,

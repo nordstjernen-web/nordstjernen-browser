@@ -116,14 +116,13 @@ typedef enum {
 #include <web-text-lib/pango-matrix.h>
 #include <web-text-lib/pango-script.h>
 
+#define NS_TYPE_PANGO_GRAVITY (ns_pango_gravity_get_type ())
+GType ns_pango_gravity_get_type (void) G_GNUC_CONST;
+
 NS_PANGO_AVAILABLE_IN_1_16
 double       ns_pango_gravity_to_rotation    (NsPangoGravity       gravity) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_1_16
 NsPangoGravity ns_pango_gravity_get_for_matrix (const NsPangoMatrix *matrix) G_GNUC_PURE;
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoGravity ns_pango_gravity_get_for_script (NsPangoScript        script,
-					   NsPangoGravity       base_gravity,
-					   NsPangoGravityHint   hint) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_1_26
 NsPangoGravity ns_pango_gravity_get_for_script_and_width
 					  (NsPangoScript        script,

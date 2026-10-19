@@ -68,22 +68,6 @@ ns_pango_fontset_get_font (NsPangoFontset  *fontset,
 }
 
 /**
- * ns_pango_fontset_get_metrics:
- * @fontset: a `NsPangoFontset`
- *
- * Get overall metric information for the fonts in the fontset.
- *
- * Returns: (transfer full): a `NsPangoFontMetrics` object
- */
-NsPangoFontMetrics *
-ns_pango_fontset_get_metrics (NsPangoFontset  *fontset)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONTSET (fontset), NULL);
-
-  return NS_PANGO_FONTSET_GET_CLASS (fontset)->get_metrics (fontset);
-}
-
-/**
  * ns_pango_fontset_foreach:
  * @fontset: a `NsPangoFontset`
  * @func: (closure data) (scope call): Callback function

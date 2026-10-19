@@ -56,10 +56,6 @@ struct _PangoFontDescription
   int size;
 };
 
-G_DEFINE_BOXED_TYPE (NsPangoFontDescription, ns_pango_font_description,
-                     ns_pango_font_description_copy,
-                     ns_pango_font_description_free);
-
 static const NsPangoFontDescription pfd_defaults = {
   NULL,                 /* family_name */
 
@@ -328,31 +324,6 @@ stretch_to_width (NsPangoStretch stretch)
     }
 }
 
-static NsPangoStretch
-width_to_stretch (NsPangoWidth width)
-{
-  width *= 2;
-
-  if (width < NS_PANGO_WIDTH_ULTRA_CONDENSED + NS_PANGO_WIDTH_EXTRA_CONDENSED)
-    return NS_PANGO_STRETCH_ULTRA_CONDENSED;
-  else if (width < NS_PANGO_WIDTH_EXTRA_CONDENSED + NS_PANGO_WIDTH_CONDENSED)
-    return NS_PANGO_STRETCH_EXTRA_CONDENSED;
-  else if (width < NS_PANGO_WIDTH_CONDENSED + NS_PANGO_WIDTH_SEMI_CONDENSED)
-    return NS_PANGO_STRETCH_CONDENSED;
-  else if (width < NS_PANGO_WIDTH_SEMI_CONDENSED + NS_PANGO_WIDTH_NORMAL)
-    return NS_PANGO_STRETCH_SEMI_CONDENSED;
-  else if (width < NS_PANGO_WIDTH_NORMAL + NS_PANGO_WIDTH_SEMI_EXPANDED)
-    return NS_PANGO_STRETCH_NORMAL;
-  else if (width < NS_PANGO_WIDTH_SEMI_EXPANDED + NS_PANGO_WIDTH_EXPANDED)
-    return NS_PANGO_STRETCH_SEMI_EXPANDED;
-  else if (width < NS_PANGO_WIDTH_EXPANDED + NS_PANGO_WIDTH_EXTRA_EXPANDED)
-    return NS_PANGO_STRETCH_EXPANDED;
-  else if (width < NS_PANGO_WIDTH_EXTRA_EXPANDED + NS_PANGO_WIDTH_ULTRA_EXPANDED)
-    return NS_PANGO_STRETCH_EXTRA_EXPANDED;
-  else
-    return NS_PANGO_STRETCH_ULTRA_EXPANDED;
-}
-
 /**
  * ns_pango_font_description_set_stretch:
  * @desc: a `NsPangoFontDescription`
@@ -371,26 +342,6 @@ ns_pango_font_description_set_stretch (NsPangoFontDescription *desc,
 
   desc->width = stretch_to_width (stretch);
   desc->mask |= NS_PANGO_FONT_MASK_STRETCH;
-}
-
-/**
- * ns_pango_font_description_get_stretch:
- * @desc: a `NsPangoFontDescription`.
- *
- * Gets the stretch field of a font description.
- *
- * See [method@Pango.FontDescription.set_stretch].
- *
- * Returns: the stretch field for the font description.
- *   Use [method@Pango.FontDescription.get_set_fields] to find
- *   out if the field was explicitly set or not.
- */
-NsPangoStretch
-ns_pango_font_description_get_stretch (const NsPangoFontDescription *desc)
-{
-  g_return_val_if_fail (desc != NULL, width_to_stretch (pfd_defaults.width));
-
-  return width_to_stretch (desc->width);
 }
 
 /**
@@ -1006,70 +957,6 @@ ns_pango_font_description_merge_static (NsPangoFontDescription       *desc,
   desc->mask |= new_mask;
 }
 
-static gint
-compute_distance (const NsPangoFontDescription *a,
-                  const NsPangoFontDescription *b)
-{
-  if (a->style == b->style)
-    {
-      return abs ((int) a->weight - (int) b->weight) +
-             abs ((int) a->width - (int) b->width);
-    }
-  else if (a->style != NS_PANGO_STYLE_NORMAL &&
-           b->style != NS_PANGO_STYLE_NORMAL)
-    {
-      /* Equate oblique and italic, but with a big penalty
-       */
-      return 1000000 + abs ((int) a->weight  - (int) b->weight) +
-                       abs ((int) a->width - (int) b->width);
-    }
-  else
-    return G_MAXINT;
-}
-
-/**
- * ns_pango_font_description_better_match:
- * @desc: a `NsPangoFontDescription`
- * @old_match: (nullable): a `NsPangoFontDescription`, or %NULL
- * @new_match: a `NsPangoFontDescription`
- *
- * Determines if the style attributes of @new_match are a closer match
- * for @desc than those of @old_match are, or if @old_match is %NULL,
- * determines if @new_match is a match at all.
- *
- * Approximate matching is done for weight, width and style; other style attributes
- * must match exactly. Style attributes are all attributes other than family
- * and size-related attributes. Approximate matching for style considers
- * %NS_PANGO_STYLE_OBLIQUE and %NS_PANGO_STYLE_ITALIC as matches, but not as good
- * a match as when the styles are equal.
- *
- * Note that @old_match must match @desc.
- *
- * Returns: %TRUE if @new_match is a better match
- */
-gboolean
-ns_pango_font_description_better_match (const NsPangoFontDescription *desc,
-                                     const NsPangoFontDescription *old_match,
-                                     const NsPangoFontDescription *new_match)
-{
-  g_return_val_if_fail (desc != NULL, G_MAXINT);
-  g_return_val_if_fail (new_match != NULL, G_MAXINT);
-
-  if (new_match->variant == desc->variant &&
-      new_match->gravity == desc->gravity &&
-      (desc->color == NS_PANGO_FONT_COLOR_DONT_CARE ||
-       new_match->color == desc->color))
-    {
-      int old_distance = old_match ? compute_distance (desc, old_match) : G_MAXINT;
-      int new_distance = compute_distance (desc, new_match);
-
-      if (new_distance < old_distance)
-        return TRUE;
-    }
-
-  return FALSE;
-}
-
 /**
  * ns_pango_font_description_copy:
  * @desc: (nullable): a `NsPangoFontDescription`, may be %NULL
@@ -1259,30 +1146,6 @@ ns_pango_font_description_free (NsPangoFontDescription *desc)
     g_free (desc->features);
 
   g_slice_free (NsPangoFontDescription, desc);
-}
-
-/**
- * ns_pango_font_descriptions_free:
- * @descs: (nullable) (array length=n_descs) (transfer full): a pointer
- *   to an array of `NsPangoFontDescription`, may be %NULL
- * @n_descs: number of font descriptions in @descs
- *
- * Frees an array of font descriptions.
- *
- * Deprecated: 1.56: Just use ns_pango_font_description_free in a loop
- */
-void
-ns_pango_font_descriptions_free (NsPangoFontDescription **descs,
-                              int                    n_descs)
-{
-  int i;
-
-  if (descs == NULL)
-    return;
-
-  for (i = 0; i<n_descs; i++)
-    ns_pango_font_description_free (descs[i]);
-  g_free (descs);
 }
 
 typedef struct
@@ -1960,204 +1823,6 @@ ns_pango_font_description_to_string (const NsPangoFontDescription *desc)
   return g_string_free (result, FALSE);
 }
 
-/**
- * ns_pango_font_description_to_filename:
- * @desc: a `NsPangoFontDescription`
- *
- * Creates a filename representation of a font description.
- *
- * The filename is identical to the result from calling
- * [method@Pango.FontDescription.to_string], but with underscores
- * instead of characters that are untypical in filenames, and in
- * lower case only.
- *
- * Returns: (transfer full) (nullable): a new string that must be freed with g_free().
- */
-char *
-ns_pango_font_description_to_filename (const NsPangoFontDescription *desc)
-{
-  char *result;
-  char *p;
-
-  g_return_val_if_fail (desc != NULL, NULL);
-
-  result = ns_pango_font_description_to_string (desc);
-
-  p = result;
-  while (*p)
-    {
-      if (G_UNLIKELY ((guchar) *p >= 128))
-        /* skip over non-ASCII chars */;
-      else if (strchr ("-+_.", *p) == NULL && !g_ascii_isalnum (*p))
-        *p = '_';
-      else
-        *p = g_ascii_tolower (*p);
-      p++;
-    }
-
-  return result;
-}
-
-static gboolean
-parse_field (const char *what,
-             const FieldMap *map,
-             int n_elements,
-             const char *str,
-             int *val,
-             gboolean warn)
-{
-  gboolean found;
-  int len = strlen (str);
-
-  if (G_UNLIKELY (*str == '\0'))
-    return FALSE;
-
-  if (field_matches ("Normal", str, len))
-    {
-      /* find the map entry with empty string */
-      int i;
-
-      for (i = 0; i < n_elements; i++)
-        if (map[i].str[0] == '\0')
-          {
-            *val = map[i].value;
-            return TRUE;
-          }
-
-      *val = 0;
-      return TRUE;
-    }
-
-  found = find_field (NULL, map, n_elements, str, len, val);
-
-  if (!found && warn)
-    {
-        int i;
-        GString *s = g_string_new (NULL);
-
-        for (i = 0; i < n_elements; i++)
-          {
-            if (i)
-              g_string_append_c (s, '/');
-            g_string_append (s, map[i].str[0] == '\0' ? "Normal" : map[i].str);
-          }
-
-        g_warning ("%s must be one of %s or a number",
-                   what,
-                   s->str);
-
-        g_string_free (s, TRUE);
-    }
-
-  return found;
-}
-
-#define FIELD(NAME, MASK) \
-  parse_field (G_STRINGIFY (NAME), NAME##_map, G_N_ELEMENTS (NAME##_map), str, (int *)(void *)NAME, warn)
-
-/**
- * ns_pango_parse_style:
- * @str: a string to parse.
- * @style: (out): a `NsPangoStyle` to store the result in.
- * @warn: if %TRUE, issue a g_warning() on bad input.
- *
- * Parses a font style.
- *
- * The allowed values are "normal", "italic" and "oblique", case
- * variations being
- * ignored.
- *
- * Returns: %TRUE if @str was successfully parsed.
- */
-gboolean
-ns_pango_parse_style (const char *str,
-                   NsPangoStyle *style,
-                   gboolean    warn)
-{
-  return FIELD (style,   NS_PANGO_FONT_MASK_STYLE);
-}
-
-/**
- * ns_pango_parse_variant:
- * @str: a string to parse.
- * @variant: (out): a `NsPangoVariant` to store the result in.
- * @warn: if %TRUE, issue a g_warning() on bad input.
- *
- * Parses a font variant.
- *
- * The allowed values are "normal", "small-caps", "all-small-caps",
- * "petite-caps", "all-petite-caps", "unicase" and "title-caps",
- * case variations being ignored.
- *
- * Returns: %TRUE if @str was successfully parsed.
- */
-gboolean
-ns_pango_parse_variant (const char   *str,
-                     NsPangoVariant *variant,
-                     gboolean      warn)
-{
-  return FIELD (variant, NS_PANGO_FONT_MASK_VARIANT);
-}
-
-/**
- * ns_pango_parse_weight:
- * @str: a string to parse.
- * @weight: (out): a `NsPangoWeight` to store the result in.
- * @warn: if %TRUE, issue a g_warning() on bad input.
- *
- * Parses a font weight.
- *
- * The allowed values are "heavy",
- * "ultrabold", "bold", "normal", "light", "ultraleight"
- * and integers. Case variations are ignored.
- *
- * Returns: %TRUE if @str was successfully parsed.
- */
-gboolean
-ns_pango_parse_weight (const char  *str,
-                    NsPangoWeight *weight,
-                    gboolean     warn)
-{
-  return FIELD (weight,  NS_PANGO_FONT_MASK_WEIGHT);
-}
-
-gboolean
-ns_pango_parse_width (const char *str,
-                   NsPangoWidth *width,
-                   gboolean    warn)
-{
-  return FIELD (width, NS_PANGO_FONT_MASK_WIDTH);
-}
-
-/**
- * ns_pango_parse_stretch:
- * @str: a string to parse.
- * @stretch: (out): a `NsPangoStretch` to store the result in.
- * @warn: if %TRUE, issue a g_warning() on bad input.
- *
- * Parses a font stretch.
- *
- * The allowed values are
- * "ultra_condensed", "extra_condensed", "condensed",
- * "semi_condensed", "normal", "semi_expanded", "expanded",
- * "extra_expanded" and "ultra_expanded". Case variations are
- * ignored and the '_' characters may be omitted.
- *
- * Returns: %TRUE if @str was successfully parsed.
- */
-gboolean
-ns_pango_parse_stretch (const char   *str,
-                     NsPangoStretch *stretch,
-                     gboolean      warn)
-{
-  NsPangoWidth width;
-  gboolean ret;
-
-  ret = ns_pango_parse_width (str, &width, warn);
-  *stretch = width_to_stretch (width);
-  return ret;
-}
-
 /*
  * NsPangoFont
  */
@@ -2336,26 +2001,6 @@ ns_pango_font_get_coverage (NsPangoFont     *font,
 }
 
 /**
- * ns_pango_font_find_shaper:
- * @font: a `NsPangoFont`
- * @language: the language tag
- * @ch: a Unicode character.
- *
- * Finds the best matching shaper for a font for a particular
- * language tag and character point.
- *
- * Returns: (transfer none) (nullable): the best matching shaper.
- * Deprecated: Shape engines are no longer used
- */
-NsPangoEngineShape *
-ns_pango_font_find_shaper (NsPangoFont     *font,
-                        NsPangoLanguage *language,
-                        guint32        ch)
-{
-  return NULL;
-}
-
-/**
  * ns_pango_font_get_glyph_extents:
  * @font: (nullable): a `NsPangoFont`
  * @glyph: the glyph index
@@ -2479,27 +2124,6 @@ ns_pango_font_get_font_map (NsPangoFont *font)
 }
 
 /**
- * ns_pango_font_get_face:
- * @font: a `NsPangoFont`
- *
- * Gets the `NsPangoFontFace` to which @font belongs.
- *
- * Note that this function can return `NULL` in cases
- * where the font outlives its font map.
- *
- * Returns: (transfer none) (nullable): the `NsPangoFontFace`
- *
- * Since: 1.46
- */
-NsPangoFontFace *
-ns_pango_font_get_face (NsPangoFont *font)
-{
-  NsPangoFontClassPrivate *pclass = NS_PANGO_FONT_GET_CLASS_PRIVATE (font);
-
-  return pclass->get_face (font);
-}
-
-/**
  * ns_pango_font_get_hb_font: (skip)
  * @font: a `NsPangoFont`
  *
@@ -2530,10 +2154,6 @@ ns_pango_font_get_hb_font (NsPangoFont *font)
 
   return priv->hb_font;
 }
-
-G_DEFINE_BOXED_TYPE (NsPangoFontMetrics, ns_pango_font_metrics,
-                     ns_pango_font_metrics_ref,
-                     ns_pango_font_metrics_unref);
 
 /**
  * ns_pango_font_metrics_new:
@@ -2677,28 +2297,6 @@ ns_pango_font_metrics_get_approximate_char_width (NsPangoFontMetrics *metrics)
   g_return_val_if_fail (metrics != NULL, 0);
 
   return metrics->approximate_char_width;
-}
-
-/**
- * ns_pango_font_metrics_get_approximate_digit_width:
- * @metrics: a `NsPangoFontMetrics` structure
- *
- * Gets the approximate digit width for a font metrics structure.
- *
- * This is merely a representative value useful, for example, for
- * determining the initial size for a window. Actual digits in
- * text can be wider or narrower than this, though this value
- * is generally somewhat more accurate than the result of
- * ns_pango_font_metrics_get_approximate_char_width() for digits.
- *
- * Returns: the digit width, in Pango units.
- */
-int
-ns_pango_font_metrics_get_approximate_digit_width (NsPangoFontMetrics *metrics)
-{
-  g_return_val_if_fail (metrics != NULL, 0);
-
-  return metrics->approximate_digit_width;
 }
 
 /**
@@ -3158,53 +2756,6 @@ ns_pango_font_face_init (NsPangoFontFace *face G_GNUC_UNUSED)
 }
 
 /**
- * ns_pango_font_face_describe:
- * @face: a `NsPangoFontFace`
- *
- * Returns a font description that matches the face.
- *
- * The resulting font description will have the family, style,
- * variant, weight and stretch of the face, but its size field
- * will be unset.
- *
- * Returns: (transfer full): a newly-created `NsPangoFontDescription` structure
- *   holding the description of the face. Use [method@Pango.FontDescription.free]
- *   to free the result.
- */
-NsPangoFontDescription *
-ns_pango_font_face_describe (NsPangoFontFace *face)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONT_FACE (face), NULL);
-
-  return NS_PANGO_FONT_FACE_GET_CLASS (face)->describe (face);
-}
-
-/**
- * ns_pango_font_face_is_synthesized:
- * @face: a `NsPangoFontFace`
- *
- * Returns whether a `NsPangoFontFace` is synthesized.
- *
- * This will be the case if the underlying font rendering engine
- * creates this face from another face, by shearing, emboldening,
- * lightening or modifying it in some other way.
- *
- * Returns: whether @face is synthesized
- *
- * Since: 1.18
- */
-gboolean
-ns_pango_font_face_is_synthesized (NsPangoFontFace  *face)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONT_FACE (face), FALSE);
-
-  if (NS_PANGO_FONT_FACE_GET_CLASS (face)->is_synthesized != NULL)
-    return NS_PANGO_FONT_FACE_GET_CLASS (face)->is_synthesized (face);
-  else
-    return FALSE;
-}
-
-/**
  * ns_pango_font_face_get_face_name:
  * @face: a `NsPangoFontFace`.
  *
@@ -3223,62 +2774,6 @@ ns_pango_font_face_get_face_name (NsPangoFontFace *face)
   g_return_val_if_fail (NS_PANGO_IS_FONT_FACE (face), NULL);
 
   return NS_PANGO_FONT_FACE_GET_CLASS (face)->get_face_name (face);
-}
-
-/**
- * ns_pango_font_face_list_sizes:
- * @face: a `NsPangoFontFace`.
- * @sizes: (out) (array length=n_sizes) (nullable) (optional):
- *   location to store a pointer to an array of int. This array
- *   should be freed with g_free().
- * @n_sizes: location to store the number of elements in @sizes
- *
- * List the available sizes for a font.
- *
- * This is only applicable to bitmap fonts. For scalable fonts, stores
- * %NULL at the location pointed to by @sizes and 0 at the location pointed
- * to by @n_sizes. The sizes returned are in Pango units and are sorted
- * in ascending order.
- *
- * Since: 1.4
- */
-void
-ns_pango_font_face_list_sizes (NsPangoFontFace  *face,
-                            int           **sizes,
-                            int            *n_sizes)
-{
-  g_return_if_fail (NS_PANGO_IS_FONT_FACE (face));
-  g_return_if_fail (sizes == NULL || n_sizes != NULL);
-
-  if (n_sizes == NULL)
-    return;
-
-  if (NS_PANGO_FONT_FACE_GET_CLASS (face)->list_sizes != NULL)
-    NS_PANGO_FONT_FACE_GET_CLASS (face)->list_sizes (face, sizes, n_sizes);
-  else
-    {
-      if (sizes != NULL)
-        *sizes = NULL;
-      *n_sizes = 0;
-    }
-}
-
-/**
- * ns_pango_font_face_get_family:
- * @face: a `NsPangoFontFace`
- *
- * Gets the `NsPangoFontFamily` that @face belongs to.
- *
- * Returns: (transfer none): the `NsPangoFontFamily`
- *
- * Since: 1.46
- */
-NsPangoFontFamily *
-ns_pango_font_face_get_family (NsPangoFontFace *face)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FONT_FACE (face), NULL);
-
-  return NS_PANGO_FONT_FACE_GET_CLASS (face)->get_family (face);
 }
 
 /**
@@ -3326,46 +2821,6 @@ ns_pango_font_get_features (NsPangoFont    *font,
 {
   if (NS_PANGO_FONT_GET_CLASS (font)->get_features)
     NS_PANGO_FONT_GET_CLASS (font)->get_features (font, features, len, num_features);
-}
-
-/**
- * ns_pango_font_get_languages:
- * @font: a `NsPangoFont`
- *
- * Returns the languages that are supported by @font.
- *
- * If the font backend does not provide this information,
- * %NULL is returned. For the fontconfig backend, this
- * corresponds to the FC_LANG member of the FcPattern.
- *
- * The returned array is only valid as long as the font
- * and its fontmap are valid.
- *
- * Returns: (transfer none) (nullable) (array zero-terminated=1) (element-type NsPangoLanguage): an array of `NsPangoLanguage`
- *
- * Since: 1.50
- */
-NsPangoLanguage **
-ns_pango_font_get_languages (NsPangoFont *font)
-{
-  NsPangoFontClassPrivate *pclass = NS_PANGO_FONT_GET_CLASS_PRIVATE (font);
-
-  return pclass->get_languages (font);
-}
-
-/*< private >
- * ns_pango_font_get_matrix:
- * @font: a `NsPangoFont`
- *
- * Gets the matrix for the transformation from 'font space' to 'user space'.
- */
-void
-ns_pango_font_get_matrix (NsPangoFont   *font,
-                       NsPangoMatrix *matrix)
-{
-  NsPangoFontClassPrivate *pclass = NS_PANGO_FONT_GET_CLASS_PRIVATE (font);
-
-  pclass->get_matrix (font, matrix);
 }
 
 /*< private >

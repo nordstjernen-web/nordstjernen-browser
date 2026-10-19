@@ -65,11 +65,6 @@ jobs:
               echo "pkg_add attempt $attempt failed; retrying"
               sleep $((attempt * 20))
             done
-            # pkgsrc splits glib's python-dependent tools out of glib2, and
-            # gtk4 does not pull them in. web-text-lib's build needs
-            # glib-mkenums, which glib2-tools provides; keep it on its own
-            # pkg_add so a miss here cannot take the line above with it.
-            /usr/sbin/pkg_add -U glib2-tools || true
           run: |
             set -e
             export PATH="/usr/pkg/bin:/usr/pkg/sbin:$PATH"
@@ -79,19 +74,10 @@ jobs:
             export PKG_CONFIG_PATH="/usr/pkg/lib/pkgconfig:/usr/X11R7/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export CC="ccache cc"
             export CXX="ccache c++"
-            # web-text-lib's build resolves glib-mkenums through glib-2.0's
-            # pkg-config tool variable and hard-errors when the file behind it
-            # is missing, so fall back to the system Pango rather than fail the
-            # build if glib2-tools did not install.
-            pango_arg=
-            if [ ! -x /usr/pkg/bin/glib-mkenums ]; then
-              echo "glib-mkenums missing: building against the system Pango"
-              pango_arg=-Dweb-text-lib=disabled
-            fi
             # WAMR's posix platform layer uses MAP_32BIT, which NetBSD does
             # not provide, so the WebAssembly engine is disabled here.
             meson setup builddir --buildtype=release -Db_ndebug=true \
-              -Dwasm=disabled $pango_arg
+              -Dwasm=disabled
             meson compile -C builddir
             if ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt 2>/dev/null \
                && grep -q Nordstjernen about.txt; then

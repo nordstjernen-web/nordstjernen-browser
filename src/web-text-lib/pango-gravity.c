@@ -25,6 +25,29 @@
 
 #include <math.h>
 
+GType
+ns_pango_gravity_get_type (void)
+{
+  static gsize type_id = 0;
+
+  if (g_once_init_enter (&type_id))
+    {
+      static const GEnumValue values[] = {
+        { NS_PANGO_GRAVITY_SOUTH, "NS_PANGO_GRAVITY_SOUTH", "south" },
+        { NS_PANGO_GRAVITY_EAST, "NS_PANGO_GRAVITY_EAST", "east" },
+        { NS_PANGO_GRAVITY_NORTH, "NS_PANGO_GRAVITY_NORTH", "north" },
+        { NS_PANGO_GRAVITY_WEST, "NS_PANGO_GRAVITY_WEST", "west" },
+        { NS_PANGO_GRAVITY_AUTO, "NS_PANGO_GRAVITY_AUTO", "auto" },
+        { 0, NULL, NULL }
+      };
+      g_once_init_leave (&type_id,
+                         g_enum_register_static (g_intern_static_string ("NsPangoGravity"),
+                                                 values));
+    }
+
+  return type_id;
+}
+
 /**
  * ns_pango_gravity_to_rotation:
  * @gravity: gravity to query, should not be %NS_PANGO_GRAVITY_AUTO
@@ -346,36 +369,6 @@ get_script_properties (NsPangoScript script)
     return script_properties[0];
 
   return script_properties[script];
-}
-
-/**
- * ns_pango_gravity_get_for_script:
- * @script: `NsPangoScript` to query
- * @base_gravity: base gravity of the paragraph
- * @hint: orientation hint
- *
- * Returns the gravity to use in laying out a `NsPangoItem`.
- *
- * The gravity is determined based on the script, base gravity, and hint.
- *
- * If @base_gravity is %NS_PANGO_GRAVITY_AUTO, it is first replaced with the
- * preferred gravity of @script.  To get the preferred gravity of a script,
- * pass %NS_PANGO_GRAVITY_AUTO and %NS_PANGO_GRAVITY_HINT_STRONG in.
- *
- * Return value: resolved gravity suitable to use for a run of text
- * with @script
- *
- * Since: 1.16
- */
-NsPangoGravity
-ns_pango_gravity_get_for_script (NsPangoScript      script,
-                              NsPangoGravity     base_gravity,
-                              NsPangoGravityHint hint)
-{
-  NsPangoScriptProperties props = get_script_properties (script);
-
-  return ns_pango_gravity_get_for_script_and_width (script, props.wide,
-                                                 base_gravity, hint);
 }
 
 /**

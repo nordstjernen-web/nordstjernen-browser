@@ -83,8 +83,6 @@ static int                  ns_pango_fc_font_get_absolute_size (NsPangoFont     
 static NsPangoVariant         ns_pango_fc_font_get_variant       (NsPangoFont        *font);
 static NsPangoFontFace *      ns_pango_fc_font_get_face          (NsPangoFont        *font);
 
-#define NS_PANGO_FC_FONT_LOCK_FACE(font)	(NS_PANGO_FC_FONT_GET_CLASS (font)->lock_face (font))
-#define NS_PANGO_FC_FONT_UNLOCK_FACE(font)	(NS_PANGO_FC_FONT_GET_CLASS (font)->unlock_face (font))
 
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (NsPangoFcFont, ns_pango_fc_font, NS_TYPE_PANGO_FONT,
                                   G_ADD_PRIVATE (NsPangoFcFont))
@@ -567,134 +565,6 @@ ns_pango_fc_font_real_get_glyph (NsPangoFcFont *font,
   return glyph;
 }
 
-/**
- * ns_pango_fc_font_lock_face: (skip)
- * @font: a `NsPangoFcFont`.
- *
- * Gets the FreeType `FT_Face` associated with a font.
- *
- * This face will be kept around until you call
- * [method@NsPangoFc.Font.unlock_face].
- *
- * Return value: the FreeType `FT_Face` associated with @font.
- *
- * Since: 1.4
- * Deprecated: 1.44: Use ns_pango_font_get_hb_font() instead
- */
-FT_Face
-ns_pango_fc_font_lock_face (NsPangoFcFont *font)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FC_FONT (font), NULL);
-
-  return NS_PANGO_FC_FONT_LOCK_FACE (font);
-}
-
-/**
- * ns_pango_fc_font_unlock_face:
- * @font: a `NsPangoFcFont`.
- *
- * Releases a font previously obtained with
- * [method@NsPangoFc.Font.lock_face].
- *
- * Since: 1.4
- * Deprecated: 1.44: Use ns_pango_font_get_hb_font() instead
- */
-void
-ns_pango_fc_font_unlock_face (NsPangoFcFont *font)
-{
-  g_return_if_fail (NS_PANGO_IS_FC_FONT (font));
-
-  NS_PANGO_FC_FONT_UNLOCK_FACE (font);
-}
-
-/**
- * ns_pango_fc_font_has_char:
- * @font: a `NsPangoFcFont`
- * @wc: Unicode codepoint to look up
- *
- * Determines whether @font has a glyph for the codepoint @wc.
- *
- * Return value: %TRUE if @font has the requested codepoint.
- *
- * Since: 1.4
- * Deprecated: 1.44: Use [method@Pango.Font.has_char]
- */
-gboolean
-ns_pango_fc_font_has_char (NsPangoFcFont *font,
-			gunichar     wc)
-{
-  NsPangoFcFontPrivate *priv = font->priv;
-  FcCharSet *charset;
-
-  g_return_val_if_fail (NS_PANGO_IS_FC_FONT (font), FALSE);
-
-  if (priv->decoder)
-    {
-      charset = ns_pango_fc_decoder_get_charset (priv->decoder, font);
-      return FcCharSetHasChar (charset, wc);
-    }
-
-  return NS_PANGO_FC_FONT_GET_CLASS (font)->has_char (font, wc);
-}
-
-/**
- * ns_pango_fc_font_get_glyph:
- * @font: a `NsPangoFcFont`
- * @wc: Unicode character to look up
- *
- * Gets the glyph index for a given Unicode character
- * for @font.
- *
- * If you only want to determine whether the font has
- * the glyph, use [method@NsPangoFc.Font.has_char].
- *
- * Return value: the glyph index, or 0, if the Unicode
- *   character doesn't exist in the font.
- *
- * Since: 1.4
- */
-NsPangoGlyph
-ns_pango_fc_font_get_glyph (NsPangoFcFont *font,
-			 gunichar     wc)
-{
-  NsPangoFcFontPrivate *priv = font->priv;
-
-  /* Replace NBSP with a normal space; it should be invariant that
-   * they shape the same other than breaking properties.
-   */
-  if (wc == 0xA0)
-	  wc = 0x20;
-
-  if (priv->decoder)
-    return ns_pango_fc_decoder_get_glyph (priv->decoder, font, wc);
-
-  return NS_PANGO_FC_FONT_GET_CLASS (font)->get_glyph (font, wc);
-}
-
-
-/**
- * ns_pango_fc_font_get_unknown_glyph:
- * @font: a `NsPangoFcFont`
- * @wc: the Unicode character for which a glyph is needed.
- *
- * Returns the index of a glyph suitable for drawing @wc
- * as an unknown character.
- *
- * Use NS_PANGO_GET_UNKNOWN_GLYPH() instead.
- *
- * Return value: a glyph index into @font.
- *
- * Since: 1.4
- */
-NsPangoGlyph
-ns_pango_fc_font_get_unknown_glyph (NsPangoFcFont *font,
-				 gunichar     wc)
-{
-  if (font && NS_PANGO_FC_FONT_GET_CLASS (font)->get_unknown_glyph)
-    return NS_PANGO_FC_FONT_GET_CLASS (font)->get_unknown_glyph (font, wc);
-
-  return NS_PANGO_GET_UNKNOWN_GLYPH (wc);
-}
 
 void
 _ns_pango_fc_font_shutdown (NsPangoFcFont *font)
@@ -703,43 +573,6 @@ _ns_pango_fc_font_shutdown (NsPangoFcFont *font)
 
   if (NS_PANGO_FC_FONT_GET_CLASS (font)->shutdown)
     NS_PANGO_FC_FONT_GET_CLASS (font)->shutdown (font);
-}
-
-/**
- * ns_pango_fc_font_kern_glyphs:
- * @font: a `NsPangoFcFont`
- * @glyphs: a `NsPangoGlyphString`
- *
- * This function used to adjust each adjacent pair of glyphs
- * in @glyphs according to kerning information in @font.
- *
- * Since 1.44, it does nothing.
- *
- * Since: 1.4
- * Deprecated: 1.32
- */
-void
-ns_pango_fc_font_kern_glyphs (NsPangoFcFont      *font,
-			   NsPangoGlyphString *glyphs)
-{
-}
-
-/**
- * _ns_pango_fc_font_get_decoder:
- * @font: a `NsPangoFcFont`
- *
- * This will return any custom decoder set on this font.
- *
- * Return value: The custom decoder
- *
- * Since: 1.6
- */
-NsPangoFcDecoder *
-_ns_pango_fc_font_get_decoder (NsPangoFcFont *font)
-{
-  NsPangoFcFontPrivate *priv = font->priv;
-
-  return priv->decoder;
 }
 
 /**
@@ -783,88 +616,6 @@ _ns_pango_fc_font_set_font_key (NsPangoFcFont    *fcfont,
   NsPangoFcFontPrivate *priv = fcfont->priv;
 
   priv->key = key;
-}
-
-/**
- * ns_pango_fc_font_get_raw_extents:
- * @fcfont: a `NsPangoFcFont`
- * @glyph: the glyph index to load
- * @ink_rect: (out) (optional): location to store ink extents of the
- *   glyph
- * @logical_rect: (out) (optional): location to store logical extents
- *   of the glyph
- *
- * Gets the extents of a single glyph from a font.
- *
- * The extents are in user space; that is, they are not transformed
- * by any matrix in effect for the font.
- *
- * Long term, this functionality probably belongs in the default
- * implementation of the get_glyph_extents() virtual function.
- * The other possibility would be to to make it public in something
- * like it's current form, and also expose glyph information
- * caching functionality similar to ns_pango_ft2_font_set_glyph_info().
- *
- * Since: 1.6
- */
-void
-ns_pango_fc_font_get_raw_extents (NsPangoFcFont    *fcfont,
-			       NsPangoGlyph      glyph,
-			       NsPangoRectangle *ink_rect,
-			       NsPangoRectangle *logical_rect)
-{
-  g_return_if_fail (NS_PANGO_IS_FC_FONT (fcfont));
-
-  if (glyph == NS_PANGO_GLYPH_EMPTY)
-    {
-      if (ink_rect)
-	{
-	  ink_rect->x = 0;
-	  ink_rect->width = 0;
-	  ink_rect->y = 0;
-	  ink_rect->height = 0;
-	}
-
-      if (logical_rect)
-	{
-	  logical_rect->x = 0;
-	  logical_rect->width = 0;
-	  logical_rect->y = 0;
-	  logical_rect->height = 0;
-	}
-    }
-  else
-    {
-      hb_font_t *hb_font = ns_pango_font_get_hb_font (NS_PANGO_FONT (fcfont));
-      hb_glyph_extents_t extents;
-      hb_font_extents_t font_extents;
-
-      hb_font_get_glyph_extents (hb_font, glyph, &extents);
-      hb_font_get_extents_for_direction (hb_font, HB_DIRECTION_LTR, &font_extents);
-
-      if (ink_rect)
-	{
-	  ink_rect->x = extents.x_bearing;
-	  ink_rect->width = extents.width;
-	  ink_rect->y = -extents.y_bearing;
-	  ink_rect->height = -extents.height;
-	}
-
-      if (logical_rect)
-	{
-          hb_position_t x, y;
-
-          hb_font_get_glyph_advance_for_direction (hb_font,
-                                                   glyph,
-                                                   HB_DIRECTION_LTR,
-                                                   &x, &y);
-
-	  logical_rect->x = 0;
-	  logical_rect->width = x;
-	  logical_rect->y = - font_extents.ascender;
-	  logical_rect->height = font_extents.ascender - font_extents.descender;
-	}
-    }
 }
 
 static void
@@ -1073,29 +824,6 @@ done:
   return hb_font;
 }
 
-/**
- * ns_pango_fc_font_get_languages:
- * @font: a `NsPangoFcFont`
- *
- * Returns the languages that are supported by @font.
- *
- * This corresponds to the FC_LANG member of the FcPattern.
- *
- * The returned array is only valid as long as the font
- * and its fontmap are valid.
- *
- * Returns: (transfer none) (nullable) (array zero-terminated=1): a
- *   %NULL-terminated array of `NsPangoLanguage`*
- *
- * Since: 1.48
- * Deprecated: 1.50: Use ns_pango_font_get_language()
- */
-NsPangoLanguage **
-ns_pango_fc_font_get_languages (NsPangoFcFont *font)
-{
-  return ns_pango_font_get_languages (NS_PANGO_FONT (font));
-}
-
 static NsPangoLanguage **
 _ns_pango_fc_font_get_languages (NsPangoFont *font)
 {
@@ -1105,22 +833,6 @@ _ns_pango_fc_font_get_languages (NsPangoFont *font)
     return NULL;
 
   return _ns_pango_fc_font_map_get_languages (NS_PANGO_FC_FONT_MAP (fcfont->fontmap), fcfont);
-}
-
-/**
- * ns_pango_fc_font_get_pattern: (skip)
- * @font: a `NsPangoFcFont`
- *
- * Returns the FcPattern that @font is based on.
- *
- * Returns: the fontconfig pattern for this font
- *
- * Since: 1.48
- */
-FcPattern *
-ns_pango_fc_font_get_pattern (NsPangoFcFont *font)
-{
-  return font->font_pattern;
 }
 
 gboolean

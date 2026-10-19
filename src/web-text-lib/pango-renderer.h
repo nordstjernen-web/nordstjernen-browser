@@ -282,13 +282,9 @@ guint16     ns_pango_renderer_get_alpha     (NsPangoRenderer    *renderer,
 NS_PANGO_AVAILABLE_IN_1_8
 void               ns_pango_renderer_set_matrix      (NsPangoRenderer     *renderer,
                                                    const NsPangoMatrix *matrix);
-NS_PANGO_AVAILABLE_IN_1_8
-const NsPangoMatrix *ns_pango_renderer_get_matrix      (NsPangoRenderer     *renderer);
 
 NS_PANGO_AVAILABLE_IN_1_20
 NsPangoLayout       *ns_pango_renderer_get_layout      (NsPangoRenderer     *renderer);
-NS_PANGO_AVAILABLE_IN_1_20
-NsPangoLayoutLine   *ns_pango_renderer_get_layout_line (NsPangoRenderer     *renderer);
 
 
 /**

@@ -41,9 +41,6 @@ typedef struct {
 
 } NsPangoFontMapClassPrivate;
 
-NS_PANGO_DEPRECATED_IN_1_38
-const char   *ns_pango_font_map_get_shape_engine_type (NsPangoFontMap *fontmap);
-
 G_END_DECLS
 
 #endif /* __NS_PANGO_FONTMAP_PRIVATE_H__ */

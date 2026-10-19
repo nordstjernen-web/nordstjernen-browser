@@ -93,38 +93,6 @@ ns_pango_glyph_string_set_size (NsPangoGlyphString *string, gint new_len)
   string->num_glyphs = new_len;
 }
 
-G_DEFINE_BOXED_TYPE (NsPangoGlyphString, ns_pango_glyph_string,
-                     ns_pango_glyph_string_copy,
-                     ns_pango_glyph_string_free);
-
-/**
- * ns_pango_glyph_string_copy:
- * @string: (nullable): a `NsPangoGlyphString`
- *
- * Copy a glyph string and associated storage.
- *
- * Return value: (nullable): the newly allocated `NsPangoGlyphString`
- */
-NsPangoGlyphString *
-ns_pango_glyph_string_copy (NsPangoGlyphString *string)
-{
-  NsPangoGlyphString *new_string;
-
-  if (string == NULL)
-    return NULL;
-
-  new_string = g_slice_new (NsPangoGlyphString);
-
-  *new_string = *string;
-
-  new_string->glyphs = g_memdup2 (string->glyphs,
-                                  string->space * sizeof (NsPangoGlyphInfo));
-  new_string->log_clusters = g_memdup2 (string->log_clusters,
-                                        string->space * sizeof (gint));
-
-  return new_string;
-}
-
 /**
  * ns_pango_glyph_string_free:
  * @string: (nullable): a `NsPangoGlyphString`, may be %NULL
@@ -311,43 +279,6 @@ ns_pango_glyph_string_get_width (NsPangoGlyphString *glyphs)
   return width;
 }
 
-/**
- * ns_pango_glyph_string_get_logical_widths:
- * @glyphs: a `NsPangoGlyphString`
- * @text: the text corresponding to the glyphs
- * @length: the length of @text, in bytes
- * @embedding_level: the embedding level of the string
- * @logical_widths: (array) (out caller-allocates): an array whose length is
- *   the number of characters in text (equal to `g_utf8_strlen (text, length)`
- *   unless text has `NUL` bytes) to be filled in with the resulting character
- *   widths.
- *
- * Given a `NsPangoGlyphString` and corresponding text, determine the width
- * corresponding to each character.
- *
- * When multiple characters compose a single cluster, the width of the
- * entire cluster is divided equally among the characters.
- *
- * See also [method@Pango.GlyphItem.get_logical_widths].
- */
-void
-ns_pango_glyph_string_get_logical_widths (NsPangoGlyphString *glyphs,
-				       const char       *text,
-				       int               length,
-				       int               embedding_level,
-				       int              *logical_widths)
-{
-  /* Build a NsPangoGlyphItem and call the other API */
-  NsPangoItem item = {0, length, ns_pango_utf8_strlen (text, length),
-		    {NULL, NULL, NULL,
-		     embedding_level, NS_PANGO_GRAVITY_AUTO, 0,
-		     NS_PANGO_SCRIPT_UNKNOWN, NULL,
-		     NULL}};
-  NsPangoGlyphItem glyph_item = {&item, glyphs};
-
-  ns_pango_glyph_item_get_logical_widths (&glyph_item, text, logical_widths);
-}
-
 /* The initial implementation here is script independent,
  * but it might actually need to be virtualized into the
  * rendering modules. Otherwise, we probably will end up
@@ -356,46 +287,6 @@ ns_pango_glyph_string_get_logical_widths (NsPangoGlyphString *glyphs,
  * The only distinction that Uniscript makes is whether
  * cursor positioning is allowed within clusters or not.
  */
-
-/**
- * ns_pango_glyph_string_index_to_x:
- * @glyphs: the glyphs return from [func@shape]
- * @text: the text for the run
- * @length: the number of bytes (not characters) in @text.
- * @analysis: the analysis information return from [func@itemize]
- * @index_: the byte index within @text
- * @trailing: whether we should compute the result for the beginning (%FALSE)
- *   or end (%TRUE) of the character.
- * @x_pos: (out) (optional): location to store result
- *
- * Converts from character position to x position.
- *
- * The X position is measured from the left edge of the run.
- * Character positions are obtained using font metrics for ligatures
- * where available, and computed by dividing up each cluster
- * into equal portions, otherwise.
- *
- * <picture>
- *   <source srcset="glyphstring-positions-dark.png" media="(prefers-color-scheme: dark)">
- *   <img alt="Glyph positions" src="glyphstring-positions-light.png">
- * </picture>
- */
-void
-ns_pango_glyph_string_index_to_x (NsPangoGlyphString *glyphs,
-                               const char       *text,
-                               int               length,
-                               NsPangoAnalysis    *analysis,
-                               int               index,
-                               gboolean          trailing,
-                               int              *x_pos)
-{
-  ns_pango_glyph_string_index_to_x_full (glyphs,
-                                      text, length,
-                                      analysis,
-                                      NULL,
-                                      index, trailing,
-                                      x_pos);
-}
 
 /**
  * ns_pango_glyph_string_index_to_x_full:

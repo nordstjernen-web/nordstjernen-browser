@@ -26,26 +26,6 @@
 #include <glib.h>
 #include <web-text-lib/pango-font.h>
 
-G_BEGIN_DECLS
-
-gboolean _ns_pango_scan_int                (const char **pos,
-	         	                 int         *out);
-
-gboolean _ns_pango_parse_enum              (GType       type,
-                                         const char *str,
-                                         int        *value,
-                                         gboolean    warn,
-                                         char      **possible_values);
-gboolean ns_pango_parse_flags              (GType       type,
-                                         const char *str,
-                                         int        *value,
-                                         char      **possible_values);
-
-char    *_ns_pango_trim_string             (const char *str);
-
-gboolean ns_pango_parse_width (const char *str,
-                            NsPangoWidth *width,
-                            gboolean    warn);
 
 G_END_DECLS
 

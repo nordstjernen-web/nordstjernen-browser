@@ -50,30 +50,17 @@ void                    ns_pango_context_changed                   (NsPangoConte
 NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_context_set_font_map              (NsPangoContext                 *context,
                                                                  NsPangoFontMap                 *font_map);
-NS_PANGO_AVAILABLE_IN_1_6
-NsPangoFontMap *          ns_pango_context_get_font_map              (NsPangoContext                 *context);
 NS_PANGO_AVAILABLE_IN_1_32
 guint                   ns_pango_context_get_serial                (NsPangoContext                 *context);
 NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_context_list_families             (NsPangoContext                 *context,
-                                                                 NsPangoFontFamily            ***families,
-                                                                 int                          *n_families);
-NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFont *             ns_pango_context_load_font                 (NsPangoContext                 *context,
                                                                  const NsPangoFontDescription   *desc);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoFontset *          ns_pango_context_load_fontset              (NsPangoContext                 *context,
-                                                                 const NsPangoFontDescription   *desc,
-                                                                 NsPangoLanguage                *language);
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontMetrics *      ns_pango_context_get_metrics               (NsPangoContext                 *context,
                                                                  const NsPangoFontDescription   *desc,
                                                                  NsPangoLanguage                *language);
 
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_context_set_font_description      (NsPangoContext                 *context,
-                                                                 const NsPangoFontDescription   *desc);
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontDescription *  ns_pango_context_get_font_description      (NsPangoContext                 *context);
 NS_PANGO_AVAILABLE_IN_ALL
@@ -87,17 +74,7 @@ void                    ns_pango_context_set_base_dir              (NsPangoConte
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoDirection          ns_pango_context_get_base_dir              (NsPangoContext                 *context);
 NS_PANGO_AVAILABLE_IN_1_16
-void                    ns_pango_context_set_base_gravity          (NsPangoContext                 *context,
-                                                                 NsPangoGravity                  gravity);
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoGravity            ns_pango_context_get_base_gravity          (NsPangoContext                 *context);
-NS_PANGO_AVAILABLE_IN_1_16
 NsPangoGravity            ns_pango_context_get_gravity               (NsPangoContext                 *context);
-NS_PANGO_AVAILABLE_IN_1_16
-void                    ns_pango_context_set_gravity_hint          (NsPangoContext                 *context,
-                                                                 NsPangoGravityHint              hint);
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoGravityHint        ns_pango_context_get_gravity_hint          (NsPangoContext                 *context);
 
 NS_PANGO_AVAILABLE_IN_1_6
 void                    ns_pango_context_set_matrix                (NsPangoContext                 *context,

@@ -60,7 +60,6 @@ struct _PangoMatrix
   double y0;
 };
 
-#define NS_TYPE_PANGO_MATRIX (ns_pango_matrix_get_type ())
 
 /**
  * NS_PANGO_MATRIX_INIT:
@@ -80,8 +79,6 @@ struct _PangoMatrix
 /* for NsPangoRectangle */
 #include <web-text-lib/pango-types.h>
 
-NS_PANGO_AVAILABLE_IN_1_6
-GType ns_pango_matrix_get_type (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_1_6
 NsPangoMatrix *ns_pango_matrix_copy   (const NsPangoMatrix *matrix);
@@ -89,33 +86,12 @@ NS_PANGO_AVAILABLE_IN_1_6
 void         ns_pango_matrix_free   (NsPangoMatrix *matrix);
 
 NS_PANGO_AVAILABLE_IN_1_6
-void ns_pango_matrix_translate (NsPangoMatrix *matrix,
-			     double       tx,
-			     double       ty);
-NS_PANGO_AVAILABLE_IN_1_6
-void ns_pango_matrix_scale     (NsPangoMatrix *matrix,
-			     double       scale_x,
-			     double       scale_y);
-NS_PANGO_AVAILABLE_IN_1_6
-void ns_pango_matrix_rotate    (NsPangoMatrix *matrix,
-			     double       degrees);
-NS_PANGO_AVAILABLE_IN_1_6
 void ns_pango_matrix_concat    (NsPangoMatrix       *matrix,
 			     const NsPangoMatrix *new_matrix);
-NS_PANGO_AVAILABLE_IN_1_16
-void ns_pango_matrix_transform_point    (const NsPangoMatrix *matrix,
-				      double            *x,
-				      double            *y);
 NS_PANGO_AVAILABLE_IN_1_16
 void ns_pango_matrix_transform_distance (const NsPangoMatrix *matrix,
 				      double            *dx,
 				      double            *dy);
-NS_PANGO_AVAILABLE_IN_1_16
-void ns_pango_matrix_transform_rectangle (const NsPangoMatrix *matrix,
-				       NsPangoRectangle    *rect);
-NS_PANGO_AVAILABLE_IN_1_16
-void ns_pango_matrix_transform_pixel_rectangle (const NsPangoMatrix *matrix,
-					     NsPangoRectangle    *rect);
 NS_PANGO_AVAILABLE_IN_1_12
 double ns_pango_matrix_get_font_scale_factor (const NsPangoMatrix *matrix) G_GNUC_PURE;
 NS_PANGO_AVAILABLE_IN_1_38

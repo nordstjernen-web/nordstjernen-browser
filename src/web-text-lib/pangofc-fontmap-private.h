@@ -46,13 +46,7 @@ typedef struct _PangoFcFontsetKey  NsPangoFcFontsetKey;
 NS_PANGO_AVAILABLE_IN_1_24
 NsPangoLanguage              *ns_pango_fc_fontset_key_get_language      (const NsPangoFcFontsetKey *key);
 NS_PANGO_AVAILABLE_IN_1_24
-const NsPangoFontDescription *ns_pango_fc_fontset_key_get_description   (const NsPangoFcFontsetKey *key);
-NS_PANGO_AVAILABLE_IN_1_24
 const NsPangoMatrix          *ns_pango_fc_fontset_key_get_matrix        (const NsPangoFcFontsetKey *key);
-NS_PANGO_AVAILABLE_IN_1_24
-double                      ns_pango_fc_fontset_key_get_absolute_size (const NsPangoFcFontsetKey *key);
-NS_PANGO_AVAILABLE_IN_1_24
-double                      ns_pango_fc_fontset_key_get_resolution    (const NsPangoFcFontsetKey *key);
 NS_PANGO_AVAILABLE_IN_1_24
 gpointer                    ns_pango_fc_fontset_key_get_context_key   (const NsPangoFcFontsetKey *key);
 
@@ -74,8 +68,6 @@ NS_PANGO_AVAILABLE_IN_1_24
 gpointer           ns_pango_fc_font_key_get_context_key (const NsPangoFcFontKey *key);
 NS_PANGO_AVAILABLE_IN_1_40
 const char        *ns_pango_fc_font_key_get_variations  (const NsPangoFcFontKey *key);
-NS_PANGO_AVAILABLE_IN_1_56
-const char        *ns_pango_fc_font_key_get_features    (const NsPangoFcFontKey *key);
 
 
 #define NS_PANGO_FC_FONT_MAP_CLASS(klass)      (G_TYPE_CHECK_CLASS_CAST ((klass), NS_TYPE_PANGO_FC_FONT_MAP, NsPangoFcFontMapClass))
