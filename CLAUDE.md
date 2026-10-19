@@ -203,8 +203,8 @@ Three rules when touching text code:
 
 - **The engine spells the API renamed** -- `ns_pango_*`, `NsPango*`,
   `NS_PANGO_*`, `NS_TYPE_PANGO_*` -- and includes `"ns_pango.h"`, never a
-  pango header directly (the fork's own headers are `<ns-pango/...>`, from
-  `src/web-text-lib/ns-pango/`). The renaming is not cosmetic: GTK loads the
+  pango header directly (the fork's own headers are `<web-text-lib/...>`, from
+  `src/web-text-lib/`). The renaming is not cosmetic: GTK loads the
   system Pango into the same process, and GObject aborts when a second
   library registers a type name it already holds.
 - **Android and iOS link the system Pango**, since the fork has no CoreText
