@@ -21,6 +21,8 @@
 #endif
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
+#define NS_PROC_FRAME_WAKE_MS  16
+#define NS_PROC_RELOAD_RESTART_US (1000 * 1000)
 #define NS_PV_WHEEL_STEP_PX    100.0
 #define NS_PV_WHEEL_TAU_MS     45.0
 #define NS_PV_FLING_TAU_MS     400.0
@@ -103,6 +105,7 @@ typedef struct {
     gboolean inspect;
     gboolean history;
     gboolean user_activated;
+    gboolean reload;
     gboolean caret_active;
     ns_rproc_http_tiles_req tiles;
     char   *have;
@@ -149,6 +152,7 @@ typedef struct {
     double           fallback_x;
     double           fallback_y;
     gboolean         animating;
+    int              wake_ms;
     gboolean         caret_blinking;
     gboolean         wheel_snapped;
     gboolean         wheel_answered;
@@ -185,6 +189,8 @@ struct NsProcView {
     GAsyncQueue *queue;
     ns_rproc_http *proc;
     GMutex      proc_lock;
+    gint64      busy_since_us;
+    ReqType     busy_type;
     char       *renderer_path;
     gboolean    private_mode;
 
@@ -307,7 +313,11 @@ struct NsProcView {
 
     guint       anim_tick_id;
     gint64      last_anim_frame_us;
+    guint       anim_timeout_id;
+    gint64      page_due_us;
+    gint64      caret_due_us;
     gboolean    page_animating;
+    int         page_wake_ms;
     gboolean    caret_blinking;
 };
 
@@ -945,6 +955,47 @@ post(Res *res)
     g_idle_add(on_result, res);
 }
 
+static void
+req_free(Req *req)
+{
+    g_free(req->url);
+    g_free(req->key);
+    g_free(req->code);
+    g_free(req->query);
+    g_free(req->export_dest);
+    g_free(req->paths);
+    g_free(req->have);
+    g_free(req->hold);
+    g_free(req);
+}
+
+static gboolean
+pv_load_superseded(NsProcView *v, const Req *req)
+{
+    return req->seq != g_atomic_int_get(&v->load_seq);
+}
+
+static void
+pv_note_busy(NsProcView *v, const Req *req)
+{
+    g_mutex_lock(&v->proc_lock);
+    v->busy_since_us = req ? g_get_monotonic_time() : 0;
+    v->busy_type = req ? req->type : REQ_QUIT;
+    g_mutex_unlock(&v->proc_lock);
+}
+
+static int
+pv_open(NsProcView *v, const Req *req, int settle, ns_rproc_http_page *pg)
+{
+    if (!v->proc)
+        return -1;
+    if (req->reload)
+        return ns_rproc_http_reload(v->proc, req->url, req->vw, req->vh,
+                                    settle, pg);
+    return ns_rproc_http_open_ex(v->proc, req->url, req->vw, req->vh, settle,
+                                 req->history, req->user_activated, pg);
+}
+
 static gpointer
 worker_main(gpointer data)
 {
@@ -952,10 +1003,14 @@ worker_main(gpointer data)
     for (;;) {
         Req *req = g_async_queue_pop(v->queue);
         if (req->type == REQ_QUIT) {
-            g_free(req->url);
-            g_free(req);
+            req_free(req);
             break;
         }
+        if (req->type == REQ_LOAD && pv_load_superseded(v, req)) {
+            req_free(req);
+            continue;
+        }
+        pv_note_busy(v, req);
         if (!v->proc && !v->closed) {
             pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                      NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
@@ -974,21 +1029,18 @@ worker_main(gpointer data)
             res->seq = req->seq;
             ns_rproc_http_page pg;
             int settle = pv_settle_ms();
-            int rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
+            int rc = pv_open(v, req, settle, &pg);
             if (rc != 0 && v->proc && !v->closed) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
-                pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
-                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
-                                         v->private_mode));
-                if (v->proc)
-                    ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
-                rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
+                if (!pv_load_superseded(v, req)) {
+                    pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(
+                                        v->renderer_path, NS_PROC_MAX_WIDTH,
+                                        NS_PROC_MAX_HEIGHT, v->private_mode));
+                    if (v->proc)
+                        ns_rproc_http_set_device_pixel_ratio(v->proc,
+                                                             req->dpr);
+                    rc = pv_open(v, req, settle, &pg);
+                }
             }
             if (rc == 0 && pg.ok) {
                 res->ok = TRUE;
@@ -1028,6 +1080,7 @@ worker_main(gpointer data)
             if (rendered) {
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
+                res->wake_ms = fr.wake_ms;
                 res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
                 res->wheel_snapped = fr.wheel_snapped ? TRUE : FALSE;
                 res->wheel_answered = fr.wheel_answered ? TRUE : FALSE;
@@ -1087,6 +1140,7 @@ worker_main(gpointer data)
                 res->ok = tick.ok ? TRUE : FALSE;
                 res->kind = tick.changed;
                 res->animating = tick.animating ? TRUE : FALSE;
+                res->wake_ms = tick.wake_ms;
                 res->pw = tick.page_w;
                 res->ph = tick.page_h;
                 res->nav = tick.nav ? g_strdup(tick.nav) : NULL;
@@ -1312,15 +1366,8 @@ worker_main(gpointer data)
                     &res->favicon_stride);
             post(res);
         }
-        g_free(req->url);
-        g_free(req->key);
-        g_free(req->code);
-        g_free(req->query);
-        g_free(req->export_dest);
-        g_free(req->paths);
-        g_free(req->have);
-        g_free(req->hold);
-        g_free(req);
+        pv_note_busy(v, NULL);
+        req_free(req);
     }
     if (v->proc)
         ns_rproc_http_close(pv_swap_proc(v, NULL));
@@ -1900,12 +1947,82 @@ arm_anim(NsProcView *v)
 }
 
 static void
+cancel_anim_timeout(NsProcView *v)
+{
+    if (v->anim_timeout_id)
+        g_source_remove(v->anim_timeout_id);
+    v->anim_timeout_id = 0;
+}
+
+static void
 disarm_anim(NsProcView *v)
 {
     if (v->anim_tick_id && v->area)
         gtk_widget_remove_tick_callback(v->area, v->anim_tick_id);
     v->anim_tick_id = 0;
     v->last_anim_frame_us = 0;
+    cancel_anim_timeout(v);
+}
+
+static void schedule_anim(NsProcView *v);
+
+static gboolean
+anim_timeout(gpointer data)
+{
+    NsProcView *v = data;
+    v->anim_timeout_id = 0;
+    if (v->closed || !v->opened || !v->area ||
+        !gtk_widget_get_mapped(v->area))
+        return G_SOURCE_REMOVE;
+    gint64 now = g_get_monotonic_time();
+    gboolean page_due = v->page_animating && now >= v->page_due_us;
+    gboolean caret_due = v->caret_blinking && now >= v->caret_due_us;
+    if (page_due && !pv_wheel_scrolling(v))
+        request_tick(v);
+    if (caret_due)
+        request_render(v);
+    if (!page_due && !caret_due)
+        schedule_anim(v);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+schedule_anim(NsProcView *v)
+{
+    if (v->closed || !v->area)
+        return;
+    if (v->page_animating && v->page_wake_ms <= NS_PROC_FRAME_WAKE_MS) {
+        cancel_anim_timeout(v);
+        arm_anim(v);
+        return;
+    }
+    disarm_anim(v);
+    if (!v->page_animating && !v->caret_blinking)
+        return;
+    gint64 due = G_MAXINT64;
+    if (v->page_animating && v->page_due_us < due)
+        due = v->page_due_us;
+    if (v->caret_blinking && v->caret_due_us < due)
+        due = v->caret_due_us;
+    gint64 delay_ms = (due - g_get_monotonic_time() + 999) / 1000;
+    v->anim_timeout_id = g_timeout_add((guint)CLAMP(delay_ms, 1, G_MAXINT),
+                                       anim_timeout, v);
+}
+
+static void
+note_anim(NsProcView *v, gboolean page_animating, int wake_ms)
+{
+    v->page_animating = page_animating;
+    v->page_wake_ms = wake_ms;
+    v->page_due_us = g_get_monotonic_time() + (gint64)wake_ms * 1000;
+    schedule_anim(v);
+}
+
+static void
+on_area_map(GtkWidget *area, gpointer data)
+{
+    (void)area;
+    schedule_anim(data);
 }
 
 static void start_link(NsProcView *v, int x, int y, LinkAct action);
@@ -1976,6 +2093,116 @@ start_hover(NsProcView *v, int x, int y)
     push_req(v, req);
 }
 
+typedef struct {
+    guint       keyval;
+    const char *key;
+    const char *code;
+    int         keycode;
+} PvKeyName;
+
+static const PvKeyName pv_key_names[] = {
+    { GDK_KEY_Up,           "ArrowUp",     "ArrowUp",        38 },
+    { GDK_KEY_Down,         "ArrowDown",   "ArrowDown",      40 },
+    { GDK_KEY_Left,         "ArrowLeft",   "ArrowLeft",      37 },
+    { GDK_KEY_Right,        "ArrowRight",  "ArrowRight",     39 },
+    { GDK_KEY_Return,       "Enter",       "Enter",          13 },
+    { GDK_KEY_KP_Enter,     "Enter",       "NumpadEnter",    13 },
+    { GDK_KEY_Escape,       "Escape",      "Escape",         27 },
+    { GDK_KEY_BackSpace,    "Backspace",   "Backspace",       8 },
+    { GDK_KEY_Tab,          "Tab",         "Tab",             9 },
+    { GDK_KEY_ISO_Left_Tab, "Tab",         "Tab",             9 },
+    { GDK_KEY_Delete,       "Delete",      "Delete",         46 },
+    { GDK_KEY_Insert,       "Insert",      "Insert",         45 },
+    { GDK_KEY_Home,         "Home",        "Home",           36 },
+    { GDK_KEY_End,          "End",         "End",            35 },
+    { GDK_KEY_Page_Up,      "PageUp",      "PageUp",         33 },
+    { GDK_KEY_Page_Down,    "PageDown",    "PageDown",       34 },
+    { GDK_KEY_space,        NULL,          "Space",          32 },
+    { GDK_KEY_Shift_L,      "Shift",       "ShiftLeft",      16 },
+    { GDK_KEY_Shift_R,      "Shift",       "ShiftRight",     16 },
+    { GDK_KEY_Control_L,    "Control",     "ControlLeft",    17 },
+    { GDK_KEY_Control_R,    "Control",     "ControlRight",   17 },
+    { GDK_KEY_Alt_L,        "Alt",         "AltLeft",        18 },
+    { GDK_KEY_Alt_R,        "Alt",         "AltRight",       18 },
+    { GDK_KEY_ISO_Level3_Shift, "AltGraph", "AltRight",      225 },
+    { GDK_KEY_Super_L,      "Meta",        "MetaLeft",       91 },
+    { GDK_KEY_Super_R,      "Meta",        "MetaRight",      92 },
+    { GDK_KEY_Meta_L,       "Meta",        "MetaLeft",       91 },
+    { GDK_KEY_Meta_R,       "Meta",        "MetaRight",      92 },
+    { GDK_KEY_Menu,         "ContextMenu", "ContextMenu",    93 },
+    { GDK_KEY_Caps_Lock,    "CapsLock",    "CapsLock",       20 },
+    { GDK_KEY_Num_Lock,     "NumLock",     "NumLock",       144 },
+    { GDK_KEY_Scroll_Lock,  "ScrollLock",  "ScrollLock",    145 },
+    { GDK_KEY_Pause,        "Pause",       "Pause",          19 },
+    { GDK_KEY_Print,        "PrintScreen", "PrintScreen",    44 },
+    { GDK_KEY_KP_Add,       NULL,          "NumpadAdd",     107 },
+    { GDK_KEY_KP_Subtract,  NULL,          "NumpadSubtract", 109 },
+    { GDK_KEY_KP_Multiply,  NULL,          "NumpadMultiply", 106 },
+    { GDK_KEY_KP_Divide,    NULL,          "NumpadDivide",  111 },
+    { GDK_KEY_KP_Decimal,   NULL,          "NumpadDecimal", 110 },
+    { GDK_KEY_KP_Separator, NULL,          "NumpadDecimal", 110 },
+    { GDK_KEY_KP_Insert,    "Insert",      "Numpad0",        45 },
+    { GDK_KEY_KP_End,       "End",         "Numpad1",        35 },
+    { GDK_KEY_KP_Down,      "ArrowDown",   "Numpad2",        40 },
+    { GDK_KEY_KP_Page_Down, "PageDown",    "Numpad3",        34 },
+    { GDK_KEY_KP_Left,      "ArrowLeft",   "Numpad4",        37 },
+    { GDK_KEY_KP_Begin,     "Clear",       "Numpad5",        12 },
+    { GDK_KEY_KP_Right,     "ArrowRight",  "Numpad6",        39 },
+    { GDK_KEY_KP_Home,      "Home",        "Numpad7",        36 },
+    { GDK_KEY_KP_Up,        "ArrowUp",     "Numpad8",        38 },
+    { GDK_KEY_KP_Page_Up,   "PageUp",      "Numpad9",        33 },
+    { GDK_KEY_KP_Delete,    "Delete",      "NumpadDecimal",  46 },
+    { GDK_KEY_minus,        NULL,          "Minus",         189 },
+    { GDK_KEY_underscore,   NULL,          "Minus",         189 },
+    { GDK_KEY_equal,        NULL,          "Equal",         187 },
+    { GDK_KEY_plus,         NULL,          "Equal",         187 },
+    { GDK_KEY_bracketleft,  NULL,          "BracketLeft",   219 },
+    { GDK_KEY_braceleft,    NULL,          "BracketLeft",   219 },
+    { GDK_KEY_bracketright, NULL,          "BracketRight",  221 },
+    { GDK_KEY_braceright,   NULL,          "BracketRight",  221 },
+    { GDK_KEY_backslash,    NULL,          "Backslash",     220 },
+    { GDK_KEY_bar,          NULL,          "Backslash",     220 },
+    { GDK_KEY_semicolon,    NULL,          "Semicolon",     186 },
+    { GDK_KEY_colon,        NULL,          "Semicolon",     186 },
+    { GDK_KEY_apostrophe,   NULL,          "Quote",         222 },
+    { GDK_KEY_quotedbl,     NULL,          "Quote",         222 },
+    { GDK_KEY_grave,        NULL,          "Backquote",     192 },
+    { GDK_KEY_asciitilde,   NULL,          "Backquote",     192 },
+    { GDK_KEY_comma,        NULL,          "Comma",         188 },
+    { GDK_KEY_less,         NULL,          "Comma",         188 },
+    { GDK_KEY_period,       NULL,          "Period",        190 },
+    { GDK_KEY_greater,      NULL,          "Period",        190 },
+    { GDK_KEY_slash,        NULL,          "Slash",         191 },
+    { GDK_KEY_question,     NULL,          "Slash",         191 },
+    { GDK_KEY_parenright,   NULL,          "Digit0",         48 },
+    { GDK_KEY_exclam,       NULL,          "Digit1",         49 },
+    { GDK_KEY_at,           NULL,          "Digit2",         50 },
+    { GDK_KEY_numbersign,   NULL,          "Digit3",         51 },
+    { GDK_KEY_dollar,       NULL,          "Digit4",         52 },
+    { GDK_KEY_percent,      NULL,          "Digit5",         53 },
+    { GDK_KEY_asciicircum,  NULL,          "Digit6",         54 },
+    { GDK_KEY_ampersand,    NULL,          "Digit7",         55 },
+    { GDK_KEY_asterisk,     NULL,          "Digit8",         56 },
+    { GDK_KEY_parenleft,    NULL,          "Digit9",         57 },
+};
+
+static const PvKeyName *
+pv_key_name(guint keyval)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(pv_key_names); i++)
+        if (pv_key_names[i].keyval == keyval)
+            return &pv_key_names[i];
+    return NULL;
+}
+
+static gboolean
+pv_keyval_is_dead(guint keyval)
+{
+    return (keyval >= GDK_KEY_dead_grave && keyval <= GDK_KEY_dead_currency) ||
+           (keyval >= GDK_KEY_dead_a &&
+            keyval <= GDK_KEY_dead_longsolidusoverlay);
+}
+
 static const char *
 keyval_js_key(guint keyval, char *buf, size_t bufsz)
 {
@@ -1986,31 +2213,17 @@ keyval_js_key(guint keyval, char *buf, size_t bufsz)
         buf[len] = '\0';
         return buf;
     }
-    switch (keyval) {
-    case GDK_KEY_Up:         return "ArrowUp";
-    case GDK_KEY_Down:       return "ArrowDown";
-    case GDK_KEY_Left:       return "ArrowLeft";
-    case GDK_KEY_Right:      return "ArrowRight";
-    case GDK_KEY_Return:
-    case GDK_KEY_KP_Enter:   return "Enter";
-    case GDK_KEY_Escape:     return "Escape";
-    case GDK_KEY_BackSpace:  return "Backspace";
-    case GDK_KEY_Tab:
-    case GDK_KEY_ISO_Left_Tab: return "Tab";
-    case GDK_KEY_Delete:     return "Delete";
-    case GDK_KEY_Insert:     return "Insert";
-    case GDK_KEY_Home:       return "Home";
-    case GDK_KEY_End:        return "End";
-    case GDK_KEY_Page_Up:    return "PageUp";
-    case GDK_KEY_Page_Down:  return "PageDown";
-    case GDK_KEY_Shift_L:
-    case GDK_KEY_Shift_R:    return "Shift";
-    case GDK_KEY_Control_L:
-    case GDK_KEY_Control_R:  return "Control";
-    case GDK_KEY_Alt_L:
-    case GDK_KEY_Alt_R:      return "Alt";
-    default: { const char *n = gdk_keyval_name(keyval); return n ? n : ""; }
+    const PvKeyName *name = pv_key_name(keyval);
+    if (name && name->key)
+        return name->key;
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) {
+        g_snprintf(buf, bufsz, "F%u", keyval - GDK_KEY_F1 + 1);
+        return buf;
     }
+    if (pv_keyval_is_dead(keyval))
+        return "Dead";
+    const char *n = gdk_keyval_name(keyval);
+    return n ? n : "";
 }
 
 static const char *
@@ -2028,25 +2241,16 @@ keyval_js_code(guint keyval, char *buf, size_t bufsz)
         g_snprintf(buf, bufsz, "Digit%c", '0' + (int)(keyval - GDK_KEY_0));
         return buf;
     }
-    switch (keyval) {
-    case GDK_KEY_Up:         return "ArrowUp";
-    case GDK_KEY_Down:       return "ArrowDown";
-    case GDK_KEY_Left:       return "ArrowLeft";
-    case GDK_KEY_Right:      return "ArrowRight";
-    case GDK_KEY_Return:     return "Enter";
-    case GDK_KEY_KP_Enter:   return "NumpadEnter";
-    case GDK_KEY_Escape:     return "Escape";
-    case GDK_KEY_BackSpace:  return "Backspace";
-    case GDK_KEY_Tab:
-    case GDK_KEY_ISO_Left_Tab: return "Tab";
-    case GDK_KEY_Delete:     return "Delete";
-    case GDK_KEY_Home:       return "Home";
-    case GDK_KEY_End:        return "End";
-    case GDK_KEY_Page_Up:    return "PageUp";
-    case GDK_KEY_Page_Down:  return "PageDown";
-    case GDK_KEY_space:      return "Space";
-    default:                 return "";
+    if (keyval >= GDK_KEY_KP_0 && keyval <= GDK_KEY_KP_9) {
+        g_snprintf(buf, bufsz, "Numpad%c", '0' + (int)(keyval - GDK_KEY_KP_0));
+        return buf;
     }
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) {
+        g_snprintf(buf, bufsz, "F%u", keyval - GDK_KEY_F1 + 1);
+        return buf;
+    }
+    const PvKeyName *name = pv_key_name(keyval);
+    return name ? name->code : "";
 }
 
 static int
@@ -2058,24 +2262,12 @@ keyval_js_keycode(guint keyval)
         return 65 + (int)(keyval - GDK_KEY_A);
     if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9)
         return 48 + (int)(keyval - GDK_KEY_0);
-    switch (keyval) {
-    case GDK_KEY_BackSpace:  return 8;
-    case GDK_KEY_Tab:        return 9;
-    case GDK_KEY_Return:
-    case GDK_KEY_KP_Enter:   return 13;
-    case GDK_KEY_Escape:     return 27;
-    case GDK_KEY_space:      return 32;
-    case GDK_KEY_Page_Up:    return 33;
-    case GDK_KEY_Page_Down:  return 34;
-    case GDK_KEY_End:        return 35;
-    case GDK_KEY_Home:       return 36;
-    case GDK_KEY_Left:       return 37;
-    case GDK_KEY_Up:         return 38;
-    case GDK_KEY_Right:      return 39;
-    case GDK_KEY_Down:       return 40;
-    case GDK_KEY_Delete:     return 46;
-    default:                 return 0;
-    }
+    if (keyval >= GDK_KEY_KP_0 && keyval <= GDK_KEY_KP_9)
+        return 96 + (int)(keyval - GDK_KEY_KP_0);
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24)
+        return 112 + (int)(keyval - GDK_KEY_F1);
+    const PvKeyName *name = pv_key_name(keyval);
+    return name ? name->keycode : 0;
 }
 
 static void
@@ -2096,7 +2288,8 @@ start_key_full(NsProcView *v, int kind, guint keyval, GdkModifierType state,
     req->mods = ((state & GDK_SHIFT_MASK)   ? 1 : 0) |
                 ((state & GDK_CONTROL_MASK) ? 2 : 0) |
                 ((state & GDK_ALT_MASK)     ? 4 : 0) |
-                ((state & GDK_META_MASK)    ? 8 : 0);
+                ((state & GDK_META_MASK)    ? 8 : 0) |
+                (kind == 0 ? NS_KEY_MOD_TEXT_SEPARATE : 0);
     req->key = g_strdup(keyval_js_key(keyval, keybuf, sizeof keybuf));
     req->code = g_strdup(keyval_js_code(keyval, codebuf, sizeof codebuf));
     push_req(v, req);
@@ -2115,7 +2308,7 @@ start_key_text(NsProcView *v, int kind, const char *text)
         return;
     Req *req = g_new0(Req, 1);
     req->type = REQ_KEY;
-    req->seq = ++v->key_seq;
+    req->seq = kind == 2 ? v->key_seq : ++v->key_seq;
     req->kind = kind;
     req->keycode = 0;
     req->mods = 0;
@@ -2271,16 +2464,47 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
 
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
 
+static gboolean
+req_outlived_by_load(const Req *req)
+{
+    switch (req->type) {
+    case REQ_LOAD: case REQ_RENDER: case REQ_TICK: case REQ_LINK:
+    case REQ_CLICK: case REQ_VIEWPORT: case REQ_KEY: case REQ_HOVER:
+    case REQ_RELEASE: case REQ_FIND: case REQ_FAVICON:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 static void
-do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
-        gboolean user_activated)
+drop_stale_requests(NsProcView *v)
+{
+    GQueue keep = G_QUEUE_INIT;
+    g_async_queue_lock(v->queue);
+    Req *req;
+    while ((req = g_async_queue_try_pop_unlocked(v->queue))) {
+        if (req_outlived_by_load(req))
+            req_free(req);
+        else
+            g_queue_push_tail(&keep, req);
+    }
+    while ((req = g_queue_pop_head(&keep)))
+        g_async_queue_push_unlocked(v->queue, req);
+    g_async_queue_unlock(v->queue);
+}
+
+static void
+do_load_full(NsProcView *v, const char *url, gboolean record,
+             gboolean history, gboolean user_activated, gboolean reload)
 {
     if (!url || !*url)
         return;
     pv_perm_resolve(v, FALSE);
     pv_audio_shutdown(v);
+    drop_stale_requests(v);
     v->pending_record = record;
-    int seq = ++v->load_seq;
+    int seq = g_atomic_int_add(&v->load_seq, 1) + 1;
     ++v->render_seq;
     ++v->link_seq;
     ++v->click_seq;
@@ -2346,7 +2570,15 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     req->dpr = v->last_vp_dpr;
     req->history = history;
     req->user_activated = user_activated;
+    req->reload = reload;
     push_req(v, req);
+}
+
+static void
+do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
+        gboolean user_activated)
+{
+    do_load_full(v, url, record, history, user_activated, FALSE);
 }
 
 void
@@ -2386,15 +2618,37 @@ ns_proc_view_forward(NsProcView *v)
     do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
 }
 
+static void
+restart_wedged_renderer(NsProcView *v)
+{
+    g_mutex_lock(&v->proc_lock);
+    if (v->proc && v->busy_since_us > 0 && v->busy_type != REQ_PRINT &&
+        v->busy_type != REQ_EXPORT &&
+        g_get_monotonic_time() - v->busy_since_us >=
+            NS_PROC_RELOAD_RESTART_US) {
+        ns_rproc_http_interrupt(v->proc);
+        ns_rproc_http_terminate(v->proc);
+    }
+    g_mutex_unlock(&v->proc_lock);
+}
+
 void
 ns_proc_view_reload(NsProcView *v)
 {
     v->render_restarts = 0;
-    if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
-        do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, FALSE,
-                TRUE);
+    char *url = NULL;
+    if (v->pending_url)
+        url = g_strdup(v->pending_url);
+    else if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
+        url = g_strdup(g_ptr_array_index(v->history, v->hist_index));
     else if (v->current_url)
-        do_load(v, v->current_url, FALSE, FALSE, TRUE);
+        url = g_strdup(v->current_url);
+    if (!url)
+        return;
+    gboolean record = v->pending_url != NULL && v->pending_record;
+    do_load_full(v, url, record, FALSE, TRUE, TRUE);
+    g_free(url);
+    restart_wedged_renderer(v);
 }
 
 void
@@ -2680,11 +2934,7 @@ on_result(gpointer data)
             pv_follow_same_document_state(v, res->url, res->url_pushed,
                                           res->title);
         if (current && res->ok) {
-            v->page_animating = res->animating;
-            if (v->page_animating || v->caret_blinking)
-                arm_anim(v);
-            else
-                disarm_anim(v);
+            note_anim(v, res->animating, res->wake_ms);
             if (res->ph > 0 && res->ph != v->page_h) {
                 v->page_h = res->ph;
                 if (res->pw > 0) v->page_w = res->pw;
@@ -2705,12 +2955,9 @@ on_result(gpointer data)
         if (res->ok && res->wheel_answered)
             pv_wheel_answered(v, res->wheel_prevented);
         if (current && res->ok) {
-            v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;
-            if (v->page_animating || v->caret_blinking)
-                arm_anim(v);
-            else
-                disarm_anim(v);
+            v->caret_due_us = g_get_monotonic_time() + NS_PROC_CARET_BLINK_US;
+            note_anim(v, res->animating, res->wake_ms);
             if (res->ph > 0 && res->ph != v->page_h) {
                 v->page_h = res->ph;
                 if (res->pw > 0) v->page_w = res->pw;
@@ -3962,6 +4209,10 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     default:                 start_key(v, 0, keyval, state); return FALSE;
     }
     start_key_full(v, 0, keyval, state, 1, tx, ty);
+    if (keyval == GDK_KEY_space) {
+        start_key(v, 3, keyval, state);
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -4464,6 +4715,7 @@ ns_proc_view_new(void)
     g_signal_connect(v->area, "notify::scale-factor",
                      G_CALLBACK(on_device_scale_changed), v);
     g_signal_connect(v->area, "realize", G_CALLBACK(on_area_realize), v);
+    g_signal_connect(v->area, "map", G_CALLBACK(on_area_map), v);
     g_signal_connect(v->area, "unrealize", G_CALLBACK(on_area_unrealize), v);
 
     GtkWidget *grid = gtk_grid_new();
@@ -4529,14 +4781,17 @@ ns_proc_view_new(void)
     gtk_widget_add_controller(v->area, scroll);
 
     GtkEventController *key = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(key, GTK_PHASE_CAPTURE);
     g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), v);
     g_signal_connect(key, "key-released", G_CALLBACK(on_key_released), v);
+    gtk_widget_add_controller(v->area, key);
+    GtkEventController *text_input = gtk_event_controller_key_new();
     v->im = gtk_im_multicontext_new();
     gtk_im_context_set_client_widget(v->im, v->area);
     g_signal_connect(v->im, "commit", G_CALLBACK(on_im_commit), v);
-    gtk_event_controller_key_set_im_context(GTK_EVENT_CONTROLLER_KEY(key),
-                                            v->im);
-    gtk_widget_add_controller(v->area, key);
+    gtk_event_controller_key_set_im_context(
+        GTK_EVENT_CONTROLLER_KEY(text_input), v->im);
+    gtk_widget_add_controller(v->area, text_input);
 
     g_signal_connect(v->area, "destroy", G_CALLBACK(on_area_destroy), v);
 

@@ -51,6 +51,45 @@ Changelog:
 * Task Manager: "End task" used the view of a tab that had closed since
   the last refresh, and the window outlived the browser window that
   opened it.
+* Keyboard: pages now receive `keydown` and `keypress` for letters,
+  digits, punctuation and Space. The input method consumed those keys
+  before the page saw them, so only `keyup` and the typed text arrived,
+  and WebAssembly and canvas games that read the keyboard did not
+  respond (#465). Text still reaches fields through the input method,
+  a cancelled `keydown` or `keypress` now stops the character being
+  inserted, and Space scrolls the page when no field has focus.
+  `code` and `keyCode` now cover modifiers, function keys, the numeric
+  keypad and punctuation.
+* Idle CPU: a tab no longer polls its renderer on every display frame
+  while it waits for something with a known time. The renderer reports
+  when it next needs to run, from the next animated-image frame, the
+  next JavaScript timer or a pending `<meta http-equiv=refresh>`, and
+  the window sleeps until then; a page with a one-second
+  `setInterval` now wakes about three times a second instead of sixty
+  (#464). Pages that draw every frame still get every frame.
+* Images: animated GIF, APNG, WebP and JPEG XL images play as many times
+  as the file's loop count asks for and then rest on their last frame,
+  as other browsers do; they looped forever before. The start page logo
+  now plays its shooting star twice, so an idle new tab uses no CPU.
+* Text fields: the caret stops blinking after ten seconds without
+  moving and stays visible, as GTK's own fields do, instead of waking
+  the browser twice a second for as long as a field has focus.
+* Reload: pages appear sooner after a reload or any navigation. The
+  first frame no longer waits out the whole 400 ms settle window for a
+  JavaScript timer that cannot fire inside it, a `requestAnimationFrame`
+  loop or a CSS animation; a 90 KB page with a five-second
+  `setInterval` now opens in about 120 ms instead of 480 ms.
+* Reload: the page is fetched again with `Cache-Control: max-age=0`
+  and revalidated instead of being shown from a still-fresh cache
+  entry, so it shows the server's current content as in other
+  browsers. The replaced page is discarded rather than kept in the
+  back-forward cache.
+* Reload: a renderer stuck on one request for over a second (a page
+  spinning in a script, or a load that never finishes) is restarted
+  when you press Reload, so the page always comes back. Navigating
+  drops queued work for the page being left, a load superseded before
+  it starts is skipped, and Reload retries a page that is still loading
+  or failed to load instead of the previous history entry.
 
 1.0.34:
 ======

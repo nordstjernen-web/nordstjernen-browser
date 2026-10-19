@@ -120,6 +120,7 @@ struct ns_browser {
     int             press_mods;
     gboolean        press_active;
     gboolean        keydown_prevented;
+    gboolean        key_text_suppressed;
     char           *search_query;
     gboolean        search_case;
     const ns_box   *search_active;
@@ -153,6 +154,7 @@ struct ns_browser {
 #define NS_LAYOUT_BACKGROUND_MIN_US (16 * 1000)
 #define NS_LAYOUT_BACKGROUND_MAX_US (120 * 1000)
 #define NS_CARET_BLINK_US (530 * 1000)
+#define NS_CARET_BLINK_TIMEOUT_US (10 * G_USEC_PER_SEC)
 
 static gboolean
 browser_doc_has_node(const ns_node *root, const ns_node *target)
@@ -769,12 +771,10 @@ typedef struct settle_ctx {
 #define NS_SETTLE_QUIET_TICKS 3
 
 static gboolean
-browser_settle_quiet(ns_browser *b)
+browser_settle_quiet(ns_browser *b, gint64 deadline_us)
 {
     if (b->dirty) return FALSE;
-    if (b->anim && ns_anim_has_active(b->anim)) return FALSE;
-    if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
-    if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
+    if (b->js && ns_js_has_work_before(b->js, deadline_us)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
     if (b->videos && ns_video_cache_has_pending(b->videos)) return FALSE;
     if (g_main_context_pending(NULL)) return FALSE;
@@ -821,7 +821,7 @@ settle_tick_cb(gpointer user_data)
         if (browser_relayout_from_mutation(b))
             b->dirty = FALSE;
     }
-    if (browser_settle_quiet(b)) {
+    if (browser_settle_quiet(b, ctx->deadline_us)) {
         if (++ctx->quiet_ticks >= NS_SETTLE_QUIET_TICKS) {
             g_main_loop_quit(ctx->loop);
             return G_SOURCE_CONTINUE;
@@ -840,13 +840,13 @@ browser_settle(ns_browser *b, int settle_ms)
         ns_video_cache_discover(b->videos, b->layout, b->doc, g_get_monotonic_time());
         ns_video_cache_note_layout(b->videos, b->layout);
     }
-    if (browser_settle_quiet(b)) return;
+    gint64 deadline_us = g_get_monotonic_time() + (gint64)settle_ms * 1000;
+    if (browser_settle_quiet(b, deadline_us)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     settle_ctx ctx = {
         .b = b,
         .loop = loop,
-        .deadline_us = g_get_monotonic_time() +
-                       (gint64)settle_ms * 1000,
+        .deadline_us = deadline_us,
     };
     guint quit = g_timeout_add(settle_ms, settle_quit_cb, loop);
     guint tick = g_timeout_add(16, settle_tick_cb, &ctx);
@@ -1476,6 +1476,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 
 static char *g_pending_referrer;
 static int g_pending_user_activated = -1;
+static gboolean g_pending_reload;
 
 void
 ns_browser_set_next_referrer(const char *url)
@@ -1488,6 +1489,12 @@ void
 ns_browser_set_next_user_activated(int user_activated)
 {
     g_pending_user_activated = user_activated ? 1 : 0;
+}
+
+void
+ns_browser_set_next_reload(int reload)
+{
+    g_pending_reload = reload != 0;
 }
 
 void
@@ -1515,6 +1522,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_pending_referrer = NULL;
     int pending_user_activated = g_pending_user_activated;
     g_pending_user_activated = -1;
+    gboolean reload = g_pending_reload;
+    g_pending_reload = FALSE;
 
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
         const char *rest = url;
@@ -1563,8 +1572,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     gboolean user_activated = pending_user_activated >= 0
         ? pending_user_activated != 0 : referrer == NULL;
     if (https_url) {
-        resp = ns_engine_navigate_blocking(https_url, referrer,
-                                           user_activated, &err);
+        resp = reload ? ns_engine_reload_blocking(https_url, referrer, &err)
+                      : ns_engine_navigate_blocking(https_url, referrer,
+                                                    user_activated, &err);
         if (resp && !resp->error && resp->body) {
             fetch_url = https_url;
         } else {
@@ -1573,13 +1583,15 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             g_clear_error(&err);
         }
     }
-    if (!resp)
-        resp = body
-            ? ns_engine_navigate_post_blocking(
-                  fetch_url, referrer, body, body_len, content_type,
-                  user_activated, &err)
-            : ns_engine_navigate_blocking(fetch_url, referrer,
-                                          user_activated, &err);
+    if (!resp && body)
+        resp = ns_engine_navigate_post_blocking(fetch_url, referrer, body,
+                                                body_len, content_type,
+                                                user_activated, &err);
+    else if (!resp && reload)
+        resp = ns_engine_reload_blocking(fetch_url, referrer, &err);
+    else if (!resp)
+        resp = ns_engine_navigate_blocking(fetch_url, referrer,
+                                           user_activated, &err);
     if (resp && !body && (resp->error || resp->status >= 400) &&
         (!resp->body || resp->body->len == 0)) {
         gboolean tls_failure = resp->error &&
@@ -2025,6 +2037,61 @@ ns_browser_animating(ns_browser *browser)
     if (browser->videos && ns_video_cache_animating(browser->videos))
         return 1;
     return 0;
+}
+
+static gboolean
+browser_needs_frame_tick(ns_browser *browser)
+{
+    return browser->dirty || browser->hover_restyle_pending ||
+           browser->repaint_requested ||
+           (browser->refresh_url && !browser->refresh_due_us) ||
+           browser_images_outstanding(browser) > 0 ||
+           (browser->js && ns_js_needs_frame_tick(browser->js)) ||
+           (browser->anim && ns_anim_has_active(browser->anim)) ||
+           (browser->videos && ns_video_cache_animating(browser->videos));
+}
+
+static int
+browser_main_context_timeout_ms(void)
+{
+    GMainContext *ctx = g_main_context_default();
+    if (!g_main_context_acquire(ctx)) return 0;
+    int max_priority = G_PRIORITY_DEFAULT;
+    int timeout = 0;
+    if (!g_main_context_prepare(ctx, &max_priority)) {
+        GPollFD fds[32];
+        g_main_context_query(ctx, max_priority, &timeout, fds,
+                             G_N_ELEMENTS(fds));
+    }
+    g_main_context_release(ctx);
+    return timeout;
+}
+
+static gint64
+browser_earliest(gint64 a, gint64 b)
+{
+    if (a < 0) return b;
+    if (b < 0) return a;
+    return a < b ? a : b;
+}
+
+int
+ns_browser_wake_ms(ns_browser *browser)
+{
+    if (!browser || !ns_browser_animating(browser)) return -1;
+    if (browser_needs_frame_tick(browser)) return 0;
+    gint64 now = g_get_monotonic_time();
+    gint64 due = browser->refresh_due_us > 0 ? browser->refresh_due_us : -1;
+    if (browser->images)
+        due = browser_earliest(due,
+                               ns_image_cache_next_frame_us(browser->images,
+                                                            now));
+    int timeout = browser_main_context_timeout_ms();
+    if (timeout >= 0)
+        due = browser_earliest(due, now + (gint64)timeout * 1000);
+    if (due <= now) return 0;
+    gint64 ms = (due - now + 999) / 1000;
+    return ms > G_MAXINT ? G_MAXINT : (int)ms;
 }
 
 int
@@ -4308,7 +4375,9 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
 
     if (kind == 2) {
         const ns_node *f = ns_js_focused_node(browser->js);
-        if (f && ns_node_editable_value(f) && key && *key &&
+        gboolean suppressed = browser->key_text_suppressed;
+        browser->key_text_suppressed = FALSE;
+        if (!suppressed && f && ns_node_editable_value(f) && key && *key &&
             g_utf8_validate(key, -1, NULL)) {
             const char *cur = ns_node_editable_value(f);
             gsize cur_len = cur ? strlen(cur) : 0;
@@ -4338,8 +4407,10 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                                           keycode, char_code,
                                           (mods & 1) != 0, FALSE, FALSE, FALSE,
                                           &press_prevented);
-            if (out_prevented && press_prevented)
-                *out_prevented = 1;
+            if (press_prevented) {
+                browser->key_text_suppressed = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
             if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
         }
         browser->keydown_prevented = FALSE;
@@ -4355,6 +4426,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
         if (out_prevented && prevented)
             *out_prevented = 1;
         browser->keydown_prevented = kind == 0 && prevented;
+        browser->key_text_suppressed = kind == 0 && prevented;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
 
         if (kind == 0 && !prevented && key && strcmp(key, "Enter") == 0 &&
@@ -4417,8 +4489,14 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
             } else if (f && ns_node_editable_value(f) &&
+                       (mods & NS_KEY_MOD_TEXT_SEPARATE) &&
+                       !(mods & (2 | 4 | 8)) &&
+                       browser_key_char_code(key) > 0) {
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
             } else if (key && strcmp(key, "Escape") == 0 &&
                        ns_js_process_close_request(browser->js)) {
                 browser->dirty = TRUE;
@@ -4477,8 +4555,10 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
         browser->caret_blink_byte = caret;
         browser->caret_blink_anchor = anchor;
     }
+    gint64 since = now - browser->caret_blink_epoch_us;
     gboolean visible = focused &&
-        ((now - browser->caret_blink_epoch_us) / NS_CARET_BLINK_US) % 2 == 0;
+        (since >= NS_CARET_BLINK_TIMEOUT_US ||
+         (since / NS_CARET_BLINK_US) % 2 == 0);
     gboolean changed = browser->caret_blink_active != (focused != NULL) ||
                        browser->caret_paint_visible != visible;
     browser->caret_blink_active = focused != NULL;
@@ -4490,7 +4570,9 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
 int
 ns_browser_caret_blinking(ns_browser *browser)
 {
-    return browser && browser->caret_blink_active ? 1 : 0;
+    return browser && browser->caret_blink_active &&
+           g_get_monotonic_time() - browser->caret_blink_epoch_us <
+               NS_CARET_BLINK_TIMEOUT_US ? 1 : 0;
 }
 
 char *

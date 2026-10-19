@@ -5453,6 +5453,18 @@ ns_fetch_has_user_activation(GPtrArray *extra_headers)
     return FALSE;
 }
 
+static gboolean
+ns_fetch_is_reload(GPtrArray *extra_headers)
+{
+    if (!extra_headers) return FALSE;
+    for (guint i = 0; i < extra_headers->len; i++) {
+        const char *header = g_ptr_array_index(extra_headers, i);
+        if (header && g_ascii_strncasecmp(header, "X-ND-Reload:", 12) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 void
 ns_hop_out_clear(ns_hop_out *out)
 {
@@ -5838,6 +5850,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (location_out) *location_out = NULL;
     gboolean is_navigation = ns_fetch_is_navigation(top_url, extra_headers);
     gboolean user_activated = ns_fetch_has_user_activation(extra_headers);
+    gboolean reload = is_navigation && ns_fetch_is_reload(extra_headers);
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
 
@@ -5936,7 +5949,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_cache_entry *cached = NULL;
     if (request_http && is_simple_get(method)) {
         cached = ns_cache_get(url, cache_partition, cache_request_headers);
-        if (cached && ns_cache_is_fresh(cached)) {
+        if (cached && !reload && ns_cache_is_fresh(cached)) {
             gboolean cache_has_cors =
                 cached->cors_allow_origin ||
                 ns_url_same_origin(effective_top_url, cached->final_url);
@@ -6033,6 +6046,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (*request_origin)
         headers = curl_slist_append(headers, vary_origin);
 
+    if (reload)
+        headers = curl_slist_append(headers, "Cache-Control: max-age=0");
     if (cached && cached->etag) {
         char *h = g_strdup_printf("If-None-Match: %s", cached->etag);
         headers = curl_slist_append(headers, h);
