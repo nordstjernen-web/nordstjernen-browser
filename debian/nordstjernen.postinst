@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    update-alternatives --install /usr/bin/internet-browser internet-browser \
+        /usr/bin/nordstjernen 60
+fi
+
+#DEBHELPER#

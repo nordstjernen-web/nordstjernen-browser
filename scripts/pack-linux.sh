@@ -238,6 +238,7 @@ ${WEBGPU_RUN_NOTE}
 ## Install on user path
 
     install -Dm755 nordstjernen ~/.local/bin/nordstjernen
+    ln -sf nordstjernen ~/.local/bin/internet-browser
     install -Dm644 data/icons/hicolor/scalable/apps/nordstjernen.svg \\
         ~/.local/share/icons/hicolor/scalable/apps/nordstjernen.svg
 

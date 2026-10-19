@@ -32,6 +32,7 @@ override_dh_auto_configure:
 # SONAME version, so they are not shipped.
 override_dh_auto_install:
 	dh_auto_install
+	rm debian/nordstjernen/usr/bin/internet-browser
 	rm -f debian/nordstjernen/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
 	rm -rf debian/nordstjernen/usr/include
 	find debian/nordstjernen/usr/lib -type d -empty -delete

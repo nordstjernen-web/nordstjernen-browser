@@ -68,6 +68,20 @@ LIB_DEPS=$(for bin in nordstjernen nordstjernen-renderer nordstjernen-audio; do
 [ -n "$LIB_DEPS" ] || { log "ERROR: could not resolve runtime packages"; exit 1; }
 log "runtime packages: $LIB_DEPS"
 
+cat > "$BUILDTOP/nordstjernen.post-install" <<'EOF'
+#!/bin/sh
+[ -e /usr/bin/internet-browser ] || \
+    ln -sf nordstjernen /usr/bin/internet-browser
+exit 0
+EOF
+cat > "$BUILDTOP/nordstjernen.pre-deinstall" <<'EOF'
+#!/bin/sh
+if [ "$(readlink /usr/bin/internet-browser)" = nordstjernen ]; then
+    rm -f /usr/bin/internet-browser
+fi
+exit 0
+EOF
+
 cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
 # Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 pkgname=nordstjernen
@@ -80,6 +94,7 @@ license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
 depends="${LIB_DEPS}ca-certificates fontconfig font-dejavu"
 options="!check !tracedeps !strip"
 source=""
+install="nordstjernen.post-install nordstjernen.pre-deinstall"
 
 build() {
 	return 0

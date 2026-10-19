@@ -243,7 +243,21 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 EOF
 cp "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm"
-chmod 755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm"
+cat >> "$PKGROOT/DEBIAN/postinst" <<'EOF'
+if [ "$1" = configure ]; then
+    update-alternatives --install /usr/bin/internet-browser internet-browser \
+        /usr/bin/nordstjernen 60
+fi
+EOF
+cat > "$PKGROOT/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+set -e
+if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
+    update-alternatives --remove internet-browser /usr/bin/nordstjernen
+fi
+EOF
+chmod 755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm" \
+    "$PKGROOT/DEBIAN/prerm"
 
 DEB="$ROOT/dist/nordstjernen_${VERSION}_${DISTRO_TAG:+${DISTRO_TAG}_}${DEBARCH}.deb"
 rm -f "$DEB"

@@ -27,6 +27,7 @@ SetCompressor /SOLID lzma
 !define APP_SMIKEY "Software\Clients\StartMenuInternet\Nordstjernen"
 !define APP_PROGID "NordstjernenHTML"
 !define APP_CLASSKEY "Software\Classes\${APP_PROGID}"
+!define APP_PATHKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\internet-browser.exe"
 
 Name "${APP_NAME} ${VERSION}"
 OutFile "${OUTFILE}"
@@ -120,6 +121,9 @@ Section "Nordstjernen (required)" SecMain
 
   WriteRegStr HKCU "Software\RegisteredApplications" "${APP_NAME}" "${APP_SMIKEY}\Capabilities"
 
+  WriteRegStr HKCU "${APP_PATHKEY}" ""     "$INSTDIR\nordstjernen.exe"
+  WriteRegStr HKCU "${APP_PATHKEY}" "Path" "$INSTDIR"
+
   WriteUninstaller "$INSTDIR\uninstall.exe"
 SectionEnd
 
@@ -147,4 +151,7 @@ Section "Uninstall"
   DeleteRegKey   HKCU "${APP_SMIKEY}"
   DeleteRegKey   HKCU "${APP_CLASSKEY}"
   DeleteRegValue HKCU "Software\RegisteredApplications" "${APP_NAME}"
+  ReadRegStr $0 HKCU "${APP_PATHKEY}" ""
+  StrCmp $0 "$INSTDIR\nordstjernen.exe" 0 +2
+    DeleteRegKey HKCU "${APP_PATHKEY}"
 SectionEnd
