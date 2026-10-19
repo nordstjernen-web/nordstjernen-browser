@@ -99,17 +99,11 @@ typedef enum {
 } NsPangoBidiType;
 
 NS_PANGO_DEPRECATED_IN_1_44
-NsPangoBidiType ns_pango_bidi_type_for_unichar (gunichar ch) G_GNUC_CONST;
-
-NS_PANGO_DEPRECATED_IN_1_44
 NsPangoDirection ns_pango_unichar_direction      (gunichar     ch) G_GNUC_CONST;
 NS_PANGO_DEPRECATED_IN_1_44
 NsPangoDirection ns_pango_find_base_dir          (const gchar *text,
 					     gint         length);
 
-NS_PANGO_DEPRECATED_IN_1_30_FOR(g_unichar_get_mirror_char)
-gboolean       ns_pango_get_mirror_char        (gunichar     ch,
-					     gunichar    *mirrored_ch);
 #endif
 
 G_END_DECLS

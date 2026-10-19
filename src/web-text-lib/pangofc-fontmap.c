@@ -43,7 +43,6 @@
 #include "pangofc-fontmap-private.h"
 #include "pangofc-private.h"
 #include "pango-impl-utils.h"
-#include "pango-enum-types.h"
 #include "pango-coverage-private.h"
 #include "pango-trace-private.h"
 #include <hb-ft.h>
@@ -556,22 +555,6 @@ ns_pango_fc_fontset_key_get_language (const NsPangoFcFontsetKey *key)
 }
 
 /**
- * ns_pango_fc_fontset_key_get_description:
- * @key: the fontset key
- *
- * Gets the font description of @key.
- *
- * Returns: the font description, which is owned by @key and should not be modified.
- *
- * Since: 1.24
- */
-const NsPangoFontDescription *
-ns_pango_fc_fontset_key_get_description (const NsPangoFcFontsetKey *key)
-{
-  return key->desc;
-}
-
-/**
  * ns_pango_fc_fontset_key_get_matrix:
  * @key: the fontset key
  *
@@ -585,40 +568,6 @@ const NsPangoMatrix *
 ns_pango_fc_fontset_key_get_matrix (const NsPangoFcFontsetKey *key)
 {
   return &key->matrix;
-}
-
-/**
- * ns_pango_fc_fontset_key_get_absolute_size:
- * @key: the fontset key
- *
- * Gets the absolute font size of @key in Pango units.
- *
- * This is adjusted for both resolution and transformation matrix.
- *
- * Returns: the pixel size of @key.
- *
- * Since: 1.24
- */
-double
-ns_pango_fc_fontset_key_get_absolute_size (const NsPangoFcFontsetKey *key)
-{
-  return key->pixelsize;
-}
-
-/**
- * ns_pango_fc_fontset_key_get_resolution:
- * @key: the fontset key
- *
- * Gets the resolution of @key
- *
- * Returns: the resolution of @key
- *
- * Since: 1.24
- */
-double
-ns_pango_fc_fontset_key_get_resolution (const NsPangoFcFontsetKey *key)
-{
-  return key->resolution;
 }
 
 /**
@@ -800,12 +749,6 @@ const char *
 ns_pango_fc_font_key_get_variations (const NsPangoFcFontKey *key)
 {
   return key->variations;
-}
-
-const char *
-ns_pango_fc_font_key_get_features (const NsPangoFcFontKey *key)
-{
-  return key->features;
 }
 
 /*
@@ -1661,46 +1604,6 @@ ns_pango_fc_font_map_class_init (NsPangoFcFontMapClass *class)
 
 
 /**
- * ns_pango_fc_font_map_add_decoder_find_func:
- * @fcfontmap: The `NsPangoFcFontMap` to add this method to.
- * @findfunc: The `NsPangoFcDecoderFindFunc` callback function
- * @user_data: User data.
- * @dnotify: A `GDestroyNotify` callback that will be called when the
- *   fontmap is finalized and the decoder is released.
- *
- * This function saves a callback method in the `NsPangoFcFontMap` that
- * will be called whenever new fonts are created.
- *
- * If the function returns a `NsPangoFcDecoder`, that decoder will be used
- * to determine both coverage via a `FcCharSet` and a one-to-one mapping
- * of characters to glyphs. This will allow applications to have
- * application-specific encodings for various fonts.
- *
- * Since: 1.6
- */
-void
-ns_pango_fc_font_map_add_decoder_find_func (NsPangoFcFontMap        *fcfontmap,
-					 NsPangoFcDecoderFindFunc findfunc,
-					 gpointer               user_data,
-					 GDestroyNotify         dnotify)
-{
-  NsPangoFcFontMapPrivate *priv;
-  NsPangoFcFindFuncInfo *info;
-
-  g_return_if_fail (NS_PANGO_IS_FC_FONT_MAP (fcfontmap));
-
-  priv = fcfontmap->priv;
-
-  info = g_slice_new (NsPangoFcFindFuncInfo);
-
-  info->findfunc = findfunc;
-  info->user_data = user_data;
-  info->dnotify = dnotify;
-
-  priv->findfuncs = g_slist_append (priv->findfuncs, info);
-}
-
-/**
  * ns_pango_fc_font_map_find_decoder:
  * @fcfontmap: The `NsPangoFcFontMap` to use.
  * @pattern: The `FcPattern` to find the decoder for.
@@ -2330,28 +2233,6 @@ ns_pango_fc_default_substitute (NsPangoFcFontMap    *fontmap,
     NS_PANGO_FC_FONT_MAP_GET_CLASS (fontmap)->default_substitute (fontmap, pattern);
 }
 
-void
-ns_pango_fc_font_map_set_default_substitute (NsPangoFcFontMap        *fontmap,
-					  NsPangoFcSubstituteFunc func,
-					  gpointer              data,
-					  GDestroyNotify        notify)
-{
-  if (fontmap->substitute_destroy)
-    fontmap->substitute_destroy (fontmap->substitute_data);
-
-  fontmap->substitute_func = func;
-  fontmap->substitute_data = data;
-  fontmap->substitute_destroy = notify;
-
-  ns_pango_fc_font_map_substitute_changed (fontmap);
-}
-
-void
-ns_pango_fc_font_map_substitute_changed (NsPangoFcFontMap *fontmap) {
-  ns_pango_fc_font_map_cache_clear(fontmap);
-  ns_pango_font_map_changed(NS_PANGO_FONT_MAP (fontmap));
-}
-
 static double
 ns_pango_fc_font_map_get_resolution (NsPangoFcFontMap *fcfontmap,
 				  NsPangoContext   *context)
@@ -2587,56 +2468,6 @@ void
 ns_pango_fc_font_map_config_changed (NsPangoFcFontMap *fcfontmap)
 {
   ns_pango_fc_font_map_cache_clear (fcfontmap);
-}
-
-/**
- * ns_pango_fc_font_map_set_config: (skip)
- * @fcfontmap: a `NsPangoFcFontMap`
- * @fcconfig: (nullable): a `FcConfig`
- *
- * Set the `FcConfig` for this font map to use.
- *
- * The default value is `NULL`, which causes Fontconfig to use its global
- * "current config". You can create a new `FcConfig` object and use this
- * API to attach it to a font map.
- *
- * This is particularly useful for example, if you want to use application
- * fonts with Pango. For that, you would create a fresh `FcConfig`, add your
- * app fonts to it, and attach it to a new Pango font map.
- *
- * If @fcconfig is different from the previous config attached to the font map,
- * [method@NsPangoFc.FontMap.config_changed] is called.
- *
- * This function acquires a reference to the `FcConfig` object; the caller
- * does **not** need to retain a reference.
- *
- * See [method@Pango.FontMap.add_font_file] for a backend-independent way
- * of using application fonts with Pango.
- *
- * Since: 1.38
- */
-void
-ns_pango_fc_font_map_set_config (NsPangoFcFontMap *fcfontmap,
-                              FcConfig       *fcconfig)
-{
-  FcConfig *oldconfig;
-
-  g_return_if_fail (NS_PANGO_IS_FC_FONT_MAP (fcfontmap));
-
-  oldconfig = fcfontmap->priv->config;
-
-  if (fcconfig)
-    FcConfigReference (fcconfig);
-
-  fcfontmap->priv->config = fcconfig;
-
-  g_clear_pointer (&fcfontmap->priv->fonts, FcFontSetDestroy);
-
-  if (oldconfig != fcconfig)
-    ns_pango_fc_font_map_config_changed (fcfontmap);
-
-  if (oldconfig)
-    FcConfigDestroy (oldconfig);
 }
 
 /**
@@ -2914,31 +2745,6 @@ _ns_pango_fc_font_map_get_languages (NsPangoFcFontMap *fcfontmap,
     }
 
   return data->languages;
-}
-
-/**
- * ns_pango_fc_font_map_create_context:
- * @fcfontmap: a `NsPangoFcFontMap`
- *
- * Creates a new context for this fontmap.
- *
- * This function is intended only for backend implementations deriving
- * from `NsPangoFcFontMap`; it is possible that a backend will store
- * additional information needed for correct operation on the `NsPangoContext`
- * after calling this function.
- *
- * Return value: (transfer full): a new `NsPangoContext`
- *
- * Since: 1.4
- *
- * Deprecated: 1.22: Use ns_pango_font_map_create_context() instead.
- */
-NsPangoContext *
-ns_pango_fc_font_map_create_context (NsPangoFcFontMap *fcfontmap)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FC_FONT_MAP (fcfontmap), NULL);
-
-  return ns_pango_font_map_create_context (NS_PANGO_FONT_MAP (fcfontmap));
 }
 
 static void

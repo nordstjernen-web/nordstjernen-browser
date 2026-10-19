@@ -502,13 +502,7 @@ struct _PangoAttrFontFeatures
   gchar *features;
 };
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                   ns_pango_attribute_get_type                (void) G_GNUC_CONST;
 
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoAttrType           ns_pango_attr_type_register                (const char                 *name);
-NS_PANGO_AVAILABLE_IN_1_22
-const char *            ns_pango_attr_type_get_name                (NsPangoAttrType               type) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_1_20
 void                    ns_pango_attribute_init                    (NsPangoAttribute             *attr,
                                                                  const NsPangoAttrClass       *klass);
@@ -562,17 +556,11 @@ NsPangoAttribute *        ns_pango_attr_strikethrough_color_new      (guint16   
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoAttribute *        ns_pango_attr_rise_new                     (int                         rise);
 NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttribute *        ns_pango_attr_baseline_shift_new           (int                         shift);
-NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttribute *        ns_pango_attr_font_scale_new               (NsPangoFontScale              scale);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoAttribute *        ns_pango_attr_scale_new                    (double                      scale_factor);
 NS_PANGO_AVAILABLE_IN_1_4
 NsPangoAttribute *        ns_pango_attr_fallback_new                 (gboolean                    enable_fallback);
 NS_PANGO_AVAILABLE_IN_1_6
 NsPangoAttribute *        ns_pango_attr_letter_spacing_new           (int                         letter_spacing);
-NS_PANGO_AVAILABLE_IN_1_58
-NsPangoAttribute *        ns_pango_attr_word_spacing_new             (int                         word_spacing);
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoAttribute *        ns_pango_attr_shape_new                    (const NsPangoRectangle        *ink_rect,
                                                                  const NsPangoRectangle        *logical_rect);
@@ -582,10 +570,6 @@ NsPangoAttribute *        ns_pango_attr_shape_new_with_data          (const NsPa
                                                                  gpointer                     data,
                                                                  NsPangoAttrDataCopyFunc        copy_func,
                                                                  GDestroyNotify               destroy_func);
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoAttribute *        ns_pango_attr_gravity_new                  (NsPangoGravity                 gravity);
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoAttribute *        ns_pango_attr_gravity_hint_new             (NsPangoGravityHint             hint);
 NS_PANGO_AVAILABLE_IN_1_38
 NsPangoAttribute *        ns_pango_attr_font_features_new            (const char                  *features);
 NS_PANGO_AVAILABLE_IN_1_38
@@ -595,10 +579,6 @@ NsPangoAttribute *        ns_pango_attr_background_alpha_new         (guint16   
 NS_PANGO_AVAILABLE_IN_1_44
 NsPangoAttribute *        ns_pango_attr_allow_breaks_new             (gboolean                     allow_breaks);
 
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttribute *        ns_pango_attr_word_new                     (void);
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttribute *        ns_pango_attr_sentence_new                 (void);
 
 NS_PANGO_AVAILABLE_IN_1_44
 NsPangoAttribute *        ns_pango_attr_insert_hyphens_new           (gboolean                     insert_hyphens);
@@ -611,13 +591,9 @@ NsPangoAttribute *        ns_pango_attr_overline_color_new           (guint16   
 NS_PANGO_AVAILABLE_IN_1_44
 NsPangoAttribute *        ns_pango_attr_show_new                     (NsPangoShowFlags               flags);
 NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttribute *        ns_pango_attr_line_height_new              (double                       factor);
-NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttribute *        ns_pango_attr_line_height_new_absolute     (int                          height);
 NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttribute *        ns_pango_attr_text_transform_new           (NsPangoTextTransform transform);
-NS_PANGO_AVAILABLE_IN_1_58
-NsPangoAttribute *        ns_pango_attr_width_new                    (NsPangoWidth                  width);
 
 NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttrString       * ns_pango_attribute_as_string               (NsPangoAttribute              *attr);
@@ -634,8 +610,6 @@ NsPangoAttrColor        * ns_pango_attribute_as_color                (NsPangoAtt
 NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttrFontDesc     * ns_pango_attribute_as_font_desc            (NsPangoAttribute              *attr);
 NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttrShape        * ns_pango_attribute_as_shape                (NsPangoAttribute              *attr);
-NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttrFontFeatures * ns_pango_attribute_as_font_features        (NsPangoAttribute              *attr);
 
 /* Attribute lists */
@@ -643,7 +617,6 @@ NsPangoAttrFontFeatures * ns_pango_attribute_as_font_features        (NsPangoAtt
 typedef struct _PangoAttrList     NsPangoAttrList;
 typedef struct _PangoAttrIterator NsPangoAttrIterator;
 
-#define NS_TYPE_PANGO_ATTR_LIST ns_pango_attr_list_get_type ()
 
 /**
  * NsPangoAttrIterator:
@@ -673,8 +646,6 @@ typedef struct _PangoAttrIterator NsPangoAttrIterator;
  * should not use a single `NsPangoAttrList` for more than one paragraph of text.
  */
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                   ns_pango_attr_list_get_type        (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoAttrList *         ns_pango_attr_list_new             (void);
@@ -690,19 +661,6 @@ void                    ns_pango_attr_list_insert          (NsPangoAttrList     
 NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_attr_list_insert_before   (NsPangoAttrList         *list,
                                                          NsPangoAttribute        *attr);
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_attr_list_change          (NsPangoAttrList         *list,
-                                                         NsPangoAttribute        *attr);
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_attr_list_splice          (NsPangoAttrList         *list,
-                                                         NsPangoAttrList         *other,
-                                                         int                    pos,
-                                                         int                    len);
-NS_PANGO_AVAILABLE_IN_1_44
-void                    ns_pango_attr_list_update          (NsPangoAttrList         *list,
-                                                         int                    pos,
-                                                         int                    remove,
-                                                         int                    add);
 
 NS_PANGO_AVAILABLE_IN_1_2
 NsPangoAttrList *         ns_pango_attr_list_filter          (NsPangoAttrList         *list,
@@ -716,13 +674,7 @@ NS_PANGO_AVAILABLE_IN_1_46
 gboolean                ns_pango_attr_list_equal           (NsPangoAttrList         *list,
                                                          NsPangoAttrList         *other_list);
 
-NS_PANGO_AVAILABLE_IN_1_50
-char *                  ns_pango_attr_list_to_string       (NsPangoAttrList         *list);
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoAttrList *         ns_pango_attr_list_from_string     (const char            *text);
 
-NS_PANGO_AVAILABLE_IN_1_44
-GType                   ns_pango_attr_iterator_get_type    (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoAttrIterator *     ns_pango_attr_list_get_iterator    (NsPangoAttrList         *list);

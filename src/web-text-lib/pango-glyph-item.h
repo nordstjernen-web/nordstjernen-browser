@@ -58,17 +58,12 @@ struct _PangoGlyphItem
   int end_x_offset;
 };
 
-#define NS_TYPE_PANGO_GLYPH_ITEM (ns_pango_glyph_item_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType ns_pango_glyph_item_get_type (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_1_2
 NsPangoGlyphItem *ns_pango_glyph_item_split        (NsPangoGlyphItem *orig,
 					       const char     *text,
 					       int             split_index);
-NS_PANGO_AVAILABLE_IN_1_20
-NsPangoGlyphItem *ns_pango_glyph_item_copy         (NsPangoGlyphItem *orig);
 NS_PANGO_AVAILABLE_IN_1_6
 void            ns_pango_glyph_item_free         (NsPangoGlyphItem *glyph_item);
 NS_PANGO_AVAILABLE_IN_1_2
@@ -152,14 +147,7 @@ struct _PangoGlyphItemIter
   int end_char;
 };
 
-#define NS_TYPE_PANGO_GLYPH_ITEM_ITER (ns_pango_glyph_item_iter_get_type ())
 
-NS_PANGO_AVAILABLE_IN_1_22
-GType               ns_pango_glyph_item_iter_get_type (void) G_GNUC_CONST;
-NS_PANGO_AVAILABLE_IN_1_22
-NsPangoGlyphItemIter *ns_pango_glyph_item_iter_copy (NsPangoGlyphItemIter *orig);
-NS_PANGO_AVAILABLE_IN_1_22
-void                ns_pango_glyph_item_iter_free (NsPangoGlyphItemIter *iter);
 
 NS_PANGO_AVAILABLE_IN_1_22
 gboolean ns_pango_glyph_item_iter_init_start   (NsPangoGlyphItemIter *iter,
@@ -174,7 +162,6 @@ gboolean ns_pango_glyph_item_iter_next_cluster (NsPangoGlyphItemIter *iter);
 NS_PANGO_AVAILABLE_IN_1_22
 gboolean ns_pango_glyph_item_iter_prev_cluster (NsPangoGlyphItemIter *iter);
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoGlyphItemIter, ns_pango_glyph_item_iter_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoGlyphItem, ns_pango_glyph_item_free)
 
 G_END_DECLS

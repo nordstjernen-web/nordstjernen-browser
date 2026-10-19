@@ -147,10 +147,7 @@ struct _PangoGlyphString {
   int space;
 };
 
-#define NS_TYPE_PANGO_GLYPH_STRING (ns_pango_glyph_string_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                   ns_pango_glyph_string_get_type             (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoGlyphString *      ns_pango_glyph_string_new                  (void);
@@ -158,8 +155,6 @@ NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_glyph_string_set_size             (NsPangoGlyphString    *string,
                                                                  int                  new_len);
 
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoGlyphString *      ns_pango_glyph_string_copy                 (NsPangoGlyphString    *string);
 NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_glyph_string_free                 (NsPangoGlyphString    *string);
 
@@ -179,21 +174,6 @@ void                    ns_pango_glyph_string_extents_range        (NsPangoGlyph
                                                                  NsPangoRectangle      *ink_rect,
                                                                  NsPangoRectangle      *logical_rect);
 
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_glyph_string_get_logical_widths   (NsPangoGlyphString    *glyphs,
-                                                                 const char          *text,
-                                                                 int                  length,
-                                                                 int                  embedding_level,
-                                                                 int                 *logical_widths);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_glyph_string_index_to_x           (NsPangoGlyphString    *glyphs,
-                                                                 const char          *text,
-                                                                 int                  length,
-                                                                 NsPangoAnalysis       *analysis,
-                                                                 int                  index_,
-                                                                 gboolean             trailing,
-                                                                 int                 *x_pos);
 NS_PANGO_AVAILABLE_IN_ALL
 void                    ns_pango_glyph_string_x_to_index           (NsPangoGlyphString    *glyphs,
                                                                  const char          *text,
@@ -231,12 +211,6 @@ typedef enum {
   NS_PANGO_SHAPE_NONE            = 0,
   NS_PANGO_SHAPE_ROUND_POSITIONS = 1 << 0,
 } NsPangoShapeFlags;
-
-NS_PANGO_AVAILABLE_IN_ALL
-void                    ns_pango_shape                             (const char          *text,
-                                                                 int                  length,
-                                                                 const NsPangoAnalysis *analysis,
-                                                                 NsPangoGlyphString    *glyphs);
 
 NS_PANGO_AVAILABLE_IN_1_32
 void                    ns_pango_shape_full                        (const char          *item_text,

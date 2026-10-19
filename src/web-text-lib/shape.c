@@ -1420,41 +1420,6 @@ ns_pango_shape_internal (const char          *item_text,
 /* {{{ Public API */
 
 /**
- * ns_pango_shape:
- * @text: the text to process
- * @length: the length (in bytes) of @text
- * @analysis: `NsPangoAnalysis` structure from [func@Pango.itemize]
- * @glyphs: (out caller-allocates): glyph string in which to store results
- *
- * Convert the characters in @text into glyphs.
- *
- * Given a segment of text and the corresponding `NsPangoAnalysis` structure
- * returned from [func@Pango.itemize], convert the characters into glyphs. You
- * may also pass in only a substring of the item from [func@Pango.itemize].
- *
- * It is recommended that you use [func@Pango.shape_full] instead, since
- * that API allows for shaping interaction happening across text item
- * boundaries.
- *
- * Some aspects of hyphen insertion and text transformation (in particular,
- * capitalization) require log attrs, and thus can only be handled by
- * [func@Pango.shape_item].
- *
- * Note that the extra attributes in the @analyis that is returned from
- * [func@Pango.itemize] have indices that are relative to the entire paragraph,
- * so you need to subtract the item offset from their indices before
- * calling [func@Pango.shape].
- */
-void
-ns_pango_shape (const char          *text,
-             int                  length,
-             const NsPangoAnalysis *analysis,
-             NsPangoGlyphString    *glyphs)
-{
-  ns_pango_shape_full (text, length, text, length, analysis, glyphs);
-}
-
-/**
  * ns_pango_shape_full:
  * @item_text: valid UTF-8 text to shape.
  * @item_length: the length (in bytes) of @item_text. -1 means nul-terminated text.

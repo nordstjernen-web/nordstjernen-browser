@@ -143,54 +143,6 @@ ns_pango_coverage_new (void)
 }
 
 /**
- * ns_pango_coverage_copy:
- * @coverage: a `NsPangoCoverage`
- *
- * Copy an existing `NsPangoCoverage`.
- *
- * Return value: (transfer full): the newly allocated `NsPangoCoverage`,
- *   with a reference count of one, which should be freed with
- *   [method@Pango.Coverage.unref].
- */
-NsPangoCoverage *
-ns_pango_coverage_copy (NsPangoCoverage *coverage)
-{
-  return NS_PANGO_COVERAGE_GET_CLASS (coverage)->copy (coverage);
-}
-
-/**
- * ns_pango_coverage_ref:
- * @coverage: (not nullable): a `NsPangoCoverage`
- *
- * Increase the reference count on the `NsPangoCoverage` by one.
- *
- * Return value: (transfer full): @coverage
- *
- * Deprecated: 1.52: Use g_object_ref instead
- */
-NsPangoCoverage *
-ns_pango_coverage_ref (NsPangoCoverage *coverage)
-{
-  return g_object_ref (coverage);
-}
-
-/**
- * ns_pango_coverage_unref:
- * @coverage: (transfer full) (not nullable): a `NsPangoCoverage`
- *
- * Decrease the reference count on the `NsPangoCoverage` by one.
- *
- * If the result is zero, free the coverage and all associated memory.
- *
- * Deprecated: 1.52: Use g_object_unref instead
- */
-void
-ns_pango_coverage_unref (NsPangoCoverage *coverage)
-{
-  g_object_unref (coverage);
-}
-
-/**
  * ns_pango_coverage_get:
  * @coverage: a `NsPangoCoverage`
  * @index_: the index to check
@@ -220,61 +172,4 @@ ns_pango_coverage_set (NsPangoCoverage     *coverage,
                     NsPangoCoverageLevel level)
 {
   NS_PANGO_COVERAGE_GET_CLASS (coverage)->set (coverage, index, level);
-}
-
-/**
- * ns_pango_coverage_max:
- * @coverage: a `NsPangoCoverage`
- * @other: another `NsPangoCoverage`
- *
- * Set the coverage for each index in @coverage to be the max (better)
- * value of the current coverage for the index and the coverage for
- * the corresponding index in @other.
- *
- * Deprecated: 1.44: This function does nothing
- */
-void
-ns_pango_coverage_max (NsPangoCoverage *coverage,
-                    NsPangoCoverage *other)
-{
-}
-
-/**
- * ns_pango_coverage_to_bytes:
- * @coverage: a `NsPangoCoverage`
- * @bytes: (out) (array length=n_bytes) (element-type guint8):
- *   location to store result (must be freed with g_free())
- * @n_bytes: (out): location to store size of result
- *
- * Convert a `NsPangoCoverage` structure into a flat binary format.
- *
- * Deprecated: 1.44: This returns %NULL
- */
-void
-ns_pango_coverage_to_bytes (NsPangoCoverage  *coverage,
-                         guchar        **bytes,
-                         int            *n_bytes)
-{
-  *bytes = NULL;
-  *n_bytes = 0;
-}
-
-/**
- * ns_pango_coverage_from_bytes:
- * @bytes: (array length=n_bytes) (element-type guint8): binary data
- *   representing a `NsPangoCoverage`
- * @n_bytes: the size of @bytes in bytes
- *
- * Convert data generated from [method@Pango.Coverage.to_bytes]
- * back to a `NsPangoCoverage`.
- *
- * Return value: (transfer full) (nullable): a newly allocated `NsPangoCoverage`
- *
- * Deprecated: 1.44: This returns %NULL
- */
-NsPangoCoverage *
-ns_pango_coverage_from_bytes (guchar *bytes,
-                           int     n_bytes)
-{
-  return NULL;
 }

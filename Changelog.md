@@ -8,7 +8,10 @@ Changelog:
   QuickJS, instead of being cloned from git at setup time. Offline and
   distribution builds now shape text through it too. The meson option is
   renamed -Dweb-text-lib (was -Dns-pango). Its sources sit directly in
-  src/web-text-lib/ and are included as <web-text-lib/...>.
+  src/web-text-lib/ and are included as <web-text-lib/...>. The library
+  is trimmed to what the browser calls: about 450 unreachable functions,
+  13 files and the generated enum types are gone (some 12,800 lines), and
+  the build no longer needs glib-mkenums.
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
   for crashes and double frees fixed twenty-five bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a

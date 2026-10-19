@@ -117,18 +117,6 @@ lang_hash (gconstpointer key)
   return h;
 }
 
-static NsPangoLanguage *
-ns_pango_language_copy (NsPangoLanguage *language)
-{
-  return language; /* language tags are const */
-}
-
-static void
-ns_pango_language_free (NsPangoLanguage *language G_GNUC_UNUSED)
-{
-  return; /* nothing */
-}
-
 /**
  * NsPangoLanguage:
  *
@@ -138,9 +126,6 @@ ns_pango_language_free (NsPangoLanguage *language G_GNUC_UNUSED)
  * `NsPangoLanguage` pointers can be efficiently
  * copied and compared with each other.
  */
-G_DEFINE_BOXED_TYPE (NsPangoLanguage, ns_pango_language,
-                     ns_pango_language_copy,
-                     ns_pango_language_free);
 
 /**
  * _ns_pango_get_lc_ctype:
@@ -795,35 +780,6 @@ out:
   G_UNLOCK (languages);
 
   return result;
-}
-
-/**
- * ns_pango_language_get_preferred:
- *
- * Returns the list of languages that the user prefers.
- *
- * The list is specified by the `NS_PANGO_LANGUAGE` or `LANGUAGE`
- * environment variables, in order of preference. Note that this
- * list does not necessarily include the language returned by
- * [func@Pango.Language.get_default].
- *
- * When choosing language-specific resources, such as the sample
- * text returned by [method@Pango.Language.get_sample_string],
- * you should first try the default language, followed by the
- * languages returned by this function.
- *
- * Returns: (transfer none) (nullable) (array zero-terminated=1): a %NULL-terminated array
- *   of `NsPangoLanguage`*
- *
- * Since: 1.48
- */
-NsPangoLanguage **
-ns_pango_language_get_preferred (void)
-{
-  /* We call this just for its side-effect of initializing languages */
-  _ns_pango_script_get_default_language (NS_PANGO_SCRIPT_COMMON);
-
-  return (NsPangoLanguage **) languages;
 }
 
 /**

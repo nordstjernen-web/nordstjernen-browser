@@ -76,12 +76,6 @@ GType ns_pango_coverage_get_type (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoCoverage *    ns_pango_coverage_new     (void);
-NS_PANGO_DEPRECATED_IN_1_52_FOR(g_object_ref)
-NsPangoCoverage *    ns_pango_coverage_ref     (NsPangoCoverage      *coverage);
-NS_PANGO_DEPRECATED_IN_1_52_FOR(g_object_unref)
-void               ns_pango_coverage_unref   (NsPangoCoverage      *coverage);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoCoverage *    ns_pango_coverage_copy    (NsPangoCoverage      *coverage);
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoCoverageLevel ns_pango_coverage_get     (NsPangoCoverage      *coverage,
 					   int                 index_);
@@ -89,17 +83,7 @@ NS_PANGO_AVAILABLE_IN_ALL
 void               ns_pango_coverage_set     (NsPangoCoverage      *coverage,
 					   int                 index_,
 					   NsPangoCoverageLevel  level);
-NS_PANGO_DEPRECATED_IN_1_44
-void               ns_pango_coverage_max     (NsPangoCoverage      *coverage,
-					   NsPangoCoverage      *other);
 
-NS_PANGO_DEPRECATED_IN_1_44
-void           ns_pango_coverage_to_bytes   (NsPangoCoverage  *coverage,
-					  guchar        **bytes,
-					  int            *n_bytes);
-NS_PANGO_DEPRECATED_IN_1_44
-NsPangoCoverage *ns_pango_coverage_from_bytes (guchar         *bytes,
-					  int             n_bytes);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(NsPangoCoverage, g_object_unref)
 

@@ -312,17 +312,6 @@ ns_pango_cairo_context_get_font_options (NsPangoContext *context)
     return NULL;
 }
 
-/**
- * _ns_pango_cairo_context_merge_font_options:
- * @context: a `NsPangoContext`
- * @options: a `cairo_font_options_t`
- *
- * Merge together options from the target surface and explicitly set
- * on the context.
- *
- * Return value: the combined set of font options. This value is owned
- *   by the context and must not be modified or freed.
- */
 const cairo_font_options_t *
 _ns_pango_cairo_context_get_merged_font_options (NsPangoContext *context)
 {
@@ -339,42 +328,6 @@ _ns_pango_cairo_context_get_merged_font_options (NsPangoContext *context)
     }
 
   return info->merged_options;
-}
-
-/**
- * ns_pango_cairo_context_set_shape_renderer:
- * @context: a `NsPangoContext`, from a pangocairo font map
- * @func: (nullable): Callback function for rendering attributes of
- *   type %NS_PANGO_ATTR_SHAPE, or %NULL to disable shape rendering.
- * @data: (nullable): User data that will be passed to @func.
- * @dnotify: (nullable): Callback that will be called when the
- *   context is freed to release @data
- *
- * Sets callback function for context to use for rendering attributes
- * of type %NS_PANGO_ATTR_SHAPE.
- *
- * See `NsPangoCairoShapeRendererFunc` for details.
- *
- * Since: 1.18
- */
-void
-ns_pango_cairo_context_set_shape_renderer (NsPangoContext                *context,
-					NsPangoCairoShapeRendererFunc  func,
-					gpointer                     data,
-					GDestroyNotify               dnotify)
-{
-  NsPangoCairoContextInfo *info;
-
-  g_return_if_fail (NS_PANGO_IS_CONTEXT (context));
-
-  info  = get_context_info (context, TRUE);
-
-  if (info->shape_renderer_notify)
-    info->shape_renderer_notify (info->shape_renderer_data);
-
-  info->shape_renderer_func   = func;
-  info->shape_renderer_data   = data;
-  info->shape_renderer_notify = dnotify;
 }
 
 /**
@@ -489,26 +442,5 @@ ns_pango_cairo_create_layout (cairo_t *cr)
   g_object_unref (context);
 
   return layout;
-}
-
-/**
- * ns_pango_cairo_update_layout:
- * @cr: a Cairo context
- * @layout: a `NsPangoLayout`, from [func@create_layout]
- *
- * Updates the private `NsPangoContext` of a `NsPangoLayout` created with
- * [func@create_layout] to match the current transformation and target
- * surface of a Cairo context.
- *
- * Since: 1.10
- */
-void
-ns_pango_cairo_update_layout (cairo_t     *cr,
-			   NsPangoLayout *layout)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail (NS_PANGO_IS_LAYOUT (layout));
-
-  _ns_pango_cairo_update_context (cr, ns_pango_layout_get_context (layout));
 }
 

@@ -90,31 +90,8 @@ struct _PangoFcFont
 NS_PANGO_AVAILABLE_IN_ALL
 GType      ns_pango_fc_font_get_type (void) G_GNUC_CONST;
 
-NS_PANGO_DEPRECATED_IN_1_44
-gboolean   ns_pango_fc_font_has_char          (NsPangoFcFont      *font,
-                                            gunichar          wc);
-NS_PANGO_AVAILABLE_IN_1_4
-guint      ns_pango_fc_font_get_glyph         (NsPangoFcFont      *font,
-                                            gunichar          wc);
 
-NS_PANGO_DEPRECATED_IN_1_50_FOR(ns_pango_font_get_language)
-NsPangoLanguage **
-           ns_pango_fc_font_get_languages     (NsPangoFcFont      *font);
 
-NS_PANGO_AVAILABLE_IN_1_48
-FcPattern *ns_pango_fc_font_get_pattern       (NsPangoFcFont      *font);
-
-NS_PANGO_DEPRECATED_FOR(NS_PANGO_GET_UNKNOWN_GLYPH)
-NsPangoGlyph ns_pango_fc_font_get_unknown_glyph (NsPangoFcFont      *font,
-                                            gunichar          wc);
-NS_PANGO_DEPRECATED_IN_1_32
-void       ns_pango_fc_font_kern_glyphs       (NsPangoFcFont      *font,
-                                            NsPangoGlyphString *glyphs);
-
-NS_PANGO_DEPRECATED_IN_1_44_FOR(ns_pango_font_get_hb_font)
-FT_Face    ns_pango_fc_font_lock_face         (NsPangoFcFont      *font);
-NS_PANGO_DEPRECATED_IN_1_44_FOR(ns_pango_font_get_hb_font)
-void       ns_pango_fc_font_unlock_face       (NsPangoFcFont      *font);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoFcFont, g_object_unref)
 

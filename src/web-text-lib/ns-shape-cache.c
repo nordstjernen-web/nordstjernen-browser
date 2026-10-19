@@ -793,34 +793,6 @@ drop_shaped_runs (void)
     }
 }
 
-void
-ns_pango_cache_clear (void)
-{
-  drop_shaped_runs ();
-  ns_pango_break_cache_clear ();
-  ns_pango_item_cache_clear ();
-}
-
-/* Gives back what nothing has read since the last sweep and keeps the working
- * set, which is what a browser under memory pressure wants from a page it is
- * still displaying. ns_pango_cache_clear() is the other end of that: everything,
- * for a page that has gone away.
- */
-void
-ns_pango_cache_trim (void)
-{
-  for (guint i = 0; i < NS_SHAPE_CACHE_SHARDS; i++)
-    {
-      g_rw_lock_writer_lock (&shards[i].lock);
-      if (shards[i].table != NULL)
-        drop_unread_entries (&shards[i]);
-      g_rw_lock_writer_unlock (&shards[i].lock);
-    }
-
-  ns_pango_break_cache_trim ();
-  ns_pango_item_cache_trim ();
-}
-
 /* A font arriving invalidates the glyphs outright. It does not invalidate the
  * items -- they name fonts, but they are keyed on the context's serial, which
  * has just moved -- so those entries are merely unreachable from here on, and
@@ -855,20 +827,4 @@ ns_pango_cache_get_stats (guint64 *hits,
           g_rw_lock_reader_unlock (&shards[i].lock);
         }
     }
-}
-
-/* Why runs were turned away, for whoever wants to print it. This used to be a
- * g_printerr() inside the getter above, which made asking for the statistics
- * write to stderr.
- */
-void
-ns_pango_cache_get_skips (guint64 *no_font,
-                          guint64 *too_long,
-                          guint64 *too_many_features,
-                          guint64 *context_dependent)
-{
-  if (no_font) *no_font = (guint) g_atomic_int_get (&skip_font);
-  if (too_long) *too_long = (guint) g_atomic_int_get (&skip_len);
-  if (too_many_features) *too_many_features = (guint) g_atomic_int_get (&skip_feat);
-  if (context_dependent) *context_dependent = (guint) g_atomic_int_get (&skip_ctx);
 }

@@ -31,16 +31,10 @@
 
 G_BEGIN_DECLS
 
-#define NS_TYPE_PANGO_LANGUAGE (ns_pango_language_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                   ns_pango_language_get_type                 (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_1_16
 NsPangoLanguage *         ns_pango_language_get_default              (void) G_GNUC_CONST;
-
-NS_PANGO_AVAILABLE_IN_1_48
-NsPangoLanguage **        ns_pango_language_get_preferred            (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoLanguage *         ns_pango_language_from_string              (const char     *language);

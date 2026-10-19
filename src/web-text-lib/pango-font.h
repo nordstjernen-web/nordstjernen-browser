@@ -329,10 +329,7 @@ typedef enum {
  * NsPangoFontDescription
  */
 
-#define NS_TYPE_PANGO_FONT_DESCRIPTION (ns_pango_font_description_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType                 ns_pango_font_description_get_type    (void) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontDescription *ns_pango_font_description_new         (void);
 NS_PANGO_AVAILABLE_IN_ALL
@@ -346,9 +343,6 @@ gboolean              ns_pango_font_description_equal       (const NsPangoFontDe
                                                           const NsPangoFontDescription  *desc2) G_GNUC_PURE;
 NS_PANGO_AVAILABLE_IN_ALL
 void                  ns_pango_font_description_free        (NsPangoFontDescription        *desc);
-NS_PANGO_DEPRECATED_IN_1_56
-void                  ns_pango_font_descriptions_free       (NsPangoFontDescription       **descs,
-                                                          int                          n_descs);
 
 NS_PANGO_AVAILABLE_IN_ALL
 void                 ns_pango_font_description_set_family        (NsPangoFontDescription *desc,
@@ -376,8 +370,6 @@ NsPangoWeight          ns_pango_font_description_get_weight        (const NsPang
 NS_PANGO_AVAILABLE_IN_ALL
 void                 ns_pango_font_description_set_stretch       (NsPangoFontDescription *desc,
                                                                NsPangoStretch          stretch);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoStretch         ns_pango_font_description_get_stretch       (const NsPangoFontDescription *desc) G_GNUC_PURE;
 
 NS_PANGO_AVAILABLE_IN_1_58
 void                 ns_pango_font_description_set_width         (NsPangoFontDescription *desc,
@@ -441,22 +433,14 @@ void ns_pango_font_description_merge_static (NsPangoFontDescription       *desc,
                                           gboolean                    replace_existing);
 
 NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_font_description_better_match (const NsPangoFontDescription *desc,
-                                              const NsPangoFontDescription *old_match,
-                                              const NsPangoFontDescription *new_match) G_GNUC_PURE;
-
-NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontDescription *ns_pango_font_description_from_string (const char                  *str);
 NS_PANGO_AVAILABLE_IN_ALL
 char *                ns_pango_font_description_to_string   (const NsPangoFontDescription  *desc);
-NS_PANGO_AVAILABLE_IN_ALL
-char *                ns_pango_font_description_to_filename (const NsPangoFontDescription  *desc);
 
 /*
  * NsPangoFontMetrics
  */
 
-#define NS_TYPE_PANGO_FONT_METRICS  (ns_pango_font_metrics_get_type ())
 
 struct _PangoFontMetrics
 {
@@ -475,8 +459,6 @@ struct _PangoFontMetrics
 };
 
 NS_PANGO_AVAILABLE_IN_ALL
-GType             ns_pango_font_metrics_get_type                    (void) G_GNUC_CONST;
-NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontMetrics *ns_pango_font_metrics_ref                         (NsPangoFontMetrics *metrics);
 NS_PANGO_AVAILABLE_IN_ALL
 void              ns_pango_font_metrics_unref                       (NsPangoFontMetrics *metrics);
@@ -488,8 +470,6 @@ NS_PANGO_AVAILABLE_IN_1_44
 int               ns_pango_font_metrics_get_height                  (NsPangoFontMetrics *metrics) G_GNUC_PURE;
 NS_PANGO_AVAILABLE_IN_ALL
 int               ns_pango_font_metrics_get_approximate_char_width  (NsPangoFontMetrics *metrics) G_GNUC_PURE;
-NS_PANGO_AVAILABLE_IN_ALL
-int               ns_pango_font_metrics_get_approximate_digit_width (NsPangoFontMetrics *metrics) G_GNUC_PURE;
 NS_PANGO_AVAILABLE_IN_1_6
 int               ns_pango_font_metrics_get_underline_position      (NsPangoFontMetrics *metrics) G_GNUC_PURE;
 NS_PANGO_AVAILABLE_IN_1_6
@@ -628,18 +608,7 @@ NS_PANGO_AVAILABLE_IN_ALL
 GType      ns_pango_font_face_get_type       (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
-NsPangoFontDescription *ns_pango_font_face_describe       (NsPangoFontFace  *face);
-NS_PANGO_AVAILABLE_IN_ALL
 const char           *ns_pango_font_face_get_face_name  (NsPangoFontFace  *face) G_GNUC_PURE;
-NS_PANGO_AVAILABLE_IN_1_4
-void                  ns_pango_font_face_list_sizes     (NsPangoFontFace  *face,
-                                                      int           **sizes,
-                                                      int            *n_sizes);
-NS_PANGO_AVAILABLE_IN_1_18
-gboolean              ns_pango_font_face_is_synthesized (NsPangoFontFace  *face) G_GNUC_PURE;
-
-NS_PANGO_AVAILABLE_IN_1_46
-NsPangoFontFamily *     ns_pango_font_face_get_family     (NsPangoFontFace  *face);
 
 
 /*
@@ -705,10 +674,6 @@ NS_PANGO_AVAILABLE_IN_ALL
 NsPangoCoverage *       ns_pango_font_get_coverage      (NsPangoFont        *font,
                                                     NsPangoLanguage    *language);
 #ifndef __GI_SCANNER__
-NS_PANGO_DEPRECATED_IN_1_44
-NsPangoEngineShape *    ns_pango_font_find_shaper       (NsPangoFont        *font,
-                                                    NsPangoLanguage    *language,
-                                                    guint32           ch);
 #endif
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFontMetrics *    ns_pango_font_get_metrics       (NsPangoFont        *font,
@@ -721,9 +686,6 @@ void                  ns_pango_font_get_glyph_extents (NsPangoFont        *font,
 NS_PANGO_AVAILABLE_IN_1_10
 NsPangoFontMap         *ns_pango_font_get_font_map      (NsPangoFont        *font);
 
-NS_PANGO_AVAILABLE_IN_1_46
-NsPangoFontFace *       ns_pango_font_get_face          (NsPangoFont        *font);
-
 NS_PANGO_AVAILABLE_IN_1_44
 gboolean              ns_pango_font_has_char          (NsPangoFont        *font,
                                                     gunichar          wc);
@@ -734,9 +696,6 @@ void                  ns_pango_font_get_features      (NsPangoFont        *font,
                                                     guint            *num_features);
 NS_PANGO_AVAILABLE_IN_1_44
 hb_font_t *           ns_pango_font_get_hb_font       (NsPangoFont        *font);
-
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoLanguage **      ns_pango_font_get_languages     (NsPangoFont        *font);
 
 /**
  * NS_PANGO_GLYPH_EMPTY:

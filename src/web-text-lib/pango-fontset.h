@@ -121,8 +121,6 @@ struct _PangoFontsetClass
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoFont *             ns_pango_fontset_get_font          (NsPangoFontset                   *fontset,
                                                          guint                           wc);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoFontMetrics *      ns_pango_fontset_get_metrics       (NsPangoFontset                   *fontset);
 NS_PANGO_AVAILABLE_IN_1_4
 void                    ns_pango_fontset_foreach           (NsPangoFontset                   *fontset,
                                                          NsPangoFontsetForeachFunc         func,

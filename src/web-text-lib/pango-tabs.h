@@ -50,19 +50,10 @@ typedef enum
   NS_PANGO_TAB_DECIMAL
 } NsPangoTabAlign;
 
-#define NS_TYPE_PANGO_TAB_ARRAY (ns_pango_tab_array_get_type ())
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoTabArray  *ns_pango_tab_array_new                 (gint           initial_size,
 						     gboolean       positions_in_pixels);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoTabArray  *ns_pango_tab_array_new_with_positions  (gint           size,
-						     gboolean       positions_in_pixels,
-						     NsPangoTabAlign  first_alignment,
-						     gint           first_position,
-						     ...);
-NS_PANGO_AVAILABLE_IN_ALL
-GType           ns_pango_tab_array_get_type            (void) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoTabArray  *ns_pango_tab_array_copy                (NsPangoTabArray *src);
 NS_PANGO_AVAILABLE_IN_ALL
@@ -82,27 +73,11 @@ void            ns_pango_tab_array_get_tab             (NsPangoTabArray *tab_arr
 						     gint           tab_index,
 						     NsPangoTabAlign *alignment,
 						     gint          *location);
-NS_PANGO_AVAILABLE_IN_ALL
-void            ns_pango_tab_array_get_tabs            (NsPangoTabArray *tab_array,
-						     NsPangoTabAlign **alignments,
-						     gint          **locations);
 
 NS_PANGO_AVAILABLE_IN_ALL
 gboolean        ns_pango_tab_array_get_positions_in_pixels (NsPangoTabArray *tab_array);
 
-NS_PANGO_AVAILABLE_IN_1_50
-void            ns_pango_tab_array_set_positions_in_pixels (NsPangoTabArray *tab_array,
-                                                         gboolean       positions_in_pixels);
 
-NS_PANGO_AVAILABLE_IN_1_50
-char *          ns_pango_tab_array_to_string           (NsPangoTabArray *tab_array);
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoTabArray * ns_pango_tab_array_from_string         (const char    *text);
-
-NS_PANGO_AVAILABLE_IN_1_50
-void            ns_pango_tab_array_set_decimal_point   (NsPangoTabArray *tab_array,
-                                                     int            tab_index,
-                                                     gunichar       decimal_point);
 NS_PANGO_AVAILABLE_IN_1_50
 gunichar        ns_pango_tab_array_get_decimal_point   (NsPangoTabArray *tab_array,
                                                      int            tab_index);

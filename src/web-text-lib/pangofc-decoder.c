@@ -59,32 +59,3 @@ ns_pango_fc_decoder_get_charset (NsPangoFcDecoder *decoder,
 
   return NS_PANGO_FC_DECODER_GET_CLASS (decoder)->get_charset (decoder, fcfont);
 }
-
-/**
- * ns_pango_fc_decoder_get_glyph:
- * @decoder: a `NsPangoFcDecoder`
- * @fcfont: a `NsPangoFcFont` to query.
- * @wc: the Unicode code point to convert to a single `NsPangoGlyph`.
- *
- * Generates a `NsPangoGlyph` for the given Unicode point using the
- * custom decoder.
- *
- * For complex scripts where there can be multiple
- * glyphs for a single character, the decoder will return whatever
- * glyph is most convenient for it. (Usually whatever glyph is directly
- * in the fonts character map table.)
- *
- * Return value: the glyph index, or 0 if the glyph isn't
- * covered by the font.
- *
- * Since: 1.6
- **/
-NsPangoGlyph
-ns_pango_fc_decoder_get_glyph (NsPangoFcDecoder *decoder,
-			    NsPangoFcFont    *fcfont,
-			    guint32         wc)
-{
-  g_return_val_if_fail (NS_PANGO_IS_FC_DECODER (decoder), 0);
-
-  return NS_PANGO_FC_DECODER_GET_CLASS (decoder)->get_glyph (decoder, fcfont, wc);
-}

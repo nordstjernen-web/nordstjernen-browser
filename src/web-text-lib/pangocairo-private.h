@@ -122,8 +122,6 @@ void _ns_pango_cairo_font_private_initialize (NsPangoCairoFontPrivate      *cf_p
 					   const cairo_matrix_t       *font_matrix);
 void _ns_pango_cairo_font_private_finalize (NsPangoCairoFontPrivate *cf_priv);
 cairo_scaled_font_t *_ns_pango_cairo_font_private_get_scaled_font (NsPangoCairoFontPrivate *cf_priv);
-void  ns_pango_cairo_font_private_get_font_options (NsPangoCairoFontPrivate *cf_private,
-                                                 cairo_font_options_t  *options);
 
 gboolean _ns_pango_cairo_font_private_is_metrics_hinted (NsPangoCairoFontPrivate *cf_priv);
 void _ns_pango_cairo_font_private_get_glyph_extents (NsPangoCairoFontPrivate *cf_priv,
@@ -143,13 +141,6 @@ GType ns_pango_cairo_renderer_get_type    (void) G_GNUC_CONST;
 
 const cairo_font_options_t *_ns_pango_cairo_context_get_merged_font_options (NsPangoContext *context);
 
-void                        ns_pango_cairo_font_get_font_options (NsPangoCairoFont       *cfont,
-                                                               cairo_font_options_t *options);
-NsPangoFont *                 ns_pango_cairo_font_map_reload_font  (NsPangoFontMap   *fontmap,
-                                                               NsPangoFont      *font,
-                                                               double          scale,
-                                                               NsPangoContext   *context,
-                                                               const char     *variations);
 
 G_END_DECLS
 

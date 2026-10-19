@@ -450,21 +450,6 @@ ns_pango_item_cache_insert (NsPangoContext   *context,
   g_rw_lock_writer_unlock (&shard->lock);
 }
 
-/* Drops what nothing has asked for since the last sweep, without touching the
- * working set -- what a browser wants when it is asked to give memory back but
- * is still displaying the page.
- */
-void
-ns_pango_item_cache_trim (void)
-{
-  for (guint i = 0; i < NS_ITEM_CACHE_SHARDS; i++)
-    {
-      g_rw_lock_writer_lock (&shards[i].lock);
-      drop_unread_entries (&shards[i]);
-      g_rw_lock_writer_unlock (&shards[i].lock);
-    }
-}
-
 void
 ns_pango_item_cache_clear (void)
 {

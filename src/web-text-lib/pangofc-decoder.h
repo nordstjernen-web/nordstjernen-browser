@@ -111,11 +111,6 @@ NS_PANGO_AVAILABLE_IN_1_6
 FcCharSet *ns_pango_fc_decoder_get_charset (NsPangoFcDecoder *decoder,
 					 NsPangoFcFont    *fcfont);
 
-NS_PANGO_AVAILABLE_IN_1_6
-NsPangoGlyph ns_pango_fc_decoder_get_glyph   (NsPangoFcDecoder *decoder,
-					 NsPangoFcFont    *fcfont,
-					 guint32         wc);
-
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (NsPangoFcDecoder, g_object_unref)
 
 G_END_DECLS

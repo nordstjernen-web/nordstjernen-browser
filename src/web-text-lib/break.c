@@ -2522,37 +2522,6 @@ ns_pango_default_break (const char    *text,
 }
 
 /**
- * ns_pango_break:
- * @text: the text to process. Must be valid UTF-8
- * @length: length of @text in bytes (may be -1 if @text is nul-terminated)
- * @analysis: `NsPangoAnalysis` structure for @text
- * @attrs: (array length=attrs_len) (out caller-allocates): an array to
- *   store character information in
- * @attrs_len: (in): size of the array passed as @attrs
- *
- * Determines possible line, word, and character breaks
- * for a string of Unicode text with a single analysis.
- *
- * For most purposes you may want to use [func@Pango.get_log_attrs].
- *
- * Deprecated: 1.44: Use [func@Pango.default_break],
- *   [func@Pango.tailor_break] and [func@Pango.attr_break].
- */
-void
-ns_pango_break (const char    *text,
-             gint           length,
-             NsPangoAnalysis *analysis,
-             NsPangoLogAttr  *attrs,
-             int            attrs_len)
-{
-  g_return_if_fail (analysis != NULL);
-  g_return_if_fail (attrs != NULL);
-
-  default_break (text, length, analysis, attrs, attrs_len);
-  tailor_break (text, length, analysis, -1, attrs, attrs_len);
-}
-
-/**
  * ns_pango_tailor_break:
  * @text: text to process. Must be valid UTF-8
  * @length: length in bytes of @text
@@ -2644,78 +2613,6 @@ ns_pango_attr_break (const char    *text,
     }
 
   g_slist_free_full (attributes, (GDestroyNotify)ns_pango_attribute_destroy);
-}
-
-/**
- * ns_pango_get_log_attrs:
- * @text: text to process. Must be valid UTF-8
- * @length: length in bytes of @text
- * @level: embedding level, or -1 if unknown
- * @language: language tag
- * @attrs: (array length=attrs_len) (out caller-allocates): array with one
- *   `NsPangoLogAttr` per character in @text, plus one extra, to be filled in
- * @attrs_len: (in): length of @attrs array
- *
- * Computes a `NsPangoLogAttr` for each character in @text.
- *
- * The @attrs array must have one `NsPangoLogAttr` for
- * each position in @text; if @text contains N characters,
- * it has N+1 positions, including the last position at the
- * end of the text. @text should be an entire paragraph;
- * logical attributes can't be computed without context
- * (for example you need to see spaces on either side of
- * a word to know the word is a word).
- */
-void
-ns_pango_get_log_attrs (const char    *text,
-                     int            length,
-                     int            level,
-                     NsPangoLanguage *language,
-                     NsPangoLogAttr  *attrs,
-                     int            attrs_len)
-{
-  int chars_broken;
-  NsPangoAnalysis analysis = { NULL };
-  NsPangoScriptIter iter;
-
-  g_return_if_fail (length == 0 || text != NULL);
-  g_return_if_fail (attrs != NULL);
-
-  analysis.level = level;
-  analysis.language = language;
-
-  ns_pango_default_break (text, length, &analysis, attrs, attrs_len);
-
-  chars_broken = 0;
-
-  _ns_pango_script_iter_init (&iter, text, length);
-  do
-    {
-      const char *run_start, *run_end;
-      NsPangoScript script;
-      int chars_in_range;
-
-      ns_pango_script_iter_get_range (&iter, &run_start, &run_end, &script);
-      analysis.script = script;
-
-      chars_in_range = ns_pango_utf8_strlen (run_start, run_end - run_start);
-
-      ns_pango_tailor_break (run_start,
-                          run_end - run_start,
-                          &analysis,
-                          -1,
-                          attrs + chars_broken,
-                          chars_in_range + 1);
-
-      chars_broken += chars_in_range;
-    }
-  while (ns_pango_script_iter_next (&iter));
-  _ns_pango_script_iter_fini (&iter);
-
-  if (chars_broken + 1 > attrs_len)
-    g_warning ("ns_pango_get_log_attrs: attrs_len should have been at least %d, but was %d.  Expect corrupted memory.",
-               chars_broken + 1,
-               attrs_len);
 }
 
 /* }}} */

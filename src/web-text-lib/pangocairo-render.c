@@ -1151,46 +1151,6 @@ _ns_pango_cairo_do_glyph_string (cairo_t          *cr,
 }
 
 static void
-_ns_pango_cairo_do_glyph_item (cairo_t          *cr,
-			    const char       *text,
-			    NsPangoGlyphItem   *glyph_item,
-			    gboolean          do_path)
-{
-  NsPangoCairoRenderer *crenderer = acquire_renderer ();
-  NsPangoRenderer *renderer = (NsPangoRenderer *) crenderer;
-
-  crenderer->cr = cr;
-  crenderer->do_path = do_path;
-  save_current_point (crenderer);
-
-  if (!do_path)
-    {
-      /* unset all part colors, since when drawing just a glyph string,
-       * prepare_run() isn't called.
-       */
-
-      ns_pango_renderer_activate (renderer);
-
-      ns_pango_renderer_set_color (renderer, NS_PANGO_RENDER_PART_FOREGROUND, NULL);
-      ns_pango_renderer_set_color (renderer, NS_PANGO_RENDER_PART_BACKGROUND, NULL);
-      ns_pango_renderer_set_color (renderer, NS_PANGO_RENDER_PART_UNDERLINE, NULL);
-      ns_pango_renderer_set_color (renderer, NS_PANGO_RENDER_PART_STRIKETHROUGH, NULL);
-      ns_pango_renderer_set_color (renderer, NS_PANGO_RENDER_PART_OVERLINE, NULL);
-    }
-
-  ns_pango_renderer_draw_glyph_item (renderer, text, glyph_item, 0, 0);
-
-  if (!do_path)
-    {
-      ns_pango_renderer_deactivate (renderer);
-    }
-
-  restore_current_point (crenderer);
-
-  release_renderer (crenderer);
-}
-
-static void
 _ns_pango_cairo_do_layout_line (cairo_t          *cr,
 			     NsPangoLayoutLine  *line,
 			     gboolean          do_path)
@@ -1231,89 +1191,10 @@ _ns_pango_cairo_do_layout (cairo_t              *cr,
   release_renderer (crenderer);
 }
 
-static void
-_ns_pango_cairo_do_error_underline (cairo_t *cr,
-				 double   x,
-				 double   y,
-				 double   width,
-				 double   height,
-				 gboolean do_path)
-{
-  /* We don't use a renderer here, for a simple reason:
-   * the only renderer we can get is the default renderer, that
-   * is all implemented here, so we shortcircuit and make our
-   * life way easier.
-   */
-
-  if (!do_path)
-    cairo_new_path (cr);
-
-  draw_error_underline (cr, x, y, width, height);
-
-  if (!do_path)
-    cairo_fill (cr);
-}
-
 
 /* public wrapper of above to show or append path */
 
 
-/**
- * ns_pango_cairo_show_glyph_string:
- * @cr: a Cairo context
- * @font: a `NsPangoFont` from a `NsPangoCairoFontMap`
- * @glyphs: a `NsPangoGlyphString`
- *
- * Draws the glyphs in @glyphs in the specified cairo context.
- *
- * The origin of the glyphs (the left edge of the baseline) will
- * be drawn at the current point of the cairo context.
- *
- * Since: 1.10
- */
-void
-ns_pango_cairo_show_glyph_string (cairo_t          *cr,
-			       NsPangoFont        *font,
-			       NsPangoGlyphString *glyphs)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail (glyphs != NULL);
-
-  _ns_pango_cairo_do_glyph_string (cr, font, glyphs, FALSE);
-}
-
-
-/**
- * ns_pango_cairo_show_glyph_item:
- * @cr: a Cairo context
- * @text: the UTF-8 text that @glyph_item refers to
- * @glyph_item: a `NsPangoGlyphItem`
- *
- * Draws the glyphs in @glyph_item in the specified cairo context,
- *
- * embedding the text associated with the glyphs in the output if the
- * output format supports it (PDF for example), otherwise it acts
- * similar to [func@show_glyph_string].
- *
- * The origin of the glyphs (the left edge of the baseline) will
- * be drawn at the current point of the cairo context.
- *
- * Note that @text is the start of the text for layout, which is then
- * indexed by `glyph_item->item->offset`.
- *
- * Since: 1.22
- */
-void
-ns_pango_cairo_show_glyph_item (cairo_t          *cr,
-			     const char       *text,
-			     NsPangoGlyphItem   *glyph_item)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail (text != NULL);
-  g_return_if_fail (glyph_item != NULL);
-
-  _ns_pango_cairo_do_glyph_item (cr, text, glyph_item, FALSE);
-}
 
 /**
  * ns_pango_cairo_show_layout_line:
@@ -1360,37 +1241,6 @@ ns_pango_cairo_show_layout (cairo_t     *cr,
 }
 
 /**
- * ns_pango_cairo_show_error_underline:
- * @cr: a Cairo context
- * @x: The X coordinate of one corner of the rectangle
- * @y: The Y coordinate of one corner of the rectangle
- * @width: Non-negative width of the rectangle
- * @height: Non-negative height of the rectangle
- *
- * Draw a squiggly line in the specified cairo context that approximately
- * covers the given rectangle in the style of an underline used to indicate a
- * spelling error.
- *
- * The width of the underline is rounded to an integer
- * number of up/down segments and the resulting rectangle is centered in the
- * original rectangle.
- *
- * Since: 1.14
- */
-void
-ns_pango_cairo_show_error_underline (cairo_t *cr,
-				  double  x,
-				  double  y,
-				  double  width,
-				  double  height)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail ((width >= 0) && (height >= 0));
-
-  _ns_pango_cairo_do_error_underline (cr, x, y, width, height, FALSE);
-}
-
-/**
  * ns_pango_cairo_glyph_string_path:
  * @cr: a Cairo context
  * @font: a `NsPangoFont` from a `NsPangoCairoFontMap`
@@ -1416,29 +1266,6 @@ ns_pango_cairo_glyph_string_path (cairo_t          *cr,
 }
 
 /**
- * ns_pango_cairo_layout_line_path:
- * @cr: a Cairo context
- * @line: a `NsPangoLayoutLine`
- *
- * Adds the text in `NsPangoLayoutLine` to the current path in the
- * specified cairo context.
- *
- * The origin of the glyphs (the left edge of the line) will be
- * at the current point of the cairo context.
- *
- * Since: 1.10
- */
-void
-ns_pango_cairo_layout_line_path (cairo_t          *cr,
-			      NsPangoLayoutLine  *line)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail (line != NULL);
-
-  _ns_pango_cairo_do_layout_line (cr, line, TRUE);
-}
-
-/**
  * ns_pango_cairo_layout_path:
  * @cr: a Cairo context
  * @layout: a Pango layout
@@ -1461,56 +1288,3 @@ ns_pango_cairo_layout_path (cairo_t     *cr,
   _ns_pango_cairo_do_layout (cr, layout, TRUE, NS_PANGO_RENDER_COMPONENT_ALL);
 }
 
-/**
- * ns_pango_cairo_layout_path_for_components:
- * @cr: a Cairo context
- * @layout: a Pango layout
- * @components: the components to include
- *
- * Adds components of a `NsPangoLayout` to the current path
- * in the specified cairo context.
- *
- * The top-left corner of the `NsPangoLayout` will be at the
- * current point of the cairo context.
- *
- * Since: 1.58
- */
-void
-ns_pango_cairo_layout_path_for_components (cairo_t              *cr,
-                                        NsPangoLayout          *layout,
-                                        NsPangoRenderComponent  components)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail (NS_PANGO_IS_LAYOUT (layout));
-
-  _ns_pango_cairo_do_layout (cr, layout, TRUE, components);
-}
-/**
- * ns_pango_cairo_error_underline_path:
- * @cr: a Cairo context
- * @x: The X coordinate of one corner of the rectangle
- * @y: The Y coordinate of one corner of the rectangle
- * @width: Non-negative width of the rectangle
- * @height: Non-negative height of the rectangle
- *
- * Add a squiggly line to the current path in the specified cairo context that
- * approximately covers the given rectangle in the style of an underline used
- * to indicate a spelling error.
- *
- * The width of the underline is rounded to an integer number of up/down
- * segments and the resulting rectangle is centered in the original rectangle.
- *
- * Since: 1.14
- */
-void
-ns_pango_cairo_error_underline_path (cairo_t *cr,
-				  double   x,
-				  double   y,
-				  double   width,
-				  double   height)
-{
-  g_return_if_fail (cr != NULL);
-  g_return_if_fail ((width >= 0) && (height >= 0));
-
-  _ns_pango_cairo_do_error_underline (cr, x, y, width, height, TRUE);
-}

@@ -60,10 +60,6 @@ void
 ns_pango_fc_font_map_config_changed (NsPangoFcFontMap *fcfontmap);
 
 NS_PANGO_AVAILABLE_IN_1_38
-void
-ns_pango_fc_font_map_set_config (NsPangoFcFontMap *fcfontmap,
-			      FcConfig       *fcconfig);
-NS_PANGO_AVAILABLE_IN_1_38
 FcConfig *
 ns_pango_fc_font_map_get_config (NsPangoFcFontMap *fcfontmap);
 
@@ -81,11 +77,6 @@ ns_pango_fc_font_map_get_config (NsPangoFcFontMap *fcfontmap);
 typedef NsPangoFcDecoder * (*NsPangoFcDecoderFindFunc) (FcPattern *pattern,
 						    gpointer   user_data);
 
-NS_PANGO_AVAILABLE_IN_1_6
-void ns_pango_fc_font_map_add_decoder_find_func (NsPangoFcFontMap        *fcfontmap,
-					      NsPangoFcDecoderFindFunc findfunc,
-					      gpointer               user_data,
-					      GDestroyNotify         dnotify);
 NS_PANGO_AVAILABLE_IN_1_26
 NsPangoFcDecoder *ns_pango_fc_font_map_find_decoder (NsPangoFcFontMap *fcfontmap,
 					        FcPattern      *pattern);
@@ -95,8 +86,6 @@ NsPangoFontDescription *ns_pango_fc_font_description_from_pattern (FcPattern *pa
 							      gboolean   include_size);
 
 #ifndef NS_PANGO_DISABLE_DEPRECATED
-NS_PANGO_DEPRECATED_IN_1_22_FOR(ns_pango_font_map_create_context)
-NsPangoContext * ns_pango_fc_font_map_create_context (NsPangoFcFontMap *fcfontmap);
 #endif
 NS_PANGO_AVAILABLE_IN_1_4
 void           ns_pango_fc_font_map_shutdown       (NsPangoFcFontMap *fcfontmap);
@@ -116,43 +105,6 @@ hb_face_t * ns_pango_fc_font_map_get_hb_face (NsPangoFcFontMap *fcfontmap,
 typedef void (*NsPangoFcSubstituteFunc) (FcPattern *pattern,
 				       gpointer   data);
 
-/**
- * ns_pango_fc_font_map_set_default_substitute:
- * @fontmap: a `NsPangoFcFontMap`
- * @func: function to call to to do final config tweaking on `FcPattern` objects
- * @data: data to pass to @func
- * @notify: function to call when @data is no longer used
- *
- * Sets a function that will be called to do final configuration
- * substitution on a `FcPattern` before it is used to load
- * the font.
- *
- * This function can be used to do things like set
- * hinting and antialiasing options.
- *
- * Since: 1.48
- */
-NS_PANGO_AVAILABLE_IN_1_48
-void ns_pango_fc_font_map_set_default_substitute (NsPangoFcFontMap        *fontmap,
-					       NsPangoFcSubstituteFunc func,
-					       gpointer              data,
-					       GDestroyNotify        notify);
-
-/**
- * ns_pango_fc_font_map_substitute_changed:
- * @fontmap: a `NsPangoFcFontMap`
- *
- * Call this function any time the results of the default
- * substitution function set with
- * [method@NsPangoFc.FontMap.set_default_substitute] change.
- *
- * That is, if your substitution function will return different
- * results for the same input pattern, you must call this function.
- *
- * Since: 1.48
- */
-NS_PANGO_AVAILABLE_IN_1_48
-void ns_pango_fc_font_map_substitute_changed (NsPangoFcFontMap *fontmap);
 
 /**
  * NS_PANGO_FC_GRAVITY:

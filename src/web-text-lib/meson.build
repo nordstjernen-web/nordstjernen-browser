@@ -135,14 +135,11 @@ wtl_sources = files(
   'fonts.c',
   'glyphstring.c',
   'itemize.c',
-  'modules.c',
   'pango-attributes.c',
   'pango-bidi-type.c',
-  'pango-color.c',
   'pango-context.c',
   'pango-coverage.c',
   'pango-emoji.c',
-  'pango-engine.c',
   'pango-fontmap.c',
   'pango-fontset.c',
   'pango-fontset-simple.c',
@@ -151,48 +148,15 @@ wtl_sources = files(
   'pango-item.c',
   'pango-language.c',
   'pango-layout.c',
-  'pango-markup.c',
   'pango-matrix.c',
   'pango-renderer.c',
   'pango-script.c',
   'pango-tabs.c',
   'pango-utils.c',
-  'reorder-items.c',
   'shape.c',
   'ns-break-cache.c',
   'ns-item-cache.c',
   'ns-shape-cache.c',
-)
-
-wtl_enum_headers = files(
-  'pango.h',
-  'pango-attributes.h',
-  'pango-bidi-type.h',
-  'pango-break.h',
-  'pango-color.h',
-  'pango-context.h',
-  'pango-coverage.h',
-  'pango-direction.h',
-  'pango-engine.h',
-  'pango-font.h',
-  'pango-fontmap.h',
-  'pango-fontset.h',
-  'pango-fontset-simple.h',
-  'pango-glyph.h',
-  'pango-glyph-item.h',
-  'pango-gravity.h',
-  'pango-item.h',
-  'pango-language.h',
-  'pango-layout.h',
-  'pango-matrix.h',
-  'pango-markup.h',
-  'pango-modules.h',
-  'pango-renderer.h',
-  'pango-script.h',
-  'pango-tabs.h',
-  'pango-types.h',
-  'pango-utils.h',
-  'ns-pango-cache.h',
 )
 
 wtl_features_conf = configuration_data()
@@ -205,23 +169,14 @@ configure_file(
   configuration: wtl_features_conf,
 )
 
-wtl_enums = import('gnome').mkenums(
-  'pango-enum-types',
-  sources: wtl_enum_headers,
-  c_template: 'pango-enum-types.c.template',
-  h_template: 'pango-enum-types.h.template',
-)
-
 wtl_lib_cflags = wtl_cflags + [
   '-DG_LOG_DOMAIN="WebTextLib"',
   '-DNS_PANGO_COMPILATION',
-  '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),
-  '-DLIBDIR="@0@"'.format(get_option('prefix') / get_option('libdir')),
 ]
 wtl_inc = [include_directories('.'), wtl_root_inc]
 
 wtl_lib = static_library('web-text-lib',
-  wtl_sources + wtl_enums,
+  wtl_sources,
   dependencies: wtl_deps,
   include_directories: wtl_inc,
   c_args: wtl_lib_cflags,
@@ -231,7 +186,6 @@ web_text_dep = declare_dependency(
   link_with: wtl_lib,
   include_directories: wtl_root_inc,
   dependencies: wtl_deps,
-  sources: wtl_enums[1],
 )
 
 wtl_fc_lib = static_library('web-text-lib-fc',
@@ -239,7 +193,6 @@ wtl_fc_lib = static_library('web-text-lib-fc',
     'pangofc-font.c',
     'pangofc-fontmap.c',
     'pangofc-decoder.c',
-    'pango-trace.c',
   ),
   dependencies: wtl_deps + web_text_dep,
   include_directories: wtl_inc,

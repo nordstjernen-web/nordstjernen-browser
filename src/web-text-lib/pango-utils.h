@@ -26,72 +26,6 @@
 #include <glib.h>
 #include <web-text-lib/pango-font.h>
 
-G_BEGIN_DECLS
-
-NS_PANGO_DEPRECATED
-char **  ns_pango_split_file_list (const char *str);
-
-NS_PANGO_DEPRECATED
-char    *ns_pango_trim_string     (const char *str);
-NS_PANGO_DEPRECATED
-gint     ns_pango_read_line      (FILE        *stream,
-			       GString     *str);
-NS_PANGO_DEPRECATED
-gboolean ns_pango_skip_space     (const char **pos);
-NS_PANGO_DEPRECATED
-gboolean ns_pango_scan_word      (const char **pos,
-			       GString     *out);
-NS_PANGO_DEPRECATED
-gboolean ns_pango_scan_string    (const char **pos,
-			       GString     *out);
-NS_PANGO_DEPRECATED
-gboolean ns_pango_scan_int       (const char **pos,
-			       int         *out);
-
-NS_PANGO_DEPRECATED
-gboolean ns_pango_parse_enum     (GType       type,
-			       const char *str,
-			       int        *value,
-			       gboolean    warn,
-			       char      **possible_values);
-
-/* Functions for parsing textual representations
- * of NsPangoFontDescription fields. They return TRUE if the input string
- * contains a valid value, which then has been assigned to the corresponding
- * field in the NsPangoFontDescription. If the warn parameter is TRUE,
- * a warning is printed (with g_warning) if the string does not
- * contain a valid value.
- */
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_parse_style   (const char   *str,
-			      NsPangoStyle   *style,
-			      gboolean      warn);
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_parse_variant (const char   *str,
-			      NsPangoVariant *variant,
-			      gboolean      warn);
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_parse_weight  (const char   *str,
-			      NsPangoWeight  *weight,
-			      gboolean      warn);
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_parse_stretch (const char   *str,
-			      NsPangoStretch *stretch,
-			      gboolean      warn);
-
-
-/* Hint line position and thickness.
- */
-NS_PANGO_AVAILABLE_IN_1_12
-void ns_pango_quantize_line_geometry (int *thickness,
-				   int *position);
-
-/* A routine from fribidi that we either wrap or provide ourselves.
- */
-NS_PANGO_AVAILABLE_IN_1_4
-guint8 * ns_pango_log2vis_get_embedding_levels (const gchar    *text,
-					     int             length,
-					     NsPangoDirection *pbase_dir);
 
 /* Unicode characters that are zero-width and should not be rendered
  * normally.
@@ -175,12 +109,6 @@ int ns_pango_version (void) G_GNUC_CONST;
 /* Return run-time Pango version as an string */
 NS_PANGO_AVAILABLE_IN_1_16
 const char * ns_pango_version_string (void) G_GNUC_CONST;
-
-/* Check that run-time Pango is as new as required */
-NS_PANGO_AVAILABLE_IN_1_16
-const char * ns_pango_version_check (int required_major,
-                                  int required_minor,
-                                  int required_micro) G_GNUC_CONST;
 
 G_END_DECLS
 

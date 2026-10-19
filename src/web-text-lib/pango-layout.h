@@ -157,8 +157,6 @@ NS_PANGO_AVAILABLE_IN_ALL
 GType        ns_pango_layout_get_type       (void) G_GNUC_CONST;
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoLayout *ns_pango_layout_new            (NsPangoContext   *context);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoLayout *ns_pango_layout_copy           (NsPangoLayout    *src);
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoContext  *ns_pango_layout_get_context    (NsPangoLayout    *layout);
@@ -175,21 +173,6 @@ void           ns_pango_layout_set_text       (NsPangoLayout    *layout,
 					    int             length);
 NS_PANGO_AVAILABLE_IN_ALL
 const char    *ns_pango_layout_get_text       (NsPangoLayout    *layout);
-
-NS_PANGO_AVAILABLE_IN_1_30
-gint           ns_pango_layout_get_character_count (NsPangoLayout *layout);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void           ns_pango_layout_set_markup     (NsPangoLayout    *layout,
-					    const char     *markup,
-					    int             length);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void           ns_pango_layout_set_markup_with_accel (NsPangoLayout    *layout,
-						   const char     *markup,
-						   int             length,
-						   gunichar        accel_marker,
-						   gunichar       *accel_char);
 
 NS_PANGO_AVAILABLE_IN_ALL
 void           ns_pango_layout_set_font_description (NsPangoLayout                *layout,
@@ -213,21 +196,13 @@ void           ns_pango_layout_set_wrap             (NsPangoLayout              
 						  NsPangoWrapMode               wrap);
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoWrapMode  ns_pango_layout_get_wrap             (NsPangoLayout                *layout);
-NS_PANGO_AVAILABLE_IN_1_16
-gboolean       ns_pango_layout_is_wrapped           (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_ALL
 void           ns_pango_layout_set_indent           (NsPangoLayout                *layout,
 						  int                         indent);
 NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_layout_get_indent           (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_ALL
-void           ns_pango_layout_set_spacing          (NsPangoLayout                *layout,
-						  int                         spacing);
-NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_layout_get_spacing          (NsPangoLayout                *layout);
-NS_PANGO_AVAILABLE_IN_1_44
-void           ns_pango_layout_set_line_spacing     (NsPangoLayout                *layout,
-                                                  float                       factor);
 NS_PANGO_AVAILABLE_IN_1_44
 float          ns_pango_layout_get_line_spacing     (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_ALL
@@ -238,8 +213,6 @@ gboolean       ns_pango_layout_get_justify          (NsPangoLayout              
 NS_PANGO_AVAILABLE_IN_1_50
 void           ns_pango_layout_set_justify_last_line (NsPangoLayout                *layout,
                                                    gboolean                    justify);
-NS_PANGO_AVAILABLE_IN_1_50
-gboolean       ns_pango_layout_get_justify_last_line (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_1_4
 void           ns_pango_layout_set_auto_dir         (NsPangoLayout                *layout,
 						  gboolean                    auto_dir);
@@ -258,9 +231,6 @@ NS_PANGO_AVAILABLE_IN_ALL
 NsPangoTabArray* ns_pango_layout_get_tabs             (NsPangoLayout                *layout);
 
 NS_PANGO_AVAILABLE_IN_ALL
-void           ns_pango_layout_set_single_paragraph_mode (NsPangoLayout                *layout,
-						       gboolean                    setting);
-NS_PANGO_AVAILABLE_IN_ALL
 gboolean       ns_pango_layout_get_single_paragraph_mode (NsPangoLayout                *layout);
 
 NS_PANGO_AVAILABLE_IN_1_6
@@ -268,25 +238,9 @@ void               ns_pango_layout_set_ellipsize (NsPangoLayout        *layout,
 					       NsPangoEllipsizeMode  ellipsize);
 NS_PANGO_AVAILABLE_IN_1_6
 NsPangoEllipsizeMode ns_pango_layout_get_ellipsize (NsPangoLayout        *layout);
-NS_PANGO_AVAILABLE_IN_1_16
-gboolean           ns_pango_layout_is_ellipsized (NsPangoLayout        *layout);
-
-NS_PANGO_AVAILABLE_IN_1_16
-int      ns_pango_layout_get_unknown_glyphs_count (NsPangoLayout    *layout);
-
-NS_PANGO_AVAILABLE_IN_1_46
-NsPangoDirection ns_pango_layout_get_direction (NsPangoLayout *layout,
-                                           int          index);
 
 NS_PANGO_AVAILABLE_IN_ALL
 void     ns_pango_layout_context_changed (NsPangoLayout    *layout);
-NS_PANGO_AVAILABLE_IN_1_32
-guint    ns_pango_layout_get_serial      (NsPangoLayout    *layout);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void     ns_pango_layout_get_log_attrs (NsPangoLayout    *layout,
-				     NsPangoLogAttr  **attrs,
-				     gint           *n_attrs);
 
 NS_PANGO_AVAILABLE_IN_1_30
 const NsPangoLogAttr *ns_pango_layout_get_log_attrs_readonly (NsPangoLayout *layout,
@@ -302,26 +256,7 @@ void     ns_pango_layout_index_to_line_x      (NsPangoLayout    *layout,
 					    gboolean        trailing,
 					    int            *line,
 					    int            *x_pos);
-NS_PANGO_AVAILABLE_IN_ALL
-void     ns_pango_layout_get_cursor_pos       (NsPangoLayout    *layout,
-					    int             index_,
-					    NsPangoRectangle *strong_pos,
-					    NsPangoRectangle *weak_pos);
 
-NS_PANGO_AVAILABLE_IN_1_50
-void     ns_pango_layout_get_caret_pos        (NsPangoLayout    *layout,
-                                            int             index_,
-                                            NsPangoRectangle *strong_pos,
-                                            NsPangoRectangle *weak_pos);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void     ns_pango_layout_move_cursor_visually (NsPangoLayout    *layout,
-					    gboolean        strong,
-					    int             old_index,
-					    int             old_trailing,
-					    int             direction,
-					    int            *new_index,
-					    int            *new_trailing);
 NS_PANGO_AVAILABLE_IN_ALL
 gboolean ns_pango_layout_xy_to_index          (NsPangoLayout    *layout,
 					    int             x,
@@ -349,35 +284,19 @@ int      ns_pango_layout_get_baseline         (NsPangoLayout    *layout);
 
 NS_PANGO_AVAILABLE_IN_ALL
 int              ns_pango_layout_get_line_count       (NsPangoLayout    *layout);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoLayoutLine *ns_pango_layout_get_line             (NsPangoLayout    *layout,
-						    int             line);
 NS_PANGO_AVAILABLE_IN_1_16
 NsPangoLayoutLine *ns_pango_layout_get_line_readonly    (NsPangoLayout    *layout,
 						    int             line);
-NS_PANGO_AVAILABLE_IN_ALL
-GSList *         ns_pango_layout_get_lines            (NsPangoLayout    *layout);
 NS_PANGO_AVAILABLE_IN_1_16
 GSList *         ns_pango_layout_get_lines_readonly   (NsPangoLayout    *layout);
 
-#define NS_TYPE_PANGO_LAYOUT_LINE (ns_pango_layout_line_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType    ns_pango_layout_line_get_type     (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_1_10
 NsPangoLayoutLine *ns_pango_layout_line_ref   (NsPangoLayoutLine *line);
 NS_PANGO_AVAILABLE_IN_ALL
 void             ns_pango_layout_line_unref (NsPangoLayoutLine *line);
 
-NS_PANGO_AVAILABLE_IN_1_50
-int      ns_pango_layout_line_get_start_index (NsPangoLayoutLine *line);
-NS_PANGO_AVAILABLE_IN_1_50
-int      ns_pango_layout_line_get_length      (NsPangoLayoutLine *line);
-NS_PANGO_AVAILABLE_IN_1_50
-gboolean ns_pango_layout_line_is_paragraph_start (NsPangoLayoutLine *line);
-NS_PANGO_AVAILABLE_IN_1_50
-NsPangoDirection ns_pango_layout_line_get_resolved_direction (NsPangoLayoutLine *line);
 
 NS_PANGO_AVAILABLE_IN_ALL
 gboolean ns_pango_layout_line_x_to_index   (NsPangoLayoutLine  *line,
@@ -399,60 +318,26 @@ NS_PANGO_AVAILABLE_IN_ALL
 void     ns_pango_layout_line_get_extents  (NsPangoLayoutLine  *line,
 					 NsPangoRectangle   *ink_rect,
 					 NsPangoRectangle   *logical_rect);
-NS_PANGO_AVAILABLE_IN_1_44
-void     ns_pango_layout_line_get_height   (NsPangoLayoutLine  *line,
-					 int              *height);
-
-NS_PANGO_AVAILABLE_IN_ALL
-void     ns_pango_layout_line_get_pixel_extents (NsPangoLayoutLine *layout_line,
-					      NsPangoRectangle  *ink_rect,
-					      NsPangoRectangle  *logical_rect);
 
 typedef struct _PangoLayoutIter NsPangoLayoutIter;
 
-#define NS_TYPE_PANGO_LAYOUT_ITER         (ns_pango_layout_iter_get_type ())
 
-NS_PANGO_AVAILABLE_IN_ALL
-GType            ns_pango_layout_iter_get_type (void) G_GNUC_CONST;
 
 NS_PANGO_AVAILABLE_IN_ALL
 NsPangoLayoutIter *ns_pango_layout_get_iter  (NsPangoLayout     *layout);
-NS_PANGO_AVAILABLE_IN_1_20
-NsPangoLayoutIter *ns_pango_layout_iter_copy (NsPangoLayoutIter *iter);
 NS_PANGO_AVAILABLE_IN_ALL
 void             ns_pango_layout_iter_free (NsPangoLayoutIter *iter);
 
 NS_PANGO_AVAILABLE_IN_ALL
 int              ns_pango_layout_iter_get_index  (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoLayoutRun  *ns_pango_layout_iter_get_run    (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_1_16
-NsPangoLayoutRun  *ns_pango_layout_iter_get_run_readonly   (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_ALL
-NsPangoLayoutLine *ns_pango_layout_iter_get_line   (NsPangoLayoutIter *iter);
 NS_PANGO_AVAILABLE_IN_1_16
 NsPangoLayoutLine *ns_pango_layout_iter_get_line_readonly  (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean         ns_pango_layout_iter_at_last_line (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_1_20
-NsPangoLayout     *ns_pango_layout_iter_get_layout (NsPangoLayoutIter *iter);
 
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_layout_iter_next_char    (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_ALL
-gboolean ns_pango_layout_iter_next_cluster (NsPangoLayoutIter *iter);
 NS_PANGO_AVAILABLE_IN_ALL
 gboolean ns_pango_layout_iter_next_run     (NsPangoLayoutIter *iter);
 NS_PANGO_AVAILABLE_IN_ALL
 gboolean ns_pango_layout_iter_next_line    (NsPangoLayoutIter *iter);
 
-NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_layout_iter_get_char_extents    (NsPangoLayoutIter *iter,
-					    NsPangoRectangle  *logical_rect);
-NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_layout_iter_get_cluster_extents (NsPangoLayoutIter *iter,
-					    NsPangoRectangle  *ink_rect,
-					    NsPangoRectangle  *logical_rect);
 NS_PANGO_AVAILABLE_IN_ALL
 void ns_pango_layout_iter_get_run_extents     (NsPangoLayoutIter *iter,
 					    NsPangoRectangle  *ink_rect,
@@ -469,13 +354,7 @@ void ns_pango_layout_iter_get_line_yrange     (NsPangoLayoutIter *iter,
 					    int             *y0_,
 					    int             *y1_);
 NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_layout_iter_get_layout_extents  (NsPangoLayoutIter *iter,
-					    NsPangoRectangle  *ink_rect,
-					    NsPangoRectangle  *logical_rect);
-NS_PANGO_AVAILABLE_IN_ALL
 int  ns_pango_layout_iter_get_baseline        (NsPangoLayoutIter *iter);
-NS_PANGO_AVAILABLE_IN_1_50
-int  ns_pango_layout_iter_get_run_baseline    (NsPangoLayoutIter *iter);
 
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(NsPangoLayout, g_object_unref)

@@ -117,10 +117,6 @@ ns_pango_item_free (NsPangoItem *item)
     g_slice_free (NsPangoItem, item);
 }
 
-G_DEFINE_BOXED_TYPE (NsPangoItem, ns_pango_item,
-                     ns_pango_item_copy,
-                     ns_pango_item_free);
-
 /**
  * ns_pango_item_split:
  * @orig: a `NsPangoItem`
@@ -371,29 +367,4 @@ ns_pango_analysis_get_size_font (const NsPangoAnalysis *analysis)
   NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
 
   return priv->size_font;
-}
-
-/**
- * ns_pango_item_get_char_offset:
- * @item: a `NsPangoItem`
- *
- * Returns the character offset of the item from the beginning
- * of the itemized text.
- *
- * If the item has not been obtained from Pango's itemization
- * machinery, then the character offset is not available. In
- * that case, this function returns -1.
- *
- * Returns: the character offset of the item from the beginning
- *   of the itemized text, or -1
- *
- * Since: 1.54
- */
-int
-ns_pango_item_get_char_offset (NsPangoItem *item)
-{
-  if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_HAS_CHAR_OFFSET)
-    return ((NsPangoItemPrivate *)item)->char_offset;
-  else
-    return -1;
 }

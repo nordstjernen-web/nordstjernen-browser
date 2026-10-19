@@ -29,8 +29,6 @@
 #include <web-text-lib/pango-context.h>
 #include <web-text-lib/pango-coverage.h>
 #include <web-text-lib/pango-direction.h>
-#include <web-text-lib/pango-engine.h>
-#include <web-text-lib/pango-enum-types.h>
 #include <web-text-lib/pango-features.h>
 #include <web-text-lib/pango-font.h>
 #include <web-text-lib/pango-fontmap.h>
@@ -43,7 +41,6 @@
 #include <web-text-lib/pango-language.h>
 #include <web-text-lib/pango-layout.h>
 #include <web-text-lib/pango-matrix.h>
-#include <web-text-lib/pango-markup.h>
 #include <web-text-lib/pango-renderer.h>
 #include <web-text-lib/pango-script.h>
 #include <web-text-lib/pango-tabs.h>

@@ -148,8 +148,6 @@ typedef guint32 NsPangoGlyph;
 
 NS_PANGO_AVAILABLE_IN_1_16
 int    ns_pango_units_from_double (double d) G_GNUC_CONST;
-NS_PANGO_AVAILABLE_IN_1_16
-double ns_pango_units_to_double (int i) G_GNUC_CONST;
 
 
 

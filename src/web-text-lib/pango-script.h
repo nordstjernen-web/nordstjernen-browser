@@ -306,15 +306,7 @@ typedef enum {                         /* ISO 15924 code */
 
 #include <web-text-lib/pango-version-macros.h>
 
-NS_PANGO_DEPRECATED_IN_1_44_FOR(g_unichar_get_script)
-NsPangoScript ns_pango_script_for_unichar         (gunichar             ch) G_GNUC_CONST;
 
-NS_PANGO_AVAILABLE_IN_1_44
-GType            ns_pango_script_iter_get_type  (void) G_GNUC_CONST;
-
-NS_PANGO_AVAILABLE_IN_1_4
-NsPangoScriptIter *ns_pango_script_iter_new       (const char          *text,
-					      int                  length);
 NS_PANGO_AVAILABLE_IN_1_4
 void             ns_pango_script_iter_get_range (NsPangoScriptIter     *iter,
                                               const char         **start,
@@ -322,10 +314,6 @@ void             ns_pango_script_iter_get_range (NsPangoScriptIter     *iter,
                                               NsPangoScript         *script);
 NS_PANGO_AVAILABLE_IN_1_4
 gboolean         ns_pango_script_iter_next      (NsPangoScriptIter     *iter);
-NS_PANGO_AVAILABLE_IN_1_4
-void             ns_pango_script_iter_free      (NsPangoScriptIter     *iter);
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(NsPangoScriptIter, ns_pango_script_iter_free)
 
 #include <web-text-lib/pango-language.h>
 

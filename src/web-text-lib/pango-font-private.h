@@ -55,8 +55,6 @@ gboolean ns_pango_font_is_hinted         (NsPangoFont *font);
 void     ns_pango_font_get_scale_factors (NsPangoFont *font,
                                        double    *x_scale,
                                        double    *y_scale);
-void     ns_pango_font_get_matrix        (NsPangoFont   *font,
-                                       NsPangoMatrix *matrix);
 
 static inline int ns_pango_font_get_absolute_size (NsPangoFont *font)
 {

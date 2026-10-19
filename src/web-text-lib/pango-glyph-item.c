@@ -137,35 +137,6 @@ ns_pango_glyph_item_split (NsPangoGlyphItem *orig,
 }
 
 /**
- * ns_pango_glyph_item_copy:
- * @orig: (nullable): a `NsPangoGlyphItem`
- *
- * Make a deep copy of an existing `NsPangoGlyphItem` structure.
- *
- * Returns: (transfer full) (nullable): the newly allocated `NsPangoGlyphItem`
- *
- * Since: 1.20
- */
-NsPangoGlyphItem *
-ns_pango_glyph_item_copy  (NsPangoGlyphItem *orig)
-{
-  NsPangoGlyphItem *result;
-
-  if (orig == NULL)
-    return NULL;
-
-  result = g_slice_new (NsPangoGlyphItem);
-
-  result->item = ns_pango_item_copy (orig->item);
-  result->glyphs = ns_pango_glyph_string_copy (orig->glyphs);
-  result->y_offset = orig->y_offset;
-  result->start_x_offset = orig->start_x_offset;
-  result->end_x_offset = orig->end_x_offset;
-
-  return result;
-}
-
-/**
  * ns_pango_glyph_item_free:
  * @glyph_item: (nullable): a `NsPangoGlyphItem`
  *
@@ -187,56 +158,6 @@ ns_pango_glyph_item_free  (NsPangoGlyphItem *glyph_item)
   g_slice_free (NsPangoGlyphItem, glyph_item);
 }
 
-G_DEFINE_BOXED_TYPE (NsPangoGlyphItem, ns_pango_glyph_item,
-                     ns_pango_glyph_item_copy,
-                     ns_pango_glyph_item_free);
-
-
-/**
- * ns_pango_glyph_item_iter_copy:
- * @orig: (nullable): a `NsPangoGlyphItem`Iter
- *
- * Make a shallow copy of an existing `NsPangoGlyphItemIter` structure.
- *
- * Returns: (transfer full) (nullable): the newly allocated `NsPangoGlyphItemIter`
- *
- * Since: 1.22
- */
-NsPangoGlyphItemIter *
-ns_pango_glyph_item_iter_copy (NsPangoGlyphItemIter *orig)
-{
-  NsPangoGlyphItemIter *result;
-
-  if (orig == NULL)
-    return NULL;
-
-  result = g_slice_new (NsPangoGlyphItemIter);
-
-  *result = *orig;
-
-  return result;
-}
-
-/**
- * ns_pango_glyph_item_iter_free:
- * @iter: (nullable): a `NsPangoGlyphItemIter`
- *
- * Frees a `NsPangoGlyphItem`Iter.
- *
- * Since: 1.22
- */
-void
-ns_pango_glyph_item_iter_free  (NsPangoGlyphItemIter *iter)
-{
-  if (iter == NULL)
-    return;
-
-  g_slice_free (NsPangoGlyphItemIter, iter);
-}
-
-G_DEFINE_BOXED_TYPE (NsPangoGlyphItemIter, ns_pango_glyph_item_iter,
-                     ns_pango_glyph_item_iter_copy,
-                     ns_pango_glyph_item_iter_free)
 
 /**
  * ns_pango_glyph_item_iter_next_cluster:

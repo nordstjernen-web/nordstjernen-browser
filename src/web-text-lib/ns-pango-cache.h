@@ -25,23 +25,10 @@
 #include <glib.h>
 #include <web-text-lib/pango-version-macros.h>
 
-G_BEGIN_DECLS
-
-/* These need the visibility macro like every other entry point: the library is
- * compiled with -fvisibility=hidden, so a declaration without it is not
- * reachable from a shared build at all.
- */
-
-/* Everything, for a page that has gone away. */
-NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_cache_clear     (void);
-
 /* What nothing has read since the last time, keeping the working set: what to
  * call when the browser is asked to give memory back but is still displaying
  * the page it cached for.
  */
-NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_cache_trim      (void);
 
 NS_PANGO_AVAILABLE_IN_ALL
 void ns_pango_cache_get_stats (guint64 *hits,
@@ -50,11 +37,6 @@ void ns_pango_cache_get_stats (guint64 *hits,
                                guint64 *entries);
 
 /* The reasons behind the `skipped' count above, for a diagnostics readout. */
-NS_PANGO_AVAILABLE_IN_ALL
-void ns_pango_cache_get_skips (guint64 *no_font,
-                               guint64 *too_long,
-                               guint64 *too_many_features,
-                               guint64 *context_dependent);
 
 /* The shape cache holds glyphs, keyed on the font; this one holds the unicode
  * break attributes of a paragraph, which depend on nothing but its text. They

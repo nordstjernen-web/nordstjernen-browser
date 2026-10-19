@@ -31,97 +31,7 @@
 #include "pango-utils.h"
 #include "pango-utils-private.h"
 
-/**
- * ns_pango_bidi_type_for_unichar:
- * @ch: a Unicode character
- *
- * Determines the bidirectional type of a character.
- *
- * The bidirectional type is specified in the Unicode Character Database.
- *
- * A simplified version of this function is available as [func@unichar_direction].
- *
- * Return value: the bidirectional character type, as used in the
- * Unicode bidirectional algorithm.
- *
- * Since: 1.22
- */
-NsPangoBidiType
-ns_pango_bidi_type_for_unichar (gunichar ch)
-{
-  G_STATIC_ASSERT (sizeof (FriBidiChar) == sizeof (gunichar));
-
-  switch ((guint) fribidi_get_bidi_type (ch))
-    {
-    case FRIBIDI_TYPE_LTR:  return NS_PANGO_BIDI_TYPE_L;
-    case FRIBIDI_TYPE_LRE:  return NS_PANGO_BIDI_TYPE_LRE;
-    case FRIBIDI_TYPE_LRO:  return NS_PANGO_BIDI_TYPE_LRO;
-    case FRIBIDI_TYPE_RTL:  return NS_PANGO_BIDI_TYPE_R;
-    case FRIBIDI_TYPE_AL:   return NS_PANGO_BIDI_TYPE_AL;
-    case FRIBIDI_TYPE_RLE:  return NS_PANGO_BIDI_TYPE_RLE;
-    case FRIBIDI_TYPE_RLO:  return NS_PANGO_BIDI_TYPE_RLO;
-    case FRIBIDI_TYPE_PDF:  return NS_PANGO_BIDI_TYPE_PDF;
-    case FRIBIDI_TYPE_EN:   return NS_PANGO_BIDI_TYPE_EN;
-    case FRIBIDI_TYPE_ES:   return NS_PANGO_BIDI_TYPE_ES;
-    case FRIBIDI_TYPE_ET:   return NS_PANGO_BIDI_TYPE_ET;
-    case FRIBIDI_TYPE_AN:   return NS_PANGO_BIDI_TYPE_AN;
-    case FRIBIDI_TYPE_CS:   return NS_PANGO_BIDI_TYPE_CS;
-    case FRIBIDI_TYPE_NSM:  return NS_PANGO_BIDI_TYPE_NSM;
-    case FRIBIDI_TYPE_BN:   return NS_PANGO_BIDI_TYPE_BN;
-    case FRIBIDI_TYPE_BS:   return NS_PANGO_BIDI_TYPE_B;
-    case FRIBIDI_TYPE_SS:   return NS_PANGO_BIDI_TYPE_S;
-    case FRIBIDI_TYPE_WS:   return NS_PANGO_BIDI_TYPE_WS;
-    case FRIBIDI_TYPE_ON:   return NS_PANGO_BIDI_TYPE_ON;
-    case FRIBIDI_TYPE_LRI:  return NS_PANGO_BIDI_TYPE_LRI;
-    case FRIBIDI_TYPE_RLI:  return NS_PANGO_BIDI_TYPE_RLI;
-    case FRIBIDI_TYPE_FSI:  return NS_PANGO_BIDI_TYPE_FSI;
-    case FRIBIDI_TYPE_PDI:  return NS_PANGO_BIDI_TYPE_PDI;
-    default:
-      return NS_PANGO_BIDI_TYPE_ON;
-    }
-}
-
 /* Some bidi-related functions */
-
-/**
- * ns_pango_log2vis_get_embedding_levels:
- * @text: the text to itemize.
- * @length: the number of bytes (not characters) to process, or -1
- *   if @text is nul-terminated and the length should be calculated.
- * @pbase_dir: (inout): input base direction, and output resolved direction.
- *
- * Return the bidirectional embedding levels of the input paragraph.
- *
- * The bidirectional embedding levels are defined by the [Unicode Bidirectional
- * Algorithm](http://www.unicode.org/reports/tr9/).
- *
- * If the input base direction is a weak direction, the direction of the
- * characters in the text will determine the final resolved direction.
- *
- * Returns: (array) (transfer full): a newly allocated array of embedding
- *   levels, one item per character (not byte), that should be freed using
- *   [func@GLib.free].
- *
- * Since: 1.4
- */
-guint8 *
-ns_pango_log2vis_get_embedding_levels (const gchar    *text,
-                                    int             length,
-                                    NsPangoDirection *pbase_dir)
-{
-  unsigned int n_chars;
-  guint8 *embedding_levels;
-
-  if (length < 0)
-    length = strlen (text);
-
-  n_chars = g_utf8_strlen (text, length);
-  embedding_levels = g_new (guint8, n_chars);
-
-  ns_pango_log2vis_fill_embedding_levels (text, length, n_chars, embedding_levels, pbase_dir);
-
-  return embedding_levels;
-}
 
 void
 ns_pango_log2vis_fill_embedding_levels (const gchar    *text,
@@ -295,26 +205,4 @@ ns_pango_unichar_direction (gunichar ch)
     return NS_PANGO_DIRECTION_LTR;
 }
 
-
-/**
- * ns_pango_get_mirror_char:
- * @ch: a Unicode character
- * @mirrored_ch: (out) (optional): location to store the mirrored character
- *
- * Returns the mirrored character of a Unicode character.
- *
- * Mirror characters are determined by the Unicode mirrored property.
- *
- * Return value: %TRUE if @ch has a mirrored character and @mirrored_ch is
- * filled in, %FALSE otherwise
- *
- * Deprecated: 1.30: Use [func@GLib.unichar_get_mirror_char] instead;
- *   the docs for that function provide full details.
- */
-gboolean
-ns_pango_get_mirror_char (gunichar  ch,
-		       gunichar *mirrored_ch)
-{
-  return g_unichar_get_mirror_char (ch, mirrored_ch);
-}
 

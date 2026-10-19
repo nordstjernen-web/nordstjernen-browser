@@ -60,19 +60,12 @@ NsPangoCoverage *_ns_pango_fc_font_map_get_coverage    (NsPangoFcFontMap *fcfont
 						   NsPangoFcFont    *fcfont);
 NsPangoCoverage  *_ns_pango_fc_font_map_fc_to_coverage (FcCharSet      *charset);
 
-NsPangoFcDecoder *_ns_pango_fc_font_get_decoder       (NsPangoFcFont    *font);
 void            _ns_pango_fc_font_set_decoder       (NsPangoFcFont    *font,
 						  NsPangoFcDecoder *decoder);
 
 NsPangoFcFontKey *_ns_pango_fc_font_get_font_key      (NsPangoFcFont    *fcfont);
 void            _ns_pango_fc_font_set_font_key      (NsPangoFcFont    *fcfont,
 						  NsPangoFcFontKey *key);
-
-_PANGO_EXTERN
-void            ns_pango_fc_font_get_raw_extents    (NsPangoFcFont    *font,
-						  NsPangoGlyph      glyph,
-						  NsPangoRectangle *ink_rect,
-						  NsPangoRectangle *logical_rect);
 
 _PANGO_EXTERN
 NsPangoFontMetrics *ns_pango_fc_font_create_base_metrics_for_context (NsPangoFcFont   *font,

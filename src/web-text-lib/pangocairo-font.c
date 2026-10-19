@@ -640,20 +640,6 @@ ns_pango_cairo_font_get_scaled_font (NsPangoCairoFont *cfont)
   return _ns_pango_cairo_font_private_get_scaled_font (cf_priv);
 }
 
-void
-ns_pango_cairo_font_get_font_options (NsPangoCairoFont       *cfont,
-                                   cairo_font_options_t *options)
-{
-  NsPangoCairoFontPrivate *cf_priv;
-
-  if (G_UNLIKELY (!cfont))
-    return;
-
-  cf_priv = NS_PANGO_CAIRO_FONT_PRIVATE (cfont);
-
-  ns_pango_cairo_font_private_get_font_options (cf_priv, options);
-}
-
 /**
  * _ns_pango_cairo_font_install:
  * @font: a `NsPangoCairoFont`
@@ -1152,16 +1138,6 @@ gboolean
 _ns_pango_cairo_font_private_is_metrics_hinted (NsPangoCairoFontPrivate *cf_priv)
 {
   return cf_priv->is_hinted;
-}
-
-void
-ns_pango_cairo_font_private_get_font_options (NsPangoCairoFontPrivate *cf_priv,
-                                           cairo_font_options_t  *options)
-{
-  if (cf_priv->scaled_font)
-    cairo_scaled_font_get_font_options (cf_priv->scaled_font, options);
-  else if (cf_priv->data)
-    cairo_font_options_merge (options, cf_priv->data->options);
 }
 
 static void
