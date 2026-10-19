@@ -28,6 +28,7 @@ typedef struct {
     int                  height;
     int                  stride;
     int                  animating;
+    int                  wake_ms;
     int                  caret_blinking;
     int                  wheel_snapped;
     int                  wheel_answered;
@@ -53,6 +54,7 @@ typedef struct {
     int   ok;
     int   changed;
     int   animating;
+    int   wake_ms;
     int   page_w;
     int   page_h;
     char *nav;

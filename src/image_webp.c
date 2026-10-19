@@ -132,7 +132,7 @@ ns_image_decode_webp(const guchar *data, gsize len, int *out_w, int *out_h)
 
 GArray *
 ns_image_decode_webp_anim_to_pixels(const guchar *data, gsize len,
-                                    int *out_w, int *out_h)
+                                    int *out_w, int *out_h, int *out_loops)
 {
     if (!ns_image_webp_supports_bytes(data, len) || len > NS_WEBP_MAX_INPUT)
         return NULL;
@@ -193,6 +193,7 @@ ns_image_decode_webp_anim_to_pixels(const guchar *data, gsize len,
     }
     if (out_w) *out_w = (int)info.canvas_width;
     if (out_h) *out_h = (int)info.canvas_height;
+    if (out_loops) *out_loops = (int)MIN(info.loop_count, (uint32_t)G_MAXINT);
     return frames;
 }
 

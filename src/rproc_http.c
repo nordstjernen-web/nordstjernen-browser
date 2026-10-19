@@ -629,6 +629,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
 {
     out->ok = 1;
     out->animating = (head->x_anim & 1) != 0;
+    out->wake_ms = head->x_wake > 0 ? (int)head->x_wake : 0;
     out->caret_blinking = (head->x_anim & 2) != 0;
     out->wheel_snapped = (head->x_anim & 4) != 0;
     out->wheel_answered = (head->x_anim & 8) != 0;
@@ -900,15 +901,18 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     memset(out, 0, sizeof *out);
     char *body = request(r, "/tick", "{}");
     if (!body) return -1;
-    long ok = 0, changed = 0, animating = 0, page_w = 0, page_h = 0;
+    long ok = 0, changed = 0, animating = 0, wake_ms = 0, page_w = 0,
+         page_h = 0;
     json_get_long(body, "ok", &ok);
     json_get_long(body, "changed", &changed);
     json_get_long(body, "animating", &animating);
+    json_get_long(body, "wake_ms", &wake_ms);
     json_get_long(body, "page_width", &page_w);
     json_get_long(body, "page_height", &page_h);
     out->ok = ok != 0;
     out->changed = changed != 0;
     out->animating = animating != 0;
+    out->wake_ms = wake_ms > 0 && wake_ms <= G_MAXINT ? (int)wake_ms : 0;
     out->page_w = (int)page_w;
     out->page_h = (int)page_h;
     out->nav = json_get_str(body, "nav");

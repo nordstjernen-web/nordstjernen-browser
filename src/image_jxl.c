@@ -46,7 +46,8 @@ ns_jxl_ticks_to_ms(const JxlBasicInfo *info, uint32_t ticks)
 
 static GArray *
 ns_jxl_decode_frames(const guchar *data, gsize len, guint max_frames,
-                     gboolean animated_only, int *out_w, int *out_h)
+                     gboolean animated_only, int *out_w, int *out_h,
+                     int *out_loops)
 {
     if (!ns_image_jxl_supports_bytes(data, len) || len > NS_JXL_MAX_INPUT)
         return NULL;
@@ -138,6 +139,8 @@ out:
     }
     if (out_w) *out_w = (int)info.xsize;
     if (out_h) *out_h = (int)info.ysize;
+    if (out_loops)
+        *out_loops = (int)MIN(info.animation.num_loops, (uint32_t)G_MAXINT);
     return frames;
 }
 
@@ -147,7 +150,7 @@ ns_image_jxl_decode_to_bgra(const guchar *data, gsize len,
                             gsize *out_stride, gsize *out_buf_len)
 {
     int w = 0, h = 0;
-    GArray *frames = ns_jxl_decode_frames(data, len, 1, FALSE, &w, &h);
+    GArray *frames = ns_jxl_decode_frames(data, len, 1, FALSE, &w, &h, NULL);
     if (!frames) return NULL;
     ns_image_pixel_frame *f = &g_array_index(frames, ns_image_pixel_frame, 0);
     guint8 *pix = f->pixels;
@@ -182,10 +185,10 @@ ns_image_decode_jxl(const guchar *data, gsize len, int *out_w, int *out_h)
 
 GArray *
 ns_image_decode_jxl_anim_to_pixels(const guchar *data, gsize len,
-                                   int *out_w, int *out_h)
+                                   int *out_w, int *out_h, int *out_loops)
 {
     GArray *frames = ns_jxl_decode_frames(data, len, NS_JXL_MAX_FRAMES,
-                                          TRUE, out_w, out_h);
+                                          TRUE, out_w, out_h, out_loops);
     if (frames && frames->len < 2) {
         g_array_free(frames, TRUE);
         return NULL;

@@ -57,6 +57,20 @@ Changelog:
   inserted, and Space scrolls the page when no field has focus.
   `code` and `keyCode` now cover modifiers, function keys, the numeric
   keypad and punctuation.
+* Idle CPU: a tab no longer polls its renderer on every display frame
+  while it waits for something with a known time. The renderer reports
+  when it next needs to run, from the next animated-image frame, the
+  next JavaScript timer or a pending `<meta http-equiv=refresh>`, and
+  the window sleeps until then; a page with a one-second
+  `setInterval` now wakes about three times a second instead of sixty
+  (#464). Pages that draw every frame still get every frame.
+* Images: animated GIF, APNG, WebP and JPEG XL images play as many times
+  as the file's loop count asks for and then rest on their last frame,
+  as other browsers do; they looped forever before. The start page logo
+  now plays its shooting star twice, so an idle new tab uses no CPU.
+* Text fields: the caret stops blinking after ten seconds without
+  moving and stays visible, as GTK's own fields do, instead of waking
+  the browser twice a second for as long as a field has focus.
 
 1.0.34:
 ======

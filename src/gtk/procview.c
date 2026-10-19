@@ -21,6 +21,7 @@
 #endif
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
+#define NS_PROC_FRAME_WAKE_MS  16
 #define NS_PV_WHEEL_STEP_PX    100.0
 #define NS_PV_WHEEL_TAU_MS     45.0
 #define NS_PV_FLING_TAU_MS     400.0
@@ -149,6 +150,7 @@ typedef struct {
     double           fallback_x;
     double           fallback_y;
     gboolean         animating;
+    int              wake_ms;
     gboolean         caret_blinking;
     gboolean         wheel_snapped;
     gboolean         wheel_answered;
@@ -307,7 +309,11 @@ struct NsProcView {
 
     guint       anim_tick_id;
     gint64      last_anim_frame_us;
+    guint       anim_timeout_id;
+    gint64      page_due_us;
+    gint64      caret_due_us;
     gboolean    page_animating;
+    int         page_wake_ms;
     gboolean    caret_blinking;
 };
 
@@ -1028,6 +1034,7 @@ worker_main(gpointer data)
             if (rendered) {
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
+                res->wake_ms = fr.wake_ms;
                 res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
                 res->wheel_snapped = fr.wheel_snapped ? TRUE : FALSE;
                 res->wheel_answered = fr.wheel_answered ? TRUE : FALSE;
@@ -1087,6 +1094,7 @@ worker_main(gpointer data)
                 res->ok = tick.ok ? TRUE : FALSE;
                 res->kind = tick.changed;
                 res->animating = tick.animating ? TRUE : FALSE;
+                res->wake_ms = tick.wake_ms;
                 res->pw = tick.page_w;
                 res->ph = tick.page_h;
                 res->nav = tick.nav ? g_strdup(tick.nav) : NULL;
@@ -1900,12 +1908,82 @@ arm_anim(NsProcView *v)
 }
 
 static void
+cancel_anim_timeout(NsProcView *v)
+{
+    if (v->anim_timeout_id)
+        g_source_remove(v->anim_timeout_id);
+    v->anim_timeout_id = 0;
+}
+
+static void
 disarm_anim(NsProcView *v)
 {
     if (v->anim_tick_id && v->area)
         gtk_widget_remove_tick_callback(v->area, v->anim_tick_id);
     v->anim_tick_id = 0;
     v->last_anim_frame_us = 0;
+    cancel_anim_timeout(v);
+}
+
+static void schedule_anim(NsProcView *v);
+
+static gboolean
+anim_timeout(gpointer data)
+{
+    NsProcView *v = data;
+    v->anim_timeout_id = 0;
+    if (v->closed || !v->opened || !v->area ||
+        !gtk_widget_get_mapped(v->area))
+        return G_SOURCE_REMOVE;
+    gint64 now = g_get_monotonic_time();
+    gboolean page_due = v->page_animating && now >= v->page_due_us;
+    gboolean caret_due = v->caret_blinking && now >= v->caret_due_us;
+    if (page_due && !pv_wheel_scrolling(v))
+        request_tick(v);
+    if (caret_due)
+        request_render(v);
+    if (!page_due && !caret_due)
+        schedule_anim(v);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+schedule_anim(NsProcView *v)
+{
+    if (v->closed || !v->area)
+        return;
+    if (v->page_animating && v->page_wake_ms <= NS_PROC_FRAME_WAKE_MS) {
+        cancel_anim_timeout(v);
+        arm_anim(v);
+        return;
+    }
+    disarm_anim(v);
+    if (!v->page_animating && !v->caret_blinking)
+        return;
+    gint64 due = G_MAXINT64;
+    if (v->page_animating && v->page_due_us < due)
+        due = v->page_due_us;
+    if (v->caret_blinking && v->caret_due_us < due)
+        due = v->caret_due_us;
+    gint64 delay_ms = (due - g_get_monotonic_time() + 999) / 1000;
+    v->anim_timeout_id = g_timeout_add((guint)CLAMP(delay_ms, 1, G_MAXINT),
+                                       anim_timeout, v);
+}
+
+static void
+note_anim(NsProcView *v, gboolean page_animating, int wake_ms)
+{
+    v->page_animating = page_animating;
+    v->page_wake_ms = wake_ms;
+    v->page_due_us = g_get_monotonic_time() + (gint64)wake_ms * 1000;
+    schedule_anim(v);
+}
+
+static void
+on_area_map(GtkWidget *area, gpointer data)
+{
+    (void)area;
+    schedule_anim(data);
 }
 
 static void start_link(NsProcView *v, int x, int y, LinkAct action);
@@ -2754,11 +2832,7 @@ on_result(gpointer data)
             pv_follow_same_document_state(v, res->url, res->url_pushed,
                                           res->title);
         if (current && res->ok) {
-            v->page_animating = res->animating;
-            if (v->page_animating || v->caret_blinking)
-                arm_anim(v);
-            else
-                disarm_anim(v);
+            note_anim(v, res->animating, res->wake_ms);
             if (res->ph > 0 && res->ph != v->page_h) {
                 v->page_h = res->ph;
                 if (res->pw > 0) v->page_w = res->pw;
@@ -2779,12 +2853,9 @@ on_result(gpointer data)
         if (res->ok && res->wheel_answered)
             pv_wheel_answered(v, res->wheel_prevented);
         if (current && res->ok) {
-            v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;
-            if (v->page_animating || v->caret_blinking)
-                arm_anim(v);
-            else
-                disarm_anim(v);
+            v->caret_due_us = g_get_monotonic_time() + NS_PROC_CARET_BLINK_US;
+            note_anim(v, res->animating, res->wake_ms);
             if (res->ph > 0 && res->ph != v->page_h) {
                 v->page_h = res->ph;
                 if (res->pw > 0) v->page_w = res->pw;
@@ -4542,6 +4613,7 @@ ns_proc_view_new(void)
     g_signal_connect(v->area, "notify::scale-factor",
                      G_CALLBACK(on_device_scale_changed), v);
     g_signal_connect(v->area, "realize", G_CALLBACK(on_area_realize), v);
+    g_signal_connect(v->area, "map", G_CALLBACK(on_area_map), v);
     g_signal_connect(v->area, "unrealize", G_CALLBACK(on_area_unrealize), v);
 
     GtkWidget *grid = gtk_grid_new();

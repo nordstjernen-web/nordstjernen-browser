@@ -227,7 +227,7 @@ ns_image_decode_wuffs(const guchar *data, gsize len, int *out_w, int *out_h)
 
 GArray *
 ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
-                                     int *out_w, int *out_h)
+                                     int *out_w, int *out_h, int *out_loops)
 {
     if (!data || len < 6) return NULL;
     ns_wuffs_format kind = ns_wuffs_detect(data, len);
@@ -315,10 +315,12 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
     }
 
     g_free(backup);
+    uint32_t loops = wuffs_base__image_decoder__num_animation_loops(s.dec);
     ns_wuffs_session_close(&s);
 
     if (frames->len == 0) { g_array_free(frames, TRUE); return NULL; }
     if (out_w) *out_w = (int)s.w;
     if (out_h) *out_h = (int)h;
+    if (out_loops) *out_loops = (int)MIN(loops, (uint32_t)G_MAXINT);
     return frames;
 }
