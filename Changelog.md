@@ -3,6 +3,10 @@ Changelog:
 
 1.0.35:
 ======
+* about:nordstjernen no longer shows the animated cartoon splash. The
+  1.7 MB embedded GIF (src/about_splash_gif.h), its source images in
+  data/ and the scripts/gen-splash.* generator are gone, which shrinks
+  the binary and the repository.
 * Text layout: the ns-pango Pango fork is now vendored in-tree as
   web-text-lib (src/web-text-lib/) and built with subdir() like lexbor and
   QuickJS, instead of being cloned from git at setup time. Offline and

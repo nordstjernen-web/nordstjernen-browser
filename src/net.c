@@ -17,7 +17,6 @@
 #include "image.h"
 #include "security.h"
 #include "about_logo_gif.h"
-#include "about_splash_gif.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -3057,18 +3056,6 @@ about_logo_markup(void)
 }
 
 static char *
-about_splash_markup(void)
-{
-    char *uri = g_strconcat("data:image/gif;base64,", about_splash_gif_b64, NULL);
-    char *markup = g_strdup_printf(
-        "<img class=\"splash\" src=\"%s\" "
-        "alt=\"Nordstjernen " NS_VERSION " splash\">",
-        uri);
-    g_free(uri);
-    return markup;
-}
-
-static char *
 about_substitute(const char *template_text,
                  const char *placeholder, const char *value)
 {
@@ -4621,9 +4608,7 @@ static const char k_about_nordstjernen_template[] =
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap{max-width:760px;margin:0 auto;padding:28px 24px 48px}\n"
     ".top{margin-bottom:22px}\n"
-    ".splash{display:block;width:100%;height:auto;border-radius:var(--radius);"
-    "border:1px solid var(--line);box-shadow:var(--shadow)}\n"
-    ".head{display:flex;align-items:center;gap:18px;margin:28px 4px 26px}\n"
+    ".head{display:flex;align-items:center;gap:18px;margin:6px 4px 26px}\n"
     ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
     "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
     ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
@@ -4659,7 +4644,6 @@ static const char k_about_nordstjernen_template[] =
     "<body><main class=\"wrap\">"
     "<div class=\"top\"><a class=\"crumb\" href=\"about:start\">"
     "\xe2\x86\x90 New Tab</a></div>"
-    "__ND_SPLASH__"
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
     "<h1>Nordstjernen<span class=\"ver\">" NS_VERSION "</span></h1>"
     "<p>A web browser implemented in C.</p></div></div>"
@@ -5112,14 +5096,9 @@ synthesize_about_response(const char *url, const char *top_url,
                                            "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
         char *diag = about_diagnostics_html();
-        char *with_diag = about_substitute(with_logo, "__ND_DIAG__", diag);
+        char *body = about_substitute(with_logo, "__ND_DIAG__", diag);
         g_free(diag);
         g_free(with_logo);
-        char *splash_markup = about_splash_markup();
-        char *body = about_substitute(with_diag, "__ND_SPLASH__",
-                                      splash_markup);
-        g_free(splash_markup);
-        g_free(with_diag);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
