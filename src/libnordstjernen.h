@@ -132,6 +132,7 @@ char *ns_browser_select(ns_browser *browser, int kind, int x, int y);
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 
 int ns_browser_animating(ns_browser *browser);
+int ns_browser_wake_ms(ns_browser *browser);
 int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
 int ns_browser_caret_blinking(ns_browser *browser);
 

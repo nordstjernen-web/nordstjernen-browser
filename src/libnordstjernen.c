@@ -154,6 +154,7 @@ struct ns_browser {
 #define NS_LAYOUT_BACKGROUND_MIN_US (16 * 1000)
 #define NS_LAYOUT_BACKGROUND_MAX_US (120 * 1000)
 #define NS_CARET_BLINK_US (530 * 1000)
+#define NS_CARET_BLINK_TIMEOUT_US (10 * G_USEC_PER_SEC)
 
 static gboolean
 browser_doc_has_node(const ns_node *root, const ns_node *target)
@@ -2026,6 +2027,61 @@ ns_browser_animating(ns_browser *browser)
     if (browser->videos && ns_video_cache_animating(browser->videos))
         return 1;
     return 0;
+}
+
+static gboolean
+browser_needs_frame_tick(ns_browser *browser)
+{
+    return browser->dirty || browser->hover_restyle_pending ||
+           browser->repaint_requested ||
+           (browser->refresh_url && !browser->refresh_due_us) ||
+           browser_images_outstanding(browser) > 0 ||
+           (browser->js && ns_js_needs_frame_tick(browser->js)) ||
+           (browser->anim && ns_anim_has_active(browser->anim)) ||
+           (browser->videos && ns_video_cache_animating(browser->videos));
+}
+
+static int
+browser_main_context_timeout_ms(void)
+{
+    GMainContext *ctx = g_main_context_default();
+    if (!g_main_context_acquire(ctx)) return 0;
+    int max_priority = G_PRIORITY_DEFAULT;
+    int timeout = 0;
+    if (!g_main_context_prepare(ctx, &max_priority)) {
+        GPollFD fds[32];
+        g_main_context_query(ctx, max_priority, &timeout, fds,
+                             G_N_ELEMENTS(fds));
+    }
+    g_main_context_release(ctx);
+    return timeout;
+}
+
+static gint64
+browser_earliest(gint64 a, gint64 b)
+{
+    if (a < 0) return b;
+    if (b < 0) return a;
+    return a < b ? a : b;
+}
+
+int
+ns_browser_wake_ms(ns_browser *browser)
+{
+    if (!browser || !ns_browser_animating(browser)) return -1;
+    if (browser_needs_frame_tick(browser)) return 0;
+    gint64 now = g_get_monotonic_time();
+    gint64 due = browser->refresh_due_us > 0 ? browser->refresh_due_us : -1;
+    if (browser->images)
+        due = browser_earliest(due,
+                               ns_image_cache_next_frame_us(browser->images,
+                                                            now));
+    int timeout = browser_main_context_timeout_ms();
+    if (timeout >= 0)
+        due = browser_earliest(due, now + (gint64)timeout * 1000);
+    if (due <= now) return 0;
+    gint64 ms = (due - now + 999) / 1000;
+    return ms > G_MAXINT ? G_MAXINT : (int)ms;
 }
 
 int
@@ -4485,8 +4541,10 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
         browser->caret_blink_byte = caret;
         browser->caret_blink_anchor = anchor;
     }
+    gint64 since = now - browser->caret_blink_epoch_us;
     gboolean visible = focused &&
-        ((now - browser->caret_blink_epoch_us) / NS_CARET_BLINK_US) % 2 == 0;
+        (since >= NS_CARET_BLINK_TIMEOUT_US ||
+         (since / NS_CARET_BLINK_US) % 2 == 0);
     gboolean changed = browser->caret_blink_active != (focused != NULL) ||
                        browser->caret_paint_visible != visible;
     browser->caret_blink_active = focused != NULL;
@@ -4498,7 +4556,9 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
 int
 ns_browser_caret_blinking(ns_browser *browser)
 {
-    return browser && browser->caret_blink_active ? 1 : 0;
+    return browser && browser->caret_blink_active &&
+           g_get_monotonic_time() - browser->caret_blink_epoch_us <
+               NS_CARET_BLINK_TIMEOUT_US ? 1 : 0;
 }
 
 char *
