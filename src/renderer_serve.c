@@ -333,6 +333,14 @@ session_animating(const struct ns_renderer_session *s)
     return ns_browser_animating(s->cur) || s->tick_deferred;
 }
 
+static int
+session_wake_ms(const struct ns_renderer_session *s)
+{
+    if (s->tick_deferred) return 0;
+    int wake = ns_browser_wake_ms(s->cur);
+    return wake > 0 ? wake : 0;
+}
+
 static void
 session_note_scroll(struct ns_renderer_session *s, long sx, long sy,
                     gboolean wheel)
@@ -507,10 +515,12 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     int hn = snprintf(hdrs, sizeof hdrs,
              "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
              "X-PageW: %d\r\nX-PageH: %d\r\nX-ScrollY: %d\r\n"
-             "X-ScrollX: %d\r\nX-Render-RC: %d\r\nX-Clipboard: %d\r\n%s%s",
+             "X-ScrollX: %d\r\nX-Render-RC: %d\r\nX-Clipboard: %d\r\n"
+             "X-Wake: %d\r\n%s%s",
              rv->vw, rv->vh, rv->vw * 4, animating,
              rv->page_w, rv->page_h, rv->requested_y, rv->requested_x,
              rv->render_rc, clipboard_pending,
+             (animating & 1) ? session_wake_ms(s) : 0,
              rv->unchanged ? "X-Unchanged: 1\r\n" : "",
              tiles ? "X-Tiles: 1\r\n" : "");
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
@@ -657,26 +667,31 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/open") == 0) {
         char *url = json_get_str(body, "url");
         long w = 0, h = 0, settle = 0, history = 0, user_activated = 0;
+        long reload = 0;
         json_get_long(body, "width", &w);
         json_get_long(body, "height", &h);
         json_get_long(body, "settle_ms", &settle);
         json_get_long(body, "history", &history);
         json_get_long(body, "user_activated", &user_activated);
+        json_get_long(body, "reload", &reload);
         int vw = css_viewport_extent(w, s->max_w);
         int vh = css_viewport_extent(h, s->max_h);
         double dpr = request_device_pixel_ratio(body);
         if (dpr > 0)
             ns_browser_set_device_pixel_ratio(NULL, dpr);
-        ns_browser *restored = (history && url)
+        ns_browser *restored = (history && !reload && url)
             ? session_bfcache_take(s, url) : NULL;
-        char *referrer = (!history && s->cur) ? ns_browser_url(s->cur) : NULL;
-        if (s->cur) {
+        char *referrer = (!history && !reload && s->cur)
+            ? ns_browser_url(s->cur) : NULL;
+        if (s->cur && reload)
+            ns_browser_close(s->cur);
+        else if (s->cur)
             session_bfcache_park_or_close(s, s->cur);
-            s->cur = NULL;
-        }
+        s->cur = NULL;
         if (referrer && !restored && url && ns_url_same_origin(referrer, url))
             ns_browser_set_next_referrer(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
+        ns_browser_set_next_reload(reload != 0 && url && *url);
         g_free(referrer);
         s->frame_valid = 0;
         ns_net_log_clear();
@@ -777,13 +792,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         ns_browser_page_size(s->cur, &page_w, &page_h);
         char *json = NULL;
         int n = asprintf(&json,
-            "{\"ok\":1,\"changed\":%d,\"animating\":%d,"
+            "{\"ok\":1,\"changed\":%d,\"animating\":%d,\"wake_ms\":%d,"
             "\"page_width\":%d,\"page_height\":%d,\"nav\":\"%s\","
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
             "\"url_pushed\":%d}",
-            changed != 0, session_animating(s) ? 1 : 0,
+            changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",

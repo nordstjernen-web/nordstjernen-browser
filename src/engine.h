@@ -26,6 +26,9 @@ ns_response *ns_engine_navigate_blocking(const char *url, const char *top_url,
                                          gboolean user_activated,
                                          GError **error);
 
+ns_response *ns_engine_reload_blocking(const char *url, const char *top_url,
+                                       GError **error);
+
 gboolean ns_engine_in_blocking_fetch(void);
 
 ns_response *ns_engine_navigate_post_blocking(

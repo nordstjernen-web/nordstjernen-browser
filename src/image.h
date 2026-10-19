@@ -56,6 +56,7 @@ struct ns_image {
     gint64       anim_start_us;
     int          anim_current;
     int          anim_total_ms;
+    int          anim_loops;
 };
 
 typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
@@ -94,7 +95,8 @@ ns_texture *ns_image_decode_wuffs(const guchar *data, gsize len,
 gboolean ns_image_png_is_animated(const guchar *data, gsize len);
 
 GArray *ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
-                                             int *out_w, int *out_h);
+                                             int *out_w, int *out_h,
+                                             int *out_loops);
 
 guint8 *ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
                                       int *out_w, int *out_h,
@@ -112,7 +114,8 @@ guint8 *ns_image_webp_decode_to_bgra(const guchar *data, gsize len,
 gboolean ns_image_webp_supports_bytes(const guchar *data, gsize len);
 
 GArray *ns_image_decode_webp_anim_to_pixels(const guchar *data, gsize len,
-                                            int *out_w, int *out_h);
+                                            int *out_w, int *out_h,
+                                            int *out_loops);
 
 void ns_image_pixel_frame_clear(gpointer data);
 
@@ -127,6 +130,8 @@ ns_texture *ns_image_decode_ico(const guchar *data, gsize len,
 
 gboolean ns_image_cache_tick(ns_image_cache *cache, gint64 now_us);
 gboolean ns_image_cache_animating(const ns_image_cache *cache);
+gint64   ns_image_cache_next_frame_us(const ns_image_cache *cache,
+                                      gint64 now_us);
 gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 
 void     ns_image_cache_begin_generation(ns_image_cache *cache);
@@ -150,7 +155,8 @@ guint8 *ns_image_jxl_decode_to_bgra(const guchar *data, gsize len,
                                     gsize *out_stride, gsize *out_buf_len);
 
 GArray *ns_image_decode_jxl_anim_to_pixels(const guchar *data, gsize len,
-                                           int *out_w, int *out_h);
+                                           int *out_w, int *out_h,
+                                           int *out_loops);
 
 gboolean ns_image_jxl_supports_bytes(const guchar *data, gsize len);
 #endif

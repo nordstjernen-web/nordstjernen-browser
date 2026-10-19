@@ -76,6 +76,8 @@ char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 char *ns_browser_click(ns_browser *browser, int x, int y, int mods);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);
 
+#define NS_KEY_MOD_TEXT_SEPARATE 16
+
 char *ns_browser_key(ns_browser *browser, int kind, const char *key,
                      const char *code, int keycode, int mods);
 char *ns_browser_key_full(ns_browser *browser, int kind, const char *key,
@@ -130,6 +132,7 @@ char *ns_browser_select(ns_browser *browser, int kind, int x, int y);
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 
 int ns_browser_animating(ns_browser *browser);
+int ns_browser_wake_ms(ns_browser *browser);
 int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
 int ns_browser_caret_blinking(ns_browser *browser);
 
@@ -139,6 +142,7 @@ char *ns_browser_url(ns_browser *browser);
 
 void ns_browser_set_next_referrer(const char *url);
 void ns_browser_set_next_user_activated(int user_activated);
+void ns_browser_set_next_reload(int reload);
 
 void ns_browser_set_color_scheme(int dark);
 void ns_browser_set_reduced_motion(int reduce);

@@ -179,6 +179,7 @@ ns_image_cache_purge(ns_image_cache *cache, ns_image *img)
     img->anim_current = 0;
     img->anim_total_ms = 0;
     img->anim_start_us = 0;
+    img->anim_loops = 0;
     img->loaded = FALSE;
     img->purged = TRUE;
 }
@@ -440,16 +441,21 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
 }
 
 static GArray *
-ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
+ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h,
+                          int *out_loops)
 {
+    *out_loops = 0;
     if ((len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') ||
         ns_image_png_is_animated(data, len))
-        return ns_image_decode_wuffs_anim_to_pixels(data, len, out_w, out_h);
+        return ns_image_decode_wuffs_anim_to_pixels(data, len, out_w, out_h,
+                                                    out_loops);
     if (ns_image_webp_supports_bytes(data, len))
-        return ns_image_decode_webp_anim_to_pixels(data, len, out_w, out_h);
+        return ns_image_decode_webp_anim_to_pixels(data, len, out_w, out_h,
+                                                   out_loops);
 #ifdef NS_HAVE_JXL
     if (ns_image_jxl_supports_bytes(data, len))
-        return ns_image_decode_jxl_anim_to_pixels(data, len, out_w, out_h);
+        return ns_image_decode_jxl_anim_to_pixels(data, len, out_w, out_h,
+                                                  out_loops);
 #endif
     return NULL;
 }
@@ -459,15 +465,17 @@ typedef struct {
     GArray     *frames;
     int         w;
     int         h;
+    int         loops;
 } ns_img_decoded;
 
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, 0, 0 };
-    int w = 0, h = 0;
+    ns_img_decoded d = { NULL, NULL, 0, 0, 0 };
+    int w = 0, h = 0, loops = 0;
     GArray *frames = NULL;
-    GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
+    GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h,
+                                                     &loops);
     if (pixel_frames) {
         frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
         g_array_free(pixel_frames, TRUE);
@@ -476,6 +484,7 @@ ns_image_decode_body(const guchar *data, gsize len)
         d.frames = frames;
         d.w = w;
         d.h = h;
+        d.loops = loops;
         return d;
     }
     if (frames) {
@@ -505,6 +514,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
             total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
         img->anim_total_ms = (int)CLAMP(total, 1, G_MAXINT);
         img->anim_start_us = g_get_monotonic_time();
+        img->anim_loops = d->loops;
         img->loaded = TRUE;
     } else if (d->tex) {
         img->texture = d->tex;
@@ -570,7 +580,7 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, 0, 0 };
+    ns_img_decoded result = { NULL, NULL, 0, 0, 0 };
     if (d) {
         result = *d;
         g_free(d);
@@ -790,6 +800,14 @@ ns_image_cache_peek(ns_image_cache *cache, const char *url)
     return img;
 }
 
+static gboolean
+ns_image_anim_finished(const ns_image *img, gint64 now_us)
+{
+    return img->anim_loops > 0 &&
+           (now_us - img->anim_start_us) / 1000 >=
+               (gint64)img->anim_loops * img->anim_total_ms;
+}
+
 gboolean
 ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
 {
@@ -814,6 +832,8 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
             if (phase < acc) { idx = (int)i; break; }
             idx = (int)i;
         }
+        if (ns_image_anim_finished(img, now_us))
+            idx = (int)img->anim_frames->len - 1;
         if (idx != img->anim_current) {
             img->anim_current = idx;
             ns_image_anim_frame *f =
@@ -825,16 +845,51 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
     return any;
 }
 
-gboolean
-ns_image_cache_animating(const ns_image_cache *cache)
+gint64
+ns_image_cache_next_frame_us(const ns_image_cache *cache, gint64 now_us)
 {
-    if (!cache) return FALSE;
+    if (!cache) return -1;
+    gint64 next = -1;
     GHashTableIter it;
     gpointer key, value;
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         const ns_image *img = value;
-        if (img->loaded && img->anim_frames && img->anim_frames->len > 1)
+        if (!img->loaded || !img->anim_frames || img->anim_frames->len < 2 ||
+            img->anim_total_ms <= 0 || ns_image_anim_finished(img, now_us))
+            continue;
+        gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
+        if (elapsed_ms < 0) elapsed_ms = 0;
+        gint64 phase = elapsed_ms % img->anim_total_ms;
+        gint64 boundary = img->anim_total_ms;
+        gint64 acc = 0;
+        for (guint i = 0; i < img->anim_frames->len; i++) {
+            acc += g_array_index(img->anim_frames, ns_image_anim_frame,
+                                 i).delay_ms;
+            if (phase < acc) {
+                boundary = acc;
+                break;
+            }
+        }
+        gint64 due = img->anim_start_us +
+                     (elapsed_ms - phase + boundary) * 1000;
+        if (next < 0 || due < next) next = due;
+    }
+    return next;
+}
+
+gboolean
+ns_image_cache_animating(const ns_image_cache *cache)
+{
+    if (!cache) return FALSE;
+    gint64 now = g_get_monotonic_time();
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        const ns_image *img = value;
+        if (img->loaded && img->anim_frames && img->anim_frames->len > 1 &&
+            !ns_image_anim_finished(img, now))
             return TRUE;
     }
     return FALSE;
@@ -872,9 +927,10 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
     ns_image *existing = g_hash_table_lookup(cache->by_url, url);
     if (existing) return existing;
 
-    int w = 0, h = 0;
+    int w = 0, h = 0, loops = 0;
     {
-        GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
+        GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h,
+                                                         &loops);
         if (pixel_frames && pixel_frames->len > 1) {
             int fw = 0, fh = 0, total = 0;
             GArray *frames = ns_image_anim_frames_from_pixels(pixel_frames,
@@ -891,6 +947,7 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
                 img->natural_height = fh;
                 img->anim_total_ms = total;
                 img->anim_start_us = g_get_monotonic_time();
+                img->anim_loops = loops;
                 img->loaded = TRUE;
                 g_hash_table_insert(cache->by_url, g_strdup(url), img);
                 ns_image_cache_account(cache, img);

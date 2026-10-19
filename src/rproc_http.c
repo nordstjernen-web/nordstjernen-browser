@@ -508,11 +508,10 @@ ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                                  settle_ms, 0, 1, out);
 }
 
-int
-ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
-                      int viewport_height, int settle_ms, int history,
-                      int user_activated,
-                      ns_rproc_http_page *out)
+static int
+rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
+           int viewport_height, int settle_ms, int history,
+           int user_activated, int reload, ns_rproc_http_page *out)
 {
     if (!r || !url || !out)
         return -1;
@@ -525,10 +524,11 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
-                      "\"user_activated\":%d,\"dpr\":%d.%03d}",
+                      "\"user_activated\":%d,\"reload\":%d,"
+                      "\"dpr\":%d.%03d}",
                       ue, viewport_width, viewport_height, settle_ms,
                       history ? 1 : 0, user_activated ? 1 : 0,
-                      dpr / 1000, dpr % 1000);
+                      reload ? 1 : 0, dpr / 1000, dpr % 1000);
     free(ue);
     if (jn < 0)
         return -1;
@@ -576,6 +576,24 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
     }
     free(body);
     return 0;
+}
+
+int
+ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
+                      int viewport_height, int settle_ms, int history,
+                      int user_activated, ns_rproc_http_page *out)
+{
+    return rproc_open(r, url, viewport_width, viewport_height, settle_ms,
+                      history, user_activated, 0, out);
+}
+
+int
+ns_rproc_http_reload(ns_rproc_http *r, const char *url, int viewport_width,
+                     int viewport_height, int settle_ms,
+                     ns_rproc_http_page *out)
+{
+    return rproc_open(r, url, viewport_width, viewport_height, settle_ms, 0,
+                      1, 1, out);
 }
 
 int
@@ -629,6 +647,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
 {
     out->ok = 1;
     out->animating = (head->x_anim & 1) != 0;
+    out->wake_ms = head->x_wake > 0 ? (int)head->x_wake : 0;
     out->caret_blinking = (head->x_anim & 2) != 0;
     out->wheel_snapped = (head->x_anim & 4) != 0;
     out->wheel_answered = (head->x_anim & 8) != 0;
@@ -900,15 +919,18 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     memset(out, 0, sizeof *out);
     char *body = request(r, "/tick", "{}");
     if (!body) return -1;
-    long ok = 0, changed = 0, animating = 0, page_w = 0, page_h = 0;
+    long ok = 0, changed = 0, animating = 0, wake_ms = 0, page_w = 0,
+         page_h = 0;
     json_get_long(body, "ok", &ok);
     json_get_long(body, "changed", &changed);
     json_get_long(body, "animating", &animating);
+    json_get_long(body, "wake_ms", &wake_ms);
     json_get_long(body, "page_width", &page_w);
     json_get_long(body, "page_height", &page_h);
     out->ok = ok != 0;
     out->changed = changed != 0;
     out->animating = animating != 0;
+    out->wake_ms = wake_ms > 0 && wake_ms <= G_MAXINT ? (int)wake_ms : 0;
     out->page_w = (int)page_w;
     out->page_h = (int)page_h;
     out->nav = json_get_str(body, "nav");
