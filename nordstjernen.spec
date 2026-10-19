@@ -83,7 +83,6 @@ test -f meson.build
 %endif
 %meson \
     -Dwebgpu=disabled \
-    -Dns-pango=disabled \
     %{?extra_meson}
 %meson_build
 

@@ -55,10 +55,8 @@ applications. It does not phone home and does not telemeter the user.
 %autosetup -n %{name}-%{version}
 
 %build
-# mock builds have no network, so the ns-pango subproject cannot be cloned:
-# shape text through the system Pango. wgpu-native is not packaged.
+# wgpu-native is not packaged.
 %meson \
-    -Dns-pango=disabled \
     -Dwebgpu=disabled
 %meson_build
 

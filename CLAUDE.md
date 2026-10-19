@@ -185,11 +185,14 @@ See `docs/quickjs.md`.
 - CI does not build it: build both configurations locally after binding
   changes (`docs/quickjs.md`, "Checking a change").
 
-### Text layout: ns-pango
+### Text layout: web-text-lib
 
-Desktop builds shape text through
-[ns-pango](https://github.com/nordstjernen-web/ns-pango), a fork of Pango
-pinned as a meson subproject (`subprojects/ns-pango.wrap`). Pango keeps no
+Desktop builds shape text through **web-text-lib**, a fork of Pango
+vendored in-tree at `src/web-text-lib/` (it began as the separate ns-pango
+repository). It is not a meson subproject -- `src/web-text-lib/meson.build`
+is loaded via `subdir()` from the top-level, builds static libraries and
+exposes `web_text_dep` / `web_text_cairo_dep` / `web_text_fc_dep`, so no
+clone or network is needed. Pango keeps no
 cache that outlives a `PangoLayout`, so the same bytes reached HarfBuzz once
 to measure a run and again to paint it, and a table cell was shaped for
 `min-content`, for `max-content` and again to lay out. The fork caches
@@ -200,16 +203,17 @@ Three rules when touching text code:
 
 - **The engine spells the API renamed** -- `ns_pango_*`, `NsPango*`,
   `NS_PANGO_*`, `NS_TYPE_PANGO_*` -- and includes `"ns_pango.h"`, never a
-  pango header directly. The renaming is not cosmetic: GTK loads the system
-  Pango into the same process, and GObject aborts when a second library
-  registers a type name it already holds.
+  pango header directly (the fork's own headers are `<ns-pango/...>`, from
+  `src/web-text-lib/ns-pango/`). The renaming is not cosmetic: GTK loads the
+  system Pango into the same process, and GObject aborts when a second
+  library registers a type name it already holds.
 - **Android and iOS link the system Pango**, since the fork has no CoreText
   backend and requires fontconfig. `src/ns_pango_names.h` maps every renamed
   name back to its stock spelling for those builds; regenerate it with
   `scripts/gen-ns-pango-names.py` after using a new Pango entry point, and
-  build `-Dns-pango=disabled` to compile that path on desktop. Anything the
-  fork adds and stock Pango lacks -- `ns_pango_cache_*` -- must sit behind
-  `#ifdef NS_USE_NS_PANGO`.
+  build `-Dweb-text-lib=disabled` to compile that path on desktop. Anything
+  the fork adds and stock Pango lacks -- `ns_pango_cache_*` -- must sit behind
+  `#ifdef NS_USE_WEB_TEXT_LIB`.
 - **A run is cached only when its shaping cannot depend on the text around
   it**, because HarfBuzz receives the paragraph as context.
   `NS_PANGO_SHAPE_CACHE=verify` shapes both ways and warns on any

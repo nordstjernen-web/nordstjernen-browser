@@ -1,7 +1,7 @@
 # Third-party software notices
 
 Nordstjernen links to (and in some cases statically includes) the
-following open-source libraries. One of them, ns-pango, is a **modified**
+following open-source libraries. One of them, web-text-lib, is a **modified**
 LGPL library; its source and our relink offer are described in its entry
 below. Their copyright notices and license
 texts are reproduced below. For libraries shipped dynamically in the
@@ -131,14 +131,15 @@ notice appear with all copies.
 
 ---
 
-### ns-pango — GNU LGPL 2.1 or later (modified Pango, statically linked)
+### web-text-lib — GNU LGPL 2.1 or later (modified Pango, statically linked)
 
 > Text itemization, shaping and line breaking, with a cache of shaped runs
-> that Pango itself does not keep.
-> <https://github.com/nordstjernen-web/ns-pango>
+> that Pango itself does not keep. Source in this repository under
+> `src/web-text-lib/`; it originated as ns-pango
+> (<https://github.com/nordstjernen-web/ns-pango>).
 >
-> Copyright the GNU Project and contributors, and Northstar contributors
-> for the modifications.
+> Copyright the GNU Project and contributors, and Northstar and Nordstjernen
+> contributors for the modifications.
 
 **This is a modified copy of Pango.** It adds a process-wide cache of
 shaped glyph strings and of context font metrics, renames every exported
@@ -146,19 +147,22 @@ symbol so it can share a process with the system Pango that GTK loads, and
 removes the backends and tooling a browser does not use. It remains
 licensed under the GNU Lesser General Public License version 2.1 or, at
 your option, any later version, and its complete corresponding source --
-including every modification -- is published at the URL above. The full
-license text is available at:
+including every modification -- is part of the Nordstjernen source tree and
+source tarball, under `src/web-text-lib/`. Upstream Pango's license file
+is kept there as `src/web-text-lib/COPYING`; the LGPL 2.1 text is at:
 
   <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
 
-Unlike the other LGPL libraries listed here, ns-pango is linked
+Unlike the other LGPL libraries listed here, web-text-lib is linked
 **statically** into the Nordstjernen executables on desktop platforms. Per
-LGPL section 6(a), you are entitled to modify ns-pango and relink
+LGPL section 6(a), you are entitled to modify web-text-lib and relink
 Nordstjernen against your modified copy: write to the address in
 `README.md` and we will supply the Nordstjernen object files, together with
 any data and utility programs needed, so that you can produce a modified
-executable. Android and iOS builds do not include ns-pango; they link the
-system Pango dynamically as before.
+executable. Because the complete Nordstjernen source is published as well,
+you can also rebuild the browser from source with your modified
+`src/web-text-lib/`. Android and iOS builds do not include web-text-lib;
+they link the system Pango dynamically as before.
 
 ## Dynamically linked
 

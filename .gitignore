@@ -52,7 +52,6 @@ compile_commands.json
 # The default QuickJS and lexbor live in src/, not subprojects/; the
 # original QuickJS (-Dquickjs=quickjs) is fetched into subprojects/quickjs/.
 /subprojects/packagecache/
-/subprojects/ns-pango/
 /subprojects/quickjs/
 /subprojects/wgpu-native-*/
 
