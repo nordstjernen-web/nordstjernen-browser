@@ -20,6 +20,99 @@ ns_selection_clear(ns_selection *sel)
     sel->active = FALSE;
 }
 
+typedef struct mark_ctx {
+    const ns_node *owner;
+    const ns_box  *box;
+    int            nth;
+    int            seen;
+    gboolean       done;
+} mark_ctx;
+
+static void
+mark_find_owner(const ns_box *b, const ns_node *owner, mark_ctx *ctx)
+{
+    if (b->dom) owner = b->dom;
+    if (b == ctx->box) {
+        ctx->owner = owner;
+        ctx->done = TRUE;
+        return;
+    }
+    for (const ns_box *c = b->first_child; c && !ctx->done; c = c->next_sibling)
+        mark_find_owner(c, owner, ctx);
+}
+
+static void
+mark_count(const ns_box *b, const ns_node *owner, mark_ctx *ctx)
+{
+    if (b->dom) owner = b->dom;
+    if (b->text && owner == ctx->owner) {
+        if (ctx->box ? b == ctx->box : ctx->seen == ctx->nth) {
+            ctx->box = b;
+            ctx->nth = ctx->seen;
+            ctx->done = TRUE;
+            return;
+        }
+        ctx->seen++;
+    }
+    for (const ns_box *c = b->first_child; c && !ctx->done; c = c->next_sibling)
+        mark_count(c, owner, ctx);
+}
+
+static ns_selection_end_mark
+selection_mark_end(const ns_box *root, const ns_box *box, gsize byte)
+{
+    ns_selection_end_mark m = { NULL, 0, 0 };
+    if (!box || !box->text) return m;
+    mark_ctx find = { NULL, box, 0, 0, FALSE };
+    mark_find_owner(root, NULL, &find);
+    if (!find.done || !find.owner) return m;
+    mark_ctx count = { find.owner, box, 0, 0, FALSE };
+    mark_count(root, NULL, &count);
+    if (count.done) {
+        m.dom = find.owner;
+        m.nth = count.nth;
+        m.byte = byte;
+    }
+    return m;
+}
+
+static const ns_box *
+selection_resolve_end(const ns_box *root, const ns_selection_end_mark *m)
+{
+    if (!m->dom) return NULL;
+    mark_ctx ctx = { m->dom, NULL, m->nth, 0, FALSE };
+    mark_count(root, NULL, &ctx);
+    if (!ctx.done || strlen(ctx.box->text) < m->byte) return NULL;
+    return ctx.box;
+}
+
+void
+ns_selection_save(const ns_box *root, const ns_selection *sel,
+                  ns_selection_mark *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!root || !ns_selection_has_range(sel)) return;
+    out->anchor = selection_mark_end(root, sel->anchor_box, sel->anchor_byte);
+    out->focus = selection_mark_end(root, sel->focus_box, sel->focus_byte);
+    out->active = out->anchor.dom && out->focus.dom;
+}
+
+void
+ns_selection_restore(const ns_box *root, const ns_selection_mark *mark,
+                     ns_selection *sel)
+{
+    ns_selection_clear(sel);
+    if (!root || !mark->active) return;
+    const ns_box *anchor = selection_resolve_end(root, &mark->anchor);
+    const ns_box *focus = selection_resolve_end(root, &mark->focus);
+    if (!anchor || !focus) return;
+    sel->anchor_box = anchor;
+    sel->anchor_byte = mark->anchor.byte;
+    sel->focus_box = focus;
+    sel->focus_byte = mark->focus.byte;
+    sel->active = TRUE;
+}
+
 gboolean
 ns_selection_has_range(const ns_selection *sel)
 {

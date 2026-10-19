@@ -193,12 +193,13 @@ reply_str2(int fd, const char *key1, const char *val1,
 }
 
 static void
-reply_href_changed(int fd, const char *href, int changed)
+reply_href_changed(int fd, const char *href, int changed, int newtab)
 {
     char *e = json_escape(href ? href : "");
     char *json = NULL;
-    int n = asprintf(&json, "{\"href\":\"%s\",\"changed\":%d}",
-                     e ? e : "", changed ? 1 : 0);
+    int n = asprintf(&json,
+                     "{\"href\":\"%s\",\"changed\":%d,\"newtab\":%d}",
+                     e ? e : "", changed ? 1 : 0, newtab ? 1 : 0);
     if (n > 0)
         http_write_response(fd, 200, "application/json", NULL, json,
                             (size_t)n);
@@ -851,11 +852,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/link") == 0 ||
         strcmp(head->path, "/click") == 0 ||
         strcmp(head->path, "/select") == 0) {
-        long x = 0, y = 0, mods = 0, kind = 0;
+        long x = 0, y = 0, mods = 0, kind = 0, button = 0, clicks = 1;
         json_get_long(body, "x", &x);
         json_get_long(body, "y", &y);
         json_get_long(body, "mods", &mods);
         json_get_long(body, "kind", &kind);
+        json_get_long(body, "button", &button);
+        json_get_long(body, "clicks", &clicks);
         char *href = NULL;
         if (s->cur && strcmp(head->path, "/link") == 0) {
             href = ns_browser_link_at(s->cur, (int)x, (int)y);
@@ -867,7 +870,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         }
         s->frame_valid = 0;
         if (s->cur && strcmp(head->path, "/click") == 0) {
-            href = ns_browser_press(s->cur, (int)x, (int)y, (int)mods);
+            href = ns_browser_press_full(s->cur, (int)x, (int)y, (int)mods,
+                                         (int)button, (int)clicks);
             session_stash_post(s, href);
         } else if (s->cur)
             href = ns_browser_select(s->cur, (int)kind, (int)x, (int)y);
@@ -917,16 +921,20 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
 
     if (strcmp(head->path, "/release") == 0) {
         s->frame_valid = 0;
-        int changed = 0;
-        long x = 0, y = 0;
+        int changed = 0, newtab = 0;
+        long x = 0, y = 0, button = 0, clicks = 1;
         gboolean at = json_get_long(body, "x", &x) == 0 &&
                       json_get_long(body, "y", &y) == 0;
+        json_get_long(body, "button", &button);
+        json_get_long(body, "clicks", &clicks);
         char *href = !s->cur ? NULL
-                   : at ? ns_browser_release_click_at(s->cur, (int)x, (int)y,
-                                                      &changed)
+                   : at ? ns_browser_release_full(s->cur, (int)x, (int)y,
+                                                  (int)button, (int)clicks,
+                                                  &changed, &newtab)
                         : ns_browser_release_click(s->cur, &changed);
-        session_stash_post(s, href);
-        reply_href_changed(ctrl_w, href, changed > 0);
+        if (!newtab)
+            session_stash_post(s, href);
+        reply_href_changed(ctrl_w, href, changed > 0, newtab);
         free(href);
         return 0;
     }
@@ -958,10 +966,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     }
 
     if (strcmp(head->path, "/hover") == 0) {
-        long x = 0, y = 0;
+        long x = 0, y = 0, mods = 0, buttons = -1;
         json_get_long(body, "x", &x);
         json_get_long(body, "y", &y);
-        int changed = s->cur ? ns_browser_hover(s->cur, (int)x, (int)y) : 0;
+        json_get_long(body, "mods", &mods);
+        json_get_long(body, "buttons", &buttons);
+        int changed = s->cur ? ns_browser_hover_full(s->cur, (int)x, (int)y,
+                                                     (int)mods, (int)buttons)
+                             : 0;
         if (changed > 0)
             s->frame_valid = 0;
         char *href = s->cur ? ns_browser_link_under(s->cur, (int)x, (int)y)
@@ -972,8 +984,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *cursor_escaped = json_escape(cursor ? cursor : "");
         char *json = NULL;
         int n = asprintf(&json,
-                         "{\"changed\":%d,\"href\":\"%s\",\"cursor\":\"%s\"}",
+                         "{\"changed\":%d,\"animating\":%d,"
+                         "\"href\":\"%s\",\"cursor\":\"%s\"}",
                          changed > 0 ? 1 : 0,
+                         s->cur && session_animating(s) ? 1 : 0,
                          href_escaped ? href_escaped : "",
                          cursor_escaped ? cursor_escaped : "");
         if (n > 0)

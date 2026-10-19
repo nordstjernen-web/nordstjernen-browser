@@ -75,6 +75,10 @@ char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 
 char *ns_browser_click(ns_browser *browser, int x, int y, int mods);
 char *ns_browser_press(ns_browser *browser, int x, int y, int mods);
+char *ns_browser_press_full(ns_browser *browser, int x, int y, int mods,
+                            int button, int clicks);
+char *ns_browser_release_full(ns_browser *browser, int x, int y, int button,
+                              int clicks, int *out_changed, int *out_newtab);
 
 #define NS_KEY_MOD_TEXT_SEPARATE 16
 
@@ -92,6 +96,8 @@ int   ns_browser_set_focused_editable_selection(ns_browser *browser,
                                                 size_t anchor);
 
 int ns_browser_hover(ns_browser *browser, int x, int y);
+int ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
+                          int buttons);
 
 int ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy);
 int ns_browser_scroll_at_full(ns_browser *browser, int x, int y, int dx,
