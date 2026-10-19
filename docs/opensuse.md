@@ -109,10 +109,13 @@ test -f meson.build
 
 ## Build options and dependencies
 
-The spec configures meson with two features off:
+The spec configures meson with one feature off:
 
     -Dwebgpu=disabled   # needs external wgpu-native, not packaged
-    -Dns-pango=disabled # OBS workers have no network to clone the subproject
+
+web-text-lib, the text-shaping Pango fork, is vendored at
+`src/web-text-lib/` and builds from the tarball, so OBS workers need no
+network for it.
 
 On 32-bit x86 the bundled WebAssembly interpreter (WAMR, `src/wamr/`) fails
 to build, so the spec additionally passes `-Dwasm=disabled` there:
@@ -137,9 +140,10 @@ Everything else builds from the declared `BuildRequires`:
 
 The FFmpeg `libav*` packages are required, not optional: meson fails without
 them on Linux, and they carry inline WebM (VP9/VP8 + Opus/Vorbis). The Pango
-packages cover the system-Pango path that `-Dns-pango=disabled` selects.
+packages are what GTK builds against; web-text-lib itself needs the cairo,
+HarfBuzz, FriBiDi and fontconfig development files.
 
-The in-tree engines (lexbor, QuickJS, WAMR) and vendored single-file
+The in-tree engines (lexbor, QuickJS, WAMR, web-text-lib) and vendored single-file
 libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
 no system copies. `mpv` and `myspell-en_US` are `Recommends` (external
 media playback and a spell-check dictionary).

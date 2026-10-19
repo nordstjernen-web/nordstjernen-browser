@@ -22,7 +22,7 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
-#ifdef NS_USE_NS_PANGO
+#ifdef NS_USE_WEB_TEXT_LIB
 #include <ns-pango/ns-pango-cache.h>
 #endif
 
@@ -171,7 +171,7 @@ ns_win32_use_fontconfig_backend(const char *dir)
     }
     if (!g_getenv("PANGOCAIRO_BACKEND"))
         g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
-#ifdef NS_USE_NS_PANGO
+#ifdef NS_USE_WEB_TEXT_LIB
     if (!g_getenv("NS_PANGOCAIRO_BACKEND"))
         g_setenv("NS_PANGOCAIRO_BACKEND", "fc", TRUE);
 #endif
@@ -455,7 +455,7 @@ ns_run_headless(ns_headless_opts *hopts)
         double sum_ms = 0, span_ms = 0, layout_ms = 0;
         ns_net_perf_snapshot(&fetches, &bytes, &sum_ms, &span_ms);
         ns_engine_layout_perf(&relayouts, &layout_ms);
-#ifdef NS_USE_NS_PANGO
+#ifdef NS_USE_WEB_TEXT_LIB
         guint64 shape_hits = 0, shape_misses = 0, shape_skips = 0,
                 shape_entries = 0;
         guint64 brk_hits = 0, brk_misses = 0, brk_skips = 0, brk_entries = 0;

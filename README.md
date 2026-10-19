@@ -84,11 +84,11 @@ scripts for AppImage, RPM, Alpine, the BSDs and MSIX are in `scripts/`.
   are parsed, and floats do not yet wrap around a shape. Web Animations
   composition (`add`/`accumulate`) works for transforms, filters and
   shapes, and transform lists interpolate through matrix decomposition.
-- **Text layout** — desktop builds shape text with **ns-pango**, a Pango fork
-  pinned as a meson subproject that caches finished glyph strings and font
-  metrics across layouts, so measuring and painting a run reach HarfBuzz once
-  instead of three times. Android and iOS link the system Pango;
-  `-Dns-pango=disabled` builds that path on the desktop too.
+- **Text layout** — desktop builds shape text with **web-text-lib**, a Pango
+  fork vendored in-tree at `src/web-text-lib/` that caches finished glyph
+  strings and font metrics across layouts, so measuring and painting a run
+  reach HarfBuzz once instead of three times. Android and iOS link the system
+  Pango; `-Dweb-text-lib=disabled` builds that path on the desktop too.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer APIs,
   Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL), custom elements including customized
@@ -210,19 +210,19 @@ WHATWG URL module), [QuickJS](https://github.com/quickjs-ng/quickjs)
 (quickjs-ng fork, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
 (WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
-(MPEG-1 video + MP2 audio) and [minimp3](https://github.com/lieff/minimp3)
-(MP3). The first `meson setup` downloads two pinned subprojects:
-[ns-pango](https://github.com/nordstjernen-web/ns-pango), the text-shaping
-fork, and the [wgpu-native](https://github.com/gfx-rs/wgpu-native) release
-for WebGPU, linked statically. `-Dns-pango=disabled -Dwebgpu=disabled` link
-the system Pango, drop WebGPU and need no network.
+(MPEG-1 video + MP2 audio), [minimp3](https://github.com/lieff/minimp3)
+(MP3) and web-text-lib (`src/web-text-lib/`, the text-shaping Pango fork
+that began as [ns-pango](https://github.com/nordstjernen-web/ns-pango)). The
+first `meson setup` downloads one pinned subproject, the
+[wgpu-native](https://github.com/gfx-rs/wgpu-native) release for WebGPU,
+linked statically; `-Dwebgpu=disabled` drops WebGPU and needs no network.
 
 **Required system libraries:**
 
 | Library | Min version | Role |
 |---------|-------------|------|
 | GTK 4 | **≥ 4.22.1 on Windows** (MSYS2 stock), ≥ 4.14 elsewhere (≥ 4.22 preferred) | UI toolkit, GSK renderer |
-| GLib / GModule, Pango, cairo, HarfBuzz | (ship with GTK; ns-pango needs GLib ≥ 2.80, cairo ≥ 1.18, HarfBuzz ≥ 8.3, fontconfig ≥ 2.15) | core types, dynamic module loading, text shaping, 2D drawing |
+| GLib / GModule, Pango, cairo, HarfBuzz | (ship with GTK; web-text-lib needs GLib ≥ 2.80, cairo ≥ 1.18, HarfBuzz ≥ 8.3, fontconfig ≥ 2.15) | core types, dynamic module loading, text shaping, 2D drawing |
 | libepoxy | — | OpenGL/ES function dispatch for WebGL |
 | libcurl | ≥ 8.5 (≥ 8.11 for WebSocket) | HTTP/2 networking, HSTS, cookies, native WebSocket |
 | OpenSSL (libcrypto, libssl) | — | WebCrypto (`crypto.subtle`), TLS for the nghttp2 backend |

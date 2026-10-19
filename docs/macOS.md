@@ -128,10 +128,10 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-QuickJS, lexbor, WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree,
-so there are no submodules. The first `meson setup` does download two
-pinned subprojects through their wraps: the ns-pango text-layout fork
-(`subprojects/ns-pango.wrap`) and the wgpu-native release behind WebGPU
+QuickJS, lexbor, WAMR, Wuffs, pl_mpeg, minimp3 and the web-text-lib
+text-layout fork (`src/web-text-lib/`) are vendored in-tree, so there are no
+submodules. The first `meson setup` does download one pinned subproject
+through its wrap: the wgpu-native release behind WebGPU
 (`subprojects/wgpu-native-macos-<arch>.wrap`, skipped when wgpu-native is
 found through pkg-config or `-Dwgpu_native_root`; see
 [`webgpu.md`](webgpu.md)).

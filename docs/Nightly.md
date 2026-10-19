@@ -94,8 +94,8 @@ dispatch would cause. The Linux
 packages are built locally in distro containers so each binary links
 against that distro's own glibc / GTK, and the source tarball is a
 plain `git archive` (the engine — lexbor, quickjs, wuffs — is vendored
-in-tree; ns-pango and wgpu-native are not, so a fully offline build of the
-tarball needs `-Dns-pango=disabled -Dwebgpu=disabled`).
+in-tree, as is the web-text-lib Pango fork; wgpu-native is not, so a fully
+offline build of the tarball needs `-Dwebgpu=disabled`).
 
 The FreeBSD and NetBSD builds run the same way as Windows/macOS —
 driven through GitHub Actions — but GitHub has no native BSD runners, so
@@ -327,7 +327,7 @@ prefer a dedicated vhost, point its `root` at `/var/www/html/nightly`
 - **`meson setup` stops with "Nordstjernen needs newer system
   libraries than this machine has"** — the image is older than the
   version floors (GTK 4.14, libcurl 8.5, and the GLib/cairo/HarfBuzz/
-  fontconfig floors of the ns-pango text stack). The default image is
+  fontconfig floors of the web-text-lib text stack). The default image is
   `debian:trixie` (Debian 13), the oldest Debian release that meets them;
   `debian:12` (bookworm) cannot build the browser. If you override
   `NIGHTLY_DEBIAN_IMAGE` or `NIGHTLY_UBUNTU_IMAGE`, pick Debian 13 /

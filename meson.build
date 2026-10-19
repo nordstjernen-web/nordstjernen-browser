@@ -132,13 +132,13 @@ endif
 # renderer-only build that needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
 gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
-use_ns_pango = not is_mobile and get_option('ns-pango').allowed()
+use_web_text_lib = not is_mobile and get_option('web-text-lib').allowed()
 
-# ns-pango enforces the text-stack floors from inside the subproject, where a
+# web-text-lib enforces the text-stack floors from inside its own build, where a
 # too-old library surfaces as a bare version mismatch and only the first of
 # several is reported. Checking every hard floor here first names them all.
 ns_dependency_floors = [['libcurl', '>=8.5']]
-if use_ns_pango
+if use_web_text_lib
   ns_dependency_floors += [
     ['glib-2.0', '>=2.80'],
     ['gobject-2.0', '>=2.80'],
@@ -162,8 +162,8 @@ foreach floor : ns_dependency_floors
 endforeach
 if ns_unmet_floors.length() > 0
   ns_floor_hint = ''
-  if use_ns_pango
-    ns_floor_hint = (' -Dns-pango=disabled drops the text-stack floors by ' +
+  if use_web_text_lib
+    ns_floor_hint = (' -Dweb-text-lib=disabled drops the text-stack floors by ' +
                      'shaping through the system Pango.')
   endif
   error('Nordstjernen needs newer system libraries than this machine has:\n' +
@@ -177,34 +177,15 @@ gobject    = dependency('gobject-2.0')
 gio        = dependency('gio-2.0')
 cairo      = dependency('cairo')
 
-# Text is shaped through ns-pango, a Pango fork that caches finished glyph
-# strings across layouts; every symbol in it is renamed, because GTK loads the
-# system Pango into the same process. Android and iOS link the system Pango
-# instead -- the fork carries no CoreText backend and requires fontconfig --
-# and src/ns_pango_names.h maps the renamed API back for them.
-if use_ns_pango
-  ns_pango_debug = ns_is_release ? 'false' : 'true'
-  ns_pango_ndebug = ns_is_release ? 'true' : 'false'
-  ns_pango_sp = subproject('ns-pango',
-    default_options: [
-      'default_library=static',
-      'c_std=gnu17',
-      'optimization=3',
-      'debug=' + ns_pango_debug,
-      'b_ndebug=' + ns_pango_ndebug,
-      'fontconfig=enabled',
-      'freetype=enabled',
-      'introspection=disabled',
-      'sysprof=disabled',
-      'libthai=auto',
-      'build-testsuite=false',
-      'nordstjernen=true',
-      'warning_level=0',
-      'werror=false',
-    ])
-  pango      = ns_pango_sp.get_variable('libpango_dep')
-  pangocairo = ns_pango_sp.get_variable('libpangocairo_dep')
-  add_project_arguments('-DNS_USE_NS_PANGO=1', language: 'c')
+# Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
+# fork that caches finished glyph strings across layouts; every symbol in it is
+# renamed, because GTK loads the system Pango into the same process. Android
+# and iOS link the system Pango instead -- the fork carries no CoreText backend
+# and requires fontconfig -- and src/ns_pango_names.h maps the renamed API back
+# for them. Its targets are declared next to lexbor's, after the last project
+# argument.
+if use_web_text_lib
+  add_project_arguments('-DNS_USE_WEB_TEXT_LIB=1', language: 'c')
 else
   pango      = dependency('pango')
   pangocairo = dependency('pangocairo')
@@ -388,8 +369,7 @@ have_fontconfig = libfontconfig.found()
 if have_fontconfig
   add_project_arguments('-DNS_HAVE_FONTCONFIG=1', language: 'c')
 endif
-if use_ns_pango
-  libpangoft2 = ns_pango_sp.get_variable('libpangoft2_dep')
+if use_web_text_lib
   have_pangoft2 = true
 else
   libpangoft2 = dependency('pangoft2', required: false)
@@ -565,6 +545,12 @@ endif
 add_project_arguments('-DNS_BUILD_DATE="' + build_date + '"', language: 'c')
 add_project_arguments('-DNS_VERSION="' + meson.project_version() + '"', language: 'c')
 
+if use_web_text_lib
+  subdir('src/web-text-lib')
+  pango       = web_text_dep
+  pangocairo  = web_text_cairo_dep
+  libpangoft2 = web_text_fc_dep
+endif
 subdir('src/lexbor')
 
 if get_option('quickjs') == 'quickjs'
