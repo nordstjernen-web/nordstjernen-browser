@@ -4218,8 +4218,7 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
     }
     if (g_utf8_strlen(key, -1) == 1 &&
         !g_unichar_iscntrl(g_utf8_get_char(key))) {
-        if (!(mods & NS_KEY_MOD_TEXT_SEPARATE))
-            browser_input_replace(b, node, sel_lo, sel_hi, key, "insertText");
+        browser_input_replace(b, node, sel_lo, sel_hi, key, "insertText");
         return TRUE;
     }
     return FALSE;
@@ -4488,6 +4487,11 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             } else if (f && !(mods & (2 | 4 | 8)) &&
                        ns_js_keyboard_activate(browser->js, f, key, FALSE)) {
                 browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && ns_node_editable_value(f) &&
+                       (mods & NS_KEY_MOD_TEXT_SEPARATE) &&
+                       !(mods & (2 | 4 | 8)) &&
+                       browser_key_char_code(key) > 0) {
                 if (out_prevented) *out_prevented = 1;
             } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods)) {

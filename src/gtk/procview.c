@@ -2198,7 +2198,9 @@ pv_key_name(guint keyval)
 static gboolean
 pv_keyval_is_dead(guint keyval)
 {
-    return keyval >= GDK_KEY_dead_grave && keyval <= GDK_KEY_dead_greek;
+    return (keyval >= GDK_KEY_dead_grave && keyval <= GDK_KEY_dead_currency) ||
+           (keyval >= GDK_KEY_dead_a &&
+            keyval <= GDK_KEY_dead_longsolidusoverlay);
 }
 
 static const char *
