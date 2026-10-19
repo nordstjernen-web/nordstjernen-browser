@@ -48,6 +48,15 @@ Changelog:
 * Task Manager: "End task" used the view of a tab that had closed since
   the last refresh, and the window outlived the browser window that
   opened it.
+* Keyboard: pages now receive `keydown` and `keypress` for letters,
+  digits, punctuation and Space. The input method consumed those keys
+  before the page saw them, so only `keyup` and the typed text arrived,
+  and WebAssembly and canvas games that read the keyboard did not
+  respond (#465). Text still reaches fields through the input method,
+  a cancelled `keydown` or `keypress` now stops the character being
+  inserted, and Space scrolls the page when no field has focus.
+  `code` and `keyCode` now cover modifiers, function keys, the numeric
+  keypad and punctuation.
 
 1.0.34:
 ======

@@ -1976,6 +1976,114 @@ start_hover(NsProcView *v, int x, int y)
     push_req(v, req);
 }
 
+typedef struct {
+    guint       keyval;
+    const char *key;
+    const char *code;
+    int         keycode;
+} PvKeyName;
+
+static const PvKeyName pv_key_names[] = {
+    { GDK_KEY_Up,           "ArrowUp",     "ArrowUp",        38 },
+    { GDK_KEY_Down,         "ArrowDown",   "ArrowDown",      40 },
+    { GDK_KEY_Left,         "ArrowLeft",   "ArrowLeft",      37 },
+    { GDK_KEY_Right,        "ArrowRight",  "ArrowRight",     39 },
+    { GDK_KEY_Return,       "Enter",       "Enter",          13 },
+    { GDK_KEY_KP_Enter,     "Enter",       "NumpadEnter",    13 },
+    { GDK_KEY_Escape,       "Escape",      "Escape",         27 },
+    { GDK_KEY_BackSpace,    "Backspace",   "Backspace",       8 },
+    { GDK_KEY_Tab,          "Tab",         "Tab",             9 },
+    { GDK_KEY_ISO_Left_Tab, "Tab",         "Tab",             9 },
+    { GDK_KEY_Delete,       "Delete",      "Delete",         46 },
+    { GDK_KEY_Insert,       "Insert",      "Insert",         45 },
+    { GDK_KEY_Home,         "Home",        "Home",           36 },
+    { GDK_KEY_End,          "End",         "End",            35 },
+    { GDK_KEY_Page_Up,      "PageUp",      "PageUp",         33 },
+    { GDK_KEY_Page_Down,    "PageDown",    "PageDown",       34 },
+    { GDK_KEY_space,        NULL,          "Space",          32 },
+    { GDK_KEY_Shift_L,      "Shift",       "ShiftLeft",      16 },
+    { GDK_KEY_Shift_R,      "Shift",       "ShiftRight",     16 },
+    { GDK_KEY_Control_L,    "Control",     "ControlLeft",    17 },
+    { GDK_KEY_Control_R,    "Control",     "ControlRight",   17 },
+    { GDK_KEY_Alt_L,        "Alt",         "AltLeft",        18 },
+    { GDK_KEY_Alt_R,        "Alt",         "AltRight",       18 },
+    { GDK_KEY_ISO_Level3_Shift, "AltGraph", "AltRight",      225 },
+    { GDK_KEY_Super_L,      "Meta",        "MetaLeft",       91 },
+    { GDK_KEY_Super_R,      "Meta",        "MetaRight",      92 },
+    { GDK_KEY_Meta_L,       "Meta",        "MetaLeft",       91 },
+    { GDK_KEY_Meta_R,       "Meta",        "MetaRight",      92 },
+    { GDK_KEY_Menu,         "ContextMenu", "ContextMenu",    93 },
+    { GDK_KEY_Caps_Lock,    "CapsLock",    "CapsLock",       20 },
+    { GDK_KEY_Num_Lock,     "NumLock",     "NumLock",       144 },
+    { GDK_KEY_Scroll_Lock,  "ScrollLock",  "ScrollLock",    145 },
+    { GDK_KEY_Pause,        "Pause",       "Pause",          19 },
+    { GDK_KEY_Print,        "PrintScreen", "PrintScreen",    44 },
+    { GDK_KEY_KP_Add,       NULL,          "NumpadAdd",     107 },
+    { GDK_KEY_KP_Subtract,  NULL,          "NumpadSubtract", 109 },
+    { GDK_KEY_KP_Multiply,  NULL,          "NumpadMultiply", 106 },
+    { GDK_KEY_KP_Divide,    NULL,          "NumpadDivide",  111 },
+    { GDK_KEY_KP_Decimal,   NULL,          "NumpadDecimal", 110 },
+    { GDK_KEY_KP_Separator, NULL,          "NumpadDecimal", 110 },
+    { GDK_KEY_KP_Insert,    "Insert",      "Numpad0",        45 },
+    { GDK_KEY_KP_End,       "End",         "Numpad1",        35 },
+    { GDK_KEY_KP_Down,      "ArrowDown",   "Numpad2",        40 },
+    { GDK_KEY_KP_Page_Down, "PageDown",    "Numpad3",        34 },
+    { GDK_KEY_KP_Left,      "ArrowLeft",   "Numpad4",        37 },
+    { GDK_KEY_KP_Begin,     "Clear",       "Numpad5",        12 },
+    { GDK_KEY_KP_Right,     "ArrowRight",  "Numpad6",        39 },
+    { GDK_KEY_KP_Home,      "Home",        "Numpad7",        36 },
+    { GDK_KEY_KP_Up,        "ArrowUp",     "Numpad8",        38 },
+    { GDK_KEY_KP_Page_Up,   "PageUp",      "Numpad9",        33 },
+    { GDK_KEY_KP_Delete,    "Delete",      "NumpadDecimal",  46 },
+    { GDK_KEY_minus,        NULL,          "Minus",         189 },
+    { GDK_KEY_underscore,   NULL,          "Minus",         189 },
+    { GDK_KEY_equal,        NULL,          "Equal",         187 },
+    { GDK_KEY_plus,         NULL,          "Equal",         187 },
+    { GDK_KEY_bracketleft,  NULL,          "BracketLeft",   219 },
+    { GDK_KEY_braceleft,    NULL,          "BracketLeft",   219 },
+    { GDK_KEY_bracketright, NULL,          "BracketRight",  221 },
+    { GDK_KEY_braceright,   NULL,          "BracketRight",  221 },
+    { GDK_KEY_backslash,    NULL,          "Backslash",     220 },
+    { GDK_KEY_bar,          NULL,          "Backslash",     220 },
+    { GDK_KEY_semicolon,    NULL,          "Semicolon",     186 },
+    { GDK_KEY_colon,        NULL,          "Semicolon",     186 },
+    { GDK_KEY_apostrophe,   NULL,          "Quote",         222 },
+    { GDK_KEY_quotedbl,     NULL,          "Quote",         222 },
+    { GDK_KEY_grave,        NULL,          "Backquote",     192 },
+    { GDK_KEY_asciitilde,   NULL,          "Backquote",     192 },
+    { GDK_KEY_comma,        NULL,          "Comma",         188 },
+    { GDK_KEY_less,         NULL,          "Comma",         188 },
+    { GDK_KEY_period,       NULL,          "Period",        190 },
+    { GDK_KEY_greater,      NULL,          "Period",        190 },
+    { GDK_KEY_slash,        NULL,          "Slash",         191 },
+    { GDK_KEY_question,     NULL,          "Slash",         191 },
+    { GDK_KEY_parenright,   NULL,          "Digit0",         48 },
+    { GDK_KEY_exclam,       NULL,          "Digit1",         49 },
+    { GDK_KEY_at,           NULL,          "Digit2",         50 },
+    { GDK_KEY_numbersign,   NULL,          "Digit3",         51 },
+    { GDK_KEY_dollar,       NULL,          "Digit4",         52 },
+    { GDK_KEY_percent,      NULL,          "Digit5",         53 },
+    { GDK_KEY_asciicircum,  NULL,          "Digit6",         54 },
+    { GDK_KEY_ampersand,    NULL,          "Digit7",         55 },
+    { GDK_KEY_asterisk,     NULL,          "Digit8",         56 },
+    { GDK_KEY_parenleft,    NULL,          "Digit9",         57 },
+};
+
+static const PvKeyName *
+pv_key_name(guint keyval)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(pv_key_names); i++)
+        if (pv_key_names[i].keyval == keyval)
+            return &pv_key_names[i];
+    return NULL;
+}
+
+static gboolean
+pv_keyval_is_dead(guint keyval)
+{
+    return keyval >= GDK_KEY_dead_grave && keyval <= GDK_KEY_dead_greek;
+}
+
 static const char *
 keyval_js_key(guint keyval, char *buf, size_t bufsz)
 {
@@ -1986,31 +2094,17 @@ keyval_js_key(guint keyval, char *buf, size_t bufsz)
         buf[len] = '\0';
         return buf;
     }
-    switch (keyval) {
-    case GDK_KEY_Up:         return "ArrowUp";
-    case GDK_KEY_Down:       return "ArrowDown";
-    case GDK_KEY_Left:       return "ArrowLeft";
-    case GDK_KEY_Right:      return "ArrowRight";
-    case GDK_KEY_Return:
-    case GDK_KEY_KP_Enter:   return "Enter";
-    case GDK_KEY_Escape:     return "Escape";
-    case GDK_KEY_BackSpace:  return "Backspace";
-    case GDK_KEY_Tab:
-    case GDK_KEY_ISO_Left_Tab: return "Tab";
-    case GDK_KEY_Delete:     return "Delete";
-    case GDK_KEY_Insert:     return "Insert";
-    case GDK_KEY_Home:       return "Home";
-    case GDK_KEY_End:        return "End";
-    case GDK_KEY_Page_Up:    return "PageUp";
-    case GDK_KEY_Page_Down:  return "PageDown";
-    case GDK_KEY_Shift_L:
-    case GDK_KEY_Shift_R:    return "Shift";
-    case GDK_KEY_Control_L:
-    case GDK_KEY_Control_R:  return "Control";
-    case GDK_KEY_Alt_L:
-    case GDK_KEY_Alt_R:      return "Alt";
-    default: { const char *n = gdk_keyval_name(keyval); return n ? n : ""; }
+    const PvKeyName *name = pv_key_name(keyval);
+    if (name && name->key)
+        return name->key;
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) {
+        g_snprintf(buf, bufsz, "F%u", keyval - GDK_KEY_F1 + 1);
+        return buf;
     }
+    if (pv_keyval_is_dead(keyval))
+        return "Dead";
+    const char *n = gdk_keyval_name(keyval);
+    return n ? n : "";
 }
 
 static const char *
@@ -2028,25 +2122,16 @@ keyval_js_code(guint keyval, char *buf, size_t bufsz)
         g_snprintf(buf, bufsz, "Digit%c", '0' + (int)(keyval - GDK_KEY_0));
         return buf;
     }
-    switch (keyval) {
-    case GDK_KEY_Up:         return "ArrowUp";
-    case GDK_KEY_Down:       return "ArrowDown";
-    case GDK_KEY_Left:       return "ArrowLeft";
-    case GDK_KEY_Right:      return "ArrowRight";
-    case GDK_KEY_Return:     return "Enter";
-    case GDK_KEY_KP_Enter:   return "NumpadEnter";
-    case GDK_KEY_Escape:     return "Escape";
-    case GDK_KEY_BackSpace:  return "Backspace";
-    case GDK_KEY_Tab:
-    case GDK_KEY_ISO_Left_Tab: return "Tab";
-    case GDK_KEY_Delete:     return "Delete";
-    case GDK_KEY_Home:       return "Home";
-    case GDK_KEY_End:        return "End";
-    case GDK_KEY_Page_Up:    return "PageUp";
-    case GDK_KEY_Page_Down:  return "PageDown";
-    case GDK_KEY_space:      return "Space";
-    default:                 return "";
+    if (keyval >= GDK_KEY_KP_0 && keyval <= GDK_KEY_KP_9) {
+        g_snprintf(buf, bufsz, "Numpad%c", '0' + (int)(keyval - GDK_KEY_KP_0));
+        return buf;
     }
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) {
+        g_snprintf(buf, bufsz, "F%u", keyval - GDK_KEY_F1 + 1);
+        return buf;
+    }
+    const PvKeyName *name = pv_key_name(keyval);
+    return name ? name->code : "";
 }
 
 static int
@@ -2058,24 +2143,12 @@ keyval_js_keycode(guint keyval)
         return 65 + (int)(keyval - GDK_KEY_A);
     if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9)
         return 48 + (int)(keyval - GDK_KEY_0);
-    switch (keyval) {
-    case GDK_KEY_BackSpace:  return 8;
-    case GDK_KEY_Tab:        return 9;
-    case GDK_KEY_Return:
-    case GDK_KEY_KP_Enter:   return 13;
-    case GDK_KEY_Escape:     return 27;
-    case GDK_KEY_space:      return 32;
-    case GDK_KEY_Page_Up:    return 33;
-    case GDK_KEY_Page_Down:  return 34;
-    case GDK_KEY_End:        return 35;
-    case GDK_KEY_Home:       return 36;
-    case GDK_KEY_Left:       return 37;
-    case GDK_KEY_Up:         return 38;
-    case GDK_KEY_Right:      return 39;
-    case GDK_KEY_Down:       return 40;
-    case GDK_KEY_Delete:     return 46;
-    default:                 return 0;
-    }
+    if (keyval >= GDK_KEY_KP_0 && keyval <= GDK_KEY_KP_9)
+        return 96 + (int)(keyval - GDK_KEY_KP_0);
+    if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24)
+        return 112 + (int)(keyval - GDK_KEY_F1);
+    const PvKeyName *name = pv_key_name(keyval);
+    return name ? name->keycode : 0;
 }
 
 static void
@@ -2096,7 +2169,8 @@ start_key_full(NsProcView *v, int kind, guint keyval, GdkModifierType state,
     req->mods = ((state & GDK_SHIFT_MASK)   ? 1 : 0) |
                 ((state & GDK_CONTROL_MASK) ? 2 : 0) |
                 ((state & GDK_ALT_MASK)     ? 4 : 0) |
-                ((state & GDK_META_MASK)    ? 8 : 0);
+                ((state & GDK_META_MASK)    ? 8 : 0) |
+                (kind == 0 ? NS_KEY_MOD_TEXT_SEPARATE : 0);
     req->key = g_strdup(keyval_js_key(keyval, keybuf, sizeof keybuf));
     req->code = g_strdup(keyval_js_code(keyval, codebuf, sizeof codebuf));
     push_req(v, req);
@@ -2115,7 +2189,7 @@ start_key_text(NsProcView *v, int kind, const char *text)
         return;
     Req *req = g_new0(Req, 1);
     req->type = REQ_KEY;
-    req->seq = ++v->key_seq;
+    req->seq = kind == 2 ? v->key_seq : ++v->key_seq;
     req->kind = kind;
     req->keycode = 0;
     req->mods = 0;
@@ -3962,6 +4036,10 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     default:                 start_key(v, 0, keyval, state); return FALSE;
     }
     start_key_full(v, 0, keyval, state, 1, tx, ty);
+    if (keyval == GDK_KEY_space) {
+        start_key(v, 3, keyval, state);
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -4529,14 +4607,17 @@ ns_proc_view_new(void)
     gtk_widget_add_controller(v->area, scroll);
 
     GtkEventController *key = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(key, GTK_PHASE_CAPTURE);
     g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), v);
     g_signal_connect(key, "key-released", G_CALLBACK(on_key_released), v);
+    gtk_widget_add_controller(v->area, key);
+    GtkEventController *text_input = gtk_event_controller_key_new();
     v->im = gtk_im_multicontext_new();
     gtk_im_context_set_client_widget(v->im, v->area);
     g_signal_connect(v->im, "commit", G_CALLBACK(on_im_commit), v);
-    gtk_event_controller_key_set_im_context(GTK_EVENT_CONTROLLER_KEY(key),
-                                            v->im);
-    gtk_widget_add_controller(v->area, key);
+    gtk_event_controller_key_set_im_context(
+        GTK_EVENT_CONTROLLER_KEY(text_input), v->im);
+    gtk_widget_add_controller(v->area, text_input);
 
     g_signal_connect(v->area, "destroy", G_CALLBACK(on_area_destroy), v);
 
