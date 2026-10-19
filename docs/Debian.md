@@ -71,14 +71,14 @@ Key choices:
 * **`debian/rules`** is a small `dh` file. Hardening is on via
   `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
   meson build already enables PIE, stack protector, and FORTIFY itself.
-  The `dh_auto_configure` override passes `-Dns-pango=disabled`
-  (sbuild/pbuilder chroots have no network, so the ns-pango subproject
-  cannot be cloned — text shapes through the system Pango instead),
-  `-Dwebgpu=disabled` (wgpu-native is not packaged), `-Davif=enabled
-  -Djxl=enabled -Dgstreamer=enabled -Daudio=enabled` (so a missing build
-  dependency fails the build instead of silently dropping a codec) and
-  `-Dbuild_date` derived from `SOURCE_DATE_EPOCH`, so the About dialog's
-  date comes from `debian/changelog` and the build is reproducible.
+  The `dh_auto_configure` override passes `-Dwebgpu=disabled`
+  (wgpu-native is not packaged; web-text-lib, the text-shaping Pango fork,
+  is vendored at `src/web-text-lib/` and builds offline in sbuild/pbuilder
+  chroots straight from the tarball), `-Davif=enabled -Djxl=enabled
+  -Dgstreamer=enabled -Daudio=enabled` (so a missing build dependency
+  fails the build instead of silently dropping a codec) and `-Dbuild_date`
+  derived from `SOURCE_DATE_EPOCH`, so the About dialog's date comes from
+  `debian/changelog` and the build is reproducible.
   The `dh_auto_install` override drops `libnordstjernen.so` and its
   header: that is the embedding API for other applications, nothing in the
   package links it, and it carries no SONAME version.
@@ -112,14 +112,14 @@ The FFmpeg `libav*` packages are **not** optional here: `meson setup` fails
 without them on Linux (inline WebM — VP9/VP8 video, Opus/Vorbis audio).
 GStreamer decodes H.264/AAC, `libbrotli-dev` enables WOFF2 web fonts,
 `libjxl-dev`/`libavif-dev` add JPEG XL and AVIF images and
-`libpoppler-glib-dev` the built-in PDF viewer. `libpango1.0-dev`,
-`libfontconfig-dev` and `libfreetype-dev` cover the system-Pango path that
-`debian/rules` selects.
+`libpoppler-glib-dev` the built-in PDF viewer. `libfontconfig-dev` and
+`libfreetype-dev`, with GTK's cairo, HarfBuzz and FriBiDi development
+packages, are what the in-tree web-text-lib text stack builds against.
 
 `libseccomp-dev` is marked `[linux-any]` in `debian/control`; all Debian
 release architectures are Linux, so it always applies. `cmake` is **not**
-a build dependency: lexbor, QuickJS, and WAMR build in-tree via meson
-`subdir()` and there are no CMake subprojects.
+a build dependency: lexbor, QuickJS, WAMR, and web-text-lib build in-tree
+via meson `subdir()` and there are no CMake subprojects.
 
 Runtime dependencies are computed automatically by `dh_shlibdeps`
 (`${shlibs:Depends}`) from the linked shared libraries — nothing is

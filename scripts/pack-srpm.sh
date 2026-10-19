@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Build a source RPM (.src.rpm) of Nordstjernen. Every subproject the build
-# needs (Wuffs, pl_mpeg) is vendored in the tarball, and the one remaining
-# wrap — ns-pango, cloned with git — is switched off in the spec, so
-# `rpmbuild --rebuild` resolves offline against the system Pango.
+# needs (Wuffs, pl_mpeg, web-text-lib) is vendored in the tarball, so
+# `rpmbuild --rebuild` resolves offline.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -92,15 +91,13 @@ engine is used. SVG images are rendered in-engine.
 %setup -q -n ${SLUG}
 
 %build
-# A rebuild has no network: the vendored subprojects are in the tarball and
-# ns-pango, the one git wrap, gives way to the system Pango.
+# A rebuild has no network: the vendored subprojects are in the tarball.
 meson setup builddir \\
     --prefix=%{_prefix} \\
     --libdir=%{_libdir} \\
     --buildtype=release \\
     -Db_lto=true \\
     -Db_ndebug=true \\
-    -Dns-pango=disabled \\
     -Dwebgpu=disabled \\
     --wrap-mode=nodownload
 meson compile -C builddir

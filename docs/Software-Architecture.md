@@ -310,9 +310,9 @@ recursive `paint_walk` (`:8896`) culls hidden/offscreen boxes, applies
 opacity/blend/mask groups, sticky offsets, 2D and 3D transforms, and
 clip-paths, and paints positioned/z-indexed children in stacking order.
 
-**Text** is shaped with **Pango** — on desktop through the **ns-pango**
-fork pinned as a meson subproject (`subprojects/ns-pango.wrap`, included
-as `"ns_pango.h"`), which caches shaped glyph strings across layouts;
+**Text** is shaped with **Pango** — on desktop through the **web-text-lib**
+fork vendored in-tree at `src/web-text-lib/` (loaded via `subdir()`,
+included as `"ns_pango.h"`), which caches shaped glyph strings across layouts;
 Android and iOS link the system Pango. `@font-face`
 fonts are fetched, converted from WOFF to SFNT (`src/font.c`) and from
 WOFF2 to SFNT over libbrotlidec when it is available (`src/woff2.c`), and
@@ -554,9 +554,9 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 ## 15. Build, embedding, and platforms
 
 - **Build system:** meson + ninja. Optional features (`gtk`, `wasm`,
-  `audio`, `webgpu`, `avif`, `jxl`, `ns-pango`) are meson feature flags,
+  `audio`, `webgpu`, `avif`, `jxl`, `web-text-lib`) are meson feature flags,
   and `http_backend` and `quickjs` are combo options; ccache is picked up
-  automatically. The vendored lexbor, QuickJS, and WAMR trees are loaded
+  automatically. The vendored lexbor, QuickJS, WAMR, and web-text-lib trees are loaded
   via `subdir()` and expose declared dependencies directly, not as
   subprojects.
 - **Embedding:** the engine is exposed as a shared library

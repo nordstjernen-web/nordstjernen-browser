@@ -43,9 +43,7 @@ builddir="$srcdir/nordstjernen-browser-$pkgver"
 options="!check"
 
 build() {
-	# abuild's build() runs without network, so the ns-pango subproject cannot
-	# be cloned: shape text through the system Pango instead.
-	abuild-meson -Dns-pango=disabled -Dwebgpu=disabled . output
+	abuild-meson -Dwebgpu=disabled . output
 	meson compile -C output
 }
 

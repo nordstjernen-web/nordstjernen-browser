@@ -12,14 +12,12 @@ BUILD_DATE := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y-%m-%d)
 %:
 	dh $@
 
-# Source builds run in a network-isolated chroot (sbuild/pbuilder), where the
-# ns-pango subproject cannot be cloned, so shape text through the system Pango;
+# Source builds run in a network-isolated chroot (sbuild/pbuilder), and
 # wgpu-native is not packaged, so WebGPU is left out. The optional codecs are
 # required explicitly so a missing build dependency fails the build instead of
 # silently dropping a feature.
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-Dns-pango=disabled \
 		-Dwebgpu=disabled \
 		-Davif=enabled \
 		-Djxl=enabled \
