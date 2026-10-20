@@ -1,6 +1,7 @@
 #!/usr/bin/make -f
 
-export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+# meson.build already sets -D_FORTIFY_SOURCE=3; dpkg's =2 would override it.
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all,-fortify
 
 include /usr/share/dpkg/architecture.mk
 include /usr/share/dpkg/pkg-info.mk
