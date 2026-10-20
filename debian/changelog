@@ -4,9 +4,12 @@ nordstjernen (1.0.36~dev-1) UNRELEASED; urgency=medium
 
  -- Andreas Røsdal <andreas.rosdal@gmail.com>  Tue, 20 Oct 2026 22:33:10 +0200
 
-nordstjernen (1.0.35-1) UNRELEASED; urgency=medium
+nordstjernen (1.0.35+ds-1) unstable; urgency=medium
 
   * New upstream release 1.0.35.
+  * Repack the upstream tarball without the Files-Excluded Gradle wrapper
+    jar (+ds), and teach debian/watch the repack suffix.
+  * Build-depend on pkgconf instead of the obsolete pkg-config.
   * debian/rules: drop dpkg's fortify flag; meson.build already builds
     with -D_FORTIFY_SOURCE=3, which dpkg's =2 overrode.
 
