@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Clean-room, hardened web browser written from scratch in C
 
 License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
-URL:            https://github.com/nordstjernen-web/nordstjernen-browser
+URL:            https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  gcc

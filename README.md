@@ -62,10 +62,10 @@ for the GPL-licensed sibling project.
 |----------|----------|
 | Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
 | Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
-| macOS | notarised `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-browser/releases) |
-| Debian / Ubuntu | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04) on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-browser/releases) |
-| Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-browser/packages) on GitHub Packages (Maven) |
-| Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-browser/tags) |
+| macOS | notarised `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| Debian / Ubuntu | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04) on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
+| Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-sol-browser/tags) |
 
 Windows 10 or later is required (the GTK 4 frontend links
 DirectComposition). Other platforms build from source — see "Build" below
@@ -273,14 +273,14 @@ Project home: <https://nordstjernen.org>
 [Join the Discord](https://discord.gg/4W959nW5vF)  
 
 ## Builds
-[![linux](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/linux.yml)
-[![macos](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/macos.yml)
-[![windows](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/windows.yml)
-[![android](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/android.yml)
-[![java](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/java.yml)
-[![freebsd](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/freebsd.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/freebsd.yml)
-[![netbsd](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/netbsd.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/netbsd.yml)
-[![musl](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/musl.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-browser/actions/workflows/musl.yml)
+[![linux](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/linux.yml)
+[![macos](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/macos.yml)
+[![windows](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/windows.yml)
+[![android](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/android.yml)
+[![java](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/java.yml)
+[![freebsd](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/freebsd.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/freebsd.yml)
+[![netbsd](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/netbsd.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/netbsd.yml)
+[![musl](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/musl.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/actions/workflows/musl.yml)
 
 <img src="docs/best-viewed-in-nordstjernen.gif" alt="Best viewed in Nordstjernen" width="140">
 

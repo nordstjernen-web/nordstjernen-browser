@@ -32,7 +32,7 @@ asking `apk info -W` which package owns each library the staged binaries
 load (see `Nightly.md`).
 
 GitHub names the archive root after the repository, so the tarball unpacks
-to `nordstjernen-browser-$pkgver` rather than `$pkgname-$pkgver`; the
+to `nordstjernen-sol-browser-$pkgver` rather than `$pkgname-$pkgver`; the
 APKBUILD sets `builddir` accordingly.
 
 ## License
