@@ -4528,7 +4528,7 @@ static const char k_about_start_template[] =
     ".brand h1{font-size:26px}}\n"
     "</style></head>"
     "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Browser "
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Sol Browser "
     "<span class=\"ver\">" NS_VERSION "</span></h1></div>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""

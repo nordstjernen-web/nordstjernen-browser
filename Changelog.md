@@ -25,7 +25,8 @@ Changelog:
   manager titles, the title-bar name, about:nordstjernen, the Windows
   message boxes and installer display name, the Linux desktop entry and
   AppStream name, the Android label, the macOS and iOS display names and
-  the Java shell. Every UI catalogue carries the translated name with
+  the Java shell, and the about:start heading, which now reads
+  "Nordstjernen Sol Browser". Every UI catalogue carries the translated name with
   "Sol" appended. Package identifiers, install paths, the profile
   directory and the user agent are unchanged.
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
