@@ -3,6 +3,9 @@ Changelog:
 
 1.0.35:
 ======
+* nordstjernen --version prints the version and --help lists the main
+  options; both exit without starting the browser. Before, either one
+  opened a browser window.
 * about:nordstjernen no longer shows the animated cartoon splash. The
   1.7 MB embedded GIF (src/about_splash_gif.h), its source images in
   data/ and the scripts/gen-splash.* generator are gone, which shrinks
