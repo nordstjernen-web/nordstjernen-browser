@@ -1,6 +1,27 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.36:
+======
+* README brought in line with the source after a full review. It names
+  1.0.35 as the current release and counts about 254,000 lines of engine C.
+  It now lists the CSS, JavaScript, networking, privacy, UI and extension
+  features the engine has, including Service Workers, Streams, Temporal,
+  HTTPS-First, Developer Tools, the Task Manager and filter-list content
+  blocking. Claims that were wrong are corrected:
+  - the headless screenshot option is `--dump=png:FILE`, not `--screenshot=`;
+  - Wuffs also decodes simple lossy WebP;
+  - `<audio>` does not play AAC files;
+  - WebGL is desktop-only, and WebGL 1 only on macOS;
+  - WebAssembly covers the MVP plus reference types and bulk memory, not the
+    full JS API;
+  - 13 of the 40 UI catalogues cover more than the browser's name;
+  - "session restore" is crash recovery;
+  - the FreeBSD and NetBSD builds have no renderer sandbox;
+  - Windows needs 10 version 1809 on x64.
+  The README now also lists iOS as an experimental port, and FriBidi, zlib
+  and libwebpdemux as required libraries.
+
 1.0.35:
 ======
 * nordstjernen --version prints the version and --help lists the main
