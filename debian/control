@@ -6,7 +6,7 @@ Build-Depends:
  debhelper-compat (= 13),
  meson (>= 1.0),
  ninja-build,
- pkg-config,
+ pkgconf,
  libglib2.0-dev,
  libgtk-4-dev (>= 4.14),
  libepoxy-dev,
