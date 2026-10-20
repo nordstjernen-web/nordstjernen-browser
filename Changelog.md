@@ -14,6 +14,10 @@ Changelog:
   dpkg's hardening flags appended -D_FORTIFY_SOURCE=2, which overrode it
   and printed a "_FORTIFY_SOURCE redefined" warning for every file.
   debian/changelog now carries 1.0.35~dev-1 to match the source version.
+* The Debian / Ubuntu build instructions use apt build-dep, which installs
+  the complete debian/control list. The hand-written package list missed
+  the AVIF, JPEG XL, GStreamer, spell-check and PDF libraries, so a build
+  that followed it silently left those features out.
 * about:nordstjernen no longer shows the animated cartoon splash. The
   1.7 MB embedded GIF (src/about_splash_gif.h), its source images in
   data/ and the scripts/gen-splash.* generator are gone, which shrinks
