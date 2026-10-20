@@ -102,7 +102,7 @@ public final class Browser {
         return t;
     });
 
-    private final JFrame frame = new JFrame("Nordstjernen" + TITLE_SUFFIX);
+    private final JFrame frame = new JFrame("Nordstjernen Sol" + TITLE_SUFFIX);
     private final JToolBar toolbar = new JToolBar();
     private final JPanel south = new JPanel(new BorderLayout());
     private final JButton back = navButton("back", "◀", "Back (Alt+Left)");
@@ -269,7 +269,7 @@ public final class Browser {
         if (logoImage != null) {
             JLabel brand = new JLabel(new ImageIcon(logoImage));
             brand.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
-            brand.setToolTipText("Nordstjernen — nordstjernen.org");
+            brand.setToolTipText("Nordstjernen Sol — nordstjernen.org");
             brand.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             brand.addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mouseClicked(java.awt.event.MouseEvent e) {
@@ -705,7 +705,7 @@ public final class Browser {
                 }
                 address.setText(finalUrl);
                 frame.setTitle((title.isEmpty() ? "Untitled" : title)
-                    + " — Nordstjernen" + (privateMode ? " (Private)" : "")
+                    + " — Nordstjernen Sol" + (privateMode ? " (Private)" : "")
                     + TITLE_SUFFIX);
                 updateNavButtons();
                 updateSecurityBadge();
@@ -1781,7 +1781,7 @@ public final class Browser {
         licenses.addActionListener(e -> navigate("about:license", true));
         menu.add(licenses);
 
-        JMenuItem about = new JMenuItem("About Nordstjernen");
+        JMenuItem about = new JMenuItem("About Nordstjernen Sol");
         about.addActionListener(e -> showAbout());
         menu.add(about);
 

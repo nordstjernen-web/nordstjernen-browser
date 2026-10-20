@@ -2089,7 +2089,7 @@ static void
 pdf_set_metadata(cairo_surface_t *surf)
 {
     cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATOR,
-                                   "Nordstjernen");
+                                   "Nordstjernen Sol");
     time_t now = time(NULL);
     struct tm tm_utc;
 #if defined(_WIN32)
