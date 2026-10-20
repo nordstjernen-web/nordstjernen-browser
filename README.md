@@ -1,7 +1,7 @@
 Nordstjernen web browser
 ========================
 
-Nordstjernen is a web browser written from scratch in C,
+Nordstjernen (aka "Sol browser") is a web browser written from scratch in C,
 focused on support for modern HTML, CSS and JavaScript standards.
 
 ![Nordstjernen showing a Wikipedia article in the light theme](docs/screenshot.png)
