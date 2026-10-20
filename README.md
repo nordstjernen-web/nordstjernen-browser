@@ -173,11 +173,15 @@ scripts for AppImage, RPM, Alpine, the BSDs and MSIX are in `scripts/`.
 
 ## Build
 
+On Debian and Ubuntu, `apt build-dep .` installs everything
+`debian/control` lists, so no optional feature (AVIF, JPEG XL, H.264
+video, spell checking, PDF) is silently left out:
+
 ```sh
-sudo apt install build-essential git pkg-config meson ninja-build \
-    libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev \
-    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+sudo apt install git
+git clone https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
+cd nordstjernen-sol-browser
+sudo apt build-dep .
 meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```

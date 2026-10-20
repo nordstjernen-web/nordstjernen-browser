@@ -8,11 +8,10 @@ locally before pushing.
 
 ## Build dependencies
 
-System packages required on Debian / Ubuntu:
+On Debian / Ubuntu, install the full build dependency list from
+`debian/control` (run in the source tree):
 
-    sudo apt install build-essential pkg-config meson ninja-build \
-        libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-        libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
+    sudo apt build-dep .
 
 On Fedora / RHEL:
 
