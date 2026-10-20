@@ -24,6 +24,10 @@ Files: *
 Copyright: 2026 Andreas Røsdal
 License: GPL-3+ or NSL-1.0
 
+Files: data/org.nordstjernen.WebBrowser.metainfo.xml
+Copyright: 2026 Andreas Røsdal
+License: CC0-1.0
+
 Files: src/lexbor/*
 Copyright: 2018-2025 Alexander Borisov
 License: Apache-2.0

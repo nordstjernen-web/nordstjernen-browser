@@ -1,4 +1,7 @@
-version=4
-opts="searchmode=plain,repacksuffix=+ds,dversionmangle=s/\+ds\d*$//,filenamemangle=s%(?:.*/)?v?@ANY_VERSION@%@PACKAGE@-$1.tar.gz%" \
-  https://api.github.com/repos/nordstjernen-web/nordstjernen-sol-browser/tags?per_page=50 \
-  https://api.github.com/repos/[^/]+/[^/]+/tarball/refs/tags/v?@ANY_VERSION@
+Version: 5
+
+Template: Github
+Owner: nordstjernen-web
+Project: nordstjernen-sol-browser
+Repack-Suffix: +ds
+Dversion-Mangle: auto
