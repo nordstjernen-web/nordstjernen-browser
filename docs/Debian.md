@@ -207,7 +207,7 @@ With a Debian Developer willing to sponsor it:
 
        reportbug --email <you> wnpp
 
-   Title it `ITP: nordstjernen -- small, hand-written web browser` and
+   Title it `ITP: nordstjernen -- web browser` and
    give the license as `GPL-3+ or NSL-1.0` (SPDX
    `LicenseRef-NSL-1.0 OR GPL-3.0-or-later`), noting that Debian distributes
    it under the GPL-3+ option and that it targets `main`.
