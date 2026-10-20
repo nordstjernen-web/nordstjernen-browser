@@ -6,6 +6,10 @@ Changelog:
 * nordstjernen --version prints the version and --help lists the main
   options; both exit without starting the browser. Before, either one
   opened a browser window.
+* Linux: the Landlock sandbox lets GTK write its renderer cache in
+  ~/.cache/gtk-4.0, so the Vulkan pipeline cache is saved between runs
+  instead of failing with "Permission denied" and being rebuilt on every
+  start.
 * about:nordstjernen no longer shows the animated cartoon splash. The
   1.7 MB embedded GIF (src/about_splash_gif.h), its source images in
   data/ and the scripts/gen-splash.* generator are gone, which shrinks

@@ -427,6 +427,15 @@ ns_print_version_or_help(int argc, char **argv)
     return -1;
 }
 
+static void
+ns_add_gtk_cache_writable_dir(void)
+{
+    g_autofree char *dir =
+        g_build_filename(g_get_user_cache_dir(), "gtk-4.0", NULL);
+    if (g_mkdir_with_parents(dir, 0700) == 0)
+        ns_security_add_writable_dir(dir);
+}
+
 static gboolean
 ns_private_mode_wanted(int argc, char **argv)
 {
@@ -611,6 +620,7 @@ main(int argc, char **argv)
 
     ns_security_win32_mitigations_init(proc_mode);
     ns_add_screenshot_writable_dirs(argc, argv);
+    ns_add_gtk_cache_writable_dir();
 
     gboolean single_process = proc_mode &&
                               ns_single_process_wanted(argc, argv);
