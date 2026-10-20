@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Nordstjernen
 Upstream-Contact: Andreas Røsdal <andreas.rosdal@gmail.com>
-Source: https://github.com/nordstjernen-web/nordstjernen-browser
+Source: https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Files-Excluded:
  android/gradle/wrapper/gradle-wrapper.jar
 Comment:

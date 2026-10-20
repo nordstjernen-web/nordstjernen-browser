@@ -16,6 +16,11 @@ Changelog:
   is trimmed to what the browser calls: about 450 unreachable functions,
   13 files and the generated enum types are gone (some 12,800 lines), and
   the build no longer needs glib-mkenums.
+* The repository is renamed to nordstjernen-web/nordstjernen-sol-browser.
+  Every link to it follows: the README badges and release links, the
+  AppStream metainfo, the Debian, RPM, OBS and Alpine packaging, the Java
+  POM and Gradle metadata, and the build documentation. The Alpine recipe
+  unpacks from the new archive root, with a checksum to match.
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
   for crashes and double frees fixed twenty-five bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a

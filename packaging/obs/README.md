@@ -25,7 +25,7 @@ spec's `%prep`). Create it if needed, then bind it to git:
 
 and add inside `<package>`:
 
-    <scmsync>https://github.com/nordstjernen-web/nordstjernen-browser?trackingbranch=main</scmsync>
+    <scmsync>https://github.com/nordstjernen-web/nordstjernen-sol-browser?trackingbranch=main</scmsync>
 
 That is the whole setup. After it, git is authoritative: edit the spec in
 this repo and push — never touch files in the OBS web UI.

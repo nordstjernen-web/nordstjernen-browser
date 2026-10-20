@@ -94,7 +94,7 @@ publishing {
                 licenses {
                     license {
                         name = 'Nordstjernen Source License v1.0'
-                        url = 'https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-browser/main/License.md'
+                        url = 'https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-sol-browser/main/License.md'
                         distribution = 'repo'
                         comments = 'LicenseRef-NSL-1.0; dual-licensed, at your option, with GPL-3.0-or-later'
                     }
@@ -114,13 +114,13 @@ publishing {
                     }
                 }
                 scm {
-                    connection = 'scm:git:https://github.com/nordstjernen-web/nordstjernen-browser.git'
-                    developerConnection = 'scm:git:ssh://git@github.com/nordstjernen-web/nordstjernen-browser.git'
-                    url = 'https://github.com/nordstjernen-web/nordstjernen-browser'
+                    connection = 'scm:git:https://github.com/nordstjernen-web/nordstjernen-sol-browser.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/nordstjernen-web/nordstjernen-sol-browser.git'
+                    url = 'https://github.com/nordstjernen-web/nordstjernen-sol-browser'
                 }
                 issueManagement {
                     system = 'GitHub Issues'
-                    url = 'https://github.com/nordstjernen-web/nordstjernen-browser/issues'
+                    url = 'https://github.com/nordstjernen-web/nordstjernen-sol-browser/issues'
                 }
             }
         }

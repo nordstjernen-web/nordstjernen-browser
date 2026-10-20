@@ -36,8 +36,8 @@ Build-Depends:
  zlib1g-dev,
 Standards-Version: 4.7.2
 Homepage: https://nordstjernen.org
-Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen-browser
-Vcs-Git: https://github.com/nordstjernen-web/nordstjernen-browser.git
+Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen-sol-browser
+Vcs-Git: https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
 Rules-Requires-Root: no
 
 Package: nordstjernen

@@ -78,7 +78,7 @@ It is set via the package meta (package → *Advanced* → *Meta* in the web
 UI, or `osc meta pkg home:andreasrosdal Nordstjernen -e`), adding one line:
 
 ```xml
-<scmsync>https://github.com/nordstjernen-web/nordstjernen-browser?trackingbranch=main</scmsync>
+<scmsync>https://github.com/nordstjernen-web/nordstjernen-sol-browser?trackingbranch=main</scmsync>
 ```
 
 After this, edit the spec in this repo and push — do not edit files in
