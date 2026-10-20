@@ -1,6 +1,6 @@
 # Nordstjernen UI translations — Chinese / 中文
 # Format: one English-source=translation pair per line; '#' starts a comment.
-Nordstjernen=北极星
+Nordstjernen Sol=北极星 Sol
 Back=后退
 Forward=前进
 Reload=重新加载

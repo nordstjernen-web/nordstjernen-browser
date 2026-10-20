@@ -21,6 +21,13 @@ Changelog:
   AppStream metainfo, the Debian, RPM, OBS and Alpine packaging, the Java
   POM and Gradle metadata, and the build documentation. The Alpine recipe
   unpacks from the new archive root, with a checksum to match.
+* The application is now called Nordstjernen Sol: the window and task
+  manager titles, the title-bar name, about:nordstjernen, the Windows
+  message boxes and installer display name, the Linux desktop entry and
+  AppStream name, the Android label, the macOS and iOS display names and
+  the Java shell. Every UI catalogue carries the translated name with
+  "Sol" appended. Package identifiers, install paths, the profile
+  directory and the user agent are unchanged.
 * Security: a review of the engine, its QuickJS fork and its lexbor fork
   for crashes and double frees fixed twenty-five bugs that a page, or an
   ordinary action in the shell, could trigger. Each commit carries a
