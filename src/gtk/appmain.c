@@ -46,6 +46,7 @@
 #include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
+#include "version.h"
 #include "watchdog.h"
 
 static char *g_self_exe;
@@ -225,6 +226,8 @@ ns_win32_args_need_console(int argc, char **argv)
         if (!argv[i]) continue;
         if (g_strcmp0(argv[i], "--headless")     == 0 ||
             g_strcmp0(argv[i], "--print-config") == 0 ||
+            g_strcmp0(argv[i], "--version")      == 0 ||
+            g_strcmp0(argv[i], "--help")         == 0 ||
             g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
@@ -393,6 +396,37 @@ ns_single_process_wanted(int argc, char **argv)
     return env && *env && g_strcmp0(env, "0") != 0;
 }
 
+static int
+ns_print_version_or_help(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--version") == 0) {
+            printf("Nordstjernen Sol Browser %s\n", NS_VERSION);
+            return 0;
+        }
+        if (g_strcmp0(argv[i], "--help") == 0 || g_strcmp0(argv[i], "-h") == 0) {
+            fputs("Usage: nordstjernen [OPTION...] [URL]\n"
+                  "\n"
+                  "  --private              open a private window\n"
+                  "  --window-size=WxH      initial window size\n"
+                  "  --proxy=URL            send traffic through this proxy\n"
+                  "  --enable-webgpu        allow WebGPU even when Settings turns it off\n"
+                  "  --remote-control       let the MCP server drive this window\n"
+                  "  --mcp                  run the MCP server over stdio\n"
+                  "  --print-config         print the effective configuration and exit\n"
+                  "  --headless             load URL without a window\n"
+                  "  --dump=text|dom|layout|png:FILE|pdf:FILE\n"
+                  "                         what a headless run writes (default text)\n"
+                  "  --viewport=W[xH]       headless viewport size\n"
+                  "  --version              print the version and exit\n"
+                  "  --help                 print this help and exit\n",
+                  stdout);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static gboolean
 ns_private_mode_wanted(int argc, char **argv)
 {
@@ -533,6 +567,8 @@ main(int argc, char **argv)
     if (ns_win32_args_need_console(argc, argv))
         ns_win32_attach_parent_console();
 #endif
+    int info_rc = ns_print_version_or_help(argc, argv);
+    if (info_rc >= 0) return info_rc;
     if (!ns_security_refuse_root()) return 77;
     init_self_exe(argc > 0 ? argv[0] : NULL);
     ns_i18n_init(g_self_exe);
