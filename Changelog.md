@@ -10,6 +10,10 @@ Changelog:
   ~/.cache/gtk-4.0, so the Vulkan pipeline cache is saved between runs
   instead of failing with "Permission denied" and being rebuilt on every
   start.
+* Debian package: built with -D_FORTIFY_SOURCE=3 as meson.build asks.
+  dpkg's hardening flags appended -D_FORTIFY_SOURCE=2, which overrode it
+  and printed a "_FORTIFY_SOURCE redefined" warning for every file.
+  debian/changelog now carries 1.0.35~dev-1 to match the source version.
 * about:nordstjernen no longer shows the animated cartoon splash. The
   1.7 MB embedded GIF (src/about_splash_gif.h), its source images in
   data/ and the scripts/gen-splash.* generator are gone, which shrinks
