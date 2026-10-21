@@ -297,7 +297,10 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
 - CSP (`default-src`, `script-src`, `style-src`, `img-src`,
   `media-src`, `connect-src`, `font-src`, `frame-src`,
   `frame-ancestors`) is parsed and enforced for both inline and
-  external resources, including nonce and hash matches. Host source
+  external resources, including nonce and hash matches. Without
+  `'unsafe-eval'` in the effective script directive, `eval()`, the
+  `Function` constructors and string timers are refused, and WebAssembly
+  compiles only with `'wasm-unsafe-eval'` or `'unsafe-eval'`. Host source
   expressions match scheme, host (with `*.` wildcard), port (defaulting
   to the scheme's default), and path (left-anchored if the source ends
   in `/`, exact otherwise). `*` follows CSP3 semantics — it matches

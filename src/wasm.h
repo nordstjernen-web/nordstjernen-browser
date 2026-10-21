@@ -9,5 +9,6 @@
 #include "ns_quickjs.h"
 
 void ns_wasm_install(JSContext *ctx, JSValueConst global);
+bool ns_wasm_compile_allowed(JSContext *ctx);
 
 #endif

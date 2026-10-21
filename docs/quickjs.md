@@ -110,6 +110,12 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
   `AbortController` shows up as their own properties, and a page's write to
   an attribute (`xhr.timeout = '1500'`) is stored as given instead of going
   through the interface's setter.
+- **CSP and `eval`.** The fork asks the browser before `eval()` or a
+  `Function` constructor compiles a string, so a Content Security Policy
+  without `'unsafe-eval'` refuses them with an `EvalError`. The original
+  engine has no such hook and runs them. String timers and WebAssembly
+  compilation are checked by the browser itself and are refused on both
+  engines.
 - **WebAssembly memory.** A view made on an imported
   `WebAssembly.Memory`'s `buffer` before the module is instantiated is
   detached by instantiation instead of being repointed at the instance's

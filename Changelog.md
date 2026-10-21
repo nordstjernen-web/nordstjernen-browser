@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a Content Security Policy without `'unsafe-eval'` now stops
+  `eval()`, `new Function()` (and the async and generator variants) and
+  `setTimeout`/`setInterval` with a string. The keyword was parsed but
+  never enforced, so a page that relied on CSP to keep an injected string
+  from becoming code got no protection. They now fail with an
+  `EvalError`, or the string timer does not run, and the console logs
+  "CSP blocked: eval". WebAssembly compiles only when the policy allows
+  `'wasm-unsafe-eval'` or `'unsafe-eval'`. An `about:blank` frame follows
+  its parent's policy; a frame that loaded its own document is unaffected.
 * Security: `<link rel=stylesheet integrity=…>` is now verified. Only
   scripts were checked, so a stylesheet whose bytes did not match its
   Subresource Integrity hash (for example one altered on a compromised
