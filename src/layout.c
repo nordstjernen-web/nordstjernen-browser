@@ -9099,6 +9099,22 @@ overflow_establishes_bfc(const ns_style *s)
 }
 
 static gboolean
+box_overflow_goes_to_viewport(const ns_box *box)
+{
+    const ns_node *html = box->dom ? box->dom->parent : NULL;
+    if (!ns_node_is_element_named(box->dom, "body") ||
+        !ns_node_is_element_named(html, "html") ||
+        (html->parent && html->parent->kind == NS_NODE_ELEMENT) ||
+        !box->parent || box->parent->dom != html)
+        return FALSE;
+    const ns_style *hs = box->parent->style;
+    return g_ascii_strcasecmp(ns_style_overflow_keyword(hs, NS_CSS_OVERFLOW_X),
+                              "visible") == 0 &&
+           g_ascii_strcasecmp(ns_style_overflow_keyword(hs, NS_CSS_OVERFLOW_Y),
+                              "visible") == 0;
+}
+
+static gboolean
 box_establishes_bfc(const ns_box *box)
 {
     if (!box || !box->parent) return TRUE;
@@ -9126,7 +9142,8 @@ box_establishes_bfc(const ns_box *box)
         keyword_is(d, "inline-table"))
         return TRUE;
     return style_is_block_level(box->style) &&
-           overflow_establishes_bfc(box->style);
+           overflow_establishes_bfc(box->style) &&
+           !box_overflow_goes_to_viewport(box);
 }
 
 static void
