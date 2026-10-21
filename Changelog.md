@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: `overflow-x: clip` with `overflow-y: visible` (and the other
+  way round) now clips only the axis that asks for it. The painter
+  clipped both axes whenever either one clipped, so content that sticks
+  out above or below such a box was cut off. On Canva the hero gradient
+  starts 80px above its `overflow-x: clip` wrapper, behind the
+  transparent header, and the header area came out white with its white
+  menu text invisible. A `hidden`, `scroll` or `auto` axis still clips
+  both, since the other axis then computes to `auto`.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
