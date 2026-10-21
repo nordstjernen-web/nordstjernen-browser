@@ -6,9 +6,9 @@ link the system Pango instead -- Android and iOS, which have no CoreText
 backend in the fork and no fontconfig -- include the generated header to map
 each name back to its stock spelling.
 
-Names under ns_pango_cache_ are the fork's own additions with no stock
-equivalent; every use of them must sit behind #ifdef NS_USE_WEB_TEXT_LIB, so they
-are deliberately left unmapped.
+Names under ns_pango_cache_, and the others in FORK_ONLY, are the fork's own
+additions with no stock equivalent; every use of them must sit behind #ifdef
+NS_USE_WEB_TEXT_LIB, so they are deliberately left unmapped.
 """
 import glob
 import io
@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEADER = os.path.join(ROOT, 'src', 'ns_pango_names.h')
 SKIP_FILES = {'ns_pango.h', 'ns_pango_names.h'}
-FORK_ONLY = ('ns_pango_cache_',)
+FORK_ONLY = ('ns_pango_cache_', 'ns_pango_fc_font_map_add_fonts')
 
 NAME = re.compile(r'\b(ns_pango_[a-z0-9_]+'
                   r'|NsPango[A-Za-z0-9_]+'

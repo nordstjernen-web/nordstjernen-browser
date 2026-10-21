@@ -2470,6 +2470,121 @@ ns_pango_fc_font_map_config_changed (NsPangoFcFontMap *fcfontmap)
   ns_pango_fc_font_map_cache_clear (fcfontmap);
 }
 
+static void
+forget_family_faces (NsPangoFcFamily *fcfamily)
+{
+  for (int i = 0; i < fcfamily->n_faces; i++)
+    {
+      fcfamily->faces[i]->family = NULL;
+      g_object_unref (fcfamily->faces[i]);
+    }
+  g_clear_pointer (&fcfamily->faces, g_free);
+  fcfamily->n_faces = -1;
+}
+
+static gboolean
+add_family_pattern (NsPangoFcFontMap *fcfontmap,
+                    FcPattern        *pattern)
+{
+  NsPangoFcFontMapPrivate *priv = fcfontmap->priv;
+  NsPangoFcFamily *family = NULL;
+  gboolean created = FALSE;
+  const char *name;
+  FcBool variable;
+  int spacing;
+
+  if (FcPatternGetString (pattern, FC_FAMILY, 0, (FcChar8 **)(void*)&name) != FcResultMatch ||
+      is_alias_family (name))
+    return FALSE;
+
+  for (int i = 0; i < priv->n_families && !family; i++)
+    if (strcmp (priv->families[i]->family_name, name) == 0)
+      family = priv->families[i];
+
+  if (!family)
+    {
+      if (FcPatternGetInteger (pattern, FC_SPACING, 0, &spacing) != FcResultMatch)
+        spacing = FC_PROPORTIONAL;
+      family = create_family (fcfontmap, name, spacing, FALSE);
+      priv->families = g_renew (NsPangoFcFamily *, priv->families, priv->n_families + 1);
+      priv->families[priv->n_families++] = family;
+      created = TRUE;
+    }
+
+  if (FcPatternGetBool (pattern, FC_VARIABLE, 0, &variable) == FcResultMatch && variable)
+    family->variable = TRUE;
+
+  FcPatternReference (pattern);
+  FcFontSetAdd (family->patterns, pattern);
+  if (family->n_faces >= 0)
+    forget_family_faces (family);
+
+  return created;
+}
+
+static void
+forget_fontsets (NsPangoFcFontMap *fcfontmap)
+{
+  NsPangoFcFontMapPrivate *priv = fcfontmap->priv;
+  NsPangoFcFontset *fontset;
+
+  while ((fontset = g_queue_pop_head (priv->fontset_cache)))
+    fontset->cache_link = NULL;
+
+  g_hash_table_remove_all (priv->fontset_hash);
+  g_hash_table_remove_all (priv->patterns_hash);
+}
+
+void
+ns_pango_fc_font_map_add_fonts (NsPangoFcFontMap *fcfontmap,
+                                FcFontSet        *fonts,
+                                int               first)
+{
+  NsPangoFcFontMapPrivate *priv;
+  int n_families;
+  gboolean added = FALSE;
+  gboolean new_family = FALSE;
+
+  g_return_if_fail (NS_PANGO_IS_FC_FONT_MAP (fcfontmap));
+
+  priv = fcfontmap->priv;
+  if (G_UNLIKELY (priv->closed) || !fonts)
+    return;
+
+  n_families = priv->n_families;
+
+  for (int i = MAX (first, 0); i < fonts->nfont; i++)
+    {
+      FcPattern *pattern = fonts->fonts[i];
+
+      if (!ns_pango_fc_is_supported_font_format (pattern))
+        continue;
+
+      pattern = pattern_set_order (pattern, FcSetApplication);
+      if (priv->n_families >= 0 && add_family_pattern (fcfontmap, pattern))
+        new_family = TRUE;
+      if (priv->fonts)
+        FcFontSetAdd (priv->fonts, pattern);
+      else
+        FcPatternDestroy (pattern);
+      added = TRUE;
+    }
+
+  if (!added)
+    return;
+
+  forget_fontsets (fcfontmap);
+
+  if (new_family)
+    {
+      qsort (priv->families, priv->n_families, sizeof (NsPangoFcFamily *), compare_font_family_names);
+      g_list_model_items_changed (G_LIST_MODEL (fcfontmap), 0, n_families, priv->n_families);
+      g_object_notify (G_OBJECT (fcfontmap), "n-items");
+    }
+
+  ns_pango_font_map_changed (NS_PANGO_FONT_MAP (fcfontmap));
+}
+
 /**
  * ns_pango_fc_font_map_get_config: (skip)
  * @fcfontmap: a `NsPangoFcFontMap`
