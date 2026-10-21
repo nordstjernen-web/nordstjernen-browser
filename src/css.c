@@ -31687,8 +31687,9 @@ static const char *kUa =
     "h6 { font-size: 0.67em; margin: 2.33em 0; }\n"
     "p { margin: 1em 0; }\n"
     "blockquote { margin: 1em 40px; }\n"
-    "hr { margin: 12px 0; height: 1px; background-color: #888888; "
-    "overflow: hidden; }\n"
+    "hr { color: gray; border-style: inset; border-width: 1px; "
+    "margin: 0.5em auto; overflow: hidden; }\n"
+    "hr[color], hr[noshade] { border-style: solid; }\n"
     "dir, dl, menu, ol, ul { margin-block: 1em; }\n"
     ":is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) { margin-block: 0; }\n"
     "dd { margin-inline-start: 40px; }\n"
@@ -33364,17 +33365,19 @@ presentational_hints_css(const ns_node *el)
             guint8 r, g, b, a;
             if (attr_is_color(color, &r, &g, &b, &a))
                 g_string_append_printf(out,
-                    "color: rgba(%u,%u,%u,%g);"
+                    "border-color: rgba(%u,%u,%u,%g);"
                     "background-color: rgba(%u,%u,%u,%g);",
                     r, g, b, a / 255.0, r, g, b, a / 255.0);
         }
         const char *size = ns_element_get_attr(el, "size");
         if (size && *size) {
             int v = ns_parse_int(size, 0, 0, 1000);
-            if (v > 0) g_string_append_printf(out, "height: %dpx;", v);
+            if (v <= 1) g_string_append(out, "border-bottom-width: 0;");
+            else g_string_append_printf(out, "height: %dpx;", v - 2);
         }
         if (ns_element_get_attr(el, "noshade") && !(color && *color))
-            g_string_append(out, "background-color: #808080;");
+            g_string_append(out, "border-color: #808080;"
+                                 "background-color: #808080;");
     }
     if (strcmp(tag, "textarea") == 0) {
         const char *wrap = ns_element_get_attr(el, "wrap");
