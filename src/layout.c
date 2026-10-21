@@ -966,6 +966,7 @@ ns_box_free(ns_box *box)
 
 static gboolean box_clips_children(const ns_box *b);
 static gboolean box_first_baseline(const ns_box *b, double *out);
+static gboolean style_has_layout_containment(const ns_style *s);
 
 static gboolean
 box_clips_for_page_height(const ns_box *b)
@@ -7713,6 +7714,8 @@ box_first_baseline(const ns_box *b, double *out)
                b->first_baseline;
         return TRUE;
     }
+    if (b->kind != NS_BOX_TABLE_ROW && style_has_layout_containment(b->style))
+        return FALSE;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
         if (style_is_absolute_or_fixed(c->style) || c->is_rendered_legend)
             continue;
@@ -8664,6 +8667,14 @@ keyword_list_has(const ns_css_value *v, const char *const *names, gsize n)
         p += len;
     }
     return FALSE;
+}
+
+static gboolean
+style_has_layout_containment(const ns_style *s)
+{
+    static const char *const contain[] = { "layout", "content", "strict" };
+    return s && keyword_list_has(s->values[NS_CSS_CONTAIN], contain,
+                                 G_N_ELEMENTS(contain));
 }
 
 static gboolean

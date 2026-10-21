@@ -32,6 +32,14 @@ Changelog:
   alphabetic baseline. With `line-height: normal`, a taller fallback
   font (emoji, Myanmar or Syriac text) still grows the line to fit its
   glyphs, as in Chrome.
+* Layout: a box with `contain: layout` (or `content` or `strict`) now
+  has no baseline when it is aligned in a line or in a flex row, as the
+  CSS containment spec says. An inline-flex or inline-block with
+  `contain: content` was aligned on the baseline of its text, so its
+  line was only as tall as the box. Chrome puts the bottom edge of the
+  box on the baseline instead, which leaves room below it for the
+  line's descent. GitHub's footer links, which are such boxes, were
+  5 px closer together than in Chrome.
 * Debian packaging: following the mentors.debian.net review, debhelper
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
