@@ -59,6 +59,12 @@ NS_PANGO_AVAILABLE_IN_1_38
 void
 ns_pango_fc_font_map_config_changed (NsPangoFcFontMap *fcfontmap);
 
+NS_PANGO_AVAILABLE_IN_ALL
+void
+ns_pango_fc_font_map_add_fonts (NsPangoFcFontMap *fcfontmap,
+                                FcFontSet        *fonts,
+                                int               first);
+
 NS_PANGO_AVAILABLE_IN_1_38
 FcConfig *
 ns_pango_fc_font_map_get_config (NsPangoFcFontMap *fcfontmap);
