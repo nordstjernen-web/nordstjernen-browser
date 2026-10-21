@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* CSS: `em`, `rem`, `ex`, `ch` and viewport units now resolve in every
+  layer of a layered value, such as the second image of
+  `background-position: 8px 8px, calc(100% - .5rem) .4375rem`. Only the
+  first layer was converted to pixels, and the painter read the others
+  as if the font units were zero, so a second background image sat in
+  the corner instead of half a rem inside it and a `background-size` of
+  `10em` in a later layer was drawn 10 pixels wide. A `background-size`
+  with one `auto` side (`2em auto`) is now resolved as well.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

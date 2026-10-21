@@ -32091,6 +32091,144 @@ calc_fold_arg_font_units(ns_css_value *v, double em_px, double rem_px)
     v->u.length.unit = NS_CSS_UNIT_PX;
 }
 
+typedef struct {
+    double font_px, root_px;
+    const char *family;
+    int weight;
+    gboolean italic;
+} layer_units_ctx;
+
+static gboolean
+length_unit_is_relative(ns_css_unit unit)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_EM: case NS_CSS_UNIT_REM:
+    case NS_CSS_UNIT_VW: case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_VMIN: case NS_CSS_UNIT_VMAX:
+    case NS_CSS_UNIT_EX: case NS_CSS_UNIT_CH:
+    case NS_CSS_UNIT_CAP: case NS_CSS_UNIT_IC:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+calc_has_relative_units(const ns_css_value *v)
+{
+    if (v->u.calc.fn) return calc_args_have_font_units(v);
+    double sum = fabs(v->u.calc.em) + fabs(v->u.calc.rem) + fabs(v->u.calc.vw) +
+                 fabs(v->u.calc.vh) + fabs(v->u.calc.vmin) + fabs(v->u.calc.vmax);
+    return sum != 0;
+}
+
+static gboolean
+size_side_is_font_relative(gboolean is_auto, ns_css_unit unit)
+{
+    return !is_auto && (unit == NS_CSS_UNIT_EM || unit == NS_CSS_UNIT_REM);
+}
+
+static gboolean
+layer_value_has_relative_units(const ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH) return length_unit_is_relative(v->u.length.unit);
+    if (v->kind == NS_CSS_V_CALC) return calc_has_relative_units(v);
+    if (v->kind != NS_CSS_V_SIZE) return FALSE;
+    return size_side_is_font_relative(v->u.size.w_auto, v->u.size.w_unit) ||
+           size_side_is_font_relative(v->u.size.h_auto, v->u.size.h_unit);
+}
+
+static double
+relative_length_px(double v, ns_css_unit unit, const layer_units_ctx *c)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_EM:
+        return v * c->font_px;
+    case NS_CSS_UNIT_REM:
+        return v * c->root_px;
+    case NS_CSS_UNIT_VW: case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_VMIN: case NS_CSS_UNIT_VMAX:
+        return viewport_resolve(v, unit);
+    default:
+        return v * font_relative_unit_px(unit, c->font_px, c->family,
+                                         c->weight, c->italic);
+    }
+}
+
+static void
+size_side_resolve(double *v, ns_css_unit *unit, gboolean is_auto,
+                  const layer_units_ctx *c)
+{
+    if (!size_side_is_font_relative(is_auto, *unit)) return;
+    *v = relative_length_px(*v, *unit, c);
+    *unit = NS_CSS_UNIT_PX;
+}
+
+static void
+calc_resolve_relative_units(ns_css_value *v, const layer_units_ctx *c)
+{
+    v->u.calc.px += v->u.calc.em * c->font_px + v->u.calc.rem * c->root_px +
+                    calc_viewport_refresh_px(v);
+    v->u.calc.em = v->u.calc.rem = 0;
+    v->u.calc.vw = v->u.calc.vh = 0;
+    v->u.calc.vmin = v->u.calc.vmax = 0;
+}
+
+static void
+layer_value_resolve_units(ns_css_value *v, const layer_units_ctx *c)
+{
+    if (calc_args_have_font_units(v))
+        calc_fold_arg_font_units(v, c->font_px, c->root_px);
+    if (v->kind == NS_CSS_V_CALC && !v->u.calc.fn) {
+        calc_resolve_relative_units(v, c);
+    } else if (v->kind == NS_CSS_V_SIZE) {
+        size_side_resolve(&v->u.size.w, &v->u.size.w_unit, v->u.size.w_auto, c);
+        size_side_resolve(&v->u.size.h, &v->u.size.h_unit, v->u.size.h_auto, c);
+    } else if (v->kind == NS_CSS_V_LENGTH &&
+               length_unit_is_relative(v->u.length.unit)) {
+        v->u.length.v = relative_length_px(v->u.length.v, v->u.length.unit, c);
+        v->u.length.unit = NS_CSS_UNIT_PX;
+    }
+}
+
+static ns_css_value *
+layer_value_cow(ns_css_value *prev)
+{
+    ns_css_value *v = prev->next_layer;
+    if (v->ref == 0) return v;
+    ns_css_value *copy = g_new0(ns_css_value, 1);
+    *copy = *v;
+    copy->ref = 0;
+    copy->image_set_text = g_strdup(v->image_set_text);
+    copy->specified = g_strdup(v->specified);
+    if (copy->next_layer) copy->next_layer->ref++;
+    v->ref--;
+    prev->next_layer = copy;
+    return copy;
+}
+
+static void
+resolve_layer_units(ns_style *out, const layer_units_ctx *c)
+{
+    for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
+        const ns_css_value *head = out->values[i];
+        if (!head || !head->next_layer) continue;
+        gboolean needs = FALSE;
+        for (const ns_css_value *l = head->next_layer; l && !needs; l = l->next_layer)
+            needs = layer_value_has_relative_units(l);
+        if (!needs) continue;
+        ns_css_value *prev = ns_css_value_cow(out, i);
+        while (prev->next_layer) {
+            ns_css_value *l = prev->next_layer;
+            if (layer_value_has_relative_units(l)) {
+                l = layer_value_cow(prev);
+                layer_value_resolve_units(l, c);
+            }
+            prev = l;
+        }
+    }
+}
+
 static void
 resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
@@ -32149,6 +32287,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
     gboolean fr_italic =
         ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "italic") ||
         ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "oblique");
+    const layer_units_ctx lc = {
+        .font_px = my_font_px, .root_px = root_px, .family = fr_family,
+        .weight = fr_weight, .italic = fr_italic,
+    };
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         if (i == NS_CSS_FONT_SIZE) continue;
         ns_css_value *v = out->values[i];
@@ -32236,21 +32378,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             if (line_pct) calc_fold_percent(v, my_font_px);
             continue;
         }
-        if (v->kind == NS_CSS_V_SIZE && !v->u.size.w_auto && !v->u.size.h_auto) {
-            gboolean needs = v->u.size.w_unit == NS_CSS_UNIT_EM ||
-                             v->u.size.w_unit == NS_CSS_UNIT_REM ||
-                             v->u.size.h_unit == NS_CSS_UNIT_EM ||
-                             v->u.size.h_unit == NS_CSS_UNIT_REM;
-            if (!needs) continue;
+        if (v->kind == NS_CSS_V_SIZE) {
+            if (!layer_value_has_relative_units(v)) continue;
             v = ns_css_value_cow(out, i);
-            if (v->u.size.w_unit == NS_CSS_UNIT_EM || v->u.size.w_unit == NS_CSS_UNIT_REM) {
-                v->u.size.w *= v->u.size.w_unit == NS_CSS_UNIT_EM ? my_font_px : root_px;
-                v->u.size.w_unit = NS_CSS_UNIT_PX;
-            }
-            if (v->u.size.h_unit == NS_CSS_UNIT_EM || v->u.size.h_unit == NS_CSS_UNIT_REM) {
-                v->u.size.h *= v->u.size.h_unit == NS_CSS_UNIT_EM ? my_font_px : root_px;
-                v->u.size.h_unit = NS_CSS_UNIT_PX;
-            }
+            layer_value_resolve_units(v, &lc);
             continue;
         }
         if (v->kind != NS_CSS_V_LENGTH) continue;
@@ -32293,6 +32424,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             break;
         }
     }
+    resolve_layer_units(out, &lc);
 }
 
 static gboolean
