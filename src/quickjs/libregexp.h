@@ -61,6 +61,9 @@ const char *lre_get_groupnames(const uint8_t *bc_buf);
 int lre_exec(uint8_t **capture,
              const uint8_t *bc_buf, const uint8_t *cbuf, int cindex, int clen,
              int cbuf_type, void *opaque);
+int lre_exec_sticky_search(uint8_t **capture,
+                           const uint8_t *bc_buf, const uint8_t *cbuf,
+                           int cindex, int clen, int cbuf_type, void *opaque);
 
 int lre_parse_escape(const uint8_t **pp, int allow_utf16);
 /* lre_is_space() is provided as an inline in libunicode.h */
