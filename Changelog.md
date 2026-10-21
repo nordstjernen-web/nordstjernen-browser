@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: a regular expression that starts with a character class,
+  such as `/[ \t\r\n\u000c]+/g` or the one Handlebars tests every
+  value against before escaping it, no longer tests all 256 byte values
+  against the class on every `exec()`. The search skips positions that
+  cannot start a match, and building that table cost far more than the
+  search itself on short strings. A class without the `i` flag now sets
+  its ranges directly, and a case-insensitive first letter adds itself
+  and its other case. On Speedometer 3.1, Editor-TipTap is 15% faster
+  and TodoMVC-jQuery 26% faster.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
