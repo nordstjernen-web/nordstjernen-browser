@@ -49506,9 +49506,14 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     JS_ToFloat64(ctx, &dur, func_data[0]);
     JS_ToInt32(ctx, &len, func_data[1]);
     JS_ToFloat64(ctx, &start, func_data[2]);
-    int32_t idx = 0;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
-    if (idx < 0 || idx >= len)
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute '%s' on 'TimeRanges': "
+                                 "1 argument required, but only 0 present.",
+                                 magic == 0 ? "start" : "end");
+    uint32_t idx = 0;
+    if (JS_ToUint32(ctx, &idx, argv[0]) < 0)
+        return JS_EXCEPTION;
+    if (idx >= (uint32_t)MAX(len, 0))
         return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
                                       "index out of TimeRanges bounds");
     return JS_NewFloat64(ctx, magic == 0 ? start : dur);
