@@ -40,6 +40,13 @@ Changelog:
   box on the baseline instead, which leaves room below it for the
   line's descent. GitHub's footer links, which are such boxes, were
   5 px closer together than in Chrome.
+* Layout: a `<body>` with `overflow-x: hidden` (or any overflow other
+  than visible) no longer keeps its first child's top margin inside it
+  when the `<html>` element's overflow is visible. CSS moves the body's
+  overflow to the viewport in that case, so the body itself is not a
+  new formatting context and the margins collapse, as in Chrome. The
+  page sat lower by the body's own top margin before, 4 px on the
+  Wikipedia portal.
 * Debian packaging: following the mentors.debian.net review, debhelper
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
