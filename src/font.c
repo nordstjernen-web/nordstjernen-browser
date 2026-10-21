@@ -61,6 +61,21 @@ typedef struct ns_font_idle_waiter {
 
 static GArray *g_idle_waiters;
 
+#ifdef NS_HAVE_FONTCONFIG
+typedef struct ns_font_family_index {
+    GHashTable *spelling_by_exact;
+    GHashTable *exact_by_loose;
+    FcConfig   *config;
+    int         system_fonts;
+    int         app_fonts;
+    guint       generation;
+} ns_font_family_index;
+
+static ns_font_family_index g_family_index;
+static GMutex               g_family_index_lock;
+static const char           g_family_ambiguous[] = "";
+#endif
+
 guint
 ns_font_pending_count(void)
 {
@@ -142,6 +157,12 @@ ns_font_init(void)
 void
 ns_font_shutdown(void)
 {
+#ifdef NS_HAVE_FONTCONFIG
+    g_mutex_lock(&g_family_index_lock);
+    g_clear_pointer(&g_family_index.spelling_by_exact, g_hash_table_destroy);
+    g_clear_pointer(&g_family_index.exact_by_loose, g_hash_table_destroy);
+    g_mutex_unlock(&g_family_index_lock);
+#endif
     if (!g_entries) return;
     GHashTableIter it;
     gpointer k, v;
@@ -177,6 +198,164 @@ ns_font_available(void)
 #endif
 }
 
+#ifdef NS_HAVE_FONTCONFIG
+static char *
+ns_font_family_key(const char *family, gboolean drop_blanks)
+{
+    char *folded = g_utf8_validate(family, -1, NULL)
+        ? g_utf8_casefold(family, -1) : g_ascii_strdown(family, -1);
+    if (!drop_blanks) return folded;
+    char *w = folded;
+    for (const char *r = folded; *r; r++)
+        if (*r != ' ') *w++ = *r;
+    *w = '\0';
+    return folded;
+}
+
+static void
+ns_font_family_index_add(ns_font_family_index *idx, const FcFontSet *set)
+{
+    for (int i = 0; set && i < set->nfont; i++) {
+        FcBool variable = FcFalse;
+        if (FcPatternGetBool(set->fonts[i], FC_VARIABLE, 0, &variable) ==
+                FcResultMatch && variable)
+            continue;
+        FcChar8 *name = NULL;
+        for (int j = 0; FcPatternGetString(set->fonts[i], FC_FAMILY, j,
+                                           &name) == FcResultMatch; j++) {
+            char *exact = ns_font_family_key((const char *)name, FALSE);
+            char *loose = ns_font_family_key((const char *)name, TRUE);
+            const char *seen = g_hash_table_lookup(idx->exact_by_loose, loose);
+            if (!seen) {
+                g_hash_table_insert(idx->exact_by_loose, loose, g_strdup(exact));
+            } else {
+                if (seen != g_family_ambiguous && strcmp(seen, exact) != 0)
+                    g_hash_table_insert(idx->exact_by_loose, loose,
+                                        (gpointer)g_family_ambiguous);
+                else
+                    g_free(loose);
+            }
+            if (!g_hash_table_contains(idx->spelling_by_exact, exact))
+                g_hash_table_insert(idx->spelling_by_exact, exact,
+                                    g_strdup((const char *)name));
+            else
+                g_free(exact);
+        }
+    }
+}
+
+static void
+ns_font_family_value_free(gpointer value)
+{
+    if (value != g_family_ambiguous) g_free(value);
+}
+
+static ns_font_family_index *
+ns_font_family_index_current(void)
+{
+    ns_font_family_index *idx = &g_family_index;
+    FcConfig *config = FcConfigGetCurrent();
+    const FcFontSet *system_set = FcConfigGetFonts(config, FcSetSystem);
+    const FcFontSet *app_set = FcConfigGetFonts(config, FcSetApplication);
+    int system_fonts = system_set ? system_set->nfont : 0;
+    int app_fonts = app_set ? app_set->nfont : 0;
+    if (idx->spelling_by_exact && idx->config == config &&
+        idx->system_fonts == system_fonts && idx->app_fonts == app_fonts &&
+        idx->generation == g_font_generation)
+        return idx;
+    if (!idx->spelling_by_exact) {
+        idx->spelling_by_exact = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, g_free);
+        idx->exact_by_loose = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, ns_font_family_value_free);
+    } else {
+        g_hash_table_remove_all(idx->spelling_by_exact);
+        g_hash_table_remove_all(idx->exact_by_loose);
+    }
+    ns_font_family_index_add(idx, system_set);
+    ns_font_family_index_add(idx, app_set);
+    idx->config = config;
+    idx->system_fonts = system_fonts;
+    idx->app_fonts = app_fonts;
+    idx->generation = g_font_generation;
+    return idx;
+}
+
+static gboolean
+ns_font_pattern_object_below_family(FcPattern *pat, FcPatternIter *iter)
+{
+    static const char *const below_family[] = {
+        "family", "familylang", "stylelang", "fullnamelang", "namelang",
+        "lang", "genericfamily", "slant", "weight", "width", "size",
+        "pixelsize", "spacing", "symbol", "decorative", "antialias", "order",
+        "fontversion", "hinting", "hintstyle", "verticallayout", "autohint",
+        "globaladvance", "embeddedbitmap", "dpi", "rgba", "scale",
+        "lcdfilter", "prgname",
+    };
+    const char *object = FcPatternIterGetObject(pat, iter);
+    if (!object) return FALSE;
+    if (strcmp(object, FC_VARIABLE) == 0) {
+        FcValue value;
+        for (int i = 0; i < FcPatternIterValueCount(pat, iter); i++)
+            if (FcPatternIterGetValue(pat, iter, i, &value, NULL) !=
+                    FcResultMatch ||
+                value.type != FcTypeBool || value.u.b != FcFalse)
+                return FALSE;
+        return TRUE;
+    }
+    for (gsize i = 0; i < G_N_ELEMENTS(below_family); i++)
+        if (strcmp(object, below_family[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_font_pattern_ranks_family_first(FcPattern *pat)
+{
+    FcPatternIter iter;
+    FcPatternIterStart(pat, &iter);
+    if (!FcPatternIterIsValid(pat, &iter)) return TRUE;
+    do {
+        if (!ns_font_pattern_object_below_family(pat, &iter)) return FALSE;
+    } while (FcPatternIterNext(pat, &iter));
+    return TRUE;
+}
+
+static gboolean
+ns_font_alias_from_index(FcPattern *pat, int last_bound, char **alias)
+{
+    if (!ns_font_pattern_ranks_family_first(pat)) return FALSE;
+    g_mutex_lock(&g_family_index_lock);
+    ns_font_family_index *idx = ns_font_family_index_current();
+    gboolean decided = TRUE;
+    gboolean weak_present = FALSE;
+    FcValue value;
+    FcValueBinding binding;
+    for (int i = 0; i <= last_bound &&
+         FcPatternGetWithBinding(pat, FC_FAMILY, i, &value, &binding) ==
+             FcResultMatch; i++) {
+        if (value.type != FcTypeString) continue;
+        char *loose = ns_font_family_key((const char *)value.u.s, TRUE);
+        const char *exact_seen = g_hash_table_lookup(idx->exact_by_loose, loose);
+        g_free(loose);
+        if (!exact_seen) continue;
+        if (binding == FcValueBindingWeak) {
+            weak_present = TRUE;
+            continue;
+        }
+        char *exact = ns_font_family_key((const char *)value.u.s, FALSE);
+        if (exact_seen != g_family_ambiguous && strcmp(exact_seen, exact) == 0)
+            *alias = g_strdup(g_hash_table_lookup(idx->spelling_by_exact, exact));
+        else
+            decided = FALSE;
+        g_free(exact);
+        g_mutex_unlock(&g_family_index_lock);
+        return decided;
+    }
+    g_mutex_unlock(&g_family_index_lock);
+    return !weak_present;
+}
+#endif
+
 char *
 ns_font_metric_alias(const char *family)
 {
@@ -194,6 +373,10 @@ ns_font_metric_alias(const char *family)
                                             &binding) == FcResultMatch; i++)
         if (binding != FcValueBindingWeak) last_bound = i;
     char *alias = NULL;
+    if (ns_font_alias_from_index(pat, last_bound, &alias)) {
+        FcPatternDestroy(pat);
+        return alias;
+    }
     FcResult result;
     FcPattern *match = FcFontMatch(NULL, pat, &result);
     FcChar8 *got = NULL;

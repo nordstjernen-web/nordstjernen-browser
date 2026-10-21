@@ -3,6 +3,20 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: a font family that is not installed no longer makes
+  fontconfig compare every installed font. For each such name (a CJK
+  font on a Western system, a vendor font, an entry deep in a fallback
+  list) the engine asked fontconfig for its best match to learn whether
+  a metric-compatible alias, such as Liberation Sans for Arial, is
+  installed, and each match took about a millisecond. The engine now
+  keeps an index of the installed family names, rebuilt when a web font
+  is added, and answers from it whenever the match is decided by the
+  family name alone; a pattern that asks for color or another property
+  that fontconfig ranks above the family still goes to fontconfig. The
+  alias found is the same for all 730 family names on the 58 frozen
+  sites. The frozen claude.ai page needs 14% less main-thread CPU to
+  first paint, and CNN, ESPN and The New York Times retire 1% to 2%
+  fewer instructions.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
