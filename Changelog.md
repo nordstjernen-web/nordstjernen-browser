@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* HSTS: a host's HTTPS-only policy no longer outlives its `max-age`. The
+  engine's own HSTS check ignored the expiry date in the HSTS file, so a
+  site was forced onto HTTPS, and the certificate-warning override refused
+  for it, forever once it had sent `Strict-Transport-Security`. A site
+  that later dropped HTTPS stayed unreachable, and the entry kept the
+  visit recorded long after the site asked for it to end. Expired entries
+  are now ignored, both when the file is read and for entries noted while
+  the browser runs.
 * Security: a cross-site iframe read and wrote its own site's first-party
   cookies through `document.cookie`. A tracker embedded on many sites could
   therefore follow the user from site to site, even though third-party
