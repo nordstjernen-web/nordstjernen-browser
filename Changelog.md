@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: a float that follows a block now starts below that block's
+  bottom margin. It was placed against the block's border edge, as if
+  the margin did not exist until the next in-flow block claimed it, so
+  on AP News the play icon of every video card rode 10 px up into the
+  headline. Chrome resolves the margins collapsed so far before it
+  places the float, which is what the engine now does too.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
