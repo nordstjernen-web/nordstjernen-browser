@@ -29,9 +29,8 @@ override_dh_auto_configure:
 # libnordstjernen.so and its header are the embedding API for other
 # applications. Nothing in this package links them and the library carries no
 # SONAME version, so they are not shipped.
-override_dh_auto_install:
-	dh_auto_install
+execute_after_dh_auto_install:
 	rm debian/nordstjernen/usr/bin/internet-browser
-	rm -f debian/nordstjernen/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
-	rm -rf debian/nordstjernen/usr/include
+	rm debian/nordstjernen/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
+	rm -r debian/nordstjernen/usr/include
 	find debian/nordstjernen/usr/lib -type d -empty -delete
