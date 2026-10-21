@@ -150,6 +150,15 @@ JS_IsHostAccess(JSContext *ctx)
     return true;
 }
 
+typedef bool JSCanCompileStrings(JSContext *ctx);
+
+static inline void
+JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn)
+{
+    (void)rt;
+    (void)fn;
+}
+
 static inline void
 JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
 {

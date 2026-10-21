@@ -437,6 +437,7 @@ struct JSRuntime {
 
     JSHostPromiseRejectionTracker *host_promise_rejection_tracker;
     void *host_promise_rejection_tracker_opaque;
+    JSCanCompileStrings *can_compile_strings;
 
     struct list_head job_list; /* list of JSJobEntry.link */
 
@@ -41552,6 +41553,18 @@ static JSValue JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
                               col, flags, scope_idx);
 }
 
+static JSValue JS_PRINTF_FORMAT_ATTR(2, 3)
+js_throw_eval_error(JSContext *ctx, JS_PRINTF_FORMAT const char *fmt, ...)
+{
+    va_list ap;
+    JSValue val;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_EVAL_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
 static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
                              JSValueConst val, int flags, int scope_idx)
 {
@@ -41561,6 +41574,10 @@ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
 
     if (!JS_IsString(val))
         return js_dup(val);
+    if (ctx->rt->can_compile_strings && !JS_IsHostAccess(ctx) &&
+        !ctx->rt->can_compile_strings(ctx))
+        return js_throw_eval_error(ctx, "code generation from strings is "
+                                   "disallowed in this context");
     str = JS_ToCStringLen(ctx, &len, val);
     if (!str)
         return JS_EXCEPTION;
@@ -59512,6 +59529,11 @@ void JS_SetHostPromiseRejectionTracker(JSRuntime *rt,
 {
     rt->host_promise_rejection_tracker = cb;
     rt->host_promise_rejection_tracker_opaque = opaque;
+}
+
+void JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn)
+{
+    rt->can_compile_strings = fn;
 }
 
 static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
