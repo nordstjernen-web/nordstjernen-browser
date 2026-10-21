@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: text measurements are now cached for pages that set
+  `tab-size` and for runs that hold an inline-block or image. The cache
+  of measured text left out every layout with tab stops, which a
+  numeric `tab-size` gives to all text on a page that sets it on the
+  root, as AP News does, and every layout holding the placeholder of an
+  inline atomic box. The key now records the tab stops and the
+  placeholder rectangles, which are all a measurement reads of them. On
+  a frozen copy of AP News every text measurement was a miss; now 82% of
+  them are hits and the main-thread CPU to first paint drops by 6%.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
