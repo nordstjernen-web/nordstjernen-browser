@@ -11,6 +11,13 @@ Changelog:
   from its parent's now carries its own, atomic inlines inside it keep
   none, and the shrink-to-fit width leaves room for the largest spacing
   so the text does not wrap early.
+* Text: `letter-spacing` is now added after every character, the last
+  one included, as Chrome does. The text library split it around each
+  character and trimmed it at the start and end of every line, so
+  letter-spaced text was one spacing narrower than in Chrome and began
+  half a spacing to the right inside a line; "abc" at 3 px came out
+  26.4 px wide instead of 28.4. The shrink-to-fit widths that added the
+  spacing back as slack no longer need to.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
