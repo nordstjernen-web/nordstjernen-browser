@@ -53776,6 +53776,30 @@ fail:
     return ret;
 }
 
+static bool js_regexp_exec_is_builtin(JSContext *ctx, JSValueConst rx)
+{
+    JSObject *p, *proto;
+    JSProperty *pr;
+    JSShapeProperty *prs;
+
+    if (JS_VALUE_GET_TAG(rx) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(rx);
+    if (p->class_id != JS_CLASS_REGEXP || p->is_exotic)
+        return false;
+    if (find_own_property(&pr, p, JS_ATOM_exec))
+        return false;
+    proto = p->shape->proto;
+    if (!proto || JS_VALUE_GET_TAG(ctx->class_proto[JS_CLASS_REGEXP]) != JS_TAG_OBJECT ||
+        proto != JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_REGEXP]) ||
+        proto->is_exotic)
+        return false;
+    prs = find_own_property(&pr, proto, JS_ATOM_exec);
+    if (!prs || (prs->flags & JS_PROP_TMASK))
+        return false;
+    return JS_IsCFunction(ctx, pr->u.value, js_regexp_exec, 0);
+}
+
 /* delete portions of a string that match a given regex */
 static JSValue JS_RegExpDelete(JSContext *ctx, JSValueConst this_val, JSValue arg)
 {
@@ -54488,6 +54512,107 @@ exception:
     return JS_EXCEPTION;
 }
 
+static int js_regexp_split_fast(JSContext *ctx, JSValueConst splitter,
+                                JSString *strp, uint32_t lim, JSValue A,
+                                int64_t *plengthA, uint32_t *pp)
+{
+    JSRegExp *re = js_get_regexp(ctx, splitter, false);
+    uint8_t *re_bytecode, **capture, *str_buf;
+    uint32_t size, p, q, start, e;
+    int rc, alloc_count, capture_count, shift, i, ret;
+    int64_t lengthA = *plengthA;
+    bool unicode;
+    JSValue sub;
+
+    re_bytecode = str8(re->bytecode);
+    capture_count = lre_get_capture_count(re_bytecode);
+    alloc_count = lre_get_alloc_count(re_bytecode);
+    unicode = (lre_get_flags(re_bytecode) &
+               (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
+    capture = js_malloc(ctx, sizeof(capture[0]) * max_int(alloc_count, 2));
+    if (!capture)
+        return -1;
+    shift = strp->is_wide_char;
+    str_buf = str8(strp);
+    size = strp->len;
+    p = q = *pp;
+    ret = 0;
+    while (q < size) {
+        rc = lre_exec_sticky_search(capture, re_bytecode, str_buf, q, size,
+                                    shift, ctx);
+        if (rc < 0) {
+            switch(rc) {
+            case LRE_RET_TIMEOUT:
+                JS_ThrowInterrupted(ctx);
+                break;
+            case LRE_RET_MEMORY_ERROR:
+                JS_ThrowOutOfMemory(ctx);
+                break;
+            default:
+                JS_ThrowInternalError(ctx, "corrupted bytecode in regexp execution");
+                break;
+            }
+            ret = -1;
+            break;
+        }
+        if (rc != 1)
+            break;
+        start = (capture[0] - str_buf) >> shift;
+        if (start >= size)
+            break;
+        js_regexp_record_match(ctx, re, strp, capture, capture_count,
+                               str_buf, shift);
+        e = (capture[1] - str_buf) >> shift;
+        if (e > size)
+            e = size;
+        if (e == p) {
+            q = string_advance_index(strp, start, unicode);
+            continue;
+        }
+        sub = js_sub_string(ctx, strp, p, start);
+        if (JS_IsException(sub) ||
+            JS_DefinePropertyValueInt64(ctx, A, lengthA++, sub,
+                                        JS_PROP_C_W_E | JS_PROP_THROW) < 0) {
+            ret = -1;
+            break;
+        }
+        if (lengthA == lim) {
+            ret = 1;
+            break;
+        }
+        p = e;
+        for(i = 1; i < capture_count; i++) {
+            if (capture[2 * i] && capture[2 * i + 1]) {
+                sub = js_sub_string(ctx, strp,
+                                    (capture[2 * i] - str_buf) >> shift,
+                                    (capture[2 * i + 1] - str_buf) >> shift);
+                if (JS_IsException(sub)) {
+                    ret = -1;
+                    break;
+                }
+            } else {
+                sub = JS_UNDEFINED;
+            }
+            if (JS_DefinePropertyValueInt64(ctx, A, lengthA++, sub,
+                                            JS_PROP_C_W_E | JS_PROP_THROW) < 0) {
+                ret = -1;
+                break;
+            }
+            if (lengthA == lim) {
+                ret = 1;
+                break;
+            }
+        }
+        if (ret != 0)
+            break;
+        q = p;
+    }
+    js_free(ctx, capture);
+    *plengthA = lengthA;
+    *pp = p;
+    return ret;
+}
+
 static JSValue js_regexp_Symbol_split(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv)
 {
@@ -54552,6 +54677,16 @@ static JSValue js_regexp_Symbol_split(JSContext *ctx, JSValueConst this_val,
         if (JS_IsNull(z))
             goto add_tail;
         goto done;
+    }
+    if (js_same_value(ctx, ctor, ctx->regexp_ctor) &&
+        js_regexp_exec_is_builtin(ctx, splitter)) {
+        int fast = js_regexp_split_fast(ctx, splitter, strp, lim, A,
+                                        &lengthA, &p);
+        if (fast < 0)
+            goto exception;
+        if (fast > 0)
+            goto done;
+        goto add_tail;
     }
     while (q < size) {
         if (JS_SetProperty(ctx, splitter, JS_ATOM_lastIndex, js_int32(q)) < 0)
