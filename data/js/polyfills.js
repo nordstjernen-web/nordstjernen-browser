@@ -881,17 +881,20 @@
         ranges.length = list.length;
         return ranges;
     };
-    function ndTimeRangeAt(ranges, index, edge) {
-        index = Number(index);
-        if (!(index >= 0) || index >= ranges.length || index !== Math.floor(index))
+    function ndTimeRangeAt(ranges, args, edge, method) {
+        if (args.length < 1)
+            throw new TypeError("Failed to execute '" + method +
+                "' on 'TimeRanges': 1 argument required, but only 0 present.");
+        var index = args[0] >>> 0;
+        if (index >= ranges.length)
             throw ndDomError('IndexSizeError', 'TimeRanges index is out of bounds');
         return ranges._ranges[index][edge];
     }
     ndTimeRanges.prototype.start = function (index) {
-        return ndTimeRangeAt(this, index, 0);
+        return ndTimeRangeAt(this, arguments, 0, 'start');
     };
     ndTimeRanges.prototype.end = function (index) {
-        return ndTimeRangeAt(this, index, 1);
+        return ndTimeRangeAt(this, arguments, 1, 'end');
     };
     if (typeof global.TimeRanges !== 'function') {
         var TimeRanges = function () {
@@ -14124,8 +14127,8 @@
                 var st = stateOf(this);
                 if (st.type !== 6 && st.type !== 7)
                     throw new TypeError('snapshotItem() requires a snapshot result');
-                i = Number(i);
-                return i >= 0 && i < st.nodes.length ? st.nodes[Math.floor(i)] : null;
+                i = i >>> 0;
+                return i < st.nodes.length ? st.nodes[i] : null;
             }
         });
         TYPE_NAMES.forEach(function (name, i) {

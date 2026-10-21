@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* JavaScript: `TimeRanges.start()`, `TimeRanges.end()` and
+  `XPathResult.snapshotItem()` now convert their index the way WebIDL
+  converts an `unsigned long`: `undefined` and `NaN` are 0 and a
+  fraction is truncated. They used `Number()`, so `start(undefined)`
+  threw `IndexSizeError`. TikTok's player logs its buffered ranges with
+  `Array.from(Array(n)).map(e => r.start(e))`, which passes `undefined`;
+  the throw aborted `endOfStream()` and the player fell back to its
+  slower path (3 errors on a load). Calling `start()` or `end()` with no
+  argument is now a `TypeError`, as in Chrome.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
