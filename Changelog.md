@@ -7,6 +7,17 @@ Changelog:
   line after the break. It was placed beside the text's last line, so
   phpBB topic lists (the freeciv forum) drew each "by author » date"
   line on top of the topic title.
+* Performance: a relayout no longer restyles the whole page because a
+  container query container changed size. Only elements whose style read
+  a container (a matching `@container` rule or a `cq*` unit) are
+  recomputed, plus descendants whose inherited values change. An empty
+  container map now counts as no map, so a page that has `@container`
+  rules but no containers keeps its styles too. In the same way, when a
+  web font finishes loading, elements whose style used `ex`, `ch`, `cap`
+  or `ic` are recomputed; before, an incremental restyle kept the
+  lengths measured with the fallback font. On frozen copies of
+  nytimes.com, apnews.com and weather.com the main-thread CPU of a load
+  drops by 42%, 48% and 53%.
 * Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
   fails when the server sends a `Content-Length`. The method was passed
   to curl as a plain custom verb, so curl waited for a body that a HEAD
