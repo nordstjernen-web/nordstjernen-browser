@@ -8,6 +8,12 @@ Changelog:
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
   and a single `Initial release` changelog entry. `docs/Debian-inclusion.md`
   tracks the road into Debian.
+* Crash fix: a streamed XMLHttpRequest response could run the page's
+  `progress` and `readystatechange` handlers on the network thread while
+  the page's own script ran on the main thread. Both threads then used
+  the same JavaScript heap, and the browser crashed in the garbage
+  collector (Al Jazeera crashed on 9 of 10 cold loads). Each received
+  chunk is now always queued to the page's thread and handled there.
 * Layout: `line-height: 0` is now honoured. It was treated like an unset
   value, so a block holding only an image or an inline-block still got a
   line of about 1.2 times its font size, and the image card wrappers
