@@ -4732,10 +4732,18 @@ ns_pango_layout_line_get_extents_and_height (NsPangoLayoutLine *line,
                                      x_pos + run_logical.x + run_logical.width) - new_pos;
           logical_rect->x = new_pos;
 
-          new_pos = MIN (logical_rect->y, run_logical.y);
-          logical_rect->height = MAX (logical_rect->y + logical_rect->height,
-                                      run_logical.y + run_logical.height) - new_pos;
-          logical_rect->y = new_pos;
+          if (tmp_list == line->runs)
+            {
+              logical_rect->y = run_logical.y;
+              logical_rect->height = run_logical.height;
+            }
+          else
+            {
+              new_pos = MIN (logical_rect->y, run_logical.y);
+              logical_rect->height = MAX (logical_rect->y + logical_rect->height,
+                                          run_logical.y + run_logical.height) - new_pos;
+              logical_rect->y = new_pos;
+            }
         }
 
       if (height)
