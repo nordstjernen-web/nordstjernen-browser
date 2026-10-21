@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Safe browsing: redirects and form submissions are now checked against the
+  blocklist. Only a plain link or typed address was, so a link to a clean
+  URL that redirected to a blocked site, or a form posting to one, loaded
+  the blocked page without a warning. Each redirect hop of a top-level
+  navigation is checked before it is fetched, and a POST navigation before
+  its data is sent; a match shows the usual warning page.
 * Security: a Content Security Policy without `'unsafe-eval'` now stops
   `eval()`, `new Function()` (and the async and generator variants) and
   `setTimeout`/`setInterval` with a string. The keyword was parsed but

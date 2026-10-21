@@ -15,6 +15,7 @@
 #include "js.h"
 #include "html.h"
 #include "image.h"
+#include "safebrowsing.h"
 #include "security.h"
 #include "about_logo_gif.h"
 
@@ -6403,6 +6404,13 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 }
 
 static gboolean
+ns_net_safebrowsing_blocks(const char *url)
+{
+    g_autofree char *host = ns_url_host_from(url);
+    return host && ns_safebrowsing_blocked(host);
+}
+
+static gboolean
 ns_fetch_is_navigation(const char *top_url, GPtrArray *extra_headers)
 {
     (void)top_url;
@@ -6512,6 +6520,14 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(resp->error);
             resp->error = g_strdup("redirect to a disallowed URL blocked");
             g_free(next);
+            break;
+        }
+        if (ns_fetch_is_navigation(cur_top, extra_headers) &&
+            ns_net_safebrowsing_blocks(next)) {
+            g_free(resp->error);
+            resp->error = g_strdup("redirect to a blocked site stopped");
+            g_free(resp->final_url);
+            resp->final_url = next;
             break;
         }
         if (hop_headers) {
