@@ -2,6 +2,7 @@
 """snapshot.py — freezes sites into script-free local copies and compares every element's box with Chrome's."""
 
 import argparse
+import base64
 import collections
 import concurrent.futures
 import functools
@@ -1102,6 +1103,15 @@ class ChromeLoads:
             self.cdp = None
 
     def load(self, url):
+        def timing(cdp, s, times):
+            metrics = {m["name"]: m["value"] for m in cdp.call("Performance.getMetrics", session=s)["metrics"]}
+            ms = lambda key: round(metrics.get(key, 0) * 1000, 1)
+            return {"cpu": ms("TaskDuration"), "style": ms("RecalcStyleDuration"), "layout": ms("LayoutDuration"),
+                    "paint": None if times.get("fcp") is None else round(times["fcp"], 1),
+                    "load": None if times.get("load") is None else round(times["load"], 1)}
+        return self.visit(url, timing)
+
+    def visit(self, url, measure):
         a = self.a
         if not self.cdp:
             self.cdp = Cdp(self.chrome, [*chrome_args(a), "--proxy-server=" + DEAD_PROXY,
@@ -1127,12 +1137,7 @@ class ChromeLoads:
                 return None, "no load event in 60 s"
             done = cdp.call("Runtime.evaluate", {"expression": CHROME_SETTLED, "awaitPromise": True,
                                                  "returnByValue": True}, session=s, timeout=60)
-            times = json.loads(done["result"]["value"])
-            metrics = {m["name"]: m["value"] for m in cdp.call("Performance.getMetrics", session=s)["metrics"]}
-            ms = lambda key: round(metrics.get(key, 0) * 1000, 1)
-            return {"cpu": ms("TaskDuration"), "style": ms("RecalcStyleDuration"), "layout": ms("LayoutDuration"),
-                    "paint": None if times.get("fcp") is None else round(times["fcp"], 1),
-                    "load": None if times.get("load") is None else round(times["load"], 1)}, None
+            return measure(cdp, s, json.loads(done["result"]["value"])), None
         except (TimeoutError, EOFError, OSError, RuntimeError, KeyError, ValueError, TypeError) as e:
             self.close()
             ctx = None
@@ -1302,6 +1307,319 @@ def cmd_perf(a):
     return 1 if slow is not None and slow > a.max_slowdown else 0
 
 
+PAINT_PROBE = r"""(function(){
+  var out = [], replaced = /^(img|svg|video|canvas|input|textarea|select|button|iframe|object|embed|hr)$/;
+  var rootClips = getComputedStyle(document.documentElement).overflow !== 'visible';
+  function paints(e, s) {
+    if (replaced.test(e.tagName.toLowerCase()) || s.backgroundImage !== 'none' || s.boxShadow !== 'none') return true;
+    if (!/^(transparent|rgba\(.*,\s*0\))$/.test(s.backgroundColor)) return true;
+    for (var side of ['Top', 'Right', 'Bottom', 'Left'])
+      if (s['border' + side + 'Style'] !== 'none' && parseFloat(s['border' + side + 'Width']) > 0) return true;
+    for (var c = e.firstChild; c; c = c.nextSibling) if (c.nodeType === 3 && c.data.trim()) return true;
+    for (var pseudo of ['::before', '::after']) {
+      var ps = getComputedStyle(e, pseudo);
+      if (ps.content !== 'none' && ps.content !== 'normal' && ps.display !== 'none') return true;
+    }
+    return false;
+  }
+  function covered(e, r) {
+    var x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
+    var hit = document.elementFromPoint(x, y);
+    return !!hit && hit !== e && !e.contains(hit) && !hit.contains(e);
+  }
+  function walk(e, path, opacity, clip) {
+    var r = e.getBoundingClientRect(), s = getComputedStyle(e), o = parseFloat(s.opacity);
+    var box = [r.left, r.top + scrollY, r.right, r.bottom + scrollY];
+    opacity *= isNaN(o) ? 1 : o;
+    if (s.position === 'fixed') clip = null;
+    var inside = !clip || (Math.min(box[2], clip[2]) - Math.max(box[0], clip[0]) > 0 &&
+                           Math.min(box[3], clip[3]) - Math.max(box[1], clip[1]) > 0);
+    var shown = s.visibility === 'visible' && opacity > 0.01 && inside && paints(e, s) && !covered(e, r);
+    var cls = (typeof e.className === 'string' && e.className) ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+    out.push(path + '\t' + e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + cls + '\t' + [Math.round(r.left), Math.round(r.top + scrollY), Math.round(r.width), Math.round(r.height)].join(',') + '\t' + (shown ? 1 : 0));
+    if (e !== document.body || rootClips) {
+      var cx = s.overflowX !== 'visible', cy = s.overflowY !== 'visible';
+      if (cx || cy) {
+        var c0 = clip || [-1e9, -1e9, 1e9, 1e9];
+        clip = [cx ? Math.max(c0[0], box[0]) : c0[0], cy ? Math.max(c0[1], box[1]) : c0[1],
+                cx ? Math.min(c0[2], box[2]) : c0[2], cy ? Math.min(c0[3], box[3]) : c0[3]];
+      }
+    }
+    var k = 0;
+    for (var c = e.firstElementChild; c; c = c.nextElementSibling) walk(c, path + '/' + (k++), opacity, clip);
+  }
+  walk(document.body, 'b', 1, null);
+  return out.join('\n');
+})()"""
+PAGE_HEIGHT = "Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)"
+PAINT_CELL = 4
+PAINT_LIMIT = 48
+PAINT_SHARE = 0.1
+PAINT_SHOWN = 20
+PAINT_CAPTURES = 2
+
+
+def paint_key(a, site_dir):
+    return hashlib.sha256(("%s\0%s\0%d\0%d" % (reference_key(a, site_dir), PAINT_PROBE, a.max_height,
+                                                PAINT_CAPTURES)).encode()).hexdigest()[:16]
+
+
+def chrome_paint(chrome, url, a, dest):
+    def capture(cdp, s, times):
+        time.sleep(a.settle_ms / 1000.0)
+        rects = cdp.call("Runtime.evaluate", {"expression": PAINT_PROBE, "returnByValue": True}, session=s,
+                         timeout=60)["result"]["value"]
+        height = cdp.call("Runtime.evaluate", {"expression": PAGE_HEIGHT, "returnByValue": True},
+                          session=s)["result"]["value"]
+        clip = {"x": 0, "y": 0, "width": a.vw, "height": min(max(int(height), a.vh), a.max_height), "scale": 1}
+        for k in range(PAINT_CAPTURES):
+            if k:
+                time.sleep(1)
+            shot = cdp.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True, "clip": clip},
+                            session=s, timeout=120)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "paint.png").write_bytes(base64.b64decode(shot["data"]))
+        (dest / "paint.tsv").write_text(rects + "\n", encoding="utf-8", errors="replace")
+        return rects.count("\n") + 1
+    return chrome.visit(url, capture)
+
+
+def ns_paint(binary, url, a, dest):
+    from PIL import Image
+    dest.mkdir(parents=True, exist_ok=True)
+    png = dest / "paint.png"
+    for stale in (png, dest / "paint-initial.png", dest / "paint.tsv"):
+        stale.unlink(missing_ok=True)
+    home = tempfile.mkdtemp(prefix="sitebench-ns-")
+    try:
+        proc = subprocess.Popen([binary, "--headless", "--viewport=%dx%d" % (a.vw, a.vh), "--settle-ms=%d" % a.settle_ms,
+                                 "--time-ms=0", "--dump=png:" + str(png), "--eval=" + PAINT_PROBE, url],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=isolated_env(home, a.locale),
+                                start_new_session=True)
+        try:
+            out, _ = proc.communicate(timeout=a.timeout)
+        except subprocess.TimeoutExpired:
+            kill_group(proc)
+            proc.communicate()
+            return 0, "timed out after %ds" % a.timeout
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    (dest / "paint-initial.png").unlink(missing_ok=True)
+    text = out.decode("utf-8", "replace")
+    text = text[text.find("eval: ") + 6:] if "eval: " in text else ""
+    (dest / "paint.tsv").write_text(text if text.endswith("\n") or not text else text + "\n", encoding="utf-8",
+                                    errors="replace")
+    if not png.exists():
+        return 0, "exit status %d, no screenshot" % proc.returncode
+    with Image.open(png) as im:
+        if im.height > a.max_height:
+            im.crop((0, 0, im.width, a.max_height)).save(png)
+    return text.count("\n"), None if "\t" in text else "no elements printed"
+
+
+def load_paint(path):
+    rects, visible = {}, set()
+    if not path.exists():
+        return rects, visible
+    for line in open(path, encoding="utf-8", errors="replace"):
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 4:
+            continue
+        try:
+            box = tuple(int(float(v)) for v in parts[2].split(","))
+        except (ValueError, OverflowError):
+            continue
+        if len(box) == 4:
+            rects[parts[0]] = (parts[1], box)
+            if parts[3] == "1":
+                visible.add(parts[0])
+    return rects, visible
+
+
+def paint_cells(im, box):
+    from PIL import Image
+    import numpy as np
+    x, y, w, h = box
+    cells = (max(1, round(w / PAINT_CELL)), max(1, round(h / PAINT_CELL)))
+    return np.asarray(im.crop((x, y, x + w, y + h)).resize(cells, Image.BOX), dtype=np.int16)
+
+
+def paint_compare(ch_dir, ns_dir):
+    from PIL import Image
+    import numpy as np
+    ch, visible = load_paint(ch_dir / "paint.tsv")
+    ns, _ = load_paint(ns_dir / "paint.tsv")
+    if not ch or not ns or not (ns_dir / "paint.png").exists():
+        return None
+    with Image.open(ch_dir / "paint.png") as a, Image.open(ns_dir / "paint.png") as b:
+        ci, ni = a.convert("RGB"), b.convert("RGB")
+    bottom = min(ci.height, ni.height)
+    compared, differs = 0, {}
+    for p in matching(ch, ns) & visible:
+        c, n = ch[p][1], ns[p][1]
+        w, h = min(c[2], n[2]), min(c[3], n[3])
+        if w < PAINT_CELL or h < PAINT_CELL or min(c[0], c[1], n[0], n[1]) < 0:
+            continue
+        if max(c[0], n[0]) + w > min(ci.width, ni.width) or max(c[1], n[1]) + h > bottom:
+            continue
+        compared += 1
+        bad = np.abs(paint_cells(ci, (c[0], c[1], w, h)) - paint_cells(ni, (n[0], n[1], w, h))).max(axis=2) > PAINT_LIMIT
+        if bad.mean() > PAINT_SHARE:
+            differs[p] = (int(bad.sum()) * PAINT_CELL * PAINT_CELL, (c[0], c[1], w, h), (n[0], n[1], w, h))
+    above = set()
+    for p in differs:
+        q = parent(p)
+        while q and q not in above:
+            above.add(q)
+            q = parent(q)
+    leaves = sorted(((v[0], p, ch[p][0], v[1], v[2]) for p, v in differs.items() if p not in above), reverse=True)
+    return {"compared": compared, "differ": len(differs), "leaves": leaves, "images": (ci, ni)}
+
+
+def paint_figure(ci, ni, cbox, nbox, label, dest):
+    from PIL import Image, ImageDraw
+    pad = 24
+    crops = []
+    for im, (x, y, w, h) in ((ci, cbox), (ni, nbox)):
+        crops.append(im.crop((max(0, x - pad), max(0, y - pad), min(im.width, x + w + pad), min(im.height, y + h + pad))))
+    width, height = sum(c.width for c in crops) + 12, max(c.height for c in crops) + 20
+    fig = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(fig)
+    x = 0
+    for crop, name in zip(crops, ("Chrome", label)):
+        draw.text((x + 4, 4), name, fill=(200, 0, 0))
+        fig.paste(crop, (x, 20))
+        x += crop.width + 12
+    if width > 1600:
+        fig = fig.resize((1600, max(1, round(height * 1600 / width))), Image.LANCZOS)
+    fig.save(dest)
+
+
+def cmd_paint(a):
+    try:
+        import numpy
+        from PIL import Image
+    except ImportError:
+        fail("paint needs Pillow and numpy (pip install pillow numpy)")
+    Image.MAX_IMAGE_PIXELS = None
+    names, version = prepare(a)
+    labels = a.labels
+    ref = Path(a.out) / "snapshot-chrome" / ("%s-%dx%d-%s" % (version or "unknown", a.vw, a.vh, a.locale))
+    httpd, base_url = serve(a.snapshots, a.settle_ms)
+    skipped, errors = {}, {label: {} for label in labels}
+    try:
+        keys = {n: paint_key(a, Path(a.snapshots) / n) for n in names}
+        todo = [n for n in names if a.refresh or read_line(ref / n / "paint-key") != keys[n]]
+        if todo:
+            print("chrome %s: painting %d snapshots" % (version, len(todo)), flush=True)
+            chrome = ChromeLoads(a.chrome, a)
+            try:
+                for name in todo:
+                    n, err = chrome_paint(chrome, base_url + urllib.parse.quote(name) + "/index.html", a, ref / name)
+                    (ref / name).mkdir(parents=True, exist_ok=True)
+                    (ref / name / "paint-key").write_text("" if err else keys[name] + "\n")
+                    print("  %-22s %6d elements%s" % (name, n or 0, "  " + err if err else ""), flush=True)
+                    if err:
+                        skipped[name] = "Chrome: " + err
+            finally:
+                chrome.close()
+        for binary, label in zip(a.bins, labels):
+            dest = Path(a.out) / "snapshot-ns" / label / "paint"
+            print("nordstjernen %s: painting %d snapshots" % (label, len(names)), flush=True)
+
+            def one(name):
+                t0 = time.time()
+                n, err = ns_paint(binary, base_url + urllib.parse.quote(name) + "/index.html", a, dest / name)
+                return name, n, err, time.time() - t0
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
+                for name, n, err, secs in ex.map(one, names):
+                    print("  %-22s %6d elements %5.1fs%s" % (name, n, secs, "  " + err if err else ""), flush=True)
+                    if err:
+                        errors[label][name] = err
+    finally:
+        httpd.shutdown()
+    report = Path(a.report or Path(a.out) / "report")
+    figures = report / "paint"
+    shutil.rmtree(figures, ignore_errors=True)
+    figures.mkdir(parents=True, exist_ok=True)
+    rows, worst = [], []
+    newest = labels[-1]
+    for name in names:
+        if name in skipped:
+            continue
+        ch_rects, _ = load_paint(ref / name / "paint.tsv")
+        if len(ch_rects) < MIN_ELEMENTS:
+            skipped[name] = "Chrome found %d elements" % len(ch_rects)
+            continue
+        row = {"site": name}
+        for label in labels:
+            got = paint_compare(ref / name, Path(a.out) / "snapshot-ns" / label / "paint" / name)
+            if not got:
+                errors[label].setdefault(name, "no elements or no screenshot")
+                row[label] = None
+                continue
+            row[label] = {"compared": got["compared"], "differ": got["differ"],
+                          "share": round(100.0 * (got["compared"] - got["differ"]) / got["compared"], 2)
+                          if got["compared"] else None,
+                          "leaves": [[p, el, area] for area, p, el, _, _ in got["leaves"][:50]]}
+            if label == newest:
+                ci, ni = got["images"]
+                for area, p, el, cbox, nbox in got["leaves"][:PAINT_SHOWN]:
+                    worst.append((area, name, p, el, cbox, nbox, ci, ni))
+                worst = sorted(worst, key=lambda w: w[0], reverse=True)[:PAINT_SHOWN]
+        rows.append(row)
+    if not rows:
+        fail("nothing to compare (%s)" % "; ".join("%s: %s" % kv for kv in skipped.items()))
+    totals = {}
+    for label in labels:
+        done = [r[label] for r in rows if r[label]]
+        compared, differ = sum(d["compared"] for d in done), sum(d["differ"] for d in done)
+        totals[label] = {"compared": compared, "differ": differ,
+                         "share": round(100.0 * (compared - differ) / compared, 2) if compared else None}
+    lines = ["# Frozen snapshots: paint, %s vs Chrome" % " vs ".join(labels), "",
+             "Chrome %s · viewport %s · Nordstjernen locale %s · %d sites · first %d px of each page" % (
+                 version, "%dx%d" % (a.vw, a.vh), a.locale, len(rows), a.max_height), "",
+             "Of the elements Chrome paints itself (visible, not fully transparent, not clipped away by an overflow, not "
+             "under another element on the first screen, and with a "
+             "background, a border, a "
+             "shadow, text of its own, a ::before or ::after box, or replaced content) that the build lays out where Chrome does, the share whose "
+             "box also looks the same in both screenshots: both crops are reduced to %d px cells, and "
+             "a box differs when more than %d%% of its cells differ by more than %d in a colour channel. The list "
+             "below names the deepest boxes that differ, the largest first." % (
+                 PAINT_CELL, round(PAINT_SHARE * 100), PAINT_LIMIT), "",
+             "| Site | %s |" % " | ".join("%s compared | %s paint the same" % (k, k) for k in labels),
+             "| --- | %s |" % " | ".join(["---: | ---:"] * len(labels))]
+    for r in rows:
+        lines.append("| %s | %s |" % (r["site"], " | ".join(
+            "%s | %s" % (fmt((r[k] or {}).get("compared")), fmt((r[k] or {}).get("share"), ".2f") + "%"
+                         if (r[k] or {}).get("share") is not None else "-") for k in labels)))
+    lines.append("| **All** | %s |" % " | ".join("%s | **%s%%**" % (fmt(totals[k]["compared"]), fmt(totals[k]["share"], ".2f"))
+                                                for k in labels))
+    if worst:
+        lines += ["", "## Where %s paints differently" % newest, "",
+                  "| Area px | Site | Element | Path | Chrome box | Figure |", "| ---: | --- | --- | --- | --- | --- |"]
+        for k, (area, name, p, el, cbox, nbox, ci, ni) in enumerate(worst, 1):
+            figure = "%02d-%s.png" % (k, name)
+            paint_figure(ci, ni, cbox, nbox, newest, figures / figure)
+            lines.append("| %s | %s | `%s` | `%s` | %s | [%s](paint/%s) |" % (
+                fmt(area), name, el[:50], p, ",".join(map(str, cbox)), figure, figure))
+    if skipped:
+        lines += ["", "Skipped: " + "; ".join("%s (%s)" % kv for kv in sorted(skipped.items()))]
+    for label in labels:
+        lines += failure_lines(label, errors[label])
+    meta = dict(common_meta(a, version, [r["site"] for r in rows], 0), maxHeight=a.max_height,
+                builds={label: {"path": b, "sha256": file_digest(b)} for b, label in zip(a.bins, labels)})
+    del meta["elements"]
+    (report / "paint.json").write_text(json.dumps({"meta": meta, "totals": totals, "sites": rows, "skipped": skipped,
+                                                   "failed": errors}, indent=1) + "\n")
+    (report / "paint.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    print("\nreport: %s" % (report / "paint.md"))
+    return 1 if any(errors.values()) else 0
+
+
 def main():
     if sys.platform == "win32":
         fail("runs on Linux and macOS only")
@@ -1342,6 +1660,11 @@ def main():
     t.add_argument("--max-slowdown", type=float, default=None,
                    help="fail when the newest build spends more than this many percent more main-thread CPU, "
                         "summed over the sites, than the oldest")
+    g = sub.add_parser("paint", parents=[shared], help="compare the screenshots of one or more builds with Chrome's")
+    g.add_argument("bins", nargs="*", help="builds to compare, oldest first (default: NS_BIN or builddir's build)")
+    g.add_argument("--labels", default=None, help="names of the builds (default: nordstjernen, or before,after)")
+    g.add_argument("--max-height", type=int, default=8000, help="compare the page down to this many pixels")
+    g.set_defaults(jobs=1)
     a = p.parse_args()
     a.only = {x for x in a.only.split(",") if x}
     if a.cmd == "freeze":
@@ -1359,18 +1682,20 @@ def main():
             if not os.access(binary, os.X_OK):
                 p.error("not an executable: %s" % binary)
         return cmd_ab(a)
-    if a.cmd == "perf":
+    if a.cmd in ("perf", "paint"):
         a.bins = a.bins or [os.environ.get("NS_BIN") or default_binary()]
         default = ["nordstjernen"] if len(a.bins) == 1 else ["before", "after"] if len(a.bins) == 2 else None
         a.labels = [x for x in a.labels.split(",") if x] if a.labels else default
         if not a.labels or len(a.labels) != len(a.bins) or len(set(a.labels)) != len(a.labels) or "chrome" in a.labels:
             p.error("--labels needs one different name per build, other than chrome")
-        if a.runs < 1:
+        if a.cmd == "perf" and a.runs < 1:
             p.error("--runs must be 1 or more")
+        if a.cmd == "paint" and a.max_height < a.vh:
+            p.error("--max-height must be at least the viewport height")
         for binary in a.bins:
             if not os.access(binary, os.X_OK):
                 p.error("not an executable: %s" % binary)
-        return cmd_perf(a)
+        return cmd_perf(a) if a.cmd == "perf" else cmd_paint(a)
     if a.cmd == "score":
         if not os.access(a.bin, os.X_OK):
             p.error("not an executable: %s" % a.bin)
