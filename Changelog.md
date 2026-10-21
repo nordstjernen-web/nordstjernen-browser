@@ -18,6 +18,14 @@ Changelog:
   lengths measured with the fallback font. On frozen copies of
   nytimes.com, apnews.com and weather.com the main-thread CPU of a load
   drops by 42%, 48% and 53%.
+* Performance: a rule whose subject is `:is()` or `:where()` is no longer
+  tested against every element when some of its arguments can never
+  match, such as `.btn:-moz-focusring`. The rule index skips those
+  arguments and files the rule under the others' class, id, tag or
+  attribute, and drops it when none is left. CSS nesting wraps parent
+  lists in `:is()`, so one vendor-prefixed parent selector put the whole
+  rule in the list checked for every element: 74 such rules on
+  nytimes.com doubled the selectors tried per element.
 * Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
   fails when the server sends a `Content-Length`. The method was passed
   to curl as a plain custom verb, so curl waited for a body that a HEAD
