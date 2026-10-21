@@ -12930,6 +12930,9 @@ flex_column_item_align(const ns_box *c, const char *align)
 static gboolean
 flex_column_item_shrinks_to_fit(const ns_box *c, const char *align)
 {
+    if (c->style && (length_is_auto(c->style->values[NS_CSS_MARGIN_LEFT]) ||
+                     length_is_auto(c->style->values[NS_CSS_MARGIN_RIGHT])))
+        return TRUE;
     const char *eff = flex_column_item_align(c, align);
     return strcmp(eff, "stretch") != 0 && strcmp(eff, "normal") != 0;
 }
@@ -12972,7 +12975,8 @@ flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
 {
     const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
     gboolean width_explicit = wv &&
-        (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
+        (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC ||
+         size_keyword_is_intrinsic(wv));
     double parent_w = line_w;
     if (fit && !width_explicit) {
         double nat = measure_natural_width(c, child_inherited);
@@ -13502,7 +13506,8 @@ layout_flex_column(ns_box *box, double cw,
             gboolean ml_auto = length_is_auto(mlv);
             gboolean mr_auto = length_is_auto(mrv);
             gboolean width_explicit = wv &&
-                (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
+                (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC ||
+                 size_keyword_is_intrinsic(wv));
             const char *eff_align = flex_column_item_align(c, align);
             gboolean stretches = !ml_auto && !mr_auto && !width_explicit &&
                 (strcmp(eff_align, "stretch") == 0 ||
@@ -13523,7 +13528,7 @@ layout_flex_column(ns_box *box, double cw,
                 at_right = FALSE;
             else if (!centered)
                 at_right = cross_start_right;
-            if ((stretches || ml_auto || mr_auto) &&
+            if (stretches &&
                 fabs(flex_item_outer_width(c) - ln->cross) > 0.01) {
                 c->x = inner_x;
                 c->y = inner_y;
@@ -13531,9 +13536,11 @@ layout_flex_column(ns_box *box, double cw,
             }
             double item_outer_w = flex_item_outer_width(c);
             double cx = ln->x;
-            if (ml_auto || mr_auto)
-                cx = ln->x;
-            else if (centered)
+            if (ml_auto || mr_auto) {
+                double free_cross = MAX(ln->cross - item_outer_w, 0);
+                cx = ln->x + (ml_auto && mr_auto ? free_cross / 2.0
+                              : ml_auto      ? free_cross : 0);
+            } else if (centered)
                 cx = ln->x + (ln->cross - item_outer_w) / 2.0;
             else if (at_right)
                 cx = ln->x + ln->cross - item_outer_w;
