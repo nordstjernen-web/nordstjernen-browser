@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* JavaScript: the engine passes test262 main as of 2026-10-13
+  (`d53ebc8b`, 102,988 test runs, 0 failures). The tests added since
+  July, such as the Intl.Locale info getters, iterator chunking and
+  `using` at the top level of a module, pass unchanged.
+  `docs/quickjs-ecma-specification-compliance.md` states the current
+  baseline and lists the staging and Atomics work in its table.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
