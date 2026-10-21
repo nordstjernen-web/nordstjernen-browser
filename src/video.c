@@ -80,9 +80,9 @@ ns_vtt_parse_ts(const char *s)
         s++;
         long f = 0;
         int nd = 0;
-        while (g_ascii_isdigit(*s)) { f = f * 10 + (*s - '0'); s++; nd++; }
-        while (nd < 3) { f *= 10; nd++; }
-        while (nd > 3) { f /= 10; nd--; }
+        for (; g_ascii_isdigit(*s); s++)
+            if (nd < 3) { f = f * 10 + (*s - '0'); nd++; }
+        for (; nd < 3; nd++) f *= 10;
         ms = f;
     }
     return (double)hours * 3600.0 + (double)mins * 60.0 + (double)secs
