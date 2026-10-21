@@ -63192,15 +63192,27 @@ ns_js_profile_enabled(void)
     return cached == 1;
 }
 
-static gboolean
-ns_js_eval_bytecode_cached(ns_js *js, const char *src, gsize len,
-                           const char *origin, JSValue *out_value,
-                           gboolean *out_compiled)
+static char *
+ns_js_classic_cache_key(const char *src, gsize len, const char *origin,
+                        int line, int col, int flags, gsize *out_len)
 {
-    if (out_compiled) *out_compiled = FALSE;
-    if (len < 1024) return FALSE;
+    GString *k = g_string_new("classic");
+    g_string_append_c(k, '\0');
+    g_string_append(k, origin ? origin : "");
+    g_string_append_c(k, '\0');
+    g_string_append_printf(k, "%d:%d:%d", line, col, flags);
+    g_string_append_c(k, '\0');
+    g_string_append_len(k, src ? src : "", (gssize)len);
+    *out_len = k->len;
+    return g_string_free(k, FALSE);
+}
+
+static gboolean
+ns_js_eval_bytecode_cached(ns_js *js, const char *key, gsize key_len,
+                           JSValue *out_value)
+{
     gsize bc_len = 0;
-    guint8 *bc = ns_bytecode_cache_get(src, len, &bc_len);
+    guint8 *bc = ns_bytecode_cache_get(key, key_len, &bc_len);
     if (!bc) return FALSE;
     JSValue fn = JS_ReadObject(js->ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
     g_free(bc);
@@ -63209,15 +63221,13 @@ ns_js_eval_bytecode_cached(ns_js *js, const char *src, gsize len,
         return FALSE;
     }
     *out_value = JS_EvalFunction(js->ctx, fn);
-    if (out_compiled) *out_compiled = TRUE;
-    (void)origin;
     return TRUE;
 }
 
 static void
-ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len)
+ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *key,
+                           gsize key_len)
 {
-    if (len < 1024) return;
     size_t bc_size = 0;
     uint8_t *bc = JS_WriteObject(js->ctx, &bc_size, fn_obj,
                                  JS_WRITE_OBJ_BYTECODE);
@@ -63225,7 +63235,7 @@ ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len
         if (bc) js_free(js->ctx, bc);
         return;
     }
-    ns_bytecode_cache_put(src, len, bc, bc_size);
+    ns_bytecode_cache_put(key, key_len, bc, bc_size);
     js_free(js->ctx, bc);
 }
 
@@ -63583,8 +63593,13 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
                        ? inline_script->src_line : 1;
     int src_col = (inline_script && inline_script->src_col > 0)
                       ? inline_script->src_col : 1;
-    if (!(ns_js_eval_bytecode_cached(js, copy, len, origin, &v, &cache_hit) &&
-          cache_hit)) {
+    gsize bc_key_len = 0;
+    char *bc_key = len >= 1024
+        ? ns_js_classic_cache_key(copy, len, origin, src_line, src_col,
+                                  source_flags, &bc_key_len)
+        : NULL;
+    cache_hit = bc_key && ns_js_eval_bytecode_cached(js, bc_key, bc_key_len, &v);
+    if (!cache_hit) {
         JSValue geval = JS_GetGlobalObject(js->ctx);
         JSEvalOptions opts = {
             .version = JS_EVAL_OPTIONS_VERSION,
@@ -63597,13 +63612,15 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         JSValue fn = JS_EvalThis2(js->ctx, geval, copy, len, &opts);
         JS_FreeValue(js->ctx, geval);
         if (!JS_IsException(fn)) {
-            ns_js_bytecode_cache_store(js, fn, copy, len);
+            if (bc_key)
+                ns_js_bytecode_cache_store(js, fn, bc_key, bc_key_len);
             v = JS_EvalFunction(js->ctx, fn);
         } else {
             v = fn;
         }
     }
 
+    g_free(bc_key);
     g_free(copy);
     js->eval_depth--;
     if (js->eval_depth == 0) {
@@ -64169,12 +64186,13 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
                             const char *module_name)
 {
     ns_js_module_prefetch_begin(js_from_ctx(ctx), module_name, src, len);
-    gsize  name_len = module_name ? strlen(module_name) : 0;
-    gsize  key_len  = name_len + 1 + len;
-    char  *key      = g_malloc(key_len);
-    memcpy(key, module_name ? module_name : "", name_len);
-    key[name_len] = '\0';
-    memcpy(key + name_len + 1, src ? src : "", len);
+    GString *key_buf = g_string_new("module");
+    g_string_append_c(key_buf, '\0');
+    g_string_append(key_buf, module_name ? module_name : "");
+    g_string_append_c(key_buf, '\0');
+    g_string_append_len(key_buf, src ? src : "", (gssize)len);
+    gsize  key_len  = key_buf->len;
+    char  *key      = g_string_free(key_buf, FALSE);
 
     if (len >= 1024) {
         gsize bc_len = 0;

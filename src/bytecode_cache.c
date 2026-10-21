@@ -1,32 +1,12 @@
-/* Nordstjernen — JavaScript bytecode cache.
+/* Nordstjernen — per-process JavaScript bytecode cache.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
 #include "bytecode_cache.h"
 
-#include "config.h"
-
-#include <fcntl.h>
-#include <glib/gstdio.h>
-#include <stdio.h>
-#include <string.h>
-
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
-
 #define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
 #define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026101502u
-#define NS_BYTECODE_CACHE_DIGEST_BYTES    32u
-#define NS_BYTECODE_CACHE_HEADER_BYTES    (8u + NS_BYTECODE_CACHE_DIGEST_BYTES)
-
-#ifdef NS_QUICKJS_ORIGINAL
-#define NS_BYTECODE_CACHE_DIR "jsbc" G_DIR_SEPARATOR_S "quickjs-" NS_QUICKJS_ORIGINAL_VERSION
-#else
-#define NS_BYTECODE_CACHE_DIR "jsbc"
-#endif
 
 typedef struct ns_bytecode_cache_entry {
     guint8 *bytes;
@@ -37,7 +17,6 @@ typedef struct ns_bytecode_cache_entry {
 static GHashTable *g_mem;
 static GMutex      g_lock;
 static guint64     g_mem_bytes;
-static char       *g_dir;
 
 static void
 ns_bytecode_cache_entry_free(gpointer data)
@@ -55,15 +34,6 @@ ns_bytecode_cache_init(void)
     if (!g_mem)
         g_mem = g_hash_table_new_full(g_str_hash, g_str_equal,
                                       g_free, ns_bytecode_cache_entry_free);
-    if (!g_dir) {
-        const ns_config *c = ns_config_get();
-        if (!c || c->cache_enabled) {
-            const char *base = g_get_user_cache_dir();
-            g_dir = g_build_filename(base, NS_APP_DIR_NAME,
-                                     NS_BYTECODE_CACHE_DIR, NULL);
-            g_mkdir_with_parents(g_dir, 0700);
-        }
-    }
     g_mutex_unlock(&g_lock);
 }
 
@@ -76,130 +46,16 @@ ns_bytecode_cache_shutdown(void)
         g_mem = NULL;
     }
     g_mem_bytes = 0;
-    g_clear_pointer(&g_dir, g_free);
     g_mutex_unlock(&g_lock);
 }
 
 static void
-hash_source(const char *src, gsize len, char out[65])
+hash_key(const char *key, gsize len, char out[65])
 {
     GChecksum *c = g_checksum_new(G_CHECKSUM_SHA256);
-    g_checksum_update(c, (const guchar *)(src ? src : ""), (gssize)len);
+    g_checksum_update(c, (const guchar *)(key ? key : ""), (gssize)len);
     g_strlcpy(out, g_checksum_get_string(c), 65);
     g_checksum_free(c);
-}
-
-static void
-digest_bytes(const guint8 *data, gsize len,
-             guint8 out[NS_BYTECODE_CACHE_DIGEST_BYTES])
-{
-    GChecksum *c = g_checksum_new(G_CHECKSUM_SHA256);
-    g_checksum_update(c, data, (gssize)len);
-    gsize out_len = NS_BYTECODE_CACHE_DIGEST_BYTES;
-    g_checksum_get_digest(c, out, &out_len);
-    g_checksum_free(c);
-}
-
-static char *
-disk_path_for(const char *key)
-{
-    g_mutex_lock(&g_lock);
-    char *base = g_strdup(g_dir);
-    g_mutex_unlock(&g_lock);
-    if (!base || !key || !*key) { g_free(base); return NULL; }
-    char sub[3] = { key[0], key[1], '\0' };
-    char *dir = g_build_filename(base, sub, NULL);
-    g_mkdir_with_parents(dir, 0700);
-    char *file = g_build_filename(dir, key + 2, NULL);
-    g_free(dir);
-    g_free(base);
-    return file;
-}
-
-static guint8 *
-read_disk(const char *key, gsize *out_len)
-{
-    char *path = disk_path_for(key);
-    if (!path) return NULL;
-    GStatBuf stbuf;
-    if (g_stat(path, &stbuf) != 0 ||
-        stbuf.st_size < (gint64)NS_BYTECODE_CACHE_HEADER_BYTES ||
-        (guint64)stbuf.st_size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES +
-                                 NS_BYTECODE_CACHE_HEADER_BYTES) {
-        g_free(path);
-        return NULL;
-    }
-    gchar *contents = NULL;
-    gsize length = 0;
-    gboolean ok = g_file_get_contents(path, &contents, &length, NULL);
-    g_free(path);
-    if (!ok) return NULL;
-    if (length < NS_BYTECODE_CACHE_HEADER_BYTES) {
-        g_free(contents);
-        return NULL;
-    }
-    guint32 magic = 0, fmt = 0;
-    memcpy(&magic, contents,     4);
-    memcpy(&fmt,   contents + 4, 4);
-    if (magic != GUINT32_FROM_LE(0x4E4A4243u) ||
-        fmt   != GUINT32_FROM_LE(NS_BYTECODE_CACHE_FORMAT_VERSION)) {
-        g_free(contents);
-        return NULL;
-    }
-    gsize bc_len = length - NS_BYTECODE_CACHE_HEADER_BYTES;
-    if (bc_len == 0 || bc_len > NS_BYTECODE_CACHE_VALUE_CAP_BYTES) {
-        g_free(contents);
-        return NULL;
-    }
-    const guint8 *bc = (const guint8 *)contents + NS_BYTECODE_CACHE_HEADER_BYTES;
-    guint8 digest[NS_BYTECODE_CACHE_DIGEST_BYTES];
-    digest_bytes(bc, bc_len, digest);
-    if (memcmp(digest, contents + 8, sizeof digest) != 0) {
-        g_free(contents);
-        return NULL;
-    }
-    guint8 *out = g_malloc(bc_len);
-    memcpy(out, bc, bc_len);
-    g_free(contents);
-    if (out_len) *out_len = bc_len;
-    return out;
-}
-
-static void
-write_disk(const char *key, const guint8 *bc, gsize bc_len)
-{
-    char *path = disk_path_for(key);
-    if (!path) return;
-    guint32 magic = GUINT32_TO_LE(0x4E4A4243u);
-    guint32 fmt   = GUINT32_TO_LE(NS_BYTECODE_CACHE_FORMAT_VERSION);
-    guint8 digest[NS_BYTECODE_CACHE_DIGEST_BYTES];
-    digest_bytes(bc, bc_len, digest);
-    char *tmp = g_strdup_printf("%s.XXXXXX", path);
-    int fd = g_mkstemp_full(tmp, O_WRONLY | O_BINARY, 0600);
-    FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
-    if (!f) {
-        if (fd >= 0) {
-            g_close(fd, NULL);
-            g_unlink(tmp);
-        }
-        g_free(tmp);
-        g_free(path);
-        return;
-    }
-    gboolean wrote = fwrite(&magic, 1, 4, f) == 4 &&
-                     fwrite(&fmt,   1, 4, f) == 4 &&
-                     fwrite(digest, 1, sizeof digest, f) == sizeof digest &&
-                     fwrite(bc,     1, bc_len, f) == bc_len &&
-                     ferror(f) == 0;
-    if (fclose(f) != 0 || !wrote) {
-        g_unlink(tmp);
-        g_free(tmp); g_free(path);
-        return;
-    }
-    if (g_rename(tmp, path) != 0)
-        g_unlink(tmp);
-    g_free(tmp);
-    g_free(path);
 }
 
 static void
@@ -228,60 +84,37 @@ evict_until_fits(gsize want_bytes)
 }
 
 guint8 *
-ns_bytecode_cache_get(const char *src, gsize src_len, gsize *out_len)
+ns_bytecode_cache_get(const char *key, gsize key_len, gsize *out_len)
 {
-    if (!src || !src_len) return NULL;
-    char key[65];
-    hash_source(src, src_len, key);
+    if (!key || !key_len) return NULL;
+    char digest[65];
+    hash_key(key, key_len, digest);
 
     g_mutex_lock(&g_lock);
-    if (!g_mem) {
-        g_mutex_unlock(&g_lock);
-        return NULL;
-    }
-    ns_bytecode_cache_entry *e = g_hash_table_lookup(g_mem, key);
+    ns_bytecode_cache_entry *e = g_mem ? g_hash_table_lookup(g_mem, digest)
+                                       : NULL;
+    guint8 *copy = NULL;
     if (e) {
         e->used_us = g_get_monotonic_time();
-        guint8 *copy = g_memdup2(e->bytes, e->len);
+        copy = g_memdup2(e->bytes, e->len);
         if (out_len) *out_len = e->len;
-        g_mutex_unlock(&g_lock);
-        return copy;
     }
     g_mutex_unlock(&g_lock);
-
-    gsize disk_len = 0;
-    guint8 *disk = read_disk(key, &disk_len);
-    if (!disk) return NULL;
-
-    g_mutex_lock(&g_lock);
-    if (g_mem && disk_len <= NS_BYTECODE_CACHE_VALUE_CAP_BYTES) {
-        if (!g_hash_table_lookup(g_mem, key)) {
-            evict_until_fits(disk_len);
-            ns_bytecode_cache_entry *ne = g_new0(ns_bytecode_cache_entry, 1);
-            ne->bytes = g_memdup2(disk, disk_len);
-            ne->len = disk_len;
-            ne->used_us = g_get_monotonic_time();
-            g_hash_table_insert(g_mem, g_strdup(key), ne);
-            g_mem_bytes += disk_len;
-        }
-    }
-    g_mutex_unlock(&g_lock);
-    if (out_len) *out_len = disk_len;
-    return disk;
+    return copy;
 }
 
 void
-ns_bytecode_cache_put(const char *src, gsize src_len,
-              const guint8 *bc, gsize bc_len)
+ns_bytecode_cache_put(const char *key, gsize key_len,
+                      const guint8 *bc, gsize bc_len)
 {
-    if (!src || !src_len || !bc || !bc_len) return;
+    if (!key || !key_len || !bc || !bc_len) return;
     if (bc_len > NS_BYTECODE_CACHE_VALUE_CAP_BYTES) return;
-    char key[65];
-    hash_source(src, src_len, key);
+    char digest[65];
+    hash_key(key, key_len, digest);
 
     g_mutex_lock(&g_lock);
     if (!g_mem) { g_mutex_unlock(&g_lock); return; }
-    ns_bytecode_cache_entry *existing = g_hash_table_lookup(g_mem, key);
+    ns_bytecode_cache_entry *existing = g_hash_table_lookup(g_mem, digest);
     if (existing) {
         existing->used_us = g_get_monotonic_time();
         g_mutex_unlock(&g_lock);
@@ -292,11 +125,7 @@ ns_bytecode_cache_put(const char *src, gsize src_len,
     ne->bytes = g_memdup2(bc, bc_len);
     ne->len = bc_len;
     ne->used_us = g_get_monotonic_time();
-    g_hash_table_insert(g_mem, g_strdup(key), ne);
+    g_hash_table_insert(g_mem, g_strdup(digest), ne);
     g_mem_bytes += bc_len;
     g_mutex_unlock(&g_lock);
-
-    const ns_config *cfg = ns_config_get();
-    if (!cfg || !cfg->private_mode)
-        write_disk(key, bc, bc_len);
 }

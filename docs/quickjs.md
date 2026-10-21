@@ -81,9 +81,8 @@ is a plain include. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
 - **Fork-only hooks.** The fork's own additions have no equivalent and fall
   back, as described below.
 
-The bytecode cache keys entries by source text only, and the two engines'
-bytecode is not interchangeable, so the original engine keeps its cache in
-`~/.cache/nordstjernen/jsbc/quickjs-<version>/`.
+The bytecode cache lives in memory in each process, so the two engines'
+bytecode, which is not interchangeable, never meets.
 
 ## Known differences on the original engine
 

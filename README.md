@@ -116,8 +116,8 @@ installer are in `scripts/`.
   Fullscreen and Pointer Lock. The quickjs-ng fork carries `Temporal`, the
   full `Intl` suite without ICU, and `ShadowRealm`. Much of the higher-level
   Web API surface is a JavaScript prelude (`data/js/polyfills.js`) compiled
-  into the binary. Compiled script bytecode is cached on disk while the
-  browser runs. The QuickJS engine is selectable at build time: the in-tree
+  into the binary. Each renderer keeps compiled script bytecode in memory, so
+  a script loaded again skips recompilation. The QuickJS engine is selectable at build time: the in-tree
   quickjs-ng fork by default, or Fabrice Bellard's original QuickJS with
   `-Dquickjs=quickjs` — see [docs/quickjs.md](docs/quickjs.md).
 - **Networking** over HTTP/2 with libcurl — HSTS, HTTPS-First (on by

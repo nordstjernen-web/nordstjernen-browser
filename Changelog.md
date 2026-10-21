@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Security: compiled JavaScript was cached by its source text alone. A
+  page could therefore serve an exact copy of a script another site uses,
+  from its own URL. When the other site later loaded its copy, the browser
+  reused the cached bytecode, which still named the first URL, and the
+  script's dynamic `import()` loaded modules from the attacker's site into
+  the victim's page. The same reuse also put the first URL into
+  `error.stack`. The cache key now covers the script's URL, position and
+  compile flags as well as its source.
+  The cache is also no longer written to disk. Every sandboxed renderer can
+  write the cache directory, and QuickJS runs bytecode without verifying
+  it, so a compromised renderer could plant code for renderers showing
+  other sites to run. Each renderer now keeps its cache in memory.
 * README brought in line with the source after a full review. It names
   1.0.35 as the current release and counts about 254,000 lines of engine C.
   It now lists the CSS, JavaScript, networking, privacy, UI and extension
