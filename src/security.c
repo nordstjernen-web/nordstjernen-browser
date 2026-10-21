@@ -127,7 +127,7 @@ ns_security_sri_check(const char *integrity_attr,
                       const void *body, gsize body_len)
 {
     if (!integrity_attr || !*integrity_attr) return TRUE;
-    if (!body || body_len == 0) return FALSE;
+    if (!body && body_len) return FALSE;
 
     int strongest = 0;
     g_auto(GStrv) tokens = g_strsplit_set(integrity_attr, " \t\r\n", -1);

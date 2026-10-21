@@ -19,6 +19,7 @@
 #include "paint.h"
 #include "print.h"
 #include "render.h"
+#include "security.h"
 
 typedef struct fetch_state {
     GMainLoop  *loop;
@@ -1403,6 +1404,14 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,
                                             cc->strict_css_mime, "link",
                                             blocking, cc->frame_depth > 0);
+            const char *integrity = ns_element_get_attr(n, "integrity");
+            if (bytes && !ns_security_sri_check(integrity,
+                                                g_bytes_get_data(bytes, NULL),
+                                                g_bytes_get_size(bytes))) {
+                ns_debug_log_emit(NS_DLOG_WARN, "sri",
+                                  "SRI mismatch: stylesheet %s", abs);
+                g_clear_pointer(&bytes, g_bytes_unref);
+            }
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
