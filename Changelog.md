@@ -14,6 +14,13 @@ Changelog:
   the same JavaScript heap, and the browser crashed in the garbage
   collector (Al Jazeera crashed on 9 of 10 cold loads). Each received
   chunk is now always queued to the page's thread and handled there.
+* Layout: positive `letter-spacing` no longer spaces an inline-block, an
+  image or another atomic inline as if it were a letter. The line
+  breaker counted that extra spacing, so a shrink-to-fit heading with
+  spaced text and a trailing icon (the BBC section titles with their
+  chevron) was a pixel too narrow and pushed the icon onto a second
+  line. Positive letter spacing now applies to the text only, as in
+  Chrome.
 * Layout: `line-height: 0` is now honoured. It was treated like an unset
   value, so a block holding only an image or an inline-block still got a
   line of about 1.2 times its font size, and the image card wrappers
