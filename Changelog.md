@@ -21,6 +21,16 @@ Changelog:
   collapsed to nothing. On Canva the image of every promotion card
   collapsed this way. The percentage now resolves against the same
   containing block during the box's own layout, as in Chrome.
+* Audio: pages now hear back from the audio player. The helper process
+  that decodes `<audio>` reported duration, position and the end of
+  playback, but the window threw those reports away, so a page never got
+  `canplaythrough`, `timeupdate` or `ended`. `load()` also never started
+  fetching, so a page that calls `play()` from its `canplaythrough`
+  handler (the click sounds on kabesalod.de) stayed silent. `load()` now
+  opens the file in the helper, and its reports reach the page as the
+  usual media events, including for `new Audio()` elements that are not
+  in the document. FLAC and WAV files play too, and the LGPL FFmpeg
+  build used for Windows releases includes their decoders.
 * SVG: `<use href="sprite.svg#icon">` now draws symbols from an external
   SVG file. Only references inside the same document worked, so icon
   sets served as one sprite file (the navigation icons on midzer.de, the

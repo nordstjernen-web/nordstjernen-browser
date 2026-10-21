@@ -3534,6 +3534,15 @@ ns_browser_contextmenu(ns_browser *browser, int x, int y)
     return ns_browser_contextmenu_full(browser, x, y, NULL);
 }
 
+void
+ns_browser_audio_feedback(ns_browser *browser, const char *line)
+{
+    if (!browser || !browser->js) return;
+    ns_js_audio_feedback(browser->js, line);
+    if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    browser->repaint_requested = TRUE;
+}
+
 char *
 ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                     int *out_stream)
