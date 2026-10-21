@@ -132,6 +132,7 @@ void ns_node_free(ns_node *node);
 
 void ns_node_append_child(ns_node *parent, ns_node *child);
 void ns_node_remove(ns_node *child);
+void ns_dom_tree_changed(void);
 ns_node *ns_node_next_in_subtree(const ns_node *node, const ns_node *root,
                                  gboolean descend);
 
