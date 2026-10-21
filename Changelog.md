@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Web Audio: a looping `AudioBufferSourceNode` with an enormous
+  `playbackRate` could push its read position to infinity during
+  real-time rendering. The position then became NaN and was used as an
+  array index, which is undefined behaviour. Such a source now stops
+  instead.
+* WebVTT: a cue timestamp with a very long fractional part, such as
+  `00:01.` followed by thousands of digits, overflowed a signed integer
+  while it was parsed. Only the first three digits are read now, which is
+  all the millisecond value ever used.
 * HSTS: a host's HTTPS-only policy no longer outlives its `max-age`. The
   engine's own HSTS check ignored the expiry date in the HSTS file, so a
   site was forced onto HTTPS, and the certificate-warning override refused

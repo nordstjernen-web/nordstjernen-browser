@@ -172,8 +172,8 @@ ns_wa_buffer_source(JSContext *ctx, JSValueConst node, uint32_t frames,
             if (pos >= n && !loop) first = last;
         }
         for (uint32_t i = first; i < last; i++) {
-            if (pos >= n) {
-                if (!loop) break;
+            if (!(pos < n)) {
+                if (!loop || !isfinite(pos)) break;
                 pos = fmod(pos, (double)n);
             }
             out[i] = src[(uint32_t)pos];
