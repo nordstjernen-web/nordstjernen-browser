@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: reading `document.fonts` no longer lays out the page.
+  The getter flushed layout on every access so that `ready` and
+  `status` would know which web fonts the page needs, and the engine's
+  own setup code reads `document.fonts` for every document before any
+  script runs, so each load laid out the page once during setup and
+  again for its first paint. `ready` and `status` are now getters that
+  flush layout when they are read, so they resolve and report exactly
+  as before; getting `document.fonts` itself, `check()`, `add()` and
+  the event handlers no longer flush. `loadingdone` still fires when
+  the pending web fonts finish loading. On frozen copies of AP News,
+  claude.ai, CNN, ESPN and IMDb the main-thread CPU to first paint
+  drops by 14%, 16%, 12%, 11% and 11%.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
