@@ -22,6 +22,7 @@
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
 #define NS_PROC_FRAME_WAKE_MS  16
+#define NS_PROC_AUDIO_POLL_MS  250
 #define NS_PROC_ANIM_FRAME_US  (G_USEC_PER_SEC / 60)
 #define NS_PROC_ANIM_FRAME_SLACK_US (NS_PROC_ANIM_FRAME_US / 4)
 #define NS_PROC_RELOAD_RESTART_US (1000 * 1000)
@@ -63,7 +64,7 @@ typedef enum {
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON,
-    REQ_TICK, REQ_PRINT, REQ_QUIT
+    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -202,6 +203,7 @@ struct NsProcView {
 
     GSubprocess  *audio_proc;
     GOutputStream *audio_in;
+    guint         audio_poll_id;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -672,6 +674,19 @@ ns_proc_audio_apply_proxy_env(GSubprocessLauncher *launcher)
         g_subprocess_launcher_setenv(launcher, "CURL_CA_BUNDLE", ca, TRUE);
 }
 
+static void request_tick(NsProcView *v);
+
+static gboolean
+pv_audio_feedback_for_page(const char *line)
+{
+    static const char *const kinds[] = {
+        "meta ", "pos ", "playing ", "ended ", "error ",
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(kinds); i++)
+        if (g_str_has_prefix(line, kinds[i])) return TRUE;
+    return FALSE;
+}
+
 static void
 pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
 {
@@ -685,6 +700,14 @@ pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
     }
     if (g_str_has_prefix(line, "error ") || g_getenv("NS_DBG_AUDIO"))
         g_printerr("[audio-helper] %s\n", line);
+    if (v && !v->closed && pv_audio_feedback_for_page(line)) {
+        Req *req = g_new0(Req, 1);
+        req->type = REQ_AUDIO_EVENT;
+        req->query = line;
+        line = NULL;
+        request_tick(v);
+        g_async_queue_push_front(v->queue, req);
+    }
     g_free(line);
     g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL,
                                         pv_audio_feedback_line, v);
@@ -767,6 +790,19 @@ pv_audio_command_allowed(NsProcView *v, const char *cmd)
     return !url || pv_audio_url_allowed(v, url);
 }
 
+static gboolean
+pv_audio_poll(gpointer data)
+{
+    NsProcView *v = data;
+    if (!v->audio_in) {
+        v->audio_poll_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    g_output_stream_write_all(v->audio_in, "poll\n", 5, NULL, NULL, NULL);
+    g_output_stream_flush(v->audio_in, NULL, NULL);
+    return G_SOURCE_CONTINUE;
+}
+
 static void
 pv_audio_pump(NsProcView *v, const char *commands)
 {
@@ -796,6 +832,9 @@ pv_audio_pump(NsProcView *v, const char *commands)
             g_data_input_stream_read_line_async(
                 g_data_input_stream_new(feedback), G_PRIORITY_DEFAULT, NULL,
                 pv_audio_feedback_line, pv_ref(v));
+        if (!v->audio_poll_id)
+            v->audio_poll_id = g_timeout_add(NS_PROC_AUDIO_POLL_MS,
+                                             pv_audio_poll, v);
     }
     if (!v->audio_in) return;
 
@@ -821,6 +860,10 @@ pv_audio_pump(NsProcView *v, const char *commands)
 static void
 pv_audio_shutdown(NsProcView *v)
 {
+    if (v->audio_poll_id) {
+        g_source_remove(v->audio_poll_id);
+        v->audio_poll_id = 0;
+    }
     if (!v->audio_proc) return;
     if (v->audio_in) {
         g_output_stream_write_all(v->audio_in, "quit\n", 5, NULL, NULL, NULL);
@@ -836,8 +879,6 @@ static gboolean maybe_update_viewport(NsProcView *v);
 static void request_hover(NsProcView *v, int x, int y);
 static void print_run(NsProcView *v, GPtrArray *pages,
                       const ns_print_setup *setup, double raster_scale);
-static void request_tick(NsProcView *v);
-static void push_req(NsProcView *v, Req *req);
 
 static void
 pv_append_proc_threads(GString *out, int pid)
@@ -1370,6 +1411,9 @@ worker_main(gpointer data)
         } else if (req->type == REQ_COLOR_SCHEME) {
             if (v->proc)
                 ns_rproc_http_set_color_scheme(v->proc, req->mods);
+        } else if (req->type == REQ_AUDIO_EVENT) {
+            if (v->proc)
+                ns_rproc_http_audio_event(v->proc, req->query);
         } else if (req->type == REQ_FAVICON) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);

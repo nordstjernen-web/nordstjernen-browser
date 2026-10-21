@@ -49352,7 +49352,7 @@ ns_media_src_is_mp3(const char *url)
     static const char *const exts[] = {
         ".mp3",
 #ifdef NS_HAVE_LIBAV
-        ".opus", ".weba", ".webm", ".ogg", ".oga",
+        ".opus", ".weba", ".webm", ".ogg", ".oga", ".flac", ".wav",
 #endif
         NULL,
     };
@@ -49398,9 +49398,44 @@ ns_media_token(JSContext *ctx, ns_node *node)
     if (!token) {
         token = g_strdup_printf("a%u", ++js->next_audio_token);
         JS_SetPropertyStr(ctx, v, "_nd_audio_token", JS_NewString(ctx, token));
+        if (!js->audio_elements)
+            js->audio_elements = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, g_free);
+        JSValue *held = g_new(JSValue, 1);
+        *held = JS_DupValue(ctx, v);
+        g_hash_table_insert(js->audio_elements, g_strdup(token), held);
     }
     JS_FreeValue(ctx, v);
     return token;
+}
+
+static void
+ns_media_audio_open(JSContext *ctx, JSValueConst this_val, ns_node *el,
+                    const char *url)
+{
+    ns_js *js = js_from_ctx(ctx);
+    char *token = ns_media_token(ctx, el);
+    JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_url");
+    const char *opened_url = JS_ToCString(ctx, opened);
+    gboolean same = opened_url && JS_IsString(opened) &&
+                    strcmp(opened_url, url) == 0;
+    JS_FreeCString(ctx, opened_url);
+    JS_FreeValue(ctx, opened);
+    if (!same) {
+        ns_js_emit_audio(js, "open %s %s", token, url);
+        JS_SetPropertyStr(ctx, this_val, "_nd_audio_url", JS_NewString(ctx, url));
+        JS_SetPropertyStr(ctx, this_val, "_nd_audio_duration", JS_UNDEFINED);
+    }
+    g_free(token);
+}
+
+static gboolean
+ns_media_plays_in_helper(ns_js *js, const ns_node *el, const char *url)
+{
+    gboolean inline_video = url && el->name &&
+        g_ascii_strcasecmp(el->name, "video") == 0 &&
+        ns_video_url_is_inline(url);
+    return url && js->audio_cb && !inline_video && ns_media_src_is_mp3(url);
 }
 
 static JSValue
@@ -49422,18 +49457,9 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
         if (js->media_play_cb)
             js->media_play_cb(el, TRUE, js->media_play_user_data);
         char *url = ns_media_resolve_src(ctx, el);
-        gboolean inline_video = url && el->name &&
-            g_ascii_strcasecmp(el->name, "video") == 0 &&
-            ns_video_url_is_inline(url);
-        if (url && js->audio_cb && !inline_video && ns_media_src_is_mp3(url)) {
+        if (ns_media_plays_in_helper(js, el, url)) {
+            ns_media_audio_open(ctx, this_val, el, url);
             char *token = ns_media_token(ctx, el);
-            JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_opened");
-            gboolean already = JS_ToBool(ctx, opened);
-            JS_FreeValue(ctx, opened);
-            if (!already) {
-                ns_js_emit_audio(js, "open %s %s", token, url);
-                JS_SetPropertyStr(ctx, this_val, "_nd_audio_opened", JS_TRUE);
-            }
             ns_js_emit_audio(js, "play %s", token);
             g_free(token);
         } else {
@@ -49698,6 +49724,28 @@ ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val, ns_node *el)
     if (network_state != 0)
         ns_js_dispatch_event(js, el, "emptied", NULL);
     ns_js_dispatch_event(js, el, "loadstart", NULL);
+    char *url = ns_media_resolve_src(ctx, el);
+    if (ns_media_plays_in_helper(js, el, url)) {
+        char *token = ns_media_existing_token(ctx, this_val);
+        JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_url");
+        const char *opened_url = JS_ToCString(ctx, opened);
+        gboolean reload_same = token && opened_url && JS_IsString(opened) &&
+                               strcmp(opened_url, url) == 0;
+        JS_FreeCString(ctx, opened_url);
+        JS_FreeValue(ctx, opened);
+        JSValue known = JS_GetPropertyStr(ctx, this_val, "_nd_audio_duration");
+        double known_duration = -1.0;
+        if (JS_IsNumber(known)) JS_ToFloat64(ctx, &known_duration, known);
+        JS_FreeValue(ctx, known);
+        if (reload_same && known_duration >= 0) {
+            ns_js_emit_audio(js, "seek %s 0", token);
+            ns_js_video_event(js, el, "meta", known_duration);
+        } else {
+            ns_media_audio_open(ctx, this_val, el, url);
+        }
+        g_free(token);
+    }
+    g_free(url);
 }
 
 static JSValue
@@ -62807,6 +62855,15 @@ ns_js_free(ns_js *js)
         g_array_free(js->font_ready_resolvers, TRUE);
         js->font_ready_resolvers = NULL;
     }
+    if (js->audio_elements) {
+        GHashTableIter it;
+        gpointer key, val;
+        g_hash_table_iter_init(&it, js->audio_elements);
+        while (g_hash_table_iter_next(&it, &key, &val))
+            JS_FreeValue(js->ctx, *(JSValue *)val);
+        g_hash_table_destroy(js->audio_elements);
+        js->audio_elements = NULL;
+    }
     if (js->webaudio_source) {
         ns_js_source_remove(js, js->webaudio_source);
         js->webaudio_source = 0;
@@ -68099,6 +68156,40 @@ ns_rvfc_wake(ns_js *js, const ns_node *media)
         }
     }
     if (woke) ns_raf_schedule_tick(js);
+}
+
+void
+ns_js_audio_feedback(ns_js *js, const char *line)
+{
+    if (!js || !js->ctx || !js->audio_elements || !line) return;
+    char kind[16], token[16];
+    double value = 0.0;
+    int fields = sscanf(line, "%15s %15s %lf", kind, token, &value);
+    if (fields < 2) return;
+    JSValue *held = g_hash_table_lookup(js->audio_elements, token);
+    ns_node *el = held ? ns_unwrap_element_mut(*held) : NULL;
+    if (!el) return;
+    JSContext *ctx = js->ctx;
+    if (strcmp(kind, "meta") == 0 && fields == 3) {
+        JS_SetPropertyStr(ctx, *held, "_nd_audio_duration",
+                          JS_NewFloat64(ctx, value));
+        ns_js_video_event(js, el, "meta", value);
+    } else if (strcmp(kind, "pos") == 0 && fields == 3) {
+        ns_js_video_event(js, el, "pos", value);
+    } else if (strcmp(kind, "playing") == 0) {
+        ns_js_dispatch_event(js, el, "playing", NULL);
+    } else if (strcmp(kind, "ended") == 0) {
+        JSValue duration = JS_GetPropertyStr(ctx, *held, "_nd_duration");
+        double end = 0.0;
+        if (JS_IsNumber(duration)) JS_ToFloat64(ctx, &end, duration);
+        JS_FreeValue(ctx, duration);
+        ns_js_video_event(js, el, "ended", end);
+    } else if (strcmp(kind, "error") == 0) {
+        JS_SetPropertyStr(ctx, *held, "_nd_audio_url", JS_UNDEFINED);
+        JS_SetPropertyStr(ctx, *held, "_nd_playing", JS_FALSE);
+        JS_SetPropertyStr(ctx, *held, "_nd_networkState", JS_NewInt32(ctx, 3));
+        ns_js_dispatch_event(js, el, "error", NULL);
+    }
 }
 
 void
