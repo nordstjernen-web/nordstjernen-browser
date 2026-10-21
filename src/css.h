@@ -1184,6 +1184,7 @@ typedef struct ns_style {
     guint32 inherited_bits;
     guint8 animation_hint;
     guint8 explicit_inherit;
+    guint8 env_dependent;
     struct ns_var_map *vars;
 } ns_style;
 
