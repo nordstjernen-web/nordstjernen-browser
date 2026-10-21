@@ -3400,6 +3400,7 @@ typedef struct {
     uint32_t c;
     uint32_t map[8];
     bool wide;
+    int single;
 } REPrefilter;
 
 static bool re_prefilter_test(const REPrefilter *pf, uint32_t c)
@@ -3452,10 +3453,113 @@ static void re_prefilter_from_range(REPrefilter *pf, const uint8_t *pc,
 
 /* Summarize what a match must start with, so the search can skip positions
    that cannot begin one instead of running the matcher at every index. */
+static bool re_prefilter_collect(REPrefilter *pf, const uint8_t *pc,
+                                 bool is_unicode, int *budget)
+{
+    for(;;) {
+        int opcode;
+        if (--*budget < 0)
+            return false;
+        opcode = *pc++;
+        switch(opcode) {
+        case REOP_save_start:
+        case REOP_save_end:
+            pc += 2;
+            break;
+        case REOP_set_char_pos:
+            pc += 1;
+            break;
+        case REOP_save_reset:
+            pc += 4;
+            break;
+        case REOP_set_i32:
+            pc += 5;
+            break;
+        case REOP_goto:
+            pc += 4 + (int)get_u32(pc);
+            break;
+        case REOP_split_goto_first:
+        case REOP_split_next_first:
+            {
+                const uint8_t *alt = pc + 4 + (int)get_u32(pc);
+                if (!re_prefilter_collect(pf, pc + 4, is_unicode, budget))
+                    return false;
+                pc = alt;
+            }
+            break;
+        case REOP_char:
+        case REOP_char32:
+            {
+                uint32_t c = opcode == REOP_char ? get_u16(pc) : get_u32(pc);
+                if (c < 0x100)
+                    re_prefilter_add(pf, c);
+                else
+                    pf->wide = true;
+            }
+            return true;
+        case REOP_char_i:
+        case REOP_char32_i:
+            {
+                uint32_t c = opcode == REOP_char_i ? get_u16(pc) : get_u32(pc);
+                uint32_t i;
+                for(i = 0; i < 0x100; i++) {
+                    if (lre_canonicalize(i, is_unicode) == c)
+                        re_prefilter_add(pf, i);
+                }
+                pf->wide = true;
+            }
+            return true;
+        case REOP_range:
+        case REOP_range_i:
+        case REOP_range32:
+        case REOP_range32_i:
+            {
+                bool wide = opcode == REOP_range32 || opcode == REOP_range32_i;
+                bool ignore_case = opcode == REOP_range_i ||
+                                   opcode == REOP_range32_i;
+                int n = get_u16(pc), i;
+                REPrefilter range;
+                if (n < 1)
+                    return false;
+                memset(&range, 0, sizeof(range));
+                re_prefilter_from_range(&range, pc + 2, n, wide, ignore_case,
+                                        is_unicode);
+                for(i = 0; i < 8; i++)
+                    pf->map[i] |= range.map[i];
+                pf->wide |= range.wide;
+            }
+            return true;
+        default:
+            return false;
+        }
+    }
+}
+
+static void re_prefilter_union(REPrefilter *pf, const uint8_t *pc,
+                               bool is_unicode)
+{
+    int budget = 256, i, count = 0;
+    if (!re_prefilter_collect(pf, pc, is_unicode, &budget)) {
+        memset(pf, 0, sizeof(*pf));
+        return;
+    }
+    pf->kind = RE_PREFILTER_BITMAP;
+    pf->single = -1;
+    for(i = 0; i < 0x100; i++) {
+        if (re_prefilter_test(pf, i)) {
+            count++;
+            pf->single = i;
+        }
+    }
+    if (count != 1)
+        pf->single = -1;
+}
+
 static void re_prefilter_init(REPrefilter *pf, const uint8_t *pc,
                               bool is_unicode)
 {
     memset(pf, 0, sizeof(*pf));
+    pf->single = -1;
     for(;;) {
         int opcode = *pc++;
         switch(opcode) {
@@ -3509,6 +3613,10 @@ static void re_prefilter_init(REPrefilter *pf, const uint8_t *pc,
                                             is_unicode);
             }
             return;
+        case REOP_split_goto_first:
+        case REOP_split_next_first:
+            re_prefilter_union(pf, pc - 1, is_unicode);
+            return;
         default:
             return;
         }
@@ -3533,6 +3641,8 @@ static const uint8_t *re_prefilter_skip(const REPrefilter *pf,
                 return NULL;
             return memchr(cptr, (int)pf->c, cbuf_end - cptr);
         }
+        if (pf->single >= 0)
+            return memchr(cptr, pf->single, cbuf_end - cptr);
         for(; cptr < cbuf_end; cptr++) {
             if (re_prefilter_test(pf, *cptr))
                 return cptr;
