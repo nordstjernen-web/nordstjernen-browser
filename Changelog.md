@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: an absolutely positioned grid or flex container with a
+  percentage `height` now gives its rows and items that height. The box
+  itself got the right height from its containing block's padding box,
+  but its own layout resolved the percentage again against the parent's
+  `height`. Under the common aspect-ratio pattern (`height: 0` and a
+  percentage `padding-top` on the parent) that came out as 0, so a
+  `1fr` row, a `flex: 1` item and every `height: 100%` below them
+  collapsed to nothing. On Canva the image of every promotion card
+  collapsed this way. The percentage now resolves against the same
+  containing block during the box's own layout, as in Chrome.
 * SVG: `<use href="sprite.svg#icon">` now draws symbols from an external
   SVG file. Only references inside the same document worked, so icon
   sets served as one sprite file (the navigation icons on midzer.de, the

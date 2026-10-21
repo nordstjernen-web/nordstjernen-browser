@@ -19416,6 +19416,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (inset_w < 0) inset_w = 0;
         abox->cb_width_override = avail;
         abox->cb_width_set = TRUE;
+        abox->cb_height_override = cb_h;
         if (stretch_w) {
             double l = l_set ? length_resolve(alv, avail, 0) : 0;
             double r = r_set ? length_resolve(arv, avail, 0) : 0;
