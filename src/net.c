@@ -5573,8 +5573,10 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
     }
-    if (!method_is_post && !method_is_get && req->method &&
-        !strpbrk(req->method, "\r\n"))
+    if (req->method && g_ascii_strcasecmp(req->method, "HEAD") == 0)
+        curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+    else if (!method_is_post && !method_is_get && req->method &&
+             !strpbrk(req->method, "\r\n"))
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, req->method);
 
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, req->headers);
