@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Text: a line no longer breaks after a `/` that is followed by an ASCII
+  character, as in Chrome. The Unicode line breaking rules allow a break
+  there, so `and/or`, `km/h`, paths and URLs wrapped after the slash,
+  and the min-content width of such text came out too small.
+  On Le Monde a photo credit `TROUILLARD/RCR ARQUITECTES` wrapped at the
+  slash, which made the lifestyle section 11 px narrower than in Chrome.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
