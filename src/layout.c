@@ -9712,54 +9712,15 @@ grid_column_flow_width(ns_box *box, const ns_style *child_style,
     return sum + flex_gap_of(box->style, 0) * (columns - 1);
 }
 
+static double grid_max_content_width(ns_box *box,
+                                     const ns_style *child_style);
+
 static double
 grid_natural_width(ns_box *box, const ns_style *child_style)
 {
     if (grid_flows_by_column(box->style))
         return grid_column_flow_width(box, child_style, FALSE);
-    const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
-    if (!cv || cv->kind != NS_CSS_V_TRACKS || cv->u.tracks.n <= 0 ||
-        cv->u.tracks.subgrid ||
-        cv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE) return -1;
-    const ns_css_tracks *tk = &cv->u.tracks;
-    int n = tk->n < NS_CSS_TRACKS_MAX ? tk->n : NS_CSS_TRACKS_MAX;
-    double col[NS_CSS_TRACKS_MAX];
-    for (int i = 0; i < n; i++) col[i] = 0;
-    int slot = 0;
-    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
-        if (style_is_absolute_or_fixed(c->style)) continue;
-        double w = measure_natural_width(c, child_style);
-        if (c->style) {
-            ns_edges m = {0}, pd = {0}, bd = {0};
-            edges_from_style(c->style, 0, &m, &pd, &bd);
-            w += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
-        }
-        int t = slot % n;
-        if (w > col[t]) col[t] = w;
-        slot++;
-    }
-    if (slot == 0) return -1;
-    double sum = 0;
-    for (int i = 0; i < n; i++) {
-        double track = col[i];
-        if (tk->tracks[i].kind == NS_CSS_TRACK_PX)
-            track = tk->tracks[i].v;
-        else if (tk->tracks[i].has_min &&
-                 tk->tracks[i].min_kind == NS_CSS_TRACK_PX &&
-                 tk->tracks[i].min_v > track)
-            track = tk->tracks[i].min_v;
-        sum += track;
-    }
-    if (n > 1) {
-        const ns_css_value *gv = box->style->values[NS_CSS_COLUMN_GAP];
-        if (!gv || (gv->kind != NS_CSS_V_LENGTH && gv->kind != NS_CSS_V_CALC))
-            gv = box->style->values[NS_CSS_GAP];
-        if (gv && (gv->kind == NS_CSS_V_LENGTH || gv->kind == NS_CSS_V_CALC)) {
-            double gap = length_resolve(gv, 0, 0);
-            if (gap > 0) sum += gap * (n - 1);
-        }
-    }
-    return sum;
+    return grid_max_content_width(box, child_style);
 }
 
 static guint
@@ -10751,6 +10712,8 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
     return contribution;
 }
 
+static double grid_min_content_width(ns_box *box,
+                                     const ns_style *child_style);
 static double measure_min_content_width(ns_box *box,
                                         const ns_style *parent_style);
 
@@ -10781,38 +10744,8 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         if (gw >= 0) return gw;
     }
     if (box->style && box_is_grid_container(box)) {
-        const ns_css_value *cv =
-            box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
-        if (cv && cv->kind == NS_CSS_V_TRACKS && cv->u.tracks.n > 0 &&
-            !cv->u.tracks.subgrid) {
-            const ns_css_tracks *tk = &cv->u.tracks;
-            double sum = 0;
-            gboolean all_definite = TRUE;
-            for (int i = 0; i < tk->n; i++) {
-                if (tk->tracks[i].kind == NS_CSS_TRACK_PX) {
-                    sum += tk->tracks[i].v;
-                } else if (tk->tracks[i].has_min &&
-                           tk->tracks[i].min_kind == NS_CSS_TRACK_PX) {
-                    sum += tk->tracks[i].min_v;
-                } else {
-                    all_definite = FALSE;
-                    break;
-                }
-            }
-            if (all_definite && sum > 0) {
-                const ns_css_value *gv =
-                    box->style->values[NS_CSS_COLUMN_GAP];
-                if (!gv || !(gv->kind == NS_CSS_V_LENGTH ||
-                             gv->kind == NS_CSS_V_CALC))
-                    gv = box->style->values[NS_CSS_GAP];
-                if (gv && (gv->kind == NS_CSS_V_LENGTH ||
-                           gv->kind == NS_CSS_V_CALC) && tk->n > 1) {
-                    double gap = length_resolve(gv, 0, 0);
-                    if (gap > 0) sum += gap * (tk->n - 1);
-                }
-                return sum;
-            }
-        }
+        double gw = grid_min_content_width(box, box->style);
+        if (gw >= 0) return gw;
     }
     const ns_style *child_style = box->style ? box->style : parent_style;
     gboolean single_line_row = box_is_flex_container(box) &&
@@ -14783,6 +14716,279 @@ grid_item_has_auto_minimum(const ns_box *c)
                                        : NULL;
     if (mnw && !length_is_auto(mnw)) return FALSE;
     return !box_is_scroll_container(c);
+}
+
+typedef struct {
+    int col, span;
+    double contribution, minimum;
+    gboolean auto_minimum;
+} grid_intrinsic_item;
+
+static double
+grid_item_outer_extras(const ns_box *c)
+{
+    if (!c->style) return 0;
+    ns_edges m = {0}, pd = {0}, bd = {0};
+    edges_from_style(c->style, 0, &m, &pd, &bd);
+    return m.left + m.right + pd.left + pd.right + bd.left + bd.right;
+}
+
+static double
+grid_item_minimum_contribution(ns_box *c, double min_content,
+                               gboolean *auto_minimum)
+{
+    const ns_style *s = c->style;
+    *auto_minimum = FALSE;
+    if (!s || c->kind == NS_BOX_INLINE || c->kind == NS_BOX_TEXT)
+        return min_content;
+    const ns_css_value *wv = s->values[NS_CSS_WIDTH];
+    gboolean preferred_fixed = wv && !value_is_percent(wv) &&
+        (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
+    if (preferred_fixed) return min_content;
+    double extras = grid_item_outer_extras(c);
+    double min_w = definite_width_limit(c, s->values[NS_CSS_MIN_WIDTH]);
+    if (min_w >= 0) return min_w + extras;
+    if (!grid_item_has_auto_minimum(c)) return extras;
+    *auto_minimum = TRUE;
+    return min_content;
+}
+
+static gboolean
+grid_min_track_is_fixed(const ns_css_track *t, double *px)
+{
+    ns_css_track_kind k = t->has_min ? t->min_kind : t->kind;
+    double v = t->has_min ? t->min_v : t->v;
+    double pct = t->has_min ? t->min_pct : t->pct;
+    if (!t->has_min && t->kind == NS_CSS_TRACK_FR) return FALSE;
+    if (k != NS_CSS_TRACK_PX || pct != 0) return FALSE;
+    *px = v > 0 ? v : 0;
+    return TRUE;
+}
+
+static double
+grid_max_track_limit(const ns_css_track *t)
+{
+    if (t->kind == NS_CSS_TRACK_PX && t->pct == 0) return t->v > 0 ? t->v : 0;
+    return -1;
+}
+
+static void
+grid_grow_span(double *size, const gboolean *open, int c0, int span,
+               double gaps, double contribution)
+{
+    double sum = gaps;
+    int n_open = 0;
+    for (int i = c0; i < c0 + span; i++) {
+        sum += size[i];
+        if (open[i]) n_open++;
+    }
+    if (contribution <= sum || n_open == 0) return;
+    double share = (contribution - sum) / n_open;
+    for (int i = c0; i < c0 + span; i++)
+        if (open[i]) size[i] += share;
+}
+
+static GArray *
+grid_intrinsic_items(ns_box *box, const ns_style *child_style,
+                     gboolean max_content, ns_css_tracks *cols, int *n_cols_out,
+                     int *max_span_out)
+{
+    const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
+    if (cv && cv->kind == NS_CSS_V_TRACKS &&
+        (cv->u.tracks.subgrid || cv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE))
+        return NULL;
+    const ns_css_value *areas_v = box->style->values[NS_CSS_GRID_TEMPLATE_AREAS];
+    const ns_css_areas *areas = areas_v && areas_v->kind == NS_CSS_V_AREAS
+        ? &areas_v->u.areas : NULL;
+    memset(cols, 0, sizeof(*cols));
+    if (cv && cv->kind == NS_CSS_V_TRACKS) *cols = cv->u.tracks;
+    int explicit_cols = cols->n;
+    if (areas && areas->n_cols > explicit_cols) {
+        grid_extend_with_auto_tracks(cols, explicit_cols, areas->n_cols,
+            box->style->values[NS_CSS_GRID_AUTO_COLUMNS]);
+        explicit_cols = cols->n;
+    }
+    int flow_cols = explicit_cols > 0 ? explicit_cols : 1;
+    int max_span = 1;
+
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(grid_intrinsic_item));
+    grid_lines col_lines = { cols, areas, FALSE };
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        int s = -1, sp = 1;
+        if (c->style) {
+            g_grid_lines = &col_lines;
+            if (!grid_resolve_pos(c->style, NS_CSS_GRID_COLUMN,
+                                  NS_CSS_GRID_COLUMN_START,
+                                  NS_CSS_GRID_COLUMN_END, explicit_cols,
+                                  &s, &sp))
+                s = -1;
+            g_grid_lines = NULL;
+        }
+        if (sp < 1) sp = 1;
+        if (sp > NS_CSS_TRACKS_MAX) sp = NS_CSS_TRACKS_MAX;
+        if (s >= 0 && s + sp > NS_CSS_TRACKS_MAX) s = NS_CSS_TRACKS_MAX - sp;
+        if (s + sp > flow_cols) flow_cols = s + sp;
+        if (sp > max_span) max_span = sp;
+        grid_intrinsic_item it = { s, sp, 0, 0, FALSE };
+        double extras = grid_item_outer_extras(c);
+        if (max_content) {
+            it.contribution = measure_natural_width(c, child_style) + extras;
+        } else {
+            it.contribution = min_width_of(c, child_style) + extras;
+            it.minimum = grid_item_minimum_contribution(c, it.contribution,
+                                                        &it.auto_minimum);
+        }
+        g_array_append_val(items, it);
+    }
+    int cursor = 0;
+    for (guint k = 0; k < items->len; k++) {
+        grid_intrinsic_item *it = &g_array_index(items, grid_intrinsic_item, k);
+        if (it->col < 0) {
+            if (cursor > 0 && cursor + it->span > flow_cols) cursor = 0;
+            it->col = cursor;
+        }
+        cursor = it->col + it->span;
+    }
+    if (flow_cols > explicit_cols)
+        grid_extend_with_auto_tracks(cols, explicit_cols, flow_cols,
+            box->style->values[NS_CSS_GRID_AUTO_COLUMNS]);
+    *n_cols_out = flow_cols;
+    *max_span_out = max_span;
+    return items;
+}
+
+static gboolean
+grid_item_crosses(const grid_intrinsic_item *it, const gboolean *tracks)
+{
+    for (int i = it->col; i < it->col + it->span; i++)
+        if (tracks[i]) return TRUE;
+    return FALSE;
+}
+
+static double
+grid_column_gap_px(const ns_box *box)
+{
+    double gap = gap_px(box->style->values[NS_CSS_COLUMN_GAP],
+                        box->style->values[NS_CSS_GAP], 0);
+    return gap > 0 ? gap : 0;
+}
+
+static double
+grid_min_content_width(ns_box *box, const ns_style *child_style)
+{
+    ns_css_tracks cols;
+    int n_cols = 0, max_span = 1;
+    GArray *items = grid_intrinsic_items(box, child_style, FALSE, &cols,
+                                         &n_cols, &max_span);
+    if (!items) return -1;
+    double base[NS_CSS_TRACKS_MAX] = {0};
+    gboolean flexible[NS_CSS_TRACKS_MAX] = {0};
+    gboolean grows[NS_CSS_TRACKS_MAX] = {0};
+    gboolean grows_flexible[NS_CSS_TRACKS_MAX] = {0};
+    for (int i = 0; i < n_cols; i++) {
+        const ns_css_track *tk = &cols.tracks[i];
+        double px = 0;
+        flexible[i] = tk->kind == NS_CSS_TRACK_FR;
+        if (grid_min_track_is_fixed(tk, &px)) {
+            base[i] = px;
+        } else {
+            grows[i] = !flexible[i];
+            grows_flexible[i] = flexible[i];
+        }
+    }
+    double gap = grid_column_gap_px(box);
+    for (int span = 1; span <= max_span; span++) {
+        for (guint k = 0; k < items->len; k++) {
+            grid_intrinsic_item *it = &g_array_index(items, grid_intrinsic_item, k);
+            if (it->span != span) continue;
+            double gaps = gap * (span - 1);
+            if (grid_item_crosses(it, flexible)) {
+                grid_grow_span(base, grows_flexible, it->col, span, gaps,
+                               it->minimum);
+                continue;
+            }
+            double contribution = it->contribution;
+            if (span == 1) {
+                const ns_css_track *tk = &cols.tracks[it->col];
+                double limit = grid_max_track_limit(tk);
+                double minimum = it->minimum;
+                if (limit >= 0 && it->auto_minimum && !tk->fit_content)
+                    minimum = MIN(minimum, limit);
+                if (limit >= 0 && contribution > limit)
+                    contribution = MAX(limit, minimum);
+            }
+            grid_grow_span(base, grows, it->col, span, gaps, contribution);
+        }
+    }
+    g_array_free(items, TRUE);
+    double sum = gap * (n_cols - 1);
+    for (int i = 0; i < n_cols; i++) sum += base[i];
+    return sum;
+}
+
+static double
+grid_max_content_width(ns_box *box, const ns_style *child_style)
+{
+    ns_css_tracks cols;
+    int n_cols = 0, max_span = 1;
+    GArray *items = grid_intrinsic_items(box, child_style, TRUE, &cols,
+                                         &n_cols, &max_span);
+    if (!items) return -1;
+    double size[NS_CSS_TRACKS_MAX] = {0};
+    double factor[NS_CSS_TRACKS_MAX] = {0};
+    gboolean flexible[NS_CSS_TRACKS_MAX] = {0};
+    gboolean grows[NS_CSS_TRACKS_MAX] = {0};
+    for (int i = 0; i < n_cols; i++) {
+        const ns_css_track *tk = &cols.tracks[i];
+        double px = 0;
+        if (grid_min_track_is_fixed(tk, &px)) size[i] = px;
+        if (tk->kind == NS_CSS_TRACK_FR) {
+            flexible[i] = TRUE;
+            factor[i] = tk->v > 0 ? tk->v : 0;
+            continue;
+        }
+        double limit = tk->fit_content ? -1 : grid_max_track_limit(tk);
+        if (limit >= 0) size[i] = MAX(size[i], limit);
+        else grows[i] = TRUE;
+    }
+    double gap = grid_column_gap_px(box);
+    for (int span = 1; span <= max_span; span++) {
+        for (guint k = 0; k < items->len; k++) {
+            grid_intrinsic_item *it = &g_array_index(items, grid_intrinsic_item, k);
+            if (it->span != span || grid_item_crosses(it, flexible)) continue;
+            double contribution = it->contribution;
+            if (span == 1 && cols.tracks[it->col].fit_content) {
+                double limit = grid_max_track_limit(&cols.tracks[it->col]);
+                if (limit >= 0 && contribution > limit)
+                    contribution = MAX(limit, size[it->col]);
+            }
+            grid_grow_span(size, grows, it->col, span, gap * (span - 1),
+                           contribution);
+        }
+    }
+    double fr = 0;
+    for (int i = 0; i < n_cols; i++)
+        if (flexible[i] && factor[i] > 0)
+            fr = MAX(fr, factor[i] > 1 ? size[i] / factor[i] : size[i]);
+    for (guint k = 0; k < items->len; k++) {
+        grid_intrinsic_item *it = &g_array_index(items, grid_intrinsic_item, k);
+        if (!grid_item_crosses(it, flexible)) continue;
+        double leftover = it->contribution - gap * (it->span - 1);
+        double factors = 0;
+        for (int i = it->col; i < it->col + it->span; i++) {
+            if (flexible[i]) factors += factor[i];
+            else leftover -= size[i];
+        }
+        if (factors <= 0) continue;
+        fr = MAX(fr, leftover / MAX(factors, 1.0));
+    }
+    for (int i = 0; i < n_cols; i++)
+        if (flexible[i]) size[i] = MAX(size[i], fr * factor[i]);
+    g_array_free(items, TRUE);
+    double sum = gap * (n_cols - 1);
+    for (int i = 0; i < n_cols; i++) sum += size[i];
+    return sum;
 }
 
 static double
