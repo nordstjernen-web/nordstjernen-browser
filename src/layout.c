@@ -6895,6 +6895,18 @@ text_measure_pixel_size(NsPangoLayout *layout, int *width, int *height)
     if (height) *height = m.logical.height;
 }
 
+static void
+inline_unspace_placeholders(NsPangoAttrList *list, const char *text)
+{
+    for (const char *p = strstr(text, "\xef\xbf\xbc"); p;
+         p = strstr(p + 3, "\xef\xbf\xbc")) {
+        NsPangoAttribute *none = ns_pango_attr_letter_spacing_new(0);
+        none->start_index = (guint)(p - text);
+        none->end_index = none->start_index + 3;
+        ns_pango_attr_list_insert(list, none);
+    }
+}
+
 void
 ns_inline_apply_spacing(NsPangoAttrList *list, const ns_style *style, const char *text)
 {
@@ -6913,6 +6925,7 @@ ns_inline_apply_spacing(NsPangoAttrList *list, const ns_style *style, const char
         ls->end_index = G_MAXUINT;
         ns_pango_attr_list_insert(list, ls);
     }
+    if (ls_px > 0) inline_unspace_placeholders(list, text);
     if (ws_px != 0) {
         int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
         for (const char *p = text; *p; p++) {
