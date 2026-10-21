@@ -27,6 +27,7 @@ typedef struct ns_css_syntax_ctx {
     double container_w;
     double container_h;
     const char *current_color;
+    gboolean *reads_context;
 } ns_css_syntax_ctx;
 
 ns_css_syntax_def *ns_css_syntax_def_parse(const char *text);

@@ -26,6 +26,14 @@ Changelog:
   lists in `:is()`, so one vendor-prefixed parent selector put the whole
   rule in the list checked for every element: 74 such rules on
   nytimes.com doubled the selectors tried per element.
+* Performance: computed values of custom properties registered with
+  `@property` are remembered during a style pass when they do not
+  depend on the element. A value with no font-relative, viewport,
+  container or `currentcolor` reference, such as an initial value of
+  `0px`, was parsed again for every element, and each element first
+  measured its font for the `lh` unit. Pages built with Tailwind 4
+  register dozens of such properties: the style time of a weather.com
+  load drops by about 14%.
 * Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
   fails when the server sends a `Content-Length`. The method was passed
   to curl as a plain custom verb, so curl waited for a body that a HEAD
