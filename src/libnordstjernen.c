@@ -1522,6 +1522,19 @@ ns_browser_set_reduced_motion(int reduce)
 }
 
 static ns_browser *
+browser_open_blocked(const char *url, const char *host, int viewport_width,
+                     double viewport_height, int settle_ms)
+{
+    char *html = ns_safebrowsing_interstitial(url, host);
+    ns_node *doc = ns_html_parse(html, html ? (gssize)strlen(html) : 0);
+    g_free(html);
+    return browser_build_from_doc(doc, g_strdup(url), viewport_width,
+                                  viewport_height, settle_ms, FALSE,
+                                  NULL, NULL, NULL, g_strdup("UTF-8"),
+                                  url, NULL);
+}
+
+static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
                     const void *body, size_t body_len, const char *content_type)
@@ -1553,17 +1566,13 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         return b;
     }
 
-    if (!body) {
+    {
         char *host = ns_url_host_from(url);
         if (host && ns_safebrowsing_blocked(host)) {
-            char *html = ns_safebrowsing_interstitial(url, host);
+            ns_browser *b = browser_open_blocked(url, host, viewport_width,
+                                                 viewport_height, settle_ms);
             g_free(host);
-            ns_node *doc = ns_html_parse(html, html ? (gssize)strlen(html) : 0);
-            g_free(html);
-            return browser_build_from_doc(doc, g_strdup(url), viewport_width,
-                                          viewport_height, settle_ms, FALSE,
-                                          NULL, NULL, NULL, g_strdup("UTF-8"),
-                                          url, NULL);
+            return b;
         }
         g_free(host);
     }
@@ -1602,6 +1611,23 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     else if (!resp)
         resp = ns_engine_navigate_blocking(fetch_url, referrer,
                                            user_activated, &err);
+    char *landed_host = resp && resp->final_url
+        ? ns_url_host_from(resp->final_url) : NULL;
+    if (landed_host && ns_safebrowsing_blocked(landed_host)) {
+        char *landed = g_strdup(resp->final_url);
+        ns_response_free(resp);
+        g_clear_error(&err);
+        g_free(file_url);
+        g_free(stripped_url);
+        g_free(https_url);
+        ns_browser *b = browser_open_blocked(landed, landed_host,
+                                             viewport_width, viewport_height,
+                                             settle_ms);
+        g_free(landed);
+        g_free(landed_host);
+        return b;
+    }
+    g_free(landed_host);
     if (resp && !body && (resp->error || resp->status >= 400) &&
         (!resp->body || resp->body->len == 0)) {
         gboolean tls_failure = resp->error &&
