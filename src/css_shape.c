@@ -2143,3 +2143,147 @@ ns_css_shape_eval_math(const ns_css_component *t, const ns_shape_ctx *cx, double
     *dim = sum.dim;
     return TRUE;
 }
+
+static double
+cv_resolve(sh_cv v, double basis)
+{
+    return v.px + v.pct * basis / 100.0;
+}
+
+static int
+clip_box_index(const char *box)
+{
+    if (!box) return NS_CLIP_BOX_BORDER;
+    if (strcmp(box, "margin-box") == 0) return NS_CLIP_BOX_MARGIN;
+    if (strcmp(box, "padding-box") == 0) return NS_CLIP_BOX_PADDING;
+    if (strcmp(box, "content-box") == 0) return NS_CLIP_BOX_CONTENT;
+    return NS_CLIP_BOX_BORDER;
+}
+
+static void
+clip_scale_radii(ns_clip_shape *o)
+{
+    double f = 1.0;
+    double sums[4] = {
+        o->rh[0] + o->rh[1], o->rv[1] + o->rv[2],
+        o->rh[2] + o->rh[3], o->rv[3] + o->rv[0],
+    };
+    double sides[4] = { o->w, o->h, o->w, o->h };
+    for (int i = 0; i < 4; i++)
+        if (sums[i] > 0 && sides[i] / sums[i] < f) f = sides[i] / sums[i];
+    for (int i = 0; i < 4; i++) {
+        o->rh[i] *= f;
+        o->rv[i] *= f;
+    }
+}
+
+static double
+clip_side_radius(const sh_crad *r, double center, double lo, double hi, double basis)
+{
+    double closest = MIN(fabs(center - lo), fabs(hi - center));
+    double farthest = MAX(fabs(center - lo), fabs(hi - center));
+    if (!r->is_kw) return MAX(0.0, cv_resolve(r->v, basis));
+    return strcmp(r->kw, "farthest-side") == 0 ? farthest : closest;
+}
+
+static gboolean
+clip_shape_from_cshape(const sh_cshape *c, const double *ref, ns_clip_shape *o)
+{
+    double x = ref[0], y = ref[1], w = ref[2], h = ref[3];
+    switch (c->kind) {
+    case SHAPE_INSET: {
+        double top = cv_resolve(c->inset[0], h), right = cv_resolve(c->inset[1], w);
+        double bottom = cv_resolve(c->inset[2], h), left = cv_resolve(c->inset[3], w);
+        if (top + bottom > h && top + bottom > 0) {
+            double f = h / (top + bottom);
+            top *= f;
+            bottom *= f;
+        }
+        if (left + right > w && left + right > 0) {
+            double f = w / (left + right);
+            left *= f;
+            right *= f;
+        }
+        o->kind = NS_CLIP_SHAPE_INSET;
+        o->x = x + left;
+        o->y = y + top;
+        o->w = MAX(0.0, w - left - right);
+        o->h = MAX(0.0, h - top - bottom);
+        for (int i = 0; i < 4; i++) {
+            o->rh[i] = MAX(0.0, cv_resolve(c->rh[i], w));
+            o->rv[i] = MAX(0.0, cv_resolve(c->rv[i], h));
+        }
+        clip_scale_radii(o);
+        return TRUE;
+    }
+    case SHAPE_CIRCLE:
+    case SHAPE_ELLIPSE:
+        o->kind = NS_CLIP_SHAPE_ELLIPSE;
+        o->cx = x + cv_resolve(c->at[0], w);
+        o->cy = y + cv_resolve(c->at[1], h);
+        if (c->kind == SHAPE_CIRCLE && c->r[0].is_kw) {
+            double rx = clip_side_radius(&c->r[0], o->cx, x, x + w, w);
+            double ry = clip_side_radius(&c->r[0], o->cy, y, y + h, h);
+            o->rx = o->ry = strcmp(c->r[0].kw, "farthest-side") == 0 ? MAX(rx, ry)
+                                                                      : MIN(rx, ry);
+        } else if (c->kind == SHAPE_CIRCLE) {
+            o->rx = o->ry = MAX(0.0, cv_resolve(c->r[0].v, hypot(w, h) / G_SQRT2));
+        } else {
+            o->rx = clip_side_radius(&c->r[0], o->cx, x, x + w, w);
+            o->ry = clip_side_radius(&c->r[1], o->cy, y, y + h, h);
+        }
+        return TRUE;
+    case SHAPE_POLYGON:
+        if (!c->pts || c->pts->len < 2) return FALSE;
+        o->kind = NS_CLIP_SHAPE_POLYGON;
+        o->evenodd = c->evenodd;
+        o->points = g_array_sized_new(FALSE, FALSE, sizeof(double), c->pts->len);
+        for (guint i = 0; i + 1 < c->pts->len; i += 2) {
+            double px = x + cv_resolve(g_array_index(c->pts, sh_cv, i), w);
+            double py = y + cv_resolve(g_array_index(c->pts, sh_cv, i + 1), h);
+            g_array_append_val(o->points, px);
+            g_array_append_val(o->points, py);
+        }
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+gboolean
+ns_css_clip_shape_resolve(const char *text, const double boxes[NS_CLIP_BOX_COUNT][4],
+                          ns_clip_shape *out)
+{
+    memset(out, 0, sizeof *out);
+    sh_value v;
+    gboolean ok = parse_value(text, &v, TRUE) && !v.none;
+    if (ok) {
+        int box = clip_box_index(v.box);
+        const double *ref = boxes[box];
+        out->box = box;
+        if (!v.have_shape) {
+            out->kind = NS_CLIP_SHAPE_BOX;
+            out->x = ref[0];
+            out->y = ref[1];
+            out->w = ref[2];
+            out->h = ref[3];
+        } else {
+            static const ns_shape_ctx px_only = { 0 };
+            sh_cshape c;
+            to_cshape(&v.sh, &px_only, &c);
+            ok = clip_shape_from_cshape(&c, ref, out);
+            if (c.pts) g_array_free(c.pts, TRUE);
+            if (c.path) g_array_free(c.path, TRUE);
+            if (c.ccmds) g_array_free(c.ccmds, TRUE);
+        }
+    }
+    value_clear(&v);
+    return ok;
+}
+
+void
+ns_clip_shape_clear(ns_clip_shape *s)
+{
+    if (s->points) g_array_free(s->points, TRUE);
+    s->points = NULL;
+}
