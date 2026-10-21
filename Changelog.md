@@ -3,6 +3,17 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: an absolutely positioned element inside another one no
+  longer costs two hash lookups per box of its containing block. Its
+  static position comes from a walk over that block's boxes, and each
+  step looked up the node's place in document order and tested the box
+  against a hash of the element's ancestors. Each box now keeps its
+  node's preorder rank and subtree end for the current layout, so the
+  ancestor test is two comparisons, and the position keyword is checked
+  once per style. The Speedometer complex-DOM pages lay out about 690
+  such elements per layout, close to 500,000 walk steps: on Speedometer
+  3.1, TodoMVC-React-Complex-DOM is 22% faster, Svelte 21%, Preact 19%,
+  ES6 14%, Lit 11% and Angular 10%.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
