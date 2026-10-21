@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Text: a fallback font no longer moves or stretches a line by the wrong
+  amount. With a fixed `line-height`, the line height was centred on the
+  fallback font's own ascent and descent, and every run after the first
+  was moved onto the baseline of the first run's script (for example the
+  ideographic baseline after Chinese text). A list item with a Syriac or
+  Chinese name came out up to 2 px taller than its 23.8 px line height,
+  so the language lists on the Wikipedia portal broke into columns at
+  the wrong entries. The line height is now laid out around the
+  element's first available font and all horizontal text sits on the
+  alphabetic baseline. With `line-height: normal`, a taller fallback
+  font (emoji, Myanmar or Syriac text) still grows the line to fit its
+  glyphs, as in Chrome.
 * Debian packaging: following the mentors.debian.net review, debhelper
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,

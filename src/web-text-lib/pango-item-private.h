@@ -42,7 +42,7 @@ typedef struct _PangoAnalysisPrivate NsPangoAnalysisPrivate;
 
 struct _PangoAnalysisPrivate
 {
-  gpointer reserved;
+  NsPangoFont *strut_font;
   NsPangoFont *size_font;
   NsPangoFont *font;
 
@@ -95,6 +95,10 @@ void               ns_pango_analysis_collect_features    (const NsPangoAnalysis 
 void               ns_pango_analysis_set_size_font       (NsPangoAnalysis              *analysis,
                                                        NsPangoFont                  *font);
 NsPangoFont *        ns_pango_analysis_get_size_font       (const NsPangoAnalysis        *analysis);
+
+void               ns_pango_analysis_set_strut_font      (NsPangoAnalysis              *analysis,
+                                                       NsPangoFont                  *font);
+NsPangoFont *        ns_pango_analysis_get_strut_font      (const NsPangoAnalysis        *analysis);
 
 GList *            ns_pango_itemize_with_font            (NsPangoContext               *context,
                                                        NsPangoDirection              base_dir,
