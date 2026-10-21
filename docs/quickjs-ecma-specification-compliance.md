@@ -37,11 +37,15 @@ scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pa
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
 "expected" failures, kept in sync with `-u` after each fix). As of
-this writing (test262 main @ `f2d14356`, 2026-07-13) the full suite is
-81152 test/mode combinations with **zero known failures**
-(`test262_errors.txt` is empty; the intentionally skipped/excluded
-categories — `async`, `module`, and a handful of slow or out-of-scope
-feature areas — remain governed by `test262.conf`). The fix history:
+this writing (test262 main @ `d53ebc8b`, 2026-10-13) the full suite is
+102988 test/mode combinations with **zero known failures**
+(`test262_errors.txt` is empty). Async and module tests run, every feature
+in `features.txt` that has tests is enabled, nothing is skipped, and
+`test262.conf` excludes only the two SpiderMonkey staging tests described in
+#37. The tests test262 gained between July 13 and October 13 (Intl.Locale
+info getters, iterator chunking, `includes` and `join`, TypedArray `with` and
+`filter` on a buffer that shrinks during coercion, `using` at the top level
+of a module, and more) all pass without engine changes. The fix history:
 
 | Cluster | Subtests | Difficulty | Status |
 | --- | --- | --- | --- |
@@ -83,6 +87,8 @@ feature areas — remain governed by `test262.conf`). The fix history:
 | Temporal (`built-ins/Temporal`, `Date.prototype.toTemporalInstant`) | 4603 | high | **done** (previously `Temporal=skip` in `test262.conf`; see #31) |
 | Deferred import evaluation (`import defer`, `import.defer()`) and source phase imports (`import source`, `import.source()`, `%AbstractModuleSource%`) | ~500 | high | **done** (features enabled in `test262.conf`; see #32) |
 | Temporal non-ISO calendars, eras and month codes (`intl402/Temporal`, `Intl.Era-monthcode`) | ~2000 | high | **done** (see #34) |
+| SpiderMonkey staging tests (`staging/sm`) | 1409 files | medium | **done** (see #35, #36) |
+| `Atomics` in the gated run, `Atomics.waitAsync`, all of `staging` | 386 files | medium | **done** (see #37) |
 
 ## Changes
 
