@@ -50409,6 +50409,36 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }" \
     "  };"
 
+#define NS_CROSS_ORIGIN_LOCATION_JS \
+    "  function crossFallback(p){ return p === 'then' || p === Symbol.toStringTag ||" \
+    "    p === Symbol.hasInstance || p === Symbol.isConcatSpreadable; }" \
+    "  var crossFallbackKeys = ['then', Symbol.toStringTag, Symbol.hasInstance," \
+    "    Symbol.isConcatSpreadable];" \
+    "  function crossLocation(target, denied){" \
+    "    var fallback = crossFallback;" \
+    "    var replace = function replace(v){ target.location.replace(v); };" \
+    "    var setHref = function(v){ target.location.href = v; };" \
+    "    return new Proxy({}, {" \
+    "      get: function(t, p){" \
+    "        if (p === 'replace') return replace;" \
+    "        if (fallback(p)) return undefined;" \
+    "        return denied(); }," \
+    "      set: function(t, p, v){ if (p === 'href'){ setHref(v); return true; } return denied(); }," \
+    "      has: function(t, p){ return p === 'href' || p === 'replace' || denied(); }," \
+    "      ownKeys: function(){ return ['href', 'replace'].concat(crossFallbackKeys); }," \
+    "      getOwnPropertyDescriptor: function(t, p){" \
+    "        if (p === 'href') return { get: undefined, set: setHref, enumerable: false, configurable: true };" \
+    "        if (p === 'replace') return { value: replace, writable: false, enumerable: false, configurable: true };" \
+    "        if (fallback(p)) return { value: undefined, writable: false, enumerable: false, configurable: true };" \
+    "        return denied(); }," \
+    "      defineProperty: function(){ return denied(); }," \
+    "      deleteProperty: function(){ return denied(); }," \
+    "      getPrototypeOf: function(){ return null; }," \
+    "      setPrototypeOf: function(t, v){ return v === null; }," \
+    "      preventExtensions: function(){ return denied(); }" \
+    "    });" \
+    "  }"
+
 static const char ns_iframe_scope_bootstrap[] =
     "(function(realWin, iframeDoc, initialURL, sandbox, docURL){"
     "  var url = initialURL || 'about:blank';"
@@ -50537,18 +50567,18 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('window',     { value: win, writable: true });"
     "  def('self',       { value: win, writable: true });"
     "  def('event',      { value: undefined, writable: true });"
+    NS_CROSS_ORIGIN_LOCATION_JS
     "  var crossWindows = new WeakMap();"
     "  function crossWindow(target, up){"
     "    if (crossWindows.has(target)) return crossWindows.get(target);"
-    "    var proxy, loc = {};"
+    "    var proxy, loc;"
     "    function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
     "    function childFrame(p){"
     "      if (typeof p !== 'string' || typeof childFrameOf !== 'function') return undefined;"
     "      var child;"
     "      try { child = childFrameOf(target, p); } catch (e) { return undefined; }"
     "      return child && typeof child === 'object' ? crossWindow(child, proxy) : undefined; }"
-    "    Object.defineProperty(loc, 'href', { enumerable:true, set:function(v){ target.location.href=v; }, get:denied });"
-    "    loc.replace = function(v){ target.location.replace(v); };"
+    "    loc = crossLocation(target, denied);"
     "    proxy = new Proxy({}, {"
     "      get:function(t,p){"
     "        if(p==='window'||p==='self'||p==='frames') return proxy;"
@@ -50559,13 +50589,13 @@ static const char ns_iframe_global_bootstrap[] =
     "        if(p==='closed') return !!target.closed;"
     "        if(p==='length') return target.length >>> 0;"
     "        if(p==='close'||p==='focus'||p==='blur') return function(){ return target[p](); };"
-    "        if(p===Symbol.toStringTag) return 'Window';"
     "        var child = childFrame(p); if(child) return child;"
+    "        if(crossFallback(p)) return undefined;"
     "        return denied(); },"
     "      set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
     "      has:function(t,p){ return p==='window'||p==='self'||p==='frames'||p==='parent'||p==='top'||"
     "        p==='postMessage'||p==='location'||p==='closed'||p==='length'||p==='close'||p==='focus'||p==='blur'||"
-    "        !!childFrame(p); }"
+    "        !!childFrame(p) || denied(); }"
     "    });"
     "    crossWindows.set(target, proxy);"
     "    return proxy;"
@@ -51857,11 +51887,10 @@ static const char ns_cross_window_bootstrap[] =
     "    Object.defineProperty(G, '__ndCrossWindows', { value: cache, configurable: true });"
     "  }"
     "  if (cache.has(target)) return cache.get(target);"
-    "  var proxy, loc = {};"
+    NS_CROSS_ORIGIN_LOCATION_JS
+    "  var proxy;"
     "  function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
-    "  Object.defineProperty(loc, 'href', { enumerable:true, set:function(v){ target.location.href=v; }, get:denied });"
-    "  loc.replace = function(v){ target.location.replace(v); };"
-    "  loc.assign = function(v){ target.location.href=v; };"
+    "  var loc = crossLocation(target, denied);"
     "  var allowed = ['window','self','frames','parent','top','opener','postMessage',"
     "    'location','closed','length','close','focus','blur'];"
     "  proxy = new Proxy({}, {"
@@ -51875,13 +51904,14 @@ static const char ns_cross_window_bootstrap[] =
     "      if(p==='closed') return !!target.closed;"
     "      if(p==='length') return target.length >>> 0;"
     "      if(p==='close'||p==='focus'||p==='blur') return function(){ return target[p](); };"
-    "      if(p===Symbol.toStringTag) return 'Window';"
+    "      if(crossFallback(p)) return undefined;"
     "      return denied(); },"
     "    set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
-    "    has:function(t,p){ return allowed.indexOf(p) >= 0; },"
-    "    ownKeys:function(){ return allowed.slice(); },"
+    "    has:function(t,p){ return allowed.indexOf(p) >= 0 || denied(); },"
+    "    ownKeys:function(){ return allowed.concat(crossFallbackKeys); },"
     "    getOwnPropertyDescriptor:function(t,p){"
-    "      if(allowed.indexOf(p) < 0) return undefined;"
+    "      if(crossFallback(p)) return { value: undefined, writable: false, enumerable: false, configurable: true };"
+    "      if(allowed.indexOf(p) < 0) return denied();"
     "      return { value: proxy[p], writable: false, enumerable: true, configurable: true }; },"
     "    defineProperty:function(){ return denied(); },"
     "    deleteProperty:function(){ return denied(); },"
