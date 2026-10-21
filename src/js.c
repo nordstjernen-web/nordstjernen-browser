@@ -7480,6 +7480,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
     ns_node *tail = ns_node_new_text(tail_text);
     ns_js *_j = js_from_ctx(ctx);
     if (n->parent) {
+        ns_dom_tree_changed();
         tail->parent = n->parent;
         tail->prev_sibling = n;
         tail->next_sibling = n->next_sibling;
@@ -35179,6 +35180,7 @@ ns_element_insert_before_single(ns_js *_j, ns_node *parent, ns_node *newc, ns_no
     if (_j && newc->parent) ns_node_iters_pre_remove(_j, newc);
     if (newc->parent) ns_node_remove(newc);
     if (_j) g_hash_table_remove(_j->orphan_nodes, newc);
+    ns_dom_tree_changed();
     newc->parent = parent;
     newc->next_sibling = ref;
     newc->prev_sibling = ref->prev_sibling;
@@ -35569,6 +35571,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     }
     if (newc->parent) ns_node_remove(newc);
     if (_j) g_hash_table_remove(_j->orphan_nodes, newc);
+    ns_dom_tree_changed();
     newc->parent = parent;
     newc->prev_sibling = oldc->prev_sibling;
     newc->next_sibling = oldc->next_sibling;
@@ -35599,6 +35602,7 @@ ns_insert_sibling_before(ns_node *ref, ns_node *newc)
     if (!ref || !ref->parent || !newc) return;
     if (ref == newc) return;
     if (newc->parent) ns_node_remove(newc);
+    ns_dom_tree_changed();
     ns_node *parent = ref->parent;
     newc->parent = parent;
     newc->next_sibling = ref;
@@ -35614,6 +35618,7 @@ ns_insert_sibling_after(ns_node *ref, ns_node *newc)
     if (!ref || !ref->parent || !newc) return;
     if (ref == newc) return;
     if (newc->parent) ns_node_remove(newc);
+    ns_dom_tree_changed();
     ns_node *parent = ref->parent;
     newc->parent = parent;
     newc->prev_sibling = ref;
@@ -35685,6 +35690,7 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
             for (gint i = (gint)kids->len - 1; i >= 0; i--) {
                 ns_node *c = kids->pdata[i];
                 ns_node_remove(c);
+                ns_dom_tree_changed();
                 c->parent = self;
                 c->next_sibling = self->first_child;
                 c->prev_sibling = NULL;
@@ -35746,6 +35752,7 @@ ns_insert_adjacent_node(ns_node *self, const char *pos, ns_node *to_insert,
     }
     if (g_ascii_strcasecmp(pos, "afterbegin") == 0) {
         ns_node_remove(to_insert);
+        ns_dom_tree_changed();
         to_insert->parent = self;
         to_insert->next_sibling = self->first_child;
         to_insert->prev_sibling = NULL;
