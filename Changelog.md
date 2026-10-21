@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Shadow DOM: setting `textContent`, `innerHTML`, `innerText` or
+  `setHTMLUnsafe()` on a shadow host, or calling `replaceChildren()` on
+  it, no longer throws its shadow root away. The engine keeps the shadow
+  root next to the host's children, and these "replace all children"
+  paths removed it with them, so the component's shadow content vanished
+  and a MutationObserver saw the `ShadowRoot` in `removedNodes`. Reddit's
+  observer called `matches()` on it and failed on every load. Only the
+  light children are replaced now, as in Chrome.
 * Layout: an absolutely positioned grid or flex container with a
   percentage `height` now gives its rows and items that height. The box
   itself got the right height from its containing block's padding box,
