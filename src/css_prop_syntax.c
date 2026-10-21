@@ -853,6 +853,7 @@ len_unit_px(ns_len_unit unit, const ns_css_syntax_ctx *ctx)
 {
     if (unit <= NS_LEN_PC) return kAbsoluteUnitPx[unit];
     if (!ctx) return 0;
+    if (ctx->reads_context) *ctx->reads_context = TRUE;
     switch (unit) {
     case NS_LEN_EM:    return ctx->font_size;
     case NS_LEN_EX:    return ctx->ex_px;
@@ -1045,6 +1046,8 @@ syn_match_single(ns_syn_kind kind, const char *ident, syn_chunk chunk,
         gboolean ok = current || parsed ||
                       first->type == NS_CSS_COMPONENT_FUNCTION;
         if (ok && emit) {
+            if (current && emit->ctx && emit->ctx->reads_context)
+                *emit->ctx->reads_context = TRUE;
             if (current && emit->ctx && emit->ctx->current_color)
                 g_string_append(emit->out, emit->ctx->current_color);
             else if (parsed) syn_append_color(emit->out, r, g, b, a);
