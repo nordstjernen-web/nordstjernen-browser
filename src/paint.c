@@ -3177,6 +3177,9 @@ ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
     if (bd == NS_PANGO_DIRECTION_NEUTRAL && st &&
         keyword_is(st->values[NS_CSS_DIRECTION], "rtl"))
         bd = NS_PANGO_DIRECTION_RTL;
+    if (bd == NS_PANGO_DIRECTION_NEUTRAL &&
+        !(st && keyword_is(st->values[NS_CSS_UNICODE_BIDI], "plaintext")))
+        bd = NS_PANGO_DIRECTION_LTR;
     if (bd != NS_PANGO_DIRECTION_NEUTRAL && layout) {
         ns_pango_layout_set_auto_dir(layout, FALSE);
         ns_pango_context_set_base_dir(ns_pango_layout_get_context(layout), bd);
