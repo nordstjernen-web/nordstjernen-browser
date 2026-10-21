@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: text now flows beside a float whenever its first word fits in
+  the space left, as CSS says. A line was moved below the float when
+  that space was narrower than 260 px (or 40% of the container), so a
+  headline next to a 496 px image in a 760 px card started under the
+  image. Every Washington Post story card with its photo on the right
+  showed the headline, blurb and byline below the photo.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
