@@ -51625,7 +51625,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         ns_js_link_interface_ctors(fctx);
         ns_js_lock_global_prototypes(fctx);
         ns_js_brand_node_interfaces(fctx, ns_element_class_id, ns_attr_class_id);
-        ns_realm_protos_seed(js, fctx, parent_ctx);
+        ns_realm_protos_seed(js, fctx, cloner->src);
         ns_realm_protos_capture(fctx);
     }
     if (ok) {
