@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: `grid-template-columns: subgrid` now places the subgrid's
+  items on the parent's columns. The subgrid placed them as if it had a
+  single column, so every item went into its own row, and the parent
+  sized its columns without looking at those items. Items now resolve
+  their lines against the columns the subgrid spans (nested subgrids
+  too), and they contribute their sizes to the parent's column tracks.
+  Mozilla's news list, a table of rows built from nested subgrids,
+  showed each entry as a 200 px tall stack of lines instead of one row.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
