@@ -439,6 +439,34 @@ scripts/sitebench/snapshot.py perf                         # builddir's build ag
 scripts/sitebench/snapshot.py perf /path/to/old/nordstjernen builddir/src/gtk/nordstjernen --runs 7
 ```
 
+- `paint` compares what the boxes look like, which the box score cannot
+  see: a missing background image, a wrong colour, a border drawn twice,
+  an image that does not show. It takes a full-page screenshot of each
+  copy, down to `--max-height` (default 8000 px), in Chrome (kept next to
+  Chrome's boxes and taken again when the copy changes) and in each build
+  (`--dump=png`), records every element's box in the same load, and
+  compares the two crops of each element that both lay out at the same
+  place, as `score` counts it. Only the elements that Chrome paints
+  itself are compared: visible, not fully transparent, not clipped away
+  by an `overflow` ancestor, not under another element on the first
+  screen, and with a background, a border, a shadow, text of their own,
+  a `::before` or `::after` box, or replaced content such as an image.
+  Both crops are reduced to 4 px cells, and an element differs when more
+  than 10% of its cells differ by more than 48 in a colour channel, which
+  leaves out the small differences between the two browsers' glyph
+  rasterizers. The report gives each build's share of compared elements
+  that look the same, per site and over all, and lists the deepest
+  elements that differ, the largest first, each with a figure of the
+  two crops side by side in `report/paint/`. An element under an overlay
+  further down the page is still compared through it. Builds render one
+  at a time unless `--jobs` says otherwise, since parallel renders can
+  miss image loads. It needs Pillow and numpy.
+
+```sh
+scripts/sitebench/snapshot.py paint                        # builddir's build against Chrome
+scripts/sitebench/snapshot.py paint /path/to/old/nordstjernen builddir/src/gtk/nordstjernen
+```
+
 Both commands exit with status 2 on usage errors and when they fail to
 run at all.
 
