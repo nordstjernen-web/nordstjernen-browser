@@ -9874,6 +9874,118 @@ backdrop_paint(cairo_t *cr, const ns_box *b, const backdrop_image *bd)
     cairo_restore(cr);
 }
 
+static gboolean
+box_position_is(const ns_box *b, const char *kw)
+{
+    return b->style && keyword_is(b->style->values[NS_CSS_POSITION], kw);
+}
+
+static gboolean
+box_is_positioned(const ns_box *b)
+{
+    const ns_css_value *p = b->style ? b->style->values[NS_CSS_POSITION] : NULL;
+    return p && !keyword_is(p, "static");
+}
+
+static gboolean
+box_moves_or_clips_contents(const ns_box *b)
+{
+    const ns_style *s = b->style;
+    if (!s) return FALSE;
+    if (b->scroll_x != 0 || b->scroll_y != 0) return TRUE;
+    if (keyword_is(s->values[NS_CSS_POSITION], "sticky")) return TRUE;
+    if (overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_X)) ||
+        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_Y)) ||
+        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW)))
+        return TRUE;
+    return s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+           s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE];
+}
+
+static gboolean
+box_groups_contents(const ns_box *b)
+{
+    const ns_style *s = b->style;
+    if (!s || box_is_positioned(b)) return FALSE;
+    const ns_css_value *cp = s->values[NS_CSS_CLIP_PATH];
+    return box_opacity(b) < 0.999 ||
+           blend_mode_operator(s) != CAIRO_OPERATOR_OVER ||
+           mask_layers_paintable(s) ||
+           (cp && !keyword_is(cp, "none")) || ns_box_layer_z(b) != 0;
+}
+
+static gboolean
+box_outside_paint_clip(const ns_box *b)
+{
+    if (!g_paint_have_clip || !(b->paint_bottom > b->paint_top))
+        return FALSE;
+    double top = b->paint_top + g_paint_anchor_dy;
+    double bottom = b->paint_bottom + g_paint_anchor_dy;
+    return bottom < g_paint_clip_y0 - g_paint_cull_margin ||
+           top > g_paint_clip_y1 + g_paint_cull_margin;
+}
+
+static const ns_box *
+box_child_for_dom(const ns_box *parent, const ns_node *dom, int depth)
+{
+    for (const ns_box *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->dom == dom) return c;
+        if (!c->dom && depth < 2) {
+            const ns_box *hit = box_child_for_dom(c, dom, depth + 1);
+            if (hit) return hit;
+        }
+    }
+    return NULL;
+}
+
+#define NS_ESCAPE_MAX_DEPTH 32
+
+static int
+abs_box_dom_chain(const ns_box *c, const ns_box *cb,
+                  const ns_node *chain[NS_ESCAPE_MAX_DEPTH])
+{
+    if (!box_position_is(c, "absolute") || !c->dom || !cb->dom ||
+        !c->dom->parent || c->dom->parent == cb->dom)
+        return 0;
+    int n = 0;
+    const ns_node *d = c->dom->parent;
+    for (; d && d != cb->dom && n < NS_ESCAPE_MAX_DEPTH; d = d->parent)
+        chain[n++] = d;
+    return d == cb->dom ? n : 0;
+}
+
+static const ns_box *
+abs_box_effect_owner(const ns_box *c, const ns_box *cb)
+{
+    const ns_node *chain[NS_ESCAPE_MAX_DEPTH];
+    int n = abs_box_dom_chain(c, cb, chain);
+    const ns_box *cur = cb, *owner = NULL;
+    for (int i = n - 1; i >= 0; i--) {
+        cur = box_child_for_dom(cur, chain[i], 0);
+        if (!cur || box_moves_or_clips_contents(cur)) break;
+        if (box_groups_contents(cur) && !box_hides_subtree(cur))
+            owner = cur;
+    }
+    return owner && !box_outside_paint_clip(owner) ? owner : NULL;
+}
+
+static gboolean
+paint_adopted_abs_boxes(cairo_t *cr, const ns_box *e, const char *highlight)
+{
+    if (!box_groups_contents(e)) return FALSE;
+    gboolean any = FALSE;
+    for (const ns_box *p = e->parent; p; p = p->parent) {
+        for (const ns_box *c = p->first_child; c; c = c->next_sibling) {
+            if (abs_box_effect_owner(c, p) != e) continue;
+            if (!cr) return TRUE;
+            paint_walk(cr, c, highlight);
+            any = TRUE;
+        }
+        if (box_is_positioned(p) || box_moves_or_clips_contents(p)) break;
+    }
+    return any;
+}
+
 static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -10037,7 +10149,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     gboolean group_clipped = FALSE;
     if (grouped) {
         if (g_paint_collect_stats) g_paint_stats.grouped++;
-        if (!has_transform && !has_sticky && !filter_kw)
+        if (!has_transform && !has_sticky && !filter_kw &&
+            !paint_adopted_abs_boxes(NULL, b, NULL))
             group_clipped = paint_group_clip(cr, b);
         cairo_push_group(cr);
     }
@@ -10270,7 +10383,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (has_transform || has_sticky) g_paint_no_cull++;
     paint_negative_layers(cr, b, highlight);
     for (guint i = 0; i < n_children; i++)
-        paint_walk(cr, entries[i].box, highlight);
+        if (!abs_box_effect_owner(entries[i].box, b))
+            paint_walk(cr, entries[i].box, highlight);
+    if (!skip_contents) paint_adopted_abs_boxes(cr, b, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;
     GPtrArray *deferred_mine = NULL;
     if (own_layer_scope) {
