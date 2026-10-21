@@ -24488,17 +24488,33 @@ index_add_by_compound_key(ns_css_rule_index *idx, const ns_css_simple *c,
 }
 
 static gboolean
+is_argument_dead(const ns_css_selector *arg)
+{
+    if (!arg || !arg->compounds || arg->compounds->len == 0 ||
+        arg->pseudo_element != NS_CSS_PE_NONE)
+        return TRUE;
+    for (guint i = 0; i < arg->compounds->len; i++) {
+        const ns_css_simple *c = g_ptr_array_index(arg->compounds, i);
+        if (c && c->never_match) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 index_add_by_is_arguments(ns_css_rule_index *idx, const ns_css_simple *subj,
                           guint ri, guint si)
 {
     if (!subj->matches_any || subj->matches_any->len == 0) return FALSE;
     const GPtrArray *group = g_ptr_array_index(subj->matches_any, 0);
     if (!group || group->len == 0) return FALSE;
-    for (guint gi = 0; gi < group->len; gi++)
-        if (!is_argument_indexable(g_ptr_array_index(group, gi)))
-            return FALSE;
     for (guint gi = 0; gi < group->len; gi++) {
         const ns_css_selector *arg = g_ptr_array_index(group, gi);
+        if (!is_argument_dead(arg) && !is_argument_indexable(arg))
+            return FALSE;
+    }
+    for (guint gi = 0; gi < group->len; gi++) {
+        const ns_css_selector *arg = g_ptr_array_index(group, gi);
+        if (is_argument_dead(arg)) continue;
         index_add_by_compound_key(idx, g_ptr_array_index(arg->compounds,
                                                          arg->compounds->len - 1),
                                   ri, si);
