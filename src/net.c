@@ -2865,9 +2865,12 @@ ns_net_stream_emit(const ns_write_ctx *ctx, const guint8 *data, gsize len)
     c->status = status;
     c->raw_headers = g_strdup(hc->raw ? hc->raw->str : "");
     c->data = g_bytes_new(data, len);
-    g_main_context_invoke_full(ctx->stream->main_ctx, G_PRIORITY_DEFAULT,
-                               ns_net_stream_chunk_dispatch, c,
-                               ns_net_stream_chunk_free);
+    GSource *source = g_idle_source_new();
+    g_source_set_priority(source, G_PRIORITY_DEFAULT);
+    g_source_set_callback(source, ns_net_stream_chunk_dispatch, c,
+                          ns_net_stream_chunk_free);
+    g_source_attach(source, ctx->stream->main_ctx);
+    g_source_unref(source);
 }
 
 static size_t
