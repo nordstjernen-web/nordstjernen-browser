@@ -104,8 +104,10 @@ void     ns_net_backend_shutdown(void);
 
 const char *ns_net_ec_curves(void);
 gboolean    ns_net_aborting(void);
-void        ns_net_store_set_cookie(const char *url, const char *set_cookie_value);
-char       *ns_net_cookies_for_request(const char *url);
+void        ns_net_store_set_cookie(const char *url, const char *value,
+                                    const char *jar_path);
+char       *ns_net_cookies_for_request(const char *url, const char *jar_path,
+                                       const char *js_path);
 void        ns_net_hsts_note(const char *url, const char *header_value);
 
 G_END_DECLS
