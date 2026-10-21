@@ -60,6 +60,12 @@ static char *g_cookie_dir;
 static char *g_private_root;
 static char *g_hsts_curl_path;
 static char *g_altsvc_path;
+
+typedef struct ns_hsts_entry {
+    gint64   expires;
+    gboolean subdomains;
+} ns_hsts_entry;
+
 static GHashTable *g_hsts_cache;
 static gint64      g_hsts_cache_mtime_us;
 static GMutex      g_hsts_lock;
@@ -417,12 +423,23 @@ ns_net_hsts_curl_path(void)
     return g_hsts_curl_path;
 }
 
+static gint64
+ns_hsts_parse_expiry(const char *stamp)
+{
+    while (*stamp == ' ' || *stamp == '"') stamp++;
+    int y, mo, d, h, mi, sec;
+    if (sscanf(stamp, "%4d%2d%2d %2d:%2d:%2d", &y, &mo, &d, &h, &mi, &sec) != 6)
+        return G_MAXINT64;
+    g_autoptr(GDateTime) when = g_date_time_new_utc(y, mo, d, h, mi, sec);
+    return when ? g_date_time_to_unix(when) : G_MAXINT64;
+}
+
 static void
 ns_hsts_cache_reload_locked(const char *path)
 {
     if (!g_hsts_cache)
         g_hsts_cache = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, NULL);
+                                             g_free, g_free);
     else
         g_hash_table_remove_all(g_hsts_cache);
 
@@ -436,6 +453,7 @@ ns_hsts_cache_reload_locked(const char *path)
         return;
     }
 
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
     char **lines = g_strsplit(content, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         char *line = g_strstrip(lines[i]);
@@ -446,9 +464,12 @@ ns_hsts_cache_reload_locked(const char *path)
         gboolean subs = (*line == '.');
         const char *host = subs ? line + 1 : line;
         if (!*host) continue;
-        g_hash_table_replace(g_hsts_cache,
-                             g_ascii_strdown(host, -1),
-                             GINT_TO_POINTER(subs ? 2 : 1));
+        gint64 expires = ns_hsts_parse_expiry(sp + 1);
+        if (expires <= now) continue;
+        ns_hsts_entry *e = g_new(ns_hsts_entry, 1);
+        e->expires = expires;
+        e->subdomains = subs;
+        g_hash_table_replace(g_hsts_cache, g_ascii_strdown(host, -1), e);
     }
     g_strfreev(lines);
     g_free(content);
@@ -465,13 +486,14 @@ file_mtime_us(const char *path)
 static gboolean
 ns_hsts_lookup_locked(const char *lower_host)
 {
-    gpointer v = g_hash_table_lookup(g_hsts_cache, lower_host);
-    if (v) return TRUE;
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    const ns_hsts_entry *e = g_hash_table_lookup(g_hsts_cache, lower_host);
+    if (e && e->expires > now) return TRUE;
     const char *dot = lower_host;
     while ((dot = strchr(dot, '.')) != NULL) {
         const char *parent = dot + 1;
-        v = g_hash_table_lookup(g_hsts_cache, parent);
-        if (v && GPOINTER_TO_INT(v) == 2) return TRUE;
+        e = g_hash_table_lookup(g_hsts_cache, parent);
+        if (e && e->subdomains && e->expires > now) return TRUE;
         dot = parent;
     }
     return FALSE;
@@ -1286,10 +1308,10 @@ ns_net_hsts_note(const char *url, const char *header_value)
         g_string_append(out, line);
         g_string_append_c(out, '\n');
     }
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
     if (max_age > 0) {
         g_autoptr(GDateTime) expires =
-            g_date_time_new_from_unix_utc(g_get_real_time() / G_USEC_PER_SEC +
-                                          max_age);
+            g_date_time_new_from_unix_utc(now + max_age);
         g_autofree char *stamp = expires
             ? g_date_time_format(expires, "%Y%m%d %H:%M:%S") : NULL;
         if (stamp)
@@ -1299,10 +1321,12 @@ ns_net_hsts_note(const char *url, const char *header_value)
     if (g_file_set_contents_full(path, out->str, (gssize)out->len,
                                  G_FILE_SET_CONTENTS_CONSISTENT, 0600, NULL) &&
         g_hsts_cache) {
-        if (max_age > 0)
-            g_hash_table_replace(g_hsts_cache, g_strdup(lower),
-                                 GINT_TO_POINTER(subdomains ? 2 : 1));
-        else
+        if (max_age > 0) {
+            ns_hsts_entry *e = g_new(ns_hsts_entry, 1);
+            e->expires = now + max_age;
+            e->subdomains = subdomains;
+            g_hash_table_replace(g_hsts_cache, g_strdup(lower), e);
+        } else
             g_hash_table_remove(g_hsts_cache, lower);
         g_hsts_cache_mtime_us = file_mtime_us(path);
     }
