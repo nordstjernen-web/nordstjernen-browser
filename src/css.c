@@ -5402,12 +5402,12 @@ tracks_add_names(ns_css_tracks *tk, const char *names, gsize names_len, int line
         while (q < qend && !is_ws(*q)) q++;
         gsize nlen = (gsize)(q - ns);
         if (nlen > 0 && !line_name_is_custom_ident(ns, nlen)) return FALSE;
-        if (nlen > 0 && nlen < NS_CSS_LINE_NAME_MAX &&
-            tk->n_line_names < NS_CSS_LINE_NAMES_MAX) {
+        if (nlen > 0 && tk->n_line_names < NS_CSS_LINE_NAMES_MAX) {
+            char *name = g_strndup(ns, nlen);
             ns_css_line_name *ln = &tk->line_names[tk->n_line_names++];
-            memcpy(ln->name, ns, nlen);
-            ln->name[nlen] = '\0';
+            ln->name = g_intern_string(name);
             ln->line = line;
+            g_free(name);
         }
     }
     return TRUE;

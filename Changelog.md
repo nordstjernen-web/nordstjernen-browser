@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: grid line names of 24 characters or more now work. Each name
+  was kept in a 24-byte buffer and a longer one was dropped, so an item
+  placed on it (`grid-area: content-toggleable / content`) fell back to
+  the wrong row. On the Guardian front page the content of every section
+  started below the section title instead of beside it, so each section
+  was 20 to 100 px too tall and the page 1,190 px too long. Names are
+  now interned strings with no length limit.
 * Frames: a `MessagePort` inside an iframe that is itself inside an
   iframe now receives proper `message` events. The engine records each
   frame's Event interfaces when the frame starts, but a nested frame
