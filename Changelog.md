@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
+  fails when the server sends a `Content-Length`. The method was passed
+  to curl as a plain custom verb, so curl waited for a body that a HEAD
+  response never has and reported "end of response with N bytes
+  missing" (or "transfer closed with N bytes remaining"), and fetch
+  rejected with that `TypeError`. LinkedIn checks its static files with
+  HEAD requests and retried each failure, which logged about a thousand
+  unhandled rejections on one load. HEAD now asks curl for headers only,
+  and the response resolves with its status and headers and an empty
+  body, as in Chrome.
 * Shadow DOM: setting `textContent`, `innerHTML`, `innerText` or
   `setHTMLUnsafe()` on a shadow host, or calling `replaceChildren()` on
   it, no longer throws its shadow root away. The engine keeps the shadow
