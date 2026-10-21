@@ -60311,8 +60311,10 @@ ns_realmdoc_cookie_get(JSContext *ctx, JSValueConst this_val,
                        JSValueConst *func_data)
 {
     (void)this_val; (void)argc; (void)argv; (void)magic;
+    ns_js *js = js_from_ctx(ctx);
     g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
-    g_autofree char *cookies = url ? ns_net_cookies_for_js(url) : NULL;
+    g_autofree char *cookies = url && js
+        ? ns_net_cookies_for_js(url, ns_js_top_url(js)) : NULL;
     return JS_NewString(ctx, cookies ? cookies : "");
 }
 
@@ -60323,10 +60325,11 @@ ns_realmdoc_cookie_set(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)magic;
     if (argc < 1) return JS_UNDEFINED;
+    ns_js *js = js_from_ctx(ctx);
     g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     const char *value = JS_ToCString(ctx, argv[0]);
-    if (url && value && strlen(value) <= 4096)
-        ns_net_cookie_store_from_js(url, value);
+    if (js && url && value && strlen(value) <= 4096)
+        ns_net_cookie_store_from_js(url, ns_js_top_url(js), value);
     if (value) JS_FreeCString(ctx, value);
     return JS_UNDEFINED;
 }
@@ -60834,10 +60837,11 @@ ns_document_refresh_cookie(ns_js *js)
 {
     guint64 version;
     if (!js->current_url || !*js->current_url ||
-        !ns_net_cookie_jar_version(js->current_url, &version) ||
+        !ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
+                                   &version) ||
         version == js->cookie_version)
         return;
-    char *visible = ns_net_cookies_for_js(js->current_url);
+    char *visible = ns_net_cookies_for_js(js->current_url, ns_js_top_url(js));
     g_free(js->cookie_value);
     js->cookie_value = visible ? visible : g_strdup("");
     js->cookie_version = version;
@@ -60996,9 +61000,11 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     g_free(js->cookie_value);
     js->cookie_value = jar;
     if (js->current_url && *js->current_url) {
-        ns_net_cookie_store_from_js(js->current_url, s);
-        ns_net_cookie_jar_version(js->current_url, &js->cookie_version);
-        char *visible = ns_net_cookies_for_js(js->current_url);
+        ns_net_cookie_store_from_js(js->current_url, ns_js_top_url(js), s);
+        ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
+                                  &js->cookie_version);
+        char *visible = ns_net_cookies_for_js(js->current_url,
+                                              ns_js_top_url(js));
         g_free(js->cookie_value);
         js->cookie_value = visible ? visible : g_strdup("");
     }
@@ -62242,8 +62248,9 @@ static void
 ns_js_seed_cookies_from_jar(ns_js *js)
 {
     if (!js || !js->current_url || !*js->current_url) return;
-    ns_net_cookie_jar_version(js->current_url, &js->cookie_version);
-    char *jar = ns_net_cookies_for_js(js->current_url);
+    ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
+                                  &js->cookie_version);
+    char *jar = ns_net_cookies_for_js(js->current_url, ns_js_top_url(js));
     if (!jar) return;
     if (!*jar) { g_free(jar); return; }
 

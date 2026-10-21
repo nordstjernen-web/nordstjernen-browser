@@ -175,7 +175,8 @@ Bodies decoded identically in every case — gzipped (105 KB), identity
 (2.2 MB), JSON (22 KB), 404 pages, and redirect chains
 (`github.com/…/raw/…` → `raw.githubusercontent.com`). Cookies, including
 `HttpOnly` ones, are stored and replayed in the same Netscape jar the curl
-path and the `document.cookie` API use.
+path and the `document.cookie` API use: the one partitioned by the
+request's top-level site.
 
 **Connection reuse** — five distinct fetches to one origin, in one process:
 
