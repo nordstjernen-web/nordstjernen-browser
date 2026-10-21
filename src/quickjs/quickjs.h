@@ -1225,6 +1225,9 @@ typedef void JSHostPromiseRejectionTracker(JSContext *ctx, JSValueConst promise,
                                            bool is_handled, void *opaque);
 JS_EXTERN void JS_SetHostPromiseRejectionTracker(JSRuntime *rt, JSHostPromiseRejectionTracker *cb, void *opaque);
 
+typedef bool JSCanCompileStrings(JSContext *ctx);
+JS_EXTERN void JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn);
+
 /* return != 0 if the JS code needs to be interrupted */
 typedef int JSInterruptHandler(JSContext *ctx, void *opaque);
 JS_EXTERN void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);

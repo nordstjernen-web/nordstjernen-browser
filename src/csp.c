@@ -205,6 +205,7 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
     if (strcmp(src, "'self'") == 0) return ns_url_same_origin(resource_url, doc_url);
     if (strcmp(src, "'unsafe-inline'") == 0 ||
         strcmp(src, "'unsafe-eval'") == 0   ||
+        strcmp(src, "'wasm-unsafe-eval'") == 0 ||
         strcmp(src, "'strict-dynamic'") == 0)
         return FALSE;
 
@@ -478,6 +479,28 @@ ns_csp_inline_event_handler_allowed(const ns_csp *csp)
     for (guint i = 0; i < csp->policies->len; i++) {
         const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
         if (!policy_inline_event_handler_allowed(p))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+policy_eval_allowed(const ns_csp_policy *p, gboolean wasm)
+{
+    ns_csp_kind k = inline_script_kind(p);
+    if (k == NS_CSP_KIND_COUNT) return TRUE;
+    const GPtrArray *list = p->sources[k];
+    return list_has_token(list, "'unsafe-eval'") ||
+           (wasm && list_has_token(list, "'wasm-unsafe-eval'"));
+}
+
+gboolean
+ns_csp_eval_allowed(const ns_csp *csp, gboolean wasm)
+{
+    if (!csp) return TRUE;
+    for (guint i = 0; i < csp->policies->len; i++) {
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        if (!policy_eval_allowed(p, wasm))
             return FALSE;
     }
     return TRUE;
