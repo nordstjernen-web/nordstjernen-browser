@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: an absolutely positioned element inside a table section is
+  now laid out. Positioning blockifies a `<tr>`, and the row collector
+  queued an absolute element only while it still counted as a row, so
+  an absolutely positioned row, or any absolutely positioned child of a
+  `<tbody>`, got no box at all: it never painted and script saw a 0 x 0
+  rect. Wikipedia collapses navbox rows with `hidden=until-found` plus
+  `position: absolute; width: 0`, and Chrome still lays their cells out
+  at their min-content width, which is what scripts and the sitebench
+  probe read. The visible page does not change.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
