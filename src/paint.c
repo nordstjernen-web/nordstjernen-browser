@@ -7106,31 +7106,143 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
     return TRUE;
 }
 
+#define NS_BROKEN_IMAGE_ICON 16.0
+
 static void
-paint_failed_image(cairo_t *cr, const ns_box *b)
+broken_image_page_path(cairo_t *cr)
+{
+    cairo_new_path(cr);
+    cairo_move_to(cr, 0.5, 0.5);
+    cairo_line_to(cr, 11.5, 0.5);
+    cairo_line_to(cr, 15.5, 4.5);
+    cairo_line_to(cr, 15.5, 15.5);
+    cairo_line_to(cr, 0.5, 15.5);
+    cairo_close_path(cr);
+}
+
+static void
+paint_broken_image_icon(cairo_t *cr, double x, double y)
+{
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    broken_image_page_path(cr);
+    cairo_set_source_rgb(cr, 0.79, 0.85, 0.96);
+    cairo_fill_preserve(cr);
+    cairo_save(cr);
+    cairo_clip(cr);
+    cairo_save(cr);
+    cairo_translate(cr, 5.5, 16.5);
+    cairo_scale(cr, 7.5, 6.0);
+    cairo_arc(cr, 0, 0, 1, 0, 2 * G_PI);
+    cairo_restore(cr);
+    cairo_set_source_rgb(cr, 0.35, 0.68, 0.22);
+    cairo_fill(cr);
+    cairo_save(cr);
+    cairo_translate(cr, 6.5, 4.5);
+    cairo_scale(cr, 2.5, 1.5);
+    cairo_arc(cr, 0, 0, 1, 0, 2 * G_PI);
+    cairo_restore(cr);
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_fill(cr);
+    cairo_restore(cr);
+    broken_image_page_path(cr);
+    cairo_set_source_rgb(cr, 0.58, 0.58, 0.59);
+    cairo_set_line_width(cr, 1);
+    cairo_stroke(cr);
+    cairo_move_to(cr, 11.5, 0.5);
+    cairo_line_to(cr, 11.5, 4.5);
+    cairo_line_to(cr, 15.5, 4.5);
+    cairo_close_path(cr);
+    cairo_set_source_rgb(cr, 0.86, 0.86, 0.86);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgb(cr, 0.58, 0.58, 0.59);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+static gboolean
+image_extent_specified(const ns_box *b, ns_css_prop prop, const char *attr)
+{
+    const ns_css_value *v = b->style ? b->style->values[prop] : NULL;
+    if (v && (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC))
+        return TRUE;
+    return b->dom && ns_element_get_attr(b->dom, attr) != NULL;
+}
+
+static gboolean
+image_request_errored(const ns_box *b, const ns_image *img)
+{
+    if (img && img->failed) return TRUE;
+    if (!b->dom) return FALSE;
+    if (ns_element_get_attr(b->dom, "src") ||
+        ns_element_get_attr(b->dom, "srcset"))
+        return TRUE;
+    return ns_node_is_element_named(b->dom->parent, "picture");
+}
+
+static void
+paint_image_alt_text(cairo_t *cr, const ns_box *b, const char *alt,
+                     double x, double y, double indent)
+{
+    const ns_css_value *ws = b->style ? b->style->values[NS_CSS_WHITE_SPACE] : NULL;
+    gboolean keep_spaces = keyword_is(ws, "pre") || keyword_is(ws, "pre-wrap") ||
+                           keyword_is(ws, "break-spaces");
+    gboolean wrap = !keyword_is(ws, "nowrap") && !keyword_is(ws, "pre");
+    GString *text = g_string_new(NULL);
+    for (const char *p = alt; *p; p++) {
+        gboolean space = *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r';
+        if (!space || keep_spaces) g_string_append_c(text, *p);
+        else if (text->len && text->str[text->len - 1] != ' ')
+            g_string_append_c(text, ' ');
+    }
+    NsPangoLayout *layout = paint_create_layout();
+    ns_paint_apply_inline_font(layout, b->style);
+    ns_pango_layout_set_text(layout, text->str, -1);
+    g_string_free(text, TRUE);
+    if (wrap)
+        ns_pango_layout_set_width(layout,
+            (int)(b->content_width * NS_PANGO_SCALE));
+    ns_pango_layout_set_indent(layout, (int)(indent * NS_PANGO_SCALE));
+    rgba fg = rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
+                        b->style ? b->style->values[NS_CSS_COLOR] : NULL,
+                        0, 0, 0, 1);
+    set_source_rgba(cr, fg);
+    cairo_move_to(cr, x, y);
+    ns_pango_cairo_show_layout(cr, layout);
+    g_object_unref(layout);
+}
+
+static void
+paint_image_fallback(cairo_t *cr, const ns_box *b, const ns_image *img)
 {
     double w = b->content_width;
     double h = b->content_height;
-    if (w <= 0 || h <= 0) return;
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_rectangle(cr, b->x, b->y, w, h);
-    cairo_fill_preserve(cr);
-    cairo_set_source_rgb(cr, 0.78, 0.78, 0.78);
-    cairo_set_line_width(cr, 1);
-    cairo_stroke(cr);
-    double s = MIN(10.0, MIN(w, h) - 2.0);
-    if (s < 4.0) return;
-    double x = b->x + 3.0;
-    double y = b->y + 3.0;
-    if (x + s > b->x + w) x = b->x + MAX(0.0, w - s - 1.0);
-    if (y + s > b->y + h) y = b->y + MAX(0.0, h - s - 1.0);
-    cairo_set_source_rgb(cr, 0.82, 0.0, 0.0);
-    cairo_set_line_width(cr, 2.0);
-    cairo_move_to(cr, x, y);
-    cairo_line_to(cr, x + s, y + s);
-    cairo_move_to(cr, x + s, y);
-    cairo_line_to(cr, x, y + s);
-    cairo_stroke(cr);
+    if (!(w > 0) || !(h > 0)) return;
+    double cx = b->x + b->margin.left + b->border.left + b->padding.left;
+    double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
+    const char *alt = b->dom ? ns_element_get_attr(b->dom, "alt") : NULL;
+    gboolean has_alt = alt && *alt;
+    gboolean sized = image_extent_specified(b, NS_CSS_WIDTH, "width") &&
+                     image_extent_specified(b, NS_CSS_HEIGHT, "height");
+    gboolean icon_fits = w >= NS_BROKEN_IMAGE_ICON + 2 &&
+                         h >= NS_BROKEN_IMAGE_ICON + 2;
+    cairo_rectangle(cr, cx, cy, w, h);
+    cairo_clip(cr);
+    if (sized && !has_alt) {
+        cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
+        cairo_set_line_width(cr, 1);
+        cairo_rectangle(cr, cx + 0.5, cy + 0.5, w - 1, h - 1);
+        cairo_stroke(cr);
+        if (icon_fits && image_request_errored(b, img))
+            paint_broken_image_icon(cr, cx + 2, cy + 2);
+        return;
+    }
+    double indent = 0;
+    if (icon_fits) {
+        paint_broken_image_icon(cr, cx, cy);
+        indent = NS_BROKEN_IMAGE_ICON;
+    }
+    if (has_alt) paint_image_alt_text(cr, b, alt, cx, cy, indent);
 }
 
 static const ns_box *g_svg_foreign_owner;
@@ -7232,43 +7344,9 @@ paint_image(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);
-    } else if (img && img->failed) {
-        if (b->content_width > 24 || b->content_height > 24)
-            paint_failed_image(cr, b);
-    } else {
-        if (b->content_width <= 24 && b->content_height <= 24) {
-            cairo_restore(cr);
-            return;
-        }
-        const ns_style *s = b->style;
-        rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
-                            s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL,
-                            0, 0, 0, 0);
-        gboolean has_bg = bg.a > 0;
-        double cx = b->x + b->margin.left + b->border.left + b->padding.left;
-        double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
-        if (!has_bg) {
-            cairo_set_source_rgb(cr, 0.92, 0.92, 0.92);
-            cairo_rectangle(cr, cx, cy, b->content_width, b->content_height);
-            cairo_fill_preserve(cr);
-            cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
-            cairo_set_line_width(cr, 1);
-            cairo_stroke(cr);
-        }
-        const char *alt = b->dom ? ns_element_get_attr(b->dom, "alt") : NULL;
-        if (alt && *alt && b->content_width > 24 && b->content_height > 16) {
-            NsPangoLayout *layout = paint_create_layout();
-            ns_pango_layout_set_text(layout, alt, -1);
-            ns_pango_layout_set_width(layout,
-                (int)((b->content_width - 8) * NS_PANGO_SCALE));
-            ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
-            int pw, ph;
-            ns_pango_layout_get_pixel_size(layout, &pw, &ph);
-            cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
-            cairo_move_to(cr, cx + 4, cy + (b->content_height - ph) / 2);
-            ns_pango_cairo_show_layout(cr, layout);
-            g_object_unref(layout);
-        }
+    } else if ((img && img->failed) || !b->media || !b->media->image_src ||
+               !*b->media->image_src) {
+        paint_image_fallback(cr, b, img);
     }
     cairo_restore(cr);
 }
