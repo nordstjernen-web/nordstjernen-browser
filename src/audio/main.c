@@ -613,6 +613,10 @@ bytes_are_container(const unsigned char *b, size_t n)
         return 1;
     if (n >= 8 && b[4] == 'f' && b[5] == 't' && b[6] == 'y' && b[7] == 'p')
         return 1;
+    if (n >= 4 && memcmp(b, "fLaC", 4) == 0)
+        return 1;
+    if (n >= 12 && memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WAVE", 4) == 0)
+        return 1;
     return 0;
 }
 

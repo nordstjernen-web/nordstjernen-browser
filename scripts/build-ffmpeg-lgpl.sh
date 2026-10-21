@@ -65,9 +65,9 @@ cd "$SRC"
     --disable-everything \
     --enable-avformat --enable-avcodec --enable-avutil \
     --enable-swscale --enable-swresample \
-    --enable-demuxer=matroska,ogg,mov \
-    --enable-decoder=vp8,vp9,theora,opus,vorbis \
-    --enable-parser=vp8,vp9,vp3,opus,vorbis,h264,aac \
+    --enable-demuxer=matroska,ogg,mov,flac,wav \
+    --enable-decoder=vp8,vp9,theora,opus,vorbis,flac,pcm_s16le,pcm_s24le,pcm_u8,pcm_f32le \
+    --enable-parser=vp8,vp9,vp3,opus,vorbis,flac,h264,aac \
     --enable-protocol=file \
     $ASM_FLAG \
     "${CROSS[@]}" \

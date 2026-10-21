@@ -1402,6 +1402,19 @@ ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark)
 }
 
 int
+ns_rproc_http_audio_event(ns_rproc_http *r, const char *line)
+{
+    if (!r || !line)
+        return -1;
+    char *le = json_escape(line);
+    char *json = NULL;
+    if (!le || asprintf(&json, "{\"line\":\"%s\"}", le) < 0)
+        json = NULL;
+    free(le);
+    return request_ok(r, "/audio-event", json);
+}
+
+int
 ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
 {
     return resolve_permission(r, "/camera", origin, allow);
