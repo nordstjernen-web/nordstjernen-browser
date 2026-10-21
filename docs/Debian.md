@@ -31,7 +31,7 @@ There are two paths, in order of effort:
 
 1. **A third-party APT repository (fastest, fully under our control).**
    We host signed `.deb`s and an `apt` repo; users add it and
-   `apt install nordstjernen`. No Debian FTP-master review, works on
+   `apt install nordstjernen-browser`. No Debian FTP-master review, works on
    Debian and every Debian derivative (Ubuntu, Mint, …). This is the
    practical channel until the package is in the archive, and is
    documented below.
@@ -65,6 +65,11 @@ debian/
 ```
 
 Key choices:
+
+* **Package name `nordstjernen-browser`.** Source and binary package are
+  both called `nordstjernen-browser`, so the archive name says what it is;
+  the installed commands stay `nordstjernen`, `nordstjernen-renderer` and
+  `nordstjernen-audio`.
 
 * **`Section: web`** — the package targets `main`, distributed under the
   GPL option of the dual license.
@@ -138,11 +143,11 @@ From a checkout that contains the `debian/` directory:
 `-b` builds a binary-only package; drop it for a full source+binary
 build. The result lands in the parent directory:
 
-    ../nordstjernen_<version>_<arch>.deb
+    ../nordstjernen-browser_<version>_<arch>.deb
 
 Install and smoke-test it:
 
-    sudo apt install ../nordstjernen_*.deb
+    sudo apt install ../nordstjernen-browser_*.deb
     nordstjernen
 
 ### Clean, reproducible builds with sbuild/pbuilder
@@ -161,7 +166,7 @@ or with `pbuilder`:
 
 ### Lint before publishing
 
-    lintian -i -I --show-overrides ../nordstjernen_*.changes
+    lintian -i -I --show-overrides ../nordstjernen-browser_*.changes
 
 For `main` the package should be lintian-clean. Any `license-problem-*`
 tag — on Nordstjernen's own sources or on a **bundled** engine — is a
@@ -179,7 +184,7 @@ machines without Debian's archive process.
    the simplest tool:
 
        aptly repo create -distribution=stable -component=main nordstjernen
-       aptly repo add nordstjernen ../nordstjernen_*.deb
+       aptly repo add nordstjernen ../nordstjernen-browser_*.deb
        aptly publish repo -gpg-key=<KEYID> nordstjernen
 
    Serve `~/.aptly/public` over HTTPS (e.g. at
@@ -193,7 +198,7 @@ machines without Debian's archive process.
        echo "deb [signed-by=/usr/share/keyrings/nordstjernen.gpg] \
          https://apt.nordstjernen.org stable main" \
          | sudo tee /etc/apt/sources.list.d/nordstjernen.list
-       sudo apt update && sudo apt install nordstjernen
+       sudo apt update && sudo apt install nordstjernen-browser
 
 Updates ship by adding the new `.deb` to the repo and re-publishing;
 `apt upgrade` then picks it up. Ship a `.deb` per release tag so
@@ -208,7 +213,7 @@ feedback are tracked in `Debian-inclusion.md`):
 
        reportbug --email <you> wnpp
 
-   Title it `ITP: nordstjernen -- web browser` and
+   Title it `ITP: nordstjernen-browser -- web browser` and
    give the license as `GPL-3+ or NSL-1.0` (SPDX
    `LicenseRef-NSL-1.0 OR GPL-3.0-or-later`), noting that Debian distributes
    it under the GPL-3+ option and that it targets `main`.

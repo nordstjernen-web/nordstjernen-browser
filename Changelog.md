@@ -7,7 +7,9 @@ Changelog:
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
   and a single `Initial release` changelog entry. `docs/Debian-inclusion.md`
-  tracks the road into Debian.
+  tracks the road into Debian. The Debian source and binary package is
+  now called `nordstjernen-browser`; the commands it installs keep their
+  names.
 * Crash fix: a streamed XMLHttpRequest response could run the page's
   `progress` and `readystatechange` handlers on the network thread while
   the page's own script ran on the main thread. Both threads then used
