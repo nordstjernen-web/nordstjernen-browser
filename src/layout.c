@@ -1389,13 +1389,13 @@ collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int d
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
+        const ns_style *rs = g_hash_table_lookup(styles, n);
+        if (rs && style_is_none(rs)) return;
+        if (rs && style_is_absolute_or_fixed(rs)) {
+            queue_absolute_node(n, rs);
+            return;
+        }
         if (is_table_row(n, styles)) {
-            const ns_style *rs = g_hash_table_lookup(styles, n);
-            if (rs && style_is_none(rs)) return;
-            if (rs && style_is_absolute_or_fixed(rs)) {
-                queue_absolute_node(n, rs);
-                return;
-            }
             g_ptr_array_add(out, (gpointer)n);
             return;
         }
