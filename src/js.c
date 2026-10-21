@@ -1434,6 +1434,36 @@ ns_js_realm_url(ns_js *js, JSContext *realm)
     return url && *url ? url : NULL;
 }
 
+static bool
+ns_js_string_compile_allowed(JSContext *ctx, gboolean wasm)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->csp) return true;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (ctx != main_ctx && ns_js_realm_url(js, ctx)) return true;
+    if (ns_csp_eval_allowed(js->csp, wasm)) return true;
+    if (js->log_cb) {
+        char *line = g_strdup_printf("CSP blocked: %s on %s",
+                                     wasm ? "WebAssembly compile" : "eval",
+                                     ns_js_top_url(js));
+        js->log_cb(line, js->log_user_data);
+        g_free(line);
+    }
+    return false;
+}
+
+static bool
+ns_js_can_compile_strings(JSContext *ctx)
+{
+    return ns_js_string_compile_allowed(ctx, FALSE);
+}
+
+bool
+ns_wasm_compile_allowed(JSContext *ctx)
+{
+    return ns_js_string_compile_allowed(ctx, TRUE);
+}
+
 static void
 ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
 {
@@ -1839,8 +1869,10 @@ ns_timer_fire(gpointer data)
     JSValue ret;
     js->callback_depth++;
     if (code) {
-        ret = JS_Eval(callback_ctx, code, strlen(code), "<timer>",
-                      JS_EVAL_TYPE_GLOBAL);
+        ret = ns_js_can_compile_strings(callback_ctx)
+            ? JS_Eval(callback_ctx, code, strlen(code), "<timer>",
+                      JS_EVAL_TYPE_GLOBAL)
+            : JS_UNDEFINED;
     } else if (t->is_idle) {
         JSValue deadline = ns_idle_deadline_new(js, callback_ctx,
                                                 idle_expired);
@@ -57788,6 +57820,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
         JS_SetHostPromiseRejectionTracker(
             js->rt, ns_js_promise_rejection_tracker, NULL);
+        JS_SetCanCompileStrings(js->rt, ns_js_can_compile_strings);
         JS_SetMaxStackSize(js->rt, (size_t)5 * 1024 * 1024);
     }
     if (!js->rt) { g_free(js); return NULL; }

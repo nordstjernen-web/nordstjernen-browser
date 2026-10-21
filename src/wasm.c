@@ -1829,6 +1829,11 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
 {
     if (!ns_wasm_runtime_ready())
         return JS_ThrowRangeError(ctx, "wasm runtime init failed");
+    if (!ns_wasm_compile_allowed(ctx))
+        return ns_wasm_throw_named(ctx, "CompileError",
+                                   "Content Security Policy refused to compile "
+                                   "WebAssembly ('wasm-unsafe-eval' is not "
+                                   "allowed)");
     if (len > G_MAXUINT32)
         return ns_wasm_throw_named(ctx, "CompileError",
                                    "wasm module too large");
