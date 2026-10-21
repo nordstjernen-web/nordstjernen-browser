@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Web storage: the `storage` event now reaches the windows the HTML
+  standard names and no others. The main window received the events
+  for its own `localStorage` and `sessionStorage` writes; listeners that
+  a frame added with `addEventListener('storage', …)` were never called;
+  and every window saw the writer's `Storage` object as `storageArea`
+  instead of its own. Temu watches `storage` events for oversized
+  values and reported each of its own writes as "storage set too long!"
+  (one error on every load). The static webstorage event tests of WPT go
+  from 14 of 21 to 27 of 30 subtests, with two files that never finished
+  now running to the end.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
