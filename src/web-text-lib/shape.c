@@ -1056,12 +1056,13 @@ segment_key (const SegmentPlan *plan,
   guint32 start = plan->starts[i];
   int len = (int) ((i + 1 < plan->n ? plan->starts[i + 1]
                                     : (guint32) plan->item_length) - start);
+  guint open_edges = (i == 0 ? 1u << 9 : 0) | (i + 1 == plan->n ? 1u << 10 : 0);
 
   return ns_pango_shape_cache_key_init (key, plan->analysis,
                                         plan->item_text + start, len,
                                         plan->paragraph_text, plan->paragraph_length,
                                         plan->flags, plan->show_flags,
-                                        NS_PANGO_TEXT_TRANSFORM_NONE,
+                                        NS_PANGO_TEXT_TRANSFORM_NONE | open_edges,
                                         NS_PANGO_SHAPE_HYPHEN_NONE,
                                         plan->features, plan->num_features);
 }
@@ -1077,7 +1078,10 @@ segment_key (const SegmentPlan *plan,
  * it. The cuts at the item's own two ends are not the shaper's to judge: what
  * lies beyond them is a different item, and whether the piece may be lifted out
  * of this paragraph at all is what context_independent() decides, per piece, in
- * segment_key().
+ * segment_key(). A piece that touches an end of its item is keyed apart from
+ * one that does not, because nothing was kerned across that end: served inside
+ * another item, a trailing space would miss the kerning against the word after
+ * it.
  *
  * Returns how many pieces it could not store. Zero means the item can be put
  * back together out of the cache; anything else means it cannot, and the caller

@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Text: the shape cache no longer serves a piece that ended an item in
+  the middle of another one. A trailing space shaped at the end of an
+  item ("See " before a link) has nothing to kern against, but the same
+  bytes inside a longer item are kerned against the next word, and the
+  cached piece brought the unkerned width with it. Text came out up to
+  0.6 px too wide, enough to wrap a label that fits in Chrome ("FROM
+  THE ATHLETIC" on the New York Times front page), and
+  `NS_PANGO_SHAPE_CACHE=verify` reported mismatches on the New York
+  Times and PayPal. Pieces at an end of their item are now keyed apart
+  from the rest.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
