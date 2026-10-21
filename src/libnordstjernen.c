@@ -38,6 +38,7 @@
 #include "safebrowsing.h"
 #include "security.h"
 #include "selection.h"
+#include "svg_external.h"
 #include "video.h"
 #include "camera.h"
 #include "webgl.h"
@@ -143,6 +144,7 @@ struct ns_browser {
     int             page_size_w;
     int             page_size_h;
     guint           videos_noted_seq;
+    guint64         svg_external_seen;
     gboolean        hover_restyle_pending;
     ns_box         *sb_box;
     const ns_node  *sb_node;
@@ -787,6 +789,7 @@ browser_settle_quiet(ns_browser *b, gint64 deadline_us)
     if (b->js && ns_js_has_work_before(b->js, deadline_us)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
     if (b->videos && ns_video_cache_has_pending(b->videos)) return FALSE;
+    if (ns_svg_external_pending() > 0) return FALSE;
     if (g_main_context_pending(NULL)) return FALSE;
     return TRUE;
 }
@@ -2024,6 +2027,11 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (++guard >= 4096) break;
         if (g_get_monotonic_time() >= deadline) break;
     }
+    if (browser->svg_external_seen != ns_svg_external_generation()) {
+        browser->svg_external_seen = ns_svg_external_generation();
+        changed = TRUE;
+        other_changed = TRUE;
+    }
     changed |= browser_sync_scroll_timelines(browser);
     if (browser->js && ns_js_consume_mutated(browser->js))
         browser->dirty = TRUE;
@@ -2072,6 +2080,8 @@ ns_browser_animating(ns_browser *browser)
         return 1;
     if (browser->videos && ns_video_cache_animating(browser->videos))
         return 1;
+    if (ns_svg_external_pending() > 0)
+        return 1;
     return 0;
 }
 
@@ -2084,7 +2094,8 @@ browser_needs_frame_tick(ns_browser *browser)
            browser_images_outstanding(browser) > 0 ||
            (browser->js && ns_js_needs_frame_tick(browser->js)) ||
            (browser->anim && ns_anim_has_active(browser->anim)) ||
-           (browser->videos && ns_video_cache_animating(browser->videos));
+           (browser->videos && ns_video_cache_animating(browser->videos)) ||
+           ns_svg_external_pending() > 0;
 }
 
 static int
