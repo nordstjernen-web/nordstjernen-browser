@@ -28012,6 +28012,7 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndDispatchPath",
                                          "__ndRealmProto",
                                          "__ndRealmProtos",
+                                         "__ndPlatformFns",
                                          "__ndAdoptCss" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
@@ -34003,6 +34004,58 @@ ns_js_snapshot_globals(ns_js *js)
     }
     JS_FreeValue(js->ctx, global);
     return names;
+}
+
+static void
+ns_js_capture_platform_functions(JSContext *ctx)
+{
+    JSAtom key = JS_GetEnginePrivateAtom(ctx, "__ndPlatformFns");
+    if (key == JS_ATOM_NULL) return;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = JS_NewObjectProto(ctx, JS_NULL);
+    JSPropertyEnum *tab = NULL;
+    uint32_t n = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &n, global, JS_GPN_STRING_MASK) == 0) {
+        for (uint32_t i = 0; i < n; i++) {
+            JSPropertyDescriptor desc;
+            int own = JS_GetOwnProperty(ctx, &desc, global, tab[i].atom);
+            if (own < 0) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                continue;
+            }
+            if (own == 0) continue;
+            if (!(desc.flags & JS_PROP_GETSET) && JS_IsFunction(ctx, desc.value))
+                JS_DefinePropertyValue(ctx, reg, tab[i].atom,
+                                       JS_DupValue(ctx, desc.value),
+                                       JS_PROP_C_W_E);
+            JS_FreeValue(ctx, desc.value);
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        JS_FreePropertyEnum(ctx, tab, n);
+    } else {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    if (JS_DefinePropertyValue(ctx, global, key, reg, JS_PROP_CONFIGURABLE) < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, global);
+    JS_FreeAtom(ctx, key);
+}
+
+static JSValue
+ns_js_platform_functions(JSContext *ctx)
+{
+    JSAtom key = JS_GetEnginePrivateAtom(ctx, "__ndPlatformFns");
+    if (key == JS_ATOM_NULL) return JS_UNDEFINED;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = JS_GetProperty(ctx, global, key);
+    if (JS_IsException(reg)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        reg = JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, global);
+    JS_FreeAtom(ctx, key);
+    return reg;
 }
 
 static void
@@ -50681,6 +50734,7 @@ static const char ns_iframe_global_bootstrap[] =
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
     "        if (pd && platformNames && Object.prototype.hasOwnProperty.call(platformNames, pk)) {"
+    "          if ('value' in pd && typeof platformNames[pk] === 'function') pd.value = platformNames[pk];"
     "          if ('value' in pd) pd.value = realmClone(pd.value);"
     "          if (pd.get) pd.get = realmClone(pd.get);"
     "          if (pd.set) pd.set = realmClone(pd.set);"
@@ -50707,20 +50761,30 @@ static const char ns_iframe_global_bootstrap[] =
 static JSValue
 ns_iframe_platform_names(JSContext *fctx, ns_js *js)
 {
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     if (!js->platform_globals) {
-        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx
-                                                 : js->ctx;
         JSContext *saved = js->ctx;
         js->ctx = main_ctx;
         js->platform_globals = ns_js_snapshot_globals(js);
         js->ctx = saved;
     }
+    JSValue originals = ns_js_platform_functions(main_ctx);
     JSValue names = JS_NewObjectProto(fctx, JS_NULL);
     GHashTableIter it;
     gpointer k;
     g_hash_table_iter_init(&it, js->platform_globals);
-    while (g_hash_table_iter_next(&it, &k, NULL))
-        JS_SetPropertyStr(fctx, names, (const char *)k, JS_TRUE);
+    while (g_hash_table_iter_next(&it, &k, NULL)) {
+        JSValue fn = JS_IsObject(originals)
+            ? JS_GetPropertyStr(main_ctx, originals, (const char *)k)
+            : JS_UNDEFINED;
+        if (JS_IsFunction(main_ctx, fn)) {
+            JS_SetPropertyStr(fctx, names, (const char *)k, fn);
+        } else {
+            JS_FreeValue(main_ctx, fn);
+            JS_SetPropertyStr(fctx, names, (const char *)k, JS_TRUE);
+        }
+    }
+    JS_FreeValue(main_ctx, originals);
     return names;
 }
 
@@ -67794,6 +67858,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     ns_js_install_document(js, doc, base_url);
     if (js->platform_globals) g_hash_table_destroy(js->platform_globals);
     js->platform_globals = ns_js_snapshot_globals(js);
+    ns_js_capture_platform_functions(js->ctx);
     {
         const char *early = g_getenv("NS_EARLY_JS_FILE");
         char *early_src = NULL;
