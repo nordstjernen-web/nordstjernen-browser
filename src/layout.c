@@ -10047,6 +10047,27 @@ replaced_width_is_percent(const ns_box *box)
            value_is_percent(box->style->values[NS_CSS_WIDTH]);
 }
 
+static gboolean
+replaced_max_width_is_percent(const ns_box *box)
+{
+    return (box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO ||
+            box->kind == NS_BOX_SVG) && box->style &&
+           value_is_percent(box->style->values[NS_CSS_MAX_WIDTH]);
+}
+
+static double definite_width_limit(const ns_box *box, const ns_css_value *v);
+
+static double
+replaced_contribution_limits(const ns_box *box, double w)
+{
+    if (!box->style) return w;
+    double max_w = definite_width_limit(box, box->style->values[NS_CSS_MAX_WIDTH]);
+    double min_w = definite_width_limit(box, box->style->values[NS_CSS_MIN_WIDTH]);
+    if (max_w >= 0 && w > max_w) w = max_w;
+    if (min_w >= 0 && w < min_w) w = min_w;
+    return w;
+}
+
 static double
 replaced_intrinsic_contribution(const ns_box *box, gboolean max_content)
 {
@@ -10081,7 +10102,8 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
         ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
         if (!ab) continue;
         gboolean cyclic = replaced_width_is_cyclic(ab) ||
-            (!max_content && replaced_width_is_percent(ab));
+            (!max_content && (replaced_width_is_percent(ab) ||
+                              replaced_max_width_is_percent(ab)));
         gboolean to_min_content = !max_content && !cyclic &&
             (ab->kind == NS_BOX_BLOCK || ab->kind == NS_BOX_TABLE);
         if (cyclic || to_min_content) {
@@ -10395,9 +10417,10 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (wv && (wv->kind == NS_CSS_V_LENGTH ||
                    wv->kind == NS_CSS_V_CALC)) {
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
-            if (styled >= 0) return styled;
+            if (styled >= 0) return replaced_contribution_limits(box, styled);
         }
-        return box->content_width > 0 ? box->content_width : 200;
+        return replaced_contribution_limits(
+            box, box->content_width > 0 ? box->content_width : 200);
     }
     if (box->kind == NS_BOX_TEXT) {
         return box->content_width > 0 ? box->content_width : 0;
@@ -10644,9 +10667,10 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (wv && !value_is_percent(wv) &&
             (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
-            if (styled >= 0) return styled;
+            if (styled >= 0) return replaced_contribution_limits(box, styled);
         }
-        return box->content_width > 0 ? box->content_width : 200;
+        return replaced_contribution_limits(
+            box, box->content_width > 0 ? box->content_width : 200);
     }
     if (box->kind == NS_BOX_TEXT)
         return box->content_width > 0 ? box->content_width : 0;
