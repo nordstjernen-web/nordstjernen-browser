@@ -8213,7 +8213,10 @@ typedef struct deferred_capture {
     const ns_node *dom;
     int z;
     gboolean isolates;
+    gboolean adopted;
 } deferred_capture;
+
+static const ns_box *g_paint_adopted_box;
 
 static guint g_paint_capture_seq;
 
@@ -8332,10 +8335,14 @@ static void
 paint_deferred_capture(cairo_t *cr, const deferred_capture *cap,
                        const char *highlight)
 {
-    if (cap->layout)
+    if (cap->layout) {
         paint_deferred_inline_layer(cr, cap, highlight);
-    else
-        paint_walk(cr, cap->box, highlight);
+        return;
+    }
+    const ns_box *saved = g_paint_adopted_box;
+    g_paint_adopted_box = cap->adopted ? cap->box : NULL;
+    paint_walk(cr, cap->box, highlight);
+    g_paint_adopted_box = saved;
 }
 
 static gboolean
@@ -9894,18 +9901,114 @@ box_is_positioned(const ns_box *b)
 }
 
 static gboolean
-box_moves_or_clips_contents(const ns_box *b)
+box_moves_contents(const ns_box *b)
 {
     const ns_style *s = b->style;
     if (!s) return FALSE;
-    if (b->scroll_x != 0 || b->scroll_y != 0) return TRUE;
     if (keyword_is(s->values[NS_CSS_POSITION], "sticky")) return TRUE;
-    if (overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_X)) ||
-        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_Y)) ||
-        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW)))
-        return TRUE;
     return s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
            s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE];
+}
+
+static void
+box_overflow_clip_axes(const ns_box *b, gboolean *clip_x, gboolean *clip_y)
+{
+    const char *ovs = ns_style_keyword(b->style, NS_CSS_OVERFLOW);
+    const char *ovx = ns_style_keyword(b->style, NS_CSS_OVERFLOW_X);
+    const char *ovy = ns_style_keyword(b->style, NS_CSS_OVERFLOW_Y);
+    if (!ovx) ovx = ovs;
+    if (!ovy) ovy = ovs;
+    *clip_x = overflow_kw_clips(ovx);
+    *clip_y = overflow_kw_clips(ovy);
+    if (*clip_x != *clip_y &&
+        g_ascii_strcasecmp(*clip_x ? ovx : ovy, "clip") != 0)
+        *clip_x = *clip_y = TRUE;
+}
+
+static gboolean
+box_overflow_clip_rect(const ns_box *b, double *px, double *py,
+                       double *pw, double *ph)
+{
+    const ns_style *bs = b->style;
+    if (!bs || !b->parent ||
+        ns_node_is_element_named(b->dom, "html") ||
+        ns_node_is_element_named(b->dom, "body"))
+        return FALSE;
+    gboolean clip_x, clip_y;
+    box_overflow_clip_axes(b, &clip_x, &clip_y);
+    if (!clip_x && !clip_y) return FALSE;
+    if (b->kind != NS_BOX_BLOCK && b->kind != NS_BOX_TABLE_CAPTION &&
+        b->kind != NS_BOX_TABLE_CELL)
+        return FALSE;
+    *px = b->x + b->margin.left + b->border.left;
+    *py = b->y + b->margin.top  + b->border.top;
+    *pw = MAX(0, b->content_width + b->padding.left + b->padding.right);
+    *ph = MAX(0, b->content_height + b->padding.top + b->padding.bottom);
+    if (isnan(*px) || isnan(*py) || isnan(*pw) || isnan(*ph)) {
+        if (g_dbg_paint_x >= 0)
+            g_printerr("[paint-nan-guard] overflow-clip <%s>\n",
+                       b->dom && b->dom->name ? b->dom->name : "?");
+        *px = *py = 0;
+        *pw = *ph = 0;
+    }
+    gboolean explicit_h =
+        (bs->values[NS_CSS_MAX_HEIGHT] &&
+         (bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_LENGTH ||
+          bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_CALC)) ||
+        (bs->values[NS_CSS_HEIGHT] &&
+         (bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_LENGTH ||
+          bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_CALC));
+    gboolean explicit_w =
+        (bs->values[NS_CSS_MAX_WIDTH] &&
+         (bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_LENGTH ||
+          bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_CALC)) ||
+        (bs->values[NS_CSS_WIDTH] &&
+         (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
+          bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC));
+    gboolean sized_by_container = ns_box_is_flex_or_grid_item(b);
+    return (!clip_x || *pw > 0 || explicit_w || sized_by_container) &&
+           (!clip_y || *ph > 0 || explicit_h || sized_by_container);
+}
+
+static void
+box_overflow_clip_path(cairo_t *cr, const ns_box *b, double px, double py,
+                       double pw, double ph)
+{
+    gboolean clip_x, clip_y;
+    box_overflow_clip_axes(b, &clip_x, &clip_y);
+    if (!clip_x || !clip_y) {
+        double ex0, ey0, ex1, ey1;
+        cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
+        if (clip_x) cairo_rectangle(cr, px, ey0, pw, ey1 - ey0);
+        else        cairo_rectangle(cr, ex0, py, ex1 - ex0, ph);
+        return;
+    }
+    corner_radii radii = box_border_radii(b);
+    if (!corner_radii_zero(radii))
+        rounded_rect_path(cr, px, py, pw, ph, radii);
+    else
+        cairo_rectangle(cr, px, py, pw, ph);
+}
+
+static gboolean
+box_scroll_offset(const ns_box *b, double *sx, double *sy)
+{
+    double px, py, pw, ph;
+    if (!box_overflow_clip_rect(b, &px, &py, &pw, &ph)) return FALSE;
+    gboolean scrolled = !isnan(b->scroll_x) && !isnan(b->scroll_y);
+    *sx = scrolled ? b->scroll_x : 0;
+    *sy = scrolled ? b->scroll_y : 0;
+    return TRUE;
+}
+
+static gboolean
+box_has_clip_path(const ns_box *b)
+{
+    const ns_css_value *cp = b->style ? b->style->values[NS_CSS_CLIP_PATH] : NULL;
+    return (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
+            b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL) &&
+           cp && cp->kind == NS_CSS_V_KEYWORD && cp->u.keyword &&
+           strcmp(cp->u.keyword, "none") != 0;
 }
 
 static gboolean
@@ -9960,19 +10063,60 @@ abs_box_dom_chain(const ns_box *c, const ns_box *cb,
     return d == cb->dom ? n : 0;
 }
 
-static const ns_box *
-abs_box_effect_owner(const ns_box *c, const ns_box *cb)
+typedef struct escape_step {
+    const ns_box *box;
+    double dx, dy;
+} escape_step;
+
+typedef struct abs_escape {
+    const ns_box *owner;
+    double owner_dx, owner_dy;
+    int n_effects, n_clips;
+    escape_step effects[NS_ESCAPE_MAX_DEPTH];
+    escape_step clips[NS_ESCAPE_MAX_DEPTH];
+} abs_escape;
+
+static void
+abs_box_escape(const ns_box *c, const ns_box *cb, abs_escape *out)
 {
     const ns_node *chain[NS_ESCAPE_MAX_DEPTH];
     int n = abs_box_dom_chain(c, cb, chain);
-    const ns_box *cur = cb, *owner = NULL;
+    const ns_box *cur = cb;
+    double dx = 0, dy = 0;
+    int n_clips = 0;
+    out->owner = NULL;
+    out->owner_dx = out->owner_dy = 0;
+    out->n_effects = out->n_clips = 0;
     for (int i = n - 1; i >= 0; i--) {
         cur = box_child_for_dom(cur, chain[i], 0);
-        if (!cur || box_moves_or_clips_contents(cur)) break;
-        if (box_groups_contents(cur) && !box_hides_subtree(cur))
-            owner = cur;
+        if (!cur || box_moves_contents(cur)) break;
+        escape_step step = { cur, dx, dy };
+        double sx, sy;
+        if (box_scroll_offset(cur, &sx, &sy)) {
+            out->clips[n_clips++] = step;
+            dx -= sx;
+            dy -= sy;
+        }
+        if (box_groups_contents(cur) && !box_hides_subtree(cur)) {
+            out->effects[out->n_effects++] = step;
+            out->owner = cur;
+            out->owner_dx = -dx;
+            out->owner_dy = -dy;
+            out->n_clips = n_clips;
+        }
     }
-    return owner && !box_outside_paint_clip(owner) ? owner : NULL;
+    if (out->owner && box_outside_paint_clip(out->owner)) {
+        out->owner = NULL;
+        out->n_clips = 0;
+    }
+}
+
+static gboolean
+abs_box_adopted(const ns_box *c, const ns_box *cb)
+{
+    abs_escape esc;
+    abs_box_escape(c, cb, &esc);
+    return esc.owner && esc.n_clips == 0;
 }
 
 static gboolean
@@ -9982,14 +10126,116 @@ paint_adopted_abs_boxes(cairo_t *cr, const ns_box *e, const char *highlight)
     gboolean any = FALSE;
     for (const ns_box *p = e->parent; p; p = p->parent) {
         for (const ns_box *c = p->first_child; c; c = c->next_sibling) {
-            if (abs_box_effect_owner(c, p) != e) continue;
-            if (!cr) return TRUE;
+            abs_escape esc;
+            abs_box_escape(c, p, &esc);
+            if (!esc.owner) continue;
+            if (!cr) {
+                for (int i = 0; i < esc.n_effects; i++)
+                    if (esc.effects[i].box == e) return TRUE;
+                continue;
+            }
+            if (esc.owner != e) continue;
+            const ns_box *saved = g_paint_adopted_box;
+            g_paint_adopted_box = c;
+            cairo_save(cr);
+            cairo_translate(cr, esc.owner_dx, esc.owner_dy);
             paint_walk(cr, c, highlight);
+            cairo_restore(cr);
+            g_paint_adopted_box = saved;
             any = TRUE;
         }
-        if (box_is_positioned(p) || box_moves_or_clips_contents(p)) break;
+        if (box_is_positioned(p) || box_moves_contents(p)) break;
     }
     return any;
+}
+
+static const ns_box *g_paint_escaped_box;
+
+static void
+paint_in_escaped_effects(cairo_t *cr, const ns_box *b, const escape_step *fx,
+                         int n, const char *highlight)
+{
+    if (n == 0) {
+        const ns_box *saved = g_paint_escaped_box;
+        g_paint_escaped_box = b;
+        paint_walk(cr, b, highlight);
+        g_paint_escaped_box = saved;
+        return;
+    }
+    const ns_box *r = fx->box;
+    double op = box_opacity(r);
+    if (op <= 0.0) return;
+    cairo_operator_t blend = blend_mode_operator(r->style);
+    gboolean mask = mask_layers_paintable(r->style);
+    gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask;
+    cairo_save(cr);
+    if (grouped) cairo_push_group(cr);
+    if (box_has_clip_path(r)) {
+        cairo_translate(cr, fx->dx, fx->dy);
+        apply_box_content_clip(cr, r);
+        cairo_translate(cr, -fx->dx, -fx->dy);
+    }
+    paint_in_escaped_effects(cr, b, fx + 1, n - 1, highlight);
+    if (grouped) {
+        cairo_pop_group_to_source(cr);
+        if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
+        cairo_pattern_t *mp = NULL;
+        if (mask) {
+            cairo_translate(cr, fx->dx, fx->dy);
+            mp = mask_layers_pattern(cr, r, NULL, op);
+        }
+        if (mp) {
+            cairo_mask(cr, mp);
+            cairo_pattern_destroy(mp);
+        } else {
+            cairo_paint_with_alpha(cr, op);
+        }
+    }
+    cairo_restore(cr);
+}
+
+static void
+erase_escaped_clips(cairo_t *cr, const abs_escape *esc)
+{
+    cairo_save(cr);
+    for (int i = 0; i < esc->n_clips; i++) {
+        const escape_step *step = &esc->clips[i];
+        double px, py, pw, ph;
+        if (!box_overflow_clip_rect(step->box, &px, &py, &pw, &ph)) continue;
+        cairo_translate(cr, step->dx, step->dy);
+        box_overflow_clip_path(cr, step->box, px, py, pw, ph);
+        cairo_translate(cr, -step->dx, -step->dy);
+        cairo_clip(cr);
+    }
+    cairo_set_operator(cr, CAIRO_OPERATOR_DEST_OUT);
+    cairo_paint(cr);
+    cairo_restore(cr);
+}
+
+static gboolean
+paint_escaped_abs_box(cairo_t *cr, const ns_box *b, const char *highlight)
+{
+    if (b == g_paint_escaped_box || b == g_paint_adopted_box ||
+        b == g_paint_tex_root || !b->parent ||
+        !box_position_is(b, "absolute"))
+        return FALSE;
+    abs_escape esc;
+    abs_box_escape(b, b->parent, &esc);
+    if (esc.n_effects == 0 || (esc.owner && esc.n_clips == 0))
+        return FALSE;
+    gboolean erase = esc.owner && !b->negative_lifted;
+    if (erase) {
+        cairo_save(cr);
+        cairo_push_group(cr);
+    }
+    paint_in_escaped_effects(cr, b, esc.effects, esc.n_effects, highlight);
+    if (erase) {
+        erase_escaped_clips(cr, &esc);
+        cairo_pop_group_to_source(cr);
+        cairo_paint(cr);
+        cairo_restore(cr);
+    }
+    return TRUE;
 }
 
 static void
@@ -10019,6 +10265,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         deferred_capture *cap = g_new0(deferred_capture, 1);
         cap->box = b;
         cap->seq = g_paint_capture_seq++;
+        cap->adopted = b == g_paint_adopted_box;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
@@ -10039,6 +10286,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             return;
         }
     }
+    if (paint_escaped_abs_box(cr, b, highlight)) return;
     double dbg_e0 = 0, dbg_e1 = 0, dbg_e2 = 0, dbg_e3 = 0;
     if (g_dbg_paint_x >= 0)
         cairo_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
@@ -10300,92 +10548,34 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
         qsort(entries, n_children, sizeof(paint_entry), paint_entry_cmp);
     }
-    const char *ovx = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_X) : NULL;
-    const char *ovy = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_Y) : NULL;
-    const char *ovs = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW) : NULL;
-    if (!ovx) ovx = ovs;
-    if (!ovy) ovy = ovs;
-    gboolean is_root = (b->parent == NULL) ||
-                       (b->dom && b->dom->name &&
-                        (strcmp(b->dom->name, "html") == 0 ||
-                         strcmp(b->dom->name, "body") == 0));
-    gboolean clip_x = overflow_kw_clips(ovx), clip_y = overflow_kw_clips(ovy);
-    if (clip_x != clip_y &&
-        g_ascii_strcasecmp(clip_x ? ovx : ovy, "clip") != 0)
-        clip_x = clip_y = TRUE;
-    gboolean clip_overflow = !is_root && (clip_x || clip_y);
+    double clip_px, clip_py, clip_pw, clip_ph;
+    gboolean clip_overflow =
+        box_overflow_clip_rect(b, &clip_px, &clip_py, &clip_pw, &clip_ph);
     gboolean scroll_anchored = FALSE;
-    if (clip_overflow &&
-        (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE_CAPTION ||
-         b->kind == NS_BOX_TABLE_CELL)) {
-        double px = b->x + b->margin.left + b->border.left;
-        double py = b->y + b->margin.top  + b->border.top;
-        double pw = b->content_width + b->padding.left + b->padding.right;
-        double ph = b->content_height + b->padding.top + b->padding.bottom;
-        if (pw < 0) pw = 0;
-        if (ph < 0) ph = 0;
-        if (isnan(px) || isnan(py) || isnan(pw) || isnan(ph)) {
-            if (g_dbg_paint_x >= 0)
-                g_printerr("[paint-nan-guard] overflow-clip <%s>\n",
-                           b->dom && b->dom->name ? b->dom->name : "?");
-            px = py = 0; pw = ph = 0;
+    if (clip_overflow) {
+        cairo_save(cr);
+        box_overflow_clip_path(cr, b, clip_px, clip_py, clip_pw, clip_ph);
+        cairo_clip(cr);
+        if (g_dbg_paint_x >= 0) {
+            double ex0, ey0, ex1, ey1;
+            cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
+            g_printerr("[paint-clip%s] <%s#%s> rect %.0f,%.0f %.0fx%.0f"
+                       " -> clip %.0f,%.0f..%.0f,%.0f\n",
+                       (ey1 - ey0 < 1 || ex1 - ex0 < 1) ? "-EMPTY" : "",
+                       b->dom && b->dom->name ? b->dom->name : "?",
+                       b->dom ? (ns_element_get_attr(b->dom, "id")
+                                 ? ns_element_get_attr(b->dom, "id") : "")
+                              : "",
+                       clip_px, clip_py, clip_pw, clip_ph, ex0, ey0, ex1, ey1);
         }
-        const ns_style *bs = b->style;
-        gboolean explicit_h = bs &&
-            ((bs->values[NS_CSS_MAX_HEIGHT] &&
-              (bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_LENGTH ||
-               bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_CALC)) ||
-             (bs->values[NS_CSS_HEIGHT] &&
-              (bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_LENGTH ||
-               bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_CALC)));
-        gboolean explicit_w = bs &&
-            ((bs->values[NS_CSS_MAX_WIDTH] &&
-              (bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_LENGTH ||
-               bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_CALC)) ||
-             (bs->values[NS_CSS_WIDTH] &&
-              (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
-               bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC)));
-        gboolean sized_by_container = ns_box_is_flex_or_grid_item(b);
-        if ((!clip_x || pw > 0 || explicit_w || sized_by_container) &&
-            (!clip_y || ph > 0 || explicit_h || sized_by_container)) {
-            cairo_save(cr);
-            corner_radii ov_radii = box_border_radii(b);
-            if (!clip_x || !clip_y) {
-                double ex0, ey0, ex1, ey1;
-                cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
-                if (clip_x) cairo_rectangle(cr, px, ey0, pw, ey1 - ey0);
-                else        cairo_rectangle(cr, ex0, py, ex1 - ex0, ph);
-            } else if (!corner_radii_zero(ov_radii)) {
-                rounded_rect_path(cr, px, py, pw, ph, ov_radii);
-            } else {
-                cairo_rectangle(cr, px, py, pw, ph);
-            }
-            cairo_clip(cr);
-            if (g_dbg_paint_x >= 0) {
-                double ex0, ey0, ex1, ey1;
-                cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
-                g_printerr("[paint-clip%s] <%s#%s> rect %.0f,%.0f %.0fx%.0f"
-                           " -> clip %.0f,%.0f..%.0f,%.0f\n",
-                           (ey1 - ey0 < 1 || ex1 - ex0 < 1) ? "-EMPTY" : "",
-                           b->dom && b->dom->name ? b->dom->name : "?",
-                           b->dom ? (ns_element_get_attr(b->dom, "id")
-                                     ? ns_element_get_attr(b->dom, "id") : "")
-                                  : "",
-                           px, py, pw, ph, ex0, ey0, ex1, ey1);
-            }
-            if ((b->scroll_x != 0 || b->scroll_y != 0) &&
-                !isnan(b->scroll_x) && !isnan(b->scroll_y)) {
-                cairo_translate(cr, -b->scroll_x, -b->scroll_y);
-                g_paint_anchor_dx -= b->scroll_x;
-                g_paint_anchor_dy -= b->scroll_y;
-                scroll_anchored = TRUE;
-            }
-            if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
-        } else {
-            clip_overflow = FALSE;
+        if ((b->scroll_x != 0 || b->scroll_y != 0) &&
+            !isnan(b->scroll_x) && !isnan(b->scroll_y)) {
+            cairo_translate(cr, -b->scroll_x, -b->scroll_y);
+            g_paint_anchor_dx -= b->scroll_x;
+            g_paint_anchor_dy -= b->scroll_y;
+            scroll_anchored = TRUE;
         }
-    } else {
-        clip_overflow = FALSE;
+        if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
     }
     gboolean own_layer_scope = paint_owns_layer_scope(
         b, grouped, has_transform, clip_overflow, has_path_clip);
@@ -10398,7 +10588,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (has_transform || has_sticky) g_paint_no_cull++;
     paint_negative_layers(cr, b, highlight);
     for (guint i = 0; i < n_children; i++)
-        if (!abs_box_effect_owner(entries[i].box, b))
+        if (!abs_box_adopted(entries[i].box, b))
             paint_walk(cr, entries[i].box, highlight);
     if (!skip_contents) paint_adopted_abs_boxes(cr, b, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;

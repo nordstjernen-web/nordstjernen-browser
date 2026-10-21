@@ -3,6 +3,17 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: an absolutely positioned element also takes the opacity,
+  `clip-path`, mask and blend mode of a static ancestor when an
+  `overflow` box sits between the two. That box does not clip the
+  element, since it is not in the element's containing block chain, so
+  the painter left the element outside the ancestor's group: text inside
+  an `overflow: hidden` card escaped an `opacity` set on an inner
+  wrapper. The part of the element inside the clipping boxes is now
+  drawn in the ancestor's group, grouped with its other content as
+  Chrome does, and the part outside them is drawn at the element's own
+  place through the same effects; a scrolled box's offset is undone for
+  both.
 * Paint: `backdrop-filter` is now drawn. The property was parsed but
   never painted, so frosted glass bars, blurred overlays and dimmed
   caption strips showed the page behind them unchanged (the Guardian
