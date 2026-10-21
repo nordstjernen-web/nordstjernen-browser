@@ -581,11 +581,10 @@ typedef enum ns_css_auto_repeat {
     NS_CSS_AUTO_REPEAT_FILL,
 } ns_css_auto_repeat;
 
-#define NS_CSS_LINE_NAME_MAX  24
 #define NS_CSS_LINE_NAMES_MAX 32
 
 typedef struct ns_css_line_name {
-    char name[NS_CSS_LINE_NAME_MAX];
+    const char *name;
     int  line;
 } ns_css_line_name;
 
