@@ -4,6 +4,7 @@
  */
 
 #include "svg.h"
+#include "svg_external.h"
 
 #include <math.h>
 #include <string.h>
@@ -1200,7 +1201,7 @@ svg_href_target(svg_ctx *ctx, const ns_node *n)
     const char *h = svg_href(n);
     if (!h) return NULL;
     while (*h && svg_is_ws(*h)) h++;
-    if (*h != '#') return NULL;
+    if (*h != '#') return ns_svg_external_target(n, h);
     return svg_by_id(ctx, h + 1);
 }
 

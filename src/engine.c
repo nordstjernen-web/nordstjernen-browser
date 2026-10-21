@@ -20,6 +20,7 @@
 #include "print.h"
 #include "render.h"
 #include "security.h"
+#include "svg_external.h"
 
 typedef struct fetch_state {
     GMainLoop  *loop;
@@ -1562,6 +1563,7 @@ ns_engine_restyle(ns_node *doc, const char *page_url,
                   const ns_node *focused, const ns_node *hover)
 {
     g_autofree char *base_url = ns_js_base_url_for_document(js, doc, page_url);
+    ns_svg_external_note_base(doc, base_url);
     GPtrArray *sheets, *sheet_docs;
     engine_pass_begin(doc, page_url, base_url, js, css_cache, &sheets,
                       &sheet_docs);
@@ -1601,6 +1603,7 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
     g_autofree char *base_url = ns_js_base_url_for_document(js, doc, page_url);
+    ns_svg_external_note_base(doc, base_url);
     GPtrArray *sheets, *sheet_docs;
     engine_pass_begin(doc, page_url, base_url, js, css_cache, &sheets,
                       &sheet_docs);
