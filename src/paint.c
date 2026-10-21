@@ -190,6 +190,9 @@ ns_paint_inline_font_attr(const ns_inline_attr *r)
     case NS_INLINE_FONT_SIZE:
         return ns_pango_attr_size_new_absolute(
             ns_paint_pango_font_size(r->font_size_px));
+    case NS_INLINE_LETTER_SPACING:
+        return ns_pango_attr_letter_spacing_new(
+            (int)lround(r->letter_spacing_px * NS_PANGO_SCALE));
     case NS_INLINE_FONT_FAMILY: {
         if (!r->family) return NULL;
         char *family = ns_css_font_family_for_pango(r->family);

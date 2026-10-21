@@ -2987,6 +2987,43 @@ emit_font_size_attr(GArray *attrs, gsize start, gsize end, double font_size_px)
     g_array_append_val(attrs, a);
 }
 
+static double
+style_letter_spacing_px(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_LETTER_SPACING] : NULL;
+    return v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PX
+        ? v->u.length.v : 0;
+}
+
+static void
+emit_letter_spacing_attrs(GArray *attrs, const GString *out, gsize start,
+                          gsize end, double letter_spacing_px)
+{
+    static const char placeholder[] = "\xef\xbf\xbc";
+    gsize piece = start;
+    for (gsize i = start; i + 3 <= end; i++) {
+        if (letter_spacing_px == 0 || memcmp(out->str + i, placeholder, 3) != 0)
+            continue;
+        if (i > piece) {
+            ns_inline_attr a = { .kind = NS_INLINE_LETTER_SPACING,
+                                 .start = piece, .len = i - piece,
+                                 .letter_spacing_px = letter_spacing_px };
+            g_array_append_val(attrs, a);
+        }
+        ns_inline_attr none = { .kind = NS_INLINE_LETTER_SPACING,
+                                .start = i, .len = 3 };
+        g_array_append_val(attrs, none);
+        piece = i + 3;
+        i += 2;
+    }
+    if (end > piece) {
+        ns_inline_attr a = { .kind = NS_INLINE_LETTER_SPACING, .start = piece,
+                             .len = end - piece,
+                             .letter_spacing_px = letter_spacing_px };
+        g_array_append_val(attrs, a);
+    }
+}
+
 static void
 emit_font_weight_attr(GArray *attrs, gsize start, gsize end, int font_weight)
 {
@@ -4453,6 +4490,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     }
     gsize fs_start = ctx->out->len;
     gboolean fs_active = font_size_self > 0;
+    double letter_spacing_self = style_letter_spacing_px(s);
+    gboolean letter_spacing_active = s && fabs(letter_spacing_self -
+        style_letter_spacing_px(inline_parent_box_style(n, ctx->styles))) > 0.001;
+    gsize letter_spacing_start = ctx->out->len;
 
     gsize color_start = ctx->out->len;
     gboolean color_active = FALSE;
@@ -4513,6 +4554,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 
     if (fs_active && ctx->out->len > fs_start)
         emit_font_size_attr(ctx->attrs, fs_start, ctx->out->len, font_size_self);
+    if (letter_spacing_active && ctx->out->len > letter_spacing_start)
+        emit_letter_spacing_attrs(ctx->attrs, ctx->out, letter_spacing_start,
+                                  ctx->out->len, letter_spacing_self);
     if (color_active && ctx->out->len > color_start)
         emit_color_attr(ctx->attrs, color_start, ctx->out->len, cr, cg, cb, ca);
     if (family_str && ctx->out->len > family_start)
@@ -7455,6 +7499,7 @@ inline_attr_affects_measure(ns_inline_attr_kind k)
     case NS_INLINE_FONT_VARIATIONS:
     case NS_INLINE_FONT_FAMILY:
     case NS_INLINE_SMALL_CAPS:
+    case NS_INLINE_LETTER_SPACING:
         return TRUE;
     default:
         return FALSE;
@@ -10342,12 +10387,13 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         ns_text_measure natural;
         text_measure(layout, &natural);
         NsPangoRectangle logical = natural.logical;
-        double slack = 0;
-        const ns_css_value *lsv = parent_style
-            ? parent_style->values[NS_CSS_LETTER_SPACING] : NULL;
-        if (lsv && lsv->kind == NS_CSS_V_LENGTH &&
-            lsv->u.length.unit == NS_CSS_UNIT_PX && lsv->u.length.v > 0)
-            slack = lsv->u.length.v;
+        double slack = MAX(style_letter_spacing_px(parent_style), 0);
+        for (guint ai = 0; box->attrs && ai < box->attrs->len; ai++) {
+            const ns_inline_attr *r =
+                &g_array_index(box->attrs, ns_inline_attr, ai);
+            if (r->kind == NS_INLINE_LETTER_SPACING)
+                slack = MAX(slack, r->letter_spacing_px);
+        }
         double pw = ceil((double)logical.width / NS_PANGO_SCALE + slack);
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
