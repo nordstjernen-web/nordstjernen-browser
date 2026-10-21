@@ -22,6 +22,8 @@
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
 #define NS_PROC_FRAME_WAKE_MS  16
+#define NS_PROC_ANIM_FRAME_US  (G_USEC_PER_SEC / 60)
+#define NS_PROC_ANIM_FRAME_SLACK_US (NS_PROC_ANIM_FRAME_US / 4)
 #define NS_PROC_RELOAD_RESTART_US (1000 * 1000)
 #define NS_PV_WHEEL_STEP_PX    100.0
 #define NS_PV_WHEEL_TAU_MS     45.0
@@ -1938,8 +1940,9 @@ anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     if (now <= 0) now = g_get_monotonic_time();
     if (ns_page_layers_advance_videos(v->layers, g_get_monotonic_time()))
         gtk_widget_queue_draw(v->area);
-    gint64 interval = v->page_animating ? G_USEC_PER_SEC / 60
-                                        : NS_PROC_CARET_BLINK_US;
+    gint64 interval = v->page_animating
+                          ? NS_PROC_ANIM_FRAME_US - NS_PROC_ANIM_FRAME_SLACK_US
+                          : NS_PROC_CARET_BLINK_US;
     if (v->last_anim_frame_us > 0 && now - v->last_anim_frame_us < interval)
         return G_SOURCE_CONTINUE;
     v->last_anim_frame_us = now;
