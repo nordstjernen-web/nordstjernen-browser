@@ -79,7 +79,7 @@ Key choices:
   fails the build instead of silently dropping a codec) and `-Dbuild_date`
   derived from `SOURCE_DATE_EPOCH`, so the About dialog's date comes from
   `debian/changelog` and the build is reproducible.
-  The `dh_auto_install` override drops `libnordstjernen.so` and its
+  An `execute_after_dh_auto_install` hook drops `libnordstjernen.so` and its
   header: that is the embedding API for other applications, nothing in the
   package links it, and it carries no SONAME version.
 * **`debian/copyright`** is DEP-5. `Files: *` declares
@@ -201,7 +201,8 @@ Updates ship by adding the new `.deb` to the repo and re-publishing;
 
 ## Path 2 — Debian `main`
 
-With a Debian Developer willing to sponsor it:
+With a Debian Developer willing to sponsor it (progress and reviewer
+feedback are tracked in `Debian-inclusion.md`):
 
 1. **File an ITP** (Intent To Package) bug against `wnpp`:
 

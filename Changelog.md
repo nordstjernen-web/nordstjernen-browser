@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Debian packaging: following the mentors.debian.net review, debhelper
+  compat 14, an `execute_after_dh_auto_install` hook that fails the build
+  when a file it removes is missing, no redundant `Rules-Requires-Root`,
+  and a single `Initial release` changelog entry. `docs/Debian-inclusion.md`
+  tracks the road into Debian.
 * Layout: `line-height: 0` is now honoured. It was treated like an unset
   value, so a block holding only an image or an inline-block still got a
   line of about 1.2 times its font size, and the image card wrappers
