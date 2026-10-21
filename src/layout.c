@@ -7148,12 +7148,20 @@ inline_insert_line_height_units(NsPangoAttrList *list, int units, guint start,
 }
 
 static void
-inline_insert_line_height(NsPangoAttrList *list, double px, guint start,
-                          guint end)
+inline_insert_line_height(NsPangoAttrList *list, double px, gboolean normal,
+                          guint start, guint end)
 {
     px = CLAMP(px, 0.0, (double)G_MAXINT16);
     inline_insert_line_height_units(
         list, MAX(1, (int)lround(px * NS_PANGO_SCALE)), start, end);
+#ifdef NS_USE_WEB_TEXT_LIB
+    NsPangoAttribute *a = ns_pango_attr_line_height_new(normal ? 1.0 : 0.0);
+    a->start_index = start;
+    a->end_index = end;
+    ns_pango_attr_list_insert(list, a);
+#else
+    (void)normal;
+#endif
 }
 
 static void
@@ -7189,9 +7197,10 @@ inline_attr_within_override(const ns_box *box, const double *px, guint i,
 
 static gboolean
 inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
-                          double strut_px)
+                          const ns_css_line_height *strut)
 {
-    inline_insert_line_height(list, strut_px, 0, G_MAXUINT);
+    double strut_px = strut->px;
+    inline_insert_line_height(list, strut_px, strut->normal, 0, G_MAXUINT);
     if (!box || !box->attrs) return FALSE;
     guint n = box->attrs->len;
     double *px = g_new(double, n);
@@ -7212,8 +7221,9 @@ inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
         if (px[i] < strut_px - 0.01) has_shorter = TRUE;
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        inline_insert_line_height(list, px[i], (guint)r->start,
-                                  (guint)(r->start + r->len));
+        inline_insert_line_height(list, px[i],
+                                  ns_paint_css_line_height_is_normal(r->style),
+                                  (guint)r->start, (guint)(r->start + r->len));
     }
     g_free(px);
     inline_insert_spacer_line_heights(list, box);
@@ -7263,8 +7273,9 @@ strut_line_lacks_root(const guint8 *kind, gsize s0, gsize s1)
 
 static void
 inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
-                           const ns_box *box, double strut_px)
+                           const ns_box *box, const ns_css_line_height *strut)
 {
+    double strut_px = strut->px;
     gsize n = box->text ? strlen(box->text) : 0;
     if (n == 0) return;
     guint8 *kind = inline_strut_kinds(box, n, strut_px);
@@ -7279,7 +7290,8 @@ inline_restore_strut_lines(NsPangoLayout *layout, NsPangoAttrList *list,
         gsize s1 = MIN(n, s0 + (gsize)line->length);
         if (!strut_line_lacks_root(kind, s0, s1)) continue;
         if (!with_struts) with_struts = ns_pango_attr_list_copy(list);
-        inline_insert_line_height(with_struts, strut_px, (guint)s0, (guint)s1);
+        inline_insert_line_height(with_struts, strut_px, strut->normal,
+                                  (guint)s0, (guint)s1);
     } while (ns_pango_layout_iter_next_line(it));
     ns_pango_layout_iter_free(it);
     g_free(kind);
@@ -7293,10 +7305,10 @@ void
 ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
                            const ns_box *box)
 {
-    const double *strut_px = g_object_get_data(G_OBJECT(layout),
-                                               NS_CSS_LINE_HEIGHT_KEY);
-    gboolean has_shorter = strut_px && list &&
-                           inline_apply_line_heights(list, box, *strut_px);
+    const ns_css_line_height *strut = g_object_get_data(G_OBJECT(layout),
+                                                        NS_CSS_LINE_HEIGHT_KEY);
+    gboolean has_shorter = strut && list &&
+                           inline_apply_line_heights(list, box, strut);
     ns_pango_layout_set_attributes(layout, list);
     if (!box || !box->attrs) return;
     gboolean stretched = FALSE;
@@ -7326,7 +7338,7 @@ ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
         stretched = TRUE;
     }
     if (stretched) ns_pango_layout_context_changed(layout);
-    if (has_shorter) inline_restore_strut_lines(layout, list, box, *strut_px);
+    if (has_shorter) inline_restore_strut_lines(layout, list, box, strut);
 }
 
 static double

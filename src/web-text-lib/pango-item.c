@@ -70,6 +70,8 @@ ns_pango_item_copy (NsPangoItem *item)
   result->analysis = item->analysis;
   if (result->analysis.lang_engine)
     g_object_ref (result->analysis.lang_engine);
+  if (ns_pango_analysis_get_strut_font (&result->analysis))
+    g_object_ref (ns_pango_analysis_get_strut_font (&result->analysis));
 
   if (result->analysis.font)
     g_object_ref (result->analysis.font);
@@ -107,6 +109,9 @@ ns_pango_item_free (NsPangoItem *item)
 
   if (item->analysis.lang_engine)
     g_object_unref (item->analysis.lang_engine);
+
+  if (ns_pango_analysis_get_strut_font (&item->analysis))
+    g_object_unref (ns_pango_analysis_get_strut_font (&item->analysis));
 
   if (item->analysis.font)
     g_object_unref (item->analysis.font);
@@ -367,4 +372,25 @@ ns_pango_analysis_get_size_font (const NsPangoAnalysis *analysis)
   NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
 
   return priv->size_font;
+}
+
+void
+ns_pango_analysis_set_strut_font (NsPangoAnalysis *analysis,
+                                  NsPangoFont     *font)
+{
+  NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
+
+  if (priv->strut_font)
+    g_object_unref (priv->strut_font);
+  priv->strut_font = font;
+  if (priv->strut_font)
+    g_object_ref (priv->strut_font);
+}
+
+NsPangoFont *
+ns_pango_analysis_get_strut_font (const NsPangoAnalysis *analysis)
+{
+  NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
+
+  return priv->strut_font;
 }

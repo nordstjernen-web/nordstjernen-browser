@@ -273,7 +273,45 @@ ns_pango_attr_int_new (const NsPangoAttrClass *klass,
 }
 /* }}} */
 /* {{{ Float attribute */
+static NsPangoAttribute *ns_pango_attr_float_new (const NsPangoAttrClass *klass,
+                                             double                value);
 
+static NsPangoAttribute *
+ns_pango_attr_float_copy (const NsPangoAttribute *attr)
+{
+  const NsPangoAttrFloat *float_attr = (NsPangoAttrFloat *)attr;
+
+  return ns_pango_attr_float_new (attr->klass, float_attr->value);
+}
+
+static void
+ns_pango_attr_float_destroy (NsPangoAttribute *attr)
+{
+  NsPangoAttrFloat *fattr = (NsPangoAttrFloat *)attr;
+
+  g_slice_free (NsPangoAttrFloat, fattr);
+}
+
+static gboolean
+ns_pango_attr_float_equal (const NsPangoAttribute *attr1,
+                        const NsPangoAttribute *attr2)
+{
+  const NsPangoAttrFloat *float_attr1 = (const NsPangoAttrFloat *)attr1;
+  const NsPangoAttrFloat *float_attr2 = (const NsPangoAttrFloat *)attr2;
+
+  return (float_attr1->value == float_attr2->value);
+}
+
+static NsPangoAttribute *
+ns_pango_attr_float_new (const NsPangoAttrClass *klass,
+                      double                value)
+{
+  NsPangoAttrFloat *result = g_slice_new (NsPangoAttrFloat);
+  ns_pango_attribute_init (&result->attr, klass);
+  result->value = value;
+
+  return (NsPangoAttribute *)result;
+}
 /* }}} */
 /* {{{ Size attribute */
 static NsPangoAttribute *ns_pango_attr_size_new_internal (int      size,
@@ -1211,6 +1249,19 @@ ns_pango_attr_overline_color_new (guint16 red,
  *
  * Since: 1.50
  */
+NsPangoAttribute *
+ns_pango_attr_line_height_new (double factor)
+{
+  static const NsPangoAttrClass klass = {
+    NS_PANGO_ATTR_LINE_HEIGHT,
+    ns_pango_attr_float_copy,
+    ns_pango_attr_float_destroy,
+    ns_pango_attr_float_equal
+  };
+
+  return ns_pango_attr_float_new (&klass, factor);
+}
+
 NsPangoAttribute *
 ns_pango_attr_line_height_new_absolute (int height)
 {

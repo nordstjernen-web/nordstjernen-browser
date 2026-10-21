@@ -4615,12 +4615,43 @@ ns_pango_layout_run_get_extents_and_height (NsPangoLayoutRun *run,
       if (properties.absolute_line_height != 0 || properties.line_height != 0.0)
         {
           int line_height, leading;
+          NsPangoRectangle own = *line_logical;
+          NsPangoFont *strut_font = ns_pango_analysis_get_strut_font (&run->item->analysis);
+          gboolean fallback = properties.absolute_line_height != 0 &&
+                              strut_font && strut_font != run->item->analysis.font &&
+                              !properties.shape_set &&
+                              !(run->item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE);
 
-          line_height = MAX (properties.absolute_line_height, ceilf (properties.line_height * line_logical->height));
+          if (fallback)
+            {
+              NsPangoRectangle strut;
+
+              ns_pango_font_get_glyph_extents (strut_font, NS_PANGO_GLYPH_EMPTY, NULL, &strut);
+              line_logical->y = strut.y - y_offset;
+              line_logical->height = strut.height;
+            }
+
+          if (properties.absolute_line_height != 0)
+            line_height = properties.absolute_line_height;
+          else
+            line_height = ceilf (properties.line_height * line_logical->height);
 
           leading = line_height - line_logical->height;
           line_logical->y -= leading / 2;
           line_logical->height += leading;
+
+          if (fallback && properties.line_height != 0.0)
+            {
+              int spacing, top, bottom;
+
+              spacing = ceilf (properties.line_height * own.height);
+              own.y -= (spacing - own.height) / 2;
+              own.height = spacing;
+              top = MIN (line_logical->y, own.y);
+              bottom = MAX (line_logical->y + line_logical->height, own.y + own.height);
+              line_logical->y = top;
+              line_logical->height = bottom - top;
+            }
         }
     }
 
@@ -5553,12 +5584,6 @@ apply_baseline_shift (NsPangoLayoutLine *line,
 {
   int y_offset = 0;
   NsPangoItem *prev = NULL;
-  hb_position_t baseline_adjustment = 0;
-#if HB_VERSION_ATLEAST(4,0,0)
-  hb_ot_layout_baseline_tag_t baseline_tag = 0;
-  hb_position_t baseline;
-  hb_position_t run_baseline;
-#endif
 
   for (GSList *l = line->runs; l; l = l->next)
     {
@@ -5566,16 +5591,6 @@ apply_baseline_shift (NsPangoLayoutLine *line,
       NsPangoItem *item = run->item;
       int start_x_offset, end_x_offset;
       int start_y_offset, end_y_offset;
-#if HB_VERSION_ATLEAST(4,0,0)
-      hb_font_t *hb_font;
-      hb_script_t script;
-      hb_language_t language;
-      hb_direction_t direction;
-      hb_tag_t script_tags[HB_OT_MAX_TAGS_PER_SCRIPT];
-      hb_tag_t lang_tags[HB_OT_MAX_TAGS_PER_LANGUAGE];
-      unsigned int script_count = HB_OT_MAX_TAGS_PER_SCRIPT;
-      unsigned int lang_count = HB_OT_MAX_TAGS_PER_LANGUAGE;
-#endif
 
       if (item->analysis.font == NULL)
         {
@@ -5586,62 +5601,15 @@ apply_baseline_shift (NsPangoLayoutLine *line,
           continue;
         }
 
-#if HB_VERSION_ATLEAST(4,0,0)
-      hb_font = ns_pango_font_get_hb_font (item->analysis.font);
-
-      script = (hb_script_t) g_unicode_script_to_iso15924 (item->analysis.script);
-      language = hb_language_from_string (ns_pango_language_to_string (item->analysis.language), -1);
-      hb_ot_tags_from_script_and_language (script, language,
-                                           &script_count, script_tags,
-                                           &lang_count, lang_tags);
-
-      if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE)
-        direction = HB_DIRECTION_TTB;
-      else
-        direction = HB_DIRECTION_LTR;
-
-      if (baseline_tag == 0)
-        {
-          if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE)
-            baseline_tag = HB_OT_LAYOUT_BASELINE_TAG_IDEO_EMBOX_CENTRAL;
-          else
-            baseline_tag = hb_ot_layout_get_horizontal_baseline_tag_for_script (script);
-          hb_ot_layout_get_baseline_with_fallback (hb_font,
-                                                   baseline_tag,
-                                                   direction,
-                                                   script_tags[script_count - 1],
-                                                   lang_count ? lang_tags[lang_count - 1] : HB_TAG_NONE,
-                                                   &run_baseline);
-          baseline = run_baseline;
-        }
-      else
-        {
-          hb_ot_layout_get_baseline_with_fallback (hb_font,
-                                                   baseline_tag,
-                                                   direction,
-                                                   script_tags[script_count - 1],
-                                                   lang_count ? lang_tags[lang_count - 1] : HB_TAG_NONE,
-                                                   &run_baseline);
-        }
-
-      /* Don't do baseline adjustment in vertical, since the renderer
-       * is still doing its own baseline shifting there
-       */
-      if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE)
-        baseline_adjustment = 0;
-      else
-        baseline_adjustment = baseline - run_baseline;
-#endif
-
       collect_baseline_shift (state, item, prev, &start_x_offset, &start_y_offset, &end_x_offset, &end_y_offset);
 
-      y_offset += start_y_offset + baseline_adjustment;
+      y_offset += start_y_offset;
 
       run->y_offset = y_offset;
       run->start_x_offset = start_x_offset;
       run->end_x_offset = end_x_offset;
 
-      y_offset += end_y_offset - baseline_adjustment;
+      y_offset += end_y_offset;
 
       prev = item;
     }
