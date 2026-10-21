@@ -17950,15 +17950,15 @@ static_abs_y_batch_walk(const ns_box *b, GArray *calcs, guint *next,
 
 static const ns_node *find_abs_containing_block_dom(const ns_node *n,
                                                     GHashTable *styles);
-static gboolean style_creates_abs_cb(const ns_style *s);
-static gboolean style_creates_fixed_cb(const ns_style *s);
+static gboolean style_creates_abs_cb(const ns_style *s, const ns_node *n);
+static gboolean style_creates_fixed_cb(const ns_style *s, const ns_node *n);
 
 static const ns_node *
 abs_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
 {
     if (e->pseudo) {
         const ns_style *hs = g_hash_table_lookup(styles, e->dom);
-        if (style_creates_abs_cb(hs)) return e->dom;
+        if (style_creates_abs_cb(hs, e->dom)) return e->dom;
     }
     return find_abs_containing_block_dom(e->dom, styles);
 }
@@ -17967,14 +17967,14 @@ static const ns_node *
 fixed_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
 {
     if (e->pseudo &&
-        style_creates_fixed_cb(g_hash_table_lookup(styles, e->dom)))
+        style_creates_fixed_cb(g_hash_table_lookup(styles, e->dom), e->dom))
         return e->dom;
     for (const ns_node *p = layout_flat_parent(e->dom); p;
          p = layout_flat_parent(p)) {
         const ns_node *frame = frame_document_host(p);
         if (frame) return frame;
         if (p->kind != NS_NODE_ELEMENT) continue;
-        if (style_creates_fixed_cb(g_hash_table_lookup(styles, p))) return p;
+        if (style_creates_fixed_cb(g_hash_table_lookup(styles, p), p)) return p;
     }
     return NULL;
 }
@@ -18183,8 +18183,9 @@ static_abs_y_precompute(ns_box *root, GHashTable *box_map, GHashTable *styles,
 }
 
 static gboolean
-style_creates_abs_cb(const ns_style *s)
+style_creates_abs_cb(const ns_style *s, const ns_node *n)
 {
+    static const char *const will_change[] = { "position" };
     if (!s) return FALSE;
     const ns_css_value *v = s->values[NS_CSS_POSITION];
     if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
@@ -18193,24 +18194,65 @@ style_creates_abs_cb(const ns_style *s)
             strcmp(kw, "fixed") == 0    || strcmp(kw, "sticky") == 0)
             return TRUE;
     }
-    return style_creates_fixed_cb(s);
+    return keyword_list_has(s->values[NS_CSS_WILL_CHANGE], will_change,
+                            G_N_ELEMENTS(will_change)) ||
+           style_creates_fixed_cb(s, n);
 }
 
 static gboolean
-style_creates_fixed_cb(const ns_style *s)
+style_is_non_atomic_inline(const ns_style *s)
+{
+    ns_display d = ns_css_display_of(s);
+    return d.box == NS_DISPLAY_BOX_NORMAL &&
+           d.internal == NS_DISPLAY_INTERNAL_NONE &&
+           d.outer == NS_DISPLAY_OUTER_INLINE &&
+           (d.inner == NS_DISPLAY_INNER_FLOW || d.inner == NS_DISPLAY_INNER_RUBY);
+}
+
+static gboolean
+style_transforms_or_contains(const ns_style *s)
+{
+    static const char *const contain[] = {
+        "layout", "paint", "strict", "content",
+    };
+    static const char *const will_change[] = {
+        "transform", "translate", "rotate", "scale", "perspective",
+        "transform-style", "offset-path", "contain",
+    };
+    const ns_css_value *pv = s->values[NS_CSS_PERSPECTIVE];
+    return style_has_layer_transform(s) ||
+           (pv && pv->kind == NS_CSS_V_LENGTH && pv->u.length.v > 0) ||
+           keyword_is(s->values[NS_CSS_TRANSFORM_STYLE], "preserve-3d") ||
+           style_differs_from(s, NS_CSS_OFFSET_PATH, "none") ||
+           keyword_list_has(s->values[NS_CSS_CONTAIN], contain,
+                            G_N_ELEMENTS(contain)) ||
+           style_differs_from(s, NS_CSS_CONTENT_VISIBILITY, "visible") ||
+           keyword_list_has(s->values[NS_CSS_WILL_CHANGE], will_change,
+                            G_N_ELEMENTS(will_change));
+}
+
+static gboolean
+style_has_filter_cb(const ns_style *s)
+{
+    static const char *const will_change[] = { "filter", "backdrop-filter" };
+    return style_differs_from(s, NS_CSS_FILTER, "none") ||
+           style_differs_from(s, NS_CSS_BACKDROP_FILTER, "none") ||
+           keyword_list_has(s->values[NS_CSS_WILL_CHANGE], will_change,
+                            G_N_ELEMENTS(will_change));
+}
+
+static gboolean
+node_is_document_element(const ns_node *n)
+{
+    return n && n->parent && n->parent->kind == NS_NODE_DOCUMENT;
+}
+
+static gboolean
+style_creates_fixed_cb(const ns_style *s, const ns_node *n)
 {
     if (!s) return FALSE;
-    static const ns_css_prop tprops[4] = {
-        NS_CSS_TRANSFORM, NS_CSS_TRANSLATE, NS_CSS_ROTATE, NS_CSS_SCALE,
-    };
-    for (int i = 0; i < 4; i++) {
-        const ns_css_value *tv = s->values[tprops[i]];
-        if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0)
-            return TRUE;
-    }
-    const ns_css_value *pv = s->values[NS_CSS_PERSPECTIVE];
-    if (pv && pv->kind == NS_CSS_V_LENGTH && pv->u.length.v > 0) return TRUE;
-    return FALSE;
+    if (style_has_filter_cb(s) && !node_is_document_element(n)) return TRUE;
+    return !style_is_non_atomic_inline(s) && style_transforms_or_contains(s);
 }
 
 static const ns_node *
@@ -18221,7 +18263,7 @@ find_abs_containing_block_dom(const ns_node *n, GHashTable *styles)
         if (frame) return frame;
         if (p->kind != NS_NODE_ELEMENT) continue;
         const ns_style *ps = g_hash_table_lookup(styles, p);
-        if (style_creates_abs_cb(ps)) return p;
+        if (style_creates_abs_cb(ps, p)) return p;
     }
     return NULL;
 }
@@ -20436,7 +20478,8 @@ ns_box_is_fixed(const ns_box *b)
         !keyword_is(b->style->values[NS_CSS_POSITION], "fixed"))
         return FALSE;
     for (const ns_box *p = b->parent; p; p = p->parent)
-        if (style_creates_fixed_cb(p->style) || node_is_frame_element(p->dom))
+        if (style_creates_fixed_cb(p->style, p->dom) ||
+            node_is_frame_element(p->dom))
             return FALSE;
     return TRUE;
 }
