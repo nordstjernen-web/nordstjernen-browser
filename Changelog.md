@@ -34,6 +34,18 @@ Changelog:
   measured its font for the `lh` unit. Pages built with Tailwind 4
   register dozens of such properties: the style time of a weather.com
   load drops by about 14%.
+* Layout: the min-content and max-content widths of a grid container now
+  come from its column tracks, as CSS Grid sizes them. The min-content
+  width ignored every track unless all of them had a fixed size and fell
+  back to the widest item, so a `430px 1fr` grid could shrink to its
+  text, while an item with `min-width: 0` and long `nowrap` text forced
+  its `1fr` track to the full text length. The max-content width put
+  items in columns by document order and ignored spans and `fr`.
+  Percentage tracks now count as `auto`, an `fr` track takes its items'
+  minimum contribution, a fixed track keeps its size and spanning items
+  share their size across their tracks. On Le Monde the lifestyle
+  section was 2005 px wide instead of 615 px and ran off the right side
+  of the page.
 * Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
   fails when the server sends a `Content-Length`. The method was passed
   to curl as a plain custom verb, so curl waited for a body that a HEAD
