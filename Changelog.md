@@ -14,6 +14,15 @@ Changelog:
   formats are now checked like Chrome does, and an unknown value throws a
   `TypeError`. The other cases throw a `TypeError` or are handled before
   they reach wgpu-native.
+* Layout: an image or video now contributes its `max-width`/`min-width`
+  limited width to the intrinsic size of the box around it. A flex item
+  holding a `<video width="2304">` with `max-width: 100vw` was sized to
+  2304 pixels and, centred by its flex container, pushed the whole page
+  half off-screen to the left (midzer.de). An image whose `max-width` is
+  a percentage now also contributes nothing to its container's
+  min-content width when it sits inline, as CSS Sizing requires, so
+  `1fr` grid columns of thumbnails shrink to fit instead of staying at
+  the images' natural width (the kabesalod.de gallery).
 * CSS animations run at the display's frame rate again. The window
   capped page animations at 60 frames a second by dropping any frame
   that came less than exactly 1/60 s after the last one, but a 60 Hz
