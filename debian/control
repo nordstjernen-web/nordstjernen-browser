@@ -2,7 +2,7 @@ Source: nordstjernen
 Section: web
 Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 Build-Depends:
- debhelper-compat (= 13),
+ debhelper-compat (= 14),
  meson (>= 1.0),
  ninja-build,
  pkgconf,
@@ -37,7 +37,6 @@ Standards-Version: 4.7.4
 Homepage: https://nordstjernen.org
 Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Vcs-Git: https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
-Rules-Requires-Root: no
 
 Package: nordstjernen
 Architecture: any

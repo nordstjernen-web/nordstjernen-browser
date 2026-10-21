@@ -25,7 +25,7 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [macOS.md](macOS.md) — macOS install (first-launch quarantine step, troubleshooting), build, `.app`/`.dmg`, and distribution (Developer ID notarisation, Mac App Store).
 - [Android.md](Android.md) — Android build and Google Play release.
 - [iOS.md](iOS.md) — the iOS port: structure, build, and what remains.
-- [Debian.md](Debian.md) · [Ubuntu.md](Ubuntu.md) · [opensuse.md](opensuse.md) · [Alpine.md](Alpine.md) — per-distro packaging.
+- [Debian.md](Debian.md) ([inclusion tracker](Debian-inclusion.md)) · [Ubuntu.md](Ubuntu.md) · [opensuse.md](opensuse.md) · [Alpine.md](Alpine.md) — per-distro packaging.
 - [Nightly.md](Nightly.md) — the nightly build server and artifact matrix.
 - [Embedding.md](Embedding.md) — embedding the engine in a C application.
 - [http-backends.md](http-backends.md) — the curl vs nghttp2 HTTP client backends (`-Dhttp_backend`), including HTTP/3 over QUIC.
