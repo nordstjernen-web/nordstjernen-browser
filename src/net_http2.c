@@ -894,7 +894,7 @@ ns_h2_on_response_header(ns_h2 *c, const char *name, size_t namelen,
     if (namelen == 10 && g_ascii_strncasecmp(name, "set-cookie", 10) == 0 &&
         c->req->cookie_jar_path) {
         char *v = g_strndup(value, valuelen);
-        ns_net_store_set_cookie(c->url, v);
+        ns_net_store_set_cookie(c->url, v, c->req->cookie_jar_path);
         g_free(v);
     }
     if (namelen == 7 && g_ascii_strncasecmp(name, "alt-svc", 7) == 0)
@@ -1114,7 +1114,9 @@ ns_h2_submit_locked(ns_conn *conn, ns_h2 *c)
         ns_h2_add_nv(nva, "referer", c->req->referer);
 
     char *cookie = c->req->cookie_jar_path
-        ? ns_net_cookies_for_request(c->url) : NULL;
+        ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
+                                     c->req->cookie_js_path)
+        : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);
         ns_h2_add_nv(nva, "cookie", cookie);
@@ -1344,7 +1346,9 @@ ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
     if (c->req->referer && *c->req->referer)
         g_string_append_printf(reqs, "Referer: %s\r\n", c->req->referer);
     char *cookie = c->req->cookie_jar_path
-        ? ns_net_cookies_for_request(c->url) : NULL;
+        ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
+                                     c->req->cookie_js_path)
+        : NULL;
     if (cookie) {
         g_string_append_printf(reqs, "Cookie: %s\r\n", cookie);
         g_free(cookie);
@@ -1444,7 +1448,8 @@ ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
                 } else if (nlen == 10 && c->req->cookie_jar_path &&
                     g_ascii_strncasecmp(line, "set-cookie", 10) == 0) {
                     char *cv = g_strndup(val, vlen);
-                    ns_net_store_set_cookie(c->url, cv);
+                    ns_net_store_set_cookie(c->url, cv,
+                                            c->req->cookie_jar_path);
                     g_free(cv);
                 } else if (nlen == 7 &&
                     g_ascii_strncasecmp(line, "alt-svc", 7) == 0) {
@@ -2353,7 +2358,9 @@ ns_h3_setup(ns_h3 *h, const char *authority, const char *path,
     if (c->req->referer && *c->req->referer)
         NS_H3_ADD("referer", c->req->referer);
     char *cookie = c->req->cookie_jar_path
-        ? ns_net_cookies_for_request(c->url) : NULL;
+        ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
+                                     c->req->cookie_js_path)
+        : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);
         NS_H3_ADD("cookie", cookie);
