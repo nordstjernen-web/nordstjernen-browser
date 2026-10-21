@@ -170,8 +170,9 @@ installer are in `scripts/`.
   Pango/Cairo and embedded inline on the text baseline.
 - **Spell checking** — optional, via Enchant: misspelled words in editable
   text get a red wavy underline, honouring the `spellcheck` attribute.
-- **Safe browsing** — a top-level navigation's host is checked against a local
-  SHA-256 blocklist before it is fetched, entirely on-device; a match shows a
+- **Safe browsing** — a top-level navigation's host, including a form
+  submission's and each redirect's, is checked against a local SHA-256
+  blocklist before it is fetched, entirely on-device; a match shows a
   full-page warning. The bundled list is only a seed: add hosts in
   `~/.config/nordstjernen/safebrowsing.list`, or point
   `NS_SAFEBROWSING_LIST` at a list that replaces it.
