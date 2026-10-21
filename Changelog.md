@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Web storage: every `localStorage` key and value now survives a
+  restart. Keys were written to disk as raw key-file names, so a key
+  with `=`, a leading or trailing space or an empty name was dropped
+  with a GLib warning (14 of them on an espn.com load), and a key with a
+  line break corrupted the file, so the next session lost the origin's
+  whole storage. A value that was not valid UTF-8, such as a string
+  with a lone surrogate, was dropped on load. Keys and values are now
+  percent-escaped in a new `[items]` group; files in the old format
+  still load and are rewritten in the new one.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
