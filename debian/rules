@@ -30,7 +30,7 @@ override_dh_auto_configure:
 # applications. Nothing in this package links them and the library carries no
 # SONAME version, so they are not shipped.
 execute_after_dh_auto_install:
-	rm debian/nordstjernen/usr/bin/internet-browser
-	rm debian/nordstjernen/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
-	rm -r debian/nordstjernen/usr/include
-	find debian/nordstjernen/usr/lib -type d -empty -delete
+	rm debian/nordstjernen-browser/usr/bin/internet-browser
+	rm debian/nordstjernen-browser/usr/lib/$(DEB_HOST_MULTIARCH)/libnordstjernen.so
+	rm -r debian/nordstjernen-browser/usr/include
+	find debian/nordstjernen-browser/usr/lib -type d -empty -delete
