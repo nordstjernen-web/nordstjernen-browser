@@ -11,6 +11,10 @@ Changelog:
   the victim's page. The same reuse also put the first URL into
   `error.stack`. The cache key now covers the script's URL, position and
   compile flags as well as its source.
+  The cache is also no longer written to disk. Every sandboxed renderer can
+  write the cache directory, and QuickJS runs bytecode without verifying
+  it, so a compromised renderer could plant code for renderers showing
+  other sites to run. Each renderer now keeps its cache in memory.
 * README brought in line with the source after a full review. It names
   1.0.35 as the current release and counts about 254,000 lines of engine C.
   It now lists the CSS, JavaScript, networking, privacy, UI and extension

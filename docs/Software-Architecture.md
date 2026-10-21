@@ -400,9 +400,12 @@ installs on a nearer prototype. Extend the bundle for these APIs, and
 delete rather than keep stubs on the C side.
 
 **Bytecode cache.** `src/bytecode_cache.c` caches compiled QuickJS
-bytecode, keyed by SHA-256 of the source, in a two-tier memory+disk
-cache (16 MB memory LRU; on-disk sharded under the cache dir), so large
-scripts skip recompilation across loads.
+bytecode in a 16 MB in-memory LRU per process, keyed by SHA-256 of the
+script's URL, position, compile flags and source, so large scripts skip
+recompilation across loads. It is never written to disk: QuickJS does not
+verify bytecode it reads, and every sandboxed renderer can write the cache
+directory, so a shared on-disk cache would let one compromised renderer
+plant code that renderers for other sites run.
 
 ---
 
