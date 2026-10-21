@@ -2618,7 +2618,6 @@ shape_run (NsPangoLayoutLine *line,
       if (state->properties.letter_spacing)
         {
           NsPangoGlyphItem glyph_item;
-          int space_left, space_right;
 
           glyph_item.item = item;
           glyph_item.glyphs = glyphs;
@@ -2627,12 +2626,6 @@ shape_run (NsPangoLayoutLine *line,
                                          layout->text,
                                          layout->log_attrs + state->start_offset,
                                          state->properties.letter_spacing);
-
-          distribute_letter_spacing (state->properties.letter_spacing, &space_left, &space_right);
-
-          glyphs->glyphs[0].geometry.width += space_left;
-          glyphs->glyphs[0].geometry.x_offset += space_left;
-          glyphs->glyphs[glyphs->num_glyphs - 1].geometry.width += space_right;
         }
 
       if (state->properties.word_spacing)
@@ -4949,16 +4942,6 @@ ns_pango_layout_line_reorder (NsPangoLayoutLine *line)
       line->runs = g_slist_reverse (logical_runs);
 }
 
-static int
-get_item_letter_spacing (NsPangoItem *item)
-{
-  ItemProperties properties;
-
-  ns_pango_layout_get_item_properties (item, &properties);
-
-  return properties.letter_spacing;
-}
-
 static void
 pad_glyphstring_right (NsPangoGlyphString *glyphs,
                        ParaBreakState   *state,
@@ -5116,107 +5099,6 @@ zero_line_final_space (NsPangoLayoutLine *line,
   DEBUG1 ("zero line final space: collapsing the space");
   glyphs->glyphs[glyph].geometry.width = 0;
   glyphs->glyphs[glyph].glyph = NS_PANGO_GLYPH_EMPTY;
-}
-
-/* When doing shaping, we add the letter spacing value for a
- * run after every grapheme in the run. This produces ugly
- * asymmetrical results, so what this routine is redistributes
- * that space to the beginning and the end of the run.
- *
- * We also trim the letter spacing from runs adjacent to
- * tabs and from the outside runs of the lines so that things
- * line up properly. The line breaking and tab positioning
- * were computed without this trimming so they are no longer
- * exactly correct, but this won't be very noticeable in most
- * cases.
- */
-static void
-adjust_line_letter_spacing (NsPangoLayoutLine *line,
-                            ParaBreakState  *state)
-{
-  NsPangoLayout *layout = line->layout;
-  gboolean reversed;
-  NsPangoLayoutRun *last_run;
-  int tab_adjustment;
-  GSList *l;
-
-  /* If we have tab stops and the resolved direction of the
-   * line is RTL, then we need to walk through the line
-   * in reverse direction to figure out the corrections for
-   * tab stops.
-   */
-  reversed = FALSE;
-  if (line->resolved_dir == NS_PANGO_DIRECTION_RTL)
-    {
-      for (l = line->runs; l; l = l->next)
-        if (is_tab_run (layout, l->data))
-          {
-            line->runs = g_slist_reverse (line->runs);
-            reversed = TRUE;
-            break;
-          }
-    }
-
-  /* Walk over the runs in the line, redistributing letter
-   * spacing from the end of the run to the start of the
-   * run and trimming letter spacing from the ends of the
-   * runs adjacent to the ends of the line or tab stops.
-   *
-   * We accumulate a correction factor from this trimming
-   * which we add onto the next tab stop space to keep the
-   * things properly aligned.
-   */
-  last_run = NULL;
-  tab_adjustment = 0;
-  for (l = line->runs; l; l = l->next)
-    {
-      NsPangoLayoutRun *run = l->data;
-      NsPangoLayoutRun *next_run = l->next ? l->next->data : NULL;
-
-      if (is_tab_run (layout, run))
-        {
-          pad_glyphstring_right (run->glyphs, state, tab_adjustment);
-          tab_adjustment = 0;
-        }
-      else
-        {
-          NsPangoLayoutRun *visual_next_run = reversed ? last_run : next_run;
-          NsPangoLayoutRun *visual_last_run = reversed ? next_run : last_run;
-          int run_spacing = get_item_letter_spacing (run->item);
-          int space_left, space_right;
-
-          distribute_letter_spacing (run_spacing, &space_left, &space_right);
-
-          if (run->glyphs->glyphs[0].geometry.width == 0)
-            {
-              /* we've zeroed this space glyph at the end of line, now remove
-               * the letter spacing added to its adjacent glyph */
-              pad_glyphstring_left (run->glyphs, state, - space_left);
-            }
-          else if (!visual_last_run || is_tab_run (layout, visual_last_run))
-            {
-              pad_glyphstring_left (run->glyphs, state, - space_left);
-              tab_adjustment += space_left;
-            }
-
-          if (run->glyphs->glyphs[run->glyphs->num_glyphs - 1].geometry.width == 0)
-            {
-              /* we've zeroed this space glyph at the end of line, now remove
-               * the letter spacing added to its adjacent glyph */
-              pad_glyphstring_right (run->glyphs, state, - space_right);
-            }
-          else if (!visual_next_run || is_tab_run (layout, visual_next_run))
-            {
-              pad_glyphstring_right (run->glyphs, state, - space_right);
-              tab_adjustment += space_right;
-            }
-        }
-
-      last_run = run;
-    }
-
-  if (reversed)
-    line->runs = g_slist_reverse (line->runs);
 }
 
 static void
@@ -5654,11 +5536,6 @@ ns_pango_layout_line_postprocess (NsPangoLayoutLine *line,
   ns_pango_layout_line_reorder (line);
 
   DEBUG ("after reordering", line, state);
-
-  /* Fixup letter spacing between runs */
-  adjust_line_letter_spacing (line, state);
-
-  DEBUG ("after letter spacing", line, state);
 
   /* Distribute extra space between words if justifying and line was wrapped */
   if (line->layout->justify && (wrapped || ellipsized || line->layout->justify_last_line))
