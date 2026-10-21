@@ -216,6 +216,7 @@ struct ns_js {
     GPtrArray    *filereader_idles;
     GHashTable   *local_storage;
     GHashTable   *session_storage;
+    GPtrArray    *frame_storages;
     char         *local_storage_origin;
     char         *local_storage_path;
     gboolean      local_storage_dirty;

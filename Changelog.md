@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Web storage: a cross-origin frame now has its own `localStorage` and
+  `sessionStorage` instead of a `SecurityError` on access. Each frame
+  gets empty storage areas that live as long as the frame, are never
+  written to disk and never shared with the page or another frame, and
+  their changes fire no `storage` events elsewhere. Chrome gives such a
+  frame (partitioned) storage, and frames that assume it is there broke:
+  the my.foxnews.com account frame on foxnews.com threw "The operation
+  is insecure" from its load handler. Sandboxed frames without
+  `allow-same-origin` still get the `SecurityError`, and `indexedDB`
+  stays unavailable in cross-origin frames.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
