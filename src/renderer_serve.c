@@ -1178,6 +1178,15 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/audio-event") == 0) {
+        char *line = json_get_str(body, "line");
+        if (s->cur && line) ns_browser_audio_feedback(s->cur, line);
+        s->frame_valid = 0;
+        http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        free(line);
+        return 0;
+    }
+
     if (strcmp(head->path, "/media") == 0) {
         long x = 0, y = 0;
         json_get_long(body, "x", &x);

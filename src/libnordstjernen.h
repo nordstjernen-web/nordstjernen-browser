@@ -119,6 +119,8 @@ char *ns_browser_eval(ns_browser *browser, const char *src);
 char *ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                           int *out_stream);
 
+void ns_browser_audio_feedback(ns_browser *browser, const char *line);
+
 int ns_browser_contextmenu(ns_browser *browser, int x, int y);
 
 enum {
