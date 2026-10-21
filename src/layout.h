@@ -75,6 +75,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_SPELLCHECK,
     NS_INLINE_EMPTY_ELEMENT,
     NS_INLINE_GENERATED,
+    NS_INLINE_LETTER_SPACING,
 } ns_inline_attr_kind;
 
 typedef struct ns_inline_attr {
@@ -82,6 +83,7 @@ typedef struct ns_inline_attr {
     gsize start;
     gsize len;
     double font_size_px;
+    double letter_spacing_px;
     double rel_dx, rel_dy;
     const ns_node *rel_layer;
     int font_weight;
