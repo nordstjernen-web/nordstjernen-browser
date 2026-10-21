@@ -6666,6 +6666,7 @@ typedef struct text_measure_head {
     int   width, height, indent, spacing;
     float line_spacing;
     guint flags;
+    guint tabs_len;
     guint attrs_len;
 } text_measure_head;
 
@@ -6729,7 +6730,12 @@ text_measure_attr_append(NsPangoAttribute *attr, gpointer data)
     NsPangoAttrFontDesc *afd;
     NsPangoAttrFontFeatures *aff;
     if (attr->klass->type == NS_PANGO_ATTR_SHAPE) {
-        sink->uncacheable = TRUE;
+        const NsPangoAttrShape *sh = (const NsPangoAttrShape *)attr;
+        gint32 v[8] = { sh->ink_rect.x, sh->ink_rect.y,
+                        sh->ink_rect.width, sh->ink_rect.height,
+                        sh->logical_rect.x, sh->logical_rect.y,
+                        sh->logical_rect.width, sh->logical_rect.height };
+        g_byte_array_append(buf, (const guint8 *)v, sizeof v);
     } else if ((as = ns_pango_attribute_as_size(attr))) {
         gint32 v[2] = { as->size, as->absolute };
         g_byte_array_append(buf, (const guint8 *)v, sizeof v);
@@ -6758,13 +6764,25 @@ text_measure_attr_append(NsPangoAttribute *attr, gpointer data)
 }
 
 static gboolean
+text_measure_tabs_append(GByteArray *buf, NsPangoTabArray *tabs)
+{
+    gint32 head[2] = { ns_pango_tab_array_get_size(tabs),
+                       ns_pango_tab_array_get_positions_in_pixels(tabs) };
+    g_byte_array_append(buf, (const guint8 *)head, sizeof head);
+    for (gint32 i = 0; i < head[0]; i++) {
+        NsPangoTabAlign align;
+        gint location;
+        ns_pango_tab_array_get_tab(tabs, i, &align, &location);
+        if (align == NS_PANGO_TAB_DECIMAL) return FALSE;
+        gint32 v[2] = { (gint32)align, location };
+        g_byte_array_append(buf, (const guint8 *)v, sizeof v);
+    }
+    return TRUE;
+}
+
+static gboolean
 text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
 {
-    NsPangoTabArray *tabs = ns_pango_layout_get_tabs(layout);
-    if (tabs) {
-        ns_pango_tab_array_free(tabs);
-        return FALSE;
-    }
     NsPangoAttrList *attrs = ns_pango_layout_get_attributes(layout);
     text_measure_head head;
     memset(&head, 0, sizeof head);
@@ -6784,15 +6802,22 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
     GByteArray *buf = g_text_measure_scratch;
     g_byte_array_set_size(buf, 0);
     g_byte_array_append(buf, (const guint8 *)&head, sizeof head);
+    NsPangoTabArray *tabs = ns_pango_layout_get_tabs(layout);
+    if (tabs) {
+        gboolean keyed = text_measure_tabs_append(buf, tabs);
+        ns_pango_tab_array_free(tabs);
+        if (!keyed) return FALSE;
+        head.tabs_len = buf->len - (guint)sizeof head;
+    }
     if (attrs) {
         text_measure_attr_sink sink = { buf, FALSE };
         NsPangoAttrList *none = ns_pango_attr_list_filter(
             attrs, text_measure_attr_append, &sink);
         if (none) ns_pango_attr_list_unref(none);
         if (sink.uncacheable) return FALSE;
-        head.attrs_len = buf->len - (guint)sizeof head;
-        memcpy(buf->data, &head, sizeof head);
+        head.attrs_len = buf->len - (guint)sizeof head - head.tabs_len;
     }
+    memcpy(buf->data, &head, sizeof head);
     const char *text = ns_pango_layout_get_text(layout);
     g_byte_array_append(buf, (const guint8 *)text, (guint)strlen(text));
     guint32 h = 2166136261u;
