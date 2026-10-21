@@ -633,6 +633,16 @@ itemize_state_fill_font (ItemizeState *state,
     }
 }
 
+static NsPangoFont *
+get_base_font (ItemizeState *state)
+{
+  if (!state->base_font)
+    state->base_font = ns_pango_font_map_load_font (state->context->font_map,
+                                                 state->context,
+                                                 state->font_desc);
+  return state->base_font;
+}
+
 static void
 itemize_state_add_character (ItemizeState *state,
                              NsPangoFont    *font,
@@ -699,6 +709,7 @@ itemize_state_add_character (ItemizeState *state,
     g_object_ref (font);
   state->item->analysis.font = font;
   state->font_position = font_position;
+  ns_pango_analysis_set_strut_font (&state->item->analysis, get_base_font (state));
 
   state->item->analysis.level = state->embedding;
   state->item->analysis.gravity = state->resolved_gravity;
@@ -784,16 +795,6 @@ get_font_foreach (NsPangoFontset *fontset,
   info->position++;
 
   return FALSE;
-}
-
-static NsPangoFont *
-get_base_font (ItemizeState *state)
-{
-  if (!state->base_font)
-    state->base_font = ns_pango_font_map_load_font (state->context->font_map,
-                                                 state->context,
-                                                 state->font_desc);
-  return state->base_font;
 }
 
 static gboolean

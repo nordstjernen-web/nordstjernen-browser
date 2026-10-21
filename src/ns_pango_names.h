@@ -21,6 +21,7 @@
 #define ns_pango_attr_insert_hyphens_new                  pango_attr_insert_hyphens_new
 #define ns_pango_attr_language_new                        pango_attr_language_new
 #define ns_pango_attr_letter_spacing_new                  pango_attr_letter_spacing_new
+#define ns_pango_attr_line_height_new                     pango_attr_line_height_new
 #define ns_pango_attr_line_height_new_absolute            pango_attr_line_height_new_absolute
 #define ns_pango_attr_list_copy                           pango_attr_list_copy
 #define ns_pango_attr_list_filter                         pango_attr_list_filter

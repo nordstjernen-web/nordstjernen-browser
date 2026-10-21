@@ -591,6 +591,8 @@ NsPangoAttribute *        ns_pango_attr_overline_color_new           (guint16   
 NS_PANGO_AVAILABLE_IN_1_44
 NsPangoAttribute *        ns_pango_attr_show_new                     (NsPangoShowFlags               flags);
 NS_PANGO_AVAILABLE_IN_1_50
+NsPangoAttribute *        ns_pango_attr_line_height_new              (double                       factor);
+NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttribute *        ns_pango_attr_line_height_new_absolute     (int                          height);
 NS_PANGO_AVAILABLE_IN_1_50
 NsPangoAttribute *        ns_pango_attr_text_transform_new           (NsPangoTextTransform transform);
