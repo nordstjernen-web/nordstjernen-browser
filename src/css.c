@@ -1497,6 +1497,7 @@ ns_css_set_font_generation_cb(guint64 (*cb)(void))
     g_font_oracle_serial++;
 }
 
+static __thread guint g_font_metric_reads;
 static void (*g_font_metrics_cb)(const char *family, double size_px,
                                  int weight, gboolean italic,
                                  ns_css_font_metrics *out);
@@ -1519,8 +1520,10 @@ font_relative_unit_px(ns_css_unit unit, double font_px,
         .cap_px = font_px * 0.7,
         .ic_px  = font_px,
     };
-    if (g_font_metrics_cb && font_px > 0)
+    if (g_font_metrics_cb && font_px > 0) {
+        g_font_metric_reads++;
         g_font_metrics_cb(family, font_px, weight, italic, &m);
+    }
     switch (unit) {
     case NS_CSS_UNIT_EX:  return m.ex_px;
     case NS_CSS_UNIT_CH:  return m.ch_px;
@@ -21270,6 +21273,7 @@ static __thread GHashTable *g_reg_reset_cache;
 static __thread GHashTable *g_var_build_cache;
 static __thread GPtrArray  *g_var_build_parents;
 static __thread gboolean    g_container_features_used;
+static __thread guint       g_container_reads;
 
 void
 ns_css_set_container_map(GHashTable *map)
@@ -21299,7 +21303,7 @@ cq_container_hash(gconstpointer node, const ns_cq_container *c)
 static guint64
 cq_map_signature(GHashTable *map)
 {
-    if (!map) return 0;
+    if (!map || g_hash_table_size(map) == 0) return 0;
     guint64 sig = (guint64)g_hash_table_size(map) + 1;
     GHashTableIter it;
     gpointer key, value;
@@ -21373,7 +21377,7 @@ ns_css_container_map_add(GHashTable *map, const void *node,
     c->names = (name_kw && g_ascii_strcasecmp(name_kw, "none") != 0)
         ? g_strdup(name_kw) : NULL;
     c->width = w;
-    c->height = h;
+    c->height = type == NS_CQ_TYPE_SIZE || vertical ? h : 0;
     c->type = type;
     c->vertical = vertical;
     const ns_node *el = node;
@@ -21454,6 +21458,7 @@ cq_select_axis(gboolean block_axis)
 static double
 container_unit_resolve(double v, ns_css_unit unit)
 {
+    g_container_reads++;
     if (g_cq_map) g_container_features_used = TRUE;
     const ns_cq_container *inline_container = cq_select_axis(FALSE);
     const ns_cq_container *block_container = cq_select_axis(TRUE);
@@ -30169,8 +30174,8 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         if (ri >= n_rules) continue;
         ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
         if (!r || cand.selector_idx >= r->selectors->len) continue;
-        if (r->container_condition && !container_rule_matches(r))
-            continue;
+        gboolean container_ok = !r->container_condition ||
+                                container_rule_matches(r);
         ns_css_selector *cand_sel =
             g_ptr_array_index(r->selectors, cand.selector_idx);
         if (ancestor_filter_usable && cand_sel &&
@@ -30201,7 +30206,11 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                 selector_cache_insert(r, sel, el, pe, matched, scope_order);
             }
             if (!matched) continue;
-            if (r->container_condition) g_container_features_used = TRUE;
+            if (r->container_condition) {
+                g_container_reads++;
+                if (!container_ok) continue;
+                g_container_features_used = TRUE;
+            }
             css_rule_match_accum *acc = &g_rule_accum[ri];
             if (acc->epoch != g_rule_match_epoch) {
                 acc->epoch = g_rule_match_epoch;
@@ -33465,6 +33474,8 @@ static GHashTable    *g_desc_id_keys;
 static GHashTable    *g_desc_attr_keys;
 static gboolean       g_desc_keys_loose;
 static GHashTable    *g_incr_self_dirty;
+static GHashTable    *g_incr_env_nodes;
+static guint64        g_incr_prev_font_gen;
 static gpointer       g_struct_desc_inv;
 static GHashTable    *g_struct_flood_keys;
 static GHashTable    *g_struct_flood_attrs;
@@ -33809,7 +33820,7 @@ ns_css_forget_node(const ns_node *node)
     if (!g_css_compute_thread) return;
     GHashTable *node_sets[] = {
         g_incr_dirty, g_incr_self_dirty, g_incr_exclude, g_incr_inv_pending,
-        g_has_subject_docs,
+        g_has_subject_docs, g_incr_env_nodes,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(node_sets); i++)
         if (node_sets[i]) g_hash_table_remove(node_sets[i], node);
@@ -35958,6 +35969,7 @@ ns_style_clone_shared(const ns_style *s)
     c->share_id = s->share_id;
     c->display  = s->display;
     c->explicit_inherit = s->explicit_inherit;
+    c->env_dependent = s->env_dependent;
     c->currentcolor_bits = s->currentcolor_bits;
     c->inherited_bits = s->inherited_bits;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
@@ -36383,6 +36395,39 @@ incr_copy_clean_subtree(ns_node *node, GHashTable *out)
     return TRUE;
 }
 
+enum {
+    STYLE_READS_CONTAINER    = 1 << 0,
+    STYLE_READS_FONT_METRICS = 1 << 1,
+};
+
+static void
+incr_note_env_dependent(ns_node *node, guint8 reads)
+{
+    if (reads) {
+        if (!g_incr_env_nodes)
+            g_incr_env_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
+        g_hash_table_insert(g_incr_env_nodes, node, GUINT_TO_POINTER(reads));
+    } else if (g_incr_env_nodes && g_hash_table_size(g_incr_env_nodes) > 0) {
+        g_hash_table_remove(g_incr_env_nodes, node);
+    }
+}
+
+static void
+incr_mark_env_dependents(guint changed)
+{
+    if (!changed || !g_incr_env_nodes ||
+        g_hash_table_size(g_incr_env_nodes) == 0)
+        return;
+    if (!g_incr_self_dirty)
+        g_incr_self_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    GHashTableIter it;
+    gpointer node, reads;
+    g_hash_table_iter_init(&it, g_incr_env_nodes);
+    while (g_hash_table_iter_next(&it, &node, &reads))
+        if (GPOINTER_TO_UINT(reads) & changed)
+            g_hash_table_add(g_incr_self_dirty, node);
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -36455,6 +36500,8 @@ cascade_walk(ns_node *node,
         g_incr_recomputed++;
         if (g_incr_changed) g_ptr_array_add(g_incr_changed, node);
         nd_node_dirty = TRUE;
+        guint container_reads_before = g_container_reads;
+        guint font_metric_reads_before = g_font_metric_reads;
         static GArray *sc_matches, *sc_var, *sc_pending;
         static GPtrArray *sc_owned;
         static GArray *sc_pe_m[9], *sc_pe_v[9], *sc_pe_p[9];
@@ -36745,6 +36792,11 @@ cascade_walk(ns_node *node,
                 g_hash_table_insert(g_style_share, k, s);
             }
         }
+        if (g_container_reads != container_reads_before)
+            s->env_dependent |= STYLE_READS_CONTAINER;
+        if (g_font_metric_reads != font_metric_reads_before)
+            s->env_dependent |= STYLE_READS_FONT_METRICS;
+        incr_note_env_dependent(node, s->env_dependent);
         }
         g_hash_table_insert(out, node, s);
         if (s->explicit_inherit && g_cascade_parent_node) {
@@ -37942,10 +37994,13 @@ ns_css_compute(ns_node *doc,
     guint64 cq_sig = cq_map_signature(g_cq_map);
     gboolean struct_kept =
         incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
+    guint64 font_gen = g_font_generation_cb ? g_font_generation_cb() : 0;
+    guint env_changed =
+        (g_incr_prev_cq_sig != cq_sig ? STYLE_READS_CONTAINER : 0) |
+        (g_incr_prev_font_gen != font_gen ? STYLE_READS_FONT_METRICS : 0);
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
-        && g_incr_prev_cq_sig == cq_sig
         && g_css_focus_node == g_incr_prev_focus
         && g_css_hover_node == g_incr_prev_hover
         && g_css_active_node == g_incr_prev_active
@@ -37955,6 +38010,10 @@ ns_css_compute(ns_node *doc,
         g_incr_pass_active = struct_kept && !has_reset &&
             incr_apply_sheet_change(doc, cached_ua, author_sheets, n_sheets,
                                     &sheet_marked);
+    if (g_incr_pass_active)
+        incr_mark_env_dependents(env_changed);
+    else if (g_incr_env_nodes)
+        g_hash_table_remove_all(g_incr_env_nodes);
     g_incr_reused = 0;
     g_incr_recomputed = 0;
     incr_mark_newly_defined(doc);
@@ -38000,6 +38059,7 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_sig = sig;
         incr_remember_sheets(cached_ua, author_sheets, n_sheets);
         g_incr_prev_cq_sig = cq_sig;
+        g_incr_prev_font_gen = font_gen;
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;
