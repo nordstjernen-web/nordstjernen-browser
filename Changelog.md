@@ -3,6 +3,10 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: a float that follows text ending in `<br>` now starts on the
+  line after the break. It was placed beside the text's last line, so
+  phpBB topic lists (the freeciv forum) drew each "by author » date"
+  line on top of the topic title.
 * Network: a `HEAD` request from `fetch()` or XMLHttpRequest no longer
   fails when the server sends a `Content-Length`. The method was passed
   to curl as a plain custom verb, so curl waited for a body that a HEAD
