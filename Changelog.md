@@ -9,6 +9,15 @@ Changelog:
   arrow on kabesalod.de) were left blank. The sprite is fetched once per
   page, parsed and kept, and the page repaints when it arrives; as in
   other browsers, only same-origin http(s) sprites are followed.
+* Intl: `Intl.NumberFormat` now picks the plural form of a unit or
+  currency name from the whole number, not from the digits shown before
+  the exponent. With scientific, engineering or compact notation,
+  `1E4 bit`, `1K byte` and `1E4 euro` became `1E4 bits`, `1K bytes` and
+  `1E4 euros`, as in Chrome. The formatjs polyfill checks exactly this
+  (`"1E4 bits"`) to decide whether the browser's `NumberFormat` is
+  complete; it replaced ours, and a mismatched polyfill then threw
+  "TypeError: not a function" eight times on each IMDb load. The compact
+  pattern itself still follows the shown digits (`1 million` in French).
 * WebGPU: a page can no longer abort the browser with a bad descriptor.
   wgpu-native panics, and the whole process aborts, when it gets a
   texture format it does not know, a missing shader module, a
