@@ -9,6 +9,7 @@ import hashlib
 import html
 import http.server
 import json
+import math
 import os
 import re
 import select
@@ -1052,11 +1053,260 @@ def cmd_ab(a):
     return 1 if worse or over or failed else 0
 
 
+def ns_load(binary, url, a):
+    home = tempfile.mkdtemp(prefix="sitebench-ns-")
+    try:
+        proc = subprocess.Popen([binary, "--headless", "--viewport=%dx%d" % (a.vw, a.vh), "--settle-ms=0", "--timing",
+                                 "--dump=none", url], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=isolated_env(home, a.locale), start_new_session=True)
+        expired = []
+        killer = threading.Timer(a.timeout, lambda: expired.append(kill_group(proc)))
+        killer.start()
+        try:
+            out = proc.stdout.read().decode("utf-8", "replace")
+            _, status, usage = os.wait4(proc.pid, 0)
+        finally:
+            killer.cancel()
+            proc.stdout.close()
+        proc.returncode = os.waitstatus_to_exitcode(status)
+        m = re.search(r"^timing: (\{.*\})$", out, re.M)
+        if expired:
+            return None, "timed out after %ds" % a.timeout
+        if proc.returncode != 0 or not m:
+            return None, "exit status %d" % proc.returncode if proc.returncode else "no timing line"
+        t = json.loads(m.group(1))
+        rss = usage.ru_maxrss / (1 << 20) if sys.platform == "darwin" else usage.ru_maxrss / 1024.0
+        return {"cpu": t["cpu_ms"], "paint": t["first_paint_ms"], "style": t["style_ms"], "layout": t["relayout_ms"],
+                "process": round((usage.ru_utime + usage.ru_stime) * 1000, 1), "rss": round(rss, 1)}, None
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+CHROME_SETTLED = (
+    "Promise.all([document.fonts ? document.fonts.ready : null, new Promise(done => {"
+    " setTimeout(() => done(null), 3000);"
+    " new PerformanceObserver(l => { for (const e of l.getEntries())"
+    "  if (e.name === 'first-contentful-paint') done(e.startTime); }).observe({type: 'paint', buffered: true}); })])"
+    ".then(([, fcp]) => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => {"
+    " const n = performance.getEntriesByType('navigation')[0];"
+    " done(JSON.stringify({fcp: fcp, load: n ? n.loadEventEnd : null})); }))))")
+
+
+class ChromeLoads:
+    def __init__(self, chrome, a):
+        self.chrome, self.a, self.cdp = chrome, a, None
+
+    def close(self):
+        if self.cdp:
+            self.cdp.close()
+            self.cdp = None
+
+    def load(self, url):
+        a = self.a
+        if not self.cdp:
+            self.cdp = Cdp(self.chrome, [*chrome_args(a), "--proxy-server=" + DEAD_PROXY,
+                                         "--window-size=%d,%d" % (a.vw + WINDOW_PAD[0], a.vh + WINDOW_PAD[1])],
+                           locale_env(a.locale))
+        cdp, ctx = self.cdp, None
+        try:
+            ctx = cdp.call("Target.createBrowserContext")["browserContextId"]
+            target = cdp.call("Target.createTarget", {"url": "about:blank", "browserContextId": ctx})["targetId"]
+            s = cdp.call("Target.attachToTarget", {"targetId": target, "flatten": True})["sessionId"]
+            for method, params in (("Page.enable", {}), ("Page.bringToFront", {}),
+                                   ("Performance.enable", {"timeDomain": "threadTicks"}),
+                                   ("Emulation.setDeviceMetricsOverride", {"width": a.vw, "height": a.vh,
+                                                                           "deviceScaleFactor": 1, "mobile": False}),
+                                   ("Emulation.setTimezoneOverride", {"timezoneId": "UTC"})):
+                cdp.call(method, params, session=s)
+            start = len(cdp.events)
+            nav = cdp.call("Page.navigate", {"url": url}, session=s, timeout=60)
+            if nav.get("errorText"):
+                return None, nav["errorText"]
+            if cdp.wait(lambda m: m.get("method") == "Page.loadEventFired" and m.get("sessionId") == s, 60,
+                        start) is None:
+                return None, "no load event in 60 s"
+            done = cdp.call("Runtime.evaluate", {"expression": CHROME_SETTLED, "awaitPromise": True,
+                                                 "returnByValue": True}, session=s, timeout=60)
+            times = json.loads(done["result"]["value"])
+            metrics = {m["name"]: m["value"] for m in cdp.call("Performance.getMetrics", session=s)["metrics"]}
+            ms = lambda key: round(metrics.get(key, 0) * 1000, 1)
+            return {"cpu": ms("TaskDuration"), "style": ms("RecalcStyleDuration"), "layout": ms("LayoutDuration"),
+                    "paint": None if times.get("fcp") is None else round(times["fcp"], 1),
+                    "load": None if times.get("load") is None else round(times["load"], 1)}, None
+        except (TimeoutError, EOFError, OSError, RuntimeError, KeyError, ValueError, TypeError) as e:
+            self.close()
+            ctx = None
+            return None, "DevTools protocol: %s" % (str(e) or type(e).__name__)
+        finally:
+            if ctx:
+                try:
+                    cdp.call("Target.disposeBrowserContext", {"browserContextId": ctx})
+                except (TimeoutError, EOFError, OSError, RuntimeError):
+                    self.close()
+            if self.cdp:
+                del self.cdp.events[:]
+
+
+def median(values):
+    values = sorted(v for v in values if v is not None)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else round((values[mid - 1] + values[mid]) / 2.0, 1)
+
+
+def summarize(runs):
+    keys = sorted({k for r in runs for k in r})
+    return {k: median(r.get(k) for r in runs) for k in keys}
+
+
+def geomean(values):
+    values = [v for v in values if v and v > 0]
+    return math.exp(sum(math.log(v) for v in values) / len(values)) if values else None
+
+
+def perf_site(a, name, url, chrome, binaries, labels):
+    loads = {"chrome": []}
+    loads.update((label, []) for label in labels)
+    errors = {}
+    builds = list(zip(binaries, labels))
+    for run in range(a.runs):
+        got, err = chrome.load(url)
+        loads["chrome"].append(got) if got else errors.setdefault("chrome", err)
+        k = run % len(builds)
+        for binary, label in builds[k:] + builds[:k]:
+            got, err = ns_load(binary, url, a)
+            loads[label].append(got) if got else errors.setdefault(label, err)
+    row = {"site": name, "errors": errors}
+    for key, runs in loads.items():
+        row[key] = dict(summarize(runs), cpuRuns=[r["cpu"] for r in runs]) if runs else None
+    return row
+
+
+def ratio(x, y):
+    return x / y if x is not None and y else None
+
+
+def fmt(v, spec=",.0f"):
+    return "-" if v is None else format(v, spec)
+
+
+def faster_in_every_run(old, new):
+    if not old or not new or not old["cpuRuns"] or not new["cpuRuns"]:
+        return None
+    if max(new["cpuRuns"]) < min(old["cpuRuns"]):
+        return -1
+    if min(new["cpuRuns"]) > max(old["cpuRuns"]):
+        return 1
+    return 0
+
+
+PERF_METRIC = (
+    "Main-thread CPU is Nordstjernen's main-thread CPU time from start to its first painted frame (`--settle-ms=0 "
+    "--timing`), and Chrome's main-thread task time in thread ticks (`Performance.getMetrics`) from navigation until "
+    "the load event, ready fonts and two animation frames, on the same frozen page served locally, each load in a "
+    "fresh profile. Medians over %d runs per site and browser, interleaved. Nordstjernen's first paint is wall time "
+    "to its first painted frame, Chrome's its first contentful paint.")
+
+
+def cmd_perf(a):
+    names, version = prepare(a)
+    labels = a.labels
+    httpd, base_url = serve(a.snapshots, a.settle_ms)
+    chrome = ChromeLoads(a.chrome, a)
+    rows = []
+    try:
+        warm = base_url + urllib.parse.quote(names[0]) + "/index.html"
+        chrome.load(warm)
+        for binary in a.bins:
+            ns_load(binary, warm, a)
+        print("timing %d snapshots, %d runs each: Chrome %s, %s" % (len(names), a.runs, version, ", ".join(labels)),
+              flush=True)
+        for name in names:
+            row = perf_site(a, name, base_url + urllib.parse.quote(name) + "/index.html", chrome, a.bins, labels)
+            rows.append(row)
+            cells = ["%s %s" % (k, fmt((row[k] or {}).get("cpu"))) for k in ["chrome"] + labels]
+            err = "; ".join("%s: %s" % kv for kv in row["errors"].items())
+            print("  %-22s cpu ms: %s%s" % (name, ", ".join(cells), "  " + err if err else ""), flush=True)
+    finally:
+        chrome.close()
+        httpd.shutdown()
+    ok = [r for r in rows if r["chrome"] and all(r[label] for label in labels)]
+    if not ok:
+        fail("nothing timed (%s)" % "; ".join("%s: %s" % (r["site"], r["errors"]) for r in rows))
+    newest, oldest = labels[-1], labels[0]
+    totals = {k: sum(r[k]["cpu"] for r in ok) for k in ["chrome"] + labels}
+    summary = {"sites": len(ok), "cpuMs": totals,
+               "cpuRatio": {k: geomean(ratio(r[k]["cpu"], r["chrome"]["cpu"]) for r in ok) for k in labels},
+               "paintRatio": {k: geomean(ratio(r[k]["paint"], r["chrome"]["paint"]) for r in ok) for k in labels},
+               "rssMb": {k: median(r[k]["rss"] for r in ok) for k in labels}}
+    meta = dict(common_meta(a, version, [r["site"] for r in ok], 0), runs=a.runs,
+                builds={label: {"path": b, "sha256": file_digest(b)} for b, label in zip(a.bins, labels)})
+    del meta["elements"]
+    lines = ["# Frozen snapshots: load cost, %s vs Chrome" % " vs ".join(labels), "",
+             "Chrome %s · viewport %s · Nordstjernen locale %s · %d sites" % (version, meta["viewport"], a.locale,
+                                                                              len(ok)), "", PERF_METRIC % a.runs, ""]
+    if len(labels) == 1:
+        lines += ["| Site | Chrome CPU ms | %s CPU ms | ÷ Chrome | Chrome FCP ms | %s first paint ms | Style ms | "
+                  "Layout ms | Peak RSS MB |" % (newest, newest),
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for r in ok:
+            c, n = r["chrome"], r[newest]
+            lines.append("| %s | %s | %s | %s× | %s | %s | %s | %s | %s |" % (
+                r["site"], fmt(c["cpu"]), fmt(n["cpu"]), fmt(ratio(n["cpu"], c["cpu"]), ".2f"), fmt(c["paint"]),
+                fmt(n["paint"]), fmt(n["style"]), fmt(n["layout"]), fmt(n["rss"])))
+    else:
+        moved = {r["site"]: faster_in_every_run(r[oldest], r[newest]) for r in ok}
+        lines += ["| Site | Chrome CPU ms | %s | Change | %s ÷ Chrome | %s |" % (
+                      " | ".join("%s CPU ms" % k for k in labels), newest,
+                      " | ".join("%s first paint ms" % k for k in labels)),
+                  "| --- | ---: | %s | ---: | ---: | %s |" % (" | ".join(["---:"] * len(labels)),
+                                                             " | ".join(["---:"] * len(labels)))]
+        for r in ok:
+            change = 100.0 * (r[newest]["cpu"] - r[oldest]["cpu"]) / r[oldest]["cpu"] if r[oldest]["cpu"] else None
+            mark = "**" if moved[r["site"]] else ""
+            lines.append("| %s | %s | %s | %s%s%s | %s× | %s |" % (
+                r["site"], fmt(r["chrome"]["cpu"]), " | ".join(fmt(r[k]["cpu"]) for k in labels), mark,
+                fmt(change, "+.1f") + "%" if change is not None else "-", mark,
+                fmt(ratio(r[newest]["cpu"], r["chrome"]["cpu"]), ".2f"), " | ".join(fmt(r[k]["paint"]) for k in labels)))
+        faster = sorted(s for s, v in moved.items() if v == -1)
+        slower = sorted(s for s, v in moved.items() if v == 1)
+        summary.update(faster=faster, slower=slower)
+        lines += ["", "In bold: %s was faster (or slower) than %s in every run. Faster on %d sites: %s. Slower on %d "
+                  "sites: %s." % (newest, oldest, len(faster), ", ".join(faster) or "none", len(slower),
+                                  ", ".join(slower) or "none")]
+    lines += ["", "| | Chrome | %s |" % " | ".join(labels), "| --- | ---: | %s |" % " | ".join(["---:"] * len(labels)),
+              "| Main-thread CPU, sum over sites (ms) | %s | %s |" % (
+                  fmt(totals["chrome"]), " | ".join(fmt(totals[k]) for k in labels)),
+              "| Main-thread CPU ÷ Chrome (geomean) | 1.00× | %s |" % " | ".join(
+                  fmt(summary["cpuRatio"][k], ".2f") + "×" for k in labels),
+              "| First paint ÷ Chrome FCP (geomean) | 1.00× | %s |" % " | ".join(
+                  fmt(summary["paintRatio"][k], ".2f") + "×" for k in labels),
+              "| Peak RSS, median over sites (MB) | | %s |" % " | ".join(fmt(summary["rssMb"][k]) for k in labels)]
+    failed = {r["site"]: r["errors"] for r in rows if r["errors"]}
+    if failed:
+        lines += ["", "Failed loads: " + "; ".join("%s (%s)" % (s, "; ".join("%s: %s" % kv for kv in e.items()))
+                                                   for s, e in sorted(failed.items()))]
+    slow = None
+    if a.max_slowdown is not None and len(labels) > 1 and totals[oldest]:
+        slow = 100.0 * (totals[newest] - totals[oldest]) / totals[oldest]
+        if slow > a.max_slowdown:
+            lines += ["", "FAIL: %s spends %.1f%% more main-thread CPU than %s over the %d sites, above "
+                      "--max-slowdown=%g" % (newest, slow, oldest, len(ok), a.max_slowdown)]
+    report = Path(a.report or Path(a.out) / "report")
+    report.mkdir(parents=True, exist_ok=True)
+    (report / "perf.json").write_text(json.dumps({"meta": meta, "summary": summary, "sites": rows}, indent=1) + "\n")
+    (report / "perf.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    print("\nreport: %s" % (report / "perf.md"))
+    return 1 if slow is not None and slow > a.max_slowdown else 0
+
+
 def main():
     if sys.platform == "win32":
         fail("runs on Linux and macOS only")
-    p = argparse.ArgumentParser(description="Freeze sites into local snapshots and compare every element's box "
-                                            "in Nordstjernen with Chrome's.")
+    p = argparse.ArgumentParser(description="Freeze sites into local snapshots and compare every element's box, "
+                                            "and the cost of loading them, in Nordstjernen with Chrome's.")
     sub = p.add_subparsers(dest="cmd", required=True)
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument("--out", default=os.environ.get("OUT", "sitebench-out"))
@@ -1085,6 +1335,13 @@ def main():
     b.add_argument("--max-site-loss", type=int, default=None,
                    help="also fail when the new build loses more than this many of the elements the old one "
                         "matched on one site, beyond that site's noise")
+    t = sub.add_parser("perf", parents=[shared], help="time one or more builds and Chrome loading the snapshots")
+    t.add_argument("bins", nargs="*", help="builds to time, oldest first (default: NS_BIN or builddir's build)")
+    t.add_argument("--labels", default=None, help="names of the builds (default: nordstjernen, or before,after)")
+    t.add_argument("--runs", type=int, default=5, help="loads per site and browser")
+    t.add_argument("--max-slowdown", type=float, default=None,
+                   help="fail when the newest build spends more than this many percent more main-thread CPU, "
+                        "summed over the sites, than the oldest")
     a = p.parse_args()
     a.only = {x for x in a.only.split(",") if x}
     if a.cmd == "freeze":
@@ -1102,6 +1359,18 @@ def main():
             if not os.access(binary, os.X_OK):
                 p.error("not an executable: %s" % binary)
         return cmd_ab(a)
+    if a.cmd == "perf":
+        a.bins = a.bins or [os.environ.get("NS_BIN") or default_binary()]
+        default = ["nordstjernen"] if len(a.bins) == 1 else ["before", "after"] if len(a.bins) == 2 else None
+        a.labels = [x for x in a.labels.split(",") if x] if a.labels else default
+        if not a.labels or len(a.labels) != len(a.bins) or len(set(a.labels)) != len(a.labels) or "chrome" in a.labels:
+            p.error("--labels needs one different name per build, other than chrome")
+        if a.runs < 1:
+            p.error("--runs must be 1 or more")
+        for binary in a.bins:
+            if not os.access(binary, os.X_OK):
+                p.error("not an executable: %s" % binary)
+        return cmd_perf(a)
     if a.cmd == "score":
         if not os.access(a.bin, os.X_OK):
             p.error("not an executable: %s" % a.bin)
