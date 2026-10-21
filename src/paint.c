@@ -3127,7 +3127,7 @@ void
 ns_paint_apply_css_line_spacing(NsPangoLayout *layout, const ns_style *s)
 {
     double lh_px = ns_paint_css_line_height_px(s);
-    if (!layout || lh_px <= 0) return;
+    if (!layout || lh_px < 0) return;
     double *stored = g_new(double, 1);
     *stored = lh_px;
     g_object_set_data_full(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY, stored,

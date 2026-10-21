@@ -7321,7 +7321,7 @@ inline_line_height(const ns_style *parent_style)
 {
     double font_size = length_or(parent_style ? parent_style->values[NS_CSS_FONT_SIZE] : NULL, 16);
     double used = ns_paint_css_line_height_px(parent_style);
-    if (used > 0) return used;
+    if (used >= 0) return used;
     return font_size * 1.2;
 }
 
