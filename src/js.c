@@ -350,7 +350,6 @@ static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
 static gboolean ns_node_is_shadow_root(const ns_node *n);
-static gboolean ns_dom_hidden_child(const ns_node *c);
 static void ns_focus_guard_forget(ns_js *js, const ns_node *n);
 static void ns_parser_hold_forget(ns_js *js, const ns_node *n);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
