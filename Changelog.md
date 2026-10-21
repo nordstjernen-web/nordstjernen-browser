@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* SVG: `<use href="sprite.svg#icon">` now draws symbols from an external
+  SVG file. Only references inside the same document worked, so icon
+  sets served as one sprite file (the navigation icons on midzer.de, the
+  arrow on kabesalod.de) were left blank. The sprite is fetched once per
+  page, parsed and kept, and the page repaints when it arrives; as in
+  other browsers, only same-origin http(s) sprites are followed.
 * WebGPU: a page can no longer abort the browser with a bad descriptor.
   wgpu-native panics, and the whole process aborts, when it gets a
   texture format it does not know, a missing shader module, a
