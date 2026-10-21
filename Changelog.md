@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: `line-height: 0` is now honoured. It was treated like an unset
+  value, so a block holding only an image or an inline-block still got a
+  line of about 1.2 times its font size, and the image card wrappers
+  that use it (BBC, Washington Post) came out 4 to 5 pixels taller
+  than the image. A line also always reached down to its
+  baseline, so text with a line height much smaller than its font made a
+  line a few pixels tall instead of the height the CSS asked for. Such
+  lines now take exactly their line height, matching Chrome.
 * Safe browsing: redirects and form submissions are now checked against the
   blocklist. Only a plain link or typed address was, so a link to a clean
   URL that redirected to a blocked site, or a form posting to one, loaded
