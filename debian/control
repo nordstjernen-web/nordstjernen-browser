@@ -1,4 +1,4 @@
-Source: nordstjernen
+Source: nordstjernen-browser
 Section: web
 Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 Build-Depends:
@@ -38,7 +38,7 @@ Homepage: https://nordstjernen.org
 Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Vcs-Git: https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
 
-Package: nordstjernen
+Package: nordstjernen-browser
 Architecture: any
 Depends:
  ${shlibs:Depends},

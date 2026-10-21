@@ -1,6 +1,6 @@
 # Debian inclusion tracker
 
-Status of getting the `nordstjernen` source package into Debian `main`
+Status of getting the `nordstjernen-browser` source package into Debian `main`
 through sponsorship on [mentors.debian.net](https://mentors.debian.net/package/nordstjernen/).
 `Debian.md` describes the packaging itself; this file records where the
 review stands and what is still to do. Update it after each upload and
@@ -15,7 +15,7 @@ each review.
 ## Open
 
 - [ ] File the ITP bug against `wnpp`
-      (`reportbug wnpp`, title `ITP: nordstjernen -- web browser`).
+      (`reportbug wnpp`, title `ITP: nordstjernen-browser -- web browser`).
 - [ ] Put the ITP number in the single `debian/changelog` entry:
       `* Initial release (Closes: #NNNNNNN)`, distribution `unstable`.
 - [ ] Upload the current `debian/` tree as upload #2. The second reviewer
@@ -37,6 +37,10 @@ each review.
       generated files): ignore or add `debian/source/lintian-overrides`.
 
 ## Done
+
+- [x] Source and binary package renamed `nordstjernen` → `nordstjernen-browser`
+      so the archive name says it is a browser. Upload #1 on mentors is under
+      the old name; upload #2 appears as a new package there.
 
 - [x] `debian/copyright` covers the AppStream metainfo under CC0-1.0
       (`inconsistent-appstream-metadata-license`).
