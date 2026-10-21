@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: a box with `aspect-ratio`, a definite `height` and an auto
+  width now takes its width from the ratio, as CSS Sizing says. Only
+  the other direction (height from width) was done, so such a box
+  stretched to its container in normal flow and shrank to 0 px wide as
+  a flex item, a float or an inline-block. Booking.com's hotel rating
+  stars (12 px tall spans with `aspect-ratio: 1`) were all invisible,
+  and the New York Times promo images were 0 px wide. A percentage
+  height transfers when it resolves against a definite height, but not
+  against a grid area.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

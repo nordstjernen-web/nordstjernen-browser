@@ -10295,6 +10295,8 @@ text_input_intrinsic_width(const ns_box *box)
     return ceil(width);
 }
 
+static double ratio_transferred_width(const ns_box *box);
+
 static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
@@ -10395,6 +10397,8 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             w = wv->u.length.v;
         else if (wv && wv->kind == NS_CSS_V_CALC && !value_is_percent(wv))
             w = length_resolve(wv, 0, -1);
+        else
+            w = ratio_transferred_width(box);
         if (w >= 0) {
             if (flex_box_is_border_box(box)) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
@@ -10413,6 +10417,41 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     return width_contribution_keyword_limits(
         box, measure_max_content_width(box, parent_style), parent_style, TRUE,
         NS_MEASURED_MAX_CONTENT);
+}
+
+static double
+ratio_percent_height_basis(const ns_box *box)
+{
+    if (style_is_absolute_or_fixed(box->style))
+        return box->cb_height_override > 0 ? box->cb_height_override : -1;
+    const ns_box *p = box->parent;
+    while (p && !p->style) p = p->parent;
+    if (p && box_is_grid_container(p)) return -1;
+    return containing_block_definite_height(box);
+}
+
+static double
+ratio_transferred_width(const ns_box *box)
+{
+    if (!box->style || box->kind != NS_BOX_BLOCK) return -1;
+    const ns_css_value *wv = box->style->values[NS_CSS_WIDTH];
+    if (wv && !length_is_auto(wv) && !size_keyword_is_intrinsic(wv)) return -1;
+    double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO],
+                                       NULL);
+    if (ratio <= 0) return -1;
+    const ns_css_value *hv = box->style->values[NS_CSS_HEIGHT];
+    if (!hv || !(hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        return -1;
+    double h;
+    if (value_is_percent(hv)) {
+        double basis = ratio_percent_height_basis(box);
+        if (basis < 0) return -1;
+        h = resolve_height_with_basis(hv, 0, basis, -1);
+    } else {
+        h = length_resolve(hv, 0, -1);
+    }
+    if (h < 0) return -1;
+    return clamp_height_minmax_px(box->style, h) * ratio;
 }
 
 static double
@@ -10670,6 +10709,18 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             return width_contribution_keyword_limits(
                 box, measure_max_content_width(box, parent_style),
                 parent_style, FALSE, NS_MEASURED_MAX_CONTENT);
+        double transferred = ratio_transferred_width(box);
+        if (transferred >= 0) {
+            if (flex_box_is_border_box(box)) {
+                ns_edges m = {0}, pd = {0}, bd = {0};
+                edges_from_style(box->style, 0, &m, &pd, &bd);
+                transferred -= pd.left + pd.right + bd.left + bd.right;
+                if (transferred < 0) transferred = 0;
+            }
+            return width_contribution_keyword_limits(box, transferred,
+                                                     parent_style, FALSE,
+                                                     NS_MEASURED_NONE);
+        }
     }
     return width_contribution_keyword_limits(
         box, min_content_width_of(box, parent_style), parent_style,
@@ -16546,6 +16597,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                                          avail);
         }
         if (cw < 0) cw = 0;
+    } else if (!flex_col_item_stretch && ratio_transferred_width(box) >= 0) {
+        cw = ratio_transferred_width(box);
+        explicit_width = TRUE;
     } else {
         cw = parent_content_width - horiz_total;
         if (cw < 0) cw = 0;
