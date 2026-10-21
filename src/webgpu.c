@@ -61,6 +61,7 @@ typedef struct {
     ns_wg_error_sink *sink;
     JSValue           lost_resolve;
     guint             error_scopes;
+    GByteArray       *scope_internal;
     gboolean          destroyed;
 } ns_wg_device;
 
@@ -934,6 +935,7 @@ wg_device_finalizer(JSRuntime *rt, JSValue val)
         d->sink->device_obj = JS_UNDEFINED;
     }
     JS_FreeValueRT(rt, d->lost_resolve);
+    if (d->scope_internal) g_byte_array_free(d->scope_internal, TRUE);
     if (d->queue) wgpuQueueRelease(d->queue);
     if (d->device) wgpuDeviceRelease(d->device);
     g_free(d);
@@ -1390,30 +1392,139 @@ wg_format_name(WGPUTextureFormat fmt)
     return "";
 }
 
+typedef struct { const char *name; int value; } wg_enum_name;
+
+static const wg_enum_name wg_view_dimension_names[] = {
+    { "1d", WGPUTextureViewDimension_1D },
+    { "2d", WGPUTextureViewDimension_2D },
+    { "2d-array", WGPUTextureViewDimension_2DArray },
+    { "cube", WGPUTextureViewDimension_Cube },
+    { "cube-array", WGPUTextureViewDimension_CubeArray },
+    { "3d", WGPUTextureViewDimension_3D },
+};
+
+static const wg_enum_name wg_texture_dimension_names[] = {
+    { "1d", WGPUTextureDimension_1D },
+    { "2d", WGPUTextureDimension_2D },
+    { "3d", WGPUTextureDimension_3D },
+};
+
+static const wg_enum_name wg_aspect_names[] = {
+    { "all", WGPUTextureAspect_All },
+    { "stencil-only", WGPUTextureAspect_StencilOnly },
+    { "depth-only", WGPUTextureAspect_DepthOnly },
+};
+
+static JSValue
+wg_throw_enum(JSContext *ctx, const char *value, const char *type)
+{
+    return JS_ThrowTypeError(ctx, "The provided value '%s' is not a valid enum value of type %s.",
+                             value, type);
+}
+
+static gboolean
+wg_enum_value(JSContext *ctx, JSValueConst v, const char *type,
+              const wg_enum_name *names, size_t count, int *out)
+{
+    const char *s = JS_ToCString(ctx, v);
+    if (!s) return FALSE;
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(s, names[i].name) == 0) {
+            *out = names[i].value;
+            JS_FreeCString(ctx, s);
+            return TRUE;
+        }
+    }
+    wg_throw_enum(ctx, s, type);
+    JS_FreeCString(ctx, s);
+    return FALSE;
+}
+
+static gboolean
+wg_enum_member(JSContext *ctx, JSValueConst dict, const char *key,
+               const char *type, const wg_enum_name *names, size_t count,
+               int *out)
+{
+    JSValue v = JS_GetPropertyStr(ctx, dict, key);
+    if (JS_IsException(v)) return FALSE;
+    gboolean ok = JS_IsUndefined(v) ||
+                  wg_enum_value(ctx, v, type, names, count, out);
+    JS_FreeValue(ctx, v);
+    return ok;
+}
+
+static gboolean
+wg_format_value(JSContext *ctx, JSValueConst v, WGPUTextureFormat *out)
+{
+    const char *s = JS_ToCString(ctx, v);
+    if (!s) return FALSE;
+    *out = wg_format_from_str(s);
+    if (*out == WGPUTextureFormat_Undefined)
+        wg_throw_enum(ctx, s, "GPUTextureFormat");
+    JS_FreeCString(ctx, s);
+    return *out != WGPUTextureFormat_Undefined;
+}
+
+static gboolean
+wg_format_member(JSContext *ctx, JSValueConst dict, const char *key,
+                 gboolean required, WGPUTextureFormat *out)
+{
+    *out = WGPUTextureFormat_Undefined;
+    JSValue v = JS_GetPropertyStr(ctx, dict, key);
+    if (JS_IsException(v)) return FALSE;
+    gboolean ok;
+    if (JS_IsUndefined(v)) {
+        ok = !required;
+        if (required)
+            JS_ThrowTypeError(ctx, "Required member '%s' is undefined.", key);
+    } else {
+        ok = wg_format_value(ctx, v, out);
+    }
+    JS_FreeValue(ctx, v);
+    return ok;
+}
+
 #define NS_WG_MAX_VIEW_FORMATS 8
 
-static size_t
-wg_read_view_formats(JSContext *ctx, JSValueConst desc, WGPUTextureFormat *out)
+static gboolean
+wg_read_view_formats(JSContext *ctx, JSValueConst desc, WGPUTextureFormat *out,
+                     size_t *count)
 {
+    *count = 0;
     JSValue v = JS_GetPropertyStr(ctx, desc, "viewFormats");
-    size_t n = 0;
+    if (JS_IsException(v)) return FALSE;
+    gboolean ok = TRUE;
     if (JS_IsObject(v)) {
         JSValue list = wg_array_from(ctx, v);
         uint32_t len = 0;
-        JSValue jl = JS_GetPropertyStr(ctx, list, "length");
-        JS_ToUint32(ctx, &len, jl);
-        JS_FreeValue(ctx, jl);
-        for (uint32_t i = 0; i < len && n < NS_WG_MAX_VIEW_FORMATS; i++) {
+        if (JS_IsException(list)) {
+            ok = FALSE;
+        } else {
+            JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+            JS_ToUint32(ctx, &len, jl);
+            JS_FreeValue(ctx, jl);
+        }
+        for (uint32_t i = 0; ok && i < len; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, list, i);
-            const char *name = JS_ToCString(ctx, e);
-            out[n++] = wg_format_from_str(name);
-            if (name) JS_FreeCString(ctx, name);
+            WGPUTextureFormat f = WGPUTextureFormat_Undefined;
+            ok = wg_format_value(ctx, e, &f);
+            if (ok && *count < NS_WG_MAX_VIEW_FORMATS) out[(*count)++] = f;
             JS_FreeValue(ctx, e);
         }
         JS_FreeValue(ctx, list);
     }
     JS_FreeValue(ctx, v);
-    return n;
+    return ok;
+}
+
+static gboolean
+wg_format_has_depth(WGPUTextureFormat f)
+{
+    return f == WGPUTextureFormat_Depth16Unorm ||
+           f == WGPUTextureFormat_Depth24Plus ||
+           f == WGPUTextureFormat_Depth24PlusStencil8 ||
+           f == WGPUTextureFormat_Depth32Float ||
+           f == WGPUTextureFormat_Depth32FloatStencil8;
 }
 
 static WGPUCompareFunction
@@ -1497,19 +1608,6 @@ wg_read_blend_component(JSContext *ctx, JSValueConst v, WGPUBlendComponent *out)
     JS_FreeValue(ctx, jd);
 }
 
-static WGPUTextureViewDimension
-wg_view_dimension(const char *s)
-{
-    if (!s) return WGPUTextureViewDimension_Undefined;
-    if (strcmp(s, "1d") == 0) return WGPUTextureViewDimension_1D;
-    if (strcmp(s, "2d") == 0) return WGPUTextureViewDimension_2D;
-    if (strcmp(s, "2d-array") == 0) return WGPUTextureViewDimension_2DArray;
-    if (strcmp(s, "cube") == 0) return WGPUTextureViewDimension_Cube;
-    if (strcmp(s, "cube-array") == 0) return WGPUTextureViewDimension_CubeArray;
-    if (strcmp(s, "3d") == 0) return WGPUTextureViewDimension_3D;
-    return WGPUTextureViewDimension_Undefined;
-}
-
 static const char *
 wg_view_dimension_name(WGPUTextureViewDimension d)
 {
@@ -1557,22 +1655,19 @@ wg_texture_createView(JSContext *ctx, JSValueConst this_val,
         memset(&desc, 0, sizeof desc);
         desc.mipLevelCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
         desc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
-        desc.aspect = WGPUTextureAspect_All;
+        int dimension = WGPUTextureViewDimension_Undefined;
+        int aspect = WGPUTextureAspect_All;
+        if (!wg_format_member(ctx, argv[0], "format", FALSE, &desc.format) ||
+            !wg_enum_member(ctx, argv[0], "dimension", "GPUTextureViewDimension",
+                            wg_view_dimension_names,
+                            G_N_ELEMENTS(wg_view_dimension_names), &dimension) ||
+            !wg_enum_member(ctx, argv[0], "aspect", "GPUTextureAspect",
+                            wg_aspect_names, G_N_ELEMENTS(wg_aspect_names),
+                            &aspect))
+            return JS_EXCEPTION;
+        desc.dimension = (WGPUTextureViewDimension)dimension;
+        desc.aspect = (WGPUTextureAspect)aspect;
         JSValue v;
-        v = JS_GetPropertyStr(ctx, argv[0], "format");
-        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
-            desc.format = wg_format_from_str(s); JS_FreeCString(ctx, s); }
-        JS_FreeValue(ctx, v);
-        v = JS_GetPropertyStr(ctx, argv[0], "dimension");
-        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
-            desc.dimension = wg_view_dimension(s); JS_FreeCString(ctx, s); }
-        JS_FreeValue(ctx, v);
-        v = JS_GetPropertyStr(ctx, argv[0], "aspect");
-        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
-            if (s && strcmp(s, "depth-only") == 0) desc.aspect = WGPUTextureAspect_DepthOnly;
-            else if (s && strcmp(s, "stencil-only") == 0) desc.aspect = WGPUTextureAspect_StencilOnly;
-            if (s) JS_FreeCString(ctx, s); }
-        JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, argv[0], "baseMipLevel");
         if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.baseMipLevel, v);
         JS_FreeValue(ctx, v);
@@ -1585,6 +1680,8 @@ wg_texture_createView(JSContext *ctx, JSValueConst this_val,
         v = JS_GetPropertyStr(ctx, argv[0], "arrayLayerCount");
         if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.arrayLayerCount, v);
         JS_FreeValue(ctx, v);
+        if (desc.mipLevelCount == 0 || desc.arrayLayerCount == 0)
+            return JS_ThrowTypeError(ctx, "createView: mipLevelCount and arrayLayerCount must not be 0");
         view = wgpuTextureCreateView(t->texture, &desc);
     } else {
         view = wgpuTextureCreateView(t->texture, NULL);
@@ -2255,18 +2352,37 @@ wg_ctx_configure(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jdev);
     if (!d) return JS_ThrowTypeError(ctx, "configure: valid device required");
 
-    JSValue jfmt = JS_GetPropertyStr(ctx, argv[0], "format");
-    const char *fmt = JS_IsString(jfmt) ? JS_ToCString(ctx, jfmt) : NULL;
-    JSValue jalpha = JS_GetPropertyStr(ctx, argv[0], "alphaMode");
-    const char *alpha = JS_IsString(jalpha) ? JS_ToCString(ctx, jalpha) : NULL;
+    static const wg_enum_name alpha_modes[] = {
+        { "opaque", 0 }, { "premultiplied", 1 },
+    };
+    WGPUTextureFormat format;
+    WGPUTextureFormat view_formats[NS_WG_MAX_VIEW_FORMATS];
+    size_t view_format_count = 0;
+    int premultiplied = 0;
+    if (!wg_format_member(ctx, argv[0], "format", TRUE, &format) ||
+        !wg_read_view_formats(ctx, argv[0], view_formats, &view_format_count) ||
+        !wg_enum_member(ctx, argv[0], "alphaMode", "GPUCanvasAlphaMode",
+                        alpha_modes, G_N_ELEMENTS(alpha_modes), &premultiplied)) {
+        wg_hold_release(&hold);
+        return JS_EXCEPTION;
+    }
+    if (format != WGPUTextureFormat_BGRA8Unorm &&
+        format != WGPUTextureFormat_RGBA8Unorm &&
+        format != WGPUTextureFormat_RGBA16Float) {
+        wg_hold_release(&hold);
+        return JS_ThrowTypeError(ctx, "configure: unsupported canvas format '%s'",
+                                 wg_format_name(format));
+    }
 
     if (c->device) wgpuDeviceRelease(c->device);
     if (c->queue) wgpuQueueRelease(c->queue);
     wgpuDeviceAddRef(d->device);
     c->device = d->device;
     c->queue = wgpuDeviceGetQueue(d->device);
-    c->format = fmt ? wg_format_from_str(fmt) : WGPUTextureFormat_BGRA8Unorm;
-    c->view_format_count = wg_read_view_formats(ctx, argv[0], c->view_formats);
+    c->format = format;
+    memcpy(c->view_formats, view_formats,
+           view_format_count * sizeof view_formats[0]);
+    c->view_format_count = view_format_count;
     JSValue jusage = JS_GetPropertyStr(ctx, argv[0], "usage");
     c->usage = WGPUTextureUsage_RenderAttachment;
     if (!JS_IsUndefined(jusage)) {
@@ -2274,15 +2390,10 @@ wg_ctx_configure(JSContext *ctx, JSValueConst this_val,
         c->usage = u & 0x1Fu;
     }
     JS_FreeValue(ctx, jusage);
-    c->opaque = !(alpha && strcmp(alpha, "premultiplied") == 0);
+    c->opaque = !premultiplied;
     c->configured = TRUE;
     wg_ctx_release_gpu(c);
     wg_hold_release(&hold);
-
-    if (fmt) JS_FreeCString(ctx, fmt);
-    if (alpha) JS_FreeCString(ctx, alpha);
-    JS_FreeValue(ctx, jfmt);
-    JS_FreeValue(ctx, jalpha);
     return JS_UNDEFINED;
 }
 
@@ -2451,37 +2562,52 @@ wg_read_stencil_face(JSContext *ctx, JSValueConst ds, const char *key,
     JS_FreeValue(ctx, f);
 }
 
-static WGPUVertexFormat
-wg_vertex_format(const char *s)
+static const wg_enum_name wg_vertex_format_names[] = {
+    { "uint8", WGPUVertexFormat_Uint8 }, { "uint8x2", WGPUVertexFormat_Uint8x2 },
+    { "uint8x4", WGPUVertexFormat_Uint8x4 }, { "sint8", WGPUVertexFormat_Sint8 },
+    { "sint8x2", WGPUVertexFormat_Sint8x2 }, { "sint8x4", WGPUVertexFormat_Sint8x4 },
+    { "unorm8", WGPUVertexFormat_Unorm8 }, { "unorm8x2", WGPUVertexFormat_Unorm8x2 },
+    { "unorm8x4", WGPUVertexFormat_Unorm8x4 }, { "snorm8", WGPUVertexFormat_Snorm8 },
+    { "snorm8x2", WGPUVertexFormat_Snorm8x2 }, { "snorm8x4", WGPUVertexFormat_Snorm8x4 },
+    { "uint16", WGPUVertexFormat_Uint16 }, { "uint16x2", WGPUVertexFormat_Uint16x2 },
+    { "uint16x4", WGPUVertexFormat_Uint16x4 }, { "sint16", WGPUVertexFormat_Sint16 },
+    { "sint16x2", WGPUVertexFormat_Sint16x2 }, { "sint16x4", WGPUVertexFormat_Sint16x4 },
+    { "unorm16", WGPUVertexFormat_Unorm16 }, { "unorm16x2", WGPUVertexFormat_Unorm16x2 },
+    { "unorm16x4", WGPUVertexFormat_Unorm16x4 }, { "snorm16", WGPUVertexFormat_Snorm16 },
+    { "snorm16x2", WGPUVertexFormat_Snorm16x2 }, { "snorm16x4", WGPUVertexFormat_Snorm16x4 },
+    { "float16", WGPUVertexFormat_Float16 }, { "float16x2", WGPUVertexFormat_Float16x2 },
+    { "float16x4", WGPUVertexFormat_Float16x4 }, { "float32", WGPUVertexFormat_Float32 },
+    { "float32x2", WGPUVertexFormat_Float32x2 }, { "float32x3", WGPUVertexFormat_Float32x3 },
+    { "float32x4", WGPUVertexFormat_Float32x4 }, { "uint32", WGPUVertexFormat_Uint32 },
+    { "uint32x2", WGPUVertexFormat_Uint32x2 }, { "uint32x3", WGPUVertexFormat_Uint32x3 },
+    { "uint32x4", WGPUVertexFormat_Uint32x4 }, { "sint32", WGPUVertexFormat_Sint32 },
+    { "sint32x2", WGPUVertexFormat_Sint32x2 }, { "sint32x3", WGPUVertexFormat_Sint32x3 },
+    { "sint32x4", WGPUVertexFormat_Sint32x4 },
+    { "unorm10-10-10-2", WGPUVertexFormat_Unorm10_10_10_2 },
+    { "unorm8x4-bgra", WGPUVertexFormat_Unorm8x4BGRA },
+};
+
+static gboolean
+wg_vertex_format_member(JSContext *ctx, JSValueConst attr, WGPUVertexFormat *out)
 {
-    if (!s) return WGPUVertexFormat_Float32x3;
-    static const struct { const char *n; WGPUVertexFormat f; } m[] = {
-        { "uint8", WGPUVertexFormat_Uint8 }, { "uint8x2", WGPUVertexFormat_Uint8x2 },
-        { "uint8x4", WGPUVertexFormat_Uint8x4 }, { "sint8", WGPUVertexFormat_Sint8 },
-        { "sint8x2", WGPUVertexFormat_Sint8x2 }, { "sint8x4", WGPUVertexFormat_Sint8x4 },
-        { "unorm8", WGPUVertexFormat_Unorm8 }, { "unorm8x2", WGPUVertexFormat_Unorm8x2 },
-        { "unorm8x4", WGPUVertexFormat_Unorm8x4 }, { "snorm8", WGPUVertexFormat_Snorm8 },
-        { "snorm8x2", WGPUVertexFormat_Snorm8x2 }, { "snorm8x4", WGPUVertexFormat_Snorm8x4 },
-        { "uint16", WGPUVertexFormat_Uint16 }, { "uint16x2", WGPUVertexFormat_Uint16x2 },
-        { "uint16x4", WGPUVertexFormat_Uint16x4 }, { "sint16", WGPUVertexFormat_Sint16 },
-        { "sint16x2", WGPUVertexFormat_Sint16x2 }, { "sint16x4", WGPUVertexFormat_Sint16x4 },
-        { "unorm16", WGPUVertexFormat_Unorm16 }, { "unorm16x2", WGPUVertexFormat_Unorm16x2 },
-        { "unorm16x4", WGPUVertexFormat_Unorm16x4 }, { "snorm16", WGPUVertexFormat_Snorm16 },
-        { "snorm16x2", WGPUVertexFormat_Snorm16x2 }, { "snorm16x4", WGPUVertexFormat_Snorm16x4 },
-        { "float16", WGPUVertexFormat_Float16 }, { "float16x2", WGPUVertexFormat_Float16x2 },
-        { "float16x4", WGPUVertexFormat_Float16x4 }, { "float32", WGPUVertexFormat_Float32 },
-        { "float32x2", WGPUVertexFormat_Float32x2 }, { "float32x3", WGPUVertexFormat_Float32x3 },
-        { "float32x4", WGPUVertexFormat_Float32x4 }, { "uint32", WGPUVertexFormat_Uint32 },
-        { "uint32x2", WGPUVertexFormat_Uint32x2 }, { "uint32x3", WGPUVertexFormat_Uint32x3 },
-        { "uint32x4", WGPUVertexFormat_Uint32x4 }, { "sint32", WGPUVertexFormat_Sint32 },
-        { "sint32x2", WGPUVertexFormat_Sint32x2 }, { "sint32x3", WGPUVertexFormat_Sint32x3 },
-        { "sint32x4", WGPUVertexFormat_Sint32x4 },
-        { "unorm10-10-10-2", WGPUVertexFormat_Unorm10_10_10_2 },
-        { "unorm8x4-bgra", WGPUVertexFormat_Unorm8x4BGRA },
-    };
-    for (size_t i = 0; i < G_N_ELEMENTS(m); i++)
-        if (strcmp(s, m[i].n) == 0) return m[i].f;
-    return WGPUVertexFormat_Float32x3;
+    JSValue v = JS_GetPropertyStr(ctx, attr, "format");
+    if (JS_IsException(v)) return FALSE;
+    int format = WGPUVertexFormat_Float32x3;
+    gboolean ok;
+    if (JS_IsUndefined(v)) {
+        JS_ThrowTypeError(ctx, "Required member 'format' is undefined.");
+        ok = FALSE;
+    } else {
+        ok = wg_enum_value(ctx, v, "GPUVertexFormat", wg_vertex_format_names,
+                           G_N_ELEMENTS(wg_vertex_format_names), &format);
+    }
+    JS_FreeValue(ctx, v);
+    if (ok && format == WGPUVertexFormat_Unorm8x4BGRA) {
+        JS_ThrowTypeError(ctx, "createRenderPipeline: vertex format 'unorm8x4-bgra' is not supported");
+        ok = FALSE;
+    }
+    *out = (WGPUVertexFormat)format;
+    return ok;
 }
 
 static WGPUPrimitiveTopology
@@ -2655,13 +2781,21 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     memset(targets, 0, sizeof targets);
     memset(blends, 0, sizeof blends);
     memset(&frag, 0, sizeof frag);
+    gboolean failed = FALSE;
 
     JSValue jvertex = JS_GetPropertyStr(ctx, argv[0], "vertex");
-    if (JS_IsObject(jvertex)) {
+    if (!JS_IsObject(jvertex)) {
+        JS_ThrowTypeError(ctx, "createRenderPipeline: vertex state required");
+        failed = TRUE;
+    } else {
         JSValue jmod = JS_GetPropertyStr(ctx, jvertex, "module");
         ns_wg_shader *vm = wg_hold_opaque(&hold, jmod, g_shader_class);
         if (vm) desc.vertex.module = vm->mod;
         JS_FreeValue(ctx, jmod);
+        if (!vm || !vm->mod) {
+            JS_ThrowTypeError(ctx, "createRenderPipeline: vertex.module must be a GPUShaderModule");
+            failed = TRUE;
+        }
         JSValue jentry = JS_GetPropertyStr(ctx, jvertex, "entryPoint");
         if (JS_IsString(jentry)) vs_entry = (char *)JS_ToCString(ctx, jentry);
         JS_FreeValue(ctx, jentry);
@@ -2670,14 +2804,19 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
         desc.vertex.constantCount = vs_consts.count;
         desc.vertex.constants = vs_consts.entries;
 
+        static const wg_enum_name step_modes[] = {
+            { "vertex", WGPUVertexStepMode_Vertex },
+            { "instance", WGPUVertexStepMode_Instance },
+        };
         JSValue jbufs = JS_GetPropertyStr(ctx, jvertex, "buffers");
-        if (JS_IsArray(jbufs)) {
+        if (!failed && JS_IsArray(jbufs)) {
             uint32_t nb = 0;
             JSValue jbl = JS_GetPropertyStr(ctx, jbufs, "length");
             JS_ToUint32(ctx, &nb, jbl);
             JS_FreeValue(ctx, jbl);
             if (nb > NS_WG_MAX_VBUF) nb = NS_WG_MAX_VBUF;
-            for (uint32_t i = 0; i < nb; i++) {
+            for (uint32_t i = 0; i < nb && !failed; i++) {
+                vbl[i].stepMode = WGPUVertexStepMode_Vertex;
                 JSValue jb = JS_GetPropertyUint32(ctx, jbufs, i);
                 if (!JS_IsObject(jb)) { JS_FreeValue(ctx, jb); continue; }
                 int64_t stride = 0;
@@ -2685,28 +2824,29 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
                 JS_ToInt64(ctx, &stride, jstride);
                 JS_FreeValue(ctx, jstride);
                 vbl[i].arrayStride = (uint64_t)stride;
-                vbl[i].stepMode = WGPUVertexStepMode_Vertex;
-                JSValue jsm = JS_GetPropertyStr(ctx, jb, "stepMode");
-                const char *sm = JS_IsString(jsm) ? JS_ToCString(ctx, jsm) : NULL;
-                if (sm && strcmp(sm, "instance") == 0)
-                    vbl[i].stepMode = WGPUVertexStepMode_Instance;
-                if (sm) JS_FreeCString(ctx, sm);
-                JS_FreeValue(ctx, jsm);
+                int step = WGPUVertexStepMode_Vertex;
+                if (!wg_enum_member(ctx, jb, "stepMode", "GPUVertexStepMode",
+                                    step_modes, G_N_ELEMENTS(step_modes), &step))
+                    failed = TRUE;
+                vbl[i].stepMode = (WGPUVertexStepMode)step;
 
                 JSValue jattrs = JS_GetPropertyStr(ctx, jb, "attributes");
                 uint32_t na = 0;
-                if (JS_IsArray(jattrs)) {
+                if (!failed && JS_IsArray(jattrs)) {
                     JSValue jal = JS_GetPropertyStr(ctx, jattrs, "length");
                     JS_ToUint32(ctx, &na, jal);
                     JS_FreeValue(ctx, jal);
                     if (na > NS_WG_MAX_ATTR) na = NS_WG_MAX_ATTR;
-                    for (uint32_t k = 0; k < na; k++) {
+                    for (uint32_t k = 0; k < na && !failed; k++) {
                         JSValue ja = JS_GetPropertyUint32(ctx, jattrs, k);
-                        JSValue jf = JS_GetPropertyStr(ctx, ja, "format");
-                        const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
-                        attrs[i][k].format = wg_vertex_format(fs);
-                        if (fs) JS_FreeCString(ctx, fs);
-                        JS_FreeValue(ctx, jf);
+                        if (!JS_IsObject(ja)) {
+                            JS_FreeValue(ctx, ja);
+                            JS_ThrowTypeError(ctx, "createRenderPipeline: vertex attribute must be an object");
+                            failed = TRUE;
+                            break;
+                        }
+                        if (!wg_vertex_format_member(ctx, ja, &attrs[i][k].format))
+                            failed = TRUE;
                         int64_t off = 0; uint32_t loc = 0;
                         JSValue jo = JS_GetPropertyStr(ctx, ja, "offset");
                         JS_ToInt64(ctx, &off, jo); JS_FreeValue(ctx, jo);
@@ -2761,16 +2901,19 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     WGPUDepthStencilState ds;
     memset(&ds, 0, sizeof ds);
     JSValue jds = JS_GetPropertyStr(ctx, argv[0], "depthStencil");
-    if (JS_IsObject(jds)) {
-        JSValue jf = JS_GetPropertyStr(ctx, jds, "format");
-        const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
-        ds.format = wg_format_from_str(fs);
-        if (fs) JS_FreeCString(ctx, fs);
-        JS_FreeValue(ctx, jf);
+    if (!failed && JS_IsObject(jds)) {
+        if (!wg_format_member(ctx, jds, "format", TRUE, &ds.format))
+            failed = TRUE;
         JSValue jdw = JS_GetPropertyStr(ctx, jds, "depthWriteEnabled");
         ds.depthWriteEnabled = JS_ToBool(ctx, jdw)
             ? WGPUOptionalBool_True : WGPUOptionalBool_False;
         JS_FreeValue(ctx, jdw);
+        if (!failed && ds.depthWriteEnabled == WGPUOptionalBool_True &&
+            !wg_format_has_depth(ds.format)) {
+            JS_ThrowTypeError(ctx, "createRenderPipeline: depthWriteEnabled needs a depth format, not '%s'",
+                              wg_format_name(ds.format));
+            failed = TRUE;
+        }
         JSValue jdc = JS_GetPropertyStr(ctx, jds, "depthCompare");
         const char *dcs = JS_IsString(jdc) ? JS_ToCString(ctx, jdc) : NULL;
         ds.depthCompare = wg_compare_func(dcs);
@@ -2822,11 +2965,15 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jms);
 
     JSValue jfrag = JS_GetPropertyStr(ctx, argv[0], "fragment");
-    if (JS_IsObject(jfrag)) {
+    if (!failed && JS_IsObject(jfrag)) {
         JSValue jmod = JS_GetPropertyStr(ctx, jfrag, "module");
         ns_wg_shader *fm = wg_hold_opaque(&hold, jmod, g_shader_class);
         if (fm) frag.module = fm->mod;
         JS_FreeValue(ctx, jmod);
+        if (!fm || !fm->mod) {
+            JS_ThrowTypeError(ctx, "createRenderPipeline: fragment.module must be a GPUShaderModule");
+            failed = TRUE;
+        }
         JSValue jentry = JS_GetPropertyStr(ctx, jfrag, "entryPoint");
         if (JS_IsString(jentry)) fs_entry = (char *)JS_ToCString(ctx, jentry);
         JS_FreeValue(ctx, jentry);
@@ -2837,18 +2984,16 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
 
         JSValue jtargets = JS_GetPropertyStr(ctx, jfrag, "targets");
         uint32_t nt = 0;
-        if (JS_IsArray(jtargets)) {
+        if (!failed && JS_IsArray(jtargets)) {
             JSValue jtl = JS_GetPropertyStr(ctx, jtargets, "length");
             JS_ToUint32(ctx, &nt, jtl);
             JS_FreeValue(ctx, jtl);
             if (nt > NS_WG_MAX_TARGET) nt = NS_WG_MAX_TARGET;
-            for (uint32_t i = 0; i < nt; i++) {
+            for (uint32_t i = 0; i < nt && !failed; i++) {
                 JSValue jtg = JS_GetPropertyUint32(ctx, jtargets, i);
-                JSValue jf = JS_GetPropertyStr(ctx, jtg, "format");
-                const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
-                targets[i].format = wg_format_from_str(fs);
-                if (fs) JS_FreeCString(ctx, fs);
-                JS_FreeValue(ctx, jf);
+                if (!JS_IsObject(jtg)) { JS_FreeValue(ctx, jtg); continue; }
+                if (!wg_format_member(ctx, jtg, "format", TRUE, &targets[i].format))
+                    failed = TRUE;
                 targets[i].writeMask = WGPUColorWriteMask_All;
                 JSValue jwm = JS_GetPropertyStr(ctx, jtg, "writeMask");
                 if (!JS_IsUndefined(jwm)) {
@@ -2877,12 +3022,14 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, jfrag);
 
-    WGPURenderPipeline pipe = wgpuDeviceCreateRenderPipeline(d->device, &desc);
+    WGPURenderPipeline pipe = failed ? NULL
+        : wgpuDeviceCreateRenderPipeline(d->device, &desc);
     wg_hold_release(&hold);
     wg_constants_clear(&vs_consts);
     wg_constants_clear(&fs_consts);
     if (vs_entry) JS_FreeCString(ctx, vs_entry);
     if (fs_entry) JS_FreeCString(ctx, fs_entry);
+    if (failed) return JS_EXCEPTION;
     if (!pipe) return JS_ThrowTypeError(ctx, "createRenderPipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_pipeline_class);
@@ -2943,16 +3090,112 @@ wg_make_bgl(JSContext *ctx, WGPUBindGroupLayout layout)
     return obj;
 }
 
-static WGPUBufferBindingType
-wg_buffer_binding_type(const char *s)
-{
-    if (s && strcmp(s, "storage") == 0) return WGPUBufferBindingType_Storage;
-    if (s && strcmp(s, "read-only-storage") == 0)
-        return WGPUBufferBindingType_ReadOnlyStorage;
-    return WGPUBufferBindingType_Uniform;
-}
+static const wg_enum_name wg_buffer_binding_names[] = {
+    { "uniform", WGPUBufferBindingType_Uniform },
+    { "storage", WGPUBufferBindingType_Storage },
+    { "read-only-storage", WGPUBufferBindingType_ReadOnlyStorage },
+};
+
+static const wg_enum_name wg_sampler_binding_names[] = {
+    { "filtering", WGPUSamplerBindingType_Filtering },
+    { "non-filtering", WGPUSamplerBindingType_NonFiltering },
+    { "comparison", WGPUSamplerBindingType_Comparison },
+};
+
+static const wg_enum_name wg_sample_type_names[] = {
+    { "float", WGPUTextureSampleType_Float },
+    { "unfilterable-float", WGPUTextureSampleType_UnfilterableFloat },
+    { "depth", WGPUTextureSampleType_Depth },
+    { "sint", WGPUTextureSampleType_Sint },
+    { "uint", WGPUTextureSampleType_Uint },
+};
+
+static const wg_enum_name wg_storage_access_names[] = {
+    { "write-only", WGPUStorageTextureAccess_WriteOnly },
+    { "read-only", WGPUStorageTextureAccess_ReadOnly },
+    { "read-write", WGPUStorageTextureAccess_ReadWrite },
+};
 
 #define NS_WG_MAX_BGL_ENTRY 32
+
+static gboolean
+wg_read_bgl_entry(JSContext *ctx, JSValueConst e, WGPUBindGroupLayoutEntry *out)
+{
+    if (!JS_IsObject(e)) {
+        JS_ThrowTypeError(ctx, "createBindGroupLayout: entry must be an object");
+        return FALSE;
+    }
+    uint32_t binding = 0, vis = 0;
+    JSValue jb = JS_GetPropertyStr(ctx, e, "binding");
+    JS_ToUint32(ctx, &binding, jb); JS_FreeValue(ctx, jb);
+    JSValue jv = JS_GetPropertyStr(ctx, e, "visibility");
+    JS_ToUint32(ctx, &vis, jv); JS_FreeValue(ctx, jv);
+    out->binding = binding;
+    out->visibility = vis & 0x7u;
+    JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
+    JSValue jsamp = JS_GetPropertyStr(ctx, e, "sampler");
+    JSValue jtex = JS_GetPropertyStr(ctx, e, "texture");
+    JSValue jstore = JS_GetPropertyStr(ctx, e, "storageTexture");
+    gboolean ok = TRUE;
+    if (JS_IsObject(jbuf)) {
+        int type = WGPUBufferBindingType_Uniform;
+        ok = wg_enum_member(ctx, jbuf, "type", "GPUBufferBindingType",
+                            wg_buffer_binding_names,
+                            G_N_ELEMENTS(wg_buffer_binding_names), &type);
+        out->buffer.type = (WGPUBufferBindingType)type;
+        JSValue jd = JS_GetPropertyStr(ctx, jbuf, "hasDynamicOffset");
+        out->buffer.hasDynamicOffset = JS_ToBool(ctx, jd);
+        JS_FreeValue(ctx, jd);
+        JSValue jm = JS_GetPropertyStr(ctx, jbuf, "minBindingSize");
+        if (!JS_IsUndefined(jm)) {
+            int64_t m = 0; JS_ToInt64(ctx, &m, jm);
+            out->buffer.minBindingSize = m > 0 ? (uint64_t)m : 0;
+        }
+        JS_FreeValue(ctx, jm);
+    } else if (JS_IsObject(jsamp)) {
+        int type = WGPUSamplerBindingType_Filtering;
+        ok = wg_enum_member(ctx, jsamp, "type", "GPUSamplerBindingType",
+                            wg_sampler_binding_names,
+                            G_N_ELEMENTS(wg_sampler_binding_names), &type);
+        out->sampler.type = (WGPUSamplerBindingType)type;
+    } else if (JS_IsObject(jtex)) {
+        int sample = WGPUTextureSampleType_Float;
+        int dim = WGPUTextureViewDimension_2D;
+        ok = wg_enum_member(ctx, jtex, "sampleType", "GPUTextureSampleType",
+                            wg_sample_type_names,
+                            G_N_ELEMENTS(wg_sample_type_names), &sample) &&
+             wg_enum_member(ctx, jtex, "viewDimension", "GPUTextureViewDimension",
+                            wg_view_dimension_names,
+                            G_N_ELEMENTS(wg_view_dimension_names), &dim);
+        out->texture.sampleType = (WGPUTextureSampleType)sample;
+        out->texture.viewDimension = (WGPUTextureViewDimension)dim;
+        JSValue jms = JS_GetPropertyStr(ctx, jtex, "multisampled");
+        out->texture.multisampled = JS_ToBool(ctx, jms);
+        JS_FreeValue(ctx, jms);
+    } else if (JS_IsObject(jstore)) {
+        int access = WGPUStorageTextureAccess_WriteOnly;
+        int dim = WGPUTextureViewDimension_2D;
+        ok = wg_enum_member(ctx, jstore, "access", "GPUStorageTextureAccess",
+                            wg_storage_access_names,
+                            G_N_ELEMENTS(wg_storage_access_names), &access) &&
+             wg_format_member(ctx, jstore, "format", TRUE,
+                              &out->storageTexture.format) &&
+             wg_enum_member(ctx, jstore, "viewDimension", "GPUTextureViewDimension",
+                            wg_view_dimension_names,
+                            G_N_ELEMENTS(wg_view_dimension_names), &dim);
+        out->storageTexture.access = (WGPUStorageTextureAccess)access;
+        out->storageTexture.viewDimension = (WGPUTextureViewDimension)dim;
+    } else {
+        JS_ThrowTypeError(ctx, "createBindGroupLayout: entry %u has no supported binding type",
+                          binding);
+        ok = FALSE;
+    }
+    JS_FreeValue(ctx, jstore);
+    JS_FreeValue(ctx, jbuf);
+    JS_FreeValue(ctx, jsamp);
+    JS_FreeValue(ctx, jtex);
+    return ok;
+}
 
 static JSValue
 wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
@@ -2965,91 +3208,21 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
     WGPUBindGroupLayoutEntry entries[NS_WG_MAX_BGL_ENTRY];
     memset(entries, 0, sizeof entries);
     uint32_t n = 0;
+    gboolean ok = TRUE;
     JSValue jentries = JS_GetPropertyStr(ctx, argv[0], "entries");
     if (JS_IsArray(jentries)) {
         JSValue jl = JS_GetPropertyStr(ctx, jentries, "length");
         JS_ToUint32(ctx, &n, jl);
         JS_FreeValue(ctx, jl);
         if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
-        for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t i = 0; i < n && ok; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, jentries, i);
-            uint32_t binding = 0, vis = 0;
-            JSValue jb = JS_GetPropertyStr(ctx, e, "binding");
-            JS_ToUint32(ctx, &binding, jb); JS_FreeValue(ctx, jb);
-            JSValue jv = JS_GetPropertyStr(ctx, e, "visibility");
-            JS_ToUint32(ctx, &vis, jv); JS_FreeValue(ctx, jv);
-            entries[i].binding = binding;
-            entries[i].visibility = vis & 0x7u;
-            JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
-            JSValue jsamp = JS_GetPropertyStr(ctx, e, "sampler");
-            JSValue jtex = JS_GetPropertyStr(ctx, e, "texture");
-            JSValue jstore = JS_GetPropertyStr(ctx, e, "storageTexture");
-            if (JS_IsObject(jbuf)) {
-                char *ts = wg_get_string(ctx, jbuf, "type");
-                entries[i].buffer.type = wg_buffer_binding_type(ts);
-                g_free(ts);
-                JSValue jd = JS_GetPropertyStr(ctx, jbuf, "hasDynamicOffset");
-                entries[i].buffer.hasDynamicOffset = JS_ToBool(ctx, jd);
-                JS_FreeValue(ctx, jd);
-                JSValue jm = JS_GetPropertyStr(ctx, jbuf, "minBindingSize");
-                if (!JS_IsUndefined(jm)) {
-                    int64_t m = 0; JS_ToInt64(ctx, &m, jm);
-                    entries[i].buffer.minBindingSize = m > 0 ? (uint64_t)m : 0;
-                }
-                JS_FreeValue(ctx, jm);
-            } else if (JS_IsObject(jsamp)) {
-                char *ts = wg_get_string(ctx, jsamp, "type");
-                entries[i].sampler.type = (ts && strcmp(ts, "non-filtering") == 0)
-                    ? WGPUSamplerBindingType_NonFiltering
-                    : (ts && strcmp(ts, "comparison") == 0)
-                    ? WGPUSamplerBindingType_Comparison
-                    : WGPUSamplerBindingType_Filtering;
-                g_free(ts);
-            } else if (JS_IsObject(jtex)) {
-                char *ss = wg_get_string(ctx, jtex, "sampleType");
-                entries[i].texture.sampleType =
-                    (ss && strcmp(ss, "unfilterable-float") == 0)
-                        ? WGPUTextureSampleType_UnfilterableFloat
-                    : (ss && strcmp(ss, "depth") == 0)
-                        ? WGPUTextureSampleType_Depth
-                    : (ss && strcmp(ss, "uint") == 0)
-                        ? WGPUTextureSampleType_Uint
-                    : (ss && strcmp(ss, "sint") == 0)
-                        ? WGPUTextureSampleType_Sint
-                    : WGPUTextureSampleType_Float;
-                g_free(ss);
-                char *vd = wg_get_string(ctx, jtex, "viewDimension");
-                entries[i].texture.viewDimension = vd ? wg_view_dimension(vd)
-                                                      : WGPUTextureViewDimension_2D;
-                g_free(vd);
-                JSValue jms = JS_GetPropertyStr(ctx, jtex, "multisampled");
-                entries[i].texture.multisampled = JS_ToBool(ctx, jms);
-                JS_FreeValue(ctx, jms);
-            } else if (JS_IsObject(jstore)) {
-                char *acc = wg_get_string(ctx, jstore, "access");
-                entries[i].storageTexture.access =
-                    (acc && strcmp(acc, "read-only") == 0)
-                        ? WGPUStorageTextureAccess_ReadOnly
-                    : (acc && strcmp(acc, "read-write") == 0)
-                        ? WGPUStorageTextureAccess_ReadWrite
-                    : WGPUStorageTextureAccess_WriteOnly;
-                g_free(acc);
-                char *fmt = wg_get_string(ctx, jstore, "format");
-                entries[i].storageTexture.format = wg_format_from_str(fmt);
-                g_free(fmt);
-                char *vd = wg_get_string(ctx, jstore, "viewDimension");
-                entries[i].storageTexture.viewDimension =
-                    vd ? wg_view_dimension(vd) : WGPUTextureViewDimension_2D;
-                g_free(vd);
-            }
-            JS_FreeValue(ctx, jstore);
-            JS_FreeValue(ctx, jbuf);
-            JS_FreeValue(ctx, jsamp);
-            JS_FreeValue(ctx, jtex);
+            ok = wg_read_bgl_entry(ctx, e, &entries[i]);
             JS_FreeValue(ctx, e);
         }
     }
     JS_FreeValue(ctx, jentries);
+    if (!ok) return JS_EXCEPTION;
 
     WGPUBindGroupLayoutDescriptor desc;
     memset(&desc, 0, sizeof desc);
@@ -3082,6 +3255,8 @@ wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
     WGPUBindGroupLayout layouts[NS_WG_MAX_BGL_ENTRY];
     memset(layouts, 0, sizeof layouts);
     wg_hold hold = { ctx, NULL };
+    WGPUBindGroupLayout empty = NULL;
+    gboolean ok = TRUE;
     uint32_t n = 0;
     JSValue jbgls = JS_GetPropertyStr(ctx, argv[0], "bindGroupLayouts");
     if (JS_IsArray(jbgls)) {
@@ -3089,10 +3264,25 @@ wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
         JS_ToUint32(ctx, &n, jl);
         JS_FreeValue(ctx, jl);
         if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
-        for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t i = 0; i < n && ok; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, jbgls, i);
             ns_wg_bgl *b = wg_hold_opaque(&hold, e, g_bgl_class);
-            if (b) layouts[i] = b->layout;
+            if (b && b->layout) {
+                layouts[i] = b->layout;
+            } else if (JS_IsNull(e) || JS_IsUndefined(e)) {
+                if (!empty) {
+                    WGPUBindGroupLayoutDescriptor ed;
+                    memset(&ed, 0, sizeof ed);
+                    empty = wgpuDeviceCreateBindGroupLayout(d->device, &ed);
+                }
+                layouts[i] = empty;
+                ok = empty != NULL;
+                if (!ok) JS_ThrowTypeError(ctx, "createPipelineLayout failed");
+            } else {
+                JS_ThrowTypeError(ctx, "createPipelineLayout: bindGroupLayouts[%u] is not a GPUBindGroupLayout",
+                                  i);
+                ok = FALSE;
+            }
             JS_FreeValue(ctx, e);
         }
     }
@@ -3102,8 +3292,11 @@ wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
     memset(&desc, 0, sizeof desc);
     desc.bindGroupLayoutCount = n;
     desc.bindGroupLayouts = layouts;
-    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(d->device, &desc);
+    WGPUPipelineLayout layout = ok
+        ? wgpuDeviceCreatePipelineLayout(d->device, &desc) : NULL;
     wg_hold_release(&hold);
+    if (empty) wgpuBindGroupLayoutRelease(empty);
+    if (!ok) return JS_EXCEPTION;
     if (!layout)
         return JS_ThrowTypeError(ctx, "createPipelineLayout failed");
 
@@ -3144,14 +3337,21 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     WGPUTextureView owned_views[NS_WG_MAX_BGL_ENTRY];
     size_t n_owned_views = 0;
     uint32_t n = 0;
+    gboolean ok = TRUE;
     JSValue jentries = JS_GetPropertyStr(ctx, argv[0], "entries");
     if (JS_IsArray(jentries)) {
         JSValue jl = JS_GetPropertyStr(ctx, jentries, "length");
         JS_ToUint32(ctx, &n, jl);
         JS_FreeValue(ctx, jl);
         if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
-        for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t i = 0; i < n && ok; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, jentries, i);
+            if (!JS_IsObject(e)) {
+                JS_FreeValue(ctx, e);
+                JS_ThrowTypeError(ctx, "createBindGroup: entry must be an object");
+                ok = FALSE;
+                break;
+            }
             uint32_t binding = 0;
             JSValue jb = JS_GetPropertyStr(ctx, e, "binding");
             JS_ToUint32(ctx, &binding, jb); JS_FreeValue(ctx, jb);
@@ -3191,6 +3391,16 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
             }
             JS_FreeValue(ctx, jres);
             JS_FreeValue(ctx, e);
+            if (!entries[i].buffer && !entries[i].sampler &&
+                !entries[i].textureView) {
+                JS_ThrowTypeError(ctx, "createBindGroup: entry %u has no valid resource",
+                                  binding);
+                ok = FALSE;
+            } else if (entries[i].buffer && entries[i].size == 0) {
+                JS_ThrowTypeError(ctx, "createBindGroup: entry %u binds 0 bytes",
+                                  binding);
+                ok = FALSE;
+            }
         }
     }
     JS_FreeValue(ctx, jentries);
@@ -3200,10 +3410,12 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     desc.layout = bgl->layout;
     desc.entryCount = n;
     desc.entries = entries;
-    WGPUBindGroup group = wgpuDeviceCreateBindGroup(d->device, &desc);
+    WGPUBindGroup group = ok && bgl->layout
+        ? wgpuDeviceCreateBindGroup(d->device, &desc) : NULL;
     wg_hold_release(&hold);
     for (size_t i = 0; i < n_owned_views; i++)
         if (owned_views[i]) wgpuTextureViewRelease(owned_views[i]);
+    if (!ok) return JS_EXCEPTION;
     if (!group) return JS_ThrowTypeError(ctx, "createBindGroup failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_bindgroup_class);
@@ -3366,6 +3578,7 @@ wg_encoder_clearBuffer(JSContext *ctx, JSValueConst this_val,
     if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToInt64(ctx, &off, argv[1]);
     if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToInt64(ctx, &size, argv[2]);
     if (off < 0) off = 0;
+    if (size == 0) return JS_UNDEFINED;
     wgpuCommandEncoderClearBuffer(e->enc, b->buffer, (uint64_t)off,
                                   size < 0 ? WGPU_WHOLE_SIZE : (uint64_t)size);
     return JS_UNDEFINED;
@@ -3418,7 +3631,10 @@ wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "pushErrorScope: invalid filter");
     }
     JS_FreeCString(ctx, f);
-    wgpuDevicePushErrorScope(d->device, filter);
+    guint8 internal = filter == WGPUErrorFilter_Internal;
+    if (!d->scope_internal) d->scope_internal = g_byte_array_new();
+    g_byte_array_append(d->scope_internal, &internal, 1);
+    if (!internal) wgpuDevicePushErrorScope(d->device, filter);
     d->error_scopes++;
     return JS_UNDEFINED;
 }
@@ -3470,6 +3686,12 @@ wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
     if (d->error_scopes == 0)
         return wg_promise_rejected(ctx, "OperationError: popErrorScope: the error scope stack is empty");
     d->error_scopes--;
+    if (d->scope_internal && d->scope_internal->len > 0) {
+        guint top = d->scope_internal->len - 1;
+        gboolean internal = d->scope_internal->data[top] != 0;
+        g_byte_array_set_size(d->scope_internal, top);
+        if (internal) return wg_promise_resolved(ctx, JS_NULL);
+    }
     wg_scope_wait wait;
     memset(&wait, 0, sizeof wait);
     WGPUPopErrorScopeCallbackInfo ci;
@@ -3601,14 +3823,18 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
     uint32_t usage = 0; JS_ToUint32(ctx, &usage, jusage); JS_FreeValue(ctx, jusage);
     desc.usage = (WGPUTextureUsage)(usage & ~0x1Fu ? 0 : usage);
 
-    JSValue jfmt = JS_GetPropertyStr(ctx, argv[0], "format");
-    const char *fmt = JS_IsString(jfmt) ? JS_ToCString(ctx, jfmt) : NULL;
-    desc.format = wg_format_from_str(fmt);
-    if (fmt) JS_FreeCString(ctx, fmt);
-    JS_FreeValue(ctx, jfmt);
     WGPUTextureFormat view_formats[NS_WG_MAX_VIEW_FORMATS];
-    desc.viewFormatCount = wg_read_view_formats(ctx, argv[0], view_formats);
+    size_t view_format_count = 0;
+    int dimension = WGPUTextureDimension_2D;
+    if (!wg_format_member(ctx, argv[0], "format", TRUE, &desc.format) ||
+        !wg_read_view_formats(ctx, argv[0], view_formats, &view_format_count) ||
+        !wg_enum_member(ctx, argv[0], "dimension", "GPUTextureDimension",
+                        wg_texture_dimension_names,
+                        G_N_ELEMENTS(wg_texture_dimension_names), &dimension))
+        return JS_EXCEPTION;
+    desc.viewFormatCount = view_format_count;
     desc.viewFormats = view_formats;
+    desc.dimension = (WGPUTextureDimension)dimension;
 
     JSValue jmip = JS_GetPropertyStr(ctx, argv[0], "mipLevelCount");
     if (!JS_IsUndefined(jmip)) { uint32_t m = 1; JS_ToUint32(ctx, &m, jmip); desc.mipLevelCount = m ? m : 1; }
@@ -3616,12 +3842,6 @@ wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
     JSValue jsamp = JS_GetPropertyStr(ctx, argv[0], "sampleCount");
     if (!JS_IsUndefined(jsamp)) { uint32_t m = 1; JS_ToUint32(ctx, &m, jsamp); desc.sampleCount = m ? m : 1; }
     JS_FreeValue(ctx, jsamp);
-    JSValue jdim = JS_GetPropertyStr(ctx, argv[0], "dimension");
-    const char *dim = JS_IsString(jdim) ? JS_ToCString(ctx, jdim) : NULL;
-    if (dim && strcmp(dim, "3d") == 0) desc.dimension = WGPUTextureDimension_3D;
-    else if (dim && strcmp(dim, "1d") == 0) desc.dimension = WGPUTextureDimension_1D;
-    if (dim) JS_FreeCString(ctx, dim);
-    JS_FreeValue(ctx, jdim);
 
     WGPUTexture tex = wgpuDeviceCreateTexture(d->device, &desc);
     if (!tex) return JS_ThrowTypeError(ctx, "createTexture failed");
@@ -3884,10 +4104,14 @@ wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, jcompute);
 
-    WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(d->device, &desc);
+    gboolean have_module = desc.compute.module != NULL;
+    WGPUComputePipeline pipe = have_module
+        ? wgpuDeviceCreateComputePipeline(d->device, &desc) : NULL;
     wg_hold_release(&hold);
     wg_constants_clear(&consts);
     if (entry) JS_FreeCString(ctx, entry);
+    if (!have_module)
+        return JS_ThrowTypeError(ctx, "createComputePipeline: compute.module must be a GPUShaderModule");
     if (!pipe) return JS_ThrowTypeError(ctx, "createComputePipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_compute_pipe_class);
@@ -4026,28 +4250,33 @@ wg_device_createRenderBundleEncoder(JSContext *ctx, JSValueConst this_val,
     WGPUTextureFormat formats[NS_WG_MAX_COLOR_ATTACHMENTS];
     WGPURenderBundleEncoderDescriptor desc;
     memset(&desc, 0, sizeof desc);
+    gboolean ok = TRUE;
     JSValue jcf = JS_GetPropertyStr(ctx, argv[0], "colorFormats");
     if (JS_IsObject(jcf)) {
         JSValue list = wg_array_from(ctx, jcf);
         uint32_t n = 0;
-        JSValue jl = JS_GetPropertyStr(ctx, list, "length");
-        JS_ToUint32(ctx, &n, jl);
-        JS_FreeValue(ctx, jl);
-        for (uint32_t i = 0; i < n && i < NS_WG_MAX_COLOR_ATTACHMENTS; i++) {
+        if (JS_IsException(list)) {
+            ok = FALSE;
+        } else {
+            JSValue jl = JS_GetPropertyStr(ctx, list, "length");
+            JS_ToUint32(ctx, &n, jl);
+            JS_FreeValue(ctx, jl);
+        }
+        for (uint32_t i = 0; ok && i < n && i < NS_WG_MAX_COLOR_ATTACHMENTS; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, list, i);
-            const char *f = JS_IsString(e) ? JS_ToCString(ctx, e) : NULL;
-            formats[desc.colorFormatCount++] = f ? wg_format_from_str(f)
-                                                 : WGPUTextureFormat_Undefined;
-            if (f) JS_FreeCString(ctx, f);
+            WGPUTextureFormat f = WGPUTextureFormat_Undefined;
+            if (!JS_IsNull(e) && !JS_IsUndefined(e))
+                ok = wg_format_value(ctx, e, &f);
+            formats[desc.colorFormatCount++] = f;
             JS_FreeValue(ctx, e);
         }
         JS_FreeValue(ctx, list);
     }
     JS_FreeValue(ctx, jcf);
     desc.colorFormats = formats;
-    char *dsf = wg_get_string(ctx, argv[0], "depthStencilFormat");
-    desc.depthStencilFormat = dsf ? wg_format_from_str(dsf) : WGPUTextureFormat_Undefined;
-    g_free(dsf);
+    if (!ok || !wg_format_member(ctx, argv[0], "depthStencilFormat", FALSE,
+                                 &desc.depthStencilFormat))
+        return JS_EXCEPTION;
     desc.sampleCount = 1;
     JSValue js = JS_GetPropertyStr(ctx, argv[0], "sampleCount");
     if (!JS_IsUndefined(js)) JS_ToUint32(ctx, &desc.sampleCount, js);

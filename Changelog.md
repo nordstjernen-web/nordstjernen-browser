@@ -3,6 +3,17 @@ Changelog:
 
 1.0.36:
 ======
+* WebGPU: a page can no longer abort the browser with a bad descriptor.
+  wgpu-native panics, and the whole process aborts, when it gets a
+  texture format it does not know, a missing shader module, a
+  bind-group-layout entry without a binding type, a zero view or binding
+  size, an "internal" error scope and a few other values. The binding
+  passed such values through unchecked, so TikTok, whose GPU probe tries
+  the misspelled format `etc2-rgb8-unorm`, aborted on 7 of 10 loads.
+  Texture formats, view dimensions, aspects, binding types and vertex
+  formats are now checked like Chrome does, and an unknown value throws a
+  `TypeError`. The other cases throw a `TypeError` or are handled before
+  they reach wgpu-native.
 * CSS animations run at the display's frame rate again. The window
   capped page animations at 60 frames a second by dropping any frame
   that came less than exactly 1/60 s after the last one, but a 60 Hz
