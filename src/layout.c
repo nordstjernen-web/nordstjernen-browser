@@ -16220,6 +16220,17 @@ center_form_control_content(ns_box *box, double measured)
         c->y += shift;
 }
 
+static gboolean
+inline_text_ends_with_break(const char *text)
+{
+    if (!text) return FALSE;
+    gsize len = strlen(text);
+    while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\t' ||
+                       text[len - 1] == '\n' || text[len - 1] == '\r'))
+        len--;
+    return len >= 3 && memcmp(text + len - 3, "\xe2\x80\xa8", 3) == 0;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -16737,7 +16748,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             collect_escaping_floats(c, floats, 0);
             double line_height = inline_line_height(child_inherited);
-            inline_line_top = c->y + MAX(0, c->content_height - line_height);
+            inline_line_top = inline_text_ends_with_break(c->text)
+                ? -1 : c->y + MAX(0, c->content_height - line_height);
             cursor_y += c->content_height;
         }
         if ((c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
