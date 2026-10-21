@@ -348,6 +348,8 @@ shape_ellipsis (EllipsizeState *state)
         case NS_PANGO_ATTR_SCALE:
         case NS_PANGO_ATTR_LETTER_SPACING:
         case NS_PANGO_ATTR_ABSOLUTE_SIZE:
+        case NS_PANGO_ATTR_LINE_HEIGHT:
+        case NS_PANGO_ATTR_ABSOLUTE_LINE_HEIGHT:
           attr->start_index = 0;
           attr->end_index = G_MAXINT;
           ns_pango_attr_list_insert (&attrs, attr);

@@ -4340,6 +4340,38 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     double pr = inline_box_side_px(s, NS_CSS_PADDING_RIGHT,
                                    NS_CSS_BORDER_RIGHT_WIDTH,
                                    NS_CSS_BORDER_RIGHT_STYLE);
+    gboolean bidi_override = FALSE;
+    gboolean bidi_isolate = FALSE;
+    gboolean bidi_plaintext = FALSE;
+    if (s) {
+        const char *ub = ns_style_keyword(s, NS_CSS_UNICODE_BIDI);
+        if (ub) {
+            if (strcmp(ub, "bidi-override") == 0)
+                bidi_override = TRUE;
+            else if (strcmp(ub, "isolate-override") == 0)
+                bidi_override = bidi_isolate = TRUE;
+            else if (strcmp(ub, "isolate") == 0)
+                bidi_isolate = TRUE;
+            else if (strcmp(ub, "plaintext") == 0)
+                bidi_plaintext = TRUE;
+        }
+    }
+    if (bidi_override || bidi_isolate || bidi_plaintext) {
+        const char *bd_dir = ns_element_get_attr(n, "dir");
+        if (!bd_dir || !*bd_dir) bd_dir = ns_style_keyword(s, NS_CSS_DIRECTION);
+        gboolean rtl = bd_dir && g_ascii_strcasecmp(bd_dir, "rtl") == 0;
+        gboolean dir_auto = (bd_dir && g_ascii_strcasecmp(bd_dir, "auto") == 0) ||
+                            (strcmp(n->name, "bdi") == 0 &&
+                             !ns_element_get_attr(n, "dir"));
+        if (bidi_isolate || bidi_plaintext)
+            g_string_append(ctx->out,
+                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"
+                : rtl                        ? "\xe2\x81\xa7"
+                                             : "\xe2\x81\xa6");
+        if (bidi_override)
+            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"
+                                           : "\xe2\x80\xad");
+    }
     append_inline_spacer(ctx, ml);
     gsize elem_start = ctx->out->len;
     append_inline_spacer(ctx, pl);
@@ -4402,39 +4434,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         g_string_append(ctx->out, open_q);
         g_free(open_q);
         ctx->q_depth++;
-    }
-
-    gboolean bidi_override = FALSE;
-    gboolean bidi_isolate = FALSE;
-    gboolean bidi_plaintext = FALSE;
-    if (s) {
-        const char *ub = ns_style_keyword(s, NS_CSS_UNICODE_BIDI);
-        if (ub) {
-            if (strcmp(ub, "bidi-override") == 0)
-                bidi_override = TRUE;
-            else if (strcmp(ub, "isolate-override") == 0)
-                bidi_override = bidi_isolate = TRUE;
-            else if (strcmp(ub, "isolate") == 0)
-                bidi_isolate = TRUE;
-            else if (strcmp(ub, "plaintext") == 0)
-                bidi_plaintext = TRUE;
-        }
-    }
-    if (bidi_override || bidi_isolate || bidi_plaintext) {
-        const char *bd_dir = ns_element_get_attr(n, "dir");
-        if (!bd_dir || !*bd_dir) bd_dir = ns_style_keyword(s, NS_CSS_DIRECTION);
-        gboolean rtl = bd_dir && g_ascii_strcasecmp(bd_dir, "rtl") == 0;
-        gboolean dir_auto = (bd_dir && g_ascii_strcasecmp(bd_dir, "auto") == 0) ||
-                            (strcmp(n->name, "bdi") == 0 &&
-                             !ns_element_get_attr(n, "dir"));
-        if (bidi_isolate || bidi_plaintext)
-            g_string_append(ctx->out,
-                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"
-                : rtl                        ? "\xe2\x81\xa7"
-                                             : "\xe2\x81\xa6");
-        if (bidi_override)
-            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"
-                                           : "\xe2\x80\xad");
     }
 
     double outer_rise = ctx->rise;
@@ -4548,10 +4547,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     emit_rise_attr(ctx, rise_start, own_rise);
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
-    if (bidi_override)
-        g_string_append(ctx->out, "\xe2\x80\xac");
-    if (bidi_isolate || bidi_plaintext)
-        g_string_append(ctx->out, "\xe2\x81\xa9");
     if (is_q) {
         ctx->q_depth--;
         char *close_q = quotes_string_for(s, ctx->q_depth, TRUE);
@@ -4571,6 +4566,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     g_array_append_val(ctx->attrs, elem);
     ctx->rise = outer_rise;
     append_inline_spacer(ctx, mr);
+    if (bidi_override)
+        g_string_append(ctx->out, "\xe2\x80\xac");
+    if (bidi_isolate || bidi_plaintext)
+        g_string_append(ctx->out, "\xe2\x81\xa9");
     ctx->active_href   = prev_href;
     ctx->active_target = prev_target;
     ctx->active_link_node = prev_link_node;
@@ -7148,13 +7147,21 @@ inline_insert_line_height_units(NsPangoAttrList *list, int units, guint start,
     ns_pango_attr_list_insert(list, a);
 }
 
+static gboolean inline_box_in_quirks_document(const ns_box *box);
+
+static int
+inline_line_height_units(double px)
+{
+    px = CLAMP(px, 0.0, (double)G_MAXINT16);
+    return MAX(1, (int)lround(px * NS_PANGO_SCALE));
+}
+
 static void
 inline_insert_line_height(NsPangoAttrList *list, double px, gboolean normal,
                           guint start, guint end)
 {
-    px = CLAMP(px, 0.0, (double)G_MAXINT16);
-    inline_insert_line_height_units(
-        list, MAX(1, (int)lround(px * NS_PANGO_SCALE)), start, end);
+    inline_insert_line_height_units(list, inline_line_height_units(px),
+                                    start, end);
 #ifdef NS_USE_WEB_TEXT_LIB
     NsPangoAttribute *a = ns_pango_attr_line_height_new(normal ? 1.0 : 0.0);
     a->start_index = start;
@@ -7310,6 +7317,13 @@ ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
                                                         NS_CSS_LINE_HEIGHT_KEY);
     gboolean has_shorter = strut && list &&
                            inline_apply_line_heights(list, box, strut);
+#ifdef NS_USE_WEB_TEXT_LIB
+    if (strut && box && !inline_box_in_quirks_document(box)) {
+        ns_pango_layout_set_strut_line_height(
+            layout, inline_line_height_units(strut->px));
+        has_shorter = FALSE;
+    }
+#endif
     ns_pango_layout_set_attributes(layout, list);
     if (!box || !box->attrs) return;
     gboolean stretched = FALSE;
@@ -7526,7 +7540,14 @@ inline_atomic_line_offsets(const ns_box *box, NsPangoLayout *layout,
     ns_pango_layout_iter_free(strut_iter);
     g_object_unref(strut);
     if (font_height <= 0) return NULL;
+#ifdef NS_USE_WEB_TEXT_LIB
+    double content_ascent = round(font_ascent);
+    double content_height = content_ascent + round(font_height - font_ascent);
+    double strut_ascent = content_ascent +
+                          floor((line_height - content_height) / 2.0);
+#else
     double strut_ascent = font_ascent + (line_height - font_height) / 2.0;
+#endif
     double strut_descent = line_height - strut_ascent;
     gboolean *has_atomic = g_new0(gboolean, line_count);
     for (guint i = 0; i < box->inline_atomics->len; i++) {

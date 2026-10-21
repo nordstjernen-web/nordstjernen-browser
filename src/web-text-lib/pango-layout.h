@@ -202,6 +202,9 @@ void           ns_pango_layout_set_indent           (NsPangoLayout              
 NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_layout_get_indent           (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_ALL
+void           ns_pango_layout_set_strut_line_height (NsPangoLayout               *layout,
+                                                   int                         line_height);
+NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_layout_get_spacing          (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_1_44
 float          ns_pango_layout_get_line_spacing     (NsPangoLayout                *layout);
