@@ -203,6 +203,17 @@ def main_thread_ms(timing, probe):
 LOCALE_OVERRIDES = ("LANGUAGE", "FC_LANG", "NS_PANGO_LANGUAGE")
 
 
+FONT_CACHE = os.path.join(tempfile.gettempdir(), "sitebench-fontconfig-%s" % (os.getuid() if hasattr(os, "getuid") else "user"))
+
+
+def share_font_cache(cache_home):
+    os.makedirs(FONT_CACHE, exist_ok=True)
+    try:
+        os.symlink(FONT_CACHE, os.path.join(cache_home, "fontconfig"))
+    except OSError:
+        pass
+
+
 def isolated_env(home, locale):
     env = dict(os.environ)
     env["HOME"] = home
@@ -217,6 +228,7 @@ def isolated_env(home, locale):
         env.setdefault("NS_ALLOW_ROOT", "1")
     for key in ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
         os.makedirs(env[key], exist_ok=True)
+    share_font_cache(env["XDG_CACHE_HOME"])
     return env
 
 

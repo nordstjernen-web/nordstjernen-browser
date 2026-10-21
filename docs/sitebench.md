@@ -199,6 +199,13 @@ for captures made before the locale was. Both browsers also run in UTC,
 Chrome through its context's time zone and Nordstjernen with `TZ=UTC`,
 so dates and times a page prints read the same in both.
 
+Each Nordstjernen load gets a new home directory, but all of them share
+one fontconfig cache, in `sitebench-fontconfig-<uid>` under the system's
+temporary directory. A home without one makes fontconfig scan the
+installed fonts again before the first frame, about 400 ms on macOS, a
+cost a user pays once and not on every page. Captures made before the
+cache was shared count it in their first paint.
+
 **Scores** (`compare.py`):
 
 - *Visual parity* (0–100) weighs viewport SSIM (30%), colour histogram
@@ -407,6 +414,30 @@ scripts/sitebench/snapshot.py ab /path/to/old/nordstjernen builddir/src/gtk/nord
   with `--max-site-loss=N`, when it loses more than N of the elements the
   old build matched on one site, beyond that site's noise. A site the old
   build fails on is left out and listed.
+
+- `perf` times the builds and Chrome loading each copy, as the cost of
+  rendering the same input. Every load starts a fresh Nordstjernen
+  process with `--settle-ms=0 --timing`, and a fresh browser context in
+  one running Chrome, with requests to other hosts refused. Nordstjernen's
+  figure is its main-thread CPU time up to its first painted frame;
+  Chrome's is its main-thread task time in thread ticks
+  (`Performance.getMetrics`) from navigation until the load event, ready
+  fonts and two animation frames. The report gives the medians over
+  `--runs` loads (default 5) per site and browser, their ratio, each
+  browser's first paint, Nordstjernen's style and layout time and peak
+  RSS, and the geometric mean of the ratios. With two or more builds,
+  oldest first (`--labels` names them), the loads of one site alternate
+  between the builds, each run starting with another one, so a busy
+  machine slows them alike; a site's change is in bold when the newest
+  build was faster, or slower, than the oldest in every run.
+  `--max-slowdown=P` exits with status 1 when the newest build spends
+  more than P percent more main-thread CPU than the oldest, summed over
+  the sites. Loads run one at a time.
+
+```sh
+scripts/sitebench/snapshot.py perf                         # builddir's build against Chrome
+scripts/sitebench/snapshot.py perf /path/to/old/nordstjernen builddir/src/gtk/nordstjernen --runs 7
+```
 
 Both commands exit with status 2 on usage errors and when they fail to
 run at all.
