@@ -953,6 +953,53 @@ static const char *plural_name(int cat)
     return intl_plural_categories[cat];
 }
 
+static char *scaled_decimal_string(const char *mantissa, int exponent)
+{
+    DynBuf digits, out;
+    const char *p = mantissa;
+    int point = 0, n;
+    bool seen_dot = false;
+
+    if (*p == '-')
+        p++;
+    dbuf_init(&digits);
+    for (; *p; p++) {
+        if (*p == '.') {
+            seen_dot = true;
+            continue;
+        }
+        dbuf_putc(&digits, *p);
+        if (!seen_dot)
+            point++;
+    }
+    n = (int)digits.size;
+    point += exponent;
+    dbuf_init(&out);
+    if (point <= 0) {
+        dbuf_putstr(&out, "0.");
+        for (int i = point; i < 0; i++)
+            dbuf_putc(&out, '0');
+        dbuf_put(&out, digits.buf, n);
+    } else {
+        int lead = 0;
+        while (lead < n - 1 && lead < point - 1 && digits.buf[lead] == '0')
+            lead++;
+        for (int i = lead; i < point; i++)
+            dbuf_putc(&out, i < n ? digits.buf[i] : '0');
+        if (point < n) {
+            dbuf_putc(&out, '.');
+            dbuf_put(&out, digits.buf + point, n - point);
+        }
+    }
+    dbuf_putc(&out, '\0');
+    dbuf_free(&digits);
+    if (out.error) {
+        dbuf_free(&out);
+        return NULL;
+    }
+    return (char *)out.buf;
+}
+
 static const char *currency_display_string(const IntlNumberFormat *nf, const char *count)
 {
     const char *s;
@@ -1132,11 +1179,11 @@ int intl_nf_partition(JSContext *ctx, const IntlNumberFormat *nf, const IntlDeci
 {
     IntlDecimal x;
     IntlRawResult res;
-    int exponent = 0, signum, plural = 5, mag_for_compact = 0;
+    int exponent = 0, signum, plural = 5, mantissa_plural = 5, mag_for_compact = 0;
     const char *formatted = NULL;
     char *num_pattern_alloc = NULL, *outer_pattern = NULL;
     const char *cldr_pattern;
-    char count_buf[16];
+    char count_buf[16], compact_count[16];
     Affixes aff;
     FormatCtx fc;
     const char *currency_str = NULL;
@@ -1161,11 +1208,14 @@ int intl_nf_partition(JSContext *ctx, const IntlNumberFormat *nf, const IntlDeci
     }
     signum = sign_category(nf, finite ? &res.rounded : xin);
     if (finite) {
-        int data = nf->data;
-        plural = intl_plural_select(data, false, formatted,
-                                    nf->notation == NOTATION_COMPACT ? exponent : 0);
+        int e = nf->notation == NOTATION_COMPACT ? exponent : 0;
+        char *value = exponent ? scaled_decimal_string(formatted, exponent) : NULL;
+        mantissa_plural = intl_plural_select(nf->data, false, formatted, e);
+        plural = value ? intl_plural_select(nf->data, false, value, e) : mantissa_plural;
+        free(value);
     }
     snprintf(count_buf, sizeof(count_buf), "%s", plural_name(plural));
+    snprintf(compact_count, sizeof(compact_count), "%s", plural_name(mantissa_plural));
 
     if (nf->style == STYLE_PERCENT)
         cldr_pattern = nf_pattern(nf, "percent.pat");
@@ -1288,7 +1338,7 @@ int intl_nf_partition(JSContext *ctx, const IntlNumberFormat *nf, const IntlDeci
                 intl_parts_add(parts, "infinity", s, strlen(s), LVL_NUMBER);
             }
         } else if (nf->notation == NOTATION_COMPACT && exponent != 0) {
-            const char *cp = compact_pattern(nf, mag_for_compact, count_buf);
+            const char *cp = compact_pattern(nf, mag_for_compact, compact_count);
             const char *zs = cp ? strchr(cp, '0') : NULL;
             if (!zs) {
                 emit_number_core(nf, parts, formatted, &aff);
