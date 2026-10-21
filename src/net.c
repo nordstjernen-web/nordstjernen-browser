@@ -1500,7 +1500,8 @@ ns_net_cookie_js_path_for_partition(const char *top_origin)
 }
 
 static char *
-ns_cookie_collect(const char *url, gboolean include_httponly)
+ns_cookie_collect(const char *url, const char *jar_path, const char *js_path,
+                  gboolean include_httponly)
 {
     if (!url || !*url) return NULL;
     g_autoptr(ns_url_parts) parts = ns_url_parts_new(url);
@@ -1510,11 +1511,6 @@ ns_cookie_collect(const char *url, gboolean include_httponly)
                        ? parts->pathname : "/";
     gboolean is_https = parts->protocol &&
                         g_ascii_strcasecmp(parts->protocol, "https:") == 0;
-
-    g_autofree char *site = ns_url_site_from(url);
-    if (!site || !*site) return NULL;
-    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
-    g_autofree char *js_path  = ns_net_cookie_js_path_for_partition(site);
 
     gint64 now = g_get_real_time() / G_USEC_PER_SEC;
     gsize hl = strlen(host);
@@ -1596,16 +1592,33 @@ ns_cookie_collect(const char *url, gboolean include_httponly)
     return g_string_free(out, FALSE);
 }
 
-char *
-ns_net_cookies_for_js(const char *url)
+static char *
+ns_cookie_js_partition(const char *url, const char *top_url)
 {
-    return ns_cookie_collect(url, FALSE);
+    if (!top_url || !*top_url || ns_url_is_same_site(url, top_url))
+        return ns_url_site_from(url);
+    const ns_config *cfg = ns_config_get();
+    ns_cookie_policy policy = cfg ? cfg->cookie_policy : NS_COOKIE_FIRST_PARTY;
+    if (policy != NS_COOKIE_ALWAYS)
+        return NULL;
+    return ns_url_site_from(top_url);
 }
 
 char *
-ns_net_cookies_for_request(const char *url)
+ns_net_cookies_for_js(const char *url, const char *top_url)
 {
-    return ns_cookie_collect(url, TRUE);
+    g_autofree char *site = ns_cookie_js_partition(url, top_url);
+    if (!site || !*site) return NULL;
+    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
+    g_autofree char *js_path  = ns_net_cookie_js_path_for_partition(site);
+    return ns_cookie_collect(url, jar_path, js_path, FALSE);
+}
+
+char *
+ns_net_cookies_for_request(const char *url, const char *jar_path,
+                           const char *js_path)
+{
+    return ns_cookie_collect(url, jar_path, js_path, TRUE);
 }
 
 static gboolean
@@ -1673,10 +1686,16 @@ ns_cookie_jars_unlock(int fd)
 }
 
 gboolean
-ns_net_cookie_jar_version(const char *url, guint64 *version)
+ns_net_cookie_jar_version(const char *url, const char *top_url,
+                          guint64 *version)
 {
-    g_autofree char *site = url ? ns_url_site_from(url) : NULL;
-    if (!site || !*site) return FALSE;
+    if (!url) return FALSE;
+    g_autofree char *site = ns_cookie_js_partition(url, top_url);
+    if (!site) {
+        *version = G_MAXUINT64;
+        return TRUE;
+    }
+    if (!*site) return FALSE;
     g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
     g_autofree char *js_path = ns_net_cookie_js_path_for_partition(site);
     guint64 v = (guint64)(guint)g_atomic_int_get(&ns_cookie_writes) + 1;
@@ -1695,7 +1714,8 @@ ns_net_cookie_jar_version(const char *url, guint64 *version)
 }
 
 static void
-ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http,
+ns_cookie_store_impl(const char *url, const char *partition_site,
+                     const char *cookie, gboolean from_http,
                      const char *jar_override)
 {
     if (!url || !*url || !cookie) return;
@@ -1820,7 +1840,8 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http,
         path = default_path;
     }
 
-    g_autofree char *site = ns_url_site_from(url);
+    g_autofree char *site = partition_site ? g_strdup(partition_site)
+                                           : ns_url_site_from(url);
     if (!site || !*site) {
         g_free(file_domain); g_free(domain_attr); g_free(path_attr);
         return;
@@ -1911,15 +1932,20 @@ ns_cookie_store_impl(const char *url, const char *cookie, gboolean from_http,
 }
 
 void
-ns_net_cookie_store_from_js(const char *url, const char *cookie)
+ns_net_cookie_store_from_js(const char *url, const char *top_url,
+                            const char *cookie)
 {
-    ns_cookie_store_impl(url, cookie, FALSE, NULL);
+    g_autofree char *site = ns_cookie_js_partition(url, top_url);
+    if (!site || !*site) return;
+    ns_cookie_store_impl(url, site, cookie, FALSE, NULL);
 }
 
 void
-ns_net_store_set_cookie(const char *url, const char *set_cookie_value)
+ns_net_store_set_cookie(const char *url, const char *set_cookie_value,
+                        const char *jar_path)
 {
-    ns_cookie_store_impl(url, set_cookie_value, TRUE, NULL);
+    if (!jar_path) return;
+    ns_cookie_store_impl(url, NULL, set_cookie_value, TRUE, jar_path);
 }
 
 static const char *
@@ -2928,7 +2954,8 @@ ns_header_store_cookie(ns_header_ctx *hc, const char *line, size_t len)
         !url)
         return;
     g_autofree char *value = g_strndup(line + 11, len - 11);
-    ns_cookie_store_impl(url, g_strstrip(value), TRUE, hc->cookie_jar_path);
+    ns_cookie_store_impl(url, NULL, g_strstrip(value), TRUE,
+                         hc->cookie_jar_path);
 }
 
 static size_t

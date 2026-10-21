@@ -3,6 +3,20 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a cross-site iframe read and wrote its own site's first-party
+  cookies through `document.cookie`. A tracker embedded on many sites could
+  therefore follow the user from site to site, even though third-party
+  cookies are blocked by default. The frame's cookies were looked up by the
+  frame's own site, never by the page it was embedded in. A cross-site
+  frame now gets no cookies under the default first-party policy, and
+  under `cookie_policy = always` it gets a jar partitioned by the top-level
+  site, as its network requests already did.
+* Security: with the nghttp2 HTTP backend (`-Dhttp_backend=nghttp2`) and
+  `cookie_policy = always`, third-party requests read and stored cookies
+  in the request site's own first-party jar instead of the top-level
+  site's partition. A cookie set on a third-party image was then sent with
+  first-party visits to that site. The backend now uses the partition jar
+  the request was given, as the curl backend does.
 * Security: compiled JavaScript was cached by its source text alone. A
   page could therefore serve an exact copy of a script another site uses,
   from its own URL. When the other site later loaded its copy, the browser
