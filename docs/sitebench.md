@@ -199,6 +199,13 @@ for captures made before the locale was. Both browsers also run in UTC,
 Chrome through its context's time zone and Nordstjernen with `TZ=UTC`,
 so dates and times a page prints read the same in both.
 
+Each Nordstjernen load gets a new home directory, but all of them share
+one fontconfig cache, in `sitebench-fontconfig-<uid>` under the system's
+temporary directory. A home without one makes fontconfig scan the
+installed fonts again before the first frame, about 400 ms on macOS, a
+cost a user pays once and not on every page. Captures made before the
+cache was shared count it in their first paint.
+
 **Scores** (`compare.py`):
 
 - *Visual parity* (0–100) weighs viewport SSIM (30%), colour histogram

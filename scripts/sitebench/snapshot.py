@@ -596,12 +596,24 @@ def chrome_rects(chrome, base_url, name, a):
     return "", "viewport came out %dx%d instead of %dx%d" % (got + (a.vw, a.vh))
 
 
+FONT_CACHE = os.path.join(tempfile.gettempdir(), "sitebench-fontconfig-%s" % (os.getuid() if hasattr(os, "getuid") else "user"))
+
+
+def share_font_cache(cache_home):
+    os.makedirs(FONT_CACHE, exist_ok=True)
+    try:
+        os.symlink(FONT_CACHE, os.path.join(cache_home, "fontconfig"))
+    except OSError:
+        pass
+
+
 def isolated_env(home, locale):
     env = locale_env(locale)
     env["HOME"] = home
     for key, sub in (("XDG_CACHE_HOME", ".cache"), ("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share")):
         env[key] = os.path.join(home, sub)
         os.makedirs(env[key], exist_ok=True)
+    share_font_cache(env["XDG_CACHE_HOME"])
     for key in ("http_proxy", "https_proxy", "all_proxy", "HTTPS_PROXY", "ALL_PROXY"):
         env[key] = DEAD_PROXY
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
