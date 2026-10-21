@@ -30916,6 +30916,7 @@ syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px,
     ctx->viewport_h = viewport_resolve(100, NS_CSS_UNIT_VH);
     ctx->container_w = ns_css_container_w();
     ctx->container_h = ns_css_container_h();
+    ctx->reads_context = NULL;
     ctx->current_color = NULL;
     if (!font_units) {
         ctx->ex_px = ctx->ch_px = font_px * 0.5;
@@ -30966,6 +30967,22 @@ syntax_value_may_use_font_units(const char *v)
     return FALSE;
 }
 
+#define NS_REG_COMPUTE_MEMO_MAX 4096
+
+static __thread GHashTable *g_reg_compute_memo;
+
+static GHashTable *
+reg_compute_memo_for(const ns_css_property_rule *pr)
+{
+    if (!g_reg_compute_memo) return NULL;
+    GHashTable *values = g_hash_table_lookup(g_reg_compute_memo, pr);
+    if (!values) {
+        values = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+        g_hash_table_insert(g_reg_compute_memo, (gpointer)pr, values);
+    }
+    return values;
+}
+
 static void
 compute_registered_vars(ns_style *s, const ns_style *parent_style,
                         double root_px)
@@ -30986,6 +31003,12 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
             g_hash_table_lookup(g_registered_props, k);
         if (!pr || !pr->syntax || ns_css_syntax_def_universal(pr->syntax))
             continue;
+        GHashTable *memo = reg_compute_memo_for(pr);
+        gpointer known = NULL;
+        if (memo && g_hash_table_lookup_extended(memo, v, NULL, &known)) {
+            if (known) g_hash_table_iter_replace(&it, g_strdup(known));
+            continue;
+        }
         gboolean font_units = syntax_value_may_use_font_units(v);
         if (!have_ctx || (font_units && !have_font_units)) {
             syntax_ctx_for_style(&ctx, s, root_px, font_units);
@@ -30996,7 +31019,13 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
             have_ctx = TRUE;
             have_font_units = font_units;
         }
+        gboolean reads_context = FALSE;
+        ctx.reads_context = &reads_context;
         char *computed = ns_css_syntax_def_compute(pr->syntax, v, &ctx);
+        ctx.reads_context = NULL;
+        if (memo && !reads_context &&
+            g_hash_table_size(memo) < NS_REG_COMPUTE_MEMO_MAX)
+            g_hash_table_insert(memo, g_strdup(v), g_strdup(computed));
         if (computed) g_hash_table_iter_replace(&it, computed);
     }
     g_free(current_color);
@@ -37897,6 +37926,9 @@ ns_css_compute(ns_node *doc,
     g_reg_reset_cache = g_hash_table_new_full(
         g_direct_hash, g_direct_equal, reg_reset_key_free,
         (GDestroyNotify)g_hash_table_destroy);
+    g_reg_compute_memo = g_hash_table_new_full(
+        g_direct_hash, g_direct_equal, NULL,
+        (GDestroyNotify)g_hash_table_destroy);
     g_var_adjust_cache = g_hash_table_new_full(
         g_direct_hash, g_direct_equal,
         (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
@@ -38029,6 +38061,7 @@ ns_css_compute(ns_node *doc,
     g_hash_table_destroy(g_var_adjust_cache);
     g_var_adjust_cache = NULL;
     g_clear_pointer(&g_reg_reset_cache, g_hash_table_destroy);
+    g_clear_pointer(&g_reg_compute_memo, g_hash_table_destroy);
     g_clear_pointer(&g_var_build_cache, g_hash_table_destroy);
     for (guint i = 0; g_var_build_parents && i < g_var_build_parents->len; i++)
         if (g_ptr_array_index(g_var_build_parents, i))
