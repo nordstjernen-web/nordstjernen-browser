@@ -14,6 +14,89 @@
 
 static void ns_class_set_clear(ns_node *el);
 
+static guint g_dom_tree_serial;
+
+void
+ns_dom_tree_changed(void)
+{
+    g_dom_tree_serial++;
+}
+
+static void
+ns_dom_attr_changed(const char *name)
+{
+    if (name && g_ascii_strcasecmp(name, "id") == 0)
+        g_dom_tree_serial++;
+}
+
+#define NS_ID_INDEX_TRACKED 4
+
+typedef struct ns_id_index_state {
+    const ns_node *doc;
+    guint complete_serial;
+    guint walked_serial;
+    gboolean complete;
+    gboolean walked;
+} ns_id_index_state;
+
+static ns_id_index_state g_id_index_states[NS_ID_INDEX_TRACKED];
+static guint g_id_index_state_next;
+
+static ns_id_index_state *
+ns_id_index_state_find(const ns_node *doc)
+{
+    for (guint i = 0; i < NS_ID_INDEX_TRACKED; i++)
+        if (g_id_index_states[i].doc == doc) return &g_id_index_states[i];
+    return NULL;
+}
+
+static ns_id_index_state *
+ns_id_index_state_for(const ns_node *doc)
+{
+    ns_id_index_state *s = ns_id_index_state_find(doc);
+    if (s) return s;
+    s = &g_id_index_states[g_id_index_state_next++ % NS_ID_INDEX_TRACKED];
+    *s = (ns_id_index_state){ .doc = doc };
+    return s;
+}
+
+static void
+ns_id_index_state_forget(const ns_node *doc)
+{
+    ns_id_index_state *s = ns_id_index_state_find(doc);
+    if (s) *s = (ns_id_index_state){ 0 };
+}
+
+static gboolean
+ns_id_index_complete(const ns_node *doc)
+{
+    const ns_id_index_state *s = ns_id_index_state_find(doc);
+    return s && s->complete && s->complete_serial == g_dom_tree_serial;
+}
+
+static gboolean
+ns_id_index_walked_unchanged(const ns_node *doc)
+{
+    const ns_id_index_state *s = ns_id_index_state_find(doc);
+    return s && s->walked && s->walked_serial == g_dom_tree_serial;
+}
+
+static void
+ns_id_index_note_walk(const ns_node *doc)
+{
+    ns_id_index_state *s = ns_id_index_state_for(doc);
+    s->walked = TRUE;
+    s->walked_serial = g_dom_tree_serial;
+}
+
+static void
+ns_id_index_note_complete(const ns_node *doc)
+{
+    ns_id_index_state *s = ns_id_index_state_for(doc);
+    s->complete = TRUE;
+    s->complete_serial = g_dom_tree_serial;
+}
+
 static gboolean
 ns_str_is_ascii_lower(const char *s)
 {
@@ -942,6 +1025,7 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
     if (el->class_set) ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
+    ns_dom_attr_changed(name);
     ns_attr *a = g_new0(ns_attr, 1);
     a->name  = (char *)name;
     a->value = (char *)(value ? value : "");
@@ -1092,6 +1176,7 @@ ns_node_free(ns_node *node)
         if (cur->id_index) {
             g_hash_table_destroy(cur->id_index);
             cur->id_index = NULL;
+            ns_id_index_state_forget(cur);
         }
         if (cur->class_index) {
             g_hash_table_destroy(cur->class_index);
@@ -1112,6 +1197,7 @@ ns_node_detach(ns_node *child)
     ns_node *p = child->parent;
     if (!p)
         return;
+    g_dom_tree_serial++;
     if (child->prev_sibling)
         child->prev_sibling->next_sibling = child->next_sibling;
     else
@@ -1132,6 +1218,7 @@ ns_node_append_child(ns_node *parent, ns_node *child)
     g_return_if_fail(child != NULL);
 
     ns_node_detach(child);
+    g_dom_tree_serial++;
     child->parent = parent;
     child->prev_sibling = parent->last_child;
     if (parent->last_child)
@@ -1218,6 +1305,7 @@ ns_element_set_attr_len(ns_node *el, const char *name,
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
+    ns_dom_attr_changed(name);
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
@@ -1265,6 +1353,8 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
+    ns_dom_attr_changed(local_name);
+    ns_dom_attr_changed(qualified);
 
     gsize vlen = value ? strlen(value) : 0;
     ns_attr *tail = NULL;
@@ -1300,6 +1390,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
+    ns_dom_attr_changed(name);
     ns_attr **link = &el->attrs;
     while (*link) {
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
@@ -1322,6 +1413,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
         ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
+    ns_dom_attr_changed(local_name);
     ns_attr **link = &el->attrs;
     while (*link) {
         if (ns_attr_matches_ns(*link, ns, local_name)) {
@@ -1632,6 +1724,7 @@ ns_doc_id_index_build(ns_node *doc)
                                               g_free, NULL);
     }
     ns_doc_index_walk(doc, doc, TRUE, ns_doc_id_index_add_node);
+    ns_id_index_note_complete(doc);
 }
 
 void
@@ -2098,13 +2191,20 @@ ns_node_find_by_id(const ns_node *root, const char *id)
 {
     if (!root || !id || !*id) return NULL;
     if (root->id_index) {
+        if (ns_id_index_complete(root))
+            return g_hash_table_lookup(root->id_index, id);
         ns_node *hit = g_hash_table_lookup(root->id_index, id);
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
                 return hit;
         }
+        if (ns_id_index_walked_unchanged(root)) {
+            ns_doc_id_index_build((ns_node *)root);
+            return g_hash_table_lookup(root->id_index, id);
+        }
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
+        ns_id_index_note_walk(root);
         if (found)
             g_hash_table_replace(root->id_index, g_strdup(id), found);
         else
@@ -2117,6 +2217,7 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         doc = doc->parent;
     if (doc && doc != root && doc->kind == NS_NODE_DOCUMENT && doc->id_index) {
         ns_node *hit = g_hash_table_lookup(doc->id_index, id);
+        if (!hit && ns_id_index_complete(doc)) return NULL;
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))

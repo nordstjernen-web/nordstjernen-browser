@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: reading a name that is not a global no longer searches
+  the whole document. A property missing on `window` falls through to
+  its named properties, the elements with that `id`, and each such miss
+  walked every element of the page. The engine's own setup code reads
+  about 500 of these names on every load. The document's id index now
+  records when it was last rebuilt from the tree, and any insertion,
+  removal or `id` change makes it stale; while it is current, a miss is
+  answered from the index alone. `getElementById()` and
+  `querySelector('#id')` misses take the same path. Which names resolve
+  does not change. On frozen copies of IMDb, CNN, AP News and The New
+  York Times the main-thread CPU to first paint drops by 21%, 19%, 10%
+  and 9%.
 * Frames: a `MessagePort` inside an iframe that is itself inside an
   iframe now receives proper `message` events. The engine records each
   frame's Event interfaces when the frame starts, but a nested frame
