@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Text: a paragraph without a `dir` attribute or `direction: rtl` now
+  runs left to right, as CSS says. The direction was guessed from the
+  first strong letter, so a line that began with Arabic, Hebrew or
+  Syriac text (even inside a `<bdi>`) was laid out right to left and
+  pushed against the right edge. On the Wikipedia portal every
+  right-to-left language name in the language lists sat at the right
+  side of its column. Such lines now start at the left edge as in
+  Chrome; `unicode-bidi: plaintext` still takes the direction from the
+  text.
 * Debian packaging: following the mentors.debian.net review, debhelper
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
