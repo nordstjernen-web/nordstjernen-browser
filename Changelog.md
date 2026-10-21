@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* JavaScript: the `RangeError` thrown by `toFixed()`, `toExponential()`
+  and `toPrecision()` for an out-of-range digit count now carries
+  Chrome's message (`toFixed() digits argument must be between 0 and
+  100`) instead of "invalid number of digits". The detectIncognito
+  library, used by CNN, tells engines apart by the length of the
+  `(-1).toFixed(-1)` message: 51 is Chrome, 44 Safari, 25 Firefox. With
+  24 it recognised none and every CNN load ended in an unhandled
+  rejection, "detectIncognito cannot determine the browser".
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
