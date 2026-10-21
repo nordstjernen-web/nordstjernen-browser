@@ -415,6 +415,30 @@ scripts/sitebench/snapshot.py ab /path/to/old/nordstjernen builddir/src/gtk/nord
   old build matched on one site, beyond that site's noise. A site the old
   build fails on is left out and listed.
 
+- `perf` times the builds and Chrome loading each copy, as the cost of
+  rendering the same input. Every load starts a fresh Nordstjernen
+  process with `--settle-ms=0 --timing`, and a fresh browser context in
+  one running Chrome, with requests to other hosts refused. Nordstjernen's
+  figure is its main-thread CPU time up to its first painted frame;
+  Chrome's is its main-thread task time in thread ticks
+  (`Performance.getMetrics`) from navigation until the load event, ready
+  fonts and two animation frames. The report gives the medians over
+  `--runs` loads (default 5) per site and browser, their ratio, each
+  browser's first paint, Nordstjernen's style and layout time and peak
+  RSS, and the geometric mean of the ratios. With two or more builds,
+  oldest first (`--labels` names them), the loads of one site alternate
+  between the builds, each run starting with another one, so a busy
+  machine slows them alike; a site's change is in bold when the newest
+  build was faster, or slower, than the oldest in every run.
+  `--max-slowdown=P` exits with status 1 when the newest build spends
+  more than P percent more main-thread CPU than the oldest, summed over
+  the sites. Loads run one at a time.
+
+```sh
+scripts/sitebench/snapshot.py perf                         # builddir's build against Chrome
+scripts/sitebench/snapshot.py perf /path/to/old/nordstjernen builddir/src/gtk/nordstjernen --runs 7
+```
+
 Both commands exit with status 2 on usage errors and when they fail to
 run at all.
 
