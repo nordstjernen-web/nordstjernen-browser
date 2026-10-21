@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* CSS: the `background` and `mask` shorthands now accept a three- or
+  four-value position with edge offsets, such as
+  `background: url(logo.svg) no-repeat right .5rem top .5rem, #0079c8`.
+  The offsets were handed to the position longhands as text they could
+  not parse, so the whole declaration was dropped: no background colour,
+  and the images repeated from the top left corner (the El País sponsor
+  labels showed scraps of their logos on white instead of a blue bar).
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
