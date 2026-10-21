@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* CSS animations run at the display's frame rate again. The window
+  capped page animations at 60 frames a second by dropping any frame
+  that came less than exactly 1/60 s after the last one, but a 60 Hz
+  display's frame times jitter around that value, so about every other
+  frame was dropped and an animation alternated between 60 and 30 frames
+  a second (around 40 on average). Sliding marquees and other moving
+  animations stuttered visibly. The cap now allows a quarter frame of
+  slack, so a 60 Hz display gets every frame.
 * Debian packaging: following the mentors.debian.net review, debhelper
   compat 14, an `execute_after_dh_auto_install` hook that fails the build
   when a file it removes is missing, no redundant `Rules-Requires-Root`,
