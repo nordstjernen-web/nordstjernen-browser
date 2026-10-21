@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Security: `<link rel=stylesheet integrity=…>` is now verified. Only
+  scripts were checked, so a stylesheet whose bytes did not match its
+  Subresource Integrity hash (for example one altered on a compromised
+  CDN) was applied anyway, although SECURITY.md promised the check. A
+  mismatched stylesheet is now ignored and logged. An empty resource
+  whose hash does match is accepted, where before any empty body failed.
 * Web Audio: a looping `AudioBufferSourceNode` with an enormous
   `playbackRate` could push its read position to infinity during
   real-time rendering. The position then became NaN and was used as an
