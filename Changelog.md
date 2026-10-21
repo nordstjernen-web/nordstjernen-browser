@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: in a column flexbox, an item with `width: fit-content` (or
+  `min-content`, `max-content`) is no longer stretched to the line, and
+  an item with `margin-left` or `margin-right: auto` shrinks to fit and
+  is pushed aside by that margin. The stretch relaid the item and reset
+  its `margin-top: auto` to 0, so on the Guardian front page every card
+  timestamp sat under its headline instead of at the bottom of the
+  card; cross-axis auto margins only moved the item to the start.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
