@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Frames: a `MessagePort` inside an iframe that is itself inside an
+  iframe now receives proper `message` events. The engine records each
+  frame's Event interfaces when the frame starts, but a nested frame
+  copied that record from its parent frame instead of from the page the
+  frame's globals were cloned from, so the copies did not match its own
+  objects. Its port events then had no `MessageEvent` prototype: `data`,
+  `type` and `target` read as `undefined`. reCAPTCHA, which talks to its
+  anchor frame over a port, threw "SyntaxError: unexpected token:
+  'undefined'" eight to ten times on PayPal, ESPN and AliExpress.
 * Layout: a float that follows text ending in `<br>` now starts on the
   line after the break. It was placed beside the text's last line, so
   phpBB topic lists (the freeciv forum) drew each "by author » date"
