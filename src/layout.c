@@ -9412,6 +9412,26 @@ inline_run_leading_atomic_outer_width(const ns_box *run)
            ab->margin.left + ab->margin.right;
 }
 
+static double
+inline_run_first_word_width(ns_box *run, const ns_style *style)
+{
+    if (!run || run->kind != NS_BOX_INLINE || !run->text)
+        return min_width_of(run, style);
+    const char *p = run->text;
+    while (*p && g_ascii_isspace(*p)) p++;
+    const char *end = p;
+    while (*end && !g_ascii_isspace(*end)) end++;
+    if (end == p || (run->inline_atomics && run->inline_atomics->len > 0))
+        return min_width_of(run, style);
+    NsPangoLayout *layout = make_pango_layout(style);
+    ns_pango_layout_set_width(layout, -1);
+    ns_pango_layout_set_text(layout, p, (int)(end - p));
+    ns_text_measure m;
+    text_measure(layout, &m);
+    g_object_unref(layout);
+    return ceil((double)m.logical.width / NS_PANGO_SCALE);
+}
+
 static gboolean
 floats_advance_to_fit(const GArray *floats, double cw, double need,
                       double *y, double *left_out, double *right_out)
@@ -17037,9 +17057,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
             floats_offsets_at(floats, line_y, &left_off, &right_off);
-            if (!style_lines_never_wrap(box->style))
-                floats_advance_to_readable_width(floats, cw, &line_y,
-                                                 &left_off, &right_off);
+            if (!style_lines_never_wrap(box->style) && left_off + right_off > 0)
+                floats_advance_to_fit(floats, cw,
+                                      inline_run_first_word_width(c, child_inherited),
+                                      &line_y, &left_off, &right_off);
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
