@@ -142,6 +142,18 @@ Changelog:
   `new Image` inside a frame: two "not a constructor" errors on every
   load. The original functions are now recorded when the document's
   globals are installed, and frames copy those.
+* Layout: line boxes now follow the CSS inline model the way Chrome
+  builds them. Every line in a standards-mode block starts from the
+  block's strut, so a line whose text all sits in a smaller span, a
+  `<sup>` or a `vertical-align: 3px` span grows like it does in Chrome
+  (a 12px span in a 16px/20px block: 21 px, was 20). Ascent and descent
+  are rounded to whole pixels and the half-leading above the text is
+  floored, so a 21.6px strut beside a 22px link gives a 22.59 px line,
+  not 22. Bidi isolate characters around an inline `<h3>` or `<p>` no
+  longer carry that element's line height with the parent's font, and a
+  `line-clamp` ellipsis keeps its line height. On the AP News front page
+  every promo title was 1 px short per line and the page drifted 54 px
+  by the photo section; it now lines up with Chrome.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

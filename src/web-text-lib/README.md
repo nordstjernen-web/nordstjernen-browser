@@ -80,7 +80,15 @@ nearest a browser could get was an attribute per separator character, which
 splits the paragraph into an item per word. `NS_PANGO_ATTR_WORD_SPACING`
 and `ns_pango_glyph_item_word_space` add the space to the advance of each
 word-separator character, at the seven characters CSS Text names and
-nowhere else.
+nowhere else. Line height follows the CSS inline model: each run's ascent
+and descent are rounded to whole pixels, the half-leading above the text is
+floored the way Chrome splits it, and `ns_pango_layout_set_strut_line_height`
+unites every line with the block's strut, so a line built only from a
+smaller span still has the block's height. On macOS, Times, Helvetica and
+Courier get 15% more ascent, as Chrome and Safari give them, and with
+`line-height: normal` a fallback font also brings its own line gap.
+`ns_pango_layout_run_get_css_extents` gives the same box for one run, for
+lines the engine assembles itself around inline-blocks.
 
 **Fixes for what a browser hits and a widget toolkit does not.** A synthesised
 bold face was measured with HarfBuzz's unbolded advances and drawn with

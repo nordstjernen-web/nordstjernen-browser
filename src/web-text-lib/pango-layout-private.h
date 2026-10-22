@@ -56,6 +56,7 @@ struct _PangoLayout
   int indent;			/* amount by which first line should be shorter */
   int spacing;			/* spacing between lines */
   float line_spacing;           /* factor to apply to line height */
+  int strut_line_height;
 
   guint justify : 1;
   guint justify_last_line : 1;
@@ -71,8 +72,10 @@ struct _PangoLayout
   /* some caching */
   guint logical_rect_cached : 1;
   guint ink_rect_cached : 1;
+  guint strut_rect_cached : 1;
   NsPangoRectangle logical_rect;
   NsPangoRectangle ink_rect;
+  NsPangoRectangle strut_rect;
   int tab_width;		/* Cached width of a tab. -1 == not yet calculated */
   gunichar decimal;
 

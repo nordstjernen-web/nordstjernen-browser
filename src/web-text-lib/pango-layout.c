@@ -522,6 +522,20 @@ ns_pango_layout_get_indent (NsPangoLayout *layout)
   return layout->indent;
 }
 
+void
+ns_pango_layout_set_strut_line_height (NsPangoLayout *layout,
+                                       int            line_height)
+{
+  g_return_if_fail (layout != NULL);
+
+  line_height = MAX (line_height, 0);
+  if (line_height != layout->strut_line_height)
+    {
+      layout->strut_line_height = line_height;
+      layout_changed (layout);
+    }
+}
+
 /**
  * ns_pango_layout_get_spacing:
  * @layout: a `NsPangoLayout`
@@ -2150,6 +2164,7 @@ ns_pango_layout_clear_lines (NsPangoLayout *layout)
   layout->unknown_glyphs_count = -1;
   layout->logical_rect_cached = FALSE;
   layout->ink_rect_cached = FALSE;
+  layout->strut_rect_cached = FALSE;
   layout->is_ellipsized = FALSE;
   layout->is_wrapped = FALSE;
 }
@@ -4348,6 +4363,138 @@ ns_pango_layout_line_get_x_ranges (NsPangoLayoutLine  *line,
     *n_ranges = range_count;
 }
 
+int
+ns_pango_font_get_legacy_ascent (NsPangoFont *font,
+                                 int          content_height)
+{
+#ifdef __APPLE__
+  NsPangoFontDescription *desc;
+  const char *family;
+  int extra = 0;
+
+  if (!font)
+    return 0;
+
+  desc = ns_pango_font_describe (font);
+  family = desc ? ns_pango_font_description_get_family (desc) : NULL;
+  if (family &&
+      (g_ascii_strcasecmp (family, "Times") == 0 ||
+       g_ascii_strcasecmp (family, "Helvetica") == 0 ||
+       g_ascii_strcasecmp (family, "Courier") == 0))
+    extra = (int) floor (content_height * 0.15 / NS_PANGO_SCALE + 0.5) * NS_PANGO_SCALE;
+  if (desc)
+    ns_pango_font_description_free (desc);
+
+  return extra;
+#else
+  (void) font;
+  (void) content_height;
+  return 0;
+#endif
+}
+
+static void
+ns_pango_round_content_area (NsPangoRectangle *rect,
+                             int               baseline_shift,
+                             NsPangoFont      *font)
+{
+  int ascent = NS_PANGO_UNITS_ROUND (baseline_shift - rect->y);
+  int descent = NS_PANGO_UNITS_ROUND (rect->y + rect->height - baseline_shift);
+
+  ascent += ns_pango_font_get_legacy_ascent (font, ascent + descent);
+  rect->y = baseline_shift - ascent;
+  rect->height = ascent + descent;
+}
+
+static void
+ns_pango_apply_line_height (NsPangoRectangle *rect,
+                            int               line_height)
+{
+  int above = NS_PANGO_UNITS_FLOOR ((line_height - rect->height) / 2);
+
+  rect->y -= above;
+  rect->height = line_height;
+}
+
+static int
+ns_pango_font_line_gap (NsPangoFont *font)
+{
+  NsPangoFontMetrics *metrics = ns_pango_font_get_metrics (font, NULL);
+  int gap;
+
+  if (!metrics)
+    return 0;
+  gap = ns_pango_font_metrics_get_height (metrics) -
+        ns_pango_font_metrics_get_ascent (metrics) -
+        ns_pango_font_metrics_get_descent (metrics);
+  ns_pango_font_metrics_unref (metrics);
+
+  return MAX (0, NS_PANGO_UNITS_ROUND (gap));
+}
+
+static void
+ns_pango_run_css_box (NsPangoLayoutRun *run,
+                      NsPangoRectangle *box,
+                      int               absolute_line_height,
+                      float             line_height_factor)
+{
+  NsPangoFont *font = run->item->analysis.font;
+  NsPangoFont *strut_font = ns_pango_analysis_get_strut_font (&run->item->analysis);
+  gboolean fallback = absolute_line_height != 0 &&
+                      strut_font && strut_font != font &&
+                      !(run->item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE);
+  int y_offset = run->y_offset;
+  NsPangoRectangle own = *box;
+  int line_height;
+
+  if (fallback)
+    {
+      NsPangoRectangle strut;
+
+      ns_pango_font_get_glyph_extents (strut_font, NS_PANGO_GLYPH_EMPTY, NULL, &strut);
+      box->y = strut.y - y_offset;
+      box->height = strut.height;
+    }
+
+  ns_pango_round_content_area (box, -y_offset, fallback ? strut_font : font);
+
+  if (absolute_line_height != 0)
+    line_height = absolute_line_height;
+  else
+    line_height = ceilf (line_height_factor * box->height);
+  ns_pango_apply_line_height (box, line_height);
+
+  if (fallback && line_height_factor != 0.0)
+    {
+      int spacing, top, bottom;
+
+      ns_pango_round_content_area (&own, -y_offset, font);
+      spacing = MAX ((int) ceilf (line_height_factor * own.height),
+                     own.height + ns_pango_font_line_gap (font));
+      ns_pango_apply_line_height (&own, spacing);
+      top = MIN (box->y, own.y);
+      bottom = MAX (box->y + box->height, own.y + own.height);
+      box->y = top;
+      box->height = bottom - top;
+    }
+}
+
+void
+ns_pango_layout_run_get_css_extents (NsPangoLayoutRun *run,
+                                     int               line_height,
+                                     gboolean          normal,
+                                     int              *above,
+                                     int              *below)
+{
+  NsPangoRectangle box;
+
+  ns_pango_glyph_string_extents (run->glyphs, run->item->analysis.font, NULL, &box);
+  box.y -= run->y_offset;
+  ns_pango_run_css_box (run, &box, line_height, normal ? 1.0 : 0.0);
+  *above = -box.y;
+  *below = box.y + box.height;
+}
+
 static void
 ns_pango_layout_get_empty_extents_and_height_at_index (NsPangoLayout    *layout,
                                                     int             index,
@@ -4434,13 +4581,11 @@ ns_pango_layout_get_empty_extents_and_height_at_index (NsPangoLayout    *layout,
               if (apply_line_height &&
                   (absolute_line_height != 0 || line_height_factor != 0.0))
                 {
-                  int line_height, leading;
+                  int line_height;
 
+                  ns_pango_round_content_area (logical_rect, 0, font);
                   line_height = MAX (absolute_line_height, ceilf (line_height_factor * logical_rect->height));
-
-                  leading = line_height - logical_rect->height;
-                  logical_rect->y -= leading / 2;
-                  logical_rect->height += leading;
+                  ns_pango_apply_line_height (logical_rect, line_height);
                 }
             }
           else
@@ -4462,6 +4607,76 @@ ns_pango_layout_get_empty_extents_and_height_at_index (NsPangoLayout    *layout,
       logical_rect->x = 0;
       logical_rect->width = 0;
     }
+}
+
+static gboolean
+ns_pango_layout_get_strut (NsPangoLayout    *layout,
+                           NsPangoRectangle *strut)
+{
+  if (!layout || layout->strut_line_height <= 0)
+    return FALSE;
+
+  if (!layout->strut_rect_cached)
+    {
+      NsPangoFontDescription *font_desc;
+      NsPangoFont *font;
+      gboolean free_font_desc = FALSE;
+
+      layout->strut_rect.x = 0;
+      layout->strut_rect.y = 0;
+      layout->strut_rect.width = 0;
+      layout->strut_rect.height = 0;
+
+      font_desc = ns_pango_context_get_font_description (layout->context);
+      if (layout->font_desc)
+        {
+          font_desc = ns_pango_font_description_copy_static (font_desc);
+          ns_pango_font_description_merge (font_desc, layout->font_desc, TRUE);
+          free_font_desc = TRUE;
+        }
+
+      font = ns_pango_context_load_font (layout->context, font_desc);
+      if (font)
+        {
+          NsPangoFontMetrics *metrics =
+            ns_pango_font_get_metrics (font, ns_pango_context_get_language (layout->context));
+
+          if (metrics)
+            {
+              layout->strut_rect.y = - ns_pango_font_metrics_get_ascent (metrics);
+              layout->strut_rect.height = ns_pango_font_metrics_get_ascent (metrics) +
+                                          ns_pango_font_metrics_get_descent (metrics);
+              ns_pango_round_content_area (&layout->strut_rect, 0, font);
+              ns_pango_apply_line_height (&layout->strut_rect, layout->strut_line_height);
+              ns_pango_font_metrics_unref (metrics);
+            }
+          g_object_unref (font);
+        }
+
+      if (free_font_desc)
+        ns_pango_font_description_free (font_desc);
+
+      layout->strut_rect_cached = TRUE;
+    }
+
+  *strut = layout->strut_rect;
+  return strut->height > 0;
+}
+
+static void
+ns_pango_layout_unite_strut (NsPangoLayout    *layout,
+                             NsPangoRectangle *logical_rect)
+{
+  NsPangoRectangle strut;
+  int top, bottom;
+
+  if (!ns_pango_layout_get_strut (layout, &strut))
+    return;
+
+  top = MIN (logical_rect->y, strut.y);
+  bottom = MAX (logical_rect->y + logical_rect->height, strut.y + strut.height);
+  logical_rect->y = top;
+  logical_rect->height = bottom - top;
 }
 
 static void
@@ -4614,44 +4829,22 @@ ns_pango_layout_run_get_extents_and_height (NsPangoLayoutRun *run,
 
       if (properties.absolute_line_height != 0 || properties.line_height != 0.0)
         {
-          int line_height, leading;
-          NsPangoRectangle own = *line_logical;
-          NsPangoFont *strut_font = ns_pango_analysis_get_strut_font (&run->item->analysis);
-          gboolean fallback = properties.absolute_line_height != 0 &&
-                              strut_font && strut_font != run->item->analysis.font &&
-                              !properties.shape_set &&
-                              !(run->item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE);
-
-          if (fallback)
+          if (properties.shape_set)
             {
-              NsPangoRectangle strut;
+              int line_height, leading;
 
-              ns_pango_font_get_glyph_extents (strut_font, NS_PANGO_GLYPH_EMPTY, NULL, &strut);
-              line_logical->y = strut.y - y_offset;
-              line_logical->height = strut.height;
+              if (properties.absolute_line_height != 0)
+                line_height = properties.absolute_line_height;
+              else
+                line_height = ceilf (properties.line_height * line_logical->height);
+              leading = line_height - line_logical->height;
+              line_logical->y -= leading / 2;
+              line_logical->height += leading;
             }
-
-          if (properties.absolute_line_height != 0)
-            line_height = properties.absolute_line_height;
           else
-            line_height = ceilf (properties.line_height * line_logical->height);
-
-          leading = line_height - line_logical->height;
-          line_logical->y -= leading / 2;
-          line_logical->height += leading;
-
-          if (fallback && properties.line_height != 0.0)
-            {
-              int spacing, top, bottom;
-
-              spacing = ceilf (properties.line_height * own.height);
-              own.y -= (spacing - own.height) / 2;
-              own.height = spacing;
-              top = MIN (line_logical->y, own.y);
-              bottom = MAX (line_logical->y + line_logical->height, own.y + own.height);
-              line_logical->y = top;
-              line_logical->height = bottom - top;
-            }
+            ns_pango_run_css_box (run, line_logical,
+                                  properties.absolute_line_height,
+                                  properties.line_height);
         }
     }
 
@@ -4791,6 +4984,9 @@ ns_pango_layout_line_get_extents_and_height (NsPangoLayoutLine *line,
       rect = logical_rect ? logical_rect : &r;
       ns_pango_layout_get_empty_extents_and_height_at_index (line->layout, line->start_index, rect, TRUE, height);
     }
+
+  if (logical_rect)
+    ns_pango_layout_unite_strut (line->layout, logical_rect);
 
   if (caching)
     {
