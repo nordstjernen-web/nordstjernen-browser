@@ -16,6 +16,7 @@ void     ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us);
 void     ns_anim_apply(ns_anim *a, GHashTable *styles);
 gboolean ns_anim_tick(ns_anim *a, gint64 now_us);
 gboolean ns_anim_has_active(const ns_anim *a);
+void     ns_anim_collect_active_nodes(const ns_anim *a, GHashTable *out);
 gboolean ns_anim_needs_layout(const ns_anim *a);
 gboolean ns_anim_paint_only(const ns_anim *a);
 typedef void (*ns_anim_event_cb)(const ns_node *node, const char *type,

@@ -690,7 +690,10 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
                            ns_render_profile *profile)
 {
     if (out_layout) *out_layout = NULL;
-    if (!c || !out_layout) return NULL;
+    if (!c || !out_layout) {
+        if (c && c->prev_layout) ns_box_free(c->prev_layout);
+        return NULL;
+    }
     if (profile) memset(profile, 0, sizeof *profile);
 
     double viewport_width = render_pass_begin(c);
@@ -711,12 +714,21 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     render_style_pass(c, styles);
     gint64 t2 = profile ? g_get_monotonic_time() : 0;
 
+    GHashTable *animated = g_hash_table_new(g_direct_hash, g_direct_equal);
+    ns_anim_collect_active_nodes(c->anim, animated);
+    ns_layout_reuse_src reuse = {
+        .prev_root = c->prev_layout,
+        .prev_styles = c->prev_styles,
+        .animated = animated,
+        .allowed = !want_cq && fabs((c->zoom > 0 ? c->zoom : 1.0) - 1.0) <= 0.001,
+    };
     ns_paint_list_ordinals_begin();
     ns_box *layout = ns_layout_build(c->doc, styles, viewport_width,
                                      c->focused_input, c->caret_byte,
                                      c->sel_anchor_byte,
-                                     c->images, c->base_url);
+                                     c->images, c->base_url, &reuse);
     ns_paint_list_ordinals_end();
+    g_hash_table_destroy(animated);
     gint64 t3 = profile ? g_get_monotonic_time() : 0;
     if (profile) {
         profile->css1_us = t1 - t0;
@@ -762,7 +774,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_box *layout2 = ns_layout_build(c->doc, styles2, viewport_width,
                                           c->focused_input, c->caret_byte,
                                           c->sel_anchor_byte,
-                                          c->images, c->base_url);
+                                          c->images, c->base_url, NULL);
         ns_paint_list_ordinals_end();
         gint64 t7 = profile ? g_get_monotonic_time() : 0;
         if (profile) {

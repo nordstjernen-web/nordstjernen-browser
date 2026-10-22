@@ -257,17 +257,19 @@ browser_relayout(ns_browser *b)
     ns_selection_save(b->layout, &b->selection, &selection_mark);
     ns_selection_clear(&b->selection);
     if (b->js && b->layout) ns_js_set_layout_root(b->js, NULL);
+    ns_box *prev_layout = b->layout;
     if (b->layout) {
         ns_paint_3d_invalidate();
-        ns_box_free(b->layout);
         b->layout = NULL;
         b->sb_box = NULL;
         b->sb_node = NULL;
         b->sb_dragging = FALSE;
     }
-    g_clear_pointer(&b->retired_styles, g_hash_table_destroy);
-    if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
-    if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
+    GHashTable *prev_retired = b->retired_styles;
+    GHashTable *prev_styles = b->styles;
+    b->retired_styles = NULL;
+    b->styles = NULL;
+    if (b->js && prev_styles) ns_js_set_style_table(b->js, NULL);
     browser_prune_cached_nodes(b);
     ns_layout_set_open_select(b->open_select);
     {
@@ -284,7 +286,11 @@ browser_relayout(ns_browser *b)
                                    b->js ? ns_js_focused_node(b->js) : NULL,
                                    b->hover_node,
                                    b->caret_byte, b->sel_anchor_byte,
+                                   prev_layout,
+                                   prev_retired ? prev_retired : prev_styles,
                                    &b->layout);
+    if (prev_retired) g_hash_table_destroy(prev_retired);
+    if (prev_styles) g_hash_table_destroy(prev_styles);
     b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
     b->layout_seq++;
     b->relaying = FALSE;

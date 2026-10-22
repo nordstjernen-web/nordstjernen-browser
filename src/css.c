@@ -33926,6 +33926,7 @@ void
 ns_css_mark_restyle_dirty(ns_node *parent)
 {
     if (!parent) return;
+    ns_dom_note_changed(parent);
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_hash_table_add(g_incr_dirty, parent);
@@ -35176,6 +35177,8 @@ ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
                                ns_node *const *removed, guint n_removed)
 {
     if (!parent) return;
+    ns_dom_note_changed(parent);
+    ns_dom_note_changed(added);
     gboolean gated = added &&
                      incr_has_mut_begin_replaced(added, removed, n_removed);
     incr_mark_childlist(parent, added);
@@ -35188,6 +35191,7 @@ ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
                               ns_node *previous_sibling)
 {
     if (!parent) return;
+    ns_dom_note_changed(parent);
     gboolean gated = n_removed > 0 &&
                      incr_has_mut_begin_nodes(removed, n_removed, FALSE);
     incr_mark_childlist(parent, NULL);
@@ -35409,6 +35413,7 @@ void
 ns_css_mark_attr_dirty(ns_node *target, const char *name, const char *old_value)
 {
     if (!target) return;
+    ns_dom_note_changed(target);
     if (name && old_value &&
         g_strcmp0(ns_element_get_attr(target, name), old_value) == 0)
         return;

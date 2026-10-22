@@ -1600,7 +1600,9 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
                    ns_js *js, GHashTable *css_cache,
                    const ns_node *focused, const ns_node *hover,
                    gsize caret_byte,
-                   gsize sel_anchor_byte, ns_box **out_layout)
+                   gsize sel_anchor_byte,
+                   ns_box *prev_layout, GHashTable *prev_styles,
+                   ns_box **out_layout)
 {
     g_autofree char *base_url = ns_js_base_url_for_document(js, doc, page_url);
     ns_svg_external_note_base(doc, base_url);
@@ -1625,6 +1627,8 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
         .hover_node      = hover,
         .caret_byte      = caret_byte,
         .sel_anchor_byte = sel_anchor_byte,
+        .prev_layout     = prev_layout,
+        .prev_styles     = prev_styles,
     };
     static int profile_env = -1;
     if (profile_env < 0)
@@ -1673,6 +1677,8 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
         rc.sheets     = (const ns_css_stylesheet *const *)sheets->pdata;
         rc.sheet_docs = (const ns_node *const *)sheet_docs->pdata;
         rc.n_sheets   = sheets->len;
+        rc.prev_layout = NULL;
+        rc.prev_styles = NULL;
         styles = ns_render_relayout(&rc, out_layout);
     }
     ns_engine_perf_add_relayout(g_get_monotonic_time() - relayout_t0);

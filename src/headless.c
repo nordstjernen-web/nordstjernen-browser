@@ -918,15 +918,22 @@ headless_relayout(headless_flush_ctx *c)
     if (g_getenv("NS_ANIM_DEBUG")) g_printerr("[anim] headless_relayout\n");
     GHashTable *scroll_save = ns_box_scroll_save(*c->layout);
     if (c->js && *c->layout) ns_js_set_layout_root(c->js, NULL);
-    if (*c->layout) { ns_paint_3d_invalidate(); ns_box_free(*c->layout); *c->layout = NULL; }
-    g_clear_pointer(&c->retired_styles, g_hash_table_destroy);
-    if (c->js && *c->styles) ns_js_set_style_table(c->js, NULL);
-    if (*c->styles) { g_hash_table_destroy(*c->styles); *c->styles = NULL; }
+    ns_box *prev_layout = *c->layout;
+    if (prev_layout) { ns_paint_3d_invalidate(); *c->layout = NULL; }
+    GHashTable *prev_retired = c->retired_styles;
+    GHashTable *prev_styles = *c->styles;
+    c->retired_styles = NULL;
+    *c->styles = NULL;
+    if (c->js && prev_styles) ns_js_set_style_table(c->js, NULL);
 
     *c->styles = ns_engine_relayout(c->doc, c->base, c->vw, c->vh,
                                     c->image_cache, c->anim, c->js,
                                     c->css_cache, headless_focus(c), NULL,
-                                    c->caret, c->anchor, c->layout);
+                                    c->caret, c->anchor, prev_layout,
+                                    prev_retired ? prev_retired : prev_styles,
+                                    c->layout);
+    if (prev_retired) g_hash_table_destroy(prev_retired);
+    if (prev_styles) g_hash_table_destroy(prev_styles);
     ns_box_scroll_restore(*c->layout, scroll_save);
     c->relaying = FALSE;
     c->layout_serial++;

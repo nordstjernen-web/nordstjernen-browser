@@ -77,6 +77,7 @@ struct ns_node {
 
     char *text;
     guint32 text_len;
+    guint32 change_stamp;
 
     ns_attr *attrs;
 
@@ -133,6 +134,10 @@ void ns_node_free(ns_node *node);
 void ns_node_append_child(ns_node *parent, ns_node *child);
 void ns_node_remove(ns_node *child);
 void ns_dom_tree_changed(void);
+void ns_dom_tree_changed_at(const ns_node *parent, const ns_node *child);
+
+void ns_dom_note_changed(const ns_node *n);
+guint32 ns_dom_change_clock_advance(void);
 ns_node *ns_node_next_in_subtree(const ns_node *node, const ns_node *root,
                                  gboolean descend);
 

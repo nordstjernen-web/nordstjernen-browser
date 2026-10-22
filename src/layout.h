@@ -216,6 +216,13 @@ typedef struct ns_box {
     struct ns_box *first_child;
     struct ns_box *last_child;
     struct ns_box *next_sibling;
+
+    double pre_offset_x, pre_offset_y;
+    guint64 build_fp;
+    guint32 born_pass;
+    gboolean build_unsafe;
+    const void *abs_placeholder_key;
+    struct ns_box_reuse *reuse;
 } ns_box;
 
 struct _PangoAttrList;
@@ -256,6 +263,13 @@ void ns_box_table_caption_extents(const ns_box *table, double *above,
 
 void ns_paint_drop_box_cache(ns_box *box);
 
+typedef struct ns_layout_reuse_src {
+    ns_box     *prev_root;
+    GHashTable *prev_styles;
+    GHashTable *animated;
+    gboolean    allowed;
+} ns_layout_reuse_src;
+
 struct ns_image_cache;
 ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
                         double viewport_width,
@@ -263,7 +277,8 @@ ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
                         gsize focused_caret_byte,
                         gsize focused_sel_anchor_byte,
                         struct ns_image_cache *image_cache,
-                        const char *base_url);
+                        const char *base_url,
+                        const ns_layout_reuse_src *reuse);
 
 gboolean ns_layout_frame_viewport(const ns_node *frame, double *w, double *h);
 

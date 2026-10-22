@@ -18,10 +18,20 @@
 #include "mathml.h"
 #include "net.h"
 #include "paint.h"
+#include "font.h"
 
 #define length_or ns_css_length_or
 
 static void hit_enter_box(const ns_box *b, double *x, double *y);
+static void reuse_note_ancestor_read(const ns_box *p);
+static void reuse_note_slot(const ns_node *slot);
+static void box_swap_contents(ns_box *fresh, ns_box *old);
+static void reuse_abs_pre_offsets(ns_box *abox, const ns_box *paint_parent);
+static gconstpointer reuse_abs_box_key(const ns_box *b);
+static void abs_box_map_build(GHashTable *map, ns_box *root);
+static void reuse_shift_pre_offsets(ns_box *b, double dx, double dy);
+static void reuse_free(struct ns_box_reuse *r);
+static guint32 g_reuse_pass;
 
 static double
 length_resolve(const ns_css_value *v, double basis, double fallback)
@@ -250,6 +260,7 @@ grid_item_min_block_contribution(const ns_box *c, double item_outer,
 static double
 box_read_definite_height(const ns_box *box)
 {
+    reuse_note_ancestor_read(box);
     ((ns_box *)box)->definite_height_read = TRUE;
     return box->definite_height;
 }
@@ -615,6 +626,7 @@ box_new(ns_box_kind kind)
     b->kind = kind;
     b->colspan = 1;
     b->rowspan = 1;
+    b->born_pass = g_reuse_pass;
     return b;
 }
 
@@ -914,6 +926,7 @@ ns_box_free(ns_box *box)
         }
         if (cur->paint_layout) ns_paint_drop_box_cache(cur);
         if (cur->owned_style) ns_style_free(cur->owned_style);
+        if (cur->reuse) reuse_free(cur->reuse);
         g_clear_pointer(&cur->negative_layers, g_ptr_array_unref);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
@@ -1851,6 +1864,7 @@ abs_pseudo_placeholder_run(const ns_box *block, const ns_style *ps)
     ph->parent = run;
     g_array_append_val(run->inline_atomics, ia);
     g_hash_table_insert(g_abs_ph_set, ph, (gpointer)ps);
+    ph->abs_placeholder_key = ps;
     return run;
 }
 
@@ -3557,6 +3571,7 @@ append_abs_placeholder(collector_ctx *ctx, gconstpointer key)
     g_string_append(ctx->out, "\xef\xbf\xbc");
     g_array_append_val(ctx->atomics, rec);
     g_hash_table_insert(g_abs_ph_set, ph, (gpointer)key);
+    ph->abs_placeholder_key = key;
 }
 
 static void
@@ -3696,6 +3711,7 @@ collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
     const ns_node *sr = host ? layout_shadow_root(host) : NULL;
     if (!sr) return FALSE;
     const char *slot_name = ns_element_get_attr(slot, "name");
+    reuse_note_slot(slot);
     gboolean any = FALSE;
     for (const ns_node *lc = host->first_child; lc; lc = lc->next_sibling) {
         if (lc == sr) continue;
@@ -6005,6 +6021,7 @@ append_slot_assigned(ns_box *block, const ns_node *slot, GHashTable *styles,
     const ns_node *sr = host ? layout_shadow_root(host) : NULL;
     if (!sr) return FALSE;
     const char *slot_name = ns_element_get_attr(slot, "name");
+    reuse_note_slot(slot);
     gboolean any = FALSE;
     const ns_node *lc = host->first_child;
     while (lc) {
@@ -16438,7 +16455,8 @@ inline_text_ends_with_break(const char *text)
 }
 
 static void
-layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
+layout_block_impl(ns_box *box, double parent_content_width,
+                  const ns_style *inherited_style)
 {
     inline_runs_join_splits(box);
     double cb_pct_basis = box_cb_basis(box, parent_content_width);
@@ -17340,11 +17358,1486 @@ collect_text_input_columns(const ns_box *b, GHashTable *cols)
     return changed;
 }
 
+static const ns_node *positioned_entry_cb_dom(const ns_abs_entry *e,
+                                              GHashTable *styles);
+static gboolean style_uses_anchors(const ns_style *s);
+
+#define NS_REUSE_MAX_CALLS 8
+#define NS_REUSE_FRAME_MAX 2048
+
+#define NS_BOX_GEOM_FIELDS(X)                                   \
+    X(double, rel_dx) X(double, rel_dy)                         \
+    X(double, content_width) X(double, content_height)          \
+    X(double, first_baseline) X(double, definite_height)        \
+    X(double, definite_height_before_flex)                      \
+    X(double, last_layout_width)                                \
+    X(gboolean, definite_height_read)                           \
+    X(double, measured_content_height)                          \
+    X(double, cb_height_override)                               \
+    X(gboolean, block_size_indefinite)                          \
+    X(double, cb_width_override) X(gboolean, cb_width_set)      \
+    X(double, flex_main_size) X(gboolean, has_flex_main)        \
+    X(gboolean, is_rendered_legend)                             \
+    X(gboolean, inline_split_tail) X(gboolean, phantom_line)    \
+    X(double, margin_top_through)                               \
+    X(ns_edges, margin) X(ns_edges, padding) X(ns_edges, border) \
+    X(double, scroll_x) X(double, scroll_y)                     \
+    X(double, scroll_max_x) X(double, scroll_max_y)             \
+    X(gboolean, scrolls)                                        \
+    X(const ns_style *, inline_layout_cache_style)              \
+    X(double, inline_layout_cache_width)                        \
+    X(double, inline_layout_cache_height)                       \
+    X(gboolean, inline_layout_cache_valid)                      \
+    X(int, vertical_wm) X(int, text_orient)                     \
+    X(const ns_style *, inline_natural_cache_style)             \
+    X(double, inline_natural_cache_width)                       \
+    X(gboolean, inline_natural_cache_valid)                     \
+    X(const ns_style *, inline_min_cache_style)                 \
+    X(double, inline_min_cache_width)                           \
+    X(gboolean, inline_min_cache_valid)                         \
+    X(int, grid_explicit_cols) X(int, grid_explicit_rows)       \
+    X(int, colspan) X(int, rowspan) X(int, columns)
+
+typedef struct ns_box_geom {
+#define NS_BOX_GEOM_DECLARE(type, name) type name;
+    NS_BOX_GEOM_FIELDS(NS_BOX_GEOM_DECLARE)
+#undef NS_BOX_GEOM_DECLARE
+} ns_box_geom;
+
+typedef struct ns_layout_tree_info {
+    guint32            stamp;
+    const ns_node     *doc;
+    GHashTable        *animated;
+    const ns_node     *focused;
+    double             viewport_w, viewport_h;
+    guint64            font_gen;
+    const ns_node     *open_select;
+    gboolean           datalist_open;
+} ns_layout_tree_info;
+
+typedef struct reuse_call {
+    guint64       key;
+    double        entry_x, entry_y;
+    ns_box_geom   snap;
+    double        snap_x, snap_y;
+    double        snap_pass_x, snap_pass_y;
+    const ns_box *ref;
+    double        ref_dx, ref_dy;
+    guint64       anc_reads;
+    guint64       inner_sig;
+} reuse_call;
+
+struct ns_box_reuse {
+    guint32     pass;
+    guint       n_calls;
+    guint       cap;
+    gboolean    unsafe;
+    guint64     ctx;
+    reuse_call *calls;
+    guint32     carried_pass;
+    guint32     replay_pass;
+    guint       replay_next;
+    guint32     touched_pass;
+    guint64     cur_sig;
+    gboolean    cur_sig_valid;
+    ns_layout_tree_info *tree;
+};
+
+typedef struct reuse_frame {
+    ns_box  *box;
+    guint64  anc_reads;
+    gboolean unsafe;
+} reuse_frame;
+
+enum {
+    REUSE_MISS_NO_TWIN,
+    REUSE_MISS_SHAPE,
+    REUSE_MISS_RECORD,
+    REUSE_MISS_KEY,
+    REUSE_MISS_CALLS,
+    REUSE_MISS_DIRTY,
+    REUSE_MISS_SUBTREE,
+    REUSE_MISS_COUNT
+};
+
+typedef struct reuse_pass_state {
+    gboolean    active;
+    gboolean    recording;
+    GHashTable *styles;
+    GHashTable *old_map;
+    GHashTable *blocked;
+    GHashTable *subtree_blocked;
+    GHashTable *carried_abs;
+    guint       abs_marked;
+    guint       fresh_calls, hits, hit_boxes, replays, fallbacks, self_hits;
+    guint       misses[REUSE_MISS_COUNT];
+} reuse_pass_state;
+
+static reuse_pass_state g_reuse;
+static reuse_frame g_reuse_frames[NS_REUSE_FRAME_MAX];
+static int g_reuse_depth;
+static int g_reuse_mode = -1;
+static gboolean g_reuse_stats;
+static const ns_node *const g_reuse_dup = (const ns_node *)&g_reuse_dup;
+
+static void
+reuse_tree_info_free(ns_layout_tree_info *t)
+{
+    if (!t) return;
+    if (t->animated) g_hash_table_destroy(t->animated);
+    g_free(t);
+}
+
+static void
+reuse_free(struct ns_box_reuse *r)
+{
+    reuse_tree_info_free(r->tree);
+    g_free(r->calls);
+    g_free(r);
+}
+
+static int
+reuse_mode(void)
+{
+    if (g_reuse_mode < 0) {
+        const char *env = g_getenv("NS_LAYOUT_REUSE");
+        g_reuse_mode = !env ? 1
+            : g_strcmp0(env, "0") == 0 ? 0
+            : g_strcmp0(env, "verify") == 0 ? 2 : 1;
+        g_reuse_stats = g_getenv("NS_LAYOUT_REUSE_STATS") != NULL;
+    }
+    return g_reuse_mode;
+}
+
+static inline guint64
+reuse_mix(guint64 h, guint64 v)
+{
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33;
+    return h;
+}
+
+static inline guint64
+reuse_mix_double(guint64 h, double d)
+{
+    guint64 v;
+    memcpy(&v, &d, sizeof v);
+    return reuse_mix(h, v);
+}
+
+static inline guint64
+reuse_mix_ptr(guint64 h, const void *p)
+{
+    return reuse_mix(h, (guint64)(guintptr)p);
+}
+
+static inline guint64
+reuse_lane(guint64 acc, guint64 w)
+{
+    acc += w * 0xc2b2ae3d27d4eb4fULL;
+    acc = (acc << 31) | (acc >> 33);
+    return acc * 0x9e3779b185ebca87ULL;
+}
+
+static guint64
+reuse_mix_bytes(guint64 h, const void *data, gsize len)
+{
+    const guint8 *p = data;
+    if (len >= 32) {
+        guint64 a = h + 0x60ea27eeadc0b5d6ULL, b = h + 0xc2b2ae3d27d4eb4fULL;
+        guint64 c = h, d = h - 0x9e3779b185ebca87ULL;
+        while (len >= 32) {
+            guint64 w[4];
+            memcpy(w, p, sizeof w);
+            a = reuse_lane(a, w[0]);
+            b = reuse_lane(b, w[1]);
+            c = reuse_lane(c, w[2]);
+            d = reuse_lane(d, w[3]);
+            p += 32;
+            len -= 32;
+        }
+        h = reuse_mix(reuse_mix(reuse_mix(reuse_mix(h, a), b), c), d);
+    }
+    while (len >= 8) {
+        guint64 w;
+        memcpy(&w, p, 8);
+        h = reuse_mix(h, w);
+        p += 8;
+        len -= 8;
+    }
+    guint64 tail = 0;
+    if (len) memcpy(&tail, p, len);
+    return reuse_mix(h, tail ^ ((guint64)len << 56));
+}
+
+static void
+box_geom_save(const ns_box *b, ns_box_geom *g)
+{
+    memset(g, 0, sizeof *g);
+#define NS_BOX_GEOM_SAVE(type, name) g->name = b->name;
+    NS_BOX_GEOM_FIELDS(NS_BOX_GEOM_SAVE)
+#undef NS_BOX_GEOM_SAVE
+}
+
+static void
+box_geom_load(ns_box *b, const ns_box_geom *g)
+{
+#define NS_BOX_GEOM_LOAD(type, name) b->name = g->name;
+    NS_BOX_GEOM_FIELDS(NS_BOX_GEOM_LOAD)
+#undef NS_BOX_GEOM_LOAD
+}
+
+static guint64
+box_geom_hash(const ns_box *b, guint64 h)
+{
+    ns_box_geom g;
+    box_geom_save(b, &g);
+    return reuse_mix_bytes(h, &g, sizeof g);
+}
+
+static struct ns_box_reuse *
+reuse_of(ns_box *b)
+{
+    if (!b->reuse) b->reuse = g_new0(struct ns_box_reuse, 1);
+    return b->reuse;
+}
+
+static guint64
+reuse_ctx_of(const ns_box *box)
+{
+    const ns_box *p = box->parent;
+    if (!p) return 0x5bd1e995ULL;
+    guint64 h = p->reuse && p->reuse->pass == g_reuse_pass
+        ? p->reuse->ctx : 0x27d4eb2dULL;
+    h = box_geom_hash(p, h);
+    h = reuse_mix_ptr(h, p->style);
+    h = reuse_mix_ptr(h, p->dom);
+    h = reuse_mix_ptr(h, p->pseudo_host);
+    return reuse_mix(h, (guint64)p->kind);
+}
+
+static guint64
+reuse_key(const ns_box *box, double width, const ns_style *inherited,
+          guint64 ctx)
+{
+    guint64 h = box_geom_hash(box, ctx);
+    h = reuse_mix_double(h, width);
+    h = reuse_mix_ptr(h, inherited);
+    h = reuse_mix_ptr(h, box->style);
+    h = reuse_mix_ptr(h, box->dom);
+    h = reuse_mix(h, (guint64)box->kind);
+    if (g_margin_above.box == box)
+        h = reuse_mix_double(reuse_mix(h, 1), g_margin_above.collapsed);
+    if (g_inherited_floats.box == box) {
+        h = reuse_mix(h, 2);
+        h = reuse_mix_double(h, g_inherited_floats.inner_x - box->x);
+        h = reuse_mix_double(h, g_inherited_floats.cw);
+        const GArray *fl = g_inherited_floats.floats;
+        for (guint i = 0; fl && i < fl->len; i++) {
+            const float_ref *f = &g_array_index(fl, float_ref, i);
+            h = reuse_mix(h, (guint64)f->side);
+            h = reuse_mix_double(h, f->top - box->y);
+            h = reuse_mix_double(h, f->bottom - box->y);
+            h = reuse_mix_double(h, f->outer_w);
+        }
+    }
+    h = reuse_mix_double(h, g_inline_atomic_cb_w);
+    h = reuse_mix(h, (guint64)g_grid_nesting);
+    h = reuse_mix(h, (guint64)g_min_measure_depth);
+    h = reuse_mix(h, (guint64)(g_pending_subgrid_cols != NULL));
+    h = reuse_mix(h, (guint64)(g_pending_subgrid_rows != NULL));
+    h = reuse_mix(h, (guint64)(g_grid_lines != NULL));
+    h = reuse_mix(h, (guint64)g_cq_seen_container);
+    h = reuse_mix_double(h, ns_css_container_w());
+    return reuse_mix_double(h, ns_css_container_h());
+}
+
+static void
+reuse_note_ancestor_read(const ns_box *p)
+{
+    if (g_reuse_depth <= 0 || g_reuse_depth > NS_REUSE_FRAME_MAX) return;
+    reuse_frame *f = &g_reuse_frames[g_reuse_depth - 1];
+    if (!f->box || p == f->box) return;
+    int level = 1;
+    for (const ns_box *a = f->box->parent; a; a = a->parent, level++) {
+        if (a == p) {
+            if (level <= 64) f->anc_reads |= G_GUINT64_CONSTANT(1) << (level - 1);
+            else f->unsafe = TRUE;
+            return;
+        }
+    }
+    for (const ns_box *a = p->parent; a; a = a->parent)
+        if (a == f->box) return;
+    f->unsafe = TRUE;
+}
+
+static void
+reuse_frames_propagate(const reuse_frame *inner)
+{
+    if (g_reuse_depth <= 0 || g_reuse_depth > NS_REUSE_FRAME_MAX) return;
+    reuse_frame *outer = &g_reuse_frames[g_reuse_depth - 1];
+    if (inner->unsafe) outer->unsafe = TRUE;
+    if (!inner->anc_reads) return;
+    int d = 0;
+    const ns_box *a = inner->box;
+    while (a && a != outer->box) {
+        a = a->parent;
+        d++;
+    }
+    if (!a || d == 0 || d > 64) {
+        outer->unsafe = TRUE;
+        return;
+    }
+    guint64 shifted = d >= 64 ? 0 : inner->anc_reads >> d;
+    outer->anc_reads |= shifted;
+}
+
+static void
+reuse_replay_ancestor_reads(ns_box *box, guint64 mask)
+{
+    ns_box *a = box->parent;
+    for (int level = 1; a && level <= 64; level++, a = a->parent)
+        if (mask & (G_GUINT64_CONSTANT(1) << (level - 1)))
+            a->definite_height_read = TRUE;
+}
+
+static void
+box_shift_tracks(ns_box *b, double dx, double dy)
+{
+    if (b->grid_col_tracks)
+        for (guint i = 0; i < b->grid_col_tracks->len; i++) {
+            ns_grid_track_edges *e =
+                &g_array_index(b->grid_col_tracks, ns_grid_track_edges, i);
+            e->start += dx;
+            e->end += dx;
+        }
+    if (b->grid_row_tracks)
+        for (guint i = 0; i < b->grid_row_tracks->len; i++) {
+            ns_grid_track_edges *e =
+                &g_array_index(b->grid_row_tracks, ns_grid_track_edges, i);
+            e->start += dy;
+            e->end += dy;
+        }
+}
+
+static void
+reuse_record_pre_offsets(ns_box *b)
+{
+    if (!b) return;
+    b->pre_offset_x = b->x;
+    b->pre_offset_y = b->y;
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        reuse_record_pre_offsets(c);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            reuse_record_pre_offsets(
+                g_array_index(b->inline_atomics, ns_inline_atomic, i).box);
+}
+
+static gboolean
+reuse_subtree_has_escaping_float(const ns_box *b)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (float_side_of(c->style) >= 0) return TRUE;
+        if (!box_establishes_bfc(c) && reuse_subtree_has_escaping_float(c))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+reuse_box_rebuild_sensitive(const ns_box *b)
+{
+    if (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
+        (b->media && (b->media->image_src || b->media->image)))
+        return TRUE;
+    const ns_css_value *cv = b->style ? b->style->values[NS_CSS_CONTENT] : NULL;
+    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
+           (strstr(cv->u.keyword, "counter") || strstr(cv->u.keyword, "quote"));
+}
+
+static gboolean
+reuse_subtree_rejects(const ns_box *b, gboolean in_abs)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        gboolean abs = in_abs || style_is_absolute_or_fixed(c->style);
+        if (c->born_pass == g_reuse_pass || c->owned_style ||
+            (abs && reuse_box_rebuild_sensitive(c)) ||
+            reuse_subtree_rejects(c, abs))
+            return TRUE;
+    }
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && (ab->born_pass == g_reuse_pass || ab->owned_style ||
+                   (in_abs && reuse_box_rebuild_sensitive(ab)) ||
+                   reuse_subtree_rejects(ab, in_abs)))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+typedef struct reuse_detached {
+    ns_box *abox;
+    ns_box *parent;
+    double  px, py;
+} reuse_detached;
+
+static void
+reuse_unmap_subtree(const ns_box *b)
+{
+    if (b->dom && g_reuse.old_map &&
+        g_hash_table_lookup(g_reuse.old_map, b->dom) == b)
+        g_hash_table_insert(g_reuse.old_map, (gpointer)b->dom,
+                            (gpointer)g_reuse_dup);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        reuse_unmap_subtree(c);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab) reuse_unmap_subtree(ab);
+    }
+}
+
+static void
+reuse_free_carried(ns_box *b)
+{
+    reuse_unmap_subtree(b);
+    ns_box_free(b);
+}
+
+static void
+reuse_detached_free(gpointer data)
+{
+    reuse_detached *d = data;
+    if (d->abox) reuse_free_carried(d->abox);
+    g_free(d);
+}
+
+static void
+reuse_detach_abs(ns_box *parent, ns_box *abox)
+{
+    gconstpointer key = reuse_abs_box_key(abox);
+    box_detach_child(parent, abox);
+    abox->parent = NULL;
+    if (!key) {
+        reuse_free_carried(abox);
+        return;
+    }
+    if (!g_reuse.carried_abs)
+        g_reuse.carried_abs = g_hash_table_new_full(g_direct_hash,
+                                                    g_direct_equal, NULL,
+                                                    reuse_detached_free);
+    reuse_detached *d = g_new0(reuse_detached, 1);
+    d->abox = abox;
+    d->parent = parent;
+    d->px = parent->x;
+    d->py = parent->y;
+    g_hash_table_replace(g_reuse.carried_abs, (gpointer)key, d);
+}
+
+static void
+reuse_rebind_detached(const ns_box *from, ns_box *to)
+{
+    if (!g_reuse.carried_abs) return;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, g_reuse.carried_abs);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        reuse_detached *d = val;
+        if (d->parent != from || !d->abox) continue;
+        d->parent = to;
+        d->px = to->x;
+        d->py = to->y;
+    }
+}
+
+static gboolean
+reuse_box_within(const ns_box *b, const ns_box *root)
+{
+    for (; b; b = b->parent)
+        if (b == root) return TRUE;
+    return FALSE;
+}
+
+static void
+reuse_forget_detached_within(const ns_box *root)
+{
+    if (!g_reuse.carried_abs) return;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, g_reuse.carried_abs);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        reuse_detached *d = val;
+        if (reuse_box_within(d->parent, root)) g_hash_table_iter_remove(&it);
+    }
+}
+
+static void
+reuse_place_subtree_in(ns_box *b, double dx, double dy, gboolean root,
+                       gboolean in_abs)
+{
+    if (!root) {
+        double tx = b->pre_offset_x + dx - b->x;
+        double ty = b->pre_offset_y + dy - b->y;
+        b->x += tx;
+        b->y += ty;
+        box_shift_tracks(b, tx, ty);
+    } else {
+        box_shift_tracks(b, b->pre_offset_x + dx - b->x,
+                         b->pre_offset_y + dy - b->y);
+    }
+    g_clear_pointer(&b->negative_layers, g_ptr_array_unref);
+    b->negative_lifted = FALSE;
+    if (b->svg_styles) b->svg_styles = g_reuse.styles;
+    if (b->reuse) b->reuse->carried_pass = g_reuse_pass;
+    if (b->abs_placeholder_key && g_abs_ph_set)
+        g_hash_table_insert(g_abs_ph_set, b, (gpointer)b->abs_placeholder_key);
+    g_reuse.hit_boxes++;
+    ns_box *c = b->first_child;
+    while (c) {
+        ns_box *next = c->next_sibling;
+        gboolean abs = style_is_absolute_or_fixed(c->style);
+        reuse_place_subtree_in(c, dx, dy, FALSE, in_abs || abs);
+        if (abs && !in_abs) reuse_detach_abs(b, c);
+        c = next;
+    }
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++) {
+            ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+            if (ab) reuse_place_subtree_in(ab, dx, dy, FALSE, in_abs);
+        }
+}
+
+static void
+reuse_place_subtree(ns_box *b, double dx, double dy, gboolean root)
+{
+    reuse_place_subtree_in(b, dx, dy, root, FALSE);
+}
+
+static gboolean
+reuse_step_place(ns_box *b, const reuse_call *c, double ex, double ey)
+{
+    const ns_box *ref = b->first_child;
+    if (ref != c->ref) return FALSE;
+    if (!ref) return !b->grid_col_tracks && !b->grid_row_tracks;
+    double sx = ex + c->ref_dx - ref->x;
+    double sy = ey + c->ref_dy - ref->y;
+    for (ns_box *ch = b->first_child; ch; ch = ch->next_sibling)
+        shift_box_tree(ch, sx, sy);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab) shift_box_tree(ab, sx, sy);
+    }
+    box_shift_tracks(b, sx, sy);
+    return TRUE;
+}
+
+static void
+reuse_apply_call(ns_box *b, const reuse_call *c, double ex, double ey)
+{
+    double tx = ex - c->entry_x, ty = ey - c->entry_y;
+    box_geom_load(b, &c->snap);
+    b->x = c->snap_x + tx;
+    b->y = c->snap_y + ty;
+    b->flex_pass_x = c->snap_pass_x + tx;
+    b->flex_pass_y = c->snap_pass_y + ty;
+}
+
+static reuse_call *
+reuse_call_slot(struct ns_box_reuse *r, guint index)
+{
+    if (index >= NS_REUSE_MAX_CALLS) return NULL;
+    if (index >= r->cap) {
+        guint cap = r->cap ? r->cap * 2 : 2;
+        while (cap <= index) cap *= 2;
+        if (cap > NS_REUSE_MAX_CALLS) cap = NS_REUSE_MAX_CALLS;
+        r->calls = g_renew(reuse_call, r->calls, cap);
+        r->cap = cap;
+    }
+    return &r->calls[index];
+}
+
+static void
+reuse_mark_touched(ns_box *b)
+{
+    for (ns_box *a = b; a; a = a->parent) {
+        if (!a->reuse) continue;
+        if (a->reuse->touched_pass == g_reuse_pass) break;
+        a->reuse->touched_pass = g_reuse_pass;
+    }
+}
+
+static void
+reuse_drop_carried_abs(ns_box *b)
+{
+    ns_box *c = b->first_child;
+    while (c) {
+        ns_box *next = c->next_sibling;
+        if (c->born_pass != g_reuse_pass && style_is_absolute_or_fixed(c->style)) {
+            box_detach_child(b, c);
+            reuse_free_carried(c);
+        } else {
+            reuse_drop_carried_abs(c);
+        }
+        c = next;
+    }
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab) reuse_drop_carried_abs(ab);
+    }
+}
+
+static void
+reuse_stop_replay(ns_box *b)
+{
+    reuse_forget_detached_within(b);
+    reuse_drop_carried_abs(b);
+    struct ns_box_reuse *r = b->reuse;
+    guint done = r->replay_pass == g_reuse_pass ? r->replay_next : 0;
+    r->replay_pass = 0;
+    r->pass = g_reuse_pass;
+    r->n_calls = MIN(done, r->n_calls);
+    r->cur_sig_valid = FALSE;
+    reuse_mark_touched(b);
+    g_reuse.fallbacks++;
+}
+
+static guint64 box_inner_sig(const ns_box *b);
+
+static guint64
+reuse_child_sig(const ns_box *b, const ns_box *c, guint64 h)
+{
+    h = reuse_mix(h, (guint64)c->kind);
+    h = reuse_mix_ptr(h, c->dom);
+    h = reuse_mix_double(h, c->x - b->x);
+    h = reuse_mix_double(h, c->y - b->y);
+    h = box_geom_hash(c, h);
+    if (c->grid_col_tracks)
+        for (guint i = 0; i < c->grid_col_tracks->len; i++)
+            h = reuse_mix_double(h, g_array_index(c->grid_col_tracks,
+                                 ns_grid_track_edges, i).start - c->x);
+    if (c->grid_row_tracks)
+        for (guint i = 0; i < c->grid_row_tracks->len; i++)
+            h = reuse_mix_double(h, g_array_index(c->grid_row_tracks,
+                                 ns_grid_track_edges, i).start - c->y);
+    if (c->reuse && c->reuse->cur_sig_valid)
+        return reuse_mix(h, c->reuse->cur_sig);
+    return reuse_mix(h, box_inner_sig(c));
+}
+
+static guint64
+box_inner_sig(const ns_box *b)
+{
+    guint64 h = 0x2545f4914f6cdd1dULL;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        h = reuse_child_sig(b, c, h);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        h = reuse_mix(h, (guint64)a->byte_off);
+        h = reuse_mix_double(h, a->owner_offset_x);
+        h = reuse_mix_double(h, a->owner_offset_y);
+        h = reuse_mix_double(h, a->rise_px);
+        if (a->box) h = reuse_child_sig(b, a->box, h);
+    }
+    if (b->atomic_line_heights)
+        h = reuse_mix_bytes(h, b->atomic_line_heights->data,
+                            b->atomic_line_heights->len *
+                            g_array_get_element_size(b->atomic_line_heights));
+    if (b->atomic_line_offsets)
+        h = reuse_mix_bytes(h, b->atomic_line_offsets->data,
+                            b->atomic_line_offsets->len *
+                            g_array_get_element_size(b->atomic_line_offsets));
+    if (b->table_col_hints)
+        h = reuse_mix_bytes(h, b->table_col_hints->data,
+                            b->table_col_hints->len *
+                            g_array_get_element_size(b->table_col_hints));
+    return h;
+}
+
+static gboolean
+reuse_call_exact(const struct ns_box_reuse *r, guint index)
+{
+    return index + 1 == r->n_calls ||
+           r->calls[index].inner_sig == r->calls[r->n_calls - 1].inner_sig;
+}
+
+static void
+reuse_serve(ns_box *b, guint index, double ex, double ey)
+{
+    struct ns_box_reuse *r = b->reuse;
+    const reuse_call *c = &r->calls[index];
+    reuse_apply_call(b, c, ex, ey);
+    reuse_replay_ancestor_reads(b, c->anc_reads);
+    r->replay_pass = g_reuse_pass;
+    r->replay_next = index + 1;
+    r->cur_sig = c->inner_sig;
+    r->cur_sig_valid = TRUE;
+    if (index + 1 != r->n_calls) reuse_mark_touched(b->parent);
+}
+
+static void
+box_swap_contents(ns_box *fresh, ns_box *old)
+{
+    ns_box tmp = *fresh;
+    ns_box *f_parent = fresh->parent, *f_next = fresh->next_sibling;
+    ns_box *o_parent = old->parent, *o_next = old->next_sibling;
+    *fresh = *old;
+    *old = tmp;
+    fresh->parent = f_parent;
+    fresh->next_sibling = f_next;
+    old->parent = o_parent;
+    old->next_sibling = o_next;
+    for (ns_box *c = fresh->first_child; c; c = c->next_sibling) c->parent = fresh;
+    for (ns_box *c = old->first_child; c; c = c->next_sibling) c->parent = old;
+    for (guint i = 0; fresh->inline_atomics && i < fresh->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(fresh->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && ab->parent == old) ab->parent = fresh;
+    }
+    for (guint i = 0; old->inline_atomics && i < old->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(old->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && ab->parent == fresh) ab->parent = old;
+    }
+}
+
+static gboolean
+reuse_node_clean(const ns_node *n)
+{
+    if (!n || g_hash_table_contains(g_reuse.blocked, n)) return FALSE;
+    if (g_hash_table_size(g_reuse.subtree_blocked) > 0)
+        for (const ns_node *a = n; a; a = a->parent)
+            if (g_hash_table_contains(g_reuse.subtree_blocked, a)) return FALSE;
+    return TRUE;
+}
+
+static void
+reuse_block_upward(const ns_node *n)
+{
+    while (n && g_hash_table_add(g_reuse.blocked, (gpointer)n))
+        n = n->parent;
+}
+
+static void
+reuse_note_slot(const ns_node *slot)
+{
+    if (g_reuse.blocked) reuse_block_upward(slot);
+}
+
+static void
+reuse_block_abs_entry(const ns_abs_entry *e)
+{
+    const ns_style *s = e->pseudo ? e->pseudo
+        : g_hash_table_lookup(g_reuse.styles, e->dom);
+    const ns_node *cb = s && !style_uses_anchors(s)
+        ? positioned_entry_cb_dom(e, g_reuse.styles) : NULL;
+    gboolean inside = FALSE;
+    for (const ns_node *a = e->dom; a && cb; a = a->parent)
+        if (a == cb) {
+            inside = TRUE;
+            break;
+        }
+    if (!inside) {
+        reuse_block_upward(e->dom);
+        return;
+    }
+    if (e->pseudo && cb == e->dom) return;
+    for (const ns_node *a = e->dom; a && a != cb; a = a->parent)
+        if (!g_hash_table_add(g_reuse.blocked, (gpointer)a)) break;
+}
+
+static void
+reuse_mark_new_abs_entries(void)
+{
+    if (!g_abs_pending || !g_reuse.blocked) return;
+    if (g_reuse.abs_marked > g_abs_pending->len) g_reuse.abs_marked = 0;
+    for (guint i = g_reuse.abs_marked; i < g_abs_pending->len; i++)
+        reuse_block_abs_entry(&g_array_index(g_abs_pending, ns_abs_entry, i));
+    g_reuse.abs_marked = g_abs_pending->len;
+}
+
+static gconstpointer
+reuse_abs_box_key(const ns_box *b)
+{
+    if (!b->pseudo_host) return b->dom;
+    const ns_style *hs = g_hash_table_lookup(g_reuse.styles, b->pseudo_host);
+    return hs ? (b->pseudo_after ? hs->after : hs->before) : NULL;
+}
+
+static gboolean
+reuse_abs_entry_carried(const ns_abs_entry *e)
+{
+    if (!g_reuse.carried_abs) return FALSE;
+    gconstpointer key = e->pseudo ? (gconstpointer)e->pseudo
+                                  : (gconstpointer)e->dom;
+    return g_hash_table_contains(g_reuse.carried_abs, key);
+}
+
+static gboolean
+reuse_reattach_abs(const ns_abs_entry *e, GHashTable *box_map)
+{
+    if (!g_reuse.carried_abs) return FALSE;
+    gconstpointer key = e->pseudo ? (gconstpointer)e->pseudo
+                                  : (gconstpointer)e->dom;
+    reuse_detached *d = g_hash_table_lookup(g_reuse.carried_abs, key);
+    if (!d || !d->abox) return FALSE;
+    ns_box *abox = d->abox;
+    d->abox = NULL;
+    shift_box_tree(abox, d->parent->x - d->px, d->parent->y - d->py);
+    box_append_child(d->parent, abox);
+    abs_box_map_build(box_map, abox);
+    reuse_abs_pre_offsets(abox, d->parent);
+    apply_position_offsets(abox, 0, 0);
+    return TRUE;
+}
+
+static void
+reuse_box_map_unmap(GHashTable *map, const ns_box *b)
+{
+    if (b->dom) g_hash_table_remove(map, b->dom);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        reuse_box_map_unmap(map, c);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab) reuse_box_map_unmap(map, ab);
+    }
+}
+
+static void
+reuse_box_map_refresh(GHashTable *map, ns_box *abox, guint hits_before)
+{
+    if (g_reuse.hits == hits_before) return;
+    reuse_box_map_unmap(map, abox);
+    abs_box_map_build(map, abox);
+}
+
+static void
+reuse_shift_pre_offsets(ns_box *b, double dx, double dy)
+{
+    if (!b || (dx == 0 && dy == 0)) return;
+    b->pre_offset_x += dx;
+    b->pre_offset_y += dy;
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        reuse_shift_pre_offsets(c, dx, dy);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++)
+        reuse_shift_pre_offsets(
+            g_array_index(b->inline_atomics, ns_inline_atomic, i).box, dx, dy);
+}
+
+static void
+reuse_abs_pre_offsets(ns_box *abox, const ns_box *paint_parent)
+{
+    reuse_record_pre_offsets(abox);
+    if (paint_parent)
+        reuse_shift_pre_offsets(abox,
+                                paint_parent->pre_offset_x - paint_parent->x,
+                                paint_parent->pre_offset_y - paint_parent->y);
+}
+
+static gboolean
+reuse_miss(int reason)
+{
+    g_reuse.misses[reason]++;
+    return FALSE;
+}
+
+static gboolean
+reuse_try_hit(ns_box *f, guint64 key, double ex, double ey)
+{
+    if (!g_reuse.active || f->born_pass != g_reuse_pass ||
+        f->kind != NS_BOX_BLOCK || !f->dom ||
+        f->dom->kind != NS_NODE_ELEMENT || !f->style || f->pseudo_host)
+        return FALSE;
+    ns_box *o = g_hash_table_lookup(g_reuse.old_map, f->dom);
+    if (!o || (const ns_node *)o == g_reuse_dup ||
+        (o->reuse && o->reuse->carried_pass == g_reuse_pass))
+        return reuse_miss(REUSE_MISS_NO_TWIN);
+    if (f->build_unsafe || !f->parent || f->parent->kind != NS_BOX_BLOCK ||
+        f->parent->columns > 1 || style_is_absolute_or_fixed(f->style))
+        return reuse_miss(REUSE_MISS_SHAPE);
+    struct ns_box_reuse *orec = o->reuse;
+    struct ns_box_reuse *frec = f->reuse;
+    guint index = frec->n_calls;
+    if (!orec || orec->unsafe || o->style != f->style ||
+        o->build_fp != f->build_fp || o->build_unsafe ||
+        orec->replay_pass == g_reuse_pass)
+        return reuse_miss(REUSE_MISS_RECORD);
+    if (index >= orec->n_calls || orec->n_calls > NS_REUSE_MAX_CALLS ||
+        !reuse_call_exact(orec, index))
+        return reuse_miss(REUSE_MISS_CALLS);
+    for (guint k = 0; k < index; k++)
+        if (frec->calls[k].key != orec->calls[k].key)
+            return reuse_miss(REUSE_MISS_KEY);
+    const reuse_call *c = &orec->calls[index];
+    if (c->key != key) return reuse_miss(REUSE_MISS_KEY);
+    if (o->first_child != c->ref ||
+        (!c->ref && (o->grid_col_tracks || o->grid_row_tracks)))
+        return reuse_miss(REUSE_MISS_RECORD);
+    reuse_mark_new_abs_entries();
+    if (!reuse_node_clean(f->dom)) return reuse_miss(REUSE_MISS_DIRTY);
+    if ((!box_establishes_bfc(f) && reuse_subtree_has_escaping_float(o)) ||
+        reuse_subtree_rejects(o, FALSE))
+        return reuse_miss(REUSE_MISS_SUBTREE);
+    g_hash_table_insert(g_reuse.old_map, (gpointer)f->dom, (gpointer)g_reuse_dup);
+    double dx = 0, dy = 0;
+    if (c->ref) {
+        dx = ex + c->ref_dx - c->ref->pre_offset_x;
+        dy = ey + c->ref_dy - c->ref->pre_offset_y;
+    }
+    reuse_place_subtree(o, dx, dy, TRUE);
+    box_swap_contents(f, o);
+    reuse_serve(f, index, ex, ey);
+    reuse_rebind_detached(o, f);
+    g_reuse.hits++;
+    return TRUE;
+}
+
+static gboolean
+reuse_replay_step(ns_box *b, guint64 key, double ex, double ey)
+{
+    struct ns_box_reuse *r = b->reuse;
+    guint j = r->replay_next;
+    if (j >= r->n_calls || r->calls[j].key != key || !reuse_call_exact(r, j) ||
+        r->touched_pass == g_reuse_pass)
+        return FALSE;
+    if (!reuse_step_place(b, &r->calls[j], ex, ey)) return FALSE;
+    reuse_serve(b, j, ex, ey);
+    g_reuse.replays++;
+    return TRUE;
+}
+
+static gboolean
+reuse_self_hit(ns_box *b, guint64 key, double ex, double ey)
+{
+    struct ns_box_reuse *r = b->reuse;
+    if (!g_reuse.active || r->unsafe || r->n_calls == 0 ||
+        r->n_calls > NS_REUSE_MAX_CALLS || r->touched_pass == g_reuse_pass ||
+        !r->cur_sig_valid ||
+        r->cur_sig != r->calls[r->n_calls - 1].inner_sig ||
+        (!box_establishes_bfc(b) && reuse_subtree_has_escaping_float(b)))
+        return FALSE;
+    for (guint m = r->n_calls; m-- > 0;) {
+        if (r->calls[m].key != key || !reuse_call_exact(r, m)) continue;
+        if (!reuse_step_place(b, &r->calls[m], ex, ey)) return FALSE;
+        reuse_serve(b, m, ex, ey);
+        g_reuse.self_hits++;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+layout_block(ns_box *box, double parent_content_width,
+             const ns_style *inherited_style)
+{
+    if (!g_reuse.recording) {
+        layout_block_impl(box, parent_content_width, inherited_style);
+        return;
+    }
+    struct ns_box_reuse *r = reuse_of(box);
+    gboolean fresh = box->born_pass == g_reuse_pass;
+    gboolean replaying = r->replay_pass == g_reuse_pass;
+    gboolean pristine = !fresh && !replaying && r->pass != g_reuse_pass;
+    if (r->tree) {
+        reuse_tree_info_free(r->tree);
+        r->tree = NULL;
+    }
+    if (fresh && r->pass != g_reuse_pass) {
+        r->pass = g_reuse_pass;
+        r->n_calls = 0;
+        r->unsafe = FALSE;
+        r->replay_pass = 0;
+    }
+    guint64 ctx = reuse_ctx_of(box);
+    guint64 key = reuse_key(box, parent_content_width, inherited_style, ctx);
+    double ex = box->x, ey = box->y;
+    if (g_reuse_depth >= NS_REUSE_FRAME_MAX) {
+        if (!fresh) reuse_stop_replay(box);
+        box->reuse->unsafe = TRUE;
+        box->reuse->ctx = ctx;
+        layout_block_impl(box, parent_content_width, inherited_style);
+        return;
+    }
+    reuse_frame *frame = &g_reuse_frames[g_reuse_depth++];
+    *frame = (reuse_frame){ .box = box };
+    gboolean served = FALSE;
+    if (replaying) {
+        served = reuse_replay_step(box, key, ex, ey);
+    } else if (fresh) {
+        g_reuse.fresh_calls++;
+        served = reuse_try_hit(box, key, ex, ey);
+    } else if (pristine) {
+        served = reuse_self_hit(box, key, ex, ey);
+    }
+    if (served) {
+        r = box->reuse;
+        frame->anc_reads = r->calls[r->replay_next - 1].anc_reads;
+        reuse_frame done = *frame;
+        g_reuse_depth--;
+        reuse_frames_propagate(&done);
+        return;
+    }
+    if (!fresh) reuse_stop_replay(box);
+    r = box->reuse;
+    r->ctx = ctx;
+    r->cur_sig_valid = FALSE;
+    guint k = r->n_calls;
+    layout_block_impl(box, parent_content_width, inherited_style);
+    reuse_frame done = g_reuse_frames[--g_reuse_depth];
+    r = box->reuse;
+    reuse_call *c = reuse_call_slot(r, k);
+    if (c) {
+        c->key = key;
+        c->entry_x = ex;
+        c->entry_y = ey;
+        box_geom_save(box, &c->snap);
+        c->snap_x = box->x;
+        c->snap_y = box->y;
+        c->snap_pass_x = box->flex_pass_x;
+        c->snap_pass_y = box->flex_pass_y;
+        c->ref = box->first_child;
+        c->ref_dx = c->ref ? c->ref->x - ex : 0;
+        c->ref_dy = c->ref ? c->ref->y - ey : 0;
+        c->anc_reads = done.anc_reads;
+        c->inner_sig = box_inner_sig(box);
+        r->cur_sig = c->inner_sig;
+        r->cur_sig_valid = TRUE;
+    } else {
+        r->unsafe = TRUE;
+    }
+    r->n_calls = k + 1;
+    if (done.unsafe) r->unsafe = TRUE;
+    reuse_frames_propagate(&done);
+}
+
+static guint64
+reuse_image_state(const ns_box *b)
+{
+    const ns_image *img = b->media ? b->media->image : NULL;
+    if (!img) return 0;
+    guint64 h = reuse_mix(0x1f, (guint64)img->loaded);
+    h = reuse_mix(h, (guint64)img->failed);
+    h = reuse_mix(h, (guint64)(guint)img->natural_width);
+    return reuse_mix(h, (guint64)(guint)img->natural_height);
+}
+
+static gboolean
+reuse_box_counts_siblings(const ns_box *b)
+{
+    if (!b->style || !b->style->display.list_item) return FALSE;
+    const char *lst = ns_style_keyword(b->style, NS_CSS_LIST_STYLE_TYPE);
+    return !lst || strcmp(lst, "none") != 0 || b->style->marker;
+}
+
+static gboolean
+reuse_box_unsafe_self(const ns_box *b)
+{
+    if (b->kind == NS_BOX_VIDEO) return TRUE;
+    if (b->media && (b->media->video_src || b->media->svg_foreign ||
+                     b->media->marker_image_src))
+        return TRUE;
+    if (b->dom && b->dom->kind == NS_NODE_ELEMENT && b->dom->name &&
+        (strcmp(b->dom->name, "select") == 0 ||
+         strcmp(b->dom->name, "slot") == 0 ||
+         strcmp(b->dom->name, "video") == 0 ||
+         strcmp(b->dom->name, "audio") == 0 ||
+         strcmp(b->dom->name, "object") == 0 ||
+         strcmp(b->dom->name, "embed") == 0))
+        return TRUE;
+    return FALSE;
+}
+
+static guint64
+reuse_fingerprint(ns_box *b)
+{
+    if (!b) return 0;
+    guint64 h = reuse_mix(0xa0761d6478bd642fULL, (guint64)b->kind);
+    h = reuse_mix_ptr(h, b->dom);
+    h = reuse_mix_ptr(h, b->style);
+    h = reuse_mix_ptr(h, b->pseudo_host);
+    h = reuse_mix(h, (guint64)b->pseudo_after);
+    if (b->text) h = reuse_mix_bytes(h, b->text, strlen(b->text));
+    h = reuse_mix(h, reuse_image_state(b));
+    if (b->media && b->media->image_src)
+        h = reuse_mix_bytes(h, b->media->image_src, strlen(b->media->image_src));
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        const ns_inline_attr *a = &g_array_index(b->attrs, ns_inline_attr, i);
+        h = reuse_mix(h, (guint64)a->kind);
+        h = reuse_mix(h, (guint64)a->start);
+        h = reuse_mix(h, (guint64)a->len);
+        h = reuse_mix_ptr(h, a->dom);
+        h = reuse_mix_ptr(h, a->style);
+        h = reuse_mix_double(h, a->font_size_px);
+        h = reuse_mix(h, ((guint64)a->r << 24) | ((guint64)a->g << 16) |
+                         ((guint64)a->b << 8) | a->a);
+    }
+    for (guint i = 0; b->links && i < b->links->len; i++) {
+        const ns_link_range *l = &g_array_index(b->links, ns_link_range, i);
+        h = reuse_mix(h, (guint64)l->start);
+        h = reuse_mix(h, (guint64)l->len);
+        h = reuse_mix_ptr(h, l->dom);
+    }
+    gboolean unsafe = reuse_box_unsafe_self(b);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        h = reuse_mix(h, (guint64)a->byte_off);
+        if (a->box) {
+            h = reuse_mix(h, reuse_fingerprint(a->box));
+            if (a->box->build_unsafe) unsafe = TRUE;
+        }
+    }
+    ns_box_geom g;
+    box_geom_save(b, &g);
+    h = reuse_mix_bytes(h, &g, sizeof g);
+    for (ns_box *c = b->first_child; c; c = c->next_sibling) {
+        h = reuse_mix(h, reuse_fingerprint(c));
+        if (c->build_unsafe && !reuse_box_counts_siblings(c)) unsafe = TRUE;
+    }
+    b->build_fp = h;
+    b->build_unsafe = unsafe || reuse_box_counts_siblings(b);
+    return h;
+}
+
+static void
+reuse_map_add(GHashTable *map, ns_box *b)
+{
+    for (ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_BOX_BLOCK && c->dom &&
+            c->dom->kind == NS_NODE_ELEMENT && b->kind == NS_BOX_BLOCK) {
+            gpointer prev = g_hash_table_lookup(map, c->dom);
+            g_hash_table_insert(map, (gpointer)c->dom,
+                                prev ? (gpointer)g_reuse_dup : c);
+        }
+        reuse_map_add(map, c);
+    }
+}
+
+static guint64
+reuse_font_generation(void)
+{
+    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
+    return ((guint64)serial << 32) | ns_font_generation();
+}
+
+static ns_layout_tree_info *
+reuse_tree_info_new(const ns_node *doc, const ns_layout_reuse_src *src,
+                    double viewport_width)
+{
+    ns_layout_tree_info *t = g_new0(ns_layout_tree_info, 1);
+    t->stamp = ns_dom_change_clock_advance();
+    t->doc = doc;
+    t->animated = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (src && src->animated) {
+        GHashTableIter it;
+        gpointer key;
+        g_hash_table_iter_init(&it, src->animated);
+        while (g_hash_table_iter_next(&it, &key, NULL))
+            g_hash_table_add(t->animated, key);
+    }
+    t->focused = g_focused_input_for_layout;
+    t->viewport_w = viewport_width;
+    t->viewport_h = ns_css_viewport_h();
+    t->font_gen = reuse_font_generation();
+    t->open_select = g_open_select_for_layout;
+    t->datalist_open = g_datalist_open_for_layout;
+    return t;
+}
+
+static void
+reuse_mark_node(const ns_node *n)
+{
+    if (!n) return;
+    if (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT)
+        reuse_block_upward(n->parent);
+    reuse_block_upward(n);
+}
+
+static void
+reuse_mark_changed_nodes(const ns_node *doc, const ns_layout_tree_info *t)
+{
+    gboolean any_animated = g_hash_table_size(t->animated) > 0;
+    const ns_node *n = doc;
+    while (n) {
+        if (n->change_stamp > t->stamp || n == t->focused ||
+            (any_animated && g_hash_table_contains(t->animated, n)))
+            reuse_mark_node(n);
+        if (n->first_child) {
+            n = n->first_child;
+            continue;
+        }
+        while (n != doc && !n->next_sibling) n = n->parent;
+        if (n == doc) break;
+        n = n->next_sibling;
+    }
+}
+
+static gboolean
+reuse_style_blocks_subtree(const ns_style *s)
+{
+    return s && (s->first_line || s->first_letter);
+}
+
+static void
+reuse_pass_begin(const ns_node *doc, GHashTable *styles, double viewport_width,
+                 const ns_layout_reuse_src *src)
+{
+    g_reuse_pass++;
+    if (g_reuse_pass == 0) g_reuse_pass = 1;
+    memset(&g_reuse, 0, sizeof g_reuse);
+    g_reuse_depth = 0;
+    g_reuse.styles = styles;
+    g_reuse.recording = reuse_mode() != 0 && src && src->allowed;
+    ns_box *old = src ? src->prev_root : NULL;
+    ns_layout_tree_info *t = old && old->reuse ? old->reuse->tree : NULL;
+    const char *skip = reuse_mode() == 0 ? "disabled"
+        : !src ? "no-source" : !src->allowed ? "not-allowed"
+        : !old ? "no-previous" : !t ? "no-tree-info"
+        : !src->prev_styles ? "no-styles"
+        : !doc || t->doc != doc ? "document"
+        : t->viewport_w != viewport_width ||
+          t->viewport_h != ns_css_viewport_h() ? "viewport"
+        : t->font_gen != reuse_font_generation() ? "fonts"
+        : t->open_select != g_open_select_for_layout ||
+          t->datalist_open != g_datalist_open_for_layout ? "popup" : NULL;
+    if (skip) {
+        if (g_reuse_stats) g_printerr("[reuse] pass=%u skipped: %s\n",
+                                      g_reuse_pass, skip);
+        return;
+    }
+    g_reuse.blocked = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_reuse.subtree_blocked = g_hash_table_new(g_direct_hash, g_direct_equal);
+    reuse_mark_changed_nodes(doc, t);
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, styles);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        if (g_hash_table_lookup(src->prev_styles, key) != val)
+            reuse_mark_node(key);
+        if (reuse_style_blocks_subtree(val))
+            g_hash_table_add(g_reuse.subtree_blocked, key);
+    }
+    g_hash_table_iter_init(&it, t->animated);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        g_hash_table_add(g_reuse.subtree_blocked, key);
+    if (src->animated) {
+        g_hash_table_iter_init(&it, src->animated);
+        while (g_hash_table_iter_next(&it, &key, NULL)) {
+            g_hash_table_add(g_reuse.subtree_blocked, key);
+            reuse_mark_node(key);
+        }
+    }
+    reuse_mark_node(g_focused_input_for_layout);
+    g_reuse.old_map = g_hash_table_new(g_direct_hash, g_direct_equal);
+    reuse_map_add(g_reuse.old_map, old);
+    g_reuse.active = TRUE;
+}
+
+static void
+reuse_pass_end(const ns_node *doc, ns_box *root,
+               const ns_layout_reuse_src *src, double viewport_width)
+{
+    if (g_reuse_stats && g_reuse.old_map)
+        g_printerr("[reuse] pass=%u fresh=%u hits=%u boxes=%u replays=%u "
+                   "self=%u fallbacks=%u miss: twin=%u "
+                   "shape=%u record=%u key=%u calls=%u dirty=%u subtree=%u\n",
+                   g_reuse_pass, g_reuse.fresh_calls, g_reuse.hits,
+                   g_reuse.hit_boxes, g_reuse.replays, g_reuse.self_hits,
+                   g_reuse.fallbacks, g_reuse.misses[REUSE_MISS_NO_TWIN],
+                   g_reuse.misses[REUSE_MISS_SHAPE],
+                   g_reuse.misses[REUSE_MISS_RECORD],
+                   g_reuse.misses[REUSE_MISS_KEY],
+                   g_reuse.misses[REUSE_MISS_CALLS],
+                   g_reuse.misses[REUSE_MISS_DIRTY],
+                   g_reuse.misses[REUSE_MISS_SUBTREE]);
+    g_clear_pointer(&g_reuse.old_map, g_hash_table_destroy);
+    g_clear_pointer(&g_reuse.carried_abs, g_hash_table_destroy);
+    g_clear_pointer(&g_reuse.blocked, g_hash_table_destroy);
+    g_clear_pointer(&g_reuse.subtree_blocked, g_hash_table_destroy);
+    g_reuse.active = FALSE;
+    gboolean recorded = g_reuse.recording;
+    g_reuse.recording = FALSE;
+    if (root && recorded) {
+        struct ns_box_reuse *r = reuse_of(root);
+        if (r->tree) reuse_tree_info_free(r->tree);
+        r->tree = reuse_tree_info_new(doc, src, viewport_width);
+    }
+    if (src && src->prev_root) ns_box_free(src->prev_root);
+}
+
+static gboolean
+reuse_close(double a, double b)
+{
+    return fabs(a - b) <= 0.01 || (isnan(a) && isnan(b));
+}
+
+static void
+reuse_describe(const ns_box *b, GString *out)
+{
+    const ns_box *chain[8];
+    int n = 0;
+    for (const ns_box *a = b; a && n < 8; a = a->parent)
+        if (a->dom && a->dom->kind == NS_NODE_ELEMENT) chain[n++] = a;
+    for (int i = n - 1; i >= 0; i--) {
+        const ns_node *d = chain[i]->dom;
+        const char *id = ns_element_get_attr(d, "id");
+        const char *cls = ns_element_get_attr(d, "class");
+        g_string_append_printf(out, "%s%s%s%s%s%s", i == n - 1 ? "" : " > ",
+                               d->name ? d->name : "?", id ? "#" : "",
+                               id ? id : "", cls ? "." : "", cls ? cls : "");
+    }
+    g_string_append_printf(out, " [%s]", ns_box_kind_name(b->kind));
+}
+
+static int
+reuse_compare(const ns_box *a, const ns_box *b, int budget)
+{
+    if (budget <= 0) return 0;
+    const char *what = NULL;
+    if (a->kind != b->kind || a->dom != b->dom) what = "identity";
+    else if (g_strcmp0(a->text, b->text) != 0) what = "text";
+    else if (!reuse_close(a->x, b->x) || !reuse_close(a->y, b->y)) what = "position";
+    else if (!reuse_close(a->content_width, b->content_width) ||
+             !reuse_close(a->content_height, b->content_height)) what = "size";
+    else if (!reuse_close(a->margin.top, b->margin.top) ||
+             !reuse_close(a->margin.left, b->margin.left) ||
+             !reuse_close(a->margin.right, b->margin.right) ||
+             !reuse_close(a->margin.bottom, b->margin.bottom) ||
+             !reuse_close(a->padding.top, b->padding.top) ||
+             !reuse_close(a->padding.left, b->padding.left) ||
+             !reuse_close(a->border.top, b->border.top) ||
+             !reuse_close(a->border.left, b->border.left)) what = "edges";
+    else if (!reuse_close(a->paint_top, b->paint_top) ||
+             !reuse_close(a->paint_bottom, b->paint_bottom)) what = "paint-bounds";
+    else if (!reuse_close(a->scroll_max_x, b->scroll_max_x) ||
+             !reuse_close(a->scroll_max_y, b->scroll_max_y) ||
+             a->scrolls != b->scrolls) what = "scroll";
+    else if (!reuse_close(a->rel_dx, b->rel_dx) ||
+             !reuse_close(a->rel_dy, b->rel_dy)) what = "relative";
+    else if (!reuse_close(a->first_baseline, b->first_baseline)) what = "baseline";
+    else if ((a->negative_layers ? a->negative_layers->len : 0) !=
+             (b->negative_layers ? b->negative_layers->len : 0)) what = "layers";
+    else if ((a->inline_atomics ? a->inline_atomics->len : 0) !=
+             (b->inline_atomics ? b->inline_atomics->len : 0)) what = "atomics";
+    if (!what) {
+        guint na = 0, nb = 0;
+        for (const ns_box *c = a->first_child; c; c = c->next_sibling) na++;
+        for (const ns_box *c = b->first_child; c; c = c->next_sibling) nb++;
+        if (na != nb) what = "children";
+    }
+    if (!what && a->inline_atomics)
+        for (guint i = 0; i < a->inline_atomics->len && !what; i++) {
+            const ns_inline_atomic *x =
+                &g_array_index(a->inline_atomics, ns_inline_atomic, i);
+            const ns_inline_atomic *y =
+                &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+            if (!reuse_close(x->owner_offset_x, y->owner_offset_x) ||
+                !reuse_close(x->owner_offset_y, y->owner_offset_y)) {
+                what = "atomic-offset";
+            }
+        }
+    if (what && strcmp(what, "paint-bounds") == 0) {
+        int before = budget;
+        const ns_box *ca = a->first_child, *cb = b->first_child;
+        for (; ca && cb && budget > 0; ca = ca->next_sibling, cb = cb->next_sibling)
+            budget = reuse_compare(ca, cb, budget);
+        if (budget < before) return budget;
+    }
+    if (what) {
+        GString *d = g_string_new(NULL);
+        reuse_describe(a, d);
+        if (strcmp(what, "paint-bounds") == 0)
+            g_string_append_printf(d, " paint %.2f..%.2f vs %.2f..%.2f",
+                                   a->paint_top, a->paint_bottom,
+                                   b->paint_top, b->paint_bottom);
+        if (strcmp(what, "scroll") == 0)
+            g_string_append_printf(d, " scroll %.2f,%.2f,%d vs %.2f,%.2f,%d",
+                                   a->scroll_max_x, a->scroll_max_y, a->scrolls,
+                                   b->scroll_max_x, b->scroll_max_y, b->scrolls);
+        g_printerr("[reuse-verify] %s mismatch at %s: reused %.2f,%.2f %.2fx%.2f"
+                   " full %.2f,%.2f %.2fx%.2f\n", what, d->str, a->x, a->y,
+                   a->content_width, a->content_height, b->x, b->y,
+                   b->content_width, b->content_height);
+        g_string_free(d, TRUE);
+        return budget - 1;
+    }
+    const ns_box *ca = a->first_child, *cb = b->first_child;
+    for (; ca && cb && budget > 0; ca = ca->next_sibling, cb = cb->next_sibling)
+        budget = reuse_compare(ca, cb, budget);
+    for (guint i = 0; a->inline_atomics && i < a->inline_atomics->len &&
+                      budget > 0; i++) {
+        const ns_box *xa = g_array_index(a->inline_atomics, ns_inline_atomic, i).box;
+        const ns_box *xb = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (xa && xb) budget = reuse_compare(xa, xb, budget);
+    }
+    return budget;
+}
+
+static void
+reuse_rebase_on(ns_box *first, GHashTable *cols)
+{
+    if (!g_reuse.blocked || !first) return;
+    g_reuse_pass++;
+    if (g_reuse_pass == 0) g_reuse_pass = 1;
+    g_hash_table_remove_all(g_reuse.old_map);
+    reuse_map_add(g_reuse.old_map, first);
+    g_hash_table_remove_all(g_reuse.blocked);
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, cols);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        reuse_block_upward(key);
+    g_reuse.abs_marked = 0;
+    if (g_reuse.carried_abs) g_hash_table_remove_all(g_reuse.carried_abs);
+    g_reuse.active = TRUE;
+}
+
+static ns_box *
+layout_build_tree(const ns_node *doc, GHashTable *styles,
+                  double viewport_width, struct ns_image_cache *image_cache)
+{
+    ns_box *root = ns_layout_build_(doc, styles, viewport_width);
+    if (!g_input_columns_for_layout) {
+        GHashTable *cols = g_hash_table_new(g_direct_hash, g_direct_equal);
+        if (collect_text_input_columns(root, cols)) {
+            g_input_columns_for_layout = cols;
+            gboolean rebase = g_reuse.active;
+            if (rebase) reuse_rebase_on(root, cols);
+            else ns_box_free(root);
+            ns_image_cache_begin_generation(image_cache);
+            ns_box *first = rebase ? root : NULL;
+            root = ns_layout_build_(doc, styles, viewport_width);
+            if (first) ns_box_free(first);
+            g_input_columns_for_layout = NULL;
+        }
+        g_hash_table_destroy(cols);
+    }
+    return root;
+}
+
+static void
+reuse_verify(ns_box *root, const ns_node *doc, GHashTable *styles,
+             double viewport_width, struct ns_image_cache *image_cache)
+{
+    g_reuse.active = FALSE;
+    GHashTable *carried = g_reuse.carried_abs;
+    g_reuse.carried_abs = NULL;
+    ns_box *ref = layout_build_tree(doc, styles, viewport_width, image_cache);
+    g_reuse.carried_abs = carried;
+    if (root && ref) {
+        int left = reuse_compare(root, ref, 20);
+        g_printerr("[reuse-verify] pass=%u hits=%u %s\n", g_reuse_pass,
+                   g_reuse.hits, left == 20 ? "identical" : "MISMATCH");
+    }
+    ns_box_free(ref);
+}
+
 ns_box *
 ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
                 const ns_node *focused_input, gsize focused_caret_byte,
                 gsize focused_sel_anchor_byte,
-                struct ns_image_cache *image_cache, const char *base_url)
+                struct ns_image_cache *image_cache, const char *base_url,
+                const ns_layout_reuse_src *reuse)
 {
     g_focused_input_for_layout = focused_input;
     g_focused_is_contenteditable_for_layout =
@@ -17361,18 +18854,10 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
     ns_paint_i18n_memo_begin();
-    ns_box *root = ns_layout_build_(doc, styles, viewport_width);
-    if (!g_input_columns_for_layout) {
-        GHashTable *cols = g_hash_table_new(g_direct_hash, g_direct_equal);
-        if (collect_text_input_columns(root, cols)) {
-            g_input_columns_for_layout = cols;
-            ns_box_free(root);
-            ns_image_cache_begin_generation(image_cache);
-            root = ns_layout_build_(doc, styles, viewport_width);
-            g_input_columns_for_layout = NULL;
-        }
-        g_hash_table_destroy(cols);
-    }
+    reuse_pass_begin(doc, styles, viewport_width, reuse);
+    ns_box *root = layout_build_tree(doc, styles, viewport_width, image_cache);
+    if (reuse_mode() == 2 && g_reuse.hits > 0)
+        reuse_verify(root, doc, styles, viewport_width, image_cache);
     ns_image_cache_collect(image_cache);
     g_focused_input_for_layout = NULL;
     g_focused_is_contenteditable_for_layout = FALSE;
@@ -17386,6 +18871,7 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     }
     record_frame_viewports(root);
     ns_paint_i18n_memo_end();
+    reuse_pass_end(doc, root, reuse, viewport_width);
     return root;
 }
 
@@ -18141,6 +19627,7 @@ static_abs_y_precompute(ns_box *root, GHashTable *box_map, GHashTable *styles,
                                               NULL, abs_calc_array_free);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
+        if (reuse_abs_entry_carried(&e)) continue;
         ns_abs_static *st = g_abs_static
             ? g_hash_table_lookup(g_abs_static, abs_entry_static_key(&e)) : NULL;
         if (st && st->run) continue;
@@ -19457,6 +20944,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     static_abs_y_precompute(root, box_map, styles, batch_y, batch_resolved);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
+        if (reuse_abs_entry_carried(&e)) {
+            reuse_reattach_abs(&e, box_map);
+            continue;
+        }
         const ns_node *cb_dom = positioned_entry_cb_dom(&e, styles);
         ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
         ns_box *static_cb = cb;
@@ -19508,9 +20999,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             g_abs_force_build = FALSE;
         }
         if (!abox) continue;
+        if (g_reuse.recording) reuse_fingerprint(abox);
 
         box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
+        guint reuse_hits_before = g_reuse.hits;
         gboolean cb_is_icb = (cb_dom == NULL);
         const ns_style *anchor_base_style = abox->style;
         char **try_options = anchor_try_options(anchor_base_style);
@@ -19751,11 +21244,14 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (grid_cb && flex_parent == cb && (static_x || static_y))
             grid_static_position(abox, cb, grid_x, grid_y, grid_w, grid_h,
                                  static_x, static_y);
+        reuse_abs_pre_offsets(abox, paint_parent);
         apply_position_offsets(abox, avail, cb_h);
+        double placed_x = abox->x, placed_y = abox->y;
         if (grid_cb)
             position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h);
         else
             position_absolute_box(abox, cb, cb_is_icb);
+        reuse_shift_pre_offsets(abox, abox->x - placed_x, abox->y - placed_y);
         if (!try_settled && !abs_box_fits(abox, anchor_imcb)) {
             if (try_options[try_index + 1]) {
                 try_index++;
@@ -19767,6 +21263,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         }
         try_settled = TRUE;
         g_strfreev(try_options);
+        reuse_box_map_refresh(box_map, abox, reuse_hits_before);
     }
     g_free(batch_y);
     g_free(batch_resolved);
@@ -19864,6 +21361,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     g_cq_seen_container = FALSE;
     ns_css_set_container_dims(0, 0);
     ns_box *root = build_block(doc, styles);
+    if (root && g_reuse.recording) reuse_fingerprint(root);
     if (!root) {
         g_array_free(g_abs_pending, TRUE);
         g_abs_pending = NULL;
@@ -19879,6 +21377,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     root->y = 0;
 
     layout_block(root, viewport_width, NULL);
+    reuse_record_pre_offsets(root);
     apply_position_offsets(root, viewport_width, root->content_height);
     process_absolute_boxes(root, styles, viewport_width);
     ns_paint_sync_inline_atomic_offsets(root);

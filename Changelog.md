@@ -3,6 +3,21 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: a forced layout no longer lays out the parts of the page
+  that did not change. Reading `offsetWidth` or `getBoundingClientRect()`
+  after a DOM or style change laid out every box of the page again. The
+  previous box tree is now kept, and a box whose element, style and
+  content are unchanged and whose layout inputs match the last pass
+  takes over its old laid-out subtree, which is moved into place. Nodes
+  changed since the last layout carry a change stamp; new style
+  pointers, running animations and focus also mark a subtree dirty.
+  Anything the reuse cannot prove (container queries, page zoom, a font
+  change, floats that leave the subtree) gets the full layout. In
+  Speedometer the NewsSite suites drop from 679 to 445 ms (Next) and
+  643 to 445 ms (Nuxt), the Preact and Svelte Complex DOM suites from
+  170 and 179 ms to 94 and 97 ms. `NS_LAYOUT_REUSE=0` turns it off;
+  `NS_LAYOUT_REUSE=verify` lays out each pass twice and prints any box
+  that differs.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

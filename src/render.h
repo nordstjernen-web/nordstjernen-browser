@@ -34,6 +34,8 @@ typedef struct ns_render_ctx {
     const ns_node                  *hover_node;
     gsize                           caret_byte;
     gsize                           sel_anchor_byte;
+    ns_box                         *prev_layout;
+    GHashTable                     *prev_styles;
     char     *(*resolve_url)(const char *href, gpointer ud);
     gboolean  (*font_allowed)(const char *abs_url, gpointer ud);
     gpointer                        cb_ud;

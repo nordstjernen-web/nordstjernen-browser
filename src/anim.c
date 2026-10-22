@@ -1808,6 +1808,17 @@ ns_anim_has_active(const ns_anim *a)
     return anim_has_time_runs(a) || (a && a->scroll_sync);
 }
 
+void
+ns_anim_collect_active_nodes(const ns_anim *a, GHashTable *out)
+{
+    if (!a || !out) return;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, a->states);
+    while (g_hash_table_iter_next(&it, &key, &val))
+        if (state_is_active(val)) g_hash_table_add(out, key);
+}
+
 static gboolean
 anim_prop_needs_relayout(int prop)
 {

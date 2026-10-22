@@ -85,7 +85,9 @@ GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                ns_js *js, GHashTable *css_cache,
                                const ns_node *focused, const ns_node *hover,
                                gsize caret_byte,
-                               gsize sel_anchor_byte, ns_box **out_layout);
+                               gsize sel_anchor_byte,
+                               ns_box *prev_layout, GHashTable *prev_styles,
+                               ns_box **out_layout);
 
 void ns_engine_layout_perf(guint64 *relayouts, double *total_ms);
 void ns_engine_blocking_perf(guint64 *waits, double *total_ms);

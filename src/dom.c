@@ -16,10 +16,32 @@ static void ns_class_set_clear(ns_node *el);
 
 static guint g_dom_tree_serial;
 
+static __thread guint32 g_dom_change_clock = 1;
+
+void
+ns_dom_note_changed(const ns_node *n)
+{
+    if (n) ((ns_node *)n)->change_stamp = g_dom_change_clock;
+}
+
+guint32
+ns_dom_change_clock_advance(void)
+{
+    return g_dom_change_clock++;
+}
+
 void
 ns_dom_tree_changed(void)
 {
     g_dom_tree_serial++;
+}
+
+void
+ns_dom_tree_changed_at(const ns_node *parent, const ns_node *child)
+{
+    g_dom_tree_serial++;
+    ns_dom_note_changed(parent);
+    ns_dom_note_changed(child);
 }
 
 static void
@@ -872,6 +894,7 @@ ns_node_new(ns_node_kind kind)
 {
     ns_node *n = g_new0(ns_node, 1);
     n->kind = kind;
+    n->change_stamp = g_dom_change_clock;
     return n;
 }
 
@@ -926,6 +949,7 @@ void
 ns_node_set_name_borrow(ns_node *n, const char *name)
 {
     if (!n) return;
+    ns_dom_note_changed(n);
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = (char *)name;
@@ -939,6 +963,7 @@ ns_node_set_name_owned(ns_node *n, char *name)
         g_free(name);
         return;
     }
+    ns_dom_note_changed(n);
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = name;
@@ -949,6 +974,7 @@ void
 ns_node_set_text_borrow(ns_node *n, const char *text)
 {
     if (!n) return;
+    ns_dom_note_changed(n);
     if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = (char *)text;
@@ -963,6 +989,7 @@ ns_node_replace_text_len_owned(ns_node *n, char *text, guint32 len)
         g_free(text);
         return;
     }
+    ns_dom_note_changed(n);
     if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = text;
@@ -1026,6 +1053,7 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_dom_attr_changed(name);
+    ns_dom_note_changed(el);
     ns_attr *a = g_new0(ns_attr, 1);
     a->name  = (char *)name;
     a->value = (char *)(value ? value : "");
@@ -1198,6 +1226,8 @@ ns_node_detach(ns_node *child)
     if (!p)
         return;
     g_dom_tree_serial++;
+    ns_dom_note_changed(p);
+    ns_dom_note_changed(child);
     if (child->prev_sibling)
         child->prev_sibling->next_sibling = child->next_sibling;
     else
@@ -1219,6 +1249,8 @@ ns_node_append_child(ns_node *parent, ns_node *child)
 
     ns_node_detach(child);
     g_dom_tree_serial++;
+    ns_dom_note_changed(parent);
+    ns_dom_note_changed(child);
     child->parent = parent;
     child->prev_sibling = parent->last_child;
     if (parent->last_child)
@@ -1306,6 +1338,7 @@ ns_element_set_attr_len(ns_node *el, const char *name,
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_dom_attr_changed(name);
+    ns_dom_note_changed(el);
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
@@ -1355,6 +1388,7 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
     el->attr_gen++;
     ns_dom_attr_changed(local_name);
     ns_dom_attr_changed(qualified);
+    ns_dom_note_changed(el);
 
     gsize vlen = value ? strlen(value) : 0;
     ns_attr *tail = NULL;
@@ -1391,6 +1425,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_dom_attr_changed(name);
+    ns_dom_note_changed(el);
     ns_attr **link = &el->attrs;
     while (*link) {
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
@@ -1414,6 +1449,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_dom_attr_changed(local_name);
+    ns_dom_note_changed(el);
     ns_attr **link = &el->attrs;
     while (*link) {
         if (ns_attr_matches_ns(*link, ns, local_name)) {
