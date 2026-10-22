@@ -267,6 +267,16 @@ Changelog:
   from its parent's now carries its own, atomic inlines inside it keep
   none, and the shrink-to-fit width leaves room for the largest spacing
   so the text does not wrap early.
+* Paint: an absolutely positioned element now takes the opacity,
+  `clip-path`, mask, blend mode and stacking order of a static ancestor
+  that sits between it and its containing block. The layout tree hangs
+  such an element under its containing block, so the painter drew it
+  outside the ancestor's group: text inside an `opacity: .3` wrapper
+  showed at full strength, and an absolutely positioned caption inside a
+  flex item with `z-index: 1` was drawn under a `z-index: 1` gradient
+  that comes earlier in the page (the IMDb trailer captions looked
+  dimmed). The painter now draws such an element inside that ancestor,
+  unless a box in between clips, scrolls or transforms its contents.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
