@@ -36,12 +36,6 @@ checkout (October 2026). These are the subtests that pass:
 | WPT `html/`, `dom/`, `url/` and related (4,899 test files) | 151,974 of 166,164 subtests (91.5 %) |
 | [test262](https://github.com/tc39/test262) on the QuickJS engine | 82,243 of 82,248 tests run (5 failures) |
 
-The HTML run leaves out the `canvas`, `browsers` and cross-origin
-directories. Tests that need the WPT Python server, such as
-form-submission echo handlers, cannot pass against a static checkout
-and are counted as failures. The test262 count covers the tests run
-after the engine's feature exclusions.
-
 **Security.** Each tab's engine runs in its own renderer process behind an
 IPC + shared-memory boundary. On Linux the renderer is sandboxed with
 seccomp + Landlock (the UI shell with Landlock); on macOS a Seatbelt profile
