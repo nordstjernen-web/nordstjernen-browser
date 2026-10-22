@@ -63,6 +63,14 @@ Changelog:
   element and mirrors it at the edges. Filter functions in `filter` and
   `backdrop-filter` now also run in the order written, so
   `blur(20px) saturate(180%)` blurs before it saturates.
+* Paint: `double`, `inset`, `outset`, `groove` and `ridge` borders are
+  drawn in their own style. They were all painted as one solid line in
+  the border colour. Double borders now show two lines with a gap, as
+  wide as Chrome draws them, and the 3D styles shade each side darker
+  or lighter with Chrome's colour rules, including the grey pair Chrome
+  uses when the border colour is `currentcolor`. Buttons and fields that
+  keep their native appearance still get a flat border, as Chrome draws
+  them natively.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

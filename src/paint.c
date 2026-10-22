@@ -900,6 +900,143 @@ border_style_is_solid(const ns_css_value *v)
            strcmp(v->u.keyword, "solid") == 0;
 }
 
+static gboolean
+box_is_native_control(const ns_box *b)
+{
+    if (!b->style || keyword_is(b->style->values[NS_CSS_APPEARANCE], "none"))
+        return FALSE;
+    return ns_node_is_element_named(b->dom, "button") ||
+           ns_node_is_element_named(b->dom, "input") ||
+           ns_node_is_element_named(b->dom, "select") ||
+           ns_node_is_element_named(b->dom, "textarea");
+}
+
+static gboolean
+border_style_is_3d(const char *kw)
+{
+    return strcmp(kw, "inset") == 0 || strcmp(kw, "outset") == 0 ||
+           strcmp(kw, "groove") == 0 || strcmp(kw, "ridge") == 0;
+}
+
+static void
+border_band_point(const double outer[2], const double inner[2], double t,
+                  double out[2])
+{
+    out[0] = outer[0] + (inner[0] - outer[0]) * t;
+    out[1] = outer[1] + (inner[1] - outer[1]) * t;
+}
+
+static double
+color_channel_quantize(double v)
+{
+    return floor(CLAMP(v, 0.0, 1.0) * 255.99) / 255.0;
+}
+
+static rgba
+color_scaled(rgba c, double m)
+{
+    rgba out = { color_channel_quantize(c.r * m), color_channel_quantize(c.g * m),
+                 color_channel_quantize(c.b * m), c.a };
+    return out;
+}
+
+static rgba
+color_darker(rgba c)
+{
+    if (c.r >= 1 && c.g >= 1 && c.b >= 1) {
+        rgba w = { 171 / 255.0, 171 / 255.0, 171 / 255.0, c.a };
+        return w;
+    }
+    double v = MAX(c.r, MAX(c.g, c.b));
+    return color_scaled(c, v > 0 ? MAX(0.0, (v - 0.33) / v) : 0);
+}
+
+static rgba
+color_lighter(rgba c)
+{
+    double v = MAX(c.r, MAX(c.g, c.b));
+    if (v <= 0) {
+        rgba k = { 84 / 255.0, 84 / 255.0, 84 / 255.0, c.a };
+        return k;
+    }
+    return color_scaled(c, MIN(1.0, v + 0.33) / v);
+}
+
+static double
+color_distance2(rgba c, double gray)
+{
+    return (c.r - gray) * (c.r - gray) + (c.g - gray) * (c.g - gray) +
+           (c.b - gray) * (c.b - gray);
+}
+
+static rgba
+border_shade(rgba c, gboolean current, gboolean darker)
+{
+    if (current) {
+        double g = (darker ? 154 : 238) / 255.0;
+        rgba fixed = { g, g, g, c.a };
+        return fixed;
+    }
+    gboolean too_dark = color_distance2(c, 0) <= color_distance2(c, 32 / 255.0);
+    if (darker) return too_dark ? color_lighter(c) : color_darker(c);
+    if (too_dark) return color_lighter(color_lighter(c));
+    gboolean too_light = color_distance2(c, 1) <= color_distance2(c, 235 / 255.0);
+    return too_light ? c : color_lighter(c);
+}
+
+static void
+fill_border_band(cairo_t *cr, const double a[2], const double b[2],
+                 const double c[2], const double d[2], rgba color)
+{
+    set_source_rgba(cr, color);
+    cairo_new_path(cr);
+    cairo_move_to(cr, a[0], a[1]);
+    cairo_line_to(cr, b[0], b[1]);
+    cairo_line_to(cr, c[0], c[1]);
+    cairo_line_to(cr, d[0], d[1]);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
+
+static void
+paint_3d_border_side(cairo_t *cr, int side, const char *kw, rgba c,
+                     gboolean current, const double outer[4][2],
+                     const double inner[4][2])
+{
+    int next = (side + 1) % 4;
+    gboolean top_left = side == 0 || side == 3;
+    gboolean groove = strcmp(kw, "groove") == 0;
+    if (!groove && strcmp(kw, "ridge") != 0) {
+        gboolean darker = top_left == (strcmp(kw, "inset") == 0);
+        fill_border_band(cr, outer[side], outer[next], inner[next],
+                         inner[side], border_shade(c, current, darker));
+        return;
+    }
+    double mid0[2], mid1[2];
+    border_band_point(outer[side], inner[side], 0.5, mid0);
+    border_band_point(outer[next], inner[next], 0.5, mid1);
+    gboolean outer_darker = top_left == groove;
+    fill_border_band(cr, outer[side], outer[next], mid1, mid0,
+                     border_shade(c, current, outer_darker));
+    fill_border_band(cr, mid0, mid1, inner[next], inner[side],
+                     border_shade(c, current, !outer_darker));
+}
+
+static void
+paint_double_border_side(cairo_t *cr, int side, double width, rgba c,
+                         const double outer[4][2], const double inner[4][2])
+{
+    int next = (side + 1) % 4;
+    double stripe = width >= 3 ? floor((width + 1) / 3.0) / width : 0.5;
+    double o0[2], o1[2], i0[2], i1[2];
+    border_band_point(outer[side], inner[side], stripe, o0);
+    border_band_point(outer[next], inner[next], stripe, o1);
+    border_band_point(outer[side], inner[side], 1.0 - stripe, i0);
+    border_band_point(outer[next], inner[next], 1.0 - stripe, i1);
+    fill_border_band(cr, outer[side], outer[next], o1, o0, c);
+    fill_border_band(cr, i0, i1, inner[next], inner[side], c);
+}
+
 static void
 border_wedge_apex(const double a0[2], const double a1[2],
                   const double b0[2], const double b1[2],
@@ -2208,6 +2345,22 @@ paint_block(cairo_t *cr, const ns_box *b)
                                           : (s ? s->values[NS_CSS_COLOR] : NULL),
                              0, 0, 0, 1);
             if (c.a <= 0) continue;
+            if (border_style_is_3d(bs->u.keyword) && !box_is_native_control(b)) {
+                static const ns_css_prop side_colors[4] = {
+                    NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
+                    NS_CSS_BORDER_BOTTOM_COLOR, NS_CSS_BORDER_LEFT_COLOR,
+                };
+                gboolean current = !sides[i].col ||
+                    ns_style_prop_from_currentcolor(s, side_colors[i]);
+                paint_3d_border_side(cr, i, bs->u.keyword, c, current,
+                                     outer_corner, inner_corner);
+                continue;
+            }
+            if (strcmp(bs->u.keyword, "double") == 0) {
+                paint_double_border_side(cr, i, sides[i].w, c,
+                                         outer_corner, inner_corner);
+                continue;
+            }
             set_source_rgba(cr, c);
             if (strcmp(bs->u.keyword, "solid") == 0) {
                 int next = (i + 1) % 4;
