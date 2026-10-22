@@ -454,6 +454,7 @@ int
 ns_canvas_dim_from_attr(const ns_node *el, const char *name, int defv);
 gboolean
 ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a);
+gboolean ns_canvas_color_is_literal(const char *s);
 ns_canvas_state *
 ns_canvas_state_for(ns_js *js, const ns_node *el);
 ns_canvas_state *

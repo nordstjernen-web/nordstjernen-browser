@@ -3,6 +3,17 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: canvas colors written as hex or as `rgb()`/`rgba()` with
+  plain numbers are parsed once instead of on every use. Each `fill()`
+  and `stroke()` parsed `fillStyle`, `strokeStyle` and `shadowColor`
+  again with the full CSS color parser, and each assignment to them
+  parsed the value and printed it back with `printf`. A small
+  per-thread table now remembers the last such colors; named colors,
+  `light-dark()`, `currentcolor` and other forms that can depend on the
+  color scheme or the element are still parsed every time. Chart.js
+  sets these colors before every bar and line: on Speedometer 3.1,
+  Charts-chartjs is 29% faster and runs 19% fewer instructions per
+  iteration.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

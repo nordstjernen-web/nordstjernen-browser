@@ -625,15 +625,46 @@ ns_color_function_string(const char *css)
     return g_string_free(out, FALSE);
 }
 
-char *
-ns_canvas_color_string(const char *css)
+typedef struct {
+    char css[48];
+    char out[48];
+} ns_canvas_color_string_memo;
+
+static __thread ns_canvas_color_string_memo g_canvas_color_string_memo[16];
+static __thread guint g_canvas_color_string_memo_next;
+
+static char *
+ns_canvas_color_string_uncached(const char *css)
 {
     double r, g, b, a;
-    if (!css || !ns_canvas_parse_color(css, &r, &g, &b, &a)) return NULL;
+    if (!ns_canvas_parse_color(css, &r, &g, &b, &a)) return NULL;
     char *function = ns_color_function_string(css);
     return function ? function
         : ns_color_serialize((guint8)round(r * 255), (guint8)round(g * 255),
                              (guint8)round(b * 255), (guint8)round(a * 255));
+}
+
+char *
+ns_canvas_color_string(const char *css)
+{
+    if (!css) return NULL;
+    gboolean memo = strlen(css) < sizeof g_canvas_color_string_memo[0].css &&
+                    ns_canvas_color_is_literal(css);
+    if (memo) {
+        for (guint i = 0; i < G_N_ELEMENTS(g_canvas_color_string_memo); i++) {
+            const ns_canvas_color_string_memo *m = &g_canvas_color_string_memo[i];
+            if (strcmp(m->css, css) == 0) return g_strdup(m->out);
+        }
+    }
+    char *out = ns_canvas_color_string_uncached(css);
+    if (memo && out && strlen(out) < sizeof g_canvas_color_string_memo[0].out) {
+        ns_canvas_color_string_memo *m = &g_canvas_color_string_memo[
+            g_canvas_color_string_memo_next++ %
+            G_N_ELEMENTS(g_canvas_color_string_memo)];
+        g_strlcpy(m->css, css, sizeof m->css);
+        g_strlcpy(m->out, out, sizeof m->out);
+    }
+    return out;
 }
 
 static gboolean
