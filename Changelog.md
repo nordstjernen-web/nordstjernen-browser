@@ -132,6 +132,16 @@ Changelog:
   (one error on every load). The static webstorage event tests of WPT go
   from 14 of 21 to 27 of 30 subtests, with two files that never finished
   now running to the end.
+* Frames: an iframe's window now gets the browser's own built-in
+  functions even when the parent page has replaced them. A new frame
+  copied its platform globals from the parent window as they were at
+  that moment, so a parent's `window.Image = function (w, h) {…}`
+  became the frame's `Image`, and as an anonymous function it was
+  copied as a function that cannot be called with `new`. ESPN's consent
+  manager replaces `Image` in the page and builds tracking pixels with
+  `new Image` inside a frame: two "not a constructor" errors on every
+  load. The original functions are now recorded when the document's
+  globals are installed, and frames copy those.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
