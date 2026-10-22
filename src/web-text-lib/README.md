@@ -95,7 +95,11 @@ bold face was measured with HarfBuzz's unbolded advances and drawn with
 FreeType's bolded ones, so `font-synthesis: weight` set too tight, worst in
 CJK, where the glyphs already fill the em box. Letter spacing is added after
 every character, the last one on a line included, as CSS and Chrome do;
-upstream split it around each character and trimmed it at the line's ends.
+upstream split it around each character and trimmed it at the line's ends. A
+range with `allow_breaks=false` kept its break opportunities after en dashes,
+soft hyphens, `|` and zero-width spaces, so a `white-space: nowrap` link such as
+"Pale Moon 3.6.29–3.6.32" still wrapped; such a range now keeps only its
+mandatory breaks.
 
 **Concurrency the library now survives, though the browser does not yet use it.**
 The browser calls into this library only from each renderer process's main loop —

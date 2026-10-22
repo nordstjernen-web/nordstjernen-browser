@@ -368,6 +368,15 @@ Changelog:
   now mapped through the transforms of the boxes above it, the same way
   block boxes are. Across the frozen sitebench snapshots 252 more
   elements match Chrome, 85 of them on WhatsApp.
+* Text: a `white-space: nowrap` link, form field or button no longer
+  wraps after an en dash, a soft hyphen, a `|` or a zero-width space.
+  The engine marks such ranges with Pango's `allow_breaks=false`, which
+  removes ordinary breaks but keeps those after dashes and word
+  dividers, so "Pale Moon 3.6.29–3.6.32" split at the dash. CSS `nowrap`
+  suppresses every soft wrap opportunity, so the text library now keeps
+  only mandatory breaks in such a range. On Wikipedia's collapsed navbox
+  rows the cells now take Chrome's widths: 162 more elements match on
+  top of the table row group fix.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

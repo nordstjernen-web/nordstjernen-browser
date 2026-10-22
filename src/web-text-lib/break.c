@@ -2028,9 +2028,9 @@ break_script (const char          *item_text,
 /* We allow customizing log attrs in two ways:
  *
  * - You can directly remove breaks from a range, using allow_breaks=false.
- *   We preserve the non-tailorable rules from UAX #14, so mandatory breaks
- *   and breaks after ZWS remain. We also preserve break opportunities after
- *   hyphens and visible word dividers.
+ *   Only mandatory breaks remain, as for CSS white-space: nowrap, which
+ *   also suppresses the opportunities after ZWS, hyphens and visible word
+ *   dividers.
  *
  * - You can tweak the segmentation by marking ranges as word or sentence.
  *   When doing so, we split adjacent segments to preserve alternating
@@ -2131,9 +2131,11 @@ handle_allow_breaks (const char    *text,
             end_pos = g_utf8_pointer_to_offset (text, text + end - offset);
 
           for (pos = start_pos + 1; pos < end_pos; pos++)
-            log_attrs[pos].is_char_break = FALSE;
-
-          remove_breaks_from_range (text, MAX (start - offset, 0), log_attrs, start_pos, end_pos);
+            {
+              log_attrs[pos].is_char_break = FALSE;
+              if (!log_attrs[pos].is_mandatory_break)
+                log_attrs[pos].is_line_break = FALSE;
+            }
 
           tailored = TRUE;
         }
