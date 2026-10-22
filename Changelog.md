@@ -3,6 +3,10 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: an element with both `opacity` below 1 and a `mask-image` is
+  drawn with its opacity. The painter composited the masked group
+  through the mask alone, so `opacity: .5` with a fading mask drew the
+  element at full strength. The mask is now multiplied by the opacity.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
