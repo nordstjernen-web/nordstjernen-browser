@@ -177,8 +177,12 @@
 #define NS_PANGO_STYLE_NORMAL                             PANGO_STYLE_NORMAL
 #define NS_PANGO_STYLE_OBLIQUE                            PANGO_STYLE_OBLIQUE
 #define ns_pango_tab_array_free                           pango_tab_array_free
+#define ns_pango_tab_array_get_positions_in_pixels        pango_tab_array_get_positions_in_pixels
+#define ns_pango_tab_array_get_size                       pango_tab_array_get_size
+#define ns_pango_tab_array_get_tab                        pango_tab_array_get_tab
 #define ns_pango_tab_array_new                            pango_tab_array_new
 #define ns_pango_tab_array_set_tab                        pango_tab_array_set_tab
+#define NS_PANGO_TAB_DECIMAL                              PANGO_TAB_DECIMAL
 #define NS_PANGO_TAB_LEFT                                 PANGO_TAB_LEFT
 #define NS_PANGO_UNDERLINE_DOUBLE                         PANGO_UNDERLINE_DOUBLE
 #define NS_PANGO_UNDERLINE_ERROR                          PANGO_UNDERLINE_ERROR
@@ -225,6 +229,7 @@
 #define NsPangoLogAttr                                    PangoLogAttr
 #define NsPangoRectangle                                  PangoRectangle
 #define NsPangoStretch                                    PangoStretch
+#define NsPangoTabAlign                                   PangoTabAlign
 #define NsPangoTabArray                                   PangoTabArray
 #define NsPangoUnderline                                  PangoUnderline
 #define NsPangoWeight                                     PangoWeight
