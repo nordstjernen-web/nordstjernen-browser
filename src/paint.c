@@ -10412,8 +10412,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                        (b->dom && b->dom->name &&
                         (strcmp(b->dom->name, "html") == 0 ||
                          strcmp(b->dom->name, "body") == 0));
-    gboolean clip_overflow = !is_root &&
-                             (overflow_kw_clips(ovx) || overflow_kw_clips(ovy));
+    gboolean clip_x = overflow_kw_clips(ovx), clip_y = overflow_kw_clips(ovy);
+    if (clip_x != clip_y &&
+        g_ascii_strcasecmp(clip_x ? ovx : ovy, "clip") != 0)
+        clip_x = clip_y = TRUE;
+    gboolean clip_overflow = !is_root && (clip_x || clip_y);
     gboolean scroll_anchored = FALSE;
     if (clip_overflow &&
         (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE_CAPTION ||
@@ -10446,14 +10449,20 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
               (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
                bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC)));
         gboolean sized_by_container = ns_box_is_flex_or_grid_item(b);
-        if ((pw > 0 || explicit_w || sized_by_container) &&
-            (ph > 0 || explicit_h || sized_by_container)) {
+        if ((!clip_x || pw > 0 || explicit_w || sized_by_container) &&
+            (!clip_y || ph > 0 || explicit_h || sized_by_container)) {
             cairo_save(cr);
             corner_radii ov_radii = box_border_radii(b);
-            if (!corner_radii_zero(ov_radii))
+            if (!clip_x || !clip_y) {
+                double ex0, ey0, ex1, ey1;
+                cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
+                if (clip_x) cairo_rectangle(cr, px, ey0, pw, ey1 - ey0);
+                else        cairo_rectangle(cr, ex0, py, ex1 - ex0, ph);
+            } else if (!corner_radii_zero(ov_radii)) {
                 rounded_rect_path(cr, px, py, pw, ph, ov_radii);
-            else
+            } else {
                 cairo_rectangle(cr, px, py, pw, ph);
+            }
             cairo_clip(cr);
             if (g_dbg_paint_x >= 0) {
                 double ex0, ey0, ex1, ey1;
