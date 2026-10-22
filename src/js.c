@@ -53279,11 +53279,14 @@ static void
 ns_js_fonts_idle(gpointer user_data)
 {
     ns_js *js = user_data;
-    if (!js || !js->font_ready_resolvers) return;
+    if (!js) return;
+    js->fonts_idle_watched = FALSE;
+    if (!js->font_ready_resolvers && !js->fonts_loadingdone_armed) return;
+    js->fonts_loadingdone_armed = FALSE;
     js->mutated = TRUE;
     GArray *resolvers = js->font_ready_resolvers;
     js->font_ready_resolvers = NULL;
-    for (guint i = 0; i + 1 < resolvers->len; i += 2) {
+    for (guint i = 0; resolvers && i + 1 < resolvers->len; i += 2) {
         JSValue fn = g_array_index(resolvers, JSValue, i);
         JSValue value = g_array_index(resolvers, JSValue, i + 1);
         JSValue r = JS_Call(js->ctx, fn, JS_UNDEFINED, 1,
@@ -53292,9 +53295,17 @@ ns_js_fonts_idle(gpointer user_data)
         JS_FreeValue(js->ctx, fn);
         JS_FreeValue(js->ctx, value);
     }
-    g_array_free(resolvers, TRUE);
+    if (resolvers) g_array_free(resolvers, TRUE);
     ns_js_fonts_dispatch_loadingdone(js);
     ns_drain_microtasks(js);
+}
+
+static void
+ns_js_watch_fonts_idle(ns_js *js)
+{
+    if (js->fonts_idle_watched) return;
+    js->fonts_idle_watched = TRUE;
+    ns_font_add_idle_cb(ns_js_fonts_idle, js);
 }
 
 static void
@@ -53306,7 +53317,7 @@ ns_js_resolve_when_fonts_loaded(JSContext *ctx, ns_js *js, JSValue resolve,
             js->font_ready_resolvers = g_array_new(FALSE, FALSE, sizeof(JSValue));
         g_array_append_val(js->font_ready_resolvers, resolve);
         g_array_append_val(js->font_ready_resolvers, value);
-        ns_font_add_idle_cb(ns_js_fonts_idle, js);
+        ns_js_watch_fonts_idle(js);
         return;
     }
     JSValue r = JS_Call(ctx, resolve, JS_UNDEFINED, 1, (JSValueConst[]){ value });
@@ -53370,31 +53381,62 @@ ns_fontfaceset_load(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_fontfaceset_get_ready(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) ns_js_flush_layout(js);
+    JSValue resolvers[2];
+    JSValue ready = JS_NewPromiseCapability(ctx, resolvers);
+    if (JS_IsException(ready)) return ready;
+    JS_FreeValue(ctx, resolvers[1]);
+    ns_js_resolve_when_fonts_loaded(ctx, js, resolvers[0],
+                                    JS_DupValue(ctx, this_val));
+    return ready;
+}
+
+static JSValue
+ns_fontfaceset_get_status(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) ns_js_flush_layout(js);
+    gboolean loading = js && ns_font_pending_count() > 0;
+    return JS_NewString(ctx, loading ? "loading" : "loaded");
+}
+
+static void
+ns_fontfaceset_define_getter(JSContext *ctx, JSValueConst set,
+                             const char *name, JSCFunction *fn)
+{
+    JSValue getter = JS_NewCFunction2(ctx, fn, name, 0, JS_CFUNC_generic, 0);
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JS_DefinePropertyGetSet(ctx, set, atom, getter, JS_UNDEFINED,
+                            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
-    if (js) ns_js_flush_layout(js);
     gboolean main_doc = js && js->ctx == ctx && js->current_doc &&
                         ns_document_root_for(ctx, this_val) == js->current_doc;
-    JSValue fs;
-    if (main_doc && JS_IsObject(js->fonts_set)) {
-        fs = JS_DupValue(ctx, js->fonts_set);
-    } else {
-        fs = JS_NewObject(ctx);
-        ns_bind_fn(ctx, fs, "check",   ns_event_true,       1);
-        ns_bind_fn(ctx, fs, "load",    ns_fontfaceset_load, 2);
-        ns_fontfaceset_install_setlike(ctx, fs);
-        if (main_doc) js->fonts_set = JS_DupValue(ctx, fs);
+    if (main_doc) {
+        js->fonts_loadingdone_armed = TRUE;
+        ns_js_watch_fonts_idle(js);
     }
-    JSValue resolvers[2];
-    JSValue ready = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(ready)) { JS_FreeValue(ctx, fs); return ready; }
-    gboolean loading = js && ns_font_pending_count() > 0;
-    ns_js_resolve_when_fonts_loaded(ctx, js, resolvers[0], JS_DupValue(ctx, fs));
-    JS_FreeValue(ctx, resolvers[1]);
-    JS_SetPropertyStr(ctx, fs, "ready",  ready);
-    JS_SetPropertyStr(ctx, fs, "status",
-                      JS_NewString(ctx, loading ? "loading" : "loaded"));
+    if (main_doc && JS_IsObject(js->fonts_set))
+        return JS_DupValue(ctx, js->fonts_set);
+    JSValue fs = JS_NewObject(ctx);
+    ns_bind_fn(ctx, fs, "check",   ns_event_true,       1);
+    ns_bind_fn(ctx, fs, "load",    ns_fontfaceset_load, 2);
+    ns_fontfaceset_install_setlike(ctx, fs);
+    ns_fontfaceset_define_getter(ctx, fs, "ready",  ns_fontfaceset_get_ready);
+    ns_fontfaceset_define_getter(ctx, fs, "status", ns_fontfaceset_get_status);
+    if (main_doc) js->fonts_set = JS_DupValue(ctx, fs);
     return fs;
 }
 

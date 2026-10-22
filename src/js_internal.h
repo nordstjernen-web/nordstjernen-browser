@@ -69,6 +69,8 @@ struct ns_js {
     GHashTable   *frame_contexts;
     GHashTable   *frame_windows;
     GArray       *font_ready_resolvers;
+    gboolean      fonts_loadingdone_armed;
+    gboolean      fonts_idle_watched;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
     ns_js_mutated_cb mut_cb;
