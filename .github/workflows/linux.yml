@@ -41,8 +41,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # A stalled mirror connection used to hang apt until the 30-minute job
+      # limit; time out and retry a stalled download instead.
       - name: Install build dependencies
+        timeout-minutes: 10
         run: |
+          printf '%s\n' 'Acquire::Retries "5";' 'Acquire::http::Timeout "30";' \
+            'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-ci-retries
           sudo apt-get update
           sudo apt-get install -y \
             ccache clang gcc g++ make cmake pkg-config meson ninja-build \
@@ -105,7 +110,7 @@ jobs:
 
       - name: ccache stats
         if: always()
-        run: ccache --show-stats
+        run: command -v ccache >/dev/null && ccache --show-stats || true
 
       - name: Smoke test (binary present and executable)
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
