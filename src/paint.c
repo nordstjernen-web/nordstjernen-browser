@@ -8871,7 +8871,8 @@ mask_clip_box_path(cairo_t *cr, const ns_box *b, const ns_css_value *clip)
 }
 
 static cairo_pattern_t *
-mask_layers_pattern(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf)
+mask_layers_pattern(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf,
+                    double alpha)
 {
     const ns_style *s = b->style;
     const ns_css_value *mask = s->values[NS_CSS_MASK_IMAGE];
@@ -8918,6 +8919,11 @@ mask_layers_pattern(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf)
         if (grad) cairo_pattern_destroy(grad);
     }
     if (tf) cairo_restore(cr);
+    if (alpha < 0.999) {
+        cairo_set_operator(cr, CAIRO_OPERATOR_DEST_IN);
+        cairo_set_source_rgba(cr, 0, 0, 0, 1);
+        cairo_paint_with_alpha(cr, alpha);
+    }
     return cairo_pop_group(cr);
 }
 
@@ -10800,7 +10806,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, blend);
         cairo_pattern_t *mp = NULL;
         if (mask_grad)
-            mp = mask_layers_pattern(cr, b, have_box_tf ? &box_tf : NULL);
+            mp = mask_layers_pattern(cr, b, have_box_tf ? &box_tf : NULL, op);
         if (mp) {
             cairo_mask(cr, mp);
         } else {
