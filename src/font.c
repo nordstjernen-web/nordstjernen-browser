@@ -177,6 +177,58 @@ ns_font_available(void)
 #endif
 }
 
+#ifdef NS_HAVE_FONTCONFIG
+static void
+fc_family_names_add(GHashTable *names, const FcFontSet *set)
+{
+    for (int i = 0; set && i < set->nfont; i++) {
+        FcChar8 *name = NULL;
+        for (int j = 0; FcPatternGetString(set->fonts[i], FC_FAMILY, j,
+                                           &name) == FcResultMatch; j++)
+            g_hash_table_add(names, FcStrDowncase(name));
+    }
+}
+
+static gboolean
+fc_set_has_family(const FcFontSet *set, const FcChar8 *family)
+{
+    for (int i = 0; set && i < set->nfont; i++) {
+        FcChar8 *name = NULL;
+        for (int j = 0; FcPatternGetString(set->fonts[i], FC_FAMILY, j,
+                                           &name) == FcResultMatch; j++)
+            if (FcStrCmpIgnoreCase(name, family) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+fc_family_exists(const FcChar8 *family)
+{
+    static GMutex lock;
+    static GHashTable *system_names;
+    static const FcFontSet *system_set;
+    static int system_count;
+    const FcFontSet *installed = FcConfigGetFonts(NULL, FcSetSystem);
+    int count = installed ? installed->nfont : 0;
+    FcChar8 *folded = FcStrDowncase(family);
+    if (!folded) return TRUE;
+    g_mutex_lock(&lock);
+    if (!system_names || installed != system_set || count != system_count) {
+        if (system_names) g_hash_table_destroy(system_names);
+        system_names = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             (GDestroyNotify)FcStrFree, NULL);
+        fc_family_names_add(system_names, installed);
+        system_set = installed;
+        system_count = count;
+    }
+    gboolean found = g_hash_table_contains(system_names, folded);
+    g_mutex_unlock(&lock);
+    FcStrFree(folded);
+    return found ||
+           fc_set_has_family(FcConfigGetFonts(NULL, FcSetApplication), family);
+}
+#endif
+
 char *
 ns_font_metric_alias(const char *family)
 {
@@ -193,6 +245,16 @@ ns_font_metric_alias(const char *family)
     for (int i = 0; FcPatternGetWithBinding(pat, FC_FAMILY, i, &value,
                                             &binding) == FcResultMatch; i++)
         if (binding != FcValueBindingWeak) last_bound = i;
+    gboolean reachable = FALSE;
+    for (int i = 0; i <= last_bound && !reachable; i++) {
+        FcChar8 *want = NULL;
+        reachable = FcPatternGetString(pat, FC_FAMILY, i, &want) == FcResultMatch &&
+                    fc_family_exists(want);
+    }
+    if (!reachable) {
+        FcPatternDestroy(pat);
+        return NULL;
+    }
     char *alias = NULL;
     FcResult result;
     FcPattern *match = FcFontMatch(NULL, pat, &result);

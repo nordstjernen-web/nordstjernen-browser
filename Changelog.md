@@ -3,6 +3,17 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: a `font-family` name that no installed font carries no
+  longer costs a full fontconfig match. Each family a page names but the
+  system lacks, which is every web font before it loads, was looked up
+  as a possible metric-compatible alias with `FcFontMatch()`, which
+  scores every installed font, about 1 ms each. An alias can only be a
+  family that some font has, so the lookup now first checks the strongly
+  bound families of the substituted pattern against the family names of
+  the installed and loaded fonts, and returns no alias without matching
+  when none of them exists. The aliases found do not change. On frozen
+  copies of Le Monde, which names 19 such families, and ESPN the
+  main-thread CPU to first paint drops by 16% and 9%.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
