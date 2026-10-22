@@ -1048,6 +1048,10 @@ typedef struct
   guint                  n;
 } SegmentPlan;
 
+#define KEY_AT_ITEM_START (1u << 9)
+#define KEY_AT_ITEM_END   (1u << 10)
+#define KEY_WHOLE_ITEM    (KEY_AT_ITEM_START | KEY_AT_ITEM_END)
+
 static gboolean
 segment_key (const SegmentPlan *plan,
              guint              i,
@@ -1056,7 +1060,8 @@ segment_key (const SegmentPlan *plan,
   guint32 start = plan->starts[i];
   int len = (int) ((i + 1 < plan->n ? plan->starts[i + 1]
                                     : (guint32) plan->item_length) - start);
-  guint open_edges = (i == 0 ? 1u << 9 : 0) | (i + 1 == plan->n ? 1u << 10 : 0);
+  guint open_edges = (i == 0 ? KEY_AT_ITEM_START : 0) |
+                     (i + 1 == plan->n ? KEY_AT_ITEM_END : 0);
 
   return ns_pango_shape_cache_key_init (key, plan->analysis,
                                         plan->item_text + start, len,
@@ -1188,7 +1193,7 @@ whole_item_key (const SegmentPlan *plan,
                                         plan->item_text, plan->item_length,
                                         plan->paragraph_text, plan->paragraph_length,
                                         plan->flags, plan->show_flags,
-                                        NS_PANGO_TEXT_TRANSFORM_NONE,
+                                        NS_PANGO_TEXT_TRANSFORM_NONE | KEY_WHOLE_ITEM,
                                         NS_PANGO_SHAPE_HYPHEN_NONE,
                                         plan->features, plan->num_features);
 }
@@ -1391,7 +1396,7 @@ ns_pango_shape_internal (const char          *item_text,
    * brought none gets no capitalisation at all. Those two shape differently
    * under the same transform, so the key has to tell them apart.
    */
-  transform_key = transform;
+  transform_key = transform | KEY_WHOLE_ITEM;
   if (transform == NS_PANGO_TEXT_TRANSFORM_CAPITALIZE && log_attrs == NULL)
     transform_key |= 1u << 8;
 
