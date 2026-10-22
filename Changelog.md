@@ -52,6 +52,17 @@ Changelog:
   filtered, so a blurred glow no longer spills outside its clip (the
   purple glow GitHub draws under its carousel showed through the video
   above it).
+* Paint: an absolutely positioned element also takes the opacity,
+  `clip-path`, mask and blend mode of a static ancestor when an
+  `overflow` box sits between the two. That box does not clip the
+  element, since it is not in the element's containing block chain, so
+  the painter left the element outside the ancestor's group: text inside
+  an `overflow: hidden` card escaped an `opacity` set on an inner
+  wrapper. The part of the element inside the clipping boxes is now
+  drawn in the ancestor's group, grouped with its other content as
+  Chrome does, and the part outside them is drawn at the element's own
+  place through the same effects; a scrolled box's offset is undone for
+  both.
 * Paint: `backdrop-filter` is now drawn. The property was parsed but
   never painted, so frosted glass bars, blurred overlays and dimmed
   caption strips showed the page behind them unchanged (the Guardian
@@ -454,6 +465,14 @@ Changelog:
   scores strip is a row of such inline-blocks; each league was cut to
   1,120 px and every league after it moved left. Across the frozen
   sitebench snapshots 171 more elements match Chrome, 108 on ESPN.
+* Paint: `overflow-x: clip` with `overflow-y: visible` (and the other
+  way round) now clips only the axis that asks for it. The painter
+  clipped both axes whenever either one clipped, so content that sticks
+  out above or below such a box was cut off. On Canva the hero gradient
+  starts 80px above its `overflow-x: clip` wrapper, behind the
+  transparent header, and the header area came out white with its white
+  menu text invisible. A `hidden`, `scroll` or `auto` axis still clips
+  both, since the other axis then computes to `auto`.
 * Paint: an element with both `opacity` below 1 and a `mask-image` is
   drawn with its opacity. The painter composited the masked group
   through the mask alone, so `opacity: .5` with a fading mask drew the
