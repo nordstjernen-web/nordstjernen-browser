@@ -388,6 +388,17 @@ Changelog:
   root element, the transform and containment properties do not do it on
   a non-replaced inline box, and `will-change: position` does it for
   absolutely positioned boxes only.
+* Performance: `String.prototype.split()` with a regular expression no
+  longer calls `exec()` at every position of the string. The
+  specification splits with a sticky copy of the pattern tried at each
+  index, and each try read and wrote `lastIndex` and built a match
+  array. When the copy is a plain `RegExp` with the built-in `exec()`,
+  the engine now searches for the next match directly, with the same
+  first-character skipping as other searches. The pieces, captures and
+  legacy `RegExp.$1` values do not change. CodeMirror splits its
+  document of about a million characters into lines this way: on
+  Speedometer 3.1, Editor-CodeMirror is 38% faster and runs 30% fewer
+  instructions.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

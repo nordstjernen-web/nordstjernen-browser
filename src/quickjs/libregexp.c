@@ -3767,6 +3767,73 @@ int lre_exec(uint8_t **capture,
     return ret;
 }
 
+int lre_exec_sticky_search(uint8_t **capture,
+                           const uint8_t *bc_buf, const uint8_t *cbuf,
+                           int cindex, int clen, int cbuf_type, void *opaque)
+{
+    REExecContext s_s, *s = &s_s;
+    int re_flags, i, ret;
+    const uint8_t *cptr, *pc;
+    REPrefilter pf;
+
+    re_flags = lre_get_flags(bc_buf);
+    s->is_unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
+    s->capture_count = get_u16(bc_buf + RE_HEADER_CAPTURE_COUNT);
+    s->cbuf = cbuf;
+    s->cbuf_end = cbuf + (clen << cbuf_type);
+    s->cbuf_type = cbuf_type;
+    if (s->cbuf_type == 1 && s->is_unicode)
+        s->cbuf_type = 2;
+    s->interrupt_counter = INTERRUPT_COUNTER_INIT;
+    s->opaque = opaque;
+
+    s->stack_buf = s->static_stack_buf;
+    s->stack_size = countof(s->static_stack_buf);
+
+    for(i = 0; i < s->capture_count * 2; i++)
+        capture[i] = NULL;
+
+    cptr = cbuf + (cindex << cbuf_type);
+    if (0 < cindex && cindex < clen && s->cbuf_type == 2) {
+        const uint16_t *p = (const uint16_t *)cptr;
+        if (is_lo_surrogate(*p) && is_hi_surrogate(p[-1])) {
+            cptr = (const uint8_t *)(p - 1);
+        }
+    }
+
+    pc = bc_buf + RE_HEADER_LEN;
+    re_prefilter_init(&pf, pc, s->is_unicode);
+    if (pf.kind != RE_PREFILTER_NONE) {
+        ret = re_exec_search(s, capture, pc, cptr, &pf);
+    } else {
+        for(;;) {
+            memset(capture, 0, sizeof(*capture) * s->capture_count * 2);
+            ret = lre_exec_backtrack(s, capture, pc, cptr);
+            if (ret != 0 || cptr >= s->cbuf_end)
+                break;
+            if (lre_poll_timeout(s)) {
+                ret = LRE_RET_TIMEOUT;
+                break;
+            }
+            if (s->cbuf_type == 0) {
+                cptr++;
+            } else {
+                const uint16_t *p = (const uint16_t *)cptr;
+                const uint16_t *end = (const uint16_t *)s->cbuf_end;
+                uint32_t c = *p++;
+                if (is_hi_surrogate(c) && s->cbuf_type == 2 &&
+                    p < end && is_lo_surrogate(*p))
+                    p++;
+                cptr = (const uint8_t *)p;
+            }
+        }
+    }
+
+    if (s->stack_buf != s->static_stack_buf)
+        lre_realloc(s->opaque, s->stack_buf, 0);
+    return ret;
+}
+
 int lre_get_alloc_count(const uint8_t *bc_buf)
 {
     return get_u16(bc_buf + RE_HEADER_CAPTURE_COUNT) * 2 +
