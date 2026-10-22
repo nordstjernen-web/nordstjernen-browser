@@ -14,6 +14,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 
 #include "anim.h"
 #include "css.h"
+#include "css_shape.h"
 #include "dom.h"
 #include "spellcheck.h"
 #include "font.h"
@@ -6804,6 +6805,111 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
         ns_paint_blur_argb(data, stride, w, h, blur_radius * blur_scale);
 }
 
+static const char *
+box_clip_path_text(const ns_box *b)
+{
+    const ns_style *st = b ? b->style : NULL;
+    const ns_css_value *v = st ? st->values[NS_CSS_CLIP_PATH] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
+    const char *cp = v->u.keyword;
+    if (!*cp || strcmp(cp, "none") == 0) return NULL;
+    return cp;
+}
+
+static void
+clip_path_reference_boxes(const ns_box *b, double boxes[NS_CLIP_BOX_COUNT][4])
+{
+    double bx = b->x + b->margin.left, by = b->y + b->margin.top;
+    double bw = b->content_width + b->padding.left + b->padding.right +
+                b->border.left + b->border.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom +
+                b->border.top + b->border.bottom;
+    const double rects[NS_CLIP_BOX_COUNT][4] = {
+        [NS_CLIP_BOX_MARGIN] = { b->x, b->y, bw + b->margin.left + b->margin.right,
+                                 bh + b->margin.top + b->margin.bottom },
+        [NS_CLIP_BOX_BORDER] = { bx, by, bw, bh },
+        [NS_CLIP_BOX_PADDING] = { bx + b->border.left, by + b->border.top,
+                                  bw - b->border.left - b->border.right,
+                                  bh - b->border.top - b->border.bottom },
+        [NS_CLIP_BOX_CONTENT] = { bx + b->border.left + b->padding.left,
+                                  by + b->border.top + b->padding.top,
+                                  b->content_width, b->content_height },
+    };
+    memcpy(boxes, rects, sizeof rects);
+}
+
+static void
+clip_shape_path(cairo_t *cr, const ns_box *b, const ns_clip_shape *s)
+{
+    switch (s->kind) {
+    case NS_CLIP_SHAPE_BOX: {
+        corner_radii r = box_border_radii(b);
+        if (s->box == NS_CLIP_BOX_PADDING)
+            r = corner_radii_inset(r, b->border.top, b->border.right,
+                                   b->border.bottom, b->border.left);
+        else if (s->box == NS_CLIP_BOX_CONTENT)
+            r = corner_radii_inset(r, b->border.top + b->padding.top,
+                                   b->border.right + b->padding.right,
+                                   b->border.bottom + b->padding.bottom,
+                                   b->border.left + b->padding.left);
+        rounded_rect_path(cr, s->x, s->y, s->w, s->h, r);
+        break;
+    }
+    case NS_CLIP_SHAPE_INSET: {
+        corner_radii r = { s->rh[0], s->rh[1], s->rh[2], s->rh[3],
+                           s->rv[0], s->rv[1], s->rv[2], s->rv[3] };
+        rounded_rect_path(cr, s->x, s->y, s->w, s->h, r);
+        break;
+    }
+    case NS_CLIP_SHAPE_ELLIPSE:
+        if (s->rx > 0 && s->ry > 0) {
+            cairo_save(cr);
+            cairo_translate(cr, s->cx, s->cy);
+            cairo_scale(cr, s->rx, s->ry);
+            cairo_new_sub_path(cr);
+            cairo_arc(cr, 0, 0, 1.0, 0, 2 * G_PI);
+            cairo_restore(cr);
+        } else {
+            cairo_rectangle(cr, s->cx, s->cy, 0, 0);
+        }
+        break;
+    case NS_CLIP_SHAPE_POLYGON:
+        cairo_set_fill_rule(cr, s->evenodd ? CAIRO_FILL_RULE_EVEN_ODD
+                                           : CAIRO_FILL_RULE_WINDING);
+        for (guint i = 0; i + 1 < s->points->len; i += 2) {
+            double px = g_array_index(s->points, double, i);
+            double py = g_array_index(s->points, double, i + 1);
+            if (i == 0) cairo_move_to(cr, px, py);
+            else        cairo_line_to(cr, px, py);
+        }
+        cairo_close_path(cr);
+        break;
+    }
+}
+
+static gboolean
+apply_clip_path(cairo_t *cr, const ns_box *b)
+{
+    const char *cp = box_clip_path_text(b);
+    if (!cp) return FALSE;
+    char *computed = ns_css_shape_computed_serialize(b->style, NULL,
+                                                     NS_CSS_CLIP_PATH);
+    double boxes[NS_CLIP_BOX_COUNT][4];
+    clip_path_reference_boxes(b, boxes);
+    ns_clip_shape shape;
+    gboolean ok = ns_css_clip_shape_resolve(computed ? computed : cp, boxes,
+                                            &shape);
+    g_free(computed);
+    if (!ok) return FALSE;
+    cairo_fill_rule_t rule = cairo_get_fill_rule(cr);
+    cairo_new_path(cr);
+    clip_shape_path(cr, b, &shape);
+    cairo_clip(cr);
+    cairo_set_fill_rule(cr, rule);
+    ns_clip_shape_clear(&shape);
+    return TRUE;
+}
+
 static gboolean
 apply_box_content_clip(cairo_t *cr, const ns_box *b)
 {
@@ -6819,92 +6925,7 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
         cairo_clip(cr);
         clipped = TRUE;
     }
-    const ns_style *st = b->style;
-    if (!st || !st->values[NS_CSS_CLIP_PATH]) return clipped;
-    if (st->values[NS_CSS_CLIP_PATH]->kind != NS_CSS_V_KEYWORD) return clipped;
-    const char *cp = st->values[NS_CSS_CLIP_PATH]->u.keyword;
-    if (!cp || !*cp || strcmp(cp, "none") == 0) return clipped;
-    double w = b->content_width;
-    double h = b->content_height;
-    double cx = b->x + w / 2.0;
-    double cy = b->y + h / 2.0;
-    if (g_ascii_strncasecmp(cp, "circle", 6) == 0) {
-        double r = (w < h ? w : h) / 2.0;
-        const char *paren = strchr(cp, '(');
-        if (paren) {
-            paren++;
-            while (*paren == ' ' || *paren == '\t') paren++;
-            if (*paren && *paren != ')') {
-                char *endp = NULL;
-                double rv = g_ascii_strtod(paren, &endp);
-                if (endp && endp != paren && rv > 0)
-                    r = (*endp == '%') ? rv / 100.0 * ((w < h ? w : h) / 2.0) : rv;
-            }
-        }
-        cairo_new_sub_path(cr);
-        cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
-        cairo_clip(cr);
-        clipped = TRUE;
-    } else if (g_ascii_strncasecmp(cp, "ellipse", 7) == 0) {
-        cairo_save(cr);
-        cairo_translate(cr, cx, cy);
-        cairo_scale(cr, w / 2.0, h / 2.0);
-        cairo_arc(cr, 0, 0, 1.0, 0, 2 * G_PI);
-        cairo_restore(cr);
-        cairo_clip(cr);
-        clipped = TRUE;
-    } else if (g_ascii_strncasecmp(cp, "polygon", 7) == 0) {
-        const char *paren = strchr(cp, '(');
-        if (!paren) return clipped;
-        paren++;
-        const char *end = strrchr(paren, ')');
-        if (!end) return clipped;
-        char *body = g_strndup(paren, (gsize)(end - paren));
-        gchar **verts = g_strsplit(body, ",", -1);
-        gboolean first = TRUE;
-        cairo_new_sub_path(cr);
-        for (int i = 0; verts[i]; i++) {
-            char *coords = g_strstrip(verts[i]);
-            if (!*coords) continue;
-            char *endp1 = NULL;
-            double xv = g_ascii_strtod(coords, &endp1);
-            if (!endp1 || endp1 == coords) continue;
-            gboolean xpct = (*endp1 == '%');
-            if (xpct) endp1++;
-            while (*endp1 == ' ' || *endp1 == '\t') endp1++;
-            char *endp2 = NULL;
-            double yv = g_ascii_strtod(endp1, &endp2);
-            if (!endp2 || endp2 == endp1) continue;
-            gboolean ypct = (*endp2 == '%');
-            double px = xpct ? b->x + xv / 100.0 * w : b->x + xv;
-            double py = ypct ? b->y + yv / 100.0 * h : b->y + yv;
-            if (first) { cairo_move_to(cr, px, py); first = FALSE; }
-            else       cairo_line_to(cr, px, py);
-        }
-        g_strfreev(verts);
-        g_free(body);
-        if (!first) {
-            cairo_close_path(cr);
-            cairo_clip(cr);
-            clipped = TRUE;
-        }
-    } else if (g_ascii_strncasecmp(cp, "inset", 5) == 0) {
-        const char *paren = strchr(cp, '(');
-        if (paren) {
-            paren++;
-            double pad = 0;
-            char *endp = NULL;
-            double pv = g_ascii_strtod(paren, &endp);
-            if (endp && endp != paren) {
-                pad = (*endp == '%') ? pv / 100.0 * ((w < h ? w : h)) : pv;
-                cairo_rectangle(cr, b->x + pad, b->y + pad,
-                                w - 2 * pad, h - 2 * pad);
-                cairo_clip(cr);
-                clipped = TRUE;
-            }
-        }
-    }
-    return clipped;
+    return apply_clip_path(cr, b) || clipped;
 }
 
 typedef struct {
@@ -9974,15 +9995,17 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
     gboolean has_path_clip = FALSE;
+    gboolean clip_after_filter = FALSE;
     if ((b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
          b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL) &&
-        style && style->values[NS_CSS_CLIP_PATH] &&
-        style->values[NS_CSS_CLIP_PATH]->kind == NS_CSS_V_KEYWORD &&
-        style->values[NS_CSS_CLIP_PATH]->u.keyword &&
-        strcmp(style->values[NS_CSS_CLIP_PATH]->u.keyword, "none") != 0) {
-        cairo_save(cr);
-        if (apply_box_content_clip(cr, b)) has_path_clip = TRUE;
-        else                                cairo_restore(cr);
+        box_clip_path_text(b)) {
+        if (fl.cr) {
+            clip_after_filter = TRUE;
+        } else {
+            cairo_save(cr);
+            if (apply_clip_path(cr, b)) has_path_clip = TRUE;
+            else                        cairo_restore(cr);
+        }
     }
     if (!box_offscreen && !self_hidden) {
         double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
@@ -10373,7 +10396,16 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (fl.cr) {
         g_paint_no_cull--;
         cr = fl.outer;
+        if (clip_after_filter) {
+            cairo_save(cr);
+            cairo_matrix_t outer_m;
+            cairo_get_matrix(cr, &outer_m);
+            if (have_box_tf) cairo_transform(cr, &box_tf);
+            apply_clip_path(cr, b);
+            cairo_set_matrix(cr, &outer_m);
+        }
         filter_layer_end(&fl);
+        if (clip_after_filter) cairo_restore(cr);
     }
 
     if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);

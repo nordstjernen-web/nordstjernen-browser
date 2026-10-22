@@ -40,6 +40,18 @@ Changelog:
   and the broken-image icon when its request failed; one with alt text
   shows the icon followed by the alt text in the element's own font and
   colour. An image that is still loading paints nothing.
+* Paint: `clip-path` basic shapes now clip like Chrome. `inset()` used
+  only its first value, as a share of the smaller side, so
+  `inset(0 100% 0 0)` hid nothing and `inset(135% 0 -100%)` clipped the
+  wrong band; it now takes all four sides, percentages of the box's
+  width and height, `calc()` and `round` corners. `circle()`,
+  `ellipse()` and `polygon()` now measure from the border box, with
+  `at` positions and circle percentages as the spec defines them, and a
+  reference box keyword alone (`clip-path: padding-box`) clips to that
+  box. A box with both `filter` and `clip-path` is clipped after it is
+  filtered, so a blurred glow no longer spills outside its clip (the
+  purple glow GitHub draws under its carousel showed through the video
+  above it).
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
