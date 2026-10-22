@@ -90,6 +90,14 @@ Changelog:
   CNN, The Guardian and The New York Times the main-thread CPU of a
   settled load drops by 16%, 15% and 13%. Builds that link the system
   Pango keep the full rebuild.
+* Crash fix: a page parked in the back-forward cache could still run an
+  async script, and the script's synchronous fetch runs a nested main
+  loop. If the tab was closed or navigated during that fetch, the parked
+  page was freed under the running script, and the browser crashed when
+  the fetch returned (espn.com, which redirects to a regional edition,
+  crashed on 3 of 5 headless loads). A tab's renderer session now counts
+  as busy while any of its pages, parked ones included, is inside such a
+  fetch, so closing or navigating the tab waits until the fetch ends.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

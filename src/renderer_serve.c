@@ -268,7 +268,14 @@ ns_renderer_session_new(int ctrl_w, unsigned char *fb, int max_w, int max_h,
 int
 ns_renderer_session_busy(const ns_renderer_session *s)
 {
-    return s && ns_browser_busy(s->cur);
+    if (!s)
+        return 0;
+    if (ns_browser_busy(s->cur))
+        return 1;
+    for (int i = 0; i < s->bf_n; i++)
+        if (ns_browser_busy(s->bf[i]))
+            return 1;
+    return 0;
 }
 
 GPtrArray *
