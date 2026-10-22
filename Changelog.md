@@ -13,6 +13,14 @@ Changelog:
   is insecure" from its load handler. Sandboxed frames without
   `allow-same-origin` still get the `SecurityError`, and `indexedDB`
   stays unavailable in cross-origin frames.
+* Frames: `document.write()` from a script that a frame's parser runs
+  now inserts the markup after that script, and a written `<script>`
+  runs before the frame's next script, as in a top-level page. The
+  frame document treated it as a write after loading: it emptied the
+  document and kept the markup for a `document.close()` that never
+  came. The my.foxnews.com account frame writes the script that defines
+  `FNC.ISA`, so it ended up with an empty document and no
+  `ISA.provider`.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

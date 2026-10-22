@@ -61623,10 +61623,27 @@ ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
     g_string_free(buf, TRUE);
 }
 
+static gboolean
+ns_realmdoc_parser_writing(JSContext *ctx, JSValueConst this_val)
+{
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    const ns_node *script = js ? js->current_script : NULL;
+    if (!doc || !script || js->frame_parser_depth == 0 ||
+        doc != js->current_doc ||
+        (script->flags & NS_NODE_NOT_PARSER_INSERTED))
+        return FALSE;
+    const ns_node *p = script;
+    while (p && p->kind != NS_NODE_DOCUMENT) p = p->parent;
+    return p == doc;
+}
+
 static JSValue
 ns_realmdoc_write(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
+    if (ns_realmdoc_parser_writing(ctx, this_val))
+        return ns_document_write_common(ctx, argc, argv, FALSE);
     ns_realmdoc_append_write(ctx, this_val, argc, argv, FALSE);
     return JS_UNDEFINED;
 }
@@ -61635,6 +61652,8 @@ static JSValue
 ns_realmdoc_writeln(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
+    if (ns_realmdoc_parser_writing(ctx, this_val))
+        return ns_document_write_common(ctx, argc, argv, TRUE);
     ns_realmdoc_append_write(ctx, this_val, argc, argv, TRUE);
     return JS_UNDEFINED;
 }
@@ -65930,9 +65949,10 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     gboolean have_external = FALSE;
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *t = &g_array_index(tasks, ns_script_task, i);
-        gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
-                                 js->callback_depth == 0 &&
-                                 !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
+        gboolean parser_paused =
+            (js->parser_hold || js->frame_parser_depth > 0) &&
+            js->eval_depth == 0 && js->callback_depth == 0 &&
+            !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
         if (t->schedule == NS_SCRIPT_BLOCKING &&
             (!ns_element_get_attr(t->node, "src") || parser_paused) &&
             !ns_script_type_is_module(t->node)) {
@@ -66988,6 +67008,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         gboolean in_frame_scope = iframe != NULL;
         if (in_frame_scope)
             ns_js_frame_scope_enter(js, fctx, iframe, &frame_scope);
+        js->frame_parser_depth++;
         for (guint i = 0; i < classic_sources->len; i++) {
             if (g_get_monotonic_time() >= iframe_deadline_us) break;
             ns_iframe_classic_source *source =
@@ -67025,6 +67046,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             ns_js_microtask_checkpoint(js);
             js->current_script = previous_script;
         }
+        js->frame_parser_depth--;
         if (in_frame_scope) ns_js_realm_scope_leave(js, &frame_scope);
     } else if (concat->len > 0) {
         GString *w = g_string_new(
