@@ -17127,7 +17127,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 + c->padding.left + c->padding.right
                 + c->border.left + c->border.right
                 + c->margin.left + c->margin.right;
-            double float_y = cursor_y;
+            double float_y = cursor_y + prev_margin_bottom;
             if (!clr && inline_line_top >= 0 && inline_line_top < cursor_y)
                 float_y = inline_line_top;
             if (clr) {
