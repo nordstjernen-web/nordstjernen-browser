@@ -1598,6 +1598,9 @@ default_break (const char    *text,
 	      break_type == G_UNICODE_BREAK_SYMBOL)
 	    break_op = BREAK_PROHIBITED; /* Rule LB13 */
 
+	  if (prev_wc == '/' && wc > ' ' && wc < 0x7f)
+	    break_op = BREAK_PROHIBITED;
+
 	  if (break_type == G_UNICODE_BREAK_NON_BREAKING_GLUE &&
 	      (prev_break_type != G_UNICODE_BREAK_SPACE &&
 	       prev_break_type != G_UNICODE_BREAK_AFTER &&
