@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: an image, canvas or other box without children that has
+  `transform-style: preserve-3d` or `perspective` is drawn again. The
+  painter made such a box the root of a 3D scene, drew only the
+  background of a block root and then the scene's children as 3D
+  planes, so a childless root drew nothing at all: Discord's floating
+  magnifier and other `preserve-3d` images were missing. A box without
+  children now paints as an ordinary (possibly 3D-transformed) box,
+  since neither property changes how it looks.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

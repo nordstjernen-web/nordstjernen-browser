@@ -8954,6 +8954,7 @@ box_perspective_px(const ns_box *b)
 static gboolean
 box_establishes_3d(const ns_box *b)
 {
+    if (!b->first_child) return FALSE;
     if (box_perspective_px(b) > 0) return TRUE;
     if (!box_preserve3d(b)) return FALSE;
     return !(b->parent && box_preserve3d(b->parent));
