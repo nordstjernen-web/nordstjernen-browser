@@ -259,6 +259,14 @@ Changelog:
   transparent header, and the header area came out white with its white
   menu text invisible. A `hidden`, `scroll` or `auto` axis still clips
   both, since the other axis then computes to `auto`.
+* Layout: `letter-spacing` set on an inline element now applies. Only
+  the block's own letter spacing reached the text, so a span such as
+  AP News's `text-transform: uppercase; letter-spacing: 1px` timestamps
+  ("45 MINS AGO") and the New York Times section labels were set tight
+  and 6 to 11 px too narrow. Each element whose letter spacing differs
+  from its parent's now carries its own, atomic inlines inside it keep
+  none, and the shrink-to-fit width leaves room for the largest spacing
+  so the text does not wrap early.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
