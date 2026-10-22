@@ -334,6 +334,13 @@ Changelog:
   `position: absolute; width: 0`, and Chrome still lays their cells out
   at their min-content width, which is what scripts and the sitebench
   probe read. The visible page does not change.
+* Layout: an `<svg>` with a `viewBox` but no width or height now takes
+  the width of its containing block and the height its aspect ratio
+  gives, as in Chrome. When the containing block also had a definite
+  height the engine stretched the SVG to fill both, so a square icon in
+  a 186 x 136 tile became 186 x 136 instead of 186 x 186 and its
+  drawing shrank to the tile's height. Bing's carousel icons and the
+  icons on Apple's product pages now size like Chrome's.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

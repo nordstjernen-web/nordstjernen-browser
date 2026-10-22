@@ -9789,12 +9789,10 @@ layout_image(ns_box *box, double parent_content_width)
     if (w < 0 && h < 0) {
         if (ratio_only && intrinsic_ratio > 0) {
             double cb_h = containing_block_definite_height(box);
-            if (parent_content_width > 0 && cb_h >= 0) {
-                w = parent_content_width; h = cb_h;
+            if (parent_content_width > 0) {
+                w = parent_content_width; h = w / intrinsic_ratio;
             } else if (cb_h >= 0) {
                 h = cb_h; w = h * intrinsic_ratio;
-            } else if (parent_content_width > 0) {
-                w = parent_content_width; h = w / intrinsic_ratio;
             } else { w = 0; h = 0; }
         } else if (nat_w > 0 && nat_h > 0) {
             w = nat_w;
