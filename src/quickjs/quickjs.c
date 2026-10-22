@@ -50229,7 +50229,7 @@ static JSValue js_number_toFixed(JSContext *ctx, JSValueConst this_val,
     if (JS_ToInt32Sat(ctx, &f, argv[0]))
         return JS_EXCEPTION;
     if (f < 0 || f > 100)
-        return JS_ThrowRangeError(ctx, "invalid number of digits");
+        return JS_ThrowRangeError(ctx, "toFixed() digits argument must be between 0 and 100");
     if (fabs(d) >= 1e21)
         flags = JS_DTOA_FORMAT_FREE;
     else
@@ -50259,7 +50259,7 @@ static JSValue js_number_toExponential(JSContext *ctx, JSValueConst this_val,
         f = 0;
     } else {
         if (f < 0 || f > 100)
-            return JS_ThrowRangeError(ctx, "invalid number of digits");
+            return JS_ThrowRangeError(ctx, "toExponential() argument must be between 0 and 100");
         f++;
         flags = JS_DTOA_FORMAT_FIXED;
     }
@@ -50287,7 +50287,7 @@ static JSValue js_number_toPrecision(JSContext *ctx, JSValueConst this_val,
         return JS_ToStringFree(ctx,  __JS_NewFloat64(d));
     }
     if (p < 1 || p > 100)
-        return JS_ThrowRangeError(ctx, "invalid number of digits");
+        return JS_ThrowRangeError(ctx, "toPrecision() argument must be between 1 and 100");
     return js_dtoa2(ctx, d, 10, p, JS_DTOA_FORMAT_FIXED);
 }
 
