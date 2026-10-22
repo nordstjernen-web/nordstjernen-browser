@@ -3435,16 +3435,70 @@ static bool re_range_contains(const uint8_t *pc, int n, bool wide, uint32_t c)
     return false;
 }
 
+static uint32_t re_prefilter_canonicalize(uint32_t c, bool is_unicode)
+{
+    if (c < 0x80) {
+        if (is_unicode) {
+            if (c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+        } else {
+            if (c >= 'a' && c <= 'z')
+                c = c - 'a' + 'A';
+        }
+        return c;
+    }
+    return lre_canonicalize(c, is_unicode);
+}
+
+static void re_prefilter_add_folded(REPrefilter *pf, uint32_t c,
+                                    bool is_unicode)
+{
+    uint32_t i;
+
+    if (c < 0x80) {
+        if (re_prefilter_canonicalize(c, is_unicode) == c)
+            re_prefilter_add(pf, c);
+        if ((c | 0x20) >= 'a' && (c | 0x20) <= 'z' &&
+            re_prefilter_canonicalize(c ^ 0x20, is_unicode) == c)
+            re_prefilter_add(pf, c ^ 0x20);
+        return;
+    }
+    for(i = 0x80; i < 0x100; i++) {
+        if (lre_canonicalize(i, is_unicode) == c)
+            re_prefilter_add(pf, i);
+    }
+}
+
 static void re_prefilter_from_range(REPrefilter *pf, const uint8_t *pc,
                                     int n, bool wide, bool ignore_case,
                                     bool is_unicode)
 {
     uint32_t c, last_high;
+    int i;
 
-    for(c = 0; c < 0x100; c++) {
-        if (re_range_contains(pc, n, wide,
-                              ignore_case ? lre_canonicalize(c, is_unicode) : c))
-            re_prefilter_add(pf, c);
+    if (ignore_case) {
+        for(c = 0; c < 0x100; c++) {
+            if (re_range_contains(pc, n, wide,
+                                  re_prefilter_canonicalize(c, is_unicode)))
+                re_prefilter_add(pf, c);
+        }
+    } else {
+        for(i = 0; i < n; i++) {
+            uint32_t low, high;
+            if (wide) {
+                low = get_u32(pc + i * 8);
+                high = get_u32(pc + i * 8 + 4);
+            } else {
+                low = get_u16(pc + i * 4);
+                high = get_u16(pc + i * 4 + 2);
+            }
+            if (low >= 0x100)
+                break;
+            if (high > 0xff)
+                high = 0xff;
+            for(c = low; c <= high; c++)
+                re_prefilter_add(pf, c);
+        }
     }
     last_high = wide ? get_u32(pc + (n - 1) * 8 + 4) : get_u16(pc + (n - 1) * 4 + 2);
     pf->wide = ignore_case || last_high >= 0x100;
@@ -3588,13 +3642,9 @@ static void re_prefilter_init(REPrefilter *pf, const uint8_t *pc,
         case REOP_char32_i:
             {
                 uint32_t c = opcode == REOP_char_i ? get_u16(pc) : get_u32(pc);
-                uint32_t i;
                 if (c >= 0x100)
                     return;
-                for(i = 0; i < 0x100; i++) {
-                    if (lre_canonicalize(i, is_unicode) == c)
-                        re_prefilter_add(pf, i);
-                }
+                re_prefilter_add_folded(pf, c, is_unicode);
                 pf->wide = true;
                 pf->kind = RE_PREFILTER_BITMAP;
             }
