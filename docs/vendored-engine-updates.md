@@ -33,6 +33,24 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-10-22 — QuickJS 5271a40 → 270b8c9
+
+| | value |
+|---|---|
+| Fork base | `5271a40` |
+| Updated to | `270b8c9` (master, "Export all API symbols in the QJS_WASI_REACTOR build (#1804)") |
+| Reported version | `0.17.0` (unchanged) |
+
+Two upstream commits.
+
+- **Unicode** — `unicode_script()` returned through its own `fail` label
+  after freeing its ranges on an allocation failure, looping forever
+  (`081d50c`). `libunicode.c` is a three-way merge; the hunk applied cleanly.
+- **WASI reactor** — the `qjs_wasi` target now defines `BUILDING_QJS_SHARED`
+  so every API symbol is exported (`270b8c9`). The fork's `CMakeLists.txt`
+  carries no WASI reactor block and no `qjs-wasi-reactor.c`, so the hunk is
+  dropped. Upstream's CI workflow is copied unmodified.
+
 ## 2026-10-18 — Lexbor 327a8b6 → f4cbbcd
 
 | | value |
