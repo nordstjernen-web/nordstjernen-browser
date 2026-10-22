@@ -52,6 +52,17 @@ Changelog:
   filtered, so a blurred glow no longer spills outside its clip (the
   purple glow GitHub draws under its carousel showed through the video
   above it).
+* Paint: `backdrop-filter` is now drawn. The property was parsed but
+  never painted, so frosted glass bars, blurred overlays and dimmed
+  caption strips showed the page behind them unchanged (the Guardian
+  card captions, Discord, YouTube and Apple headers). The painter now
+  copies what is already drawn under the element's border box, runs the
+  filter list over it and draws the result inside the element's
+  rounded border box, under its background, clipped and masked with
+  the element. As in Chrome, the blur reads only the area under the
+  element and mirrors it at the edges. Filter functions in `filter` and
+  `backdrop-filter` now also run in the order written, so
+  `blur(20px) saturate(180%)` blurs before it saturates.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

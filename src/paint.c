@@ -6706,41 +6706,16 @@ ns_paint_blur_argb(guchar *data, int stride, int w, int h, double sigma)
     }
 }
 
+typedef struct {
+    int op;
+    double amount;
+} image_filter_op;
+
 static void
-apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
-                   double blur_scale)
+apply_image_color_ops(guchar *data, int stride, int w, int h,
+                      const image_filter_op *ops, int n_ops)
 {
-    if (!filter || !*filter) return;
-    typedef struct { int op; double amount; } fop;
-    fop ops[16];
-    int n_ops = 0;
-    double blur_radius = 0;
-    const char *q = filter;
-    while (*q && n_ops < 16) {
-        int op = 0;
-        const char *name = NULL;
-        const char *body = NULL;
-        gsize nlen = 0;
-        const char *next = filter_function_next(q, &name, &nlen, &body, NULL);
-        if (!next) break;
-        double amt = parse_filter_amount(body, NULL);
-        q = next;
-        if (filter_name_is(name, nlen, "grayscale")) op = 1;
-        else if (filter_name_is(name, nlen, "sepia")) op = 2;
-        else if (filter_name_is(name, nlen, "invert")) op = 3;
-        else if (filter_name_is(name, nlen, "brightness")) op = 4;
-        else if (filter_name_is(name, nlen, "contrast")) op = 5;
-        else if (filter_name_is(name, nlen, "saturate")) op = 6;
-        else if (filter_name_is(name, nlen, "blur")) {
-            if (amt >= 0 && amt > blur_radius) blur_radius = amt;
-        }
-        if (op && amt >= 0) {
-            ops[n_ops].op = op;
-            ops[n_ops].amount = amt;
-            n_ops++;
-        }
-    }
-    if (n_ops == 0 && blur_radius <= 0) return;
+    if (n_ops <= 0) return;
     for (int y = 0; y < h; y++) {
         guchar *row = data + y * stride;
         for (int x = 0; x < w; x++) {
@@ -6789,20 +6764,59 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
                     break;
                 }
                 }
+                r = CLAMP(r, 0.0, 1.0);
+                g = CLAMP(g, 0.0, 1.0);
+                b = CLAMP(b, 0.0, 1.0);
             }
-            if (r < 0) r = 0;
-            if (r > 1) r = 1;
-            if (g < 0) g = 0;
-            if (g > 1) g = 1;
-            if (b < 0) b = 0;
-            if (b > 1) b = 1;
             px[0] = (guchar)(b * a * 255.0 + 0.5);
             px[1] = (guchar)(g * a * 255.0 + 0.5);
             px[2] = (guchar)(r * a * 255.0 + 0.5);
         }
     }
+}
+
+static void
+apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
+                   double blur_scale)
+{
+    if (!filter || !*filter) return;
+    image_filter_op ops[16];
+    int n_ops = 0;
+    int ops_before_blur = -1;
+    double blur_radius = 0;
+    const char *q = filter;
+    while (*q && n_ops < 16) {
+        int op = 0;
+        const char *name = NULL;
+        const char *body = NULL;
+        gsize nlen = 0;
+        const char *next = filter_function_next(q, &name, &nlen, &body, NULL);
+        if (!next) break;
+        double amt = parse_filter_amount(body, NULL);
+        q = next;
+        if (filter_name_is(name, nlen, "grayscale")) op = 1;
+        else if (filter_name_is(name, nlen, "sepia")) op = 2;
+        else if (filter_name_is(name, nlen, "invert")) op = 3;
+        else if (filter_name_is(name, nlen, "brightness")) op = 4;
+        else if (filter_name_is(name, nlen, "contrast")) op = 5;
+        else if (filter_name_is(name, nlen, "saturate")) op = 6;
+        else if (filter_name_is(name, nlen, "blur")) {
+            if (amt >= 0 && amt > blur_radius) blur_radius = amt;
+            if (ops_before_blur < 0) ops_before_blur = n_ops;
+        }
+        if (op && amt >= 0) {
+            ops[n_ops].op = op;
+            ops[n_ops].amount = amt;
+            n_ops++;
+        }
+    }
+    if (n_ops == 0 && blur_radius <= 0) return;
+    if (blur_radius <= 0 || ops_before_blur < 0) ops_before_blur = n_ops;
+    apply_image_color_ops(data, stride, w, h, ops, ops_before_blur);
     if (blur_radius > 0)
         ns_paint_blur_argb(data, stride, w, h, blur_radius * blur_scale);
+    apply_image_color_ops(data, stride, w, h, ops + ops_before_blur,
+                          n_ops - ops_before_blur);
 }
 
 static const char *
@@ -9800,6 +9814,165 @@ paint_owns_layer_scope(const ns_box *b, gboolean grouped,
     return b == g_paint_tex_root || ns_box_is_stacking_context(b);
 }
 
+typedef enum {
+    BOX_TF_OK,
+    BOX_TF_INVALID,
+    BOX_TF_DEGENERATE,
+} box_tf_state;
+
+static box_tf_state
+box_transform_matrix(const ns_box *b, const ns_css_transform *tf,
+                     cairo_matrix_t *out)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double ox, oy, oz;
+    box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
+                         &ox, &oy, &oz);
+    ns_mat4 m;
+    ns_css_transform_to_mat4(tf, bw, bh, &m);
+    if (isnan(m.m[0]) || isnan(m.m[4]) || isnan(m.m[1]) ||
+        isnan(m.m[5]) || isnan(m.m[3]) || isnan(m.m[7]) ||
+        isnan(ox) || isnan(oy))
+        return BOX_TF_INVALID;
+    if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6)
+        return BOX_TF_DEGENERATE;
+    cairo_matrix_t cm;
+    cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
+    cairo_matrix_init_translate(out, ox, oy);
+    cairo_matrix_multiply(out, &cm, out);
+    cairo_matrix_translate(out, -ox, -oy);
+    return BOX_TF_OK;
+}
+
+#define NS_BACKDROP_MAX_PIXELS (16 * 1024 * 1024)
+
+typedef struct {
+    cairo_surface_t *surf;
+    double x, y;
+    double scale_x, scale_y;
+} backdrop_image;
+
+static const char *
+box_backdrop_filter(const ns_box *b)
+{
+    const ns_css_value *v = b->style
+        ? b->style->values[NS_CSS_BACKDROP_FILTER] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
+        !*v->u.keyword || g_ascii_strcasecmp(v->u.keyword, "none") == 0)
+        return NULL;
+    return v->u.keyword;
+}
+
+static void
+backdrop_device_bounds(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf,
+                       double *x0, double *y0, double *x1, double *y1)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    cairo_save(cr);
+    if (tf) cairo_transform(cr, tf);
+    const double corners[4][2] = {
+        { bx, by }, { bx + bw, by }, { bx, by + bh }, { bx + bw, by + bh },
+    };
+    *x0 = *y0 = G_MAXDOUBLE;
+    *x1 = *y1 = -G_MAXDOUBLE;
+    for (int i = 0; i < 4; i++) {
+        double x = corners[i][0], y = corners[i][1];
+        cairo_user_to_device(cr, &x, &y);
+        *x0 = MIN(*x0, x);
+        *y0 = MIN(*y0, y);
+        *x1 = MAX(*x1, x);
+        *y1 = MAX(*y1, y);
+    }
+    cairo_restore(cr);
+}
+
+static int
+backdrop_mirror(int i, int n)
+{
+    if (n <= 1) return 0;
+    int period = 2 * n;
+    i %= period;
+    if (i < 0) i += period;
+    return i < n ? i : period - 1 - i;
+}
+
+static void
+backdrop_capture(cairo_t *cr, const ns_box *b, const char *filter,
+                 const cairo_matrix_t *tf, backdrop_image *out)
+{
+    cairo_surface_t *target = cairo_get_group_target(cr);
+    if (!target || cairo_surface_get_type(target) != CAIRO_SURFACE_TYPE_IMAGE)
+        return;
+    cairo_format_t fmt = cairo_image_surface_get_format(target);
+    if (fmt != CAIRO_FORMAT_ARGB32 && fmt != CAIRO_FORMAT_RGB24) return;
+    int tw = cairo_image_surface_get_width(target);
+    int th = cairo_image_surface_get_height(target);
+    if (tw <= 0 || th <= 0) return;
+    double off_x, off_y, scale_x, scale_y;
+    cairo_surface_get_device_offset(target, &off_x, &off_y);
+    cairo_surface_get_device_scale(target, &scale_x, &scale_y);
+    double x0, y0, x1, y1;
+    backdrop_device_bounds(cr, b, tf, &x0, &y0, &x1, &y1);
+    int px0 = MAX(0, (int)floor(x0 * scale_x + off_x));
+    int py0 = MAX(0, (int)floor(y0 * scale_y + off_y));
+    int px1 = MIN(tw, (int)ceil(x1 * scale_x + off_x));
+    int py1 = MIN(th, (int)ceil(y1 * scale_y + off_y));
+    int iw = px1 - px0, ih = py1 - py0;
+    int pad = (int)ceil(filter_blur_sigma(filter) * 3.0 * MAX(scale_x, scale_y));
+    if (iw <= 0 || ih <= 0) return;
+    int w = iw + 2 * pad, h = ih + 2 * pad;
+    if ((gint64)w * h > NS_BACKDROP_MAX_PIXELS) return;
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return;
+    }
+    cairo_surface_flush(target);
+    cairo_surface_flush(surf);
+    const guchar *src = cairo_image_surface_get_data(target);
+    int src_stride = cairo_image_surface_get_stride(target);
+    guchar *dst = cairo_image_surface_get_data(surf);
+    int dst_stride = cairo_image_surface_get_stride(surf);
+    guint32 opaque = fmt == CAIRO_FORMAT_RGB24 ? 0xff000000u : 0;
+    for (int y = 0; y < h; y++) {
+        const guchar *srow =
+            src + (py0 + backdrop_mirror(y - pad, ih)) * src_stride;
+        guchar *drow = dst + y * dst_stride;
+        for (int x = 0; x < w; x++) {
+            guint32 px;
+            memcpy(&px, srow + (px0 + backdrop_mirror(x - pad, iw)) * 4,
+                   sizeof px);
+            px |= opaque;
+            memcpy(drow + x * 4, &px, sizeof px);
+        }
+    }
+    apply_image_filter(dst, dst_stride, w, h, filter, MAX(scale_x, scale_y));
+    cairo_surface_mark_dirty(surf);
+    out->surf = surf;
+    out->x = px0 - pad - off_x;
+    out->y = py0 - pad - off_y;
+    out->scale_x = scale_x;
+    out->scale_y = scale_y;
+}
+
+static void
+backdrop_paint(cairo_t *cr, const ns_box *b, const backdrop_image *bd)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    cairo_save(cr);
+    cairo_new_path(cr);
+    rounded_rect_path(cr, bx, by, bw, bh, box_border_radii(b));
+    cairo_clip(cr);
+    cairo_identity_matrix(cr);
+    cairo_scale(cr, 1.0 / bd->scale_x, 1.0 / bd->scale_y);
+    cairo_set_source_surface(cr, bd->surf, bd->x, bd->y);
+    cairo_paint(cr);
+    cairo_restore(cr);
+}
+
 static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -9947,6 +10120,19 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (box_offscreen && g_paint_collect_stats) g_paint_stats.offscreen++;
 
+    cairo_matrix_t box_tf;
+    gboolean have_box_tf = FALSE;
+    box_tf_state tf_state = has_transform
+        ? box_transform_matrix(b, &eff_tf, &box_tf) : BOX_TF_INVALID;
+    backdrop_image backdrop = { 0 };
+    const char *backdrop_kw = box_backdrop_filter(b);
+    if (backdrop_kw && !fl.cr && !box_offscreen && !self_hidden &&
+        (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
+         b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL) &&
+        (!has_transform || tf_state == BOX_TF_OK))
+        backdrop_capture(cr, b, backdrop_kw, has_transform ? &box_tf : NULL,
+                         &backdrop);
+
     gboolean group_clipped = FALSE;
     if (grouped) {
         if (g_paint_collect_stats) g_paint_stats.grouped++;
@@ -9954,27 +10140,13 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             group_clipped = paint_group_clip(cr, b);
         cairo_push_group(cr);
     }
-    cairo_matrix_t box_tf;
-    gboolean have_box_tf = FALSE;
     if (has_transform) {
         cairo_save(cr);
-        double bx, by, bw, bh;
-        box_border_rect(b, &bx, &by, &bw, &bh);
-        double ox, oy, oz;
-        box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
-                             &ox, &oy, &oz);
-        ns_mat4 m;
-        ns_css_transform_to_mat4(&eff_tf, bw, bh, &m);
-        cairo_matrix_t cm;
-        cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5],
-                          m.m[3], m.m[7]);
-        if (isnan(m.m[0]) || isnan(m.m[4]) || isnan(m.m[1]) ||
-            isnan(m.m[5]) || isnan(m.m[3]) || isnan(m.m[7]) ||
-            isnan(ox) || isnan(oy)) {
+        if (tf_state == BOX_TF_INVALID) {
             if (g_dbg_paint_x >= 0)
                 g_printerr("[paint-nan-guard] transform <%s>\n",
                            b->dom && b->dom->name ? b->dom->name : "?");
-        } else if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6) {
+        } else if (tf_state == BOX_TF_DEGENERATE) {
             cairo_restore(cr);
             if (grouped)
                 cairo_pattern_destroy(cairo_pop_group(cr));
@@ -9987,9 +10159,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
-            cairo_matrix_init_translate(&box_tf, ox, oy);
-            cairo_matrix_multiply(&box_tf, &cm, &box_tf);
-            cairo_matrix_translate(&box_tf, -ox, -oy);
             have_box_tf = TRUE;
             cairo_transform(cr, &box_tf);
         }
@@ -10017,6 +10186,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
             b->kind == NS_BOX_MATH || b->kind == NS_BOX_SVG) {
             if (g_paint_collect_stats) g_paint_stats.blocks++;
+            if (backdrop.surf) backdrop_paint(cr, b, &backdrop);
             if (b->kind == NS_BOX_TABLE_ROW)
                 paint_table_row(cr, b);
             else
@@ -10407,6 +10577,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         filter_layer_end(&fl);
         if (clip_after_filter) cairo_restore(cr);
     }
+    if (backdrop.surf) cairo_surface_destroy(backdrop.surf);
 
     if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
     if (g_dbg_paint_x >= 0) {
