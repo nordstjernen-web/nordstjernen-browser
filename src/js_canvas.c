@@ -617,7 +617,35 @@ ns_canvas_parse_color_function(const char *s, double *r, double *g, double *b, d
 }
 
 gboolean
-ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
+ns_canvas_color_is_literal(const char *s)
+{
+    const char *p;
+    if (s[0] == '#') {
+        for (p = s + 1; *p; p++)
+            if (!g_ascii_isxdigit(*p)) return FALSE;
+        return p - s > 1;
+    }
+    if (g_ascii_strncasecmp(s, "rgb", 3) != 0) return FALSE;
+    p = s + 3;
+    if (*p == 'a' || *p == 'A') p++;
+    if (*p != '(') return FALSE;
+    for (p++; *p && *p != ')'; p++)
+        if (!g_ascii_isdigit(*p) && !strchr(" .,%/+-eE", *p)) return FALSE;
+    return *p == ')' && p[1] == '\0';
+}
+
+typedef struct {
+    char css[48];
+    gboolean ok;
+    double r, g, b, a;
+} ns_canvas_color_memo;
+
+static __thread ns_canvas_color_memo g_canvas_color_memo[16];
+static __thread guint g_canvas_color_memo_next;
+
+static gboolean
+ns_canvas_parse_color_uncached(const char *s, double *r, double *g, double *b,
+                               double *a)
 {
     guint8 cr, cg, cb, ca;
     if (!ns_css_parse_color(s, &cr, &cg, &cb, &ca))
@@ -626,6 +654,43 @@ ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
     *g = cg / 255.0;
     *b = cb / 255.0;
     *a = ca / 255.0;
+    return TRUE;
+}
+
+gboolean
+ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
+{
+    gboolean memo = strlen(s) < sizeof g_canvas_color_memo[0].css &&
+                    ns_canvas_color_is_literal(s);
+    if (memo) {
+        for (guint i = 0; i < G_N_ELEMENTS(g_canvas_color_memo); i++) {
+            const ns_canvas_color_memo *m = &g_canvas_color_memo[i];
+            if (strcmp(m->css, s) != 0) continue;
+            if (!m->ok) return FALSE;
+            *r = m->r;
+            *g = m->g;
+            *b = m->b;
+            *a = m->a;
+            return TRUE;
+        }
+    }
+    double pr = 0, pg = 0, pb = 0, pa = 0;
+    gboolean ok = ns_canvas_parse_color_uncached(s, &pr, &pg, &pb, &pa);
+    if (memo) {
+        ns_canvas_color_memo *m = &g_canvas_color_memo[
+            g_canvas_color_memo_next++ % G_N_ELEMENTS(g_canvas_color_memo)];
+        g_strlcpy(m->css, s, sizeof m->css);
+        m->ok = ok;
+        m->r = pr;
+        m->g = pg;
+        m->b = pb;
+        m->a = pa;
+    }
+    if (!ok) return FALSE;
+    *r = pr;
+    *g = pg;
+    *b = pb;
+    *a = pa;
     return TRUE;
 }
 
