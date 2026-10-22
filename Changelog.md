@@ -469,6 +469,15 @@ Changelog:
   drawn with its opacity. The painter composited the masked group
   through the mask alone, so `opacity: .5` with a fading mask drew the
   element at full strength. The mask is now multiplied by the opacity.
+* Layout: a link around an absolutely positioned image stays inline.
+  An inline element that held block-level media became a block, and
+  the test for media ran before the test for `position`, which
+  blockifies an absolute `<img>` or `<video>`. The link then broke the
+  line it sat in and its rect covered the whole containing block. An
+  out-of-flow child no longer makes its parent block-level, and an
+  inline left with nothing in flow reports the zero-height rect of its
+  phantom line, as Chrome does. Across the frozen sitebench snapshots
+  94 more elements match Chrome, 75 of them in eBay's video cards.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
