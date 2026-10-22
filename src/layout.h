@@ -214,6 +214,13 @@ typedef struct ns_box {
     int rowspan;
     int columns;
 
+    guint order_epoch;
+    guint order_rank;
+    guint order_end;
+    const ns_style *order_abs_style;
+    gboolean order_abs_style_set;
+    gboolean order_abs;
+
     struct ns_box *parent;
     struct ns_box *first_child;
     struct ns_box *last_child;

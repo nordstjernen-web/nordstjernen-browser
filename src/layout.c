@@ -18135,21 +18135,74 @@ node_is_ancestor_of(const ns_node *a, const ns_node *n)
 }
 
 static GHashTable *g_node_order;
+static GArray *g_node_order_end;
+static guint g_node_order_epoch;
 
 static void
 node_order_build(const ns_node *root)
 {
     g_node_order = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_node_order_end = g_array_new(FALSE, TRUE, sizeof(guint));
+    g_array_set_size(g_node_order_end, 1);
+    if (++g_node_order_epoch == 0) g_node_order_epoch = 1;
+    GArray *open = g_array_new(FALSE, FALSE, sizeof(guint));
     guint rank = 0;
-    GQueue stack = G_QUEUE_INIT;
-    g_queue_push_head(&stack, (gpointer)root);
-    while (!g_queue_is_empty(&stack)) {
-        const ns_node *n = g_queue_pop_head(&stack);
+    const ns_node *n = root;
+    for (;;) {
         g_hash_table_insert(g_node_order, (gpointer)n,
                             GUINT_TO_POINTER(++rank));
-        for (const ns_node *c = n->last_child; c; c = c->prev_sibling)
-            g_queue_push_head(&stack, (gpointer)c);
+        g_array_set_size(g_node_order_end, rank + 1);
+        g_array_append_val(open, rank);
+        if (n->first_child) {
+            n = n->first_child;
+            continue;
+        }
+        for (;;) {
+            guint closed = g_array_index(open, guint, open->len - 1);
+            g_array_set_size(open, open->len - 1);
+            g_array_index(g_node_order_end, guint, closed) = rank;
+            if (n == root || !n->parent) goto done;
+            if (n->next_sibling) {
+                n = n->next_sibling;
+                break;
+            }
+            n = n->parent;
+        }
     }
+done:
+    g_array_free(open, TRUE);
+}
+
+static void
+node_order_clear(void)
+{
+    g_clear_pointer(&g_node_order, g_hash_table_destroy);
+    if (g_node_order_end) {
+        g_array_free(g_node_order_end, TRUE);
+        g_node_order_end = NULL;
+    }
+}
+
+static void
+box_order_load(ns_box *b)
+{
+    if (b->order_epoch == g_node_order_epoch) return;
+    b->order_epoch = g_node_order_epoch;
+    b->order_rank = g_node_order && b->dom ? GPOINTER_TO_UINT(
+        g_hash_table_lookup(g_node_order, (gpointer)b->dom)) : 0;
+    b->order_end = b->order_rank
+        ? g_array_index(g_node_order_end, guint, b->order_rank) : 0;
+}
+
+static gboolean
+box_is_absolute_or_fixed(ns_box *b)
+{
+    if (!b->order_abs_style_set || b->order_abs_style != b->style) {
+        b->order_abs_style = b->style;
+        b->order_abs_style_set = TRUE;
+        b->order_abs = style_is_absolute_or_fixed(b->style);
+    }
+    return b->order_abs;
 }
 
 static gboolean
@@ -18197,14 +18250,20 @@ typedef struct static_abs_target {
 } static_abs_target;
 
 static gboolean
-static_abs_y_visit_other(const ns_box *b, const static_abs_target *t,
-                         double *out)
+static_abs_target_inside(const ns_box *b, const static_abs_target *t)
 {
-    guint rb = g_node_order ? GPOINTER_TO_UINT(
-        g_hash_table_lookup(g_node_order, (gpointer)b->dom)) : 0;
+    if (!t->rank) return g_hash_table_contains(t->ancestors, b->dom);
+    return b->order_rank && b->order_rank < t->rank &&
+           t->rank <= b->order_end;
+}
+
+static gboolean
+static_abs_y_visit_other(ns_box *b, const static_abs_target *t, double *out)
+{
+    guint rb = b->order_rank;
     gboolean ranked = rb && t->rank;
     if (ranked ? t->rank < rb : node_precedes(t->node, b->dom)) return FALSE;
-    if (style_is_absolute_or_fixed(b->style)) return FALSE;
+    if (box_is_absolute_or_fixed(b)) return FALSE;
     if (ranked ? rb < t->rank : node_precedes(b->dom, t->node)) {
         double bottom = box_outer_bottom(b);
         if (bottom > *out) *out = bottom;
@@ -18213,12 +18272,13 @@ static_abs_y_visit_other(const ns_box *b, const static_abs_target *t,
 }
 
 static gboolean
-static_abs_y_visit(const ns_box *b, const static_abs_target *t, double *out)
+static_abs_y_visit(ns_box *b, const static_abs_target *t, double *out)
 {
     if (!b->dom || b->dom == t->node) return TRUE;
-    if (!g_hash_table_contains(t->ancestors, b->dom))
+    box_order_load(b);
+    if (!static_abs_target_inside(b, t))
         return static_abs_y_visit_other(b, t, out);
-    if (!style_is_absolute_or_fixed(b->style)) {
+    if (!box_is_absolute_or_fixed(b)) {
         double edge = b->y + b->margin.top + b->border.top + b->padding.top;
         if (edge > *out) *out = edge;
     }
@@ -18226,27 +18286,30 @@ static_abs_y_visit(const ns_box *b, const static_abs_target *t, double *out)
 }
 
 static void
-static_abs_y_walk_from(const ns_box *b, const static_abs_target *t, double *out)
+static_abs_y_walk_from(ns_box *b, const static_abs_target *t, double *out)
 {
     if (!static_abs_y_visit(b, t, out)) return;
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
         static_abs_y_walk_from(c, t, out);
 }
 
 static void
-static_abs_y_walk(const ns_box *b, const ns_node *target, double *out)
+static_abs_y_walk(ns_box *b, const ns_node *target, double *out)
 {
     if (!b || !target || !out) return;
     static_abs_target t = {
         .node = target,
         .rank = g_node_order ? GPOINTER_TO_UINT(
             g_hash_table_lookup(g_node_order, (gpointer)target)) : 0,
-        .ancestors = g_hash_table_new(g_direct_hash, g_direct_equal),
+        .ancestors = NULL,
     };
-    for (const ns_node *p = target->parent; p; p = p->parent)
-        g_hash_table_add(t.ancestors, (gpointer)p);
+    if (!t.rank) {
+        t.ancestors = g_hash_table_new(g_direct_hash, g_direct_equal);
+        for (const ns_node *p = target->parent; p; p = p->parent)
+            g_hash_table_add(t.ancestors, (gpointer)p);
+    }
     static_abs_y_walk_from(b, &t, out);
-    g_hash_table_destroy(t.ancestors);
+    if (t.ancestors) g_hash_table_destroy(t.ancestors);
 }
 
 static double
@@ -20166,7 +20229,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     g_free(batch_resolved);
     g_hash_table_destroy(box_map);
     g_array_set_size(g_abs_pending, 0);
-    g_clear_pointer(&g_node_order, g_hash_table_destroy);
+    node_order_clear();
 }
 
 static gboolean
