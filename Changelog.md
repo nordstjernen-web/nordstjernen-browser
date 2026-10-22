@@ -71,6 +71,15 @@ Changelog:
   uses when the border colour is `currentcolor`. Buttons and fields that
   keep their native appearance still get a flat border, as Chrome draws
   them natively.
+* Paint: a horizontal rule (`<hr>`) is drawn once. Its default style was
+  a 1px grey background with 12px margins, and the painter added a
+  second rule 4px below it whenever the rule had no border, so every
+  plain `<hr>` showed two lines, and so did styled ones such as the BBC
+  section dividers (`border-width: 0; height: 2px; background: …`). The
+  rule now uses the HTML default style (a 1px inset border in grey, 0.5em
+  margins) and paints only what its CSS asks for. The `color`,
+  `noshade` and `size` attributes map to the same properties as in
+  Chrome.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

@@ -8285,36 +8285,6 @@ paint_marker(cairo_t *cr, const ns_box *b)
     }
 }
 
-static void
-paint_hr(cairo_t *cr, const ns_box *b)
-{
-    if (!b->dom || !b->dom->name || strcmp(b->dom->name, "hr") != 0) return;
-    if (b->border.top > 0 || b->border.bottom > 0 ||
-        b->border.left > 0 || b->border.right > 0) return;
-    double h = 1.0;
-    const ns_style *s = b->style;
-    if (s && s->values[NS_CSS_HEIGHT] &&
-        s->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_LENGTH) {
-        double hv = s->values[NS_CSS_HEIGHT]->u.length.v;
-        if (hv > 0) h = hv;
-    }
-    if (h > 24) h = 24;
-    double y = b->y + b->margin.top + 4;
-    double x0 = b->x + b->margin.left;
-    double x1 = x0 + b->content_width;
-    rgba color = rgba_of(s ? s->values[NS_CSS_COLOR] : NULL, 0.65, 0.65, 0.65, 1);
-    set_source_rgba(cr, color);
-    if (h <= 1.5) {
-        cairo_set_line_width(cr, h);
-        cairo_move_to(cr, x0, y);
-        cairo_line_to(cr, x1, y);
-        cairo_stroke(cr);
-    } else {
-        cairo_rectangle(cr, x0, y, x1 - x0, h);
-        cairo_fill(cr);
-    }
-}
-
 static gboolean
 box_is_hidden(const ns_box *b)
 {
@@ -10357,10 +10327,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                    : "");
             }
         }
-        if (b->kind == NS_BOX_BLOCK) {
+        if (b->kind == NS_BOX_BLOCK)
             paint_marker(cr, b);
-            paint_hr(cr, b);
-        }
         if (b->kind == NS_BOX_INLINE && !skip_contents) {
             if (g_paint_collect_stats) g_paint_stats.inlines++;
             paint_inline(cr, b, highlight);
