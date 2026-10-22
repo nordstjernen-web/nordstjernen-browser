@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Text: the shape cache no longer serves a short item as a word inside
+  a longer one. An item that has no space to be cut at, such as "Hub "
+  before an element in another font, is stored whole, and it was stored
+  under the same key as a word shaped between two others. Its trailing
+  space was shaped with nothing after it, so served inside "q&nbsp;Hub
+  To" it missed the kerning against the "T" and came out 0.6 px too
+  wide at 20 px in AliExpress's TT Norms Pro, and
+  `NS_PANGO_SHAPE_CACHE=verify` reported the mismatch. Items stored
+  whole are now keyed apart from pieces, as the pieces at an item's
+  ends already were.
 * Text: the shape cache no longer serves a piece that ended an item in
   the middle of another one. A trailing space shaped at the end of an
   item ("See " before a link) has nothing to kern against, but the same
