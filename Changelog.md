@@ -207,6 +207,16 @@ Changelog:
   importing module and fetched: ESPN's Disney player bundle imports
   `react`, so each load requested `…/dist/react` from the CDN, got an
   XML 403 page and failed with a MIME type error instead.
+* Frames: a cross-origin window and its `location` now follow the HTML
+  rules for cross-origin access. `then` and the `Symbol.toStringTag`,
+  `Symbol.hasInstance` and `Symbol.isConcatSpreadable` keys read as
+  `undefined`, and every other member outside the allowed list throws
+  a `SecurityError`, including `in` checks and property descriptors.
+  Reading `then` used to throw, so resolving a promise with a
+  cross-origin window (`resolve(iframe.contentWindow)`) rejected with
+  "Blocked cross-origin frame access"; Le Monde's forecast SDK does
+  that with its storage frame. A cross-origin `location.hostname` read
+  `undefined` instead of throwing, and `location.assign` was callable.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
