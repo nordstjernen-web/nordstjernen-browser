@@ -377,6 +377,17 @@ Changelog:
   only mandatory breaks in such a range. On Wikipedia's collapsed navbox
   rows the cells now take Chrome's widths: 162 more elements match on
   top of the table row group fix.
+* Layout: `filter`, `backdrop-filter`, `contain: paint` (also `layout`,
+  `strict` and `content`), `content-visibility`,
+  `transform-style: preserve-3d`, `offset-path`, and `will-change` naming
+  one of these or a transform property now make an element the
+  containing block of its absolutely and fixed positioned descendants,
+  as in Chrome. Only `transform` and `perspective` did, so a positioned
+  child of a blurred wrapper was placed against an outer box and painted
+  outside the blur, sharp. As in Chrome, `filter` does not do this on the
+  root element, the transform and containment properties do not do it on
+  a non-replaced inline box, and `will-change: position` does it for
+  absolutely positioned boxes only.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
