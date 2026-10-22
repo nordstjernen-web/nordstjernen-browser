@@ -36651,14 +36651,38 @@ ns_attr_state_find(ns_js *js, const ns_node *owner, const char *namespace_uri,
 {
     if (!js || !js->attr_wrappers || !owner || !local_name) return NULL;
     if (namespace_uri && !*namespace_uri) namespace_uri = NULL;
-    for (guint i = 0; i < js->attr_wrappers->len; i++) {
-        ns_js_attr *state = g_ptr_array_index(js->attr_wrappers, i);
-        if (state->owner == owner &&
-            g_strcmp0(state->namespace_uri, namespace_uri) == 0 &&
+    GPtrArray *states = g_hash_table_lookup(js->attr_wrappers, owner);
+    if (!states) return NULL;
+    for (guint i = 0; i < states->len; i++) {
+        ns_js_attr *state = g_ptr_array_index(states, i);
+        if (g_strcmp0(state->namespace_uri, namespace_uri) == 0 &&
             strcmp(state->local_name, local_name) == 0)
             return state;
     }
     return NULL;
+}
+
+static void
+ns_attr_state_unregister(ns_js_attr *state, ns_node *owner)
+{
+    if (!state->js || !state->js->attr_wrappers) return;
+    GPtrArray *states = g_hash_table_lookup(state->js->attr_wrappers, owner);
+    if (!states) return;
+    g_ptr_array_remove(states, state);
+    if (states->len == 0)
+        g_hash_table_remove(state->js->attr_wrappers, owner);
+}
+
+static void
+ns_attr_state_register(ns_js_attr *state, ns_node *owner)
+{
+    if (!state->js || !state->js->attr_wrappers) return;
+    GPtrArray *states = g_hash_table_lookup(state->js->attr_wrappers, owner);
+    if (!states) {
+        states = g_ptr_array_new();
+        g_hash_table_insert(state->js->attr_wrappers, owner, states);
+    }
+    g_ptr_array_add(states, state);
 }
 
 static void
@@ -36670,9 +36694,9 @@ ns_attr_state_detach(ns_js_attr *state)
         g_free(state->value);
         state->value = g_strdup(attr->value ? attr->value : "");
     }
+    ns_node *owner = state->owner;
     state->owner = NULL;
-    if (state->js && state->js->attr_wrappers)
-        g_ptr_array_remove_fast(state->js->attr_wrappers, state);
+    ns_attr_state_unregister(state, owner);
     JSValue pinned = state->pinned;
     state->pinned = JS_UNDEFINED;
     if (state->js && state->js->ctx && !JS_IsUndefined(pinned))
@@ -36691,19 +36715,28 @@ static void
 ns_attr_detach_owner(ns_js *js, ns_node *owner)
 {
     if (!js || !js->attr_wrappers || !owner) return;
-    for (guint i = js->attr_wrappers->len; i > 0; i--) {
-        ns_js_attr *state = g_ptr_array_index(js->attr_wrappers, i - 1);
-        if (state->owner == owner) ns_attr_state_detach(state);
+    GPtrArray *states;
+    while ((states = g_hash_table_lookup(js->attr_wrappers, owner)) != NULL) {
+        ns_js_attr *state = g_ptr_array_index(states, states->len - 1);
+        if (state->owner == owner && state->js == js) {
+            ns_attr_state_detach(state);
+            continue;
+        }
+        g_ptr_array_remove_index(states, states->len - 1);
+        if (states->len == 0)
+            g_hash_table_remove(js->attr_wrappers, owner);
     }
 }
 
 static void
 ns_attr_detach_all(ns_js *js)
 {
-    while (js && js->attr_wrappers && js->attr_wrappers->len > 0) {
-        ns_js_attr *state = g_ptr_array_index(js->attr_wrappers,
-                                              js->attr_wrappers->len - 1);
-        ns_attr_state_detach(state);
+    while (js && js->attr_wrappers && g_hash_table_size(js->attr_wrappers) > 0) {
+        GHashTableIter it;
+        gpointer owner = NULL;
+        g_hash_table_iter_init(&it, js->attr_wrappers);
+        if (!g_hash_table_iter_next(&it, &owner, NULL)) break;
+        ns_attr_detach_owner(js, owner);
     }
 }
 
@@ -36839,8 +36872,7 @@ ns_attr_state_attach(JSContext *ctx, JSValueConst entry, ns_js_attr *state,
     state->js = js_from_ctx(ctx);
     state->owner = owner;
     state->pinned = JS_DupValue(ctx, entry);
-    if (state->js && state->js->attr_wrappers)
-        g_ptr_array_add(state->js->attr_wrappers, state);
+    ns_attr_state_register(state, owner);
 }
 
 static JSValue
@@ -58150,7 +58182,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
     js->pinned_wrappers_set = g_hash_table_new(g_direct_hash, g_direct_equal);
-    js->attr_wrappers = g_ptr_array_new();
+    js->attr_wrappers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                              NULL,
+                                              (GDestroyNotify)g_ptr_array_unref);
     js->attribute_maps = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->pending_fetches = g_ptr_array_new();
     js->fetch_states_by_id = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -63299,7 +63333,7 @@ ns_js_free(ns_js *js)
     ns_attr_detach_all(js);
     ns_attribute_maps_release_all(js);
     if (js->attr_wrappers) {
-        g_ptr_array_free(js->attr_wrappers, TRUE);
+        g_hash_table_destroy(js->attr_wrappers);
         js->attr_wrappers = NULL;
     }
     if (js->attribute_maps) {

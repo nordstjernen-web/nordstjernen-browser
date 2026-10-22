@@ -349,6 +349,16 @@ Changelog:
   against every string given to `.html()`, and on Speedometer 3.1
   TodoMVC-jQuery this search was about a quarter of the run: the suite
   is now 18% faster and runs 30% fewer instructions.
+* Performance: finding the `Attr` object of an attribute no longer
+  scans every `Attr` object the page holds. The engine keeps each one so
+  the same object comes back for the same attribute, but kept them in
+  one list, scanned to find one and scanned again to drop an element's
+  objects when the element is freed. `document.importNode()` gives every
+  imported attribute its new owner document, which creates its `Attr`
+  object, so on TodoMVC-WebComponents the list grew with every item and
+  each iteration was slower than the one before. The objects are now
+  kept per owner element. On Speedometer 3.1, TodoMVC-WebComponents is
+  29% faster over its 10 iterations and runs 20% fewer instructions.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
