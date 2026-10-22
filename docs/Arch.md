@@ -1,7 +1,9 @@
 # Nordstjernen on Arch Linux — packaging and the AUR
 
 The Arch package recipe is `packaging/arch/PKGBUILD`, with its generated
-`packaging/arch/.SRCINFO`. It builds a tagged release tarball with
+`packaging/arch/.SRCINFO`. The package is named `nordstjernen-browser`, as in
+Debian, so the name says what it is; the command it installs is still
+`nordstjernen`. It builds a tagged release tarball with
 `arch-meson`, the same way the Debian and openSUSE packages build it. For
 plain build-from-source instructions see `Linux.md`.
 
@@ -37,7 +39,7 @@ The package:
   and unused by the browser) and the `internet-browser` link, which Northstar
   and Southstar also install and which Arch has no `update-alternatives` for.
 - declares `license=('GPL-3.0-or-later OR LicenseRef-NSL-1.0')` and links
-  `License.md` into `/usr/share/licenses/nordstjernen/`, as Arch requires
+  `License.md` into `/usr/share/licenses/nordstjernen-browser/`, as Arch requires
   for a `LicenseRef-` license.
 
 The one remaining `namcap` warning is `libgstvideo` linked but unused by
@@ -51,11 +53,11 @@ New packages enter Arch through the AUR; a package moves to the official
 publish it, use an AUR account with an SSH key:
 
 ```sh
-git clone ssh://aur@aur.archlinux.org/nordstjernen.git aur-nordstjernen
-cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO aur-nordstjernen/
-cd aur-nordstjernen
+git clone ssh://aur@aur.archlinux.org/nordstjernen-browser.git aur-nordstjernen-browser
+cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO aur-nordstjernen-browser/
+cd aur-nordstjernen-browser
 git add PKGBUILD .SRCINFO
-git commit -m "Initial upload: nordstjernen 1.0.35"
+git commit -m "Initial upload: nordstjernen-browser 1.0.35"
 git push
 ```
 

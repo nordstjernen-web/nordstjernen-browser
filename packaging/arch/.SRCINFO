@@ -1,4 +1,4 @@
-pkgbase = nordstjernen
+pkgbase = nordstjernen-browser
 	pkgdesc = Small web browser written from scratch in C, with a GTK 4 interface
 	pkgver = 1.0.35
 	pkgrel = 1
@@ -44,7 +44,7 @@ pkgbase = nordstjernen
 	optdepends = gst-plugins-bad: H.264 and AAC playback
 	optdepends = hunspell: spell checking
 	optdepends = hunspell-en_us: English dictionary for spell checking
-	source = nordstjernen-1.0.35.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/1.0.35.tar.gz
+	source = nordstjernen-browser-1.0.35.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/1.0.35.tar.gz
 	sha256sums = eb9f7b1d66ef204861001cc6c75fc96e6d9e482117209f181312520e08adcce0
 
-pkgname = nordstjernen
+pkgname = nordstjernen-browser

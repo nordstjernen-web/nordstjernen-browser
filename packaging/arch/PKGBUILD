@@ -1,6 +1,6 @@
 # Maintainer: Andreas Røsdal <andreas dot rosdal at gmail dot com>
 
-pkgname=nordstjernen
+pkgname=nordstjernen-browser
 pkgver=1.0.35
 pkgrel=1
 pkgdesc='Small web browser written from scratch in C, with a GTK 4 interface'

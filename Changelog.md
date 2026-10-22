@@ -3,7 +3,7 @@ Changelog:
 
 1.0.36:
 ======
-* Packaging: Arch Linux package recipe in `packaging/arch/` (PKGBUILD and
+* Packaging: Arch Linux package `nordstjernen-browser` in `packaging/arch/` (PKGBUILD and
   .SRCINFO, ready for the AUR), documented in `docs/Arch.md`. It builds
   without warnings in a clean Arch chroot and passes namcap.
 * Build: the sources that define `_GNU_SOURCE` now define it as `1`. SDL2
