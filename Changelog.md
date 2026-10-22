@@ -341,6 +341,14 @@ Changelog:
   a 186 x 136 tile became 186 x 136 instead of 186 x 186 and its
   drawing shrank to the tile's height. Bing's carousel icons and the
   icons on Apple's product pages now size like Chrome's.
+* Performance: a regular expression made of alternatives, such as
+  `/<script|<style|<link/i`, now skips the positions where none of them
+  can start. The search already jumped to the next possible first
+  character of a pattern with a single start, but an alternation ran the
+  matcher at every position of the string. jQuery tests that pattern
+  against every string given to `.html()`, and on Speedometer 3.1
+  TodoMVC-jQuery this search was about a quarter of the run: the suite
+  is now 18% faster and runs 30% fewer instructions.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
