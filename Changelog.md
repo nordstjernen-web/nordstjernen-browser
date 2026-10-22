@@ -3,6 +3,8 @@ Changelog:
 
 1.0.36:
 ======
+* JavaScript: QuickJS fork synced with quickjs-ng master `270b8c9`; fixes an
+  infinite loop in `unicode_script()` on allocation failure.
 * CI: Gradle 9.8.2 in the Android and Java workflows and the Android wrapper;
   Android Gradle Plugin 9.4.1.
 * Packaging: Arch Linux package `nordstjernen-browser` in `packaging/arch/` (PKGBUILD and
