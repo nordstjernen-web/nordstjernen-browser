@@ -25280,7 +25280,7 @@ static gboolean
 ns_css_node_is_target(const ns_node *el)
 {
     if (g_css_detached || !g_target_fragment || !el) return FALSE;
-    const char *eid = ns_element_get_attr(el, "id");
+    const char *eid = ns_element_id_attr(el);
     if (eid && strcmp(eid, g_target_fragment) == 0) return TRUE;
     if (el->name && g_ascii_strcasecmp(el->name, "a") == 0) {
         const char *nm = ns_element_get_attr(el, "name");
@@ -25592,7 +25592,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
         }
     }
     if (sel->id) {
-        const char *id = ns_element_get_attr(el, "id");
+        const char *id = ns_element_id_attr(el);
         if (!id || strcmp(id, sel->id) != 0) return FALSE;
     }
     if (sel->classes->len > 0) {
@@ -28062,7 +28062,7 @@ css_ancestor_filter_update(const ns_node *el, int delta)
     if (el->name)
         css_ancestor_filter_count(
             css_identifier_hash('%', el->name, strlen(el->name)), delta);
-    const char *id = ns_element_get_attr(el, "id");
+    const char *id = ns_element_id_attr(el);
     if (id)
         css_ancestor_filter_count(css_identifier_hash('#', id, strlen(id)),
                                   delta);
@@ -30011,7 +30011,7 @@ css_element_keys_for(const ns_node *el)
     keys->el = el;
     keys->pass = g_element_keys_pass;
     keys->n = 0;
-    const char *id = ns_element_get_attr(el, "id");
+    const char *id = ns_element_id_attr(el);
     if (id && *id) css_element_keys_add(keys, '#', id, strlen(id), FALSE);
     css_element_keys_add_classes(keys, ns_element_get_attr(el, "class"));
     if (el->name && *el->name)
@@ -34612,7 +34612,7 @@ incr_name_change_unused(const ns_node *target, const char *name,
     if (g_ascii_strcasecmp(name, "id") == 0)
         return g_id_keys && !g_id_keys_loose &&
                !incr_id_in_keys(old_value) &&
-               !incr_id_in_keys(ns_element_get_attr(target, "id"));
+               !incr_id_in_keys(ns_element_id_attr(target));
     return FALSE;
 }
 
@@ -34770,7 +34770,7 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
     if (n->name && incr_keyset_contains(keyset, '%', n->name,
                                         strlen(n->name), TRUE))
         return TRUE;
-    const char *id = ns_element_get_attr(n, "id");
+    const char *id = ns_element_id_attr(n);
     if (id && *id && incr_keyset_contains(keyset, '#', id, strlen(id), FALSE))
         return TRUE;
     return incr_class_list_matches_keys(ns_element_get_attr(n, "class"),
@@ -34869,7 +34869,7 @@ incr_has_anchor_matches(const ns_node *n, const incr_has_anchor *a)
     if (a->type && (!n->name || g_ascii_strcasecmp(n->name, a->type) != 0))
         return FALSE;
     if (a->id) {
-        const char *id = ns_element_get_attr(n, "id");
+        const char *id = ns_element_id_attr(n);
         if (!id || strcmp(id, a->id) != 0) return FALSE;
     }
     for (guint i = 0; i < a->classes->len; i++) {
@@ -35039,7 +35039,7 @@ incr_has_apply_name_and_id(ns_node *n)
     if (n->name &&
         incr_has_apply_key(n, '%', n->name, strlen(n->name), TRUE))
         return TRUE;
-    const char *id = ns_element_get_attr(n, "id");
+    const char *id = ns_element_id_attr(n);
     return id && *id && incr_has_apply_key(n, '#', id, strlen(id), FALSE);
 }
 
@@ -35241,7 +35241,7 @@ incr_attr_key_change_is_sib(const ns_node *target, const char *name,
 {
     if (!target || !name || !g_sib_keys) return FALSE;
     if (g_ascii_strcasecmp(name, "id") == 0) {
-        const char *value = ns_element_get_attr(target, "id");
+        const char *value = ns_element_id_attr(target);
         char *new_key = value && *value ? g_strconcat("#", value, NULL) : NULL;
         char *old_key = old_value && *old_value ?
             g_strconcat("#", old_value, NULL) : NULL;
@@ -35357,7 +35357,7 @@ incr_queue_attr_change(GPtrArray *queue, const ns_node *target,
                                        ns_element_get_attr(target, "class"));
     if (g_ascii_strcasecmp(name, "id") == 0)
         return incr_queue_id_change(queue, old_value,
-                                    ns_element_get_attr(target, "id"));
+                                    ns_element_id_attr(target));
     return TRUE;
 }
 
@@ -36950,7 +36950,7 @@ style_host_scope_id(ns_node *style_el)
 {
     for (ns_node *a = style_el; a && a->kind != NS_NODE_DOCUMENT; a = a->parent)
         if (a->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL)
+            ns_element_has_shadow_marker(a))
             return shadow_root_host_scope_id(a);
     return NULL;
 }

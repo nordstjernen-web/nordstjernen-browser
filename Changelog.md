@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: finding an element's `id`, and checking whether a node
+  is a shadow root, no longer scans the attributes of elements that
+  have neither. Tree walks ask every element for its `id` and every
+  child whether it is a shadow root, and each answer compared the names
+  of all the element's attributes. A `window` property that is not a
+  global, such as Lit's `litNonce`, falls through to a walk of the
+  whole document for an element with that `id` whenever the tree
+  changed since the last lookup. Each element now keeps two flag bits,
+  set when an attribute named `id` or the internal shadow-root marker
+  is added and recomputed when one is removed, and the walks test them
+  first. On Speedometer 3.1, TodoMVC-Lit-Complex-DOM is 13% faster and
+  TodoMVC-JavaScript-ES6-Webpack-Complex-DOM 5% faster.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

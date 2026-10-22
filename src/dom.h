@@ -69,6 +69,8 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_HAS_LISTENERS  (1u << 19)
 #define NS_NODE_SHEET_DISABLED (1u << 20)
 #define NS_NODE_STYLE_USES_ATTR (1u << 21)
+#define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
+#define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
 
 struct ns_node {
     ns_node_kind kind;
@@ -151,6 +153,8 @@ gboolean    ns_attr_name_is_internal(const char *name);
 ns_node    *ns_node_clone(const ns_node *src, gboolean deep);
 ns_node    *ns_template_content_get(ns_node *tpl);
 const char *ns_element_get_attr(const ns_node *el, const char *name);
+const char *ns_element_id_attr(const ns_node *el);
+gboolean    ns_element_has_shadow_marker(const ns_node *el);
 const char *ns_element_get_attr_len(const ns_node *el, const char *name,
                                     gsize *out_len);
 const ns_attr *ns_element_find_attr(const ns_node *el, const char *name);

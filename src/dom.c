@@ -1018,6 +1018,27 @@ ns_node_own_strings_deep(ns_node *n)
     g_ptr_array_free(stack, TRUE);
 }
 
+static guint32
+ns_attr_presence_bit(const char *name)
+{
+    if (!name) return 0;
+    if ((name[0] | 0x20) == 'i' && (name[1] | 0x20) == 'd' && name[2] == '\0')
+        return NS_NODE_ATTR_MAYBE_ID;
+    if ((name[0] | 0x20) == 'd' && g_ascii_strcasecmp(name, NS_SHADOW_ATTR) == 0)
+        return NS_NODE_ATTR_MAYBE_SHADOW;
+    return 0;
+}
+
+static void
+ns_attr_presence_removed(ns_node *el, const char *name)
+{
+    guint32 bit = ns_attr_presence_bit(name);
+    if (!bit) return;
+    el->flags &= ~bit;
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        el->flags |= ns_attr_presence_bit(a->name) & bit;
+}
+
 void
 ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
 {
@@ -1035,6 +1056,7 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
     for (ns_attr *cur = el->attrs; cur; cur = cur->next) tail = cur;
     if (tail) tail->next = a;
     else      el->attrs = a;
+    el->flags |= ns_attr_presence_bit(a->name);
 }
 
 void
@@ -1327,6 +1349,7 @@ ns_element_set_attr_len(ns_node *el, const char *name,
     a->next = NULL;
     if (tail) tail->next = a;
     else      el->attrs = a;
+    el->flags |= ns_attr_presence_bit(a->name);
 }
 
 void
@@ -1380,6 +1403,7 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
                (ns_str_is_ascii_lower(qualified) ? NS_ATTR_NAME_LOWER : 0);
     if (tail) tail->next = a;
     else      el->attrs = a;
+    el->flags |= ns_attr_presence_bit(a->name);
 }
 
 void
@@ -1396,6 +1420,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
             ns_attr *dead = *link;
             *link = dead->next;
+            ns_attr_presence_removed(el, dead->name);
             ns_attr_free_one(dead);
             return;
         }
@@ -1419,6 +1444,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
         if (ns_attr_matches_ns(*link, ns, local_name)) {
             ns_attr *dead = *link;
             *link = dead->next;
+            ns_attr_presence_removed(el, dead->name);
             ns_attr_free_one(dead);
             return;
         }
@@ -1535,6 +1561,7 @@ ns_element_find_attr(const ns_node *el, const char *name)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !name)
         return NULL;
+
     if (el->flags & NS_NODE_SVG_NS) {
         for (const ns_attr *a = el->attrs; a; a = a->next)
             if (a->name && strcmp(a->name, name) == 0)
@@ -1559,6 +1586,23 @@ ns_element_find_attr(const ns_node *el, const char *name)
             return a;
     }
     return NULL;
+}
+
+gboolean
+ns_element_has_shadow_marker(const ns_node *el)
+{
+    return el && el->kind == NS_NODE_ELEMENT &&
+           (el->flags & NS_NODE_ATTR_MAYBE_SHADOW) &&
+           ns_element_find_attr(el, NS_SHADOW_ATTR) != NULL;
+}
+
+const char *
+ns_element_id_attr(const ns_node *el)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT ||
+        !(el->flags & NS_NODE_ATTR_MAYBE_ID))
+        return NULL;
+    return ns_element_get_attr(el, "id");
 }
 
 const char *
@@ -1627,8 +1671,7 @@ ns_dom_tree_scope_boundary(const ns_node *n)
 {
     return n &&
         ((n->kind == NS_NODE_DOCUMENT && n->parent) ||
-         (n->kind == NS_NODE_ELEMENT &&
-          ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL));
+         ns_element_has_shadow_marker(n));
 }
 
 static ns_node *
@@ -1663,7 +1706,7 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
 {
     if (!root || !id || depth >= NS_DOM_MAX_DEPTH) return NULL;
     if (root->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(root, "id");
+        const char *eid = ns_element_id_attr(root);
         if (eid && strcmp(eid, id) == 0) return (ns_node *)root;
     }
     if (ns_node_is_element_named(root, "template")) return NULL;
@@ -1699,7 +1742,7 @@ static void
 ns_doc_id_index_add_node(ns_node *doc, ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT) return;
-    const char *eid = ns_element_get_attr(n, "id");
+    const char *eid = ns_element_id_attr(n);
     if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
         g_hash_table_insert(doc->id_index, g_strdup(eid), n);
 }
@@ -1708,7 +1751,7 @@ static void
 ns_doc_id_index_remove_node(ns_node *doc, ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT) return;
-    const char *eid = ns_element_get_attr(n, "id");
+    const char *eid = ns_element_id_attr(n);
     if (eid && *eid && g_hash_table_lookup(doc->id_index, eid) == n)
         g_hash_table_remove(doc->id_index, eid);
 }
@@ -2606,8 +2649,7 @@ ns_node_collect_text(const ns_node *root)
 static gboolean
 ns_node_is_shadow_root_marked(const ns_node *n)
 {
-    return n && n->kind == NS_NODE_ELEMENT &&
-           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+    return ns_element_has_shadow_marker(n);
 }
 
 gboolean
