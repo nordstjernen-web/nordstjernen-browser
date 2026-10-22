@@ -5150,7 +5150,7 @@ static gboolean
 ns_instof_is_shadow_host_attr(const ns_node *n)
 {
     return n->kind == NS_NODE_ELEMENT &&
-           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+           ns_element_has_shadow_marker(n);
 }
 
 static gboolean
@@ -16553,7 +16553,7 @@ ns_window_nd_adopt_css(JSContext *ctx, JSValueConst this_val,
     if (argc < 2 || !JS_IsHostAccess(ctx)) return JS_UNDEFINED;
     ns_node *root = ns_unwrap_element_mut(argv[0]);
     if (!root || root->kind != NS_NODE_ELEMENT ||
-        !ns_element_get_attr(root, NS_SHADOW_ATTR))
+        !ns_element_has_shadow_marker(root))
         return JS_UNDEFINED;
     size_t len = 0;
     const char *css = JS_ToCStringLen(ctx, &len, argv[1]);
@@ -29597,7 +29597,7 @@ ns_js_index_child_change(ns_js *js, ns_node *parent,
                 const char *nm = ns_element_get_attr(added, "name");
                 if (nm && *nm)
                     JS_DefinePropertyValueStr(ctx, past_map, nm, ns_make_element(ctx, added), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
-                const char *id = ns_element_get_attr(added, "id");
+                const char *id = ns_element_id_attr(added);
                 if (id && *id)
                     JS_DefinePropertyValueStr(ctx, past_map, id, ns_make_element(ctx, added), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                 JS_FreeValue(ctx, past_map);
@@ -29668,7 +29668,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
                     const char *nm = ns_element_get_attr(n, "name");
                     if (nm && *nm)
                         JS_DefinePropertyValueStr(ctx, past_map, nm, ns_make_element(ctx, n), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
-                    const char *id = ns_element_get_attr(n, "id");
+                    const char *id = ns_element_id_attr(n);
                     if (id && *id)
                         JS_DefinePropertyValueStr(ctx, past_map, id, ns_make_element(ctx, n), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                     JS_FreeValue(ctx, past_map);
@@ -29773,7 +29773,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
         g_ascii_strcasecmp(name, "id") == 0) {
         if (old_value && *old_value)
             ns_doc_id_index_unregister(doc, old_value, target);
-        const char *new_id = ns_element_get_attr(target, "id");
+        const char *new_id = ns_element_id_attr(target);
         if (new_id && *new_id)
             ns_doc_id_index_register(doc, new_id, target);
     }
@@ -38072,7 +38072,7 @@ static gboolean
 ns_element_id_is(const ns_node *n, const char *id)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    const char *nid = ns_element_get_attr(n, "id");
+    const char *nid = ns_element_id_attr(n);
     return nid && strcmp(nid, id) == 0;
 }
 
@@ -38702,7 +38702,7 @@ ns_element_matches(JSContext *ctx, JSValueConst this_val,
         return m ? JS_TRUE : JS_FALSE;
     }
     if (ns_is_simple_id_selector(sel)) {
-        const char *id = ns_element_get_attr(el, "id");
+        const char *id = ns_element_id_attr(el);
         gboolean m = id && strcmp(id, sel + 1) == 0;
         JS_FreeCString(ctx, sel);
         return m ? JS_TRUE : JS_FALSE;
@@ -38760,7 +38760,7 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
         int depth = 0;
         for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
              !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
-            const char *id = ns_element_get_attr(cur, "id");
+            const char *id = ns_element_id_attr(cur);
             if (id && strcmp(id, target_id) == 0) {
                 JS_FreeCString(ctx, sel);
                 return ns_make_element(ctx, cur);
@@ -41443,7 +41443,7 @@ ns_element_find_shadow_child(const ns_node *host)
     if (!host) return NULL;
     for (ns_node *c = host->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT) continue;
-        if (ns_element_get_attr(c, NS_SHADOW_ATTR))
+        if (ns_element_has_shadow_marker(c))
             return c;
     }
     return NULL;
@@ -41687,8 +41687,7 @@ ns_element_get_shadowRoot(JSContext *ctx, JSValueConst this_val)
 static gboolean
 ns_node_is_shadow_root(const ns_node *n)
 {
-    return n && n->kind == NS_NODE_ELEMENT
-        && ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+    return ns_element_has_shadow_marker(n);
 }
 
 static const ns_node *
@@ -43072,7 +43071,7 @@ ns_form_collect_radio_nodes(const ns_node *form, const ns_node *scan,
         if (ns_dom_hidden_child(c)) continue;
         if (ns_node_name_is_any_of(c, controls) &&
             ns_form_owner(c, doc) == form) {
-            const char *id = ns_element_get_attr(c, "id");
+            const char *id = ns_element_id_attr(c);
             const char *nm = ns_element_get_attr(c, "name");
             if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
                 JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
@@ -43331,7 +43330,7 @@ ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
         JSValue el = JS_GetPropertyUint32(ctx, snap, i);
         const ns_node *n = ns_unwrap_element(el);
         if (n) {
-            const char *id = ns_element_get_attr(n, "id");
+            const char *id = ns_element_id_attr(n);
             gboolean html_ns = !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
             const char *nm = html_ns ? ns_element_get_attr(n, "name") : NULL;
             if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
@@ -43443,7 +43442,7 @@ ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
                 JSValue el = JS_GetPropertyUint32(ctx, snap, i);
                 const ns_node *n = ns_unwrap_element(el);
                 if (n) {
-                    const char *id = ns_element_get_attr(n, "id");
+                    const char *id = ns_element_id_attr(n);
                     if (id && *id) {
                         JSAtom a = JS_NewAtom(ctx, id);
                         gboolean proto_has = JS_IsObject(proto) &&
@@ -44111,7 +44110,7 @@ ns_array_namedItem(JSContext *ctx, JSValueConst this_val,
         JSValue item = JS_GetPropertyUint32(ctx, this_val, i);
         const ns_node *el = ns_unwrap_element(item);
         if (el) {
-            const char *id = ns_element_get_attr(el, "id");
+            const char *id = ns_element_id_attr(el);
             const char *nm = ns_element_get_attr(el, "name");
             if ((id && strcmp(id, name) == 0) ||
                 (nm && strcmp(nm, name) == 0)) {
@@ -44209,7 +44208,7 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
         const ns_node *el = ns_unwrap_element(item);
         gboolean match = FALSE;
         if (el) {
-            const char *id = ns_element_get_attr(el, "id");
+            const char *id = ns_element_id_attr(el);
             const char *nm = ns_element_get_attr(el, "name");
             match = (id && strcmp(id, name) == 0) ||
                     (nm && strcmp(nm, name) == 0);
@@ -49185,7 +49184,7 @@ ns_options_namedItem(JSContext *ctx, JSValueConst this_val,
         for (ns_node *c = n->first_child; c; c = c->next_sibling) {
             if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
             if (g_ascii_strcasecmp(c->name, "option") == 0) {
-                const char *id = ns_element_get_attr(c, "id");
+                const char *id = ns_element_id_attr(c);
                 const char *nm = ns_element_get_attr(c, "name");
                 if ((id && strcmp(id, name) == 0) ||
                     (nm && strcmp(nm, name) == 0)) {
@@ -61505,7 +61504,7 @@ ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
         if (name && *name) {
             JSValue element = ns_make_element(ctx, n);
             ns_define_missing_named_value(ctx, document,
-                                          ns_element_get_attr(n, "id"), element);
+                                          ns_element_id_attr(n), element);
             ns_define_missing_named_value(ctx, document, name, element);
             JS_FreeValue(ctx, element);
         }

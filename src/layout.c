@@ -3664,7 +3664,7 @@ find_datalist_by_id(const ns_node *node, const char *id, int depth)
     if (!node || !id || depth >= NS_LAYOUT_MAX_DEPTH) return NULL;
     if (node->kind == NS_NODE_ELEMENT && node->name &&
         strcmp(node->name, "datalist") == 0) {
-        const char *did = ns_element_get_attr(node, "id");
+        const char *did = ns_element_id_attr(node);
         if (did && strcmp(did, id) == 0) return node;
     }
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
@@ -5757,7 +5757,7 @@ layout_shadow_root(const ns_node *host)
 {
     if (!host || host->kind != NS_NODE_ELEMENT) return NULL;
     for (const ns_node *c = host->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && ns_element_get_attr(c, NS_SHADOW_ATTR))
+        if (c->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(c))
             return c;
     return NULL;
 }
@@ -5766,7 +5766,7 @@ static const ns_node *
 layout_slot_host(const ns_node *slot)
 {
     for (const ns_node *p = slot ? slot->parent : NULL; p; p = p->parent)
-        if (p->kind == NS_NODE_ELEMENT && ns_element_get_attr(p, NS_SHADOW_ATTR))
+        if (p->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(p))
             return p->parent;
     return NULL;
 }
@@ -5777,7 +5777,7 @@ layout_find_slot(const ns_node *scope, const char *name, int depth)
     if (depth >= NS_LAYOUT_MAX_DEPTH) return NULL;
     for (const ns_node *c = scope ? scope->first_child : NULL; c;
          c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
+        if (c->kind != NS_NODE_ELEMENT || ns_element_has_shadow_marker(c))
             continue;
         if (c->name && strcmp(c->name, "slot") == 0) {
             const char *slot_name = ns_element_get_attr(c, "name");
@@ -6285,7 +6285,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     }
     if (n->kind != NS_NODE_ELEMENT) return NULL;
     if (node_is_frame_fallback(n)) return NULL;
-    if (ns_element_get_attr(n, NS_SHADOW_ATTR)) return NULL;
+    if (ns_element_has_shadow_marker(n)) return NULL;
 
     const ns_style *s = g_hash_table_lookup(styles, n);
     if (s && style_is_none(s)) return NULL;
@@ -21535,13 +21535,13 @@ image_map_find(const ns_node *n, const char *name, int depth)
 {
     if (!n || depth >= 512) return NULL;
     if (ns_node_is_element_named(n, "map")) {
-        const char *id = ns_element_get_attr(n, "id");
+        const char *id = ns_element_id_attr(n);
         const char *nm = ns_element_get_attr(n, "name");
         if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
             return n;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
+        if (c->kind != NS_NODE_ELEMENT || ns_element_has_shadow_marker(c))
             continue;
         const ns_node *m = image_map_find(c, name, depth + 1);
         if (m) return m;
@@ -21556,7 +21556,7 @@ image_map_for(const ns_node *img)
     const char *hash = usemap ? strchr(usemap, '#') : NULL;
     if (!hash || !hash[1]) return NULL;
     const ns_node *scope = img;
-    while (scope->parent && !ns_element_get_attr(scope, NS_SHADOW_ATTR))
+    while (scope->parent && !ns_element_has_shadow_marker(scope))
         scope = scope->parent;
     return image_map_find(scope, hash + 1, 0);
 }

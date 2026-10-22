@@ -1097,7 +1097,7 @@ style_shadow_host_id(const ns_node *style)
 {
     for (const ns_node *a = style; a; a = a->parent)
         if (a->kind == NS_NODE_ELEMENT && a->parent &&
-            ns_element_get_attr(a, NS_SHADOW_ATTR) != NULL)
+            ns_element_has_shadow_marker(a))
             return ns_element_get_attr(a->parent, NS_HOST_SCOPE_ATTR);
     return NULL;
 }
@@ -2224,7 +2224,7 @@ ns_engine_dump_layout(const ns_box *b, int indent, GString *out)
         b->content_width, b->content_height);
     if (b->dom && b->dom->name) {
         const char *id = b->dom->kind == NS_NODE_ELEMENT
-                       ? ns_element_get_attr(b->dom, "id") : NULL;
+                       ? ns_element_id_attr(b->dom) : NULL;
         if (id && *id)
             g_string_append_printf(out, " <%s#%s>", b->dom->name, id);
         else
