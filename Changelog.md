@@ -465,14 +465,6 @@ Changelog:
   scores strip is a row of such inline-blocks; each league was cut to
   1,120 px and every league after it moved left. Across the frozen
   sitebench snapshots 171 more elements match Chrome, 108 on ESPN.
-* Paint: `overflow-x: clip` with `overflow-y: visible` (and the other
-  way round) now clips only the axis that asks for it. The painter
-  clipped both axes whenever either one clipped, so content that sticks
-  out above or below such a box was cut off. On Canva the hero gradient
-  starts 80px above its `overflow-x: clip` wrapper, behind the
-  transparent header, and the header area came out white with its white
-  menu text invisible. A `hidden`, `scroll` or `auto` axis still clips
-  both, since the other axis then computes to `auto`.
 * Paint: an element with both `opacity` below 1 and a `mask-image` is
   drawn with its opacity. The painter composited the masked group
   through the mask alone, so `opacity: .5` with a fading mask drew the
