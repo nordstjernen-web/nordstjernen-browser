@@ -54262,6 +54262,81 @@ static int js_is_standard_regexp(JSContext *ctx, JSValueConst rx)
     return res;
 }
 
+static int js_regexp_replace_global_fast(JSContext *ctx, JSValueConst rx,
+                                         JSString *sp, JSString *rp,
+                                         bool full_unicode, StringBuffer *b)
+{
+    JSRegExp *re = js_get_regexp(ctx, rx, false);
+    uint8_t *re_bytecode, **capture, *str_buf;
+    int re_flags, rc, alloc_count, capture_count, shift, ret;
+    int64_t last_index;
+    uint32_t start, end, next_pos;
+    bool unicode;
+
+    re_bytecode = str8(re->bytecode);
+    re_flags = lre_get_flags(re_bytecode);
+    unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
+    if (!(re_flags & LRE_FLAG_GLOBAL) || (re_flags & LRE_FLAG_STICKY) ||
+        unicode != full_unicode)
+        return 0;
+    capture_count = lre_get_capture_count(re_bytecode);
+    alloc_count = lre_get_alloc_count(re_bytecode);
+    capture = js_malloc(ctx, sizeof(capture[0]) * max_int(alloc_count, 2));
+    if (!capture)
+        return -1;
+    shift = sp->is_wide_char;
+    str_buf = str8(sp);
+    last_index = 0;
+    next_pos = 0;
+    ret = 1;
+    for(;;) {
+        if (last_index > sp->len) {
+            rc = 2;
+        } else {
+            rc = lre_exec(capture, re_bytecode, str_buf, last_index, sp->len,
+                          shift, ctx);
+        }
+        if (rc < 0) {
+            switch(rc) {
+            case LRE_RET_TIMEOUT:
+                JS_ThrowInterrupted(ctx);
+                break;
+            case LRE_RET_MEMORY_ERROR:
+                JS_ThrowOutOfMemory(ctx);
+                break;
+            default:
+                JS_ThrowInternalError(ctx, "corrupted bytecode in regexp execution");
+                break;
+            }
+            ret = -1;
+            break;
+        }
+        if (rc != 1)
+            break;
+        start = (capture[0] - str_buf) >> shift;
+        end = (capture[1] - str_buf) >> shift;
+        js_regexp_record_match(ctx, re, sp, capture, capture_count,
+                               str_buf, shift);
+        if (string_buffer_concat(b, sp, next_pos, start) ||
+            string_buffer_concat(b, rp, 0, rp->len)) {
+            ret = -1;
+            break;
+        }
+        next_pos = end;
+        last_index = end;
+        if (end == start)
+            last_index = string_advance_index(sp, end, full_unicode);
+    }
+    js_free(ctx, capture);
+    if (ret < 0)
+        return -1;
+    if (string_buffer_concat(b, sp, next_pos, sp->len))
+        return -1;
+    if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, js_int32(0)) < 0)
+        return -1;
+    return 1;
+}
+
 static JSValue js_regexp_Symbol_replace(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv)
 {
@@ -54325,6 +54400,17 @@ static JSValue js_regexp_Symbol_replace(JSContext *ctx, JSValueConst this_val,
         /* use faster version for simple cases */
         res = JS_RegExpDelete(ctx, rx, str);
         goto done;
+    }
+    if (rp && is_global && string_indexof_char(rp, '$', 0) < 0 &&
+        js_regexp_exec_is_builtin(ctx, rx)) {
+        int fast = js_regexp_replace_global_fast(ctx, rx, sp, rp,
+                                                 fullUnicode, b);
+        if (fast < 0)
+            goto exception;
+        if (fast > 0) {
+            res = string_buffer_end(b);
+            goto done1;
+        }
     }
     for(;;) {
         JSValue result;

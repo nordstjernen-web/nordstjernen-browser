@@ -437,6 +437,15 @@ Changelog:
   sets these colors before every bar and line: on Speedometer 3.1,
   Charts-chartjs is 29% faster and runs 19% fewer instructions per
   iteration.
+* Performance: `String.prototype.replace()` with a global regular
+  expression and a replacement string no longer calls `exec()` once per
+  match. Each call read and wrote `lastIndex` and built a match array,
+  which the replace loop then read back. When the regular expression is
+  a plain `RegExp` with the built-in `exec()` and the replacement has no
+  `$` pattern, the engine now runs the matcher in one loop and appends
+  the pieces directly; `lastIndex` and the legacy `RegExp.$1` values end
+  as before. ProseMirror collapses the whitespace of every text node
+  this way: on Speedometer 3.1, Editor-TipTap is 13% faster.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
