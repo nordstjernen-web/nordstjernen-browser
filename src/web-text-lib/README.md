@@ -93,7 +93,9 @@ lines the engine assembles itself around inline-blocks.
 **Fixes for what a browser hits and a widget toolkit does not.** A synthesised
 bold face was measured with HarfBuzz's unbolded advances and drawn with
 FreeType's bolded ones, so `font-synthesis: weight` set too tight, worst in
-CJK, where the glyphs already fill the em box.
+CJK, where the glyphs already fill the em box. Letter spacing is added after
+every character, the last one on a line included, as CSS and Chrome do;
+upstream split it around each character and trimmed it at the line's ends.
 
 **Concurrency the library now survives, though the browser does not yet use it.**
 The browser calls into this library only from each renderer process's main loop —

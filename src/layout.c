@@ -10382,13 +10382,20 @@ typedef struct select_width_entry {
 } select_width_entry;
 
 static double
+letter_spacing_slack(double letter_spacing_px)
+{
+#ifdef NS_USE_WEB_TEXT_LIB
+    (void)letter_spacing_px;
+    return 0;
+#else
+    return MAX(letter_spacing_px, 0);
+#endif
+}
+
+static double
 letter_spacing_slack_px(const ns_style *s)
 {
-    const ns_css_value *v = s->values[NS_CSS_LETTER_SPACING];
-    if (v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PX &&
-        v->u.length.v > 0)
-        return v->u.length.v;
-    return 0;
+    return letter_spacing_slack(style_letter_spacing_px(s));
 }
 
 static double
@@ -10559,12 +10566,12 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         ns_text_measure natural;
         text_measure(layout, &natural);
         NsPangoRectangle logical = natural.logical;
-        double slack = MAX(style_letter_spacing_px(parent_style), 0);
+        double slack = letter_spacing_slack_px(parent_style);
         for (guint ai = 0; box->attrs && ai < box->attrs->len; ai++) {
             const ns_inline_attr *r =
                 &g_array_index(box->attrs, ns_inline_attr, ai);
             if (r->kind == NS_INLINE_LETTER_SPACING)
-                slack = MAX(slack, r->letter_spacing_px);
+                slack = MAX(slack, letter_spacing_slack(r->letter_spacing_px));
         }
         double pw = ceil((double)logical.width / NS_PANGO_SCALE + slack);
         if (box->inline_atomics) {

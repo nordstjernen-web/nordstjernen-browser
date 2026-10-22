@@ -666,17 +666,6 @@ ns_pango_glyph_item_letter_space (NsPangoGlyphItem *glyph_item,
   NsPangoGlyphItemIter iter;
   NsPangoGlyphInfo *glyphs = glyph_item->glyphs->glyphs;
   gboolean have_cluster;
-  int space_left, space_right;
-
-  space_left = letter_spacing / 2;
-
-  /* hinting */
-  if ((letter_spacing & (NS_PANGO_SCALE - 1)) == 0)
-    {
-      space_left = NS_PANGO_UNITS_ROUND (space_left);
-    }
-
-  space_right = letter_spacing - space_left;
 
   for (have_cluster = ns_pango_glyph_item_iter_init_start (&iter, glyph_item, text);
        have_cluster;
@@ -684,40 +673,21 @@ ns_pango_glyph_item_letter_space (NsPangoGlyphItem *glyph_item,
     {
       if (!log_attrs[iter.start_char].is_cursor_position)
         {
-          if (glyphs[iter.start_glyph].geometry.width == 0)
-            {
-              if (iter.start_glyph < iter.end_glyph) /* LTR */
-                glyphs[iter.start_glyph].geometry.x_offset -= space_right;
-              else
-                glyphs[iter.start_glyph].geometry.x_offset += space_left;
-            }
+          if (glyphs[iter.start_glyph].geometry.width == 0 &&
+              iter.start_glyph < iter.end_glyph)
+            glyphs[iter.start_glyph].geometry.x_offset -= letter_spacing;
           continue;
         }
 
-      if (iter.start_glyph < iter.end_glyph) /* LTR */
-	{
-	  if (iter.start_char > 0)
-	    {
-	      glyphs[iter.start_glyph].geometry.width    += space_left ;
-	      glyphs[iter.start_glyph].geometry.x_offset += space_left ;
-	    }
-	  if (iter.end_char < glyph_item->item->num_chars)
-	    {
-	      glyphs[iter.end_glyph-1].geometry.width    += space_right;
-	    }
-	}
-      else			                 /* RTL */
-	{
-	  if (iter.start_char > 0)
-	    {
-	      glyphs[iter.start_glyph].geometry.width    += space_right;
-	    }
-	  if (iter.end_char < glyph_item->item->num_chars)
-	    {
-	      glyphs[iter.end_glyph+1].geometry.x_offset += space_left ;
-	      glyphs[iter.end_glyph+1].geometry.width    += space_left ;
-	    }
-	}
+      if (iter.start_glyph < iter.end_glyph)
+        {
+          glyphs[iter.end_glyph-1].geometry.width += letter_spacing;
+        }
+      else
+        {
+          glyphs[iter.end_glyph+1].geometry.x_offset += letter_spacing;
+          glyphs[iter.end_glyph+1].geometry.width    += letter_spacing;
+        }
     }
 }
 
