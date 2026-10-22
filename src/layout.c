@@ -560,9 +560,9 @@ border_side_width(const ns_style *s, ns_css_prop width_prop,
                   ns_css_prop style_prop)
 {
     const ns_css_value *st = s->values[style_prop];
-    if (st && st->kind == NS_CSS_V_KEYWORD && st->u.keyword &&
-        (strcmp(st->u.keyword, "none") == 0 ||
-         strcmp(st->u.keyword, "hidden") == 0))
+    if (!st || (st->kind == NS_CSS_V_KEYWORD && st->u.keyword &&
+                (strcmp(st->u.keyword, "none") == 0 ||
+                 strcmp(st->u.keyword, "hidden") == 0)))
         return 0;
     return length_or(s->values[width_prop], 0);
 }
