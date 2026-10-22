@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: an absolutely positioned child of a flex container resolves a
+  percentage width against the container's padding box. Block layout
+  took every child of a row flex container for a flex item and used the
+  container's content width as the base, so a `width: 100%` overlay in
+  a flex container with 8 px padding came out 16 px narrow. An absolute
+  child is not a flex item, and its containing block is the padding
+  box. Across the frozen sitebench snapshots 67 more elements match
+  Chrome, 38 of them in IMDb's poster overlays.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
