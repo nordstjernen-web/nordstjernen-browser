@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: a border whose style is `none` because nothing set one now
+  takes no space. Layout zeroed a side only when `border-style` was
+  written out as `none` or `hidden`; with no style value at all, which
+  is what the initial value, `initial` and `unset` leave, the width
+  still counted. `border: unset` (which also sets the width to
+  `medium`) therefore added 3 px on every side, and a bare
+  `border-width: 6px` added 6 px, although nothing was drawn. On El País
+  a 12-column grid reset this way lost 6 px and every card moved;
+  across the frozen sitebench snapshots 249 more elements match Chrome,
+  117 of them on eBay and 105 on El País.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
