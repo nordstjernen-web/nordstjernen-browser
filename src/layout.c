@@ -10481,7 +10481,10 @@ atomic_inline_fit_width(ns_box *box, const ns_style *style, double avail)
     double input_width = text_input_intrinsic_width(box);
     if (input_width > 0) return input_width;
     double natural = measure_natural_width(box, style);
-    return natural < avail ? natural : avail;
+    if (natural <= avail) return natural;
+    double min_content = min_content_width_of(box, style);
+    if (min_content <= avail) return avail;
+    return min_content < natural ? min_content : natural;
 }
 
 static double
