@@ -3,6 +3,8 @@ Changelog:
 
 1.0.36:
 ======
+* CI: Gradle 9.8.2 in the Android and Java workflows and the Android wrapper;
+  Android Gradle Plugin 9.4.1.
 * Packaging: Arch Linux package `nordstjernen-browser` in `packaging/arch/` (PKGBUILD and
   .SRCINFO, ready for the AUR), documented in `docs/Arch.md`. It builds
   without warnings in a clean Arch chroot and passes namcap.
