@@ -6597,6 +6597,9 @@ filter_has_bitmap_effect(const char *filter)
             filter_name_is(name, nlen, "brightness") ||
             filter_name_is(name, nlen, "contrast") ||
             filter_name_is(name, nlen, "saturate") ||
+            filter_name_is(name, nlen, "hue-rotate") ||
+            filter_name_is(name, nlen, "opacity") ||
+            filter_name_is(name, nlen, "drop-shadow") ||
             filter_name_is(name, nlen, "blur"))
             return TRUE;
         p = next;
@@ -6760,6 +6763,19 @@ parse_filter_drop_shadows(const char *filter, rgba current_color,
     return n;
 }
 
+static double
+filter_drop_shadow_reach(const char *filter, rgba current_color)
+{
+    image_drop_shadow shadows[8];
+    int n = parse_filter_drop_shadows(filter, current_color, shadows,
+                                      G_N_ELEMENTS(shadows));
+    double reach = 0;
+    for (int i = 0; i < n; i++)
+        reach += MAX(fabs(shadows[i].x), fabs(shadows[i].y)) +
+                 ceil(shadows[i].blur * 3.0);
+    return ceil(reach);
+}
+
 static cairo_surface_t *
 drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
                     double ox, double oy, double sx, double sy,
@@ -6768,9 +6784,8 @@ drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
     if (cw <= 0 || ch <= 0 || sx <= 0 || sy <= 0) return NULL;
     if (cw > 4096) cw = 4096;
     if (ch > 4096) ch = 4096;
-    int radius = shadow.blur > 0 ? (int)(shadow.blur + 0.5) : 0;
-    if (radius > 512) radius = 512;
-    int pad = radius * 2 + 2;
+    double sigma = MIN(MAX(shadow.blur, 0), 512.0);
+    int pad = (int)ceil(sigma * 3.0) + 2;
     int sw = cw + pad * 2;
     int sh = ch + pad * 2;
     cairo_surface_t *shadow_surf =
@@ -6806,8 +6821,8 @@ drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
             px[3] = (guchar)(a * 255.0 + 0.5);
         }
     }
-    if (radius > 0)
-        box_blur_argb(data, stride, sw, sh, radius);
+    if (sigma > 0)
+        ns_paint_blur_argb(data, stride, sw, sh, sigma);
     cairo_surface_mark_dirty(shadow_surf);
     if (pad_out) *pad_out = pad;
     (void)iw;
@@ -6920,6 +6935,26 @@ apply_image_color_ops(guchar *data, int stride, int w, int h,
                     b = lum + (b - lum) * t;
                     break;
                 }
+                case 7: {
+                    double c = cos(t * G_PI / 180.0);
+                    double sn = sin(t * G_PI / 180.0);
+                    double hr = r * (0.213 + c * 0.787 - sn * 0.213) +
+                                g * (0.715 - c * 0.715 - sn * 0.715) +
+                                b * (0.072 - c * 0.072 + sn * 0.928);
+                    double hg = r * (0.213 - c * 0.213 + sn * 0.143) +
+                                g * (0.715 + c * 0.285 + sn * 0.140) +
+                                b * (0.072 - c * 0.072 - sn * 0.283);
+                    double hb = r * (0.213 - c * 0.213 - sn * 0.787) +
+                                g * (0.715 - c * 0.715 + sn * 0.715) +
+                                b * (0.072 + c * 0.928 + sn * 0.072);
+                    r = hr;
+                    g = hg;
+                    b = hb;
+                    break;
+                }
+                case 8:
+                    a *= CLAMP(t, 0.0, 1.0);
+                    break;
                 }
                 r = CLAMP(r, 0.0, 1.0);
                 g = CLAMP(g, 0.0, 1.0);
@@ -6928,26 +6963,77 @@ apply_image_color_ops(guchar *data, int stride, int w, int h,
             px[0] = (guchar)(b * a * 255.0 + 0.5);
             px[1] = (guchar)(g * a * 255.0 + 0.5);
             px[2] = (guchar)(r * a * 255.0 + 0.5);
+            px[3] = (guchar)(a * 255.0 + 0.5);
         }
     }
 }
 
+static double
+parse_filter_angle_deg(const char *p)
+{
+    while (*p && g_ascii_isspace((unsigned char)*p)) p++;
+    char *endp = NULL;
+    double v = g_ascii_strtod(p, &endp);
+    if (!endp || endp == p) return 0;
+    if (g_ascii_strncasecmp(endp, "grad", 4) == 0) return v * 0.9;
+    if (g_ascii_strncasecmp(endp, "rad", 3) == 0) return v * 180.0 / G_PI;
+    if (g_ascii_strncasecmp(endp, "turn", 4) == 0) return v * 360.0;
+    return v;
+}
+
+static void
+filter_apply_drop_shadow(guchar *data, int stride, int w, int h,
+                         const image_drop_shadow *shadow, double scale)
+{
+    guchar *src = g_memdup2(data, (gsize)stride * h);
+    int dx = (int)lround(shadow->x * scale);
+    int dy = (int)lround(shadow->y * scale);
+    rgba c = shadow->color;
+    for (int y = 0; y < h; y++) {
+        guchar *row = data + y * stride;
+        int sy = y - dy;
+        for (int x = 0; x < w; x++) {
+            int sx = x - dx;
+            double a = sy >= 0 && sy < h && sx >= 0 && sx < w
+                ? src[sy * stride + sx * 4 + 3] / 255.0 * c.a : 0;
+            guchar *px = row + x * 4;
+            px[0] = (guchar)(c.b * a * 255.0 + 0.5);
+            px[1] = (guchar)(c.g * a * 255.0 + 0.5);
+            px[2] = (guchar)(c.r * a * 255.0 + 0.5);
+            px[3] = (guchar)(a * 255.0 + 0.5);
+        }
+    }
+    if (shadow->blur > 0)
+        ns_paint_blur_argb(data, stride, w, h, shadow->blur * scale);
+    for (int y = 0; y < h; y++) {
+        guchar *row = data + y * stride;
+        const guchar *top = src + y * stride;
+        for (int x = 0; x < w; x++) {
+            double keep = 1.0 - top[x * 4 + 3] / 255.0;
+            for (int i = 0; i < 4; i++)
+                row[x * 4 + i] = (guchar)MIN(255.0,
+                    top[x * 4 + i] + row[x * 4 + i] * keep + 0.5);
+        }
+    }
+    g_free(src);
+}
+
 static void
 apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
-                   double blur_scale)
+                   double blur_scale, const rgba *shadow_color)
 {
     if (!filter || !*filter) return;
     image_filter_op ops[16];
     int n_ops = 0;
-    int ops_before_blur = -1;
-    double blur_radius = 0;
     const char *q = filter;
-    while (*q && n_ops < 16) {
+    while (*q) {
         int op = 0;
         const char *name = NULL;
         const char *body = NULL;
+        const char *body_end = NULL;
         gsize nlen = 0;
-        const char *next = filter_function_next(q, &name, &nlen, &body, NULL);
+        const char *next =
+            filter_function_next(q, &name, &nlen, &body, &body_end);
         if (!next) break;
         double amt = parse_filter_amount(body, NULL);
         q = next;
@@ -6957,23 +7043,36 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter,
         else if (filter_name_is(name, nlen, "brightness")) op = 4;
         else if (filter_name_is(name, nlen, "contrast")) op = 5;
         else if (filter_name_is(name, nlen, "saturate")) op = 6;
-        else if (filter_name_is(name, nlen, "blur")) {
-            if (amt >= 0 && amt > blur_radius) blur_radius = amt;
-            if (ops_before_blur < 0) ops_before_blur = n_ops;
+        else if (filter_name_is(name, nlen, "opacity")) op = 8;
+        else if (filter_name_is(name, nlen, "hue-rotate")) {
+            op = 7;
+            amt = parse_filter_angle_deg(body);
         }
-        if (op && amt >= 0) {
+        if (op && (amt >= 0 || op == 7)) {
+            if (n_ops == G_N_ELEMENTS(ops)) {
+                apply_image_color_ops(data, stride, w, h, ops, n_ops);
+                n_ops = 0;
+            }
             ops[n_ops].op = op;
             ops[n_ops].amount = amt;
             n_ops++;
+            continue;
+        }
+        image_drop_shadow shadow;
+        if (filter_name_is(name, nlen, "blur") && amt > 0) {
+            apply_image_color_ops(data, stride, w, h, ops, n_ops);
+            n_ops = 0;
+            ns_paint_blur_argb(data, stride, w, h, amt * blur_scale);
+        } else if (shadow_color &&
+                   filter_name_is(name, nlen, "drop-shadow") &&
+                   parse_filter_shadow_body(body, body_end, *shadow_color,
+                                            &shadow)) {
+            apply_image_color_ops(data, stride, w, h, ops, n_ops);
+            n_ops = 0;
+            filter_apply_drop_shadow(data, stride, w, h, &shadow, blur_scale);
         }
     }
-    if (n_ops == 0 && blur_radius <= 0) return;
-    if (blur_radius <= 0 || ops_before_blur < 0) ops_before_blur = n_ops;
-    apply_image_color_ops(data, stride, w, h, ops, ops_before_blur);
-    if (blur_radius > 0)
-        ns_paint_blur_argb(data, stride, w, h, blur_radius * blur_scale);
-    apply_image_color_ops(data, stride, w, h, ops + ops_before_blur,
-                          n_ops - ops_before_blur);
+    apply_image_color_ops(data, stride, w, h, ops, n_ops);
 }
 
 static const char *
@@ -7128,7 +7227,7 @@ texture_surface_create(ns_texture *tex, int iw, int ih, const char *filter_kw)
     int dst_stride = cairo_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
     if (filter_kw)
-        apply_image_filter(dst, dst_stride, iw, ih, filter_kw, 1.0);
+        apply_image_filter(dst, dst_stride, iw, ih, filter_kw, 1.0, NULL);
     cairo_surface_mark_dirty(surf);
     return surf;
 }
@@ -9014,7 +9113,8 @@ box_filter_layer_keyword(const ns_box *b)
 {
     if (!b->style || b == g_paint_tex_root) return NULL;
     if (b->kind != NS_BOX_BLOCK && b->kind != NS_BOX_TABLE &&
-        b->kind != NS_BOX_TABLE_CAPTION && b->kind != NS_BOX_TABLE_CELL)
+        b->kind != NS_BOX_TABLE_CAPTION && b->kind != NS_BOX_TABLE_CELL &&
+        b->kind != NS_BOX_SVG)
         return NULL;
     const ns_css_value *v = b->style->values[NS_CSS_FILTER];
     if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
@@ -9070,6 +9170,7 @@ typedef struct {
     cairo_surface_t *surf;
     double           x, y, k;
     const char      *filter;
+    rgba             color;
 } filter_layer;
 
 static filter_layer_state
@@ -9077,7 +9178,10 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
                    gboolean transformed, filter_layer *fl)
 {
     double sigma = filter_blur_sigma(filter);
-    double spread = ceil(sigma * 3.0);
+    rgba color = rgba_of(b->style ? b->style->values[NS_CSS_COLOR] : NULL,
+                         0, 0, 0, 1);
+    double spread = MAX(ceil(sigma * 3.0),
+                        filter_drop_shadow_reach(filter, color));
     double cx0, cy0, cx1, cy1;
     cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
     double bx, by, bw, bh;
@@ -9122,7 +9226,7 @@ filter_layer_begin(cairo_t *cr, const ns_box *b, const char *filter,
     cairo_translate(tcr, -x0, -y0);
     *fl = (filter_layer){
         .outer = cr, .cr = tcr, .surf = surf,
-        .x = x0, .y = y0, .k = k, .filter = filter,
+        .x = x0, .y = y0, .k = k, .filter = filter, .color = color,
     };
     return FILTER_LAYER_OPEN;
 }
@@ -9146,7 +9250,7 @@ filter_layer_end(filter_layer *fl)
                        cairo_image_surface_get_stride(fl->surf),
                        cairo_image_surface_get_width(fl->surf),
                        cairo_image_surface_get_height(fl->surf),
-                       fl->filter, fl->k);
+                       fl->filter, fl->k, &fl->color);
     cairo_surface_mark_dirty(fl->surf);
     cairo_t *cr = fl->outer;
     cairo_save(cr);
@@ -9436,7 +9540,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
             cairo_surface_flush(tex);
             apply_image_filter(cairo_image_surface_get_data(tex),
                                cairo_image_surface_get_stride(tex),
-                               tw, th, filter_kw, 1.0);
+                               tw, th, filter_kw, 1.0, NULL);
             cairo_surface_mark_dirty(tex);
         }
         if (cacheable) {
@@ -10092,7 +10196,8 @@ backdrop_capture(cairo_t *cr, const ns_box *b, const char *filter,
             memcpy(drow + x * 4, &px, sizeof px);
         }
     }
-    apply_image_filter(dst, dst_stride, w, h, filter, MAX(scale_x, scale_y));
+    apply_image_filter(dst, dst_stride, w, h, filter, MAX(scale_x, scale_y),
+                       NULL);
     cairo_surface_mark_dirty(surf);
     out->surf = surf;
     out->x = px0 - pad - off_x;

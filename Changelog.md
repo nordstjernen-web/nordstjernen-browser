@@ -63,6 +63,17 @@ Changelog:
   Chrome does, and the part outside them is drawn at the element's own
   place through the same effects; a scrolled box's offset is undone for
   both.
+* Paint: the `drop-shadow()`, `hue-rotate()` and `opacity()` filter
+  functions now work on elements, `filter` works on inline `<svg>`
+  elements, and every function of a `filter` runs in its place in the
+  list, blurs and shadows included. The element filter knew only
+  grayscale, sepia, invert, brightness, contrast, saturate and blur, and
+  skipped `<svg>` boxes altogether, so a `filter: drop-shadow(...)` card
+  drew no shadow and a grayscale or hue-rotated SVG icon kept its
+  colours; images knew `drop-shadow()` but blurred it about half as much
+  as Chrome. The third length of `drop-shadow()` is now the standard
+  deviation of the blur, as in Chrome, and the filtered area grows by
+  the shadow's offset and blur.
 * Paint: `backdrop-filter` is now drawn. The property was parsed but
   never painted, so frosted glass bars, blurred overlays and dimmed
   caption strips showed the page behind them unchanged (the Guardian
