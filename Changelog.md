@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: a positioned inline-block, inline-flex or other atomic inline,
+  or one that starts a stacking context, is painted with the positioned
+  boxes of its stacking context, in its `z-index` order, as CSS 2
+  Appendix E orders them. It was painted with the line's text, before
+  every positioned box of the stacking context, so a `z-index: 2`
+  inline-flex holding Naver's AI search icon was covered by a white
+  `transform`ed pill that comes before it in the page, and the
+  headlines of CNN's video cards were hidden under the card image.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
