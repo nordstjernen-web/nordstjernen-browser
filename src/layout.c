@@ -14836,6 +14836,40 @@ grid_expand_flexible_rows(double *row_height, int n_rows,
 }
 
 static double
+grid_row_fr_factor(const ns_css_tracks *rows_tracks,
+                   const ns_css_tracks *auto_rows_tracks, int explicit_rows,
+                   int r)
+{
+    const ns_css_track *tk = NULL;
+    if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
+    else if (auto_rows_tracks && auto_rows_tracks->n > 0)
+        tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
+    return tk && tk->kind == NS_CSS_TRACK_FR && tk->v > 0 ? tk->v : 0;
+}
+
+static void
+grid_size_flexible_rows_to_content(double *row_height, int n_rows,
+                                   const ns_css_tracks *rows_tracks,
+                                   const ns_css_tracks *auto_rows_tracks,
+                                   int explicit_rows)
+{
+    double fraction = 0;
+    for (int r = 0; r < n_rows; r++) {
+        double fr = grid_row_fr_factor(rows_tracks, auto_rows_tracks,
+                                       explicit_rows, r);
+        if (fr > 0)
+            fraction = MAX(fraction, fr > 1 ? row_height[r] / fr
+                                            : row_height[r]);
+    }
+    for (int r = 0; r < n_rows; r++) {
+        double fr = grid_row_fr_factor(rows_tracks, auto_rows_tracks,
+                                       explicit_rows, r);
+        if (fr > 0 && fraction * fr > row_height[r])
+            row_height[r] = fraction * fr;
+    }
+}
+
+static double
 grid_auto_repeat_height(const ns_box *box, double row_basis, double cw)
 {
     if (row_basis > 0) return row_basis;
@@ -16109,6 +16143,8 @@ layout_grid(ns_box *box, double cw,
                                   auto_rows_tracks, explicit_rows,
                                   row_basis - (n_rows > 1 ? row_gap * (n_rows - 1) : 0));
     } else if (!rows_subgrid && n_rows > 0) {
+        grid_size_flexible_rows_to_content(row_height, n_rows, rows_tracks,
+                                           auto_rows_tracks, explicit_rows);
         const ns_css_value *mnv = box->style
             ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
         double min_h = mnv && (mnv->kind == NS_CSS_V_LENGTH ||

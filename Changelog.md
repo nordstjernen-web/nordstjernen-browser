@@ -181,6 +181,14 @@ Changelog:
   with a lone surrogate, was dropped on load. Keys and values are now
   percent-escaped in a new `[items]` group; files in the old format
   still load and are rewritten in the new one.
+* Layout: `fr` rows in a grid whose height is auto now share one flex
+  fraction. Each `1fr` row took the height of its own content, so
+  `grid-template-rows: 1fr 1fr` gave rows of 108 and 117 px where Chrome
+  makes both 117, and `1fr 2fr` did not keep the 1:2 ratio. The rows now
+  grow to the largest base size per `fr`, as CSS Grid's "find the size of
+  an fr" step does for an indefinite height. The Guardian's newsletter
+  cards, PayPal's image frames and Le Monde's teaser rows line up with
+  Chrome.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
