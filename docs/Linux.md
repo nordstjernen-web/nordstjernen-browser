@@ -25,6 +25,11 @@ On openSUSE:
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
         libwebp-devel libSDL2-devel
 
+On Arch Linux (packaging and the AUR: `Arch.md`):
+
+    sudo pacman -S --needed base-devel meson gtk4 libepoxy curl uchardet \
+        libpsl sqlite libseccomp libwebp sdl2 ffmpeg
+
 On Alpine (musl libc):
 
     sudo apk add build-base linux-headers pkgconf meson ninja gtk4.0-dev \

@@ -1,0 +1,87 @@
+# Maintainer: Andreas Røsdal <andreas dot rosdal at gmail dot com>
+
+pkgname=nordstjernen
+pkgver=1.0.35
+pkgrel=1
+pkgdesc='Small web browser written from scratch in C, with a GTK 4 interface'
+arch=(x86_64 aarch64)
+url='https://nordstjernen.org'
+license=('GPL-3.0-or-later OR LicenseRef-NSL-1.0')
+depends=(
+  brotli
+  cairo
+  curl
+  enchant
+  ffmpeg
+  fontconfig
+  freetype2
+  fribidi
+  gdk-pixbuf2
+  glib2
+  glibc
+  gst-plugins-base-libs
+  gstreamer
+  gtk4
+  harfbuzz
+  hicolor-icon-theme
+  libavif
+  libepoxy
+  libgcc
+  libjxl
+  libpsl
+  libseccomp
+  libthai
+  libvorbis
+  libwebp
+  openssl
+  opusfile
+  poppler-glib
+  sdl2
+  sqlite
+  uchardet
+  zlib
+)
+makedepends=(meson)
+optdepends=(
+  'gst-libav: H.264 and AAC playback'
+  'gst-plugins-good: H.264 and AAC playback'
+  'gst-plugins-bad: H.264 and AAC playback'
+  'hunspell: spell checking'
+  'hunspell-en_us: English dictionary for spell checking'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz")
+sha256sums=('eb9f7b1d66ef204861001cc6c75fc96e6d9e482117209f181312520e08adcce0')
+
+_srcdir=nordstjernen-sol-browser-$pkgver
+
+build() {
+  # wgpu-native is not in the Arch repositories and meson would otherwise
+  # download a prebuilt release, so WebGPU is left out, as in the Debian and
+  # openSUSE packages. The optional codecs are required explicitly so a
+  # missing dependency fails the build instead of dropping a feature.
+  arch-meson "$_srcdir" build \
+    -Dwebgpu=disabled \
+    -Davif=enabled \
+    -Djxl=enabled \
+    -Dgstreamer=enabled \
+    -Daudio=enabled \
+    -Dbuild_date="$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%F)"
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+
+  # libnordstjernen.so and its header are the embedding API; the browser links
+  # the engine statically, and the library has no SONAME version.
+  rm "$pkgdir/usr/lib/libnordstjernen.so"
+  rm -r "$pkgdir/usr/include"
+  rmdir "$pkgdir/usr/lib"
+  # Northstar and Southstar install the same command; Arch has no
+  # update-alternatives to arbitrate it.
+  rm "$pkgdir/usr/bin/internet-browser"
+
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s /usr/share/nordstjernen/License.md "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/nordstjernen/THIRD-PARTY-LICENSES.md "$pkgdir/usr/share/licenses/$pkgname/"
+}

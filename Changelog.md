@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Packaging: Arch Linux package recipe in `packaging/arch/` (PKGBUILD and
+  .SRCINFO, ready for the AUR), documented in `docs/Arch.md`. It builds
+  without warnings in a clean Arch chroot and passes namcap.
+* Build: the sources that define `_GNU_SOURCE` now define it as `1`. SDL2
+  over SDL3 (sdl2-compat, the `sdl2` package on Arch and other current
+  distributions) adds `-D_GNU_SOURCE=1` to the compiler flags, and the
+  different definition gave a redefinition warning in seven files, which
+  fails a `--werror` build.
 * Layout: a box with `aspect-ratio`, a definite `height` and an auto
   width now takes its width from the ratio, as CSS Sizing says. Only
   the other direction (height from width) was done, so such a box

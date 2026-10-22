@@ -237,7 +237,7 @@ meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-Windows, Fedora, openSUSE and macOS instructions are in
+Windows, Fedora, openSUSE, Arch Linux and macOS instructions are in
 [docs/](docs/README.md); keyboard, mouse and touch controls are in
 [docs/Controls.md](docs/Controls.md).
 
