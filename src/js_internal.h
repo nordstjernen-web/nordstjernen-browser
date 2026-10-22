@@ -216,6 +216,7 @@ struct ns_js {
     GPtrArray    *filereader_idles;
     GHashTable   *local_storage;
     GHashTable   *session_storage;
+    GPtrArray    *frame_storages;
     char         *local_storage_origin;
     char         *local_storage_path;
     gboolean      local_storage_dirty;
@@ -264,6 +265,7 @@ struct ns_js {
     GHashTable   *reported_rejections;
     GHashTable   *iframe_globals;
     int           iframe_load_depth;
+    int           frame_parser_depth;
     GArray       *pending_storage_events;
     gboolean      storage_events_draining;
     gint64        last_orphan_sweep_us;

@@ -154,6 +154,24 @@ Changelog:
   `line-clamp` ellipsis keeps its line height. On the AP News front page
   every promo title was 1 px short per line and the page drifted 54 px
   by the photo section; it now lines up with Chrome.
+* Web storage: a cross-origin frame now has its own `localStorage` and
+  `sessionStorage` instead of a `SecurityError` on access. Each frame
+  gets empty storage areas that live as long as the frame, are never
+  written to disk and never shared with the page or another frame, and
+  their changes fire no `storage` events elsewhere. Chrome gives such a
+  frame (partitioned) storage, and frames that assume it is there broke:
+  the my.foxnews.com account frame on foxnews.com threw "The operation
+  is insecure" from its load handler. Sandboxed frames without
+  `allow-same-origin` still get the `SecurityError`, and `indexedDB`
+  stays unavailable in cross-origin frames.
+* Frames: `document.write()` from a script that a frame's parser runs
+  now inserts the markup after that script, and a written `<script>`
+  runs before the frame's next script, as in a top-level page. The
+  frame document treated it as a write after loading: it emptied the
+  document and kept the markup for a `document.close()` that never
+  came. The my.foxnews.com account frame writes the script that defines
+  `FNC.ISA`, so it ended up with an empty document and no
+  `ISA.provider`.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
