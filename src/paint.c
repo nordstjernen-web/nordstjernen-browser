@@ -9014,13 +9014,9 @@ box_transform_origin(const ns_box *b, double bx, double by, double bw,
     }
 }
 
-static void
-collect_3d_quads(const ns_box *b, const ns_mat4 *pm, GArray *quads)
+static gboolean
+box_transform_mat4(const ns_box *b, ns_mat4 *out, gboolean *affine2d)
 {
-    if (box_hides_subtree(b) || b == g_paint_skip_box) return;
-    double bx, by, bw, bh;
-    box_border_rect(b, &bx, &by, &bw, &bh);
-    ns_mat4 m = *pm;
     const ns_css_transform *anim_tf =
         g_paint_anim ? ns_anim_get_transform(g_paint_anim, b->dom) : NULL;
     ns_css_transform eff;
@@ -9031,16 +9027,40 @@ collect_3d_quads(const ns_box *b, const ns_mat4 *pm, GArray *quads)
                       b->style->values[NS_CSS_ROTATE] ||
                       b->style->values[NS_CSS_SCALE])))
         ns_css_style_effective_transform(b->style, anim_tf, &eff);
-    if (eff.n_ops > 0) {
-        double ox, oy, oz;
-        box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
-                             &ox, &oy, &oz);
-        ns_mat4 tm;
-        ns_css_transform_to_mat4(&eff, bw, bh, &tm);
-        ns_mat4_translate(&m, ox, oy, oz);
-        ns_mat4_multiply(&m, &tm, &m);
-        ns_mat4_translate(&m, -ox, -oy, -oz);
-    }
+    if (eff.n_ops == 0) return FALSE;
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double ox, oy, oz;
+    box_transform_origin(b, bx, by, bw, bh, NS_CSS_TRANSFORM_ORIGIN,
+                         &ox, &oy, &oz);
+    ns_mat4 tm;
+    ns_css_transform_to_mat4(&eff, bw, bh, &tm);
+    if (affine2d) *affine2d = ns_mat4_is_affine2d(&tm);
+    ns_mat4_identity(out);
+    ns_mat4_translate(out, ox, oy, oz);
+    ns_mat4_multiply(out, &tm, out);
+    ns_mat4_translate(out, -ox, -oy, -oz);
+    return TRUE;
+}
+
+static gboolean
+box_3d_root_own_mat4(const ns_box *b, ns_mat4 *out)
+{
+    gboolean affine2d = TRUE;
+    return box_establishes_3d(b) && b != g_paint_tex_root &&
+           box_transform_mat4(b, out, &affine2d) && !affine2d;
+}
+
+static void
+collect_3d_quads(const ns_box *b, const ns_mat4 *pm, GArray *quads)
+{
+    if (box_hides_subtree(b) || b == g_paint_skip_box) return;
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    ns_mat4 m = *pm;
+    ns_mat4 own;
+    if (box_transform_mat4(b, &own, NULL))
+        ns_mat4_multiply(&m, &own, &m);
     gboolean p3d = box_preserve3d(b);
     if (!p3d || !b->first_child) {
         if (box_subtree_paints(b)) {
@@ -9483,7 +9503,16 @@ collect_root_quads(const ns_box *b)
 {
     GArray *quads = g_array_new(FALSE, FALSE, sizeof(ns_quad3));
     ns_mat4 root;
-    ns_mat4_identity(&root);
+    if (box_3d_root_own_mat4(b, &root)) {
+        if (!box_hides_subtree(b) && box_has_own_decor(b)) {
+            double bx, by, bw, bh;
+            box_border_rect(b, &bx, &by, &bw, &bh);
+            ns_quad3 q = { b, root, bx, by, bw, bh, 0, quads->len, TRUE };
+            g_array_append_val(quads, q);
+        }
+    } else {
+        ns_mat4_identity(&root);
+    }
     if (box_establishes_3d(b)) {
         double d = box_perspective_px(b);
         if (d > 0) {
@@ -9529,8 +9558,10 @@ static void
 paint_3d_root_below_quads(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!box_establishes_3d(b)) return;
-    if (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
-        b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL)
+    ns_mat4 own;
+    if ((b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
+         b->kind == NS_BOX_TABLE_CAPTION || b->kind == NS_BOX_TABLE_CELL) &&
+        !box_3d_root_own_mat4(b, &own))
         paint_block(cr, b);
     paint_negative_layers(cr, b, highlight);
 }
