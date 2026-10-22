@@ -9623,6 +9623,22 @@ image_border_box_extras(const ns_box *box)
            box->border.left + box->border.right;
 }
 
+static gboolean
+img_has_source(const ns_node *img)
+{
+    const char *src = ns_element_get_attr(img, "src");
+    const char *srcset = ns_element_get_attr(img, "srcset");
+    if ((src && *src) || (srcset && *srcset)) return TRUE;
+    if (!ns_node_is_element_named(img->parent, "picture")) return FALSE;
+    for (const ns_node *c = img->parent->first_child; c && c != img;
+         c = c->next_sibling) {
+        const char *set = ns_node_is_element_named(c, "source")
+            ? ns_element_get_attr(c, "srcset") : NULL;
+        if (set && *set) return TRUE;
+    }
+    return FALSE;
+}
+
 static void
 layout_image(ns_box *box, double parent_content_width)
 {
@@ -9720,6 +9736,9 @@ layout_image(ns_box *box, double parent_content_width)
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
     gboolean ratio_only = box->media && box->media->intrinsic_ratio_only;
+    gboolean img_sourceless = box->kind == NS_BOX_IMAGE &&
+        ns_node_is_element_named(box->dom, "img") && !(img && img->loaded) &&
+        !img_has_source(box->dom);
     gboolean w_specified = w >= 0;
     gboolean h_specified = h >= 0;
     if (w < 0 && h < 0) {
@@ -9738,10 +9757,10 @@ layout_image(ns_box *box, double parent_content_width)
         } else { w = 0; h = 0; }
     } else if (w < 0) {
         w = intrinsic_ratio > 0 ? h * intrinsic_ratio
-          : video_without_metadata ? 300 : h;
+          : video_without_metadata ? 300 : img_sourceless ? 0 : h;
     } else if (h < 0) {
         h = intrinsic_ratio > 0 ? w / intrinsic_ratio
-          : video_without_metadata ? 150 : w;
+          : video_without_metadata ? 150 : img_sourceless ? 0 : w;
     }
     if (metadata_video && h <= 0 && w > 0 && nat_w > 0 && nat_h > 0)
         h = w * (nat_h / nat_w);

@@ -223,6 +223,12 @@ Changelog:
   `using` at the top level of a module, pass unchanged.
   `docs/quickjs-ecma-specification-compliance.md` states the current
   baseline and lists the staging and Atomics work in its table.
+* Layout: an `<img>` with no source and only one specified dimension is
+  now empty in the other, as in Chrome. Without `src`, `srcset` or a
+  `<picture>` source with a `srcset`, there is no image to give it a
+  size, but the engine made it square, so a lazy-loading placeholder
+  with `width: 100%` was as tall as it was wide. On ESPN the video cards
+  of the news feed grew from 353 to 628 px and the feed ran 64 px long.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
