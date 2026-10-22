@@ -5434,7 +5434,8 @@ paint_inline_atomic(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
                     sy + a->box->rel_dy - a->box->y);
     g_paint_no_cull++;
     const ns_box *saved_flush = g_paint_flush_box;
-    g_paint_flush_box = a->box;
+    if (g_paint_defer_depth == 0 || !ns_box_is_upper_layer(a->box))
+        g_paint_flush_box = a->box;
     paint_walk(cr, a->box, highlight);
     g_paint_flush_box = saved_flush;
     g_paint_no_cull--;
@@ -8435,6 +8436,7 @@ typedef struct deferred_capture {
     NsPangoLayout *layout;
     guint layer;
     inline_layer_place at;
+    gboolean no_cull;
     const ns_node *dom;
     int z;
     gboolean isolates;
@@ -8657,7 +8659,9 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
             g_paint_deferred_list = NULL;
             g_paint_defer_depth++;
         }
+        if (cap->no_cull) g_paint_no_cull++;
         paint_deferred_capture(target, cap, highlight);
+        if (cap->no_cull) g_paint_no_cull--;
         if (flat) {
             GPtrArray *found = g_paint_deferred_list;
             g_paint_deferred_list = saved_list;
@@ -10493,6 +10497,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cap->seq = g_paint_capture_seq++;
         cap->adopted = b == g_paint_adopted_box;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
+        cap->no_cull = g_paint_no_cull > 0;
         g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
             g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
