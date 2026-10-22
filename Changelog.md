@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Layout: an inline-block is never narrower than its min-content.
+  Its shrink-to-fit width was the smaller of its max-content and the
+  available width, without the min-content floor, so an inline-block
+  holding a `nowrap` flex row or fixed-width items wider than the line
+  was squeezed to the line width while its content overflowed. ESPN's
+  scores strip is a row of such inline-blocks; each league was cut to
+  1,120 px and every league after it moved left. Across the frozen
+  sitebench snapshots 171 more elements match Chrome, 108 on ESPN.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
