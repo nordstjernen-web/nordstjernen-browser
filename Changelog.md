@@ -359,6 +359,15 @@ Changelog:
   each iteration was slower than the one before. The objects are now
   kept per owner element. On Speedometer 3.1, TodoMVC-WebComponents is
   29% faster over its 10 iterations and runs 20% fewer instructions.
+* DOM: `getBoundingClientRect()` and `getClientRects()` on an inline
+  element inside a transformed block now include that transform. The
+  inline path walked the boxes adding up offsets and scroll positions
+  but never applied an ancestor's `transform`, `translate`, `rotate` or
+  `scale`, so a link in a `translateY(-50%)` header or a scaled card
+  reported the place it would have without the transform. Each rect is
+  now mapped through the transforms of the boxes above it, the same way
+  block boxes are. Across the frozen sitebench snapshots 252 more
+  elements match Chrome, 85 of them on WhatsApp.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

@@ -19083,43 +19083,53 @@ box_can_host_fixed(const ns_box *anc)
 }
 
 static gboolean
-box_hit_untransform_point(const ns_box *b, double *x, double *y)
+box_local_transform(const ns_box *b, double dx, double dy, ns_mat4 *out)
 {
     const ns_style *s = b->style;
-    if (!s) return TRUE;
+    if (!s) return FALSE;
     if (!(s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
           s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]))
-        return TRUE;
+        return FALSE;
     ns_css_transform eff;
     eff.n_ops = 0;
     ns_css_style_effective_transform(s, NULL, &eff);
-    if (eff.n_ops == 0) return TRUE;
-    double bx = b->x + b->margin.left;
-    double by = b->y + b->margin.top;
+    if (eff.n_ops == 0) return FALSE;
+    double bx = b->x + b->margin.left + dx;
+    double by = b->y + b->margin.top + dy;
     double bw = b->content_width + b->padding.left + b->padding.right +
                 b->border.left + b->border.right;
     double bh = b->content_height + b->padding.top + b->padding.bottom +
                 b->border.top + b->border.bottom;
     double ox = bx + bw / 2.0;
     double oy = by + bh / 2.0;
+    double oz = 0;
     const ns_css_value *origin = s->values[NS_CSS_TRANSFORM_ORIGIN];
     if (origin && origin->kind == NS_CSS_V_TRANSFORM &&
         origin->u.transform.n_ops > 0) {
         const ns_css_transform_op *o = &origin->u.transform.ops[0];
         ox = bx + (o->a_is_percent ? o->a / 100.0 * bw : o->a);
         oy = by + (o->b_is_percent ? o->b / 100.0 * bh : o->b);
+        oz = o->c;
     }
     ns_mat4 m;
     ns_css_transform_to_mat4(&eff, bw, bh, &m);
+    ns_mat4_identity(out);
+    ns_mat4_translate(out, ox, oy, oz);
+    ns_mat4_multiply(out, &m, out);
+    ns_mat4_translate(out, -ox, -oy, -oz);
+    return TRUE;
+}
+
+static gboolean
+box_hit_untransform_point(const ns_box *b, double *x, double *y)
+{
+    ns_mat4 m;
+    if (!box_local_transform(b, 0, 0, &m)) return TRUE;
     if (!ns_mat4_is_affine2d(&m)) return TRUE;
     cairo_matrix_t cm;
     cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
     if (cairo_matrix_invert(&cm) != CAIRO_STATUS_SUCCESS) return FALSE;
-    double px = *x - ox, py = *y - oy;
-    double qx = cm.xx * px + cm.xy * py + cm.x0;
-    double qy = cm.yx * px + cm.yy * py + cm.y0;
-    *x = qx + ox;
-    *y = qy + oy;
+    cairo_matrix_transform_point(&cm, x, y);
     return TRUE;
 }
 
@@ -21817,13 +21827,51 @@ inline_attr_element(const ns_inline_attr *r)
     return r->kind == NS_INLINE_ELEMENT ? r : NULL;
 }
 
+static const ns_mat4 *
+inline_rect_enter_box(const ns_box *b, double dx, double dy,
+                      const ns_mat4 *outer, ns_mat4 *local)
+{
+    ns_mat4 m;
+    if (!box_local_transform(b, dx, dy, &m)) return outer;
+    if (outer)
+        ns_mat4_multiply(outer, &m, local);
+    else
+        *local = m;
+    return local;
+}
+
+static void
+inline_rect_map(const ns_mat4 *xf, double *x, double *y, double *w, double *h)
+{
+    if (!xf) return;
+    double cx[4] = { *x, *x + *w, *x, *x + *w };
+    double cy[4] = { *y, *y, *y + *h, *y + *h };
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    for (int i = 0; i < 4; i++) {
+        double px, py, pz, pw;
+        ns_mat4_apply(xf, cx[i], cy[i], 0, &px, &py, &pz, &pw);
+        if (fabs(pw) > 1e-9) { px /= pw; py /= pw; }
+        if (i == 0 || px < x0) x0 = px;
+        if (i == 0 || py < y0) y0 = py;
+        if (i == 0 || px > x1) x1 = px;
+        if (i == 0 || py > y1) y1 = py;
+    }
+    *x = x0;
+    *y = y0;
+    *w = x1 - x0;
+    *h = y1 - y0;
+}
+
 static void
 box_inline_union_for_dom(const ns_box *root, const ns_node *target,
-                         double dx, double dy,
+                         double dx, double dy, const ns_mat4 *outer_xf,
                          double *x0, double *y0, double *x1, double *y1,
                          gboolean *any)
 {
     if (!root) return;
+    ns_mat4 local_xf;
+    const ns_mat4 *xf = inline_rect_enter_box(root, dx, dy, outer_xf,
+                                              &local_xf);
     if (root->kind == NS_BOX_INLINE && root->attrs && root->text) {
         for (guint i = 0; i < root->attrs->len; i++) {
             const ns_inline_attr *r =
@@ -21843,6 +21891,7 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
             }
             double rx0 = root->x + dx + ex;
             double ry0 = root->y + dy + ey;
+            inline_rect_map(xf, &rx0, &ry0, &ew, &eh);
             double rx1 = rx0 + ew;
             double ry1 = ry0 + eh;
             if (!*any) {
@@ -21859,7 +21908,8 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
     double cdx = dx - root->scroll_x;
     double cdy = dy - root->scroll_y;
     for (const ns_box *c = root->first_child; c; c = c->next_sibling)
-        box_inline_union_for_dom(c, target, cdx, cdy, x0, y0, x1, y1, any);
+        box_inline_union_for_dom(c, target, cdx, cdy, xf,
+                                 x0, y0, x1, y1, any);
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
             const ns_inline_atomic *atomic =
@@ -21869,16 +21919,20 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
                          atomic->box->rel_dx - atomic->box->x;
             double ady = cdy + root->y + atomic->owner_offset_y +
                          atomic->box->rel_dy - atomic->box->y;
-            box_inline_union_for_dom(atomic->box, target, adx, ady,
+            box_inline_union_for_dom(atomic->box, target, adx, ady, xf,
                                      x0, y0, x1, y1, any);
         }
 }
 
 static void
 box_inline_rects_for_dom(const ns_box *root, const ns_node *target,
-                         double dx, double dy, GArray *out)
+                         double dx, double dy, const ns_mat4 *outer_xf,
+                         GArray *out)
 {
     if (!root) return;
+    ns_mat4 local_xf;
+    const ns_mat4 *xf = inline_rect_enter_box(root, dx, dy, outer_xf,
+                                              &local_xf);
     if (root->kind == NS_BOX_INLINE && root->attrs && root->text) {
         for (guint i = 0; i < root->attrs->len; i++) {
             const ns_inline_attr *r =
@@ -21889,15 +21943,17 @@ box_inline_rects_for_dom(const ns_box *root, const ns_node *target,
             if (!ns_paint_inline_range_rects(root, r->start, r->len, r, out))
                 continue;
             for (guint k = before; k + 3 < out->len; k += 4) {
-                g_array_index(out, double, k) += root->x + dx;
-                g_array_index(out, double, k + 1) += root->y + dy;
+                double *rect = &g_array_index(out, double, k);
+                rect[0] += root->x + dx;
+                rect[1] += root->y + dy;
+                inline_rect_map(xf, &rect[0], &rect[1], &rect[2], &rect[3]);
             }
         }
     }
     double cdx = dx - root->scroll_x;
     double cdy = dy - root->scroll_y;
     for (const ns_box *c = root->first_child; c; c = c->next_sibling)
-        box_inline_rects_for_dom(c, target, cdx, cdy, out);
+        box_inline_rects_for_dom(c, target, cdx, cdy, xf, out);
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
             const ns_inline_atomic *atomic =
@@ -21907,7 +21963,7 @@ box_inline_rects_for_dom(const ns_box *root, const ns_node *target,
                          atomic->box->rel_dx - atomic->box->x;
             double ady = cdy + root->y + atomic->owner_offset_y +
                          atomic->box->rel_dy - atomic->box->y;
-            box_inline_rects_for_dom(atomic->box, target, adx, ady, out);
+            box_inline_rects_for_dom(atomic->box, target, adx, ady, xf, out);
         }
 }
 
@@ -21916,7 +21972,7 @@ ns_box_inline_rects_for_dom(const ns_box *root, const ns_node *target)
 {
     if (!root || !target) return NULL;
     GArray *out = g_array_new(FALSE, FALSE, sizeof(double));
-    box_inline_rects_for_dom(root, target, 0, 0, out);
+    box_inline_rects_for_dom(root, target, 0, 0, NULL, out);
     if (out->len == 0) {
         g_array_free(out, TRUE);
         return NULL;
@@ -21931,7 +21987,7 @@ ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
     if (!root || !target) return FALSE;
     double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     gboolean any = FALSE;
-    box_inline_union_for_dom(root, target, 0, 0, &x0, &y0, &x1, &y1, &any);
+    box_inline_union_for_dom(root, target, 0, 0, NULL, &x0, &y0, &x1, &y1, &any);
     if (!any) return FALSE;
     if (x) *x = x0;
     if (y) *y = y0;
