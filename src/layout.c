@@ -15042,6 +15042,72 @@ grid_max_content_width(ns_box *box, const ns_style *child_style)
     return sum;
 }
 
+typedef struct {
+    ns_box *box;
+    const ns_style *inherited;
+    int col, span;
+    double extra;
+} grid_col_item;
+
+static double
+grid_item_edge_extra(const ns_box *c, gboolean leading)
+{
+    if (!c->style) return 0;
+    ns_edges m = {0}, pd = {0}, bd = {0};
+    edges_from_style(c->style, 0, &m, &pd, &bd);
+    return leading ? m.left + pd.left + bd.left : m.right + pd.right + bd.right;
+}
+
+static void
+grid_collect_col_items(GArray *out, ns_box *c, const ns_style *inherited,
+                       int col, int span, double extra, int depth)
+{
+    if (depth >= 8 || span < 1 || !box_is_grid_container(c) ||
+        !style_columns_are_subgrid(c->style)) {
+        grid_col_item it = { c, inherited, col, span, extra };
+        g_array_append_val(out, it);
+        return;
+    }
+    double lead = grid_item_edge_extra(c, TRUE);
+    double trail = grid_item_edge_extra(c, FALSE);
+    int cursor = 0;
+    for (ns_box *gc = c->first_child; gc; gc = gc->next_sibling) {
+        if (style_is_absolute_or_fixed(gc->style)) continue;
+        int s = -1, sp = 1;
+        if (gc->style &&
+            !grid_resolve_pos(gc->style, NS_CSS_GRID_COLUMN,
+                              NS_CSS_GRID_COLUMN_START, NS_CSS_GRID_COLUMN_END,
+                              span, &s, &sp))
+            s = -1;
+        if (sp < 1) sp = 1;
+        if (sp > span) sp = span;
+        if (s < 0) {
+            if (cursor > 0 && cursor + sp > span) cursor = 0;
+            s = cursor;
+        }
+        if (s + sp > span) s = span - sp;
+        cursor = s + sp;
+        double edge = (s == 0 ? lead : 0) + (s + sp == span ? trail : 0);
+        grid_collect_col_items(out, gc, c->style, col + s, sp, extra + edge,
+                               depth + 1);
+    }
+}
+
+static GArray *
+grid_col_items(GPtrArray *items, GArray *placed_cols, GArray *col_spans,
+               const ns_style *child_inherited)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(grid_col_item));
+    for (guint k = 0; k < items->len; k++) {
+        int col = k < placed_cols->len ? g_array_index(placed_cols, int, k) : -1;
+        int span = g_array_index(col_spans, int, k);
+        if (col < 0) continue;
+        grid_collect_col_items(out, items->pdata[k], child_inherited, col,
+                               span < 1 ? 1 : span, 0, 0);
+    }
+    return out;
+}
+
 static double
 grid_item_fit_border_width(ns_box *c, const ns_style *child_inherited,
                            double area)
@@ -15199,6 +15265,8 @@ layout_grid(ns_box *box, double cw,
     int fit_start = 0, fit_count = 0;
     ns_css_tracks cols_buf = expand_auto_repeat_ex(cols_src, cw, col_gap,
                                                    &fit_start, &fit_count);
+    if (cols_subgrid)
+        grid_extend_with_auto_tracks(&cols_buf, 0, sg->n, NULL);
     if (areas && !cols_subgrid) {
         int templated = cols_src == &default_cols ? 0 : cols_buf.n;
         if (areas->n_cols > templated)
@@ -15485,24 +15553,24 @@ layout_grid(ns_box *box, double cw,
     double col_content[NS_CSS_TRACKS_MAX] = {0};
     double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
+    GArray *col_items = grid_col_items(items, placed_cols, col_spans,
+                                       child_inherited);
     for (int t = 0; t < n_cols; t++) {
         gboolean fr_auto = fr_track_min_is_auto(&cols->tracks[t]);
         if (!track_is_intrinsic(cols->tracks[t].kind) &&
             !(cols->tracks[t].has_min &&
               track_is_intrinsic(cols->tracks[t].min_kind)) && !fr_auto)
             continue;
-        for (guint k = 0; k < items->len; k++) {
-            int item_col = k < placed_cols->len
-                ? g_array_index(placed_cols, int, k) : -1;
-            if (item_col != t ||
-                g_array_index(col_spans, int, k) != 1) continue;
-            ns_box *c = items->pdata[k];
+        for (guint k = 0; k < col_items->len; k++) {
+            const grid_col_item *ci = &g_array_index(col_items, grid_col_item, k);
+            if (ci->col != t || ci->span != 1) continue;
+            ns_box *c = ci->box;
             if (fr_auto && !grid_item_has_auto_minimum(c)) {
                 any_auto_content = TRUE;
                 continue;
             }
-            double nw = measure_natural_width(c, child_inherited);
-            double mw = min_width_of(c, child_inherited);
+            double nw = measure_natural_width(c, ci->inherited);
+            double mw = min_width_of(c, ci->inherited);
             if (c->style) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, mw, &m, &pd, &bd);
@@ -15511,6 +15579,8 @@ layout_grid(ns_box *box, double cw,
                 mw += extra;
                 nw += extra;
             }
+            mw += ci->extra;
+            nw += ci->extra;
             if (nw > avail) nw = avail;
             if (nw > col_content[t]) col_content[t] = nw;
             if (mw > col_min[t]) col_min[t] = mw;
@@ -15518,14 +15588,14 @@ layout_grid(ns_box *box, double cw,
         }
     }
     for (int span = 2; span <= n_cols; span++) {
-        for (guint k = 0; k < items->len; k++) {
-            int c0 = k < placed_cols->len ? g_array_index(placed_cols, int, k) : -1;
-            if (c0 < 0 || g_array_index(col_spans, int, k) != span ||
-                c0 + span > n_cols)
+        for (guint k = 0; k < col_items->len; k++) {
+            const grid_col_item *ci = &g_array_index(col_items, grid_col_item, k);
+            int c0 = ci->col;
+            if (c0 < 0 || ci->span != span || c0 + span > n_cols)
                 continue;
-            ns_box *c = items->pdata[k];
-            double nw = measure_natural_width(c, child_inherited);
-            double mw = min_width_of(c, child_inherited);
+            ns_box *c = ci->box;
+            double nw = measure_natural_width(c, ci->inherited);
+            double mw = min_width_of(c, ci->inherited);
             if (c->style) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, mw, &m, &pd, &bd);
@@ -15534,12 +15604,15 @@ layout_grid(ns_box *box, double cw,
                 mw += extra;
                 nw += extra;
             }
+            mw += ci->extra;
+            nw += ci->extra;
             if (nw > avail) nw = avail;
             if (grid_span_accommodate(cols, c0, span, col_gap_after, avail,
                                       mw, nw, col_min, col_content))
                 any_auto_content = TRUE;
         }
     }
+    g_array_free(col_items, TRUE);
     resolve_track_sizes_full(cols, avail, cw,
                              any_auto_content ? col_min : NULL,
                              any_auto_content ? col_content : NULL, col_sizes,
