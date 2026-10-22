@@ -115,6 +115,13 @@ Changelog:
   `(-1).toFixed(-1)` message: 51 is Chrome, 44 Safari, 25 Firefox. With
   24 it recognised none and every CNN load ended in an unhandled
   rejection, "detectIncognito cannot determine the browser".
+* Service workers: a service worker's global scope now has
+  `self.serviceWorker`, the `ServiceWorker` object for the worker itself
+  with its `scriptURL` and `state`. Its `registration` now moves the
+  worker through `installing`, `waiting` and `active`, and the worker
+  gets `statechange` events, as the page side already did. AliExpress's
+  service worker reads `new URL(self.serviceWorker.scriptURL).hostname`
+  at start-up and logged a `TypeError` on every load.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

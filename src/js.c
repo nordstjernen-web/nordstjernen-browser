@@ -27796,6 +27796,19 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     JS_SetPropertyStr(ctx, reg, "navigationPreload", np);
     JS_SetPropertyStr(ctx, global, "registration", reg);
 
+    ns_bind_ctor(ctx, global, "ServiceWorker", ns_illegal_constructor, 0);
+    JSValue self_sw = JS_NewObject(ctx);
+    ns_sw_set_proto_from(ctx, self_sw, global, "ServiceWorker");
+    JS_SetPropertyStr(ctx, self_sw, "scriptURL",
+                      JS_NewString(ctx, host->url ? host->url : ""));
+    JS_SetPropertyStr(ctx, self_sw, "state", JS_NewString(ctx, "parsed"));
+    JS_SetPropertyStr(ctx, self_sw, "onstatechange", JS_NULL);
+    JS_SetPropertyStr(ctx, self_sw, "onerror", JS_NULL);
+    JS_SetPropertyStr(ctx, self_sw, "_listeners", JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, self_sw);
+    ns_bind_fn(ctx, self_sw, "dispatchEvent", ns_target_dispatchEvent, 1);
+    JS_SetPropertyStr(ctx, global, "serviceWorker", self_sw);
+
     ns_bind_ctor(ctx, global, "Client", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WindowClient", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "Clients", ns_illegal_constructor, 0);
@@ -27885,6 +27898,27 @@ ns_sw_make_extendable_event(JSContext *ctx, const char *type)
 }
 
 static void
+ns_sw_scope_set_state(JSContext *ctx, JSValueConst global, const char *state,
+                      const char *slot)
+{
+    static const char *const slots[] = { "installing", "waiting", "active" };
+    JSValue sw = JS_GetPropertyStr(ctx, global, "serviceWorker");
+    JSValue reg = JS_GetPropertyStr(ctx, global, "registration");
+    if (slot && JS_IsObject(reg) && JS_IsObject(sw)) {
+        for (gsize i = 0; i < G_N_ELEMENTS(slots); i++)
+            JS_SetPropertyStr(ctx, reg, slots[i],
+                              strcmp(slots[i], slot) == 0
+                                  ? JS_DupValue(ctx, sw) : JS_NULL);
+    }
+    if (JS_IsObject(sw)) {
+        JS_SetPropertyStr(ctx, sw, "state", JS_NewString(ctx, state));
+        ns_target_fire_event(ctx, sw, "statechange");
+    }
+    JS_FreeValue(ctx, reg);
+    JS_FreeValue(ctx, sw);
+}
+
+static void
 ns_sw_fire_lifecycle(ns_js *js)
 {
     if (!js || !js->ctx || !js->worker_host) return;
@@ -27892,16 +27926,21 @@ ns_sw_fire_lifecycle(ns_js *js)
     ns_worker_host *host = js->worker_host;
     JSValue global = JS_GetGlobalObject(ctx);
 
+    ns_sw_scope_set_state(ctx, global, "installing", "installing");
     JSValue install = ns_sw_make_extendable_event(ctx, "install");
     ns_worker_dispatch(ctx, global, "install", install);
     JS_FreeValue(ctx, install);
     ns_drain_microtasks(js);
     if (!g_atomic_int_get(&host->closing)) {
+        ns_sw_scope_set_state(ctx, global, "installed", "waiting");
         ns_sw_post_owner_state(host, "installed");
+        ns_sw_scope_set_state(ctx, global, "activating", "active");
         ns_sw_post_owner_state(host, "activating");
         JSValue activate = ns_sw_make_extendable_event(ctx, "activate");
         ns_worker_dispatch(ctx, global, "activate", activate);
         JS_FreeValue(ctx, activate);
+        ns_drain_microtasks(js);
+        ns_sw_scope_set_state(ctx, global, "activated", NULL);
         ns_drain_microtasks(js);
         ns_sw_post_owner_state(host, "activated");
     }
