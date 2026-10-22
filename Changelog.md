@@ -80,6 +80,16 @@ Changelog:
   margins) and paints only what its CSS asks for. The `color`,
   `noshade` and `size` attributes map to the same properties as in
   Chrome.
+* Performance: a web font that finishes loading no longer rebuilds the
+  whole font map. Each arrival threw away every font, face and coverage
+  table the text library had built and listed all installed fonts again,
+  which was 12% of the renderer's busy time on The New York Times, where
+  57 fonts arrive. The new font's faces are now added to the map that is
+  already there, and only the cached font matches are dropped, so text
+  still switches to the font as soon as it arrives. On frozen copies of
+  CNN, The Guardian and The New York Times the main-thread CPU of a
+  settled load drops by 16%, 15% and 13%. Builds that link the system
+  Pango keep the full rebuild.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

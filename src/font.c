@@ -604,6 +604,23 @@ ns_font_describe_added(FcFontSet *app_fonts, int first_added,
 }
 
 static void
+ns_font_map_add(FcFontSet *app_fonts, int first_added)
+{
+    (void)app_fonts;
+    (void)first_added;
+#ifdef NS_HAVE_PANGOFC
+    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    if (!fm || !NS_PANGO_IS_FC_FONT_MAP(fm)) return;
+#ifdef NS_USE_WEB_TEXT_LIB
+    ns_pango_fc_font_map_add_fonts(NS_PANGO_FC_FONT_MAP(fm), app_fonts,
+                                   first_added);
+#else
+    ns_pango_fc_font_map_config_changed(NS_PANGO_FC_FONT_MAP(fm));
+#endif
+#endif
+}
+
+static void
 ns_font_install_file(const char *path, const ns_font_entry *face)
 {
     if (!path) return;
@@ -612,11 +629,7 @@ ns_font_install_file(const char *path, const ns_font_entry *face)
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
     FcFontSet *app_fonts = FcConfigGetFonts(NULL, FcSetApplication);
     if (app_fonts) ns_font_describe_added(app_fonts, first_added, face);
-#ifdef NS_HAVE_PANGOFC
-    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
-    if (fm && NS_PANGO_IS_FC_FONT_MAP(fm))
-        ns_pango_fc_font_map_config_changed(NS_PANGO_FC_FONT_MAP(fm));
-#endif
+    ns_font_map_add(app_fonts, first_added);
 }
 #endif
 
