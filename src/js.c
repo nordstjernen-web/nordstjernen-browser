@@ -64113,7 +64113,16 @@ ns_js_module_normalize(JSContext *ctx, const char *base_name,
         g_free(mapped);
         return out;
     }
-    char *abs_url = ns_url_resolve(base_name && *base_name ? base_name : NULL, name);
+    gboolean relative = name[0] == '/' || g_str_has_prefix(name, "./") ||
+                        g_str_has_prefix(name, "../");
+    char *abs_url = ns_url_resolve(relative && base_name && *base_name
+                                       ? base_name : NULL, name);
+    if (!abs_url && !relative) {
+        JS_ThrowTypeError(ctx, "Failed to resolve module specifier \"%s\". "
+                          "Relative references must start with either "
+                          "\"/\", \"./\", or \"../\".", name);
+        return NULL;
+    }
     if (!abs_url) abs_url = g_strdup(name);
     char *out = js_strdup(ctx, abs_url);
     g_free(abs_url);

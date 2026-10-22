@@ -201,6 +201,12 @@ Changelog:
   the pending web fonts finish loading. On frozen copies of AP News,
   claude.ai, CNN, ESPN and IMDb the main-thread CPU to first paint
   drops by 14%, 16%, 12%, 11% and 11%.
+* JavaScript modules: a bare specifier such as `import 'react'` that no
+  import map maps is now a `TypeError` ("Failed to resolve module
+  specifier"), as in Chrome. It was resolved as a path relative to the
+  importing module and fetched: ESPN's Disney player bundle imports
+  `react`, so each load requested `…/dist/react` from the CDN, got an
+  XML 403 page and failed with a MIME type error instead.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
