@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Paint: an element with `transform-style: preserve-3d` that starts a
+  3D scene now keeps its own 3D transform. The painter applied that
+  transform only when it was a flat 2D one, so a card with
+  `transform: rotateY(40deg)` and no perspective above it was drawn
+  unrotated, at full width, with its faces. The element's background is
+  now drawn as a plane of the scene through its transform, and its
+  children are drawn through it as well.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
