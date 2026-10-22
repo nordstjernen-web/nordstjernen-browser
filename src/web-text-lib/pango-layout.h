@@ -205,6 +205,15 @@ NS_PANGO_AVAILABLE_IN_ALL
 void           ns_pango_layout_set_strut_line_height (NsPangoLayout               *layout,
                                                    int                         line_height);
 NS_PANGO_AVAILABLE_IN_ALL
+int            ns_pango_font_get_legacy_ascent      (NsPangoFont                 *font,
+                                                   int                         content_height);
+NS_PANGO_AVAILABLE_IN_ALL
+void           ns_pango_layout_run_get_css_extents  (NsPangoLayoutRun            *run,
+                                                   int                         line_height,
+                                                   gboolean                    normal,
+                                                   int                        *above,
+                                                   int                        *below);
+NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_layout_get_spacing          (NsPangoLayout                *layout);
 NS_PANGO_AVAILABLE_IN_1_44
 float          ns_pango_layout_get_line_spacing     (NsPangoLayout                *layout);

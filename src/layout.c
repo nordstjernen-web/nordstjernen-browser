@@ -7521,6 +7521,97 @@ inline_box_in_quirks_document(const ns_box *box)
     return FALSE;
 }
 
+#ifdef NS_USE_WEB_TEXT_LIB
+static double
+inline_font_legacy_ascent(NsPangoFont *font, double content_height)
+{
+    return (double)ns_pango_font_get_legacy_ascent(
+        font, (int)lround(content_height * NS_PANGO_SCALE)) / NS_PANGO_SCALE;
+}
+
+static const NsPangoAttrShape *
+inline_run_shape(const NsPangoLayoutRun *run)
+{
+    for (const GSList *l = run->item->analysis.extra_attrs; l; l = l->next) {
+        const NsPangoAttribute *attr = l->data;
+        if (attr->klass->type == NS_PANGO_ATTR_SHAPE)
+            return (const NsPangoAttrShape *)attr;
+    }
+    return NULL;
+}
+
+static gboolean
+inline_atomic_aligns_to_line_edge(const ns_box *box, gsize offset)
+{
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+        if (a->byte_off != offset) continue;
+        if (!a->box || (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, a->box)))
+            return TRUE;
+        const char *va = a->box->style
+            ? ns_style_keyword(a->box->style, NS_CSS_VERTICAL_ALIGN) : NULL;
+        return va && (strcmp(va, "top") == 0 || strcmp(va, "bottom") == 0);
+    }
+    return FALSE;
+}
+
+static double
+inline_run_line_height(const ns_box *box, gsize offset, double line_height,
+                       gboolean normal, gboolean *out_normal)
+{
+    const ns_inline_attr *inner = NULL;
+    for (guint i = 0; box->attrs && i < box->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        if (offset < r->start || offset >= r->start + r->len) continue;
+        if (r->kind == NS_INLINE_SPACER || r->kind == NS_INLINE_CHECKBOX ||
+            r->kind == NS_INLINE_CHECKBOX_CHECKED || r->kind == NS_INLINE_RANGE ||
+            r->kind == NS_INLINE_RADIO || r->kind == NS_INLINE_RADIO_CHECKED)
+            return -1;
+        if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
+        if (!inner || r->start > inner->start ||
+            (r->start == inner->start && r->len < inner->len))
+            inner = r;
+    }
+    double px = inner ? ns_paint_css_line_height_px(inner->style) : -1;
+    *out_normal = px >= 0 ? ns_paint_css_line_height_is_normal(inner->style)
+                          : normal;
+    return px >= 0 ? px : line_height;
+}
+
+static gboolean
+inline_line_css_extent(const ns_box *box, NsPangoLayoutLine *line,
+                       double line_height, gboolean normal,
+                       double *above, double *below)
+{
+    for (GSList *l = line ? line->runs : NULL; l; l = l->next) {
+        NsPangoLayoutRun *run = l->data;
+        double rise = (double)run->y_offset / NS_PANGO_SCALE;
+        const NsPangoAttrShape *shape = inline_run_shape(run);
+        if (shape) {
+            if (inline_atomic_aligns_to_line_edge(box, (gsize)run->item->offset))
+                return FALSE;
+            double y = (double)shape->logical_rect.y / NS_PANGO_SCALE;
+            double h = (double)shape->logical_rect.height / NS_PANGO_SCALE;
+            *above = MAX(*above, rise - y);
+            *below = MAX(*below, y + h - rise);
+            continue;
+        }
+        gboolean run_normal = normal;
+        double lh = inline_run_line_height(box, (gsize)run->item->offset,
+                                           line_height, normal, &run_normal);
+        if (lh < 0) continue;
+        int run_above = 0, run_below = 0;
+        ns_pango_layout_run_get_css_extents(run, inline_line_height_units(lh),
+                                            run_normal, &run_above, &run_below);
+        if (run_above + run_below <= 0) continue;
+        *above = MAX(*above, (double)run_above / NS_PANGO_SCALE);
+        *below = MAX(*below, (double)run_below / NS_PANGO_SCALE);
+    }
+    return TRUE;
+}
+#endif
+
 static double *
 inline_atomic_line_offsets(const ns_box *box, NsPangoLayout *layout,
                            const ns_style *parent_style, double line_height,
@@ -7537,15 +7628,23 @@ inline_atomic_line_offsets(const ns_box *box, NsPangoLayout *layout,
     double font_ascent = (double)(ns_pango_layout_iter_get_baseline(strut_iter) -
                                   strut_rect.y) / NS_PANGO_SCALE;
     double font_height = (double)strut_rect.height / NS_PANGO_SCALE;
+#ifdef NS_USE_WEB_TEXT_LIB
+    NsPangoLayoutLine *strut_line = ns_pango_layout_iter_get_line_readonly(strut_iter);
+    NsPangoFont *strut_font = strut_line && strut_line->runs
+        ? ((NsPangoLayoutRun *)strut_line->runs->data)->item->analysis.font
+        : NULL;
+    double content_ascent = round(font_ascent);
+    double content_height = content_ascent + round(font_height - font_ascent);
+    double legacy_ascent = inline_font_legacy_ascent(strut_font, content_height);
+    content_ascent += legacy_ascent;
+    content_height += legacy_ascent;
+    double strut_ascent = content_ascent +
+                          floor((line_height - content_height) / 2.0);
+#endif
     ns_pango_layout_iter_free(strut_iter);
     g_object_unref(strut);
     if (font_height <= 0) return NULL;
-#ifdef NS_USE_WEB_TEXT_LIB
-    double content_ascent = round(font_ascent);
-    double content_height = content_ascent + round(font_height - font_ascent);
-    double strut_ascent = content_ascent +
-                          floor((line_height - content_height) / 2.0);
-#else
+#ifndef NS_USE_WEB_TEXT_LIB
     double strut_ascent = font_ascent + (line_height - font_height) / 2.0;
 #endif
     double strut_descent = line_height - strut_ascent;
@@ -7569,12 +7668,23 @@ inline_atomic_line_offsets(const ns_box *box, NsPangoLayout *layout,
     for (int j = 0; j < line_count; j++) {
         NsPangoRectangle logical;
         ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
-        double pango_h = (double)logical.height / NS_PANGO_SCALE;
         double ascent = (double)(ns_pango_layout_iter_get_baseline(iter) -
                                  logical.y) / NS_PANGO_SCALE;
-        if (has_atomic[j]) {
-            double above = MAX(strut_ascent, ascent);
-            double below = MAX(strut_descent, pango_h - ascent);
+        double pango_h = (double)logical.height / NS_PANGO_SCALE;
+#ifdef NS_USE_WEB_TEXT_LIB
+        double above = strut_ascent, below = strut_descent;
+        gboolean css_line = inline_line_css_extent(
+            box, ns_pango_layout_iter_get_line_readonly(iter), line_height,
+            ns_paint_css_line_height_is_normal(parent_style), &above, &below);
+#else
+        double above = 0, below = 0;
+        gboolean css_line = FALSE;
+#endif
+        if (!css_line && has_atomic[j]) {
+            above = MAX(strut_ascent, ascent);
+            below = MAX(strut_descent, pango_h - ascent);
+        }
+        if (css_line || has_atomic[j]) {
             if (above + below > line_heights[j]) line_heights[j] = above + below;
             offsets[j] = above - ascent;
         } else {
