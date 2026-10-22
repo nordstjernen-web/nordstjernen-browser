@@ -1,6 +1,6 @@
 /* Nordstjernen — HTTP/JSON renderer server (IPC experiment, pixels in body). */
 
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 
 #ifdef NS_HAVE_SDL
 #define SDL_MAIN_HANDLED

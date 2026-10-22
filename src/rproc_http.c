@@ -1,6 +1,6 @@
 /* Nordstjernen — HTTP renderer IPC client (experiment; mirrors rproc.c). */
 
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #include "rproc_http.h"
 #include "ipc_http.h"
 #include "print.h"

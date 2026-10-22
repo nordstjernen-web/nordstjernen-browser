@@ -1,6 +1,6 @@
 /* Nordstjernen — local phishing/malware blocklist and warning interstitial. */
 
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #include "safebrowsing.h"
 #include "net.h"
 

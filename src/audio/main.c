@@ -1,5 +1,5 @@
 /* nordstjernen-audio: isolated MP3 / MPEG-1 audio playback helper driven over stdin/stdout. */
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #ifdef main

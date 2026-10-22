@@ -1,7 +1,7 @@
 /* Nordstjernen — renderer request dispatch over the HTTP/JSON IPC protocol,
    shared by nordstjernen-renderer and the single-process in-process host. */
 
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #include "renderer_serve.h"
 #include "libnordstjernen.h"
 #include "renderer_tiles.h"

@@ -1,6 +1,6 @@
 /* Nordstjernen — per-process thread dump to stderr, incl. a SIGQUIT trigger. */
 
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #include "threaddump.h"
 
 #include <stdarg.h>
