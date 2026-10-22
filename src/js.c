@@ -3920,61 +3920,18 @@ static gboolean ns_fire_property_on_handler(ns_js *js, const ns_node *target,
 static JSValue ns_iframe_lookup_realm_window(ns_js *js, ns_node *iframe);
 
 static void
-ns_storage_call_frame_handler(ns_js *js, JSValue fn, JSValueConst fwin,
-                              JSValueConst ev)
+ns_storage_event_retarget_area(ns_js *js, JSValueConst ev, JSValueConst win)
 {
-    if (!JS_IsFunction(js->ctx, fn)) return;
-    JSValueConst args[1] = { ev };
-    JSValue r = JS_Call(js->ctx, fn, fwin, 1, args);
-    if (JS_IsException(r)) {
-        JSValue ex = JS_GetException(js->ctx);
-        const char *m = JS_ToCString(js->ctx, ex);
-        if (m && js->log_cb) {
-            char *line = g_strdup_printf("JS error in onstorage: %s", m);
-            js->log_cb(line, js->log_user_data);
-            g_free(line);
-        }
-        if (m) JS_FreeCString(js->ctx, m);
-        JS_FreeValue(js->ctx, ex);
-    }
-    JS_FreeValue(js->ctx, r);
-}
-
-static void
-ns_storage_fire_frame_on_prop(ns_js *js, JSValueConst fwin, JSValueConst ev)
-{
-    JSAtom atom = JS_NewAtom(js->ctx, "onstorage");
-    JSPropertyDescriptor desc;
-    int has = JS_GetOwnProperty(js->ctx, &desc, fwin, atom);
-    JS_FreeAtom(js->ctx, atom);
-    if (has <= 0) return;
-    if (!(desc.flags & JS_PROP_GETSET))
-        ns_storage_call_frame_handler(js, desc.value, fwin, ev);
-    JS_FreeValue(js->ctx, desc.value);
-    JS_FreeValue(js->ctx, desc.getter);
-    JS_FreeValue(js->ctx, desc.setter);
-}
-
-static void
-ns_storage_fire_frame_body_handler(ns_js *js, JSValueConst fwin,
-                                   const ns_node *body, JSValueConst ev)
-{
-    const char *src = ns_element_get_attr(body, "onstorage");
-    if (!src || !*src) return;
-    if (!ns_csp_inline_event_handler_allowed(js->csp)) return;
-    GString *code = g_string_new(
-        "(function(__nsStorageEvt){with(this){(function(event){\n");
-    g_string_append(code, src);
-    g_string_append(code, "\n}).call(this,__nsStorageEvt);}})");
-    JSValue fn = JS_Eval(js->ctx, code->str, code->len, "<inline>",
-                         JS_EVAL_TYPE_GLOBAL);
-    g_string_free(code, TRUE);
-    if (JS_IsException(fn)) {
-        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
-        return;
-    }
-    ns_storage_call_frame_handler(js, fn, fwin, ev);
-    JS_FreeValue(js->ctx, fn);
+    JSValue area = JS_GetPropertyStr(js->ctx, ev, "storageArea");
+    GHashTable *store = JS_GetOpaque(area, ns_storage_class_id);
+    JS_FreeValue(js->ctx, area);
+    if (!store) return;
+    JSValue own = JS_GetPropertyStr(js->ctx, win,
+        store == js->local_storage ? "localStorage" : "sessionStorage");
+    if (JS_GetOpaque(own, ns_storage_class_id) == store)
+        JS_SetPropertyStr(js->ctx, (JSValue)ev, "storageArea", own);
+    else
+        JS_FreeValue(js->ctx, own);
 }
 
 static void
@@ -3988,12 +3945,18 @@ ns_storage_deliver_frames(ns_js *js, ns_node *n, JSValueConst ev,
             JS_VALUE_GET_PTR(fwin) == JS_VALUE_GET_PTR(source_win);
         if (!is_source) {
             ns_node *body = ns_node_find_first_element(n, "body");
-            if (JS_IsObject(fwin)) {
+            JSContext *realm = JS_IsObject(fwin)
+                ? ns_js_node_realm_context(js, n) : NULL;
+            if (realm) {
+                ns_realm_scope scope;
+                ns_js_realm_scope_enter(js, realm, &scope);
                 JS_SetPropertyStr(js->ctx, (JSValue)ev, "target",
                                   JS_DupValue(js->ctx, fwin));
-                ns_storage_fire_frame_on_prop(js, fwin, ev);
-                if (body)
-                    ns_storage_fire_frame_body_handler(js, fwin, body, ev);
+                ns_storage_event_retarget_area(js, ev, fwin);
+                ns_js_dispatch_window_only_event(js, n, "storage",
+                                                 JS_DupValue(js->ctx, ev),
+                                                 NULL);
+                ns_js_realm_scope_leave(js, &scope);
             } else if (body) {
                 ns_fire_inline_on_handler(js, body, "storage", (JSValue)ev);
                 ns_fire_property_on_handler(js, body, "storage", (JSValue)ev);
@@ -4029,10 +3992,13 @@ ns_storage_drain_deferred_events(ns_js *js)
         if (js->current_doc)
             ns_storage_deliver_frames(js, js->current_doc, p.ev, p.src, 0);
         JSValue g = JS_GetGlobalObject(js->ctx);
-        JS_SetPropertyStr(js->ctx, p.ev, "target", JS_DupValue(js->ctx, g));
+        if (JS_VALUE_GET_PTR(g) != JS_VALUE_GET_PTR(p.src)) {
+            JS_SetPropertyStr(js->ctx, p.ev, "target", JS_DupValue(js->ctx, g));
+            ns_storage_event_retarget_area(js, p.ev, g);
+            ns_js_dispatch_window_only_event(js, js->current_doc, "storage",
+                                             JS_DupValue(js->ctx, p.ev), NULL);
+        }
         JS_FreeValue(js->ctx, g);
-        ns_js_dispatch_window_only_event(js, js->current_doc, "storage",
-                                         JS_DupValue(js->ctx, p.ev), NULL);
         JS_FreeValue(js->ctx, p.ev);
         JS_FreeValue(js->ctx, p.src);
         ns_drain_microtasks(js);
