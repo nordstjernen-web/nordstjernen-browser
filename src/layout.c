@@ -16460,12 +16460,12 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     gboolean flex_grow_filled = FALSE;
     const char *parent_flex_dir = box->parent
         ? flex_direction_of(box->parent->style) : "row";
-    gboolean flex_row_item = box->parent &&
-        box_is_flex_container(box->parent) &&
+    gboolean flex_item = box->parent && box_is_flex_container(box->parent) &&
+        !style_is_absolute_or_fixed(box->style);
+    gboolean flex_row_item = flex_item &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
-    gboolean flex_col_item_stretch = box->parent &&
-        box_is_flex_container(box->parent) &&
+    gboolean flex_col_item_stretch = flex_item &&
         (strcmp(parent_flex_dir, "column") == 0 ||
          strcmp(parent_flex_dir, "column-reverse") == 0);
     if (flex_col_item_stretch) {
