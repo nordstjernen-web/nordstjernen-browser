@@ -205,6 +205,8 @@ NS_PANGO_AVAILABLE_IN_ALL
 void           ns_pango_layout_set_strut_line_height (NsPangoLayout               *layout,
                                                    int                         line_height);
 NS_PANGO_AVAILABLE_IN_ALL
+int            ns_pango_layout_get_strut_line_height (NsPangoLayout               *layout);
+NS_PANGO_AVAILABLE_IN_ALL
 int            ns_pango_font_get_legacy_ascent      (NsPangoFont                 *font,
                                                    int                         content_height);
 NS_PANGO_AVAILABLE_IN_ALL

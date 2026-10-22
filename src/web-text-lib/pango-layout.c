@@ -536,6 +536,13 @@ ns_pango_layout_set_strut_line_height (NsPangoLayout *layout,
     }
 }
 
+int
+ns_pango_layout_get_strut_line_height (NsPangoLayout *layout)
+{
+  g_return_val_if_fail (layout != NULL, 0);
+  return layout->strut_line_height;
+}
+
 /**
  * ns_pango_layout_get_spacing:
  * @layout: a `NsPangoLayout`

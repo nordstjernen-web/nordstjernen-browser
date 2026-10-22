@@ -6704,7 +6704,7 @@ typedef struct text_measure_key {
 
 typedef struct text_measure_head {
     guint serial;
-    int   width, height, indent, spacing;
+    int   width, height, indent, spacing, strut_line_height;
     float line_spacing;
     guint flags;
     guint tabs_len;
@@ -6833,6 +6833,9 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
     head.indent = ns_pango_layout_get_indent(layout);
     head.spacing = ns_pango_layout_get_spacing(layout);
     head.line_spacing = ns_pango_layout_get_line_spacing(layout);
+#ifdef NS_USE_WEB_TEXT_LIB
+    head.strut_line_height = ns_pango_layout_get_strut_line_height(layout);
+#endif
     head.flags = (guint)ns_pango_layout_get_justify(layout) |
                  (guint)ns_pango_layout_get_single_paragraph_mode(layout) << 2 |
                  (guint)ns_pango_layout_get_auto_dir(layout) << 3 |
