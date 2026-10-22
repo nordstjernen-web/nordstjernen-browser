@@ -1092,20 +1092,18 @@ child_makes_block_media(const ns_node *c, GHashTable *styles, int depth)
 {
     if (c->kind != NS_NODE_ELEMENT || !c->name) return FALSE;
     if (node_is_non_rendering(c)) return FALSE;
+    const ns_style *cs = styles ? g_hash_table_lookup(styles, c) : NULL;
+    if (cs && (style_is_none(cs) || style_is_absolute_or_fixed(cs)))
+        return FALSE;
     if (node_has_media_metadata(c) ||
         (is_replaced_block_tag(c->name) &&
          !is_inline_level_replaced(c, styles)) ||
         strcmp(c->name, "iframe") == 0)
         return TRUE;
-    if (styles) {
-        const ns_style *cs = g_hash_table_lookup(styles, c);
-        if (cs) {
-            if (style_is_none(cs) || style_is_absolute_or_fixed(cs))
-                return FALSE;
-            if (style_is_block_level(cs)) return TRUE;
-            if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
-                return FALSE;
-        }
+    if (cs) {
+        if (style_is_block_level(cs)) return TRUE;
+        if (ns_display_is_atomic_inline(ns_css_display_of(cs)))
+            return FALSE;
     }
     return contains_block_media_depth(c, styles, depth + 1);
 }
@@ -21375,7 +21373,7 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
                 &g_array_index(root->attrs, ns_inline_attr, i);
             if (r->dom != target) continue;
             double ex, ey, ew = 0, eh;
-            if (r->kind == NS_INLINE_EMPTY_ELEMENT) {
+            if (r->kind == NS_INLINE_EMPTY_ELEMENT || root->phantom_line) {
                 if (!ns_paint_inline_empty_rect(root, r, &ex, &ey, &eh))
                     continue;
             } else if (r->len == 0 ||
@@ -21428,7 +21426,8 @@ box_inline_rects_for_dom(const ns_box *root, const ns_node *target,
         for (guint i = 0; i < root->attrs->len; i++) {
             const ns_inline_attr *r =
                 &g_array_index(root->attrs, ns_inline_attr, i);
-            if (r->dom != target || r->kind != NS_INLINE_ELEMENT || r->len == 0)
+            if (r->dom != target || r->kind != NS_INLINE_ELEMENT || r->len == 0 ||
+                root->phantom_line)
                 continue;
             guint before = out->len;
             if (!ns_paint_inline_range_rects(root, r->start, r->len, r, out))
