@@ -45,6 +45,12 @@ void   ns_pango_item_cache_insert (NsPangoContext   *context,
 
 void   ns_pango_item_cache_clear  (void);
 
+gboolean ns_pango_attr_lists_equal_in_order (NsPangoAttrList *a,
+                                             NsPangoAttrList *b);
+
+guint    ns_pango_attr_lists_hash           (guint            hash,
+                                             NsPangoAttrList *attrs);
+
 G_END_DECLS
 
 #endif /* __NS_ITEM_CACHE_H__ */

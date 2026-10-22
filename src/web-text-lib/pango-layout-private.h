@@ -155,6 +155,11 @@ void     _ns_pango_layout_get_iter (NsPangoLayout     *layout,
 
 void     _ns_pango_layout_iter_destroy (NsPangoLayoutIter *iter);
 
+GSList * _ns_pango_layout_copy_lines (GSList        *lines,
+                                      NsPangoLayout *layout);
+
+gsize    _ns_pango_layout_lines_size (GSList        *lines);
+
 G_END_DECLS
 
 #endif /* __NS_PANGO_LAYOUT_PRIVATE_H__ */

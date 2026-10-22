@@ -159,9 +159,9 @@ item_key_hash (gconstpointer v)
  * two that are not will simply miss, which costs an itemise and never a wrong
  * answer.
  */
-static gboolean
-attr_lists_equal_in_order (NsPangoAttrList *a,
-                           NsPangoAttrList *b)
+gboolean
+ns_pango_attr_lists_equal_in_order (NsPangoAttrList *a,
+                                    NsPangoAttrList *b)
 {
   GPtrArray *pa, *pb;
 
@@ -210,7 +210,7 @@ item_key_equal (gconstpointer a,
       memcmp (ka->text, kb->text, ka->length) != 0)
     return FALSE;
 
-  return attr_lists_equal_in_order (ka->attrs, kb->attrs);
+  return ns_pango_attr_lists_equal_in_order (ka->attrs, kb->attrs);
 }
 
 static void
@@ -229,9 +229,9 @@ item_entry_free (gpointer data)
  * takes the cheap half of the attributes -- how many there are and where they
  * begin and end -- and leaves comparing their values to the equal function.
  */
-static guint
-hash_attrs (guint            hash,
-            NsPangoAttrList *attrs)
+guint
+ns_pango_attr_lists_hash (guint            hash,
+                          NsPangoAttrList *attrs)
 {
   GPtrArray *a = attrs ? attrs->attributes : NULL;
 
@@ -283,7 +283,7 @@ probe_init (ItemKey          *key,
   hash = hash * 33 + (guint) base_dir;
   hash = hash * 33 + (guint) start_index;
   hash = hash * 33 + (guint) length;
-  key->hash = mix_hash (hash_attrs (hash, attrs));
+  key->hash = mix_hash (ns_pango_attr_lists_hash (hash, attrs));
 
   return TRUE;
 }

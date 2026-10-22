@@ -138,6 +138,10 @@ void              ns_pango_shape_cache_insert_range (const NsPangoShapeKey    *k
 
 void              ns_pango_shape_cache_font_map_changed (void);
 
+guint             ns_pango_shape_cache_epoch     (void);
+
+guint             ns_pango_shape_cache_miss_count (void);
+
 gboolean          ns_pango_shape_cache_matches   (const NsPangoShapeKey    *key,
                                                   const NsPangoGlyphString *glyphs);
 

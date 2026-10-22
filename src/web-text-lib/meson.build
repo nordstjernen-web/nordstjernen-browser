@@ -156,6 +156,7 @@ wtl_sources = files(
   'shape.c',
   'ns-break-cache.c',
   'ns-item-cache.c',
+  'ns-layout-cache.c',
   'ns-shape-cache.c',
 )
 

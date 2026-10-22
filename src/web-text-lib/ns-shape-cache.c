@@ -26,6 +26,7 @@
 #include "ns-shape-cache.h"
 #include "ns-break-cache.h"
 #include "ns-item-cache.h"
+#include "ns-layout-cache.h"
 #include "ns-pango-cache.h"
 #include "pango-impl-utils.h"
 
@@ -110,6 +111,7 @@ static gint cache_hits;
 static gint cache_misses;
 static gint cache_skips;
 static gint skip_font, skip_len, skip_feat, skip_ctx;
+static gint epoch;
 
 /* One variable governs all three caches, which is why the predicate is not
  * named after this one. NS_PANGO_SHAPE_CACHE is the name it shipped under and
@@ -374,6 +376,31 @@ run_size (const CachedRun *run,
 {
   return run->num_glyphs * (sizeof (NsPangoGlyphInfo) + sizeof (int)) +
          sizeof (NsPangoShapeKey) + text_length;
+}
+
+static gboolean
+runs_equal (const CachedRun *a,
+            const CachedRun *b)
+{
+  if (a->num_glyphs != b->num_glyphs)
+    return FALSE;
+
+  for (int i = 0; i < a->num_glyphs; i++)
+    {
+      const NsPangoGlyphInfo *x = &a->glyphs[i];
+      const NsPangoGlyphInfo *y = &b->glyphs[i];
+
+      if (x->glyph != y->glyph ||
+          x->geometry.width != y->geometry.width ||
+          x->geometry.x_offset != y->geometry.x_offset ||
+          x->geometry.y_offset != y->geometry.y_offset ||
+          x->attr.is_cluster_start != y->attr.is_cluster_start ||
+          x->attr.is_color != y->attr.is_color ||
+          a->log_clusters[i] != b->log_clusters[i])
+        return FALSE;
+    }
+
+  return TRUE;
 }
 
 static void
@@ -656,6 +683,9 @@ drop_unread_entries (ShapeShard *shard)
     }
 
   shard->bytes -= MIN (freed, shard->bytes);
+
+  if (freed > 0)
+    g_atomic_int_inc (&epoch);
 }
 
 static void
@@ -682,6 +712,7 @@ make_room (ShapeShard *shard)
     {
       g_hash_table_remove_all (shard->table);
       shard->bytes = 0;
+      g_atomic_int_inc (&epoch);
     }
 }
 
@@ -722,7 +753,11 @@ ns_pango_shape_cache_insert_range (const NsPangoShapeKey    *key,
     const CachedRun *old = g_hash_table_lookup (shard->table, key);
 
     if (old != NULL)
-      shard->bytes -= MIN (run_size (old, key->text_length), shard->bytes);
+      {
+        shard->bytes -= MIN (run_size (old, key->text_length), shard->bytes);
+        if (!runs_equal (old, run))
+          g_atomic_int_inc (&epoch);
+      }
   }
 
   shard->bytes += run_size (run, key->text_length);
@@ -764,7 +799,11 @@ ns_pango_shape_cache_insert (const NsPangoShapeKey    *key,
     const CachedRun *old = g_hash_table_lookup (shard->table, key);
 
     if (old != NULL)
-      shard->bytes -= MIN (run_size (old, key->text_length), shard->bytes);
+      {
+        shard->bytes -= MIN (run_size (old, key->text_length), shard->bytes);
+        if (!runs_equal (old, run))
+          g_atomic_int_inc (&epoch);
+      }
   }
 
   shard->bytes += run_size (run, key->text_length);
@@ -791,6 +830,20 @@ drop_shaped_runs (void)
 
       g_rw_lock_writer_unlock (&shards[i].lock);
     }
+
+  g_atomic_int_inc (&epoch);
+}
+
+guint
+ns_pango_shape_cache_epoch (void)
+{
+  return (guint) g_atomic_int_get (&epoch);
+}
+
+guint
+ns_pango_shape_cache_miss_count (void)
+{
+  return (guint) g_atomic_int_get (&cache_misses);
 }
 
 /* A font arriving invalidates the glyphs outright. It does not invalidate the
@@ -803,6 +856,7 @@ ns_pango_shape_cache_font_map_changed (void)
 {
   drop_shaped_runs ();
   ns_pango_item_cache_clear ();
+  ns_pango_layout_cache_clear ();
 }
 
 void

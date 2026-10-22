@@ -88,6 +88,8 @@
 #include "pango-layout-private.h"
 #include "pango-attributes-private.h"
 #include "pango-font-private.h"
+#include "ns-layout-cache.h"
+#include "ns-shape-cache.h"
 
 
 typedef struct _ItemProperties ItemProperties;
@@ -3707,7 +3709,7 @@ apply_attributes_to_runs (NsPangoLayout   *layout,
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 static void
-ns_pango_layout_check_lines (NsPangoLayout *layout)
+ns_pango_layout_break_lines (NsPangoLayout *layout)
 {
   const char *start;
   gboolean done = FALSE;
@@ -3919,6 +3921,223 @@ ns_pango_layout_check_lines (NsPangoLayout *layout)
 }
 
 #pragma GCC diagnostic pop
+
+static NsPangoGlyphString *
+glyph_string_copy (const NsPangoGlyphString *string)
+{
+  NsPangoGlyphString *copy = ns_pango_glyph_string_new ();
+
+  if (string->num_glyphs > 0)
+    {
+      ns_pango_glyph_string_set_size (copy, string->num_glyphs);
+      memcpy (copy->glyphs, string->glyphs,
+              string->num_glyphs * sizeof (NsPangoGlyphInfo));
+      memcpy (copy->log_clusters, string->log_clusters,
+              string->num_glyphs * sizeof (int));
+    }
+
+  return copy;
+}
+
+static NsPangoLayoutRun *
+run_copy (const NsPangoLayoutRun *run)
+{
+  NsPangoLayoutRun *copy = g_slice_new (NsPangoLayoutRun);
+
+  copy->item = ns_pango_item_copy (run->item);
+  copy->glyphs = glyph_string_copy (run->glyphs);
+  copy->y_offset = run->y_offset;
+  copy->start_x_offset = run->start_x_offset;
+  copy->end_x_offset = run->end_x_offset;
+
+  return copy;
+}
+
+GSList *
+_ns_pango_layout_copy_lines (GSList        *lines,
+                             NsPangoLayout *layout)
+{
+  GSList *out = NULL;
+
+  for (GSList *l = lines; l; l = l->next)
+    {
+      const NsPangoLayoutLinePrivate *src = l->data;
+      NsPangoLayoutLinePrivate *dst = g_slice_new (NsPangoLayoutLinePrivate);
+      GSList *runs = NULL;
+
+      for (GSList *r = src->line.runs; r; r = r->next)
+        runs = g_slist_prepend (runs, run_copy (r->data));
+
+      dst->line = src->line;
+      dst->line.layout = layout;
+      dst->line.runs = g_slist_reverse (runs);
+      dst->ref_count = 1;
+      dst->cache_status = src->cache_status == CACHED ? CACHED : NOT_CACHED;
+      dst->ink_rect = src->ink_rect;
+      dst->logical_rect = src->logical_rect;
+      dst->height = src->height;
+
+      out = g_slist_prepend (out, dst);
+    }
+
+  return g_slist_reverse (out);
+}
+
+gsize
+_ns_pango_layout_lines_size (GSList *lines)
+{
+  gsize size = 0;
+
+  for (GSList *l = lines; l; l = l->next)
+    {
+      const NsPangoLayoutLine *line = l->data;
+
+      size += sizeof (NsPangoLayoutLinePrivate) + sizeof (GSList);
+
+      for (GSList *r = line->runs; r; r = r->next)
+        {
+          const NsPangoLayoutRun *run = r->data;
+
+          size += sizeof (NsPangoLayoutRun) + sizeof (GSList) +
+                  sizeof (NsPangoItemPrivate) +
+                  g_slist_length (run->item->analysis.extra_attrs) *
+                  (sizeof (NsPangoAttribute) + sizeof (GSList) + 64) +
+                  sizeof (NsPangoGlyphString) +
+                  run->glyphs->num_glyphs * (sizeof (NsPangoGlyphInfo) + sizeof (int));
+        }
+    }
+
+  return size;
+}
+
+static gboolean
+runs_agree (const NsPangoLayoutRun *a,
+            const NsPangoLayoutRun *b)
+{
+  if (a->item->offset != b->item->offset ||
+      a->item->length != b->item->length ||
+      a->item->num_chars != b->item->num_chars ||
+      a->item->analysis.font != b->item->analysis.font ||
+      a->item->analysis.level != b->item->analysis.level ||
+      a->item->analysis.flags != b->item->analysis.flags ||
+      a->item->analysis.script != b->item->analysis.script ||
+      a->item->analysis.gravity != b->item->analysis.gravity ||
+      a->y_offset != b->y_offset ||
+      a->start_x_offset != b->start_x_offset ||
+      a->end_x_offset != b->end_x_offset ||
+      a->glyphs->num_glyphs != b->glyphs->num_glyphs)
+    return FALSE;
+
+  for (int i = 0; i < a->glyphs->num_glyphs; i++)
+    {
+      const NsPangoGlyphInfo *x = &a->glyphs->glyphs[i];
+      const NsPangoGlyphInfo *y = &b->glyphs->glyphs[i];
+
+      if (x->glyph != y->glyph ||
+          x->geometry.width != y->geometry.width ||
+          x->geometry.x_offset != y->geometry.x_offset ||
+          x->geometry.y_offset != y->geometry.y_offset ||
+          x->attr.is_cluster_start != y->attr.is_cluster_start ||
+          x->attr.is_color != y->attr.is_color ||
+          a->glyphs->log_clusters[i] != b->glyphs->log_clusters[i])
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+lines_agree (GSList *a,
+             GSList *b)
+{
+  for (; a && b; a = a->next, b = b->next)
+    {
+      NsPangoLayoutLine *x = a->data;
+      NsPangoLayoutLine *y = b->data;
+      NsPangoRectangle ink_x, ink_y, logical_x, logical_y;
+      int height_x, height_y;
+      GSList *rx, *ry;
+
+      if (x->start_index != y->start_index ||
+          x->length != y->length ||
+          x->is_paragraph_start != y->is_paragraph_start ||
+          x->resolved_dir != y->resolved_dir)
+        return FALSE;
+
+      for (rx = x->runs, ry = y->runs; rx && ry; rx = rx->next, ry = ry->next)
+        if (!runs_agree (rx->data, ry->data))
+          return FALSE;
+
+      if (rx || ry)
+        return FALSE;
+
+      ns_pango_layout_line_get_extents_and_height (x, &ink_x, &logical_x, &height_x);
+      ns_pango_layout_line_get_extents_and_height (y, &ink_y, &logical_y, &height_y);
+
+      if (memcmp (&ink_x, &ink_y, sizeof ink_x) != 0 ||
+          memcmp (&logical_x, &logical_y, sizeof logical_x) != 0 ||
+          height_x != height_y)
+        return FALSE;
+    }
+
+  return a == NULL && b == NULL;
+}
+
+static void
+verify_restored_lines (NsPangoLayout *layout)
+{
+  GSList *served = layout->lines;
+  NsPangoLogAttr *served_attrs = layout->log_attrs;
+  gboolean served_wrapped = layout->is_wrapped;
+  gboolean served_ellipsized = layout->is_ellipsized;
+
+  layout->lines = NULL;
+  layout->line_count = 0;
+  layout->log_attrs = NULL;
+  layout->is_wrapped = FALSE;
+  layout->is_ellipsized = FALSE;
+
+  ns_pango_layout_break_lines (layout);
+
+  if (!lines_agree (served, layout->lines) ||
+      served_wrapped != layout->is_wrapped ||
+      served_ellipsized != layout->is_ellipsized ||
+      memcmp (served_attrs, layout->log_attrs,
+              (layout->n_chars + 1) * sizeof (NsPangoLogAttr)) != 0)
+    g_warning ("layout cache mismatch on '%.*s'", layout->length, layout->text);
+
+  g_slist_free_full (served, (GDestroyNotify) ns_pango_layout_line_unref);
+  g_free (served_attrs);
+}
+
+static void
+ns_pango_layout_check_lines (NsPangoLayout *layout)
+{
+  NsPangoLayoutKey key;
+  gboolean keyed;
+
+  check_context_changed (layout);
+
+  if (G_LIKELY (layout->lines))
+    return;
+
+  if (G_UNLIKELY (!layout->text))
+    ns_pango_layout_set_text (layout, NULL, 0);
+
+  keyed = ns_pango_layout_cache_key_init (&key, layout);
+
+  if (keyed && ns_pango_layout_cache_restore (&key, layout))
+    {
+      if (G_UNLIKELY (ns_pango_shape_cache_verifying ()))
+        verify_restored_lines (layout);
+      return;
+    }
+
+  ns_pango_layout_break_lines (layout);
+
+  if (keyed)
+    ns_pango_layout_cache_store (&key, layout);
+}
 
 /**
  * ns_pango_layout_line_ref:

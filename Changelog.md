@@ -3,6 +3,20 @@ Changelog:
 
 1.0.36:
 ======
+* Performance: text laid out again with the same inputs now reuses the
+  lines of the earlier layout. The engine measures an inline run for
+  min-content and max-content, lays it out at its width and paints it,
+  and each of those built a new layout that itemized, shaped and broke
+  the same text again; on a frozen copy of Temu 95% of all layouts
+  repeated an earlier one. web-text-lib now keeps the broken lines, with
+  their extents, keyed on everything the line breaker reads, and copies
+  them into the next layout with the same text, attributes, font, width
+  and context. A layout is only kept when all of its glyphs came from the
+  shape cache, and is dropped once that cache replaces or evicts a run,
+  so a copy always matches what breaking the text again would give.
+  `--debug=net` reports the hits. On frozen copies of Temu, AP News, The
+  Guardian, The New York Times and CNN the main-thread CPU to first paint
+  drops by 16%, 8%, 7%, 6% and 6%.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
