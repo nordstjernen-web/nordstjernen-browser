@@ -32,6 +32,14 @@ Changelog:
   headline next to a 496 px image in a 760 px card started under the
   image. Every Washington Post story card with its photo on the right
   showed the headline, blurb and byline below the photo.
+* Paint: an image that fails to load, or has no source, no longer covers
+  its box with an opaque white or light grey placeholder, so the
+  element's own background and whatever lies behind it stay visible, as
+  in Chrome (the ESPN story cards with a dark backdrop showed a light
+  grey block). A sized image without alt text gets a thin silver frame
+  and the broken-image icon when its request failed; one with alt text
+  shows the icon followed by the alt text in the element's own font and
+  colour. An image that is still loading paints nothing.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to
