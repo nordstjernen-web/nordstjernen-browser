@@ -507,6 +507,13 @@ Changelog:
   placeholder rectangles, which are all a measurement reads of them. On
   a frozen copy of AP News every text measurement was a miss; now 82% of
   them are hits and the main-thread CPU to first paint drops by 6%.
+* Paint: a `background-image: url(...)` on an inline element such as a
+  link or a `<span>` is drawn. Only gradients and the backgrounds of
+  form controls reached the inline painter, so the icon Wikipedia puts
+  after every external link, and any other inline icon set as a
+  background, was missing. The inline element now records its first
+  image layer like a form control does, and every such image of a line
+  box is fetched, not only the first one.
 * Layout: grid line names of 24 characters or more now work. Each name
   was kept in a 24-byte buffer and a longer one was dropped, so an item
   placed on it (`grid-area: content-toggleable / content`) fell back to

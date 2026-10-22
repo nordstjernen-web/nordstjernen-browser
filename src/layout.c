@@ -1729,6 +1729,15 @@ collect_peek_image(const char *src)
     return img;
 }
 
+static const char *
+style_first_bg_url(const ns_style *s)
+{
+    for (const ns_css_value *l = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+         l; l = l->next_layer)
+        if (l->kind == NS_CSS_V_URL && l->u.url) return l->u.url;
+    return NULL;
+}
+
 static void
 collect_box_bg_image(ns_box *box, const ns_style *s)
 {
@@ -2812,7 +2821,6 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
     const ns_style *s = NULL;
     double fs = 16;
     const char *bg_image_src = NULL;
-    void *bg_image = NULL;
     if (dom && styles) {
         s = g_hash_table_lookup(styles, dom);
         if (s) {
@@ -2825,18 +2833,7 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
                                         fs, 0);
             if (bw > 0) bw += ns_control_css_extra_w(dom, s);
             if (bh > 0) bh += ns_control_css_extra_h(dom, s);
-            const ns_css_value *bg = s->values[NS_CSS_BACKGROUND_IMAGE];
-            if (bg && bg->kind == NS_CSS_V_URL && bg->u.url) {
-                bg_image_src = bg->u.url;
-                if (g_image_cache_for_layout) {
-                    char *abs = g_base_url_for_layout
-                        ? ns_url_resolve(g_base_url_for_layout, bg_image_src)
-                        : NULL;
-                    bg_image = ns_image_cache_peek(g_image_cache_for_layout,
-                                                   abs ? abs : bg_image_src);
-                    g_free(abs);
-                }
-            }
+            bg_image_src = style_first_bg_url(s);
         }
     }
     if (dom && dom->name && strcmp(dom->name, "textarea") == 0) {
@@ -2860,7 +2857,7 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
         .native_chrome = !control_prefers_css_chrome(k, dom, s),
         .style = s,
         .bg_image_src = bg_image_src,
-        .bg_image = bg_image,
+        .bg_image = collect_peek_image(bg_image_src),
     };
     g_array_append_val(attrs, a);
 }
@@ -4604,7 +4601,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         .rise_px = ctx->rise,
         .dom = n,
         .style = s,
+        .bg_image_src = style_first_bg_url(s),
     };
+    elem.bg_image = collect_peek_image(elem.bg_image_src);
     g_array_append_val(ctx->attrs, elem);
     ctx->rise = outer_rise;
     append_inline_spacer(ctx, mr);

@@ -1881,6 +1881,12 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             g_ptr_array_add(srcs, box->media->border_image_src);
         if (box->media->mask_image_src)
             g_ptr_array_add(srcs, box->media->mask_image_src);
+        for (guint ai = 0; box->attrs && ai < box->attrs->len; ai++) {
+            const ns_inline_attr *a =
+                &g_array_index(box->attrs, ns_inline_attr, ai);
+            if (a->bg_image_src && a->bg_image_src != box->media->bg_image_src)
+                g_ptr_array_add(srcs, (gpointer)a->bg_image_src);
+        }
         const char *box_base = engine_node_frame_base(box->dom, base_url);
         for (guint si = 0; si < srcs->len; si++) {
             const char *src = g_ptr_array_index(srcs, si);
