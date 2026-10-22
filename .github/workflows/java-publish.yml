@@ -53,7 +53,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.8.0'
+          gradle-version: '9.8.2'
 
       - name: Check the tag matches the Java version
         run: |
