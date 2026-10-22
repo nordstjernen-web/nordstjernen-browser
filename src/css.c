@@ -17383,6 +17383,7 @@ ns_css_background_shorthand_serialize(const char *image, const char *position,
 
 typedef struct {
     char *image, *pos_x, *pos_y, *size, *repeat, *attachment, *origin, *clip;
+    char *pos_x_used, *pos_y_used;
 } bg_layer_text;
 
 static void
@@ -17391,6 +17392,8 @@ bg_layer_text_clear(bg_layer_text *l)
     g_free(l->image);
     g_free(l->pos_x);
     g_free(l->pos_y);
+    g_free(l->pos_x_used);
+    g_free(l->pos_y_used);
     g_free(l->size);
     g_free(l->repeat);
     g_free(l->attachment);
@@ -17561,6 +17564,7 @@ bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
         char *canon = position_canonical_ex(pos->str, TRUE, TRUE);
         if (canon) {
             position_split_specified(canon, &out->pos_x, &out->pos_y);
+            position_split(canon, &out->pos_x_used, &out->pos_y_used);
             g_free(canon);
         } else {
             ok = FALSE;
@@ -17661,8 +17665,8 @@ mask_layer_append(const char *layer, ns_css_value **heads,
                                          : "border-box";
         const char *geom[4] = {
             parts.geom.size ? parts.geom.size : "auto",
-            parts.geom.pos_x ? parts.geom.pos_x : "0%",
-            parts.geom.pos_y ? parts.geom.pos_y : "0%",
+            parts.geom.pos_x_used ? parts.geom.pos_x_used : "0%",
+            parts.geom.pos_y_used ? parts.geom.pos_y_used : "0%",
             parts.geom.repeat ? parts.geom.repeat : "repeat",
         };
         static const ns_css_prop geom_props[4] = {
@@ -17762,9 +17766,13 @@ parse_background_shorthand(const char *vtext, gboolean important,
                     l->image, l->pos_x, l->pos_y, l->size, l->repeat,
                     l->attachment, l->origin, l->clip,
                 };
+                const char *used_texts[8] = {
+                    NULL, l->pos_x_used, l->pos_y_used,
+                };
                 const char *text = layer_texts[f];
                 if (!text) text = fields[f].initial;
-                ns_css_value *v = parse_value_for(fields[f].prop, text);
+                const char *used = used_texts[f] ? used_texts[f] : text;
+                ns_css_value *v = parse_value_for(fields[f].prop, used);
                 if (!v) { ok = FALSE; break; }
                 g_free(v->specified);
                 v->specified = g_strdup(text);
