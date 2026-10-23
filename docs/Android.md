@@ -248,7 +248,7 @@ Versioning: `versionCode` is a monotonic int and Play rejects a repeat;
 `android/app/build.gradle` and are **not** derived from `meson.build`, so they
 are bumped by hand. The ladder so far: 1.0.22 = 7, 1.0.23 = 8, 1.0.24 = 9,
 1.0.25 = 10, 1.0.26 = 11, 1.0.27 = 12, 1.0.28 = 13, 1.0.29 = 14,
-1.0.30 = 15, 1.0.31 = 17 (16 was already taken on Play), 1.0.32 = 18, 1.0.33 = 19.
+1.0.30 = 15, 1.0.31 = 17 (16 was already taken on Play), 1.0.32 = 18, 1.0.33 = 19, 1.0.36 = 20.
 
 For a critical security fix, halt rollout, then re-submit on a fast rollout.
 
