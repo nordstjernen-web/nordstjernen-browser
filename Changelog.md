@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a `MessagePort` transferred into another frame through
+  `postMessage` now belongs to the receiving realm: it takes that
+  realm's `MessagePort.prototype`, and messages posted to it are
+  delivered there. The port used to keep the sender's prototype and an
+  internal `_realm` function, so a frame could reach the sender's
+  `Function` through `port.postMessage.constructor`, and the port's
+  messages were cloned into the sender's realm. The port's internal
+  fields are hidden from page script.
 * Security: the config file, session list, cookie jar, HSTS store,
   localStorage, extension storage and the font and media caches are
   written with mode `0600`, as SECURITY.md states. They were created

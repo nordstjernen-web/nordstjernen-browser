@@ -14622,7 +14622,7 @@ ns_port_new(JSContext *ctx)
     JS_SetPropertyStr(ctx, p, "onmessage", JS_NULL);
     JS_SetPropertyStr(ctx, p, "onmessageerror", JS_NULL);
     JS_DefinePropertyValueStr(ctx, p, "_realm",
-        JS_NewCFunction(ctx, ns_port_realm_marker, "", 0), 0);
+        JS_NewCFunction(ctx, ns_port_realm_marker, "", 0), JS_PROP_CONFIGURABLE);
     JS_SetPropertyStr(ctx, p, "_is_port",       JS_TRUE);
     JS_SetPropertyStr(ctx, p, "_closed",        JS_FALSE);
     JS_SetPropertyStr(ctx, p, "_started",       JS_FALSE);
@@ -14888,6 +14888,24 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
 }
 
 static void
+ns_port_adopt(JSContext *ctx, JSContext *realm, JSValueConst port)
+{
+    JSValue is_port = JS_GetPropertyStr(ctx, port, "_is_port");
+    gboolean ok = JS_ToBool(ctx, is_port) > 0;
+    JS_FreeValue(ctx, is_port);
+    if (!ok) return;
+    JSValue g = JS_GetGlobalObject(realm);
+    JSValue proto = ns_proto_of(realm, g, "MessagePort");
+    if (JS_IsObject(proto) && JS_SetPrototype(realm, port, proto) < 0)
+        JS_FreeValue(realm, JS_GetException(realm));
+    JS_FreeValue(realm, proto);
+    JS_FreeValue(realm, g);
+    JS_DefinePropertyValueStr(realm, port, "_realm",
+        JS_NewCFunction(realm, ns_port_realm_marker, "", 0),
+        JS_PROP_CONFIGURABLE);
+}
+
+static void
 ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
 {
     if (!realm) return;
@@ -14904,9 +14922,11 @@ ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
     JS_FreeValue(ctx, data);
     JSValue realm_ports = JS_NewArray(realm);
     uint32_t n = JS_IsArray(ports) ? ns_js_array_length(ctx, ports) : 0;
-    for (uint32_t i = 0; i < n; i++)
-        JS_SetPropertyUint32(realm, realm_ports, i,
-                             JS_GetPropertyUint32(ctx, ports, i));
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue port = JS_GetPropertyUint32(ctx, ports, i);
+        if (realm != ctx && JS_IsObject(port)) ns_port_adopt(ctx, realm, port);
+        JS_SetPropertyUint32(realm, realm_ports, i, port);
+    }
     JS_SetPropertyStr(ctx, ev, "ports", ns_freeze_array(realm, realm_ports));
     JS_FreeValue(realm, realm_ports);
     JS_FreeValue(ctx, ports);
@@ -28175,7 +28195,12 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndRealmProtos",
                                          "__ndPlatformFns",
                                          "__ndAdoptCss",
-                                         "__ndCrossWindowMaker" };
+                                         "__ndCrossWindowMaker",
+                                         "_realm",
+                                         "_pair",
+                                         "_queue",
+                                         "_is_port",
+                                         "_started" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
     ns_net_add_private_names(ctx);
