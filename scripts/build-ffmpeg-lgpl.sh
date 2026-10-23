@@ -30,17 +30,28 @@ trap 'rm -rf "$WORK"' EXIT
 
 log() { printf '[ffmpeg-lgpl] %s\n' "$*" >&2; }
 
-TARBALL="$WORK/ffmpeg-${VER}.tar.gz"
-fetched=0
-for url in \
-    "https://ffmpeg.org/releases/ffmpeg-${VER}.tar.gz" \
-    "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n${VER}"; do
-    log "fetching $url"
-    if curl -fsSL --retry 3 --max-time 300 -o "$TARBALL" "$url"; then
-        fetched=1; break
+case "$VER" in
+    8.1.1) SHA256=1b856f26a07082b6879f3e5300d81e8c7ce3b410ade5898b14382d90c2904634 ;;
+    *)     SHA256=${FFMPEG_SHA256:-} ;;
+esac
+[ -n "$SHA256" ] || { log "ERROR: no pinned checksum for FFmpeg ${VER}; set FFMPEG_SHA256"; exit 1; }
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
     fi
-done
-[ "$fetched" = 1 ] || { log "ERROR: could not download FFmpeg ${VER}"; exit 1; }
+}
+
+TARBALL="$WORK/ffmpeg-${VER}.tar.gz"
+url="https://ffmpeg.org/releases/ffmpeg-${VER}.tar.gz"
+log "fetching $url"
+curl -fsSL --retry 3 --max-time 300 -o "$TARBALL" "$url" ||
+    { log "ERROR: could not download FFmpeg ${VER}"; exit 1; }
+got=$(sha256_of "$TARBALL")
+[ "$got" = "$SHA256" ] ||
+    { log "ERROR: checksum mismatch for $url (got $got)"; exit 1; }
 
 SRC="$WORK/ffmpeg-src"
 mkdir -p "$SRC"
