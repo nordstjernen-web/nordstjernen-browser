@@ -297,6 +297,18 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         p->status = code;
         p->is_event_stream = FALSE;
         g_clear_pointer(&p->allow_origin, g_free);
+    } else if (total >= 9 && p->status >= 300 && p->status < 400 &&
+               p->es->csp &&
+               !g_ascii_strncasecmp(buffer, "Location:", 9)) {
+        char *cur = NULL;
+        curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &cur);
+        g_autofree char *loc = g_strstrip(g_strndup(buffer + 9, total - 9));
+        g_autofree char *target = cur ? ns_url_resolve(cur, loc) : NULL;
+        if (!target ||
+            !ns_csp_allows(p->es->csp, NS_CSP_CONNECT, target, p->es->origin)) {
+            p->fatal = TRUE;
+            return 0;
+        }
     } else if (total >= 28 &&
                !g_ascii_strncasecmp(buffer, "Access-Control-Allow-Origin:", 28)) {
         g_free(p->allow_origin);
