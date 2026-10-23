@@ -591,8 +591,6 @@ main(int argc, char **argv)
             return rc;
         }
     }
-    ns_thread_dump_install_signal("nordstjernen");
-
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
 
     for (int i = 1; i < argc; i++) {
@@ -647,6 +645,7 @@ main(int argc, char **argv)
         ns_security_sandbox_init(g_self_exe);
         ns_security_seccomp_init();
     }
+    ns_thread_dump_install_signal("nordstjernen");
     ns_debug_log_init();
     g_log_set_writer_func(ns_log_writer, NULL, NULL);
 #ifdef G_OS_WIN32

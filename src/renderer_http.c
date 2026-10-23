@@ -147,8 +147,6 @@ main(int argc, char **argv)
     renderer_watch_parent_death();
 #endif
 
-    ns_thread_dump_install_signal("nordstjernen-renderer");
-
     int shm_mode = argc > 3 && strcmp(argv[3], "shm") == 0;
     int stdio_mode = argc > 3 && strcmp(argv[3], "stdio") == 0;
     size_t fb_size = (size_t)max_w * (size_t)max_h * 4u;
@@ -250,6 +248,7 @@ main(int argc, char **argv)
     if (scheme && *scheme)
         ns_browser_set_color_scheme(g_str_equal(scheme, "dark"));
     ns_browser_sandbox(argv[0]);
+    ns_thread_dump_install_signal("nordstjernen-renderer");
 
     size_t bufsz = fb_size + 65536;
     if (bufsz > 0x7fffffff) bufsz = 0x7fffffff;
