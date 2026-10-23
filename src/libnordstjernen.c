@@ -909,9 +909,17 @@ browser_url_is_privileged_page(const char *url)
 }
 
 static gboolean
+browser_url_is_http(const char *url)
+{
+    return g_ascii_strncasecmp(url, "http://", 7) == 0 ||
+           g_ascii_strncasecmp(url, "https://", 8) == 0;
+}
+
+static gboolean
 browser_url_continues_interstitial(const char *url, const char *from)
 {
     const char *rest = url + strlen(NS_UNSAFE_CONTINUE_SCHEME);
+    if (!browser_url_is_http(rest)) return FALSE;
     g_autofree char *target_host = ns_url_host_from(rest);
     g_autofree char *from_host = from ? ns_url_host_from(from) : NULL;
     return target_host && from_host && *target_host &&
@@ -1555,13 +1563,16 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         const char *rest = url;
         while (g_str_has_prefix(rest, NS_UNSAFE_CONTINUE_SCHEME))
             rest += strlen(NS_UNSAFE_CONTINUE_SCHEME);
-        if (!*rest) return NULL;
+        if (!browser_url_is_http(rest)) return NULL;
         char *real = g_strdup(rest);
         char *host = ns_url_host_from(real);
         if (host) {
             ns_safebrowsing_allow_host(host);
             g_free(host);
         }
+        g_pending_referrer = g_steal_pointer(&referrer);
+        g_pending_user_activated = pending_user_activated;
+        g_pending_reload = reload;
         ns_browser *b = browser_open_common(real, viewport_width,
                                             viewport_height, settle_ms,
                                             body, body_len, content_type);
