@@ -23649,7 +23649,9 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
         return JS_FALSE;
     const char *url = JS_ToCString(ctx, argv[0]);
     if (!url) return JS_FALSE;
-    if (!g_str_has_prefix(url, "blob:")) {
+    if (!g_str_has_prefix(url, "blob:") || !js->blob_urls ||
+        !g_hash_table_contains(js->blob_urls, url) ||
+        !ns_net_blob_url_visible_to(url, ns_js_current_url(js))) {
         JS_FreeCString(ctx, url);
         return JS_FALSE;
     }
@@ -23682,6 +23684,8 @@ ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type)
 {
     if (out_type) *out_type = NULL;
     if (!js || !js->blob_urls || !url) return NULL;
+    const char *doc_url = ns_js_current_url(js);
+    if (*doc_url && !ns_net_blob_url_visible_to(url, doc_url)) return NULL;
     ns_blob_entry *e = g_hash_table_lookup(js->blob_urls, url);
     if (!e) return NULL;
     if (out_type) *out_type = e->type;
