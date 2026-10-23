@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Docs: SECURITY.md now states that W^X is a property of the code
+  rather than something seccomp enforces (GPU shader compilers need
+  executable mappings). It also lists the developer environment knobs
+  and notes the extension directory's location and the Landlock thread
+  caveat on older kernels. Two new known gaps are documented: content
+  scripts in the page's JS world, and a renderer that can write the
+  config file.
 * Security (sandbox): unpacked extensions load from
   `~/.local/share/nordstjernen-extensions` (an existing
   `nordstjernen/extensions` directory is moved there at startup), which
