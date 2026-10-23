@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Security (Linux sandbox): with WebGL and WebGPU both switched off, the
+  renderer's seccomp filter refuses `mprotect`/`pkey_mprotect` with
+  `PROT_EXEC` and anonymous executable `mmap`, and drops
+  `remap_file_pages`. That enforces W^X for injected code, while
+  file-backed executable mappings stay allowed for the dynamic loader.
+  GStreamer's ORC is switched to its C fallback in that mode.
 * Renderers defer configuration saves to the parent only when the GTK
   shell starts them (it sets `NS_CONFIG_VIA_PARENT`). Other embedders
   of `nordstjernen-renderer`, such as the Java front-end, which do not
