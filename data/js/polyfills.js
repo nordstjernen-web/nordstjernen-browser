@@ -4525,7 +4525,9 @@
     (function () {
         var backend = global.__nd_idb;
         if (!backend) return;
-        if (global.indexedDB) {
+        var hasFactory;
+        try { hasFactory = !!global.indexedDB; } catch (e) { hasFactory = true; }
+        if (hasFactory) {
             try { delete global.__nd_idb; } catch (e) {
                 try { global.__nd_idb = undefined; } catch (e2) {}
             }

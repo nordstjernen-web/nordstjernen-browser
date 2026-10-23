@@ -6,6 +6,19 @@ Changelog:
 * Build: `config_free_strings` casts the string slot through `void *`,
   so clang's `-Wcast-align` no longer fails the `--werror` Linux, macOS
   and Windows CI builds.
+* Security (iframes): frames that are cross-origin to their embedder,
+  sandboxed without `allow-same-origin`, or nested inside such a frame now
+  get a JavaScript realm built natively, the same way as the page's main
+  realm, instead of one cloned from the embedder. Their interface
+  objects, prototypes, polyfill-implemented APIs, collections, events and
+  location objects all belong to the frame's own context. The polyfill
+  bundle is compiled to bytecode once per process and loaded per context.
+  The engine helpers behind `URL`, `URLSearchParams`, `getComputedStyle`,
+  `NodeList` and body consumers are kept per context, and events the
+  engine builds for a node in another realm are adopted into that realm,
+  which also fixes `click()` events inside same-origin frames.
+* Interface member naming at realm setup runs in C instead of JavaScript,
+  cutting about 20 ms from every page load and every new frame.
 * Security (Linux sandbox): with WebGL and WebGPU both switched off, the
   renderer's seccomp filter refuses `mprotect`/`pkey_mprotect` with
   `PROT_EXEC` and anonymous executable `mmap`, and drops

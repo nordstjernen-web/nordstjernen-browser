@@ -406,17 +406,30 @@ hardened network pipeline as any other resource (TLS verification,
 cap, CSP `frame-src`); `srcdoc` is parsed inline. The content document is
 parsed by lexbor and laid out in place.
 
-A loaded frame gets a JavaScript realm, but **within the parent tab's
-single QuickJS runtime** — there is no separate runtime, context, or OS
-process per frame. The realm is a synthetic scope: the frame sees its own
-`window`, `document`, `location`, and `history`, and `top`/`parent`/`self`/
-`frames` are redirected to the frame itself rather than exposing the parent's
-real global. This is a best-effort JavaScript-level boundary for ordinary
-content, **not** a hard security boundary the way per-tab runtimes or the
-cross-origin top-level navigation teardown (above) are: a memory-safety bug
-or a Proxy escape in one frame is not contained from the rest of the
-document's origin. Treat frame isolation as defence-in-depth, not as an
-origin sandbox.
+A loaded frame gets its own JavaScript realm (a QuickJS context) **within
+the parent tab's single QuickJS runtime** — there is no separate runtime or
+OS process per frame. How the realm is built depends on the frame's origin:
+
+- A frame that is cross-origin to its embedder, sandboxed without
+  `allow-same-origin`, or nested inside such a frame gets a realm built the
+  same way as the page's main realm: the C bindings, the per-context class
+  prototypes, the polyfill bundle (compiled to bytecode once per process and
+  loaded per context) and the post-setup steps all run in the frame's own
+  context. No constructor, prototype or engine helper in its global
+  environment belongs to the embedder's context, and objects the engine
+  hands it (DOM wrappers, collections, events, message ports) use the
+  frame's own prototypes. Its `parent`/`top` are cross-origin proxies that
+  only expose `postMessage`, `location` assignment and the other
+  cross-origin-safe members.
+- A same-origin frame keeps the faster path: its realm copies the
+  embedder's class prototypes and C functions, and functions written in
+  JavaScript run as forwarders in the embedder's context. That is
+  acceptable because the two documents share an origin.
+
+This is a JavaScript-level boundary, **not** a process boundary the way
+per-tab renderers or the cross-origin top-level navigation teardown
+(above) are: a memory-safety bug in one frame is not contained from the
+rest of the tab.
 
 The `sandbox` attribute is parsed and enforced, with nested frames
 inheriting the intersection of their ancestors' sandboxes:
@@ -470,14 +483,13 @@ The `document.cookie` setter:
 
 ## Known gaps
 
-- **Iframe isolation is JS-level, not a runtime or process boundary.**
-  A loaded frame shares the parent tab's QuickJS runtime and global
-  prototypes; its separate `window`/`document`/`location` and redirected
-  `top`/`parent` are a synthetic scope, not a true cross-origin sandbox.
-  Cross-document `postMessage` is correspondingly limited. A
-  per-origin/per-frame runtime would close this and is tracked as future
-  work; until then, do not rely on a cross-origin frame being contained
-  from the embedding origin.
+- **Iframe isolation is a realm boundary, not a runtime or process
+  boundary.** Cross-origin and opaque-origin frames get their own realm
+  with their own intrinsics and interface objects, but they share the
+  tab's QuickJS runtime, heap and renderer process with the embedder, so
+  a memory-safety bug in the engine is not contained to one frame. A
+  per-origin renderer process would close this and is tracked as future
+  work.
 - **Extension content scripts run in the page's JavaScript world.**
   Their `chrome.*` bridges are bound in C and `chrome.storage` works
   without page-replaceable intrinsics, but the content script's own
