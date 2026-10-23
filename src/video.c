@@ -1122,7 +1122,9 @@ ns_video_stream_file_create(ns_video_cache *cache, const char *subdir,
     char *path = g_strdup_printf("%s/%c%d-%u.dat", dir, prefix,
                                  (int)getpid(), ++cache->next_token);
     char *file_url = NULL;
-    if (g_file_set_contents(path, (const char *)data, (gssize)len, NULL))
+    if (g_file_set_contents_full(path, (const char *)data, (gssize)len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL))
         file_url = g_strdup_printf("file://%s", path);
     g_free(path);
     g_free(dir);

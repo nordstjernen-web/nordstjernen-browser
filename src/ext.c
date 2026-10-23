@@ -265,7 +265,9 @@ ns_ext_js_swrite(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, json_v);
     gboolean ok = FALSE;
     g_autofree char *path = ns_ext_storage_path(id, area);
-    if (path && json && g_file_set_contents(path, json, -1, NULL)) {
+    if (path && json && g_file_set_contents_full(path, json, -1,
+                                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL)) {
         g_chmod(path, 0600);
         ok = TRUE;
     }
