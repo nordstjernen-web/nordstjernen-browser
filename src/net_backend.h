@@ -59,6 +59,7 @@ typedef struct ns_hop_req {
     const char        *no_proxy;
     const char        *cookie_jar_path;
     const char        *cookie_js_path;
+    int                samesite_cross;
     gboolean           follow_redirects;
     long               max_redirs;
     gboolean           request_ftp;
@@ -107,7 +108,7 @@ gboolean    ns_net_aborting(void);
 void        ns_net_store_set_cookie(const char *url, const char *value,
                                     const char *jar_path);
 char       *ns_net_cookies_for_request(const char *url, const char *jar_path,
-                                       const char *js_path);
+                                       const char *js_path, int samesite_cross);
 void        ns_net_hsts_note(const char *url, const char *header_value);
 
 G_END_DECLS

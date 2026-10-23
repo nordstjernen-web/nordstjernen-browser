@@ -1115,7 +1115,8 @@ ns_h2_submit_locked(ns_conn *conn, ns_h2 *c)
 
     char *cookie = c->req->cookie_jar_path
         ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
-                                     c->req->cookie_js_path)
+                                     c->req->cookie_js_path,
+                                     c->req->samesite_cross)
         : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);
@@ -1347,7 +1348,8 @@ ns_h2_run_http1(ns_h2 *c, const char *authority, const char *path)
         g_string_append_printf(reqs, "Referer: %s\r\n", c->req->referer);
     char *cookie = c->req->cookie_jar_path
         ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
-                                     c->req->cookie_js_path)
+                                     c->req->cookie_js_path,
+                                     c->req->samesite_cross)
         : NULL;
     if (cookie) {
         g_string_append_printf(reqs, "Cookie: %s\r\n", cookie);
@@ -2359,7 +2361,8 @@ ns_h3_setup(ns_h3 *h, const char *authority, const char *path,
         NS_H3_ADD("referer", c->req->referer);
     char *cookie = c->req->cookie_jar_path
         ? ns_net_cookies_for_request(c->url, c->req->cookie_jar_path,
-                                     c->req->cookie_js_path)
+                                     c->req->cookie_js_path,
+                                     c->req->samesite_cross)
         : NULL;
     if (cookie) {
         g_ptr_array_add(owned, cookie);

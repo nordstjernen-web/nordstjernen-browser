@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: cookies obey `SameSite`. On a navigation from another site,
+  `Strict` cookies are withheld, and on a cross-site POST (or any other
+  unsafe method) `Lax` ones too; a cookie without the attribute counts
+  as `Lax`, as in other browsers. A form submitted by a user's click
+  now also reports the page it came from: it went out with the target
+  site's own `Origin` and `Sec-Fetch-Site: none`, which only
+  script-driven navigations had been fixed for. Cross-site GET
+  navigations no longer send `Origin`.
 * Docs: SECURITY.md now matches the code. Service workers and
   extensions are implemented, and WebGL and WebGPU are on by default.
   The full codec set is listed. The Landlock list now includes the
