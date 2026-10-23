@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a function passed into a `ShadowRealm` through a wrapped
+  function now reaches the realm as a wrapper created in that realm, as
+  the proposal specifies. It used to arrive unwrapped, so code in the
+  realm could reach the page's `Function` constructor through
+  `f.constructor`. `ShadowRealm.prototype.evaluate` and `eval` inside
+  the realm also obey a Content-Security-Policy without
+  `'unsafe-eval'`.
 * Security: classic scripts inside an `<iframe>` get the same checks as
   scripts in the top document. A frame loaded `<script src>` without
   blocking mixed content, without checking `integrity`, and without

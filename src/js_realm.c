@@ -9,6 +9,7 @@
 static JSClassID ns_shadowrealm_class_id;
 
 typedef struct {
+    JSContext *outer;
     JSContext *child;
 } ns_shadowrealm;
 
@@ -26,48 +27,69 @@ static JSClassDef ns_shadowrealm_class = {
     "ShadowRealm", .finalizer = ns_shadowrealm_finalizer,
 };
 
-static JSValue realm_wrap_value(JSContext *ctx, JSValueConst realm_obj,
-                                JSValue v);
+static JSValue realm_wrap_value(JSContext *into, JSValueConst realm_obj,
+                                JSValue v, gboolean from_inner);
 
 static JSValue
 realm_wrapped_call(JSContext *ctx, JSValueConst this_val, int argc,
                    JSValueConst *argv, int magic, JSValueConst *data)
 {
-    (void)this_val; (void)magic;
+    (void)this_val;
     JSValueConst target = data[0];
     JSValueConst realm_obj = data[1];
+    gboolean target_inner = magic != 0;
+    ns_shadowrealm *r = JS_GetOpaque(realm_obj, ns_shadowrealm_class_id);
+    if (!r || !r->child || !r->outer)
+        return JS_ThrowTypeError(ctx, "ShadowRealm is gone");
+    JSContext *tctx = target_inner ? r->child : r->outer;
     for (int i = 0; i < argc; i++) {
         if (JS_IsObject(argv[i]) && !JS_IsFunction(ctx, argv[i]))
             return JS_ThrowTypeError(ctx,
                 "ShadowRealm wrapped function: only primitives and callables "
                 "may cross the realm boundary");
     }
-    JSValue r = JS_Call(ctx, target, JS_UNDEFINED, argc, argv);
-    if (JS_IsException(r)) {
-        JSValue exc = JS_GetException(ctx);
-        const char *msg = JS_ToCString(ctx, exc);
+    JSValue *args = argc > 0 ? g_new0(JSValue, argc) : NULL;
+    for (int i = 0; i < argc; i++) {
+        args[i] = realm_wrap_value(tctx, realm_obj, JS_DupValue(ctx, argv[i]),
+                                   !target_inner);
+        if (JS_IsException(args[i])) {
+            for (int j = 0; j < i; j++) JS_FreeValue(tctx, args[j]);
+            g_free(args);
+            JS_FreeValue(tctx, JS_GetException(tctx));
+            return JS_ThrowTypeError(ctx, "ShadowRealm: argument cannot cross");
+        }
+    }
+    JSValue res = JS_Call(tctx, target, JS_UNDEFINED, argc,
+                          (JSValueConst *)args);
+    for (int i = 0; i < argc; i++) JS_FreeValue(tctx, args[i]);
+    g_free(args);
+    if (JS_IsException(res)) {
+        JSValue exc = JS_GetException(tctx);
+        const char *msg = JS_ToCString(tctx, exc);
         JSValue te = JS_ThrowTypeError(ctx, "%s",
                                        msg ? msg : "ShadowRealm callable threw");
-        if (msg) JS_FreeCString(ctx, msg);
-        JS_FreeValue(ctx, exc);
+        if (msg) JS_FreeCString(tctx, msg);
+        JS_FreeValue(tctx, exc);
         return te;
     }
-    return realm_wrap_value(ctx, realm_obj, r);
+    return realm_wrap_value(ctx, realm_obj, res, target_inner);
 }
 
 static JSValue
-realm_wrap_value(JSContext *ctx, JSValueConst realm_obj, JSValue v)
+realm_wrap_value(JSContext *into, JSValueConst realm_obj, JSValue v,
+                 gboolean from_inner)
 {
     if (!JS_IsObject(v))
         return v;
-    if (JS_IsFunction(ctx, v)) {
+    if (JS_IsFunction(into, v)) {
         JSValueConst data[2] = { v, realm_obj };
-        JSValue fn = JS_NewCFunctionData(ctx, realm_wrapped_call, 0, 0, 2, data);
-        JS_FreeValue(ctx, v);
+        JSValue fn = JS_NewCFunctionData(into, realm_wrapped_call, 0,
+                                         from_inner ? 1 : 0, 2, data);
+        JS_FreeValue(into, v);
         return fn;
     }
-    JS_FreeValue(ctx, v);
-    return JS_ThrowTypeError(ctx,
+    JS_FreeValue(into, v);
+    return JS_ThrowTypeError(into,
         "ShadowRealm: evaluation result must be a primitive or a callable");
 }
 
@@ -85,6 +107,8 @@ ns_shadowrealm_ctor(JSContext *ctx, JSValueConst new_target,
     JS_FreeValue(ctx, proto);
     if (JS_IsException(obj)) { JS_FreeContext(child); return obj; }
     ns_shadowrealm *r = g_new0(ns_shadowrealm, 1);
+    JS_SetContextOpaque(child, JS_GetContextOpaque(ctx));
+    r->outer = ctx;
     r->child = child;
     JS_SetOpaque(obj, r);
     return obj;
@@ -98,6 +122,10 @@ ns_shadowrealm_evaluate(JSContext *ctx, JSValueConst this_val,
     if (!r) return JS_EXCEPTION;
     if (argc < 1 || !JS_IsString(argv[0]))
         return JS_ThrowTypeError(ctx, "ShadowRealm.prototype.evaluate expects a string");
+    if (!ns_js_eval_compile_allowed(ctx))
+        return JS_ThrowTypeError(ctx,
+            "ShadowRealm.prototype.evaluate: refused to evaluate a string "
+            "(Content-Security-Policy)");
     size_t len = 0;
     const char *src = JS_ToCStringLen(ctx, &len, argv[0]);
     if (!src) return JS_EXCEPTION;
@@ -113,7 +141,7 @@ ns_shadowrealm_evaluate(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(r->child, exc);
         return te;
     }
-    return realm_wrap_value(ctx, this_val, res);
+    return realm_wrap_value(ctx, this_val, res, TRUE);
 }
 
 static JSValue
