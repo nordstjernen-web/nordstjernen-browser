@@ -698,6 +698,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         s->cur = NULL;
         if (referrer && !restored && url && ns_url_same_origin(referrer, url))
             ns_browser_set_next_referrer(referrer);
+        else if (referrer && !restored && url && !user_activated)
+            ns_browser_set_next_initiator(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
         ns_browser_set_next_reload(reload != 0 && url && *url);
         g_free(referrer);

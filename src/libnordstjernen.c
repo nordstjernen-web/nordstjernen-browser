@@ -1496,6 +1496,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 }
 
 static char *g_pending_referrer;
+static char *g_pending_initiator;
 static int g_pending_user_activated = -1;
 static gboolean g_pending_reload;
 
@@ -1504,6 +1505,13 @@ ns_browser_set_next_referrer(const char *url)
 {
     g_free(g_pending_referrer);
     g_pending_referrer = (url && *url) ? g_strdup(url) : NULL;
+}
+
+void
+ns_browser_set_next_initiator(const char *url)
+{
+    g_free(g_pending_initiator);
+    g_pending_initiator = (url && *url) ? g_strdup(url) : NULL;
 }
 
 void
@@ -1554,6 +1562,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 
     g_autofree char *referrer = g_pending_referrer;
     g_pending_referrer = NULL;
+    g_autofree char *initiator = g_pending_initiator;
+    g_pending_initiator = NULL;
     int pending_user_activated = g_pending_user_activated;
     g_pending_user_activated = -1;
     gboolean reload = g_pending_reload;
@@ -1571,6 +1581,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             g_free(host);
         }
         g_pending_referrer = g_steal_pointer(&referrer);
+        g_pending_initiator = g_steal_pointer(&initiator);
         g_pending_user_activated = pending_user_activated;
         g_pending_reload = reload;
         ns_browser *b = browser_open_common(real, viewport_width,
@@ -1603,10 +1614,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     GError *err = NULL;
     ns_response *resp = NULL;
     gboolean user_activated = pending_user_activated >= 0
-        ? pending_user_activated != 0 : referrer == NULL;
+        ? pending_user_activated != 0 : referrer == NULL && initiator == NULL;
     if (https_url) {
         resp = reload ? ns_engine_reload_blocking(https_url, referrer, &err)
                       : ns_engine_navigate_blocking(https_url, referrer,
+                                                    initiator,
                                                     user_activated, &err);
         if (resp && !resp->error && resp->body) {
             fetch_url = https_url;
@@ -1617,13 +1629,14 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         }
     }
     if (!resp && body)
-        resp = ns_engine_navigate_post_blocking(fetch_url, referrer, body,
+        resp = ns_engine_navigate_post_blocking(fetch_url, referrer,
+                                                initiator, body,
                                                 body_len, content_type,
                                                 user_activated, &err);
     else if (!resp && reload)
         resp = ns_engine_reload_blocking(fetch_url, referrer, &err);
     else if (!resp)
-        resp = ns_engine_navigate_blocking(fetch_url, referrer,
+        resp = ns_engine_navigate_blocking(fetch_url, referrer, initiator,
                                            user_activated, &err);
     char *landed_host = resp && resp->final_url
         ? ns_url_host_from(resp->final_url) : NULL;

@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a navigation a page starts towards another origin now
+  reports that page as its initiator. The renderer dropped the
+  cross-origin referrer so the target would load in its own cookie
+  partition, which also made the request look browser-initiated: a
+  cross-site form POST went out with `Sec-Fetch-Site: none`, counted
+  as user-activated, and carried `Origin:` of the target itself. The
+  initiator now sets `Origin` and `Sec-Fetch-Site`, while cookies are
+  still those of the destination site.
 * Security: `CSSStyleSheet.cssRules` of a `<link>` stylesheet only reads
   back the sheet's text when it is same-origin with the document, and a
   cross-origin stylesheet must be served as `text/css` even in quirks

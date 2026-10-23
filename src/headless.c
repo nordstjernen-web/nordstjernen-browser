@@ -2154,9 +2154,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     GError *err = NULL;
     gint64 phase_t0 = g_get_monotonic_time();
     ns_response *resp = post_body
-        ? ns_engine_navigate_post_blocking(fetch_url, top_url, post_body,
+        ? ns_engine_navigate_post_blocking(fetch_url, top_url, NULL, post_body,
                                            post_len, post_ct, hop == 0, &err)
-        : ns_engine_navigate_blocking(fetch_url, top_url, hop == 0, &err);
+        : ns_engine_navigate_blocking(fetch_url, top_url, NULL, hop == 0,
+                                      &err);
     g_timing.fetch_us += g_get_monotonic_time() - phase_t0;
     g_timing.hops++;
     g_timing.status = resp ? (int)resp->status : 0;
