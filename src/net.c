@@ -5487,6 +5487,21 @@ ns_fetch_has_user_activation(GPtrArray *extra_headers)
     return FALSE;
 }
 
+static const char *
+ns_fetch_initiator(GPtrArray *extra_headers)
+{
+    if (!extra_headers) return NULL;
+    for (guint i = 0; i < extra_headers->len; i++) {
+        const char *header = g_ptr_array_index(extra_headers, i);
+        if (header && g_ascii_strncasecmp(header, "X-ND-Initiator:", 15) == 0) {
+            const char *v = header + 15;
+            while (*v == ' ' || *v == '\t') v++;
+            return *v ? v : NULL;
+        }
+    }
+    return NULL;
+}
+
 static gboolean
 ns_fetch_is_reload(GPtrArray *extra_headers)
 {
@@ -5887,6 +5902,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     gboolean is_navigation = ns_fetch_is_navigation(top_url, extra_headers);
     gboolean user_activated = ns_fetch_has_user_activation(extra_headers);
     gboolean reload = is_navigation && ns_fetch_is_reload(extra_headers);
+    const char *initiator = is_navigation && !top_url
+        ? ns_fetch_initiator(extra_headers) : NULL;
+    const char *request_site_url = initiator ? initiator : top_url;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
 
@@ -5964,8 +5982,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_strdup_printf("Accept-Language: %s", accept_language);
     g_autofree char *vary_agent =
         g_strdup_printf("User-Agent: %s", effective_ua);
-    const char *request_origin =
-        ns_net_request_origin(url, top_url, top_origin, method);
+    const char *request_origin = initiator
+        ? ns_net_request_origin(url, initiator, initiator, method)
+        : ns_net_request_origin(url, top_url, top_origin, method);
     g_autofree char *vary_origin =
         g_strdup_printf("Origin: %s", request_origin);
     const char *const cache_request_headers[] = {
@@ -6097,11 +6116,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 
     if (request_http) {
         const char *fetch_site;
-        if (!top_url || !*top_url) {
+        if (!request_site_url || !*request_site_url) {
             fetch_site = "none";
-        } else if (ns_url_same_origin(top_url, url)) {
+        } else if (ns_url_same_origin(request_site_url, url)) {
             fetch_site = "same-origin";
-        } else if (ns_url_is_same_site(top_url, url)) {
+        } else if (ns_url_is_same_site(request_site_url, url)) {
             fetch_site = "same-site";
         } else {
             fetch_site = "cross-site";

@@ -149,6 +149,7 @@ char *ns_browser_title(ns_browser *browser);
 char *ns_browser_url(ns_browser *browser);
 
 void ns_browser_set_next_referrer(const char *url);
+void ns_browser_set_next_initiator(const char *url);
 void ns_browser_set_next_user_activated(int user_activated);
 void ns_browser_set_next_reload(int reload);
 

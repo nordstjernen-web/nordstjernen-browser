@@ -96,19 +96,24 @@ static ns_response *
 engine_request_blocking(const char *url, const char *top_url,
                         const char *method, const void *body, gsize body_len,
                         const char *content_type, gboolean navigation,
-                        gboolean user_activated,
+                        const char *initiator, gboolean user_activated,
                         const char *const *resource_headers,
                         GError **error)
 {
     fetch_state st = {0};
     st.loop = g_main_loop_new(NULL, FALSE);
-    const char *navigation_headers[] = {
-        "X-ND-Navigate: 1", "X-ND-User-Activated: 1", NULL
-    };
-    const char *redirect_headers[] = { "X-ND-Navigate: 1", NULL };
-    const char *const *headers = navigation
-        ? (user_activated ? navigation_headers : redirect_headers)
-        : resource_headers;
+    g_autofree char *initiator_origin =
+        navigation && initiator ? ns_url_origin_from(initiator) : NULL;
+    g_autofree char *initiator_header =
+        initiator_origin && *initiator_origin &&
+        !strpbrk(initiator_origin, "\r\n")
+            ? g_strdup_printf("X-ND-Initiator: %s", initiator_origin) : NULL;
+    const char *navigation_headers[4] = { "X-ND-Navigate: 1" };
+    int nh = 1;
+    if (user_activated) navigation_headers[nh++] = "X-ND-User-Activated: 1";
+    if (initiator_header) navigation_headers[nh++] = initiator_header;
+    const char *const *headers = navigation ? navigation_headers
+                                            : resource_headers;
     ns_net_request_async(url, top_url, method, body, body_len, content_type,
                          headers,
                          NULL, on_fetch_done, &st);
@@ -123,7 +128,7 @@ ns_response *
 ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, FALSE, NULL, error);
+                                   FALSE, NULL, FALSE, NULL, error);
 }
 
 static ns_response *
@@ -131,15 +136,17 @@ engine_fetch_blocking_with_headers(const char *url, const char *top_url,
                                    const char *const *headers, GError **error)
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, FALSE, headers, error);
+                                   FALSE, NULL, FALSE, headers, error);
 }
 
 ns_response *
 ns_engine_navigate_blocking(const char *url, const char *top_url,
+                            const char *initiator,
                             gboolean user_activated, GError **error)
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   TRUE, user_activated, NULL, error);
+                                   TRUE, initiator, user_activated, NULL,
+                                   error);
 }
 
 ns_response *
@@ -149,18 +156,19 @@ ns_engine_reload_blocking(const char *url, const char *top_url, GError **error)
         "X-ND-Navigate: 1", "X-ND-User-Activated: 1", "X-ND-Reload: 1", NULL
     };
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, FALSE, reload_headers, error);
+                                   FALSE, NULL, FALSE, reload_headers, error);
 }
 
 ns_response *
 ns_engine_navigate_post_blocking(const char *url, const char *top_url,
+                                 const char *initiator,
                                  const void *body, gsize body_len,
                                  const char *content_type,
                                  gboolean user_activated, GError **error)
 {
     return engine_request_blocking(url, top_url, "POST", body, body_len,
-                                   content_type, TRUE, user_activated, NULL,
-                                   error);
+                                   content_type, TRUE, initiator,
+                                   user_activated, NULL, error);
 }
 
 static gboolean
