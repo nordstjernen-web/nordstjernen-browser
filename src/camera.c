@@ -77,13 +77,6 @@ ns_camera_permission(ns_js *js)
         return -1;
     }
 
-    const char *allow_env = g_getenv("NS_CAMERA_ALLOW");
-    if (allow_env && allow_env[0] == '1') {
-        ns_camera_record_decision(origin, TRUE);
-        g_free(origin);
-        return 1;
-    }
-
     g_hash_table_insert(g_camera_decisions, g_strdup(origin),
                         GINT_TO_POINTER(3));
     g_free(g_camera_pending);
