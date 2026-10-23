@@ -48114,13 +48114,22 @@ ns_js_image_loads_pending(const ns_js *js)
     return FALSE;
 }
 
+static gboolean
+ns_js_is_frame_document_edge(const ns_node *child, const ns_node *parent)
+{
+    return child && child->kind == NS_NODE_DOCUMENT &&
+           !(child->flags & NS_NODE_FRAGMENT) &&
+           (ns_node_is_element_named(parent, "iframe") ||
+            ns_node_is_element_named(parent, "frame") ||
+            ns_node_is_element_named(parent, "object"));
+}
+
 static const char *
 ns_js_frame_url_above(const ns_node *n, const ns_node **root)
 {
-    for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
-        if (ns_node_is_element_named(p, "iframe") ||
-            ns_node_is_element_named(p, "frame") ||
-            ns_node_is_element_named(p, "object")) {
+    const ns_node *child = n;
+    for (const ns_node *p = n ? n->parent : NULL; p; child = p, p = p->parent) {
+        if (ns_js_is_frame_document_edge(child, p)) {
             const char *fu = ns_element_get_attr(p, "data-nd-frame-url");
             if (fu && *fu) return fu;
         }
@@ -48186,10 +48195,14 @@ ns_js_node_doc_base(ns_js *js, const ns_node *el)
 static ns_node *
 ns_js_node_frame(const ns_node *node)
 {
-    for (const ns_node *p = node; p; p = p->parent)
-        if (ns_node_is_element_named(p, "iframe") ||
-            ns_node_is_element_named(p, "frame") ||
-            ns_node_is_element_named(p, "object"))
+    if (!node) return NULL;
+    if (ns_node_is_element_named(node, "iframe") ||
+        ns_node_is_element_named(node, "frame") ||
+        ns_node_is_element_named(node, "object"))
+        return (ns_node *)node;
+    for (const ns_node *child = node, *p = node->parent; p;
+         child = p, p = p->parent)
+        if (ns_js_is_frame_document_edge(child, p))
             return (ns_node *)p;
     return NULL;
 }
@@ -50940,15 +50953,15 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('origin', { get: function(){ if ((sandbox & 1) && !(sandbox & 8)) return 'null'; var u=mk(url); return u ? u.origin : 'null'; } });"
     "  def('name', { value: frameName, writable: true });"
     "  function tagAs(obj, iface){"
-    "    try { var proto = realWin[iface] && realWin[iface].prototype;"
+    "    try { var C = Object.prototype.hasOwnProperty.call(G, iface) ? G[iface]"
+    "                : (crossOrigin ? null : realWin[iface]);"
+    "      var proto = C && C.prototype;"
     "      if (proto) Object.setPrototypeOf(obj, proto); } catch (e) {}"
     "    try { Object.defineProperty(obj, Symbol.toStringTag,"
     "      { value: iface, writable: false, enumerable: false, configurable: true }); } catch (e) {}"
     "  }"
     "  try { Object.defineProperty(G, Symbol.toStringTag,"
     "    { value: 'Window', writable: false, enumerable: false, configurable: true }); } catch (e) {}"
-    "  tagAs(loc, 'Location');"
-    "  tagAs(hist, 'History');"
     "  try {"
     "    ['timeline', 'pictureInPictureEnabled'].forEach(function(k){"
     "      if (iframeDoc && !(k in iframeDoc) && realWin.document && k in realWin.document &&"
@@ -51004,6 +51017,16 @@ static const char ns_iframe_global_bootstrap[] =
     "    def('Range', { value: FrameRange, writable: true });"
     "  }"
     "  try { Object.setPrototypeOf(G, realmClone(Object.getPrototypeOf(realWin))); } catch (e) {}"
+    "  tagAs(loc, 'Location');"
+    "  tagAs(hist, 'History');"
+    "  if (crossOrigin && iframeDoc) {"
+    "    try { Object.defineProperty(iframeDoc, 'location', { configurable: true, enumerable: true,"
+    "      get: function(){ return loc; }, set: function(v){ loc.href = v; } }); } catch (e) {}"
+    "    try { Object.defineProperty(iframeDoc, 'defaultView', { configurable: true, enumerable: true,"
+    "      writable: true, value: G }); } catch (e) {}"
+    "    try { Object.defineProperty(iframeDoc, 'adoptedStyleSheets', { configurable: true, enumerable: true,"
+    "      writable: true, value: realmClone(iframeDoc.adoptedStyleSheets || []) }); } catch (e) {}"
+    "  }"
     "  return { location: loc, history: hist };"
     "})";
 
