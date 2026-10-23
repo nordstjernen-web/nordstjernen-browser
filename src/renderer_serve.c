@@ -45,6 +45,7 @@ struct ns_renderer_session {
     char          *post_body;
     size_t         post_len;
     char          *post_ct;
+    char          *page_nav;
     ns_tiles      *tiles;
 };
 
@@ -116,6 +117,8 @@ session_stash_post(ns_renderer_session *s, const char *href)
 {
     if (!s || !s->cur)
         return;
+    free(s->page_nav);
+    s->page_nav = (href && *href) ? strdup(href) : NULL;
     size_t len = 0;
     char *ct = NULL;
     char *pb = ns_browser_take_post(s->cur, &len, &ct);
@@ -696,9 +699,12 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         else if (s->cur)
             session_bfcache_park_or_close(s, s->cur);
         s->cur = NULL;
+        gboolean page_initiated = !user_activated ||
+            (s->page_nav && url && strcmp(s->page_nav, url) == 0);
+        g_clear_pointer(&s->page_nav, free);
         if (referrer && !restored && url && ns_url_same_origin(referrer, url))
             ns_browser_set_next_referrer(referrer);
-        else if (referrer && !restored && url && !user_activated)
+        else if (referrer && !restored && url && page_initiated)
             ns_browser_set_next_initiator(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
         ns_browser_set_next_reload(reload != 0 && url && *url);
@@ -730,6 +736,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             title = ns_browser_title(s->cur);
             final_url = ns_browser_url(s->cur);
             nav = ns_browser_take_pending_nav(s->cur);
+            if (nav) session_stash_post(s, nav);
             security = ns_browser_security(s->cur, &ip);
         }
         title_escaped = json_escape(title ? title : "");
