@@ -55,6 +55,18 @@
 #include <bcrypt.h>
 #endif
 
+#ifdef __linux__
+static gboolean ns_runtime_dir_writable = TRUE;
+#endif
+
+void
+ns_security_runtime_dir_read_only(void)
+{
+#ifdef __linux__
+    ns_runtime_dir_writable = FALSE;
+#endif
+}
+
 gboolean
 ns_security_env_flag(const char *name)
 {
@@ -541,7 +553,8 @@ ns_security_sandbox_init(const char *self_exe)
     add_path_rw(rfd, fs_read, g_get_user_config_dir());
     add_path_rw(rfd, fs_read, g_get_user_data_dir());
     add_path_rw(rfd, fs_read, g_get_user_cache_dir());
-    add_path_rw(rfd, fs_rw,   g_get_user_runtime_dir());
+    add_path_rw(rfd, ns_runtime_dir_writable ? fs_rw : fs_read,
+                g_get_user_runtime_dir());
 
     char *ns_cfg_root =
         g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
@@ -574,7 +587,9 @@ ns_security_sandbox_init(const char *self_exe)
             dl_dir = g_strdup(dl);
         else if (home)
             dl_dir = g_build_filename(home, "Downloads", NULL);
-        if (dl_dir && home && g_str_has_prefix(dl_dir, home)) {
+        gsize home_len = home ? strlen(home) : 0;
+        if (dl_dir && home_len > 1 && g_str_has_prefix(dl_dir, home) &&
+            dl_dir[home_len] == G_DIR_SEPARATOR && dl_dir[home_len + 1]) {
             g_mkdir_with_parents(dl_dir, 0700);
             if (g_file_test(dl_dir, G_FILE_TEST_IS_DIR))
                 add_path_rw(rfd, fs_rw, dl_dir);
@@ -646,7 +661,13 @@ ns_security_sandbox_init(const char *self_exe)
         }
     }
 
-    if (landlock_restrict_self_(rfd, 0) != 0) {
+    int restricted = -1;
+#ifdef LANDLOCK_RESTRICT_SELF_TSYNC
+    restricted = landlock_restrict_self_(rfd, LANDLOCK_RESTRICT_SELF_TSYNC);
+#endif
+    if (restricted != 0)
+        restricted = landlock_restrict_self_(rfd, 0);
+    if (restricted != 0) {
         g_info("landlock: restrict_self failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("Landlock enforcement (restrict_self) failed");
     }

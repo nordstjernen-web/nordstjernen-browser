@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Security (Linux sandbox): renderers get the XDG runtime directory
+  (`/run/user/$UID`) read-only instead of read+write. The download
+  directory is writable only when it is a real sub-directory of
+  `$HOME`; when `XDG_DOWNLOAD_DIR` was `$HOME` itself (or merely
+  started with the same characters), all of it became writable.
+  The thread-dump helper thread starts after Landlock is applied
+  instead of before it, so it no longer runs unconfined, and Landlock
+  is applied to every thread where the kernel headers offer
+  `LANDLOCK_RESTRICT_SELF_TSYNC`.
 * Security: a `MessagePort` transferred into another frame through
   `postMessage` now belongs to the receiving realm: it takes that
   realm's `MessagePort.prototype`, and messages posted to it are
