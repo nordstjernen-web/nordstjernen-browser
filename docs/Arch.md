@@ -36,8 +36,7 @@ The package:
 - requires AVIF, JPEG XL, GStreamer and the audio helper explicitly, so a
   missing dependency fails the build instead of dropping a feature.
 - drops `libnordstjernen.so` and its header (the embedding API, unversioned
-  and unused by the browser) and the `internet-browser` link, which Northstar
-  and Southstar also install and which Arch has no `update-alternatives` for.
+  and unused by the browser).
 - declares `license=('GPL-3.0-or-later OR LicenseRef-NSL-1.0')` and links
   `License.md` into `/usr/share/licenses/nordstjernen-browser/`, as Arch requires
   for a `LicenseRef-` license.

@@ -77,9 +77,6 @@ package() {
   rm "$pkgdir/usr/lib/libnordstjernen.so"
   rm -r "$pkgdir/usr/include"
   rmdir "$pkgdir/usr/lib"
-  # Northstar and Southstar install the same command; Arch has no
-  # update-alternatives to arbitrate it.
-  rm "$pkgdir/usr/bin/internet-browser"
 
   install -d "$pkgdir/usr/share/licenses/$pkgname"
   ln -s /usr/share/nordstjernen/License.md "$pkgdir/usr/share/licenses/$pkgname/"
