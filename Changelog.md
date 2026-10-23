@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a page can no longer reach the raw window of a cross-origin
+  frame through the proxy that stands in for it. The proxy was built
+  after page scripts had run, with the page's own `WeakMap`, `Proxy`,
+  `Array.prototype.concat` and `__nsPostMessageFrom`, so overriding any
+  of them handed the page the real frame window. It is now built from
+  intrinsics captured when the realm is set up and kept under an
+  engine-private name. Sandboxed and cross-origin frames also throw
+  their own realm's `DOMException` for denied storage, and no longer
+  get the parent's `document.timeline`, both of which led back to the
+  parent's `Function`.
 * Security: `fetch()` and `XMLHttpRequest` send a CORS preflight
   (`OPTIONS` with `Access-Control-Request-Method`/`-Headers`) before a
   cross-origin request with a non-simple method, header or content
