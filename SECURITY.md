@@ -64,9 +64,11 @@ does its own fetching and persistence. See `docs/tab-isolation.md`.)
 PIE, full RELRO, non-executable stack, separate-code segments,
 `-fstack-protector-strong`, `-fstack-clash-protection`,
 `-fcf-protection=full` (Intel CET / AMD IBT), `_FORTIFY_SOURCE=3`
-(`=2` fallback), `-Wformat=2 -Wformat-security`. No JIT is used or
-linked — W^X holds for the whole process, so any RCE primitive has to
-work without writable executable pages.
+(`=2` fallback), `-Wformat=2 -Wformat-security`. The browser's own code
+has no JIT and maps no writable executable pages. That is a property of
+the code, not something the sandbox enforces: seccomp still allows
+`mmap`/`mprotect` with `PROT_EXEC`, because the GPU drivers behind WebGL
+and WebGPU (Mesa's llvmpipe among them) compile shaders to machine code.
 
 ### Privilege drop (`src/security.c`)
 
@@ -118,10 +120,15 @@ socket, so it normally needs no `/dev/shm` name at all.
   `~/.netrc`, shell history — is **not** reachable, also when
   `$XAUTHORITY` is `~/.Xauthority`; other applications' state kept under
   the XDG directories (other browsers' profiles among it) is readable.
-  No directory the renderer can write to is also executable. Landlock
-  binds the threads that exist when it is applied only where the kernel
-  supports `LANDLOCK_RESTRICT_SELF_TSYNC`, so the browser starts its own
-  helper threads after the sandbox is in place.
+  No directory the renderer can write to is also executable. Unpacked
+  extensions load from `~/.local/share/nordstjernen-extensions`, outside
+  the writable profile, so a renderer cannot plant one. Landlock binds
+  the threads that exist when it is applied only where the kernel
+  supports `LANDLOCK_RESTRICT_SELF_TSYNC`; the browser starts its own
+  helper threads after the sandbox is in place, but on older kernels
+  threads that libraries started earlier (the audio helper's sound
+  device thread among them) are confined by seccomp only, and the
+  process logs how many there were.
 - **seccomp-bpf (syscalls).** Default-deny allow-list: the filter is
   built with `SCMP_ACT_ERRNO(EPERM)` as the default action and then
   permits only the ~266 syscalls the browser actually needs
@@ -170,7 +177,20 @@ sandbox is best-effort: on a kernel without Landlock or seccomp the
 renderer logs a warning and continues **unconfined**. Set
 `NS_REQUIRE_SANDBOX=1` to make that fail-closed — a renderer (or media
 helper) that cannot install its filesystem and syscall confinement then
-refuses to run rather than process untrusted content unsandboxed.
+refuses to run rather than process untrusted content unsandboxed. These
+switches, and the `NS_NO_*` settings switches below, count as set only
+for a value other than empty, `0`, `false`, `no` or `off`.
+
+Developer and test knobs read from the environment, which take effect only
+for whoever starts the browser:
+`NS_HTTP_PROXY`, `NS_HTTPS_PROXY`, `NS_NO_PROXY` and `NS_DOH_URL`
+override the network settings; `NS_SAFEBROWSING_LIST` replaces the
+Safe Browsing list; `NS_EXTENSIONS_DIR` adds extension directories;
+`NS_I18N_DIR` loads UI catalogues from another directory; `NS_LOG_FILE`
+writes the debug log to a file; `NS_FRAME_DUMP` writes rendered frames
+as PNGs; `NS_WEBGL_ALLOW` and `NS_WEBGPU_ALLOW` turn the GPU APIs on;
+`NS_NO_HARDEN_ALLOC`, `NS_NO_HTTPS_FIRST`, `NS_NO_JAVASCRIPT`,
+`NS_NO_WATCHDOG` and `NS_PRIVATE` change the matching settings.
 
 ### macOS sandbox
 
@@ -454,6 +474,16 @@ The `document.cookie` setter:
   per-origin/per-frame runtime would close this and is tracked as future
   work; until then, do not rely on a cross-origin frame being contained
   from the embedding origin.
+- **Extension content scripts run in the page's JavaScript world.**
+  Their `chrome.*` bridges are bound in C and `chrome.storage` works
+  without page-replaceable intrinsics, but the content script's own
+  code shares globals and prototypes with the page, so a hostile page
+  can observe or tamper with what a content script does on it. An
+  isolated world needs a second JavaScript context over the same DOM.
+- **The renderer can write the configuration file.** Settings pages are
+  served and saved by the renderer, so a compromised renderer can change
+  `nordstjernen.conf` (proxy, DNS-over-HTTPS, home page) for later
+  sessions. Moving settings into the UI process would close this.
 - **No per-path filesystem sandbox on Windows.** The mitigation
   suite restricts the *process* (no remote DLL loads, no dynamic
   code, no child processes, etc.) but does not allow-list the
