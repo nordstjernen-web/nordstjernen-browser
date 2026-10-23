@@ -497,7 +497,9 @@ ns_config_save(GError **error)
             break;
         }
     }
-    gboolean ok = g_file_set_contents(g_cfg_path, s->str, (gssize)s->len, error);
+    gboolean ok = g_file_set_contents_full(g_cfg_path, s->str, (gssize)s->len,
+                                           G_FILE_SET_CONTENTS_CONSISTENT |
+                                           G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, error);
     if (ok) g_chmod(g_cfg_path, 0600);
     g_string_free(s, TRUE);
     return ok;

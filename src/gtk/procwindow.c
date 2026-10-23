@@ -2963,7 +2963,9 @@ write_session_cb(gpointer data)
             g_string_append_c(s, '\n');
         }
     }
-    g_file_set_contents(pw->session_path, s->str, (gssize)s->len, NULL);
+    g_file_set_contents_full(pw->session_path, s->str, (gssize)s->len,
+                             G_FILE_SET_CONTENTS_CONSISTENT |
+                             G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL);
     g_string_free(s, TRUE);
     return G_SOURCE_CONTINUE;
 }

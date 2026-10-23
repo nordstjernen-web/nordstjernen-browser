@@ -417,7 +417,9 @@ ns_net_hsts_curl_path(void)
     char *contents = NULL;
     gsize len = 0;
     if (g_file_get_contents(real, &contents, &len, NULL))
-        g_file_set_contents(g_hsts_curl_path, contents, (gssize)len, NULL);
+        g_file_set_contents_full(g_hsts_curl_path, contents, (gssize)len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL);
     g_free(contents);
     g_free(real);
     g_free(real_dir);
@@ -1945,7 +1947,9 @@ ns_cookie_store_impl(const char *url, const char *partition_site,
             file_domain, tail, path, secure ? "TRUE" : "FALSE",
             expiry, name_dup, vdup);
     }
-    if (g_file_set_contents(jar_path, out->str, out->len, NULL))
+    if (g_file_set_contents_full(jar_path, out->str, out->len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL))
         g_chmod(jar_path, 0600);
     g_atomic_int_inc(&ns_cookie_writes);
     ns_cookie_jars_unlock(jars_lock);

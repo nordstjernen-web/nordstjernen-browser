@@ -904,7 +904,9 @@ ns_font_store_entry(ns_font_entry *e, const guint8 *data, gsize len)
     char *path = ns_font_cache_path_for(e->family, e->url, forced_ext);
     GError *werr = NULL;
     gboolean stored = path &&
-        g_file_set_contents(path, (const char *)data, (gssize)len, &werr);
+        g_file_set_contents_full(path, (const char *)data, (gssize)len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, &werr);
     if (stored) {
         g_free(e->deferred_path);
         e->deferred_path = NULL;

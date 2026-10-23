@@ -3,6 +3,10 @@ Changelog:
 
 1.0.36:
 ======
+* Security: the config file, session list, cookie jar, HSTS store,
+  localStorage, extension storage and the font and media caches are
+  written with mode `0600`, as SECURITY.md states. They were created
+  with the default umask, usually world-readable `0644`.
 * Packaging: `scripts/pack-appimage.sh` downloads pinned releases of
   linuxdeploy, linuxdeploy-plugin-gtk, appimagetool and the type2
   runtime and checks each against a SHA-256 before running it, also

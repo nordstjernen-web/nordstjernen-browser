@@ -3520,7 +3520,9 @@ ns_storage_flush(ns_js *js)
     char *data = g_key_file_to_data(kf, &len, NULL);
     if (data) {
         GError *err = NULL;
-        if (!g_file_set_contents(js->local_storage_path, data, (gssize)len, &err)) {
+        if (!g_file_set_contents_full(js->local_storage_path, data, (gssize)len,
+                                      G_FILE_SET_CONTENTS_CONSISTENT |
+                                      G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, &err)) {
             g_warning("local storage: failed to write %s: %s",
                       js->local_storage_path, err->message);
             g_clear_error(&err);
