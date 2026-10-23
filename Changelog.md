@@ -3,6 +3,10 @@ Changelog:
 
 1.0.36:
 ======
+* Renderers defer configuration saves to the parent only when the GTK
+  shell starts them (it sets `NS_CONFIG_VIA_PARENT`). Other embedders
+  of `nordstjernen-renderer`, such as the Java front-end, which do not
+  handle the new channel, keep writing the file themselves.
 * Security: renderers can no longer change the configuration file. A
   settings save in a page, or a camera/WebGL decision, now goes to the UI
   process, which writes `nordstjernen.conf`. If the change touches the
