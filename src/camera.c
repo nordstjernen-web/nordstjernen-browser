@@ -9,6 +9,7 @@
 #include "js.h"
 #include "net.h"
 
+static GMutex      g_camera_lock;
 static GHashTable *g_camera_decisions;
 static char *g_camera_pending;
 
@@ -34,8 +35,10 @@ ns_camera_record_decision(const char *origin, gboolean allow)
 char *
 ns_camera_take_pending_origin(void)
 {
+    g_mutex_lock(&g_camera_lock);
     char *origin = g_camera_pending;
     g_camera_pending = NULL;
+    g_mutex_unlock(&g_camera_lock);
     return origin;
 }
 
@@ -43,7 +46,11 @@ void
 ns_camera_set_decision(const char *origin, int allow)
 {
     if (!origin || !*origin) return;
+    g_mutex_lock(&g_camera_lock);
     ns_camera_record_decision(origin, allow ? TRUE : FALSE);
+    if (g_camera_pending && g_strcmp0(g_camera_pending, origin) == 0)
+        g_clear_pointer(&g_camera_pending, g_free);
+    g_mutex_unlock(&g_camera_lock);
     if (allow) {
         ns_config *cfg = ns_config_mut();
         if (cfg && !cfg->camera_enabled) {
@@ -51,8 +58,6 @@ ns_camera_set_decision(const char *origin, int allow)
             ns_config_save(NULL);
         }
     }
-    if (g_camera_pending && g_strcmp0(g_camera_pending, origin) == 0)
-        g_clear_pointer(&g_camera_pending, g_free);
 }
 
 int
@@ -60,17 +65,22 @@ ns_camera_permission(ns_js *js)
 {
     const char *url = ns_js_current_url(js);
     char *origin = ns_url_origin_from(url);
-    if (!origin || !*origin) {
+    gboolean opaque = !origin || !*origin || strcmp(origin, "null") == 0;
+    if (opaque) {
         g_free(origin);
         origin = g_strdup(url && *url ? url : "this page");
     }
 
+    g_mutex_lock(&g_camera_lock);
     if (!g_camera_decisions)
         g_camera_decisions = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                    g_free, NULL);
     gpointer prev = NULL;
     if (g_hash_table_lookup_extended(g_camera_decisions, origin, NULL, &prev)) {
         int v = GPOINTER_TO_INT(prev);
+        if (opaque && v != 3)
+            g_hash_table_remove(g_camera_decisions, origin);
+        g_mutex_unlock(&g_camera_lock);
         g_free(origin);
         if (v == 1) return 1;
         if (v == 2) return 0;
@@ -81,6 +91,7 @@ ns_camera_permission(ns_js *js)
                         GINT_TO_POINTER(3));
     g_free(g_camera_pending);
     g_camera_pending = g_strdup(origin);
+    g_mutex_unlock(&g_camera_lock);
     g_free(origin);
     return -1;
 }

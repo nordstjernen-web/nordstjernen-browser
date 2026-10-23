@@ -1502,6 +1502,8 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
                      ns_wasm_linkage *linkage, JSValueConst import_object)
 {
     int32_t n = wasm_runtime_get_import_count(module);
+    g_autofree wasm_val_t *global_vals = g_new0(wasm_val_t, n > 0 ? n : 1);
+    g_autofree gboolean *global_set = g_new0(gboolean, n > 0 ? n : 1);
     for (int32_t i = 0; i < n; i++) {
         wasm_import_t imp;
         wasm_runtime_get_import_type(module, i, &imp);
@@ -1566,7 +1568,8 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
                     }
                     return FALSE;
                 }
-                wasm_runtime_link_import_global(module, i, &val);
+                global_vals[i] = val;
+                global_set[i] = TRUE;
                 break;
             }
             default:
@@ -1607,6 +1610,9 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
                 wasm_func_type_get_result_valkind(imp.u.func_type, 0);
         g_ptr_array_add(linkage->bindings, b);
     }
+    for (int32_t i = 0; i < n; i++)
+        if (global_set[i])
+            wasm_runtime_link_import_global(module, i, &global_vals[i]);
     return TRUE;
 }
 

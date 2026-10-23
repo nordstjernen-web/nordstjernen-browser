@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: `WebAssembly.Instance` reads every import before linking
+  any global, so an import getter that instantiates the same module
+  again can no longer swap the outer instance's global values. Camera
+  permission decisions are guarded by a lock, and a decision for an
+  opaque origin (`data:`, sandboxed or blank documents) is used once
+  rather than stored for every such page. A huge `backdrop-filter:
+  blur()` radius or `drop-shadow()` offset no longer overflows an
+  integer conversion.
 * Security (extensions): `chrome.storage.local/sync/managed` `get`,
   `set`, `remove` and `clear` run entirely in C and return the engine's
   own promises, defining result properties rather than assigning them.
