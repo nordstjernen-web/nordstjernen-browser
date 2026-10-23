@@ -3,6 +3,9 @@ Changelog:
 
 1.0.36:
 ======
+* Security: SQLite profile databases (IndexedDB, history and the other
+  stores opened through `ns_db_open`) are set to mode `0600` when
+  opened. IndexedDB files were created with SQLite's default `0644`.
 * Build: `scripts/build-ffmpeg-lgpl.sh` downloads FFmpeg only from
   ffmpeg.org and checks the tarball against a pinned SHA-256 (the
   mutable GitHub tag fallback is gone; other versions need
