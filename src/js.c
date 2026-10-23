@@ -19409,7 +19409,9 @@ ns_linked_css_text(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_NewString(ctx, "");
     const char *url = JS_ToCString(ctx, argv[0]);
     if (!url) return JS_NewString(ctx, "");
-    char *text = ns_engine_linked_css_text(url);
+    const char *doc_url = ns_js_current_url(js_from_ctx(ctx));
+    char *text = ns_url_same_origin(doc_url, url) || g_str_has_prefix(url, "data:")
+                 ? ns_engine_linked_css_text(url) : NULL;
     JS_FreeCString(ctx, url);
     JSValue r = JS_NewString(ctx, text ? text : "");
     g_free(text);
