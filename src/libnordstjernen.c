@@ -1173,6 +1173,10 @@ ns_browser_init(void)
 void
 ns_browser_sandbox(const char *self_exe)
 {
+    gboolean gpu_apis = ns_config_get()->webgl_enabled ||
+                        ns_config_get()->webgpu_enabled;
+    if (!gpu_apis)
+        g_setenv("ORC_CODE", "backup", TRUE);
     ns_os_media_preinit();
     ns_security_win32_mitigations_init(FALSE);
     if (ns_config_get()->webgl_enabled || ns_config_get()->webgpu_enabled)
@@ -1182,6 +1186,8 @@ ns_browser_sandbox(const char *self_exe)
     if (ns_config_get()->webgl_enabled)
         ns_gl_prepare_for_sandbox();
     ns_security_seccomp_deny_unix_sockets();
+    if (!gpu_apis)
+        ns_security_seccomp_deny_exec_memory();
     ns_security_seccomp_init();
 }
 

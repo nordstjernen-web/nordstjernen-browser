@@ -24,6 +24,7 @@
 #include <linux/landlock.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #ifdef NS_HAVE_SECCOMP
 #include <seccomp.h>
@@ -270,7 +271,16 @@ ns_win_relaunch_deelevated(void)
 
 #ifdef NS_SECCOMP_FILTER_ARGS
 static gboolean ns_seccomp_unix_sockets = TRUE;
+static gboolean ns_seccomp_exec_memory_denied;
 #endif
+
+void
+ns_security_seccomp_deny_exec_memory(void)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    ns_seccomp_exec_memory_denied = TRUE;
+#endif
+}
 
 void
 ns_security_seccomp_deny_unix_sockets(void)
@@ -977,6 +987,38 @@ static const char *const ns_seccomp_allowed_names[] = {
     "writev",
 };
 
+static gboolean
+ns_seccomp_is_exec_memory_call(const char *name)
+{
+    static const char *const calls[] = {
+        "mmap", "mmap2", "mprotect", "pkey_mprotect", "remap_file_pages",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(calls); i++)
+        if (strcmp(name, calls[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_seccomp_add_memory_rules(scmp_filter_ctx ctx)
+{
+    static const char *const mmaps[] = { "mmap", "mmap2" };
+    for (gsize i = 0; i < G_N_ELEMENTS(mmaps); i++) {
+        int nr = seccomp_syscall_resolve_name(mmaps[i]);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                               SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC, 0));
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                               SCMP_A3(SCMP_CMP_MASKED_EQ, MAP_ANONYMOUS, 0));
+    }
+    static const char *const protects[] = { "mprotect", "pkey_mprotect" };
+    for (gsize i = 0; i < G_N_ELEMENTS(protects); i++) {
+        int nr = seccomp_syscall_resolve_name(protects[i]);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                               SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC, 0));
+    }
+}
+
 static void
 ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
 {
@@ -1051,11 +1093,19 @@ ns_security_seccomp_init(void)
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
+    gboolean deny_exec = FALSE;
+#ifdef NS_SECCOMP_FILTER_ARGS
+    deny_exec = ns_seccomp_exec_memory_denied;
+#endif
     for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
+        if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
+            continue;
         int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
         if (nr == __NR_SCMP_ERROR) continue;
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
     }
+    if (deny_exec)
+        ns_seccomp_add_memory_rules(ctx);
     ns_seccomp_add_process_rules(ctx);
 
     int rc = seccomp_load(ctx);

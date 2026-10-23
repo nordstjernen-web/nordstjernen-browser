@@ -65,10 +65,14 @@ PIE, full RELRO, non-executable stack, separate-code segments,
 `-fstack-protector-strong`, `-fstack-clash-protection`,
 `-fcf-protection=full` (Intel CET / AMD IBT), `_FORTIFY_SOURCE=3`
 (`=2` fallback), `-Wformat=2 -Wformat-security`. The browser's own code
-has no JIT and maps no writable executable pages. That is a property of
-the code, not something the sandbox enforces: seccomp still allows
-`mmap`/`mprotect` with `PROT_EXEC`, because the GPU drivers behind WebGL
-and WebGPU (Mesa's llvmpipe among them) compile shaders to machine code.
+has no JIT and maps no writable executable pages. When WebGL and WebGPU
+are both switched off, the Linux renderer's seccomp filter enforces this:
+`mprotect`/`pkey_mprotect` with `PROT_EXEC` and anonymous executable
+`mmap` are refused (file-backed executable mappings stay allowed for the
+dynamic loader, and GStreamer's ORC runs its C fallback). With either
+GPU API on, the filter must allow executable mappings, because the GPU
+drivers behind them (Mesa's llvmpipe among them) compile shaders to
+machine code; a separate GPU process would lift that.
 
 ### Privilege drop (`src/security.c`)
 
