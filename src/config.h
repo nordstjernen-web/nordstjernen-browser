@@ -86,6 +86,10 @@ const ns_config *ns_config_get(void);
 ns_config       *ns_config_mut(void);
 char            *ns_config_dump(void);
 gboolean         ns_config_save(GError **error);
+void             ns_config_defer_saves(gboolean defer);
+char            *ns_config_take_pending_save(void);
+char            *ns_config_sensitive_changes(const char *text);
+gboolean         ns_config_apply_text(const char *text, GError **error);
 
 void             ns_config_lock(void);
 void             ns_config_unlock(void);

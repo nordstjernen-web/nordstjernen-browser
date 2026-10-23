@@ -27,7 +27,8 @@ typedef enum {
     NS_PROC_EVT_FAVICON,
     NS_PROC_EVT_WEBGL,
     NS_PROC_EVT_FULLSCREEN,
-    NS_PROC_EVT_ZOOM
+    NS_PROC_EVT_ZOOM,
+    NS_PROC_EVT_CONFIG
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,

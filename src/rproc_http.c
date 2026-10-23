@@ -661,6 +661,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->webgl = head_field_dup(head->x_webgl);
     out->camera = head_field_dup(head->x_camera);
     out->download = head_field_dup(head->x_download);
+    out->config = head_field_dup(head->x_config);
     out->audio = head_field_dup(head->x_audio);
     out->window_action = head_field_dup(head->x_window_action);
     out->clipboard = head->x_clipboard > 0;
@@ -937,6 +938,7 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->webgl = json_get_str(body, "webgl");
     out->camera = json_get_str(body, "camera");
     out->download = json_get_str(body, "download");
+    out->config = json_get_str(body, "config");
     out->audio = json_get_str(body, "audio");
     out->window_action = json_get_str(body, "window_action");
     out->title = json_get_str(body, "title");
@@ -956,6 +958,7 @@ ns_rproc_http_tick_clear(ns_rproc_http_tick *out)
     free(out->webgl);
     free(out->camera);
     free(out->download);
+    free(out->config);
     free(out->audio);
     free(out->window_action);
     free(out->title);

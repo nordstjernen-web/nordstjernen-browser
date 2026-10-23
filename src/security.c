@@ -575,7 +575,13 @@ ns_security_sandbox_init(const char *self_exe)
         g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_cfg_root, 0700);
     chmod(ns_cfg_root, 0700);
-    add_path_rw(rfd, fs_rw, ns_cfg_root);
+    add_path_rw(rfd, ns_runtime_dir_writable ? fs_rw : fs_read, ns_cfg_root);
+    if (!ns_runtime_dir_writable) {
+        g_autofree char *cookies =
+            g_build_filename(ns_cfg_root, "cookies", NULL);
+        g_mkdir_with_parents(cookies, 0700);
+        add_path_rw(rfd, fs_rw, cookies);
+    }
     g_free(ns_cfg_root);
 
     char *ns_data_root =

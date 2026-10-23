@@ -323,6 +323,13 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_download, val, vlen);
             out->x_download[vlen] = '\0';
         }
+        else if (strcasecmp(line, "X-Config") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_config)
+                vlen = sizeof out->x_config - 1;
+            memcpy(out->x_config, val, vlen);
+            out->x_config[vlen] = '\0';
+        }
         else if (strcasecmp(line, "X-Audio") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_audio)
