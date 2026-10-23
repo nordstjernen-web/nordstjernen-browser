@@ -3,6 +3,15 @@ Changelog:
 
 1.0.36:
 ======
+* Security (extensions): an Adblock cosmetic filter whose selector holds
+  `}`, `/*` or a trailing backslash is ignored instead of being pasted
+  into the generated stylesheet, where it could inject rules. Match
+  patterns and `urlFilter` wildcards are matched without recursive
+  backtracking, which was exponential in the number of `*`s. Files an
+  extension loads must resolve, after symlinks, inside the extension
+  directory. `chrome.storage` parses and serialises JSON in C and uses
+  intrinsics captured when the shim starts, so a page replacing
+  `JSON.parse` no longer sees or rewrites the extension's storage.
 * Security: the sandbox and hardening switches (`NS_NO_SANDBOX`,
   `NS_NO_SECCOMP`, `NS_NO_WIN32_MITIGATIONS`, `NS_ALLOW_ROOT`,
   `NS_REQUIRE_SANDBOX`) count as set only for a value other than empty,

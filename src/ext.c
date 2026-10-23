@@ -5,6 +5,7 @@
 
 #include "ext.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <glib/gstdio.h>
@@ -65,19 +66,25 @@ ns_ext_area_ok(const char *area)
 static gboolean
 ns_ext_wildcard(const char *pat, const char *str)
 {
-    while (*pat) {
+    const char *star_pat = NULL, *star_str = NULL;
+    for (;;) {
         if (*pat == '*') {
-            pat++;
+            while (*pat == '*') pat++;
             if (!*pat) return TRUE;
-            for (; *str; str++)
-                if (ns_ext_wildcard(pat, str)) return TRUE;
-            return FALSE;
+            star_pat = pat;
+            star_str = str;
+            continue;
         }
-        if (*pat != *str) return FALSE;
-        pat++;
-        str++;
+        if (!*pat && !*str) return TRUE;
+        if (*pat && *pat == *str) {
+            pat++;
+            str++;
+            continue;
+        }
+        if (!star_pat || !*star_str) return FALSE;
+        pat = star_pat;
+        str = ++star_str;
     }
-    return *str == 0;
 }
 
 static void
@@ -218,16 +225,22 @@ ns_ext_js_sread(JSContext *ctx, JSValueConst this_val,
                 JSValueConst *func_data)
 {
     (void)this_val; (void)magic;
-    if (argc < 1) return JS_NewString(ctx, "{}");
+    if (argc < 1) return JS_NewObject(ctx);
     const char *id = JS_ToCString(ctx, func_data[0]);
     const char *area = JS_ToCString(ctx, argv[0]);
     char *out = NULL;
+    gsize out_len = 0;
     g_autofree char *path = ns_ext_storage_path(id, area);
     if (path) {
         char *data = NULL;
-        if (g_file_get_contents(path, &data, NULL, NULL)) out = data;
+        if (g_file_get_contents(path, &data, &out_len, NULL)) out = data;
     }
-    JSValue r = JS_NewString(ctx, out ? out : "{}");
+    JSValue r = out ? JS_ParseJSON(ctx, out, out_len, "<extension-storage>")
+                    : JS_NewObject(ctx);
+    if (JS_IsException(r)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        r = JS_NewObject(ctx);
+    }
     g_free(out);
     JS_FreeCString(ctx, id);
     JS_FreeCString(ctx, area);
@@ -243,7 +256,13 @@ ns_ext_js_swrite(JSContext *ctx, JSValueConst this_val,
     if (argc < 2) return JS_FALSE;
     const char *id = JS_ToCString(ctx, func_data[0]);
     const char *area = JS_ToCString(ctx, argv[0]);
-    const char *json = JS_ToCString(ctx, argv[1]);
+    JSValue json_v = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(json_v)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        json_v = JS_UNDEFINED;
+    }
+    const char *json = JS_IsString(json_v) ? JS_ToCString(ctx, json_v) : NULL;
+    JS_FreeValue(ctx, json_v);
     gboolean ok = FALSE;
     g_autofree char *path = ns_ext_storage_path(id, area);
     if (path && json && g_file_set_contents(path, json, -1, NULL)) {
@@ -288,21 +307,22 @@ ns_ext_js_uilang(JSContext *ctx, JSValueConst this_val,
 
 static const char ns_ext_shim_prelude[] =
 ";(function(N){"
-"var PL=N.p,UL=N.l;"
+"var PL=N.p,UL=N.l,OK=Object.keys,AI=Array.isArray,P=Promise;"
+"function each(l,f){for(var i=0;i<l.length;i++)f(l[i]);}"
 "function area(X,name){"
-"function rd(){try{return JSON.parse(X.r(name))||{};}catch(e){return{};}}"
-"function wr(o){return X.w(name,JSON.stringify(o));}"
-"return {get:function(keys){return new Promise(function(res){var a=rd(),o={};"
+"function rd(){var o=X.r(name);return o&&typeof o==='object'?o:{};}"
+"function wr(o){return X.w(name,o);}"
+"return {get:function(keys){return new P(function(res){var a=rd(),o={};"
 "if(keys==null)o=a;"
 "else if(typeof keys==='string'){if(keys in a)o[keys]=a[keys];}"
-"else if(Array.isArray(keys)){keys.forEach(function(k){if(k in a)o[k]=a[k];});}"
-"else if(typeof keys==='object'){Object.keys(keys).forEach(function(k){o[k]=(k in a)?a[k]:keys[k];});}"
+"else if(AI(keys)){each(keys,function(k){if(k in a)o[k]=a[k];});}"
+"else if(typeof keys==='object'){each(OK(keys),function(k){o[k]=(k in a)?a[k]:keys[k];});}"
 "res(o);});},"
-"set:function(items){return new Promise(function(res){var a=rd();"
-"Object.keys(items||{}).forEach(function(k){a[k]=items[k];});wr(a);res();});},"
-"remove:function(keys){return new Promise(function(res){var a=rd();"
-"(Array.isArray(keys)?keys:[keys]).forEach(function(k){delete a[k];});wr(a);res();});},"
-"clear:function(){return new Promise(function(res){wr({});res();});}};}"
+"set:function(items){return new P(function(res){var a=rd();"
+"each(OK(items||{}),function(k){a[k]=items[k];});wr(a);res();});},"
+"remove:function(keys){return new P(function(res){var a=rd();"
+"each(AI(keys)?keys:[keys],function(k){delete a[k];});wr(a);res();});},"
+"clear:function(){return new P(function(res){wr({});res();});}};}"
 "function make_api(X){"
 "var id=X.id,man=null;"
 "function getManifest(){if(man===null){try{man=JSON.parse(X.m());}catch(e){man={};}}return man;}"
@@ -359,6 +379,27 @@ ns_ext_collect_strings(JSContext *ctx, JSValueConst arr, GPtrArray *out)
     }
 }
 
+static gboolean
+ns_ext_path_within(const char *path, const char *base)
+{
+    gsize blen = strlen(base);
+    return strncmp(path, base, blen) == 0 &&
+           (path[blen] == '\0' || path[blen] == G_DIR_SEPARATOR);
+}
+
+static char *
+ns_ext_resolved_path(const char *path)
+{
+#ifdef G_OS_WIN32
+    return g_canonicalize_filename(path, NULL);
+#else
+    char *r = realpath(path, NULL);
+    char *out = r ? g_strdup(r) : NULL;
+    free(r);
+    return out;
+#endif
+}
+
 static char *
 ns_ext_safe_path(const char *base_dir, const char *rel)
 {
@@ -366,9 +407,10 @@ ns_ext_safe_path(const char *base_dir, const char *rel)
     g_autofree char *canon_base = g_canonicalize_filename(base_dir, NULL);
     g_autofree char *joined = g_build_filename(base_dir, rel, NULL);
     char *canon = g_canonicalize_filename(joined, NULL);
-    gsize blen = strlen(canon_base);
-    if (strncmp(canon, canon_base, blen) != 0 ||
-        (canon[blen] != '\0' && canon[blen] != G_DIR_SEPARATOR)) {
+    g_autofree char *real_base = ns_ext_resolved_path(canon_base);
+    g_autofree char *real = ns_ext_resolved_path(canon);
+    if (!ns_ext_path_within(canon, canon_base) || !real || !real_base ||
+        !ns_ext_path_within(real, real_base)) {
         g_free(canon);
         return NULL;
     }
@@ -740,7 +782,9 @@ ns_abp_parse_cosmetic(ns_ext *e, const char *line, const char *sep)
     g_autofree char *dom_spec = g_strndup(line, at - line);
     const char *selector = at + strlen(sep);
     while (*selector == ' ') selector++;
-    if (!*selector || strchr(selector, '{')) return;
+    if (!*selector || strpbrk(selector, "{}") || strstr(selector, "/*") ||
+        g_str_has_suffix(selector, "\\"))
+        return;
     if (g_str_has_prefix(selector, "+js") || g_str_has_prefix(selector, "script:"))
         return;
 
@@ -1023,26 +1067,29 @@ ns_dnr_sep(char c)
 static gboolean
 ns_dnr_match_here(const char *p, const char *s, gboolean end_anchor)
 {
-    while (*p) {
+    const char *star_p = NULL, *star_s = NULL;
+    for (;;) {
         if (*p == '*') {
-            p++;
+            while (*p == '*') p++;
             if (!*p) return TRUE;
-            for (;;) {
-                if (ns_dnr_match_here(p, s, end_anchor)) return TRUE;
-                if (!*s) return FALSE;
-                s++;
-            }
+            star_p = p;
+            star_s = s;
+            continue;
         }
-        if (*p == '^') {
+        if (!*p) {
+            if (!end_anchor || !*s) return TRUE;
+        } else if (*p == '^') {
             if (*s == '\0') { p++; continue; }
             if (ns_dnr_sep(*s)) { p++; s++; continue; }
-            return FALSE;
+        } else if (*s && *s == *p) {
+            p++;
+            s++;
+            continue;
         }
-        if (*s != *p) return FALSE;
-        p++;
-        s++;
+        if (!star_p || !*star_s) return FALSE;
+        p = star_p;
+        s = ++star_s;
     }
-    return end_anchor ? (*s == '\0') : TRUE;
 }
 
 static gboolean
