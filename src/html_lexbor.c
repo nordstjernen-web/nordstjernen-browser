@@ -564,8 +564,7 @@ ns_xml_well_formed(const char *input, gssize len, char **out_root_ns)
                 if (!e) { ok = FALSE; break; }
                 p = e; continue;
             }
-            const char *e = q;
-            while (e < end && *e != '>') e++;
+            const char *e = ns_xml_declaration_end(q + 1, end);
             if (e >= end) { ok = FALSE; break; }
             p = e + 1; continue;
         }

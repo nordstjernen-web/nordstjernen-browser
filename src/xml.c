@@ -26,6 +26,35 @@ typedef struct {
     gboolean    ok;
 } xml_parser;
 
+const char *
+ns_xml_declaration_end(const char *p, const char *end)
+{
+    int bracket = 0;
+    char quote = 0;
+    while (p < end) {
+        char c = *p;
+        if (quote) {
+            if (c == quote) quote = 0;
+        } else if (bracket > 0 && end - p >= 4 && strncmp(p, "<!--", 4) == 0) {
+            const char *e = p + 4;
+            while (e + 2 < end && strncmp(e, "-->", 3) != 0) e++;
+            if (e + 2 >= end) return end;
+            p = e + 3;
+            continue;
+        } else if (c == '"' || c == '\'') {
+            quote = c;
+        } else if (c == '[') {
+            bracket++;
+        } else if (c == ']') {
+            if (bracket > 0) bracket--;
+        } else if (c == '>' && bracket == 0) {
+            return p;
+        }
+        p++;
+    }
+    return end;
+}
+
 static gboolean
 xml_is_space(char c)
 {
@@ -182,14 +211,7 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
                 continue;
             }
             if (xp->end - xp->p >= 9 && g_ascii_strncasecmp(xp->p, "<!DOCTYPE", 9) == 0) {
-                const char *e = xp->p + 9;
-                int bracket = 0;
-                while (e < xp->end) {
-                    if (*e == '[') bracket++;
-                    else if (*e == ']') { if (bracket > 0) bracket--; }
-                    else if (*e == '>' && bracket == 0) break;
-                    e++;
-                }
+                const char *e = ns_xml_declaration_end(xp->p + 9, xp->end);
                 if (doc) {
                     const char *t = xp->p + 9;
                     while (t < e && xml_is_space(*t)) t++;

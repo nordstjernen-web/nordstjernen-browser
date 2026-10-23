@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Security (XML): the XHTML well-formedness check and the XML parser
+  find the end of a `<!DOCTYPE … [ … ]>` the same way, skipping quoted
+  strings and comments in the internal subset. The check stopped at the
+  first `>` and the parser at the first unbalanced `]>`, even inside
+  an entity value like `"]>"`, so the two could disagree about where
+  the document started.
 * Security (CSP): keyword sources match case-insensitively (`'SELF'`,
   `'Strict-Dynamic'`, `'NONCE-…'`), as the spec says; an ignored
   `'strict-dynamic'` used to re-enable host allow-lists. A source
