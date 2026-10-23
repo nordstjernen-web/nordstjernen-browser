@@ -493,7 +493,7 @@ config_free_strings(ns_config *c)
 {
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++)
         if (cfg_fields[i].kind == CFG_STRING)
-            g_clear_pointer((char **)((char *)c + cfg_fields[i].offset), g_free);
+            g_clear_pointer((char **)(void *)((char *)c + cfg_fields[i].offset), g_free);
 }
 
 static const char *const sensitive_keys[] = {
