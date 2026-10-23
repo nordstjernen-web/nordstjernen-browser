@@ -14,6 +14,8 @@
 
 static ns_config g_cfg;
 static char     *g_cfg_path;
+static gboolean  g_cfg_defer_saves;
+static char     *g_cfg_pending_save;
 
 static void
 set_string(char **slot, const char *value)
@@ -219,17 +221,8 @@ apply_pair(ns_config *c, const char *key, const char *value)
 }
 
 static void
-load_file(ns_config *c, const char *path)
+parse_text(ns_config *c, const char *contents)
 {
-    char *contents = NULL;
-    gsize len = 0;
-    GError *err = NULL;
-    if (!g_file_get_contents(path, &contents, &len, &err)) {
-        if (!g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-            g_warning("config: failed to read %s: %s", path, err->message);
-        g_clear_error(&err);
-        return;
-    }
     char **lines = g_strsplit(contents, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         char *line = g_strstrip(lines[i]);
@@ -242,6 +235,21 @@ load_file(ns_config *c, const char *path)
         if (*key) apply_pair(c, key, value);
     }
     g_strfreev(lines);
+}
+
+static void
+load_file(ns_config *c, const char *path)
+{
+    char *contents = NULL;
+    gsize len = 0;
+    GError *err = NULL;
+    if (!g_file_get_contents(path, &contents, &len, &err)) {
+        if (!g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT))
+            g_warning("config: failed to read %s: %s", path, err->message);
+        g_clear_error(&err);
+        return;
+    }
+    parse_text(c, contents);
     g_free(contents);
 }
 
@@ -441,8 +449,129 @@ reduced_motion_name(ns_reduced_motion_pref p)
     return reduced_motion_names[p];
 }
 
+static char *
+field_string(const ns_config *c, const cfg_field *f)
+{
+    const void *slot = (const char *)c + f->offset;
+    switch (f->kind) {
+    case CFG_STRING: {
+        const char *v = *(const char *const *)slot;
+        char *line = g_strdup(v ? v : "");
+        g_strdelimit(line, "\r\n", ' ');
+        return line;
+    }
+    case CFG_BOOL:
+        return g_strdup(*(const gboolean *)slot ? "true" : "false");
+    case CFG_INT:
+        return g_strdup_printf("%d", *(const int *)slot);
+    case CFG_REFERER:
+        return g_strdup(referer_policy_name(*(const ns_referer_policy *)slot));
+    case CFG_COOKIE:
+        return g_strdup(cookie_policy_name(*(const ns_cookie_policy *)slot));
+    case CFG_COLOR_SCHEME:
+        return g_strdup(color_scheme_name(*(const ns_color_scheme_pref *)slot));
+    case CFG_REDUCED_MOTION:
+        return g_strdup(reduced_motion_name(*(const ns_reduced_motion_pref *)slot));
+    }
+    return g_strdup("");
+}
+
+static GString *
+config_serialize(const ns_config *c)
+{
+    GString *s = g_string_new(NULL);
+    g_string_append(s, "# nordstjernen configuration\n");
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
+        g_autofree char *v = field_string(c, &cfg_fields[i]);
+        g_string_append_printf(s, "%s = %s\n", cfg_fields[i].key, v);
+    }
+    return s;
+}
+
+static void
+config_free_strings(ns_config *c)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++)
+        if (cfg_fields[i].kind == CFG_STRING)
+            g_clear_pointer((char **)((char *)c + cfg_fields[i].offset), g_free);
+}
+
+static const char *const sensitive_keys[] = {
+    "home_url", "search_engine", "ai_model_mirror", "http_proxy",
+    "https_proxy", "no_proxy", "doh_url", "cookie_policy", "https_first",
+    "harden_allocator", "tls_allow_insecure_override", "remote_control",
+};
+
+void
+ns_config_defer_saves(gboolean defer)
+{
+    g_cfg_defer_saves = defer;
+}
+
+char *
+ns_config_take_pending_save(void)
+{
+    return g_steal_pointer(&g_cfg_pending_save);
+}
+
+char *
+ns_config_sensitive_changes(const char *text)
+{
+    if (!text) return NULL;
+    ns_config proposed;
+    memset(&proposed, 0, sizeof proposed);
+    apply_default(&proposed);
+    parse_text(&proposed, text);
+    GString *out = g_string_new(NULL);
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
+        const cfg_field *f = &cfg_fields[i];
+        gboolean sensitive = FALSE;
+        for (gsize k = 0; k < G_N_ELEMENTS(sensitive_keys) && !sensitive; k++)
+            sensitive = strcmp(f->key, sensitive_keys[k]) == 0;
+        if (!sensitive) continue;
+        g_autofree char *was = field_string(&g_cfg, f);
+        g_autofree char *now = field_string(&proposed, f);
+        if (strcmp(was, now) != 0)
+            g_string_append_printf(out, "%s: \u201c%s\u201d \u2192 \u201c%s\u201d\n",
+                                   f->key, was, now);
+    }
+    config_free_strings(&proposed);
+    if (out->len == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean config_write_file(GError **error);
+
+gboolean
+ns_config_apply_text(const char *text, GError **error)
+{
+    if (!text) return FALSE;
+    ns_config fresh;
+    memset(&fresh, 0, sizeof fresh);
+    apply_default(&fresh);
+    parse_text(&fresh, text);
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++)
+        adopt_field(&g_cfg, &fresh, &cfg_fields[i]);
+    config_free_strings(&fresh);
+    return config_write_file(error);
+}
+
 gboolean
 ns_config_save(GError **error)
+{
+    if (g_cfg_defer_saves) {
+        g_free(g_cfg_pending_save);
+        g_cfg_pending_save = g_string_free(config_serialize(&g_cfg), FALSE);
+        return TRUE;
+    }
+    return config_write_file(error);
+}
+
+static gboolean
+config_write_file(GError **error)
 {
     if (!g_cfg_path) {
         g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_NOENT,
@@ -459,46 +588,7 @@ ns_config_save(GError **error)
     }
     g_free(dir);
 
-    const ns_config *c = &g_cfg;
-    GString *s = g_string_new(NULL);
-    g_string_append(s, "# nordstjernen configuration\n");
-    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
-        const cfg_field *f = &cfg_fields[i];
-        const void *slot = (const char *)c + f->offset;
-        switch (f->kind) {
-        case CFG_STRING: {
-            const char *v = *(const char *const *)slot;
-            g_autofree char *line = g_strdup(v ? v : "");
-            g_strdelimit(line, "\r\n", ' ');
-            g_string_append_printf(s, "%s = %s\n", f->key, line);
-            break;
-        }
-        case CFG_BOOL:
-            g_string_append_printf(s, "%s = %s\n", f->key,
-                                   *(const gboolean *)slot ? "true" : "false");
-            break;
-        case CFG_INT:
-            g_string_append_printf(s, "%s = %d\n", f->key,
-                                   *(const int *)slot);
-            break;
-        case CFG_REFERER:
-            g_string_append_printf(s, "%s = %s\n", f->key,
-                referer_policy_name(*(const ns_referer_policy *)slot));
-            break;
-        case CFG_COOKIE:
-            g_string_append_printf(s, "%s = %s\n", f->key,
-                cookie_policy_name(*(const ns_cookie_policy *)slot));
-            break;
-        case CFG_COLOR_SCHEME:
-            g_string_append_printf(s, "%s = %s\n", f->key,
-                color_scheme_name(*(const ns_color_scheme_pref *)slot));
-            break;
-        case CFG_REDUCED_MOTION:
-            g_string_append_printf(s, "%s = %s\n", f->key,
-                reduced_motion_name(*(const ns_reduced_motion_pref *)slot));
-            break;
-        }
-    }
+    GString *s = config_serialize(&g_cfg);
     gboolean ok = g_file_set_contents_full(g_cfg_path, s->str, (gssize)s->len,
                                            G_FILE_SET_CONTENTS_CONSISTENT |
                                            G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, error);

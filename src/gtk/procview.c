@@ -142,6 +142,7 @@ typedef struct {
     char            *webgl;
     char            *camera;
     char            *download;
+    char            *config;
     char            *audio;
     char            *window_action;
     char            *clipboard;
@@ -1166,6 +1167,10 @@ worker_main(gpointer data)
                     res->download = g_strdup(fr.download);
                     free(fr.download);
                 }
+                if (fr.config) {
+                    res->config = g_strdup(fr.config);
+                    free(fr.config);
+                }
                 if (fr.audio) {
                     res->audio = g_strdup(fr.audio);
                     free(fr.audio);
@@ -1197,6 +1202,7 @@ worker_main(gpointer data)
                 res->webgl = tick.webgl ? g_strdup(tick.webgl) : NULL;
                 res->camera = tick.camera ? g_strdup(tick.camera) : NULL;
                 res->download = tick.download ? g_strdup(tick.download) : NULL;
+                res->config = tick.config ? g_strdup(tick.config) : NULL;
                 res->audio = tick.audio ? g_strdup(tick.audio) : NULL;
                 res->window_action = tick.window_action
                     ? g_strdup(tick.window_action) : NULL;
@@ -2992,6 +2998,8 @@ on_result(gpointer data)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
+        if (res->ok && res->config && *res->config)
+            post_emit(v, NS_PROC_EVT_CONFIG, res->config);
         if (current && res->ok && res->audio && *res->audio)
             pv_audio_pump(v, res->audio);
         if (current && res->ok && res->window_action && *res->window_action)
@@ -3067,6 +3075,8 @@ on_result(gpointer data)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
+        if (res->ok && res->config && *res->config)
+            post_emit(v, NS_PROC_EVT_CONFIG, res->config);
         if (res->ok && res->audio && *res->audio)
             pv_audio_pump(v, res->audio);
         if (res->ok && res->window_action && *res->window_action)
@@ -3340,6 +3350,7 @@ done:
     g_free(res->webgl);
     g_free(res->camera);
     g_free(res->download);
+    g_free(res->config);
     g_free(res->audio);
     free(res->clipboard);
     g_free(res->window_action);

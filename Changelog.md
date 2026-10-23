@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Security: renderers can no longer change the configuration file. A
+  settings save in a page, or a camera/WebGL decision, now goes to the UI
+  process, which writes `nordstjernen.conf`. If the change touches the
+  home page, search engine, proxies, DNS-over-HTTPS, cookie policy,
+  HTTPS-first, allocator hardening, the TLS override, remote control
+  or the AI model mirror, the UI process first shows a native dialog
+  listing the changes and applies them only on "Apply". On Linux the
+  renderer's Landlock grant on the config directory is read-only
+  (except for the cookie jars). A renderer re-reads the file on every
+  navigation.
 * The browser's second command name is now `open-browser-nordstjernen`
   (it was `internet-browser`): the installed symlink, the `.deb`/`.rpm`
   alternative, the Alpine link, the Windows App Paths alias and the MSIX

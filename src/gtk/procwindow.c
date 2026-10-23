@@ -1135,6 +1135,44 @@ set_tab_loading(GtkWidget *page, gboolean loading)
 }
 
 static void
+pw_config_confirmed(GObject *src, GAsyncResult *res, gpointer data)
+{
+    char *text = data;
+    int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, NULL);
+    if (choice == 1)
+        ns_config_apply_text(text, NULL);
+    g_free(text);
+}
+
+static void
+pw_handle_renderer_config(ProcWindow *pw, const char *encoded)
+{
+    gsize len = 0;
+    guchar *raw = g_base64_decode(encoded, &len);
+    if (!raw) return;
+    char *text = g_strndup((const char *)raw, len);
+    g_free(raw);
+    char *changes = ns_config_sensitive_changes(text);
+    if (!changes) {
+        ns_config_apply_text(text, NULL);
+        g_free(text);
+        return;
+    }
+    GtkAlertDialog *dialog = gtk_alert_dialog_new(
+        "%s", ns_i18n("Apply these security-related settings?"));
+    gtk_alert_dialog_set_detail(dialog, changes);
+    const char *buttons[] = { ns_i18n("Cancel"), ns_i18n("Apply"), NULL };
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    gtk_alert_dialog_choose(dialog, GTK_WINDOW(pw->window), NULL,
+                            pw_config_confirmed, text);
+    g_object_unref(dialog);
+    g_free(changes);
+}
+
+static void
 on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                gpointer user_data)
 {
@@ -1209,6 +1247,10 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
     case NS_PROC_EVT_ZOOM:
         if (is_current)
             update_zoom_indicator(pw, v);
+        break;
+    case NS_PROC_EVT_CONFIG:
+        if (text && *text)
+            pw_handle_renderer_config(pw, text);
         break;
     case NS_PROC_EVT_DOWNLOAD:
         if (text && *text) {

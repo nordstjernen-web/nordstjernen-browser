@@ -112,6 +112,17 @@ session_bfcache_clear(ns_renderer_session *s)
     s->bf_n = 0;
 }
 
+static char *
+session_take_config(void)
+{
+    g_autofree char *text = ns_config_take_pending_save();
+    if (!text) return NULL;
+    gchar *b64 = g_base64_encode((const guchar *)text, strlen(text));
+    char *out = strdup(b64);
+    g_free(b64);
+    return out;
+}
+
 static void
 session_stash_post(ns_renderer_session *s, const char *href)
 {
@@ -513,6 +524,7 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     char *camera = render_take_line(s->cur, ns_browser_take_pending_camera, 0);
     char *download = render_take_line(s->cur, ns_browser_take_pending_download,
                                       0);
+    char *config = session_take_config();
     char *audio = render_take_line(s->cur, ns_browser_take_pending_audio, 1);
     char *window_action =
         render_take_line(s->cur, ns_browser_take_pending_window_action, 0);
@@ -539,6 +551,7 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
                           3000);
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Config", config, 12000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Audio", audio, 16000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Window-Action",
                           window_action, 31);
@@ -546,6 +559,7 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     free(webgl);
     free(camera);
     free(download);
+    free(config);
     free(audio);
     free(window_action);
     if (tiles)
@@ -676,6 +690,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     }
 
     if (strcmp(head->path, "/open") == 0) {
+        ns_config_reload();
         char *url = json_get_str(body, "url");
         long w = 0, h = 0, settle = 0, history = 0, user_activated = 0;
         long reload = 0;
@@ -787,6 +802,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *webgl = ns_browser_take_pending_webgl(s->cur);
         char *camera = ns_browser_take_pending_camera(s->cur);
         char *download = ns_browser_take_pending_download(s->cur);
+        char *config = session_take_config();
         char *audio = ns_browser_take_pending_audio(s->cur);
         char *window_action = ns_browser_take_pending_window_action(s->cur);
         if (audio)
@@ -798,6 +814,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *webgl_e = json_escape(webgl ? webgl : "");
         char *camera_e = json_escape(camera ? camera : "");
         char *download_e = json_escape(download ? download : "");
+        char *config_e = json_escape(config ? config : "");
         char *audio_e = json_escape(audio ? audio : "");
         char *window_action_e = json_escape(window_action ? window_action : "");
         char *title = ns_browser_title(s->cur);
@@ -812,12 +829,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "{\"ok\":1,\"changed\":%d,\"animating\":%d,\"wake_ms\":%d,"
             "\"page_width\":%d,\"page_height\":%d,\"nav\":\"%s\","
             "\"webgl\":\"%s\",\"camera\":\"%s\","
-            "\"download\":\"%s\",\"audio\":\"%s\","
+            "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
             "\"url_pushed\":%d}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
+            config_e ? config_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",
             title_e ? title_e : "", url_e ? url_e : "", url_pushed);
         if (n >= 0)
@@ -828,6 +846,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(webgl_e);
         free(camera_e);
         free(download_e);
+        free(config_e);
         free(audio_e);
         free(window_action_e);
         free(title_e);
@@ -838,6 +857,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(webgl);
         free(camera);
         free(download);
+        free(config);
         free(audio);
         free(window_action);
         return 0;

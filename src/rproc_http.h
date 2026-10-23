@@ -44,6 +44,7 @@ typedef struct {
     char                *webgl;
     char                *camera;
     char                *download;
+    char                *config;
     char                *audio;
     char                *window_action;
     int                  clipboard;
@@ -61,6 +62,7 @@ typedef struct {
     char *webgl;
     char *camera;
     char *download;
+    char *config;
     char *audio;
     char *window_action;
     char *title;
