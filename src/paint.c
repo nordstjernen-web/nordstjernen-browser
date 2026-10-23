@@ -6864,7 +6864,8 @@ paint_texture_drop_shadows(cairo_t *cr, cairo_surface_t *surf, const ns_box *b,
 void
 ns_paint_blur_argb(guchar *data, int stride, int w, int h, double sigma)
 {
-    if (sigma < 0.5) return;
+    if (!(sigma >= 0.5)) return;
+    if (sigma > 512.0) sigma = 512.0;
     double ideal = sqrt(12.0 * sigma * sigma / 3.0 + 1.0);
     int wl = (int)floor(ideal);
     if (wl % 2 == 0) wl--;

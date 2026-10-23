@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: each `new WebAssembly.Instance()` links its own values for
+  imported globals and throws `LinkError` when one is missing or has
+  the wrong type. A missing global used to keep whatever value an
+  earlier instance of the same module had linked, and a NaN or huge
+  number for an `i32` global went through an undefined float-to-int
+  cast. A `filter: blur()` sigma is clamped (and NaN ignored) before it
+  is turned into box widths. The Safe Browsing tables, read from
+  network threads, are guarded by a mutex.
 * Security: a cross-origin `fetch()` or XHR response shows script only
   the CORS-safelisted headers and those named in
   `Access-Control-Expose-Headers`. `Content-Disposition`,
