@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: every in-page `blob:` lookup (scripts, module imports,
+  workers, images, `fetch`) checks that the URL belongs to the
+  document's origin, and the internal hook that refreshes a blob URL's
+  contents only updates an existing URL of the page's own origin
+  instead of accepting any `blob:` string.
 * Security: a `<link>` stylesheet that redirects to another origin is
   held to that origin: it must be `text/css` even in quirks mode, and
   its text is not exposed to page script through `cssRules`. The checks
