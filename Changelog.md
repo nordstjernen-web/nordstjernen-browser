@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: three routes past the CORS preflight are closed. A
+  307/308 redirect that keeps a non-simple method is preflighted again
+  at its new origin. `navigator.sendBeacon()` with a non-safelisted
+  content type such as `application/json` is preflighted. A fetch that a
+  service worker hands back to the network now keeps the preflight.
 * Security: cookies obey `SameSite`. On a navigation from another site,
   `Strict` cookies are withheld, and on a cross-site POST (or any other
   unsafe method) `Lax` ones too; a cookie without the attribute counts
