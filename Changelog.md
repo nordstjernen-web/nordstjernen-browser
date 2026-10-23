@@ -3,6 +3,9 @@ Changelog:
 
 1.0.36:
 ======
+* Build: `config_free_strings` casts the string slot through `void *`,
+  so clang's `-Wcast-align` no longer fails the `--werror` Linux, macOS
+  and Windows CI builds.
 * Security (Linux sandbox): with WebGL and WebGPU both switched off, the
   renderer's seccomp filter refuses `mprotect`/`pkey_mprotect` with
   `PROT_EXEC` and anonymous executable `mmap`, and drops
