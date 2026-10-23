@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Packaging: `scripts/pack-appimage.sh` downloads pinned releases of
+  linuxdeploy, linuxdeploy-plugin-gtk, appimagetool and the type2
+  runtime and checks each against a SHA-256 before running it, also
+  when the file is already cached. It used to fetch the moving
+  `continuous`/`master` builds and run them unchecked.
 * Security: each `new WebAssembly.Instance()` links its own values for
   imported globals and throws `LinkError` when one is missing or has
   the wrong type. A missing global used to keep whatever value an

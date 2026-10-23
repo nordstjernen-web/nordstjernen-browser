@@ -20,32 +20,58 @@ GTKPLUGIN="$TOOLS/linuxdeploy-plugin-gtk.sh"
 APPIMAGETOOL="$TOOLS/appimagetool-${ARCH}.AppImage"
 RUNTIME="$TOOLS/runtime-${ARCH}"
 
-if [ ! -x "$LINUXDEPLOY" ]; then
-    echo "Fetching linuxdeploy..."
-    curl -L --fail -o "$LINUXDEPLOY" \
-        "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${ARCH}.AppImage"
-    chmod +x "$LINUXDEPLOY"
-fi
+LINUXDEPLOY_TAG=1-alpha-20251107-1
+GTKPLUGIN_COMMIT=7a3fbc31a9e5075073ff8790f26effbac5f84453
+APPIMAGETOOL_TAG=1.9.1
+RUNTIME_TAG=20251108
+GTKPLUGIN_SHA256=b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171
+case "$ARCH" in
+    x86_64)
+        LINUXDEPLOY_SHA256=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+        APPIMAGETOOL_SHA256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+        RUNTIME_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+        ;;
+    aarch64)
+        LINUXDEPLOY_SHA256=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+        APPIMAGETOOL_SHA256=f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+        RUNTIME_SHA256=00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
+        ;;
+    *)
+        echo "$(basename "$0"): no pinned AppImage tooling for $ARCH" >&2
+        exit 1
+        ;;
+esac
 
-if [ ! -x "$GTKPLUGIN" ]; then
-    echo "Fetching linuxdeploy-plugin-gtk..."
-    curl -L --fail -o "$GTKPLUGIN" \
-        "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
-    chmod +x "$GTKPLUGIN"
-fi
+fetch_verified() {
+    local dest=$1 url=$2 sha=$3
+    if [ -s "$dest" ] && echo "$sha  $dest" | sha256sum -c --status -; then
+        chmod +x "$dest"
+        return
+    fi
+    echo "Fetching $(basename "$dest")..."
+    rm -f "$dest" "$dest.part"
+    curl -L --fail -o "$dest.part" "$url"
+    if ! echo "$sha  $dest.part" | sha256sum -c --status -; then
+        echo "$(basename "$0"): checksum mismatch for $url" >&2
+        rm -f "$dest.part"
+        exit 1
+    fi
+    mv "$dest.part" "$dest"
+    chmod +x "$dest"
+}
 
-if [ ! -x "$APPIMAGETOOL" ]; then
-    echo "Fetching appimagetool..."
-    curl -L --fail -o "$APPIMAGETOOL" \
-        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
-    chmod +x "$APPIMAGETOOL"
-fi
-
-if [ ! -s "$RUNTIME" ]; then
-    echo "Fetching type2-runtime..."
-    curl -L --fail -o "$RUNTIME" \
-        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}"
-fi
+fetch_verified "$LINUXDEPLOY" \
+    "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_TAG}/linuxdeploy-${ARCH}.AppImage" \
+    "$LINUXDEPLOY_SHA256"
+fetch_verified "$GTKPLUGIN" \
+    "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/${GTKPLUGIN_COMMIT}/linuxdeploy-plugin-gtk.sh" \
+    "$GTKPLUGIN_SHA256"
+fetch_verified "$APPIMAGETOOL" \
+    "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_TAG}/appimagetool-${ARCH}.AppImage" \
+    "$APPIMAGETOOL_SHA256"
+fetch_verified "$RUNTIME" \
+    "https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME_TAG}/runtime-${ARCH}" \
+    "$RUNTIME_SHA256"
 
 release_build_or_die() {
     local cfg
