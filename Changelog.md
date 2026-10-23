@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Security: the sandbox and hardening switches (`NS_NO_SANDBOX`,
+  `NS_NO_SECCOMP`, `NS_NO_WIN32_MITIGATIONS`, `NS_ALLOW_ROOT`,
+  `NS_REQUIRE_SANDBOX`) count as set only for a value other than empty,
+  `0`, `false`, `no` or `off`. `NS_NO_SANDBOX=0` used to turn the
+  sandbox off. The undocumented `NS_EARLY_JS_FILE` (run a local file as
+  script in every page) and `NS_CAMERA_ALLOW` (grant every site the
+  camera without asking) are gone.
 * Security: `<input type="file">` no longer reads a file from disk
   because of an internal `data-nd-file-path` attribute. Nothing in the
   browser sets that attribute; the code was only reachable if a page

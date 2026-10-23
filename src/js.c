@@ -68138,16 +68138,6 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     if (js->platform_globals) g_hash_table_destroy(js->platform_globals);
     js->platform_globals = ns_js_snapshot_globals(js);
     ns_js_capture_platform_functions(js->ctx);
-    {
-        const char *early = g_getenv("NS_EARLY_JS_FILE");
-        char *early_src = NULL;
-        if (early && *early &&
-            g_file_get_contents(early, &early_src, NULL, NULL)) {
-            char *r = ns_js_eval_source(js, early_src, "early-inject");
-            g_free(r);
-            g_free(early_src);
-        }
-    }
     if (js->early_inject_src && *js->early_inject_src) {
         char *r = ns_js_eval_source(js, js->early_inject_src, "early-inject");
         g_free(r);

@@ -56,6 +56,18 @@
 #endif
 
 gboolean
+ns_security_env_flag(const char *name)
+{
+    const char *v = g_getenv(name);
+    if (!v) return FALSE;
+    while (*v == ' ' || *v == '\t') v++;
+    return *v && g_strcmp0(v, "0") != 0 &&
+           g_ascii_strcasecmp(v, "false") != 0 &&
+           g_ascii_strcasecmp(v, "no") != 0 &&
+           g_ascii_strcasecmp(v, "off") != 0;
+}
+
+gboolean
 ns_security_csprng_fill(void *buf, gsize len)
 {
     if (!buf || len == 0) return TRUE;
@@ -252,7 +264,7 @@ ns_security_refuse_root(void)
 {
 #if defined(__linux__) || defined(__APPLE__)
     if (geteuid() != 0 && getuid() != 0) return TRUE;
-    if (g_getenv("NS_ALLOW_ROOT")) {
+    if (ns_security_env_flag("NS_ALLOW_ROOT")) {
         g_warning("nordstjernen: running as root because NS_ALLOW_ROOT is set");
         return TRUE;
     }
@@ -264,7 +276,7 @@ ns_security_refuse_root(void)
     return FALSE;
 #elif defined(G_OS_WIN32)
     if (!ns_win_is_elevated()) return TRUE;
-    if (g_getenv("NS_ALLOW_ROOT")) {
+    if (ns_security_env_flag("NS_ALLOW_ROOT")) {
         g_warning("nordstjernen: running as Administrator because "
                   "NS_ALLOW_ROOT is set");
         return TRUE;
@@ -432,8 +444,7 @@ add_gpu_devices(int rfd, guint64 fs_read)
 static void
 ns_sandbox_require_or_die(const char *what)
 {
-    const char *req = g_getenv("NS_REQUIRE_SANDBOX");
-    if (!req || !*req || g_strcmp0(req, "0") == 0)
+    if (!ns_security_env_flag("NS_REQUIRE_SANDBOX"))
         return;
     g_printerr("nordstjernen: %s, but NS_REQUIRE_SANDBOX is set — refusing to "
                "run untrusted content unconfined.\n", what);
@@ -443,7 +454,7 @@ ns_sandbox_require_or_die(const char *what)
 void
 ns_security_sandbox_init(const char *self_exe)
 {
-    if (g_getenv("NS_NO_SANDBOX")) return;
+    if (ns_security_env_flag("NS_NO_SANDBOX")) return;
 
     guint64 fs_read =
         LANDLOCK_ACCESS_FS_READ_FILE |
@@ -958,8 +969,8 @@ ns_seccomp_deny_tty_injection(void)
 void
 ns_security_seccomp_init(void)
 {
-    if (g_getenv("NS_NO_SANDBOX")) return;
-    if (g_getenv("NS_NO_SECCOMP")) return;
+    if (ns_security_env_flag("NS_NO_SANDBOX")) return;
+    if (ns_security_env_flag("NS_NO_SECCOMP")) return;
 
 #ifdef NS_HAVE_SECCOMP
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
@@ -1035,7 +1046,7 @@ void
 ns_security_sandbox_init(const char *self_exe)
 {
     (void)self_exe;
-    if (g_getenv("NS_NO_SANDBOX"))
+    if (ns_security_env_flag("NS_NO_SANDBOX"))
         return;
 
     GString *prof = g_string_new(
@@ -1127,7 +1138,7 @@ ns_win32_apply_mitigation(ns_smp_fn fn, PROCESS_MITIGATION_POLICY policy,
 void
 ns_security_win32_mitigations_init(gboolean allow_child_processes)
 {
-    if (g_getenv("NS_NO_WIN32_MITIGATIONS")) return;
+    if (ns_security_env_flag("NS_NO_WIN32_MITIGATIONS")) return;
 
     HMODULE k = GetModuleHandleW(L"kernel32.dll");
     if (!k) return;
