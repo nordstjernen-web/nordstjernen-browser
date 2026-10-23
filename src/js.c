@@ -10193,7 +10193,8 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     }
     if (g_str_has_prefix(url, "blob:")) {
         char *btype = NULL;
-        GBytes *b = ns_js_blob_url_lookup(st->js, url, &btype);
+        GBytes *b = ns_net_blob_url_visible_to(url, top)
+            ? ns_js_blob_url_lookup(st->js, url, &btype) : NULL;
         ns_response *resp = g_new0(ns_response, 1);
         if (b) {
             gsize blen = 0;

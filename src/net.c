@@ -7285,13 +7285,28 @@ ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data)
     g_blob_resolver_ud = user_data;
 }
 
+gboolean
+ns_net_blob_url_visible_to(const char *blob_url, const char *doc_url)
+{
+    if (!doc_url || !*doc_url) return TRUE;
+    if (!blob_url || !g_str_has_prefix(blob_url, "blob:")) return FALSE;
+    g_autofree char *blob_origin = ns_url_origin_from(blob_url + 5);
+    g_autofree char *doc_origin = g_str_has_prefix(doc_url, "blob:")
+        ? ns_url_origin_from(doc_url + 5) : ns_url_origin_from(doc_url);
+    if (!blob_origin || !*blob_origin) blob_origin = g_strdup("null");
+    if (!doc_origin || !*doc_origin) doc_origin = g_strdup("null");
+    return g_ascii_strcasecmp(blob_origin, doc_origin) == 0;
+}
+
 static gboolean
-ns_net_complete_blob(const char *url, GCancellable *cancellable,
+ns_net_complete_blob(const char *url, const char *top_url,
+                     GCancellable *cancellable,
                      GAsyncReadyCallback callback, gpointer user_data)
 {
     if (!g_blob_resolver || !g_str_has_prefix(url, "blob:")) return FALSE;
     char *type = NULL;
-    GBytes *bytes = g_blob_resolver(url, &type, g_blob_resolver_ud);
+    GBytes *bytes = ns_net_blob_url_visible_to(url, top_url)
+        ? g_blob_resolver(url, &type, g_blob_resolver_ud) : NULL;
     GTask *task = g_task_new(NULL, cancellable, callback, user_data);
     g_task_set_source_tag(task, ns_net_fetch_async);
     ns_response *resp = g_new0(ns_response, 1);
@@ -7358,7 +7373,8 @@ ns_net_request_async_streaming(const char         *url,
 {
     g_return_if_fail(url != NULL);
 
-    if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
+    if (ns_net_complete_blob(url, top_url, cancellable, callback, user_data))
+        return;
 
     char *key = (!cancellable && !body && !on_chunk)
         ? ns_net_request_key(url, top_url, method, extra_headers) : NULL;
