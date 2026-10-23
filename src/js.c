@@ -41381,72 +41381,13 @@ ns_input_get_files(JSContext *ctx, JSValueConst this_val)
     if (!ns_node_is_element_named(n, "input")) return JS_NULL;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || g_ascii_strcasecmp(type, "file") != 0) return JS_NULL;
-    g_autofree char *path = g_strdup(ns_element_get_attr(n, "data-nd-file-path"));
-
-    JSValue cached_path = JS_GetPropertyStr(ctx, this_val, "__nd_files_path");
-    const char *cp = JS_IsString(cached_path) ? JS_ToCString(ctx, cached_path) : NULL;
-    gboolean same = (!path && !cp) ||
-                    (path && cp && strcmp(path, cp) == 0);
-    if (cp) JS_FreeCString(ctx, cp);
-    JS_FreeValue(ctx, cached_path);
-    if (same) {
-        JSValue cached = JS_GetPropertyStr(ctx, this_val, "__nd_files_cache");
-        if (JS_IsArray(cached)) return cached;
-        JS_FreeValue(ctx, cached);
-    }
+    JSValue cached = JS_GetPropertyStr(ctx, this_val, "__nd_files_cache");
+    if (JS_IsArray(cached)) return cached;
+    JS_FreeValue(ctx, cached);
 
     JSValue arr = JS_NewArray(ctx);
-    if (path && *path) {
-        char *contents = NULL;
-        gsize len = 0;
-        GError *err = NULL;
-        if (g_file_get_contents(path, &contents, &len, &err)) {
-            const char *base = strrchr(path, '/');
-#ifdef G_OS_WIN32
-            const char *base_w = strrchr(path, '\\');
-            if (!base || (base_w && base_w > base)) base = base_w;
-#endif
-            const char *bname = base ? base + 1 : path;
-
-            g_autofree char *mime = g_content_type_guess(path,
-                (const guchar *)contents, len < 4096 ? len : 4096, NULL);
-            g_autofree char *mime_type = mime ? g_content_type_get_mime_type(mime) : NULL;
-
-            JSValue global = JS_GetGlobalObject(ctx);
-            JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");
-            JS_FreeValue(ctx, global);
-            if (JS_IsConstructor(ctx, file_ctor)) {
-                JSValue ab = JS_NewArrayBufferCopy(ctx,
-                    (const uint8_t *)contents, len);
-                JSValue parts = JS_NewArray(ctx);
-                JS_SetPropertyUint32(ctx, parts, 0, ab);
-                JSValue opts = JS_NewObject(ctx);
-                JS_SetPropertyStr(ctx, opts, "type",
-                    JS_NewString(ctx, mime_type && *mime_type
-                                       ? mime_type : "application/octet-stream"));
-                JSValue name_str = JS_NewString(ctx, bname);
-                JSValueConst args[3] = { parts, name_str, opts };
-                JSValue file = JS_CallConstructor(ctx, file_ctor, 3, args);
-                if (!JS_IsException(file))
-                    JS_SetPropertyUint32(ctx, arr, 0, file);
-                else
-                    JS_FreeValue(ctx, JS_GetException(ctx));
-                JS_FreeValue(ctx, parts);
-                JS_FreeValue(ctx, name_str);
-                JS_FreeValue(ctx, opts);
-            }
-            JS_FreeValue(ctx, file_ctor);
-            g_free(contents);
-        } else if (err) {
-            g_error_free(err);
-        }
-    }
     JS_SetPropertyStr(ctx, arr, "item",
         JS_NewCFunction(ctx, ns_namedmap_item, "item", 1));
-
-    JS_DefinePropertyValueStr(ctx, this_val, "__nd_files_path",
-        JS_NewString(ctx, path ? path : ""),
-        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, this_val, "__nd_files_cache",
         JS_DupValue(ctx, arr),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
