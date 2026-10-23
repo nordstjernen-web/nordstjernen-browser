@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: the Safe Browsing "continue anyway" scheme only leads on to
+  an `http:` or `https:` URL. A page could wrap a `file://` URL whose
+  host matched its own and open a local file, since the stripped target
+  was loaded with no referrer. The referrer and user activation now carry
+  through to the target.
 * Security: a web font whose SFNT table directory lists the same tag
   twice is refused instead of being rebuilt with the first table's bytes
   in the second table's slot.
