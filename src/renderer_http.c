@@ -123,9 +123,8 @@ main(int argc, char **argv)
 #ifdef NS_HAVE_SDL
     SDL_SetMainReady();
 #endif
-    const char *selftest_url = g_getenv("NS_RENDER_SELFTEST");
-    if (selftest_url && *selftest_url)
-        return renderer_selftest(selftest_url);
+    if (argc == 3 && strcmp(argv[1], "--selftest") == 0)
+        return renderer_selftest(argv[2]);
     if (argc < 3)
         return 2;
 

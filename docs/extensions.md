@@ -14,8 +14,11 @@ Extensions are loaded **unpacked** (a directory containing
 locations are scanned at renderer start:
 
 - Every immediate sub-directory of
-  `$XDG_DATA_HOME/nordstjernen/extensions/` (GLib's user data directory:
-  on Linux, by default `~/.local/share/nordstjernen/extensions/<ext>/`).
+  `$XDG_DATA_HOME/nordstjernen-extensions/` (GLib's user data directory:
+  on Linux, by default `~/.local/share/nordstjernen-extensions/<ext>/`).
+  It sits outside the profile directory so that a sandboxed renderer,
+  which can write the profile, cannot plant an extension; an older
+  `nordstjernen/extensions/` directory is moved there at startup.
 - Any path in the `NS_EXTENSIONS_DIR` environment variable
   (`:`-separated, `;` on Windows). Each entry is treated as a directory of extensions,
   or — if it directly contains a `manifest.json` — as a single
@@ -99,7 +102,7 @@ ignored.
 ## Example: content script
 
 ```
-~/.local/share/nordstjernen/extensions/hello/
+~/.local/share/nordstjernen-extensions/hello/
 ├── manifest.json
 └── content.js
 ```
@@ -128,7 +131,7 @@ requests to a few ad/tracker hosts and any URL with an `/ads/` path
 segment, and hides leftover ad containers with an injected stylesheet.
 
 ```
-~/.local/share/nordstjernen/extensions/adblock/
+~/.local/share/nordstjernen-extensions/adblock/
 ├── manifest.json
 ├── rules.json
 └── hide.css
@@ -194,7 +197,7 @@ and point at it with `nordstjernen_filter_lists` — no conversion to JSON
 needed. Both network and cosmetic (element-hiding) rules are honored.
 
 ```
-~/.local/share/nordstjernen/extensions/easylist/
+~/.local/share/nordstjernen-extensions/easylist/
 ├── manifest.json
 └── easylist.txt
 ```
