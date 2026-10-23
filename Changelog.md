@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Build: `scripts/build-ffmpeg-lgpl.sh` downloads FFmpeg only from
+  ffmpeg.org and checks the tarball against a pinned SHA-256 (the
+  mutable GitHub tag fallback is gone; other versions need
+  `FFMPEG_SHA256`). `scripts/fetch-wgpu-native.sh` checks the release
+  zip against the hash pinned in the matching `.wrap` (or
+  `WGPU_NATIVE_SHA256`). Third-party GitHub Actions are pinned to
+  commit SHAs.
 * Security: `WebAssembly.Instance` reads every import before linking
   any global, so an import getter that instantiates the same module
   again can no longer swap the outer instance's global values. Camera

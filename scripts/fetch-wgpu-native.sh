@@ -72,6 +72,25 @@ if ! fetch "$tmp/wgpu.zip" "$url"; then
     log "download failed: $url"
     exit 3
 fi
+want=${WGPU_NATIVE_SHA256:-}
+if [ -z "$want" ]; then
+    want=$(grep -h -A2 "^source_url = .*/$VERSION/$asset\$" \
+               "$ROOT"/subprojects/wgpu-native-*.wrap 2>/dev/null |
+           sed -n 's/^source_hash = //p' | head -n1)
+fi
+if [ -z "$want" ]; then
+    log "no pinned checksum for $VERSION/$asset; set WGPU_NATIVE_SHA256"
+    exit 3
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+    got=$(sha256sum "$tmp/wgpu.zip" | cut -d' ' -f1)
+else
+    got=$(shasum -a 256 "$tmp/wgpu.zip" | cut -d' ' -f1)
+fi
+if [ "$got" != "$want" ]; then
+    log "checksum mismatch for $url (got $got)"
+    exit 3
+fi
 rm -rf "$dest"
 mkdir -p "$dest"
 if ! unzip -q -o "$tmp/wgpu.zip" -d "$dest"; then
