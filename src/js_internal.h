@@ -334,6 +334,7 @@ struct ns_js {
     int           form_data_helper_set;
     JSValue       body_consumer_helper;
     int           body_consumer_helper_set;
+    GHashTable   *realm_helpers;
     JSAtom        atom_capture;
     JSAtom        atom_once;
     JSAtom        atom_signal;
