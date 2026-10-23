@@ -4,6 +4,7 @@
  */
 
 #include "eventsource.h"
+#include "csp.h"
 #include "net.h"
 
 #include <curl/curl.h>
@@ -16,6 +17,7 @@
 struct ns_es {
     char     *url;
     char     *origin;
+    ns_csp   *csp;
     char     *last_event_id;
     gint64    reconnect_ms;
     GThread  *thread;
@@ -40,6 +42,7 @@ ns_es_destroy(ns_es *es)
 {
     g_free(es->url);
     g_free(es->origin);
+    if (es->csp) ns_csp_free(es->csp);
     g_free(es->last_event_id);
     g_mutex_clear(&es->lock);
     g_free(es);
@@ -260,6 +263,16 @@ ns_es_cors_allows(const ns_es_parse *p)
             (origin && strcmp(p->allow_origin, origin) == 0));
 }
 
+static gboolean
+ns_es_csp_allows(const ns_es_parse *p)
+{
+    if (!p->es->csp) return TRUE;
+    char *final_url = NULL;
+    curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &final_url);
+    return final_url &&
+           ns_csp_allows(p->es->csp, NS_CSP_CONNECT, final_url, p->es->origin);
+}
+
 static size_t
 ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
@@ -295,7 +308,7 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     } else if (total <= 2) {
         if (!p->opened) {
             if (p->status == 200 && p->is_event_stream &&
-                !ns_es_cors_allows(p)) {
+                (!ns_es_cors_allows(p) || !ns_es_csp_allows(p))) {
                 p->fatal = TRUE;
             } else if (p->status == 200 && p->is_event_stream) {
                 p->opened = TRUE;
@@ -427,11 +440,22 @@ ns_es_worker(gpointer data)
 
 ns_es *
 ns_es_new(const char *url, const char *origin, const char *last_event_id,
+          const char *const *csp_headers,
           const ns_es_callbacks *cbs, gpointer user_data)
 {
     ns_es *es = g_new0(ns_es, 1);
     es->url = g_strdup(url);
     es->origin = g_strdup(origin);
+    for (const char *const *h = csp_headers; h && *h; h++) {
+        ns_csp *parsed = ns_csp_parse(*h);
+        if (!parsed) continue;
+        if (es->csp) {
+            ns_csp_merge(es->csp, parsed);
+            ns_csp_free(parsed);
+        } else {
+            es->csp = parsed;
+        }
+    }
     es->last_event_id = g_strdup(last_event_id ? last_event_id : "");
     es->reconnect_ms = 3000;
     es->refcount = 1;

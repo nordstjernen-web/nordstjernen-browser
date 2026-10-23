@@ -21,6 +21,7 @@ typedef struct ns_es_callbacks {
 } ns_es_callbacks;
 
 ns_es *ns_es_new(const char *url, const char *origin, const char *last_event_id,
+                 const char *const *csp_headers,
                  const ns_es_callbacks *cbs, gpointer user_data);
 
 void ns_es_close(ns_es *es);
