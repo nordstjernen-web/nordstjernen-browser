@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security: `fetch()` and `XMLHttpRequest` send a CORS preflight
+  (`OPTIONS` with `Access-Control-Request-Method`/`-Headers`) before a
+  cross-origin request with a non-simple method, header or content
+  type, and fail the request unless the server allows its origin,
+  method and headers. Before, a cross-origin `PUT`/`DELETE` or a
+  request with custom headers reached the server unchecked. Successful
+  preflights are cached in memory for `Access-Control-Max-Age` (5 s by
+  default, 2 hours at most).
 * Security: a navigation a page starts towards another origin now
   reports that page as its initiator. The renderer dropped the
   cross-origin referrer so the target would load in its own cookie

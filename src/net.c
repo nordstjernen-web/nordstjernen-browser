@@ -5881,7 +5881,8 @@ ns_net_request_key(const char *url, const char *top_url, const char *method,
     g_string_append(key, partition);
     GPtrArray *sorted = g_ptr_array_new();
     for (int i = 0; extra_headers && extra_headers[i]; i++)
-        g_ptr_array_add(sorted, (gpointer)extra_headers[i]);
+        if (g_ascii_strncasecmp(extra_headers[i], "X-ND-CORS:", 10) != 0)
+            g_ptr_array_add(sorted, (gpointer)extra_headers[i]);
     g_ptr_array_sort(sorted, ns_header_line_cmp);
     for (guint i = 0; i < sorted->len; i++) {
         g_string_append_c(key, '\x1f');
@@ -6473,6 +6474,206 @@ ns_headers_strip_sensitive(GPtrArray *headers)
     }
 }
 
+#define NS_CORS_PREFLIGHT_CACHE_MAX 256
+
+static GMutex      g_cors_preflight_lock;
+static GHashTable *g_cors_preflight_cache;
+
+static gboolean
+ns_cors_method_is_simple(const char *method)
+{
+    return !method || !*method ||
+           g_ascii_strcasecmp(method, "GET") == 0 ||
+           g_ascii_strcasecmp(method, "HEAD") == 0 ||
+           g_ascii_strcasecmp(method, "POST") == 0;
+}
+
+static gboolean
+ns_cors_content_type_is_simple(const char *ct)
+{
+    if (!ct) return TRUE;
+    while (*ct == ' ' || *ct == '\t') ct++;
+    gsize n = strcspn(ct, "; \t");
+    static const char *const simple[] = {
+        "application/x-www-form-urlencoded", "multipart/form-data",
+        "text/plain", NULL,
+    };
+    for (int i = 0; simple[i]; i++)
+        if (strlen(simple[i]) == n && g_ascii_strncasecmp(ct, simple[i], n) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_cors_header_is_simple(const char *name, const char *value)
+{
+    if (g_ascii_strcasecmp(name, "accept") == 0 ||
+        g_ascii_strcasecmp(name, "accept-language") == 0 ||
+        g_ascii_strcasecmp(name, "content-language") == 0)
+        return TRUE;
+    if (g_ascii_strcasecmp(name, "content-type") == 0)
+        return ns_cors_content_type_is_simple(value);
+    return FALSE;
+}
+
+static char *
+ns_cors_unsafe_header_names(GPtrArray *extra_headers, const char *content_type)
+{
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        const char *colon = h ? strchr(h, ':') : NULL;
+        if (!colon || colon == h) continue;
+        if (g_ascii_strncasecmp(h, "X-ND-", 5) == 0) continue;
+        char *name = g_ascii_strdown(h, colon - h);
+        g_strstrip(name);
+        const char *value = colon + 1;
+        if (ns_cors_header_is_simple(name, value)) {
+            g_free(name);
+            continue;
+        }
+        gboolean dup = FALSE;
+        for (guint j = 0; j < names->len && !dup; j++)
+            dup = strcmp(g_ptr_array_index(names, j), name) == 0;
+        if (dup) g_free(name);
+        else g_ptr_array_add(names, name);
+    }
+    if (!ns_cors_content_type_is_simple(content_type)) {
+        gboolean dup = FALSE;
+        for (guint j = 0; j < names->len && !dup; j++)
+            dup = strcmp(g_ptr_array_index(names, j), "content-type") == 0;
+        if (!dup) g_ptr_array_add(names, g_strdup("content-type"));
+    }
+    if (names->len == 0) {
+        g_ptr_array_free(names, TRUE);
+        return NULL;
+    }
+    g_ptr_array_sort(names, ns_header_line_cmp);
+    g_ptr_array_add(names, NULL);
+    char *out = g_strjoinv(",", (char **)names->pdata);
+    g_ptr_array_free(names, TRUE);
+    return out;
+}
+
+static gboolean
+ns_cors_list_allows(const char *list, const char *item, gboolean star_ok)
+{
+    if (!list) return FALSE;
+    gchar **parts = g_strsplit(list, ",", -1);
+    gboolean found = FALSE;
+    for (int i = 0; parts[i] && !found; i++) {
+        g_strstrip(parts[i]);
+        found = g_ascii_strcasecmp(parts[i], item) == 0 ||
+                (star_ok && strcmp(parts[i], "*") == 0);
+    }
+    g_strfreev(parts);
+    return found;
+}
+
+static gboolean
+ns_cors_preflight_cached(const char *key)
+{
+    g_mutex_lock(&g_cors_preflight_lock);
+    gpointer v = g_cors_preflight_cache
+        ? g_hash_table_lookup(g_cors_preflight_cache, key) : NULL;
+    gboolean hit = v && *(gint64 *)v > g_get_monotonic_time();
+    g_mutex_unlock(&g_cors_preflight_lock);
+    return hit;
+}
+
+static void
+ns_cors_preflight_remember(const char *key, const char *max_age)
+{
+    gint64 secs = max_age ? g_ascii_strtoll(max_age, NULL, 10) : 5;
+    if (secs <= 0) return;
+    if (secs > 7200) secs = 7200;
+    gint64 *until = g_new(gint64, 1);
+    *until = g_get_monotonic_time() + secs * G_USEC_PER_SEC;
+    g_mutex_lock(&g_cors_preflight_lock);
+    if (!g_cors_preflight_cache)
+        g_cors_preflight_cache = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                       g_free, g_free);
+    if (g_hash_table_size(g_cors_preflight_cache) >= NS_CORS_PREFLIGHT_CACHE_MAX)
+        g_hash_table_remove_all(g_cors_preflight_cache);
+    g_hash_table_insert(g_cors_preflight_cache, g_strdup(key), until);
+    g_mutex_unlock(&g_cors_preflight_lock);
+}
+
+static gboolean
+ns_fetch_wants_cors(GPtrArray *extra_headers)
+{
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (h && g_ascii_strncasecmp(h, "X-ND-CORS:", 10) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static char *
+ns_fetch_cors_preflight(const char *url, const char *top_url,
+                        const char *method, const char *content_type,
+                        GPtrArray *extra_headers, GCancellable *cancellable)
+{
+    if (!top_url || !*top_url || !ns_url_is_http_or_https(url) ||
+        ns_url_same_origin(top_url, url))
+        return NULL;
+    g_autofree char *unsafe_headers =
+        ns_cors_unsafe_header_names(extra_headers, content_type);
+    gboolean simple_method = ns_cors_method_is_simple(method);
+    if (simple_method && !unsafe_headers) return NULL;
+
+    g_autofree char *origin = ns_url_origin_from(top_url);
+    g_autofree char *key = g_strdup_printf("%s %s %s %s", origin ? origin : "",
+                                           url, method,
+                                           unsafe_headers ? unsafe_headers : "");
+    if (ns_cors_preflight_cached(key)) return NULL;
+
+    g_autofree char *method_h =
+        g_strdup_printf("Access-Control-Request-Method: %s", method);
+    g_autofree char *headers_h = unsafe_headers
+        ? g_strdup_printf("Access-Control-Request-Headers: %s", unsafe_headers)
+        : NULL;
+    GPtrArray *pre = g_ptr_array_new();
+    g_ptr_array_add(pre, method_h);
+    if (headers_h) g_ptr_array_add(pre, headers_h);
+    ns_response *r = ns_fetch_sync_hop(url, top_url, "OPTIONS", NULL, 0, NULL,
+                                       pre, cancellable, NULL, FALSE, NULL);
+    g_ptr_array_free(pre, TRUE);
+    if (!r) return g_strdup("CORS preflight failed");
+
+    char *failure = NULL;
+    g_autofree char *acao =
+        ns_net_raw_header_values(r->raw_headers, "Access-Control-Allow-Origin");
+    g_autofree char *acam =
+        ns_net_raw_header_values(r->raw_headers, "Access-Control-Allow-Methods");
+    g_autofree char *acah =
+        ns_net_raw_header_values(r->raw_headers, "Access-Control-Allow-Headers");
+    g_autofree char *max_age =
+        ns_net_raw_header_values(r->raw_headers, "Access-Control-Max-Age");
+    if (acao) g_strstrip(acao);
+    if (r->error || r->status < 200 || r->status > 299) {
+        failure = g_strdup("CORS preflight failed");
+    } else if (!acao || (strcmp(acao, "*") != 0 &&
+                         g_strcmp0(acao, origin) != 0)) {
+        failure = g_strdup("CORS preflight: origin not allowed");
+    } else if (!simple_method && !ns_cors_list_allows(acam, method, TRUE)) {
+        failure = g_strdup_printf("CORS preflight: method %s not allowed",
+                                  method);
+    } else if (unsafe_headers) {
+        gchar **names = g_strsplit(unsafe_headers, ",", -1);
+        for (int i = 0; names[i] && !failure; i++) {
+            gboolean star_ok = strcmp(names[i], "authorization") != 0;
+            if (!ns_cors_list_allows(acah, names[i], star_ok))
+                failure = g_strdup_printf("CORS preflight: header %s not allowed",
+                                          names[i]);
+        }
+        g_strfreev(names);
+    }
+    if (!failure) ns_cors_preflight_remember(key, max_age);
+    ns_response_free(r);
+    return failure;
+}
+
 static ns_response *
 ns_fetch_sync(const char *url, const char *top_url, const char *method,
               const void *body, gsize body_len, const char *content_type,
@@ -6487,6 +6688,19 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         blocked->status = 0;
         blocked->error = g_strdup("blocked by extension");
         return blocked;
+    }
+
+    if (ns_fetch_wants_cors(extra_headers)) {
+        char *failure = ns_fetch_cors_preflight(
+            url, top_url, method && *method ? method : "GET", content_type,
+            extra_headers, cancellable);
+        if (failure) {
+            ns_response *blocked = g_new0(ns_response, 1);
+            blocked->body = g_byte_array_new();
+            blocked->final_url = g_strdup(url);
+            blocked->error = failure;
+            return blocked;
+        }
     }
 
     const ns_config *cfg = ns_config_get();
