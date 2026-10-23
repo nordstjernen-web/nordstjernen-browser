@@ -10,7 +10,8 @@ each review.
 
 | Upload | Version | Date | Result |
 |---|---|---|---|
-| #1 | `1.0.35+ds-1` | 2026-10-20 | Needs work (two reviews, 2026-10-21) |
+| #1 | `1.0.35+ds-1` | 2026-10-20 | Needs work (two reviews, 2026-10-21); deleted from mentors by the uploader |
+| #2 | `nordstjernen-browser 1.0.36+ds-1` | 2026-10-23 | Uploaded; source lintian clean, binary build verified in `debian:unstable` |
 
 ## Open
 
@@ -18,9 +19,6 @@ each review.
       (`reportbug wnpp`, title `ITP: nordstjernen-browser -- web browser`).
 - [ ] Put the ITP number in the single `debian/changelog` entry:
       `* Initial release (Closes: #NNNNNNN)`, distribution `unstable`.
-- [ ] Upload the current `debian/` tree as upload #2. The second reviewer
-      asked to see it before reviewing further (upload #1 predates the
-      format 5 `debian/watch`).
 - [ ] File the RFS (Request For Sponsorship) bug against `sponsorship-requests`
       once upload #2 is clean.
 - [ ] Decide whether to move the packaging to a separate salsa.debian.org
@@ -38,6 +36,8 @@ each review.
 
 ## Done
 
+- [x] Upload #2 (`1.0.36+ds-1`) carries the current `debian/` tree that the
+      second reviewer asked to see.
 - [x] Source and binary package renamed `nordstjernen` → `nordstjernen-browser`
       so the archive name says it is a browser. Upload #1 on mentors is under
       the old name; upload #2 appears as a new package there.
