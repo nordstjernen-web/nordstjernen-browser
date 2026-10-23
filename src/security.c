@@ -57,7 +57,16 @@
 
 #ifdef __linux__
 static gboolean ns_runtime_dir_writable = TRUE;
+static gboolean ns_config_dir_writable = TRUE;
 #endif
+
+void
+ns_security_config_dir_read_only(void)
+{
+#ifdef __linux__
+    ns_config_dir_writable = FALSE;
+#endif
+}
 
 void
 ns_security_runtime_dir_read_only(void)
@@ -575,8 +584,8 @@ ns_security_sandbox_init(const char *self_exe)
         g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_cfg_root, 0700);
     chmod(ns_cfg_root, 0700);
-    add_path_rw(rfd, ns_runtime_dir_writable ? fs_rw : fs_read, ns_cfg_root);
-    if (!ns_runtime_dir_writable) {
+    add_path_rw(rfd, ns_config_dir_writable ? fs_rw : fs_read, ns_cfg_root);
+    if (!ns_config_dir_writable) {
         g_autofree char *cookies =
             g_build_filename(ns_cfg_root, "cookies", NULL);
         g_mkdir_with_parents(cookies, 0700);

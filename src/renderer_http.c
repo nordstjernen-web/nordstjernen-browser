@@ -13,6 +13,7 @@
 #include "ipc_http.h"
 #include "libnordstjernen.h"
 #include "config.h"
+#include "security.h"
 #include "net.h"
 #include "renderer_serve.h"
 #include "threaddump.h"
@@ -126,7 +127,10 @@ main(int argc, char **argv)
 #endif
     if (argc == 3 && strcmp(argv[1], "--selftest") == 0)
         return renderer_selftest(argv[2]);
-    ns_config_defer_saves(TRUE);
+    if (ns_security_env_flag("NS_CONFIG_VIA_PARENT")) {
+        ns_config_defer_saves(TRUE);
+        ns_security_config_dir_read_only();
+    }
     if (argc < 3)
         return 2;
 
