@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: `CSSStyleSheet.cssRules` of a `<link>` stylesheet only reads
+  back the sheet's text when it is same-origin with the document, and a
+  cross-origin stylesheet must be served as `text/css` even in quirks
+  mode. A quirks-mode page could link a cross-origin HTML or JSON
+  response as a stylesheet and read the body verbatim.
 * Security: the Safe Browsing "continue anyway" scheme only leads on to
   an `http:` or `https:` URL. A page could wrap a `file://` URL whose
   host matched its own and open a local file, since the stripped target

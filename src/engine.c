@@ -291,6 +291,7 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
         url, top_url, ns_net_accept_headers_for(NS_FETCH_DEST_STYLE), NULL);
     GBytes *bytes = NULL;
     gboolean enforce_mime = strict_mime ||
+        (top_url && !ns_url_same_origin(url, top_url)) ||
         (resp && ns_net_header_is_nosniff(resp->x_content_type_options));
     gboolean mime_ok = !enforce_mime || !resp ||
                        content_type_is_css(resp->content_type);
