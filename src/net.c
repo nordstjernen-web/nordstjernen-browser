@@ -5999,6 +5999,100 @@ ns_net_request_key(const char *url, const char *top_url, const char *method,
     return g_string_free(key, FALSE);
 }
 
+static gboolean ns_fetch_wants_cors(GPtrArray *extra_headers);
+
+typedef struct {
+    gconstpointer owner;
+    char         *doc_url;
+    ns_csp       *csp;
+} ns_net_csp_entry;
+
+static GMutex      g_csp_lock;
+static GHashTable *g_csp_by_origin;
+
+static void
+ns_net_csp_entry_free(gpointer p)
+{
+    ns_net_csp_entry *e = p;
+    if (!e) return;
+    g_free(e->doc_url);
+    if (e->csp) ns_csp_free(e->csp);
+    g_free(e);
+}
+
+void
+ns_net_csp_register(gconstpointer owner, const char *doc_url,
+                    const char *const *headers)
+{
+    g_autofree char *origin = doc_url ? ns_url_origin_from(doc_url) : NULL;
+    if (!origin || !*origin || strcmp(origin, "null") == 0) return;
+    ns_csp *merged = NULL;
+    for (const char *const *h = headers; h && *h; h++) {
+        ns_csp *parsed = ns_csp_parse(*h);
+        if (!parsed) continue;
+        if (merged) {
+            ns_csp_merge(merged, parsed);
+            ns_csp_free(parsed);
+        } else {
+            merged = parsed;
+        }
+    }
+    if (!merged) return;
+    ns_net_csp_entry *e = g_new0(ns_net_csp_entry, 1);
+    e->owner = owner;
+    e->doc_url = g_strdup(doc_url);
+    e->csp = merged;
+    g_mutex_lock(&g_csp_lock);
+    if (!g_csp_by_origin)
+        g_csp_by_origin = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, ns_net_csp_entry_free);
+    g_hash_table_replace(g_csp_by_origin, g_steal_pointer(&origin), e);
+    g_mutex_unlock(&g_csp_lock);
+}
+
+void
+ns_net_csp_unregister(gconstpointer owner)
+{
+    g_mutex_lock(&g_csp_lock);
+    if (g_csp_by_origin) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, g_csp_by_origin);
+        while (g_hash_table_iter_next(&it, &k, &v))
+            if (((ns_net_csp_entry *)v)->owner == owner)
+                g_hash_table_iter_remove(&it);
+    }
+    g_mutex_unlock(&g_csp_lock);
+}
+
+gboolean
+ns_net_csp_allows(const char *doc_url, ns_csp_kind kind, const char *url,
+                  const char *nonce, gboolean parser_inserted)
+{
+    if (!doc_url || !url) return TRUE;
+    g_autofree char *origin = ns_url_origin_from(doc_url);
+    if (!origin || !*origin) return TRUE;
+    gboolean ok = TRUE;
+    g_mutex_lock(&g_csp_lock);
+    ns_net_csp_entry *e = g_csp_by_origin
+        ? g_hash_table_lookup(g_csp_by_origin, origin) : NULL;
+    if (e)
+        ok = ns_csp_allows_with_nonce(e->csp, kind, url, e->doc_url, nonce,
+                                      parser_inserted);
+    g_mutex_unlock(&g_csp_lock);
+    return ok;
+}
+
+static ns_csp_kind
+ns_net_hop_csp_kind(GPtrArray *extra_headers)
+{
+    const char *dest = ns_net_fetch_destination(extra_headers);
+    if (strcmp(dest, "image") == 0) return NS_CSP_IMG;
+    if (strcmp(dest, "font") == 0) return NS_CSP_FONT;
+    if (ns_fetch_wants_cors(extra_headers)) return NS_CSP_CONNECT;
+    return NS_CSP_KIND_COUNT;
+}
+
 static ns_response *
 ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                   const void *body, gsize body_len, const char *content_type,
@@ -6015,6 +6109,14 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     const char *request_site_url = initiator ? initiator : top_url;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
+    ns_csp_kind policy_kind = is_navigation ? NS_CSP_KIND_COUNT
+                                            : ns_net_hop_csp_kind(extra_headers);
+    if (policy_kind != NS_CSP_KIND_COUNT &&
+        !ns_net_csp_allows(top_url, policy_kind, url, NULL, FALSE)) {
+        resp->final_url = g_strdup(url);
+        resp->error = g_strdup("blocked by Content-Security-Policy");
+        return resp;
+    }
 
     if (!is_navigation) {
         char *dead_host = ns_url_origin_from_any(url);

@@ -10,6 +10,7 @@
 #include <glib.h>
 
 #include "config.h"
+#include "csp.h"
 #include "version.h"
 
 G_BEGIN_DECLS
@@ -129,6 +130,12 @@ char      **ns_net_navigator_languages(void);
 typedef GBytes *(*ns_net_blob_resolver)(const char *url, char **out_type,
                                         gpointer user_data);
 void ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data);
+void ns_net_csp_register(gconstpointer owner, const char *doc_url,
+                         const char *const *headers);
+void ns_net_csp_unregister(gconstpointer owner);
+gboolean ns_net_csp_allows(const char *doc_url, ns_csp_kind kind,
+                           const char *url, const char *nonce,
+                           gboolean parser_inserted);
 gboolean ns_net_blob_url_visible_to(const char *blob_url, const char *doc_url);
 
 void ns_net_fetch_async(const char        *url,

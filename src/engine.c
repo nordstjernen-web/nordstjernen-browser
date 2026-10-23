@@ -554,6 +554,13 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
         ns_net_preconnect_async(g_ptr_array_index(connects, i));
     for (guint i = 0; i < urls->len; i++) {
         const preload_target *target = g_ptr_array_index(urls, i);
+        ns_csp_kind kind = target->dest == NS_FETCH_DEST_SCRIPT ? NS_CSP_SCRIPT
+                         : target->dest == NS_FETCH_DEST_STYLE ? NS_CSP_STYLE
+                         : target->dest == NS_FETCH_DEST_IMAGE ? NS_CSP_IMG
+                         : target->dest == NS_FETCH_DEST_FONT ? NS_CSP_FONT
+                         : NS_CSP_CONNECT;
+        if (!ns_net_csp_allows(base_url, kind, target->url, NULL, TRUE))
+            continue;
         const char *const *headers = ns_net_accept_headers_for(target->dest);
         if (target->dest != NS_FETCH_DEST_DEFAULT) {
             char *key = ns_net_request_key(target->url, base_url, "GET", headers);
@@ -584,6 +591,10 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             char *abs = ns_url_resolve(base_url, im->url);
             if (!abs) continue;
+            if (!ns_net_csp_allows(top_url, NS_CSP_STYLE, abs, NULL, TRUE)) {
+                g_free(abs);
+                continue;
+            }
             if (seen && g_hash_table_contains(seen, abs)) {
                 g_free(abs);
                 continue;
@@ -1432,6 +1443,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             link_sheet_enabled(n) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
+            if (abs && !ns_net_csp_allows(cc->top_url, NS_CSP_STYLE, abs,
+                                          ns_element_get_attr(n, "nonce"),
+                                          TRUE))
+                g_clear_pointer(&abs, g_free);
             gboolean blocking = engine_node_in_head(n);
             GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,
                                             cc->strict_css_mime, "link",

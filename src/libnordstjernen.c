@@ -1357,6 +1357,38 @@ browser_prepare_document_response(ns_response *resp)
 }
 
 static void
+browser_collect_meta_csp(GPtrArray *out, const ns_node *node, int depth)
+{
+    if (depth > 1024) return;
+    for (const ns_node *c = node ? node->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            g_ascii_strcasecmp(c->name, "meta") == 0) {
+            const char *he = ns_element_get_attr(c, "http-equiv");
+            const char *content = ns_element_get_attr(c, "content");
+            if (he && g_ascii_strcasecmp(he, "content-security-policy") == 0 &&
+                content && *content)
+                g_ptr_array_add(out, (gpointer)content);
+        }
+        browser_collect_meta_csp(out, c, depth + 1);
+    }
+}
+
+static void
+browser_register_early_csp(const ns_node *doc, const char *url,
+                           const char *csp_header)
+{
+    GPtrArray *headers = g_ptr_array_new();
+    if (csp_header && *csp_header)
+        g_ptr_array_add(headers, (gpointer)csp_header);
+    browser_collect_meta_csp(headers, doc, 0);
+    g_ptr_array_add(headers, NULL);
+    if (headers->len > 1)
+        ns_net_csp_register(doc, url, (const char *const *)headers->pdata);
+    g_ptr_array_free(headers, TRUE);
+}
+
+static void
 browser_apply_meta_csp(ns_js *js, const ns_node *node, int depth)
 {
     if (depth > 1024) return;
@@ -1406,6 +1438,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     ns_css_set_target_fragment(has_fragment && fragment && *fragment
                                    ? fragment : NULL);
 
+    browser_register_early_csp(doc, url, csp_header);
     if (ns_config_get()->speculative_preload)
         ns_engine_speculative_preload(doc, base, FALSE);
 
@@ -5118,6 +5151,7 @@ void
 ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
+    ns_net_csp_unregister(browser->doc);
     if (browser->media_events_source)
         g_source_remove(browser->media_events_source);
     if (browser->img_sessions) {
