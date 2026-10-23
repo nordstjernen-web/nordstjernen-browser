@@ -35,13 +35,14 @@ trusted.
 
 - Bugs in third-party libraries (libcurl, GTK 4, GLib, lexbor, QuickJS,
   Wuffs, …). Report upstream; we update when fixes ship.
-- Features we deliberately don't implement: WebRTC, EME/DRM, service
-  workers, browser extensions, JIT, "AI" web APIs. (WebGL *is*
-  implemented, off by default and gated behind a per-site trust prompt —
-  see `docs/webgl.md`. WebGPU is an **experimental**, opt-in feature —
-  absent unless the build has wgpu-native and the browser is started with
-  `--enable-webgpu` — see `docs/webgpu.md`. MSE and inline WebM/MP4
-  playback *are* implemented; their decoders are in scope above.)
+- Features we deliberately don't implement: WebRTC, EME/DRM, JIT,
+  "AI" web APIs. (WebGL *is* implemented and on by default; it can be
+  switched off in Settings — see `docs/webgl.md`. WebGPU is an
+  **experimental** feature, on by default in builds that have
+  wgpu-native and switchable in Settings — see `docs/webgpu.md`.
+  Service workers, unpacked WebExtensions (`docs/extensions.md`), MSE
+  and inline WebM/MP4 playback *are* implemented, and their code is in
+  scope.)
 - CPU-level side channels (Spectre-class).
 - Attacks that already require local code execution as the same user.
 
@@ -105,14 +106,22 @@ socket, so it normally needs no `/dev/shm` name at all.
   itself, and the XDG config, data and cache directories (`~/.config`,
   `~/.local/share`, `~/.cache`). Read+write access to
   `~/.config/nordstjernen`, `~/.local/share/nordstjernen`,
-  `~/.cache/nordstjernen`. While WebGL or WebGPU is enabled, also
+  `~/.cache/nordstjernen`, and the user's download directory when it is
+  a sub-directory of `$HOME` (never `$HOME` itself). `/proc`, `/sys` and
+  `/run` are readable; the XDG runtime directory (`/run/user/$UID`) is
+  read+write for the UI process and read-only for renderers. The V4L2
+  camera nodes (`/dev/video*`) and `/dev/snd` are read+write. While
+  WebGL or WebGPU is enabled, also
   read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*`, which
   the driver behind those APIs opens to render on the GPU; with both off
   in Settings the renderer gets no access to them. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
   `~/.netrc`, shell history — is **not** reachable, also when
   `$XAUTHORITY` is `~/.Xauthority`; other applications' state kept under
   the XDG directories (other browsers' profiles among it) is readable.
-  No directory the renderer can write to is also executable.
+  No directory the renderer can write to is also executable. Landlock
+  binds the threads that exist when it is applied only where the kernel
+  supports `LANDLOCK_RESTRICT_SELF_TSYNC`, so the browser starts its own
+  helper threads after the sandbox is in place.
 - **seccomp-bpf (syscalls).** Default-deny allow-list: the filter is
   built with `SCMP_ACT_ERRNO(EPERM)` as the default action and then
   permits only the ~266 syscalls the browser actually needs
@@ -134,8 +143,12 @@ socket, so it normally needs no `/dev/shm` name at all.
   TSYNC propagates the filter to every thread.
 - **Media decoding.** Nordstjernen decodes a fixed, in-tree set of media
   rather than shelling out to an external player: MPEG-1 (pl_mpeg) and
-  MP3 (minimp3) always, plus WebM/VP9/VP8 video and Opus/Vorbis audio
-  through FFmpeg's `libav*` where it is built in. Video frames decode
+  MP3 (minimp3) always; through FFmpeg's `libav*`, where it is built
+  in, the WebM and MP4 demuxers and VP9, VP8, AV1, HEVC, MPEG-4 Part 2
+  and Theora video plus Opus and Vorbis audio; and H.264 video and AAC
+  audio through the operating system's decoders (Media Foundation,
+  VideoToolbox/AudioToolbox, MediaCodec or GStreamer). Builds without
+  libav demux MP4 with the in-tree `src/mp4.c`. Video frames decode
   inside the seccomp + Landlock renderer, so attacker-controlled codec
   bytes stay within the strongest sandbox — MSE streams included; audio
   decodes in the `nordstjernen-audio` helper process, which on Linux runs

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Docs: SECURITY.md now matches the code. Service workers and
+  extensions are implemented, and WebGL and WebGPU are on by default.
+  The full codec set is listed. The Landlock list now includes the
+  download directory, `/proc`, `/sys`, `/run`, the runtime directory,
+  camera nodes and `/dev/snd`, and notes the thread caveat.
 * Security (Linux sandbox): renderers get the XDG runtime directory
   (`/run/user/$UID`) read-only instead of read+write. The download
   directory is writable only when it is a real sub-directory of
