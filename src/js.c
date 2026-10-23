@@ -67020,6 +67020,47 @@ ns_js_iframe_restore_scheduling(JSContext *ctx)
     JS_FreeValue(ctx, g);
 }
 
+static gboolean
+ns_iframe_script_url_allowed(ns_js *js, const ns_csp *frame_csp,
+                             const char *url, const char *origin,
+                             const char *nonce)
+{
+    const char *why = NULL;
+    if (g_str_has_prefix(origin, "https://") && g_str_has_prefix(url, "http://"))
+        why = "mixed-content blocked: script";
+    else if (frame_csp &&
+             !ns_csp_allows_with_nonce(frame_csp, NS_CSP_SCRIPT, url, origin,
+                                       nonce, TRUE))
+        why = "CSP blocked: script";
+    if (why && js->log_cb) {
+        char *line = g_strdup_printf("%s %s in frame %s", why, url, origin);
+        js->log_cb(line, js->log_user_data);
+        g_free(line);
+    }
+    return why == NULL;
+}
+
+static gboolean
+ns_iframe_inline_script_allowed(ns_js *js, const ns_csp *frame_csp,
+                                const ns_node *n, const char *origin,
+                                const char *nonce)
+{
+    if (!frame_csp) return TRUE;
+    GString *text = g_string_new(NULL);
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_TEXT && c->text) g_string_append(text, c->text);
+    gboolean ok = ns_csp_inline_script_allowed(frame_csp, text->str, text->len,
+                                               nonce);
+    g_string_free(text, TRUE);
+    if (!ok && js->log_cb) {
+        char *line = g_strdup_printf("CSP blocked: inline <script> in frame %s",
+                                     origin);
+        js->log_cb(line, js->log_user_data);
+        g_free(line);
+    }
+    return ok;
+}
+
 static void
 ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
                          JSValue iframe_doc, JSValueConst iframe_scope,
@@ -67153,7 +67194,7 @@ static void
 ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                          const char *origin, JSValue iframe_doc,
                          JSValueConst iframe_scope, unsigned sandbox,
-                         ns_node *iframe)
+                         ns_node *iframe, const ns_csp *frame_csp)
 {
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_collect_script_tasks(content_root, tasks);
@@ -67180,8 +67221,12 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         if (ns_script_type_is_module(n)) { g_ptr_array_add(modules, n); continue; }
         ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
         const char *src = ns_element_get_attr(n, "src");
+        const char *nonce = ns_element_get_attr(n, "nonce");
         if (src && *src) {
             char *abs_url = ns_url_resolve(origin, src);
+            if (abs_url && !ns_iframe_script_url_allowed(js, frame_csp, abs_url,
+                                                         origin, nonce))
+                g_clear_pointer(&abs_url, g_free);
             if (abs_url) {
                 GError *err = NULL;
                 ns_perf_resource_info info = { 0 };
@@ -67192,7 +67237,21 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                 gboolean nosniff_blocked = r &&
                     ns_net_header_is_nosniff(r->x_content_type_options) &&
                     !content_type_is_javascript(r->content_type);
-                if (!nosniff_blocked && r && r->body && r->body->len > 0 &&
+                gboolean policy_blocked = r && r->final_url &&
+                    strcmp(r->final_url, abs_url) != 0 &&
+                    !ns_iframe_script_url_allowed(js, frame_csp, r->final_url,
+                                                  origin, nonce);
+                gboolean sri_blocked = r && r->body &&
+                    !ns_security_sri_check(ns_element_get_attr(n, "integrity"),
+                                           r->body->data, r->body->len);
+                if (sri_blocked && js->log_cb) {
+                    char *line = g_strdup_printf("SRI mismatch: script %s",
+                                                 abs_url);
+                    js->log_cb(line, js->log_user_data);
+                    g_free(line);
+                }
+                if (!nosniff_blocked && !policy_blocked && !sri_blocked &&
+                    r && r->body && r->body->len > 0 &&
                     !r->error && (r->status == 200 || r->status == 0)) {
                     if (r->body->len <= expose_scan_cap &&
                         !ns_js_iframe_source_is_webpack_chunk((const char *)r->body->data,
@@ -67209,6 +67268,9 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                 g_clear_error(&err);
                 g_free(abs_url);
             }
+        } else if (!ns_iframe_inline_script_allowed(js, frame_csp, n, origin,
+                                                    nonce)) {
+            continue;
         } else {
             GString *inline_source = g_string_new(NULL);
             for (const ns_node *c = n->first_child; c; c = c->next_sibling)
@@ -67834,8 +67896,12 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 g_free(line);
             }
         } else if (JS_IsObject(realm_doc)) {
+            ns_csp *own_csp = resp && resp->csp_header && *resp->csp_header
+                ? ns_csp_parse(resp->csp_header) : NULL;
+            const ns_csp *frame_csp = resp ? own_csp : js->csp;
             ns_js_run_iframe_scripts(js, content_root, iorigin, realm_doc,
-                                     realm_scope, sandbox, iframe);
+                                     realm_scope, sandbox, iframe, frame_csp);
+            if (own_csp) ns_csp_free(own_csp);
         } else {
             GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
             ns_js_collect_script_tasks(content_root, tasks);

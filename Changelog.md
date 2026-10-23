@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Security: classic scripts inside an `<iframe>` get the same checks as
+  scripts in the top document. A frame loaded `<script src>` without
+  blocking mixed content, without checking `integrity`, and without
+  any Content-Security-Policy. The frame's own CSP now applies to its
+  external and inline scripts, including the URL a script redirected
+  to; `srcdoc` and `about:blank` frames inherit the embedder's policy.
 * Security: a page can no longer reach the raw window of a cross-origin
   frame through the proxy that stands in for it. The proxy was built
   after page scripts had run, with the page's own `WeakMap`, `Proxy`,
