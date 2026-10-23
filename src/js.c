@@ -99,6 +99,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 typedef struct ns_worker_host ns_worker_host;
 
 struct ns_worker_host {
+    char        **csp_headers;
     gint          ref_count;
     gint          closing;
     gint          owner_alive;
@@ -445,6 +446,7 @@ static void ns_js_link_interfaces(JSContext *ctx);
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_install_cross_window_maker(JSContext *ctx, JSValueConst global);
+static char **ns_js_csp_headers_dup(const ns_js *js);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static void ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global);
 static void ns_target_report_exception(ns_js *js, JSContext *ctx, const char *type);
@@ -25432,7 +25434,9 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
         .on_error   = ns_js_es_on_error,
         .busy       = ns_js_es_busy,
     };
-    s->es = ns_es_new(target, origin && *origin ? origin : "null", NULL, &cbs, s);
+    g_auto(GStrv) csp_headers = ns_js_csp_headers_dup(js);
+    s->es = ns_es_new(target, origin && *origin ? origin : "null", NULL,
+                      (const char *const *)csp_headers, &cbs, s);
     g_free(origin);
     g_free(target);
 
@@ -25505,6 +25509,7 @@ ns_worker_host_unref(ns_worker_host *host)
     if (host->context) g_main_context_unref(host->context);
     g_free(host->url);
     g_free(host->base_url);
+    g_strfreev(host->csp_headers);
     g_free(host->name);
     g_free(host->origin);
     g_free(host->inline_script);
@@ -27263,6 +27268,15 @@ ns_worker_global_close(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_worker_import_allowed(ns_js *js, const char *url)
+{
+    return !js->csp ||
+           ns_csp_allows(js->csp, NS_CSP_SCRIPT, url,
+                         js->current_url ? js->current_url
+                                         : js->worker_host->url);
+}
+
 static JSValue
 ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
@@ -27283,7 +27297,13 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
         if (!abs_url) return JS_ThrowTypeError(ctx, "importScripts: invalid URL");
         char *final_url = NULL;
         char *error = NULL;
-        char *body = ns_worker_fetch_script(host, abs_url, TRUE, &final_url, &error);
+        char *body = ns_worker_import_allowed(js, abs_url)
+            ? ns_worker_fetch_script(host, abs_url, TRUE, &final_url, &error)
+            : NULL;
+        if (body && final_url && !ns_worker_import_allowed(js, final_url))
+            g_clear_pointer(&body, g_free);
+        if (!body && !error)
+            error = g_strdup("blocked by Content-Security-Policy script-src");
         g_free(abs_url);
         if (!body) {
             JSValue ret = JS_ThrowTypeError(ctx, "importScripts: %s",
@@ -28411,6 +28431,8 @@ ns_worker_js_new(ns_worker_host *host)
     js->pristine_promise = JS_UNDEFINED;
     js->main_context = host->context;
     js->worker_host = host;
+    for (char **h = host->csp_headers; h && *h; h++)
+        ns_js_add_csp_header(js, *h);
     js->partition_key = (host->origin && *host->origin)
         ? g_strdup(host->origin) : NULL;
     js->log_cb = ns_worker_log_cb;
@@ -28900,6 +28922,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->context = g_main_context_new();
     host->url = abs_url;
     host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
+    host->csp_headers = ns_js_csp_headers_dup(js);
     host->name = g_strdup(name ? name : "");
     host->inline_script = inline_script;
     host->inline_script_len = inline_script_len;
@@ -28969,6 +28992,21 @@ ns_sw_default_scope(const char *abs_url)
     return g_strndup(abs_url, (gsize)(slash - abs_url) + 1);
 }
 
+static gboolean
+ns_sw_url_trustworthy(const char *url)
+{
+    if (!url) return FALSE;
+    if (g_ascii_strncasecmp(url, "https://", 8) == 0 ||
+        g_ascii_strncasecmp(url, "file:", 5) == 0)
+        return TRUE;
+    if (g_ascii_strncasecmp(url, "http://", 7) != 0) return FALSE;
+    g_autofree char *host = ns_url_host_from(url);
+    return host && (g_ascii_strcasecmp(host, "localhost") == 0 ||
+                    g_str_has_suffix(host, ".localhost") ||
+                    g_str_has_prefix(host, "127.") ||
+                    strcmp(host, "[::1]") == 0);
+}
+
 static JSValue
 ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -29003,6 +29041,20 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         g_free(scope);
         return ns_sw_reject(ctx, "SecurityError",
                             "scope origin does not match the script URL");
+    }
+    if (!ns_sw_url_trustworthy(js->current_url) ||
+        !ns_sw_url_trustworthy(abs_url)) {
+        g_free(abs_url);
+        g_free(scope);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "service workers need a secure context");
+    }
+    g_autofree char *max_scope = ns_sw_default_scope(abs_url);
+    if (!g_str_has_prefix(scope, max_scope)) {
+        g_free(abs_url);
+        g_free(scope);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "scope is not under the script's directory");
     }
 
     ns_worker_host policy = {0};
@@ -63152,6 +63204,7 @@ ns_js_free(ns_js *js)
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
+    g_clear_pointer(&js->csp_headers, g_ptr_array_unref);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
@@ -65265,6 +65318,25 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         ns_response *resp = ns_js_fetch_subresource(js, abs_url, origin,
             ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT), &err, "script",
             &info);
+        if (resp && resp->final_url && strcmp(resp->final_url, abs_url) != 0 &&
+            ((g_str_has_prefix(origin, "https://") &&
+              g_str_has_prefix(resp->final_url, "http://")) ||
+             (js->csp &&
+              !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, resp->final_url,
+                                        origin, nonce, parser_inserted)))) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf(
+                    "blocked after redirect: script %s -> %s", abs_url,
+                    resp->final_url);
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            ns_response_free(resp);
+            g_clear_error(&err);
+            g_free(abs_url);
+            ns_js_dispatch_resource_event(js, n, "error");
+            return;
+        }
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
@@ -68647,12 +68719,25 @@ ns_js_set_early_inject_src(ns_js *js, const char *src)
     js->early_inject_src = g_strdup(src);
 }
 
+static char **
+ns_js_csp_headers_dup(const ns_js *js)
+{
+    if (!js || !js->csp_headers || js->csp_headers->len == 0) return NULL;
+    char **out = g_new0(char *, js->csp_headers->len + 1);
+    for (guint i = 0; i < js->csp_headers->len; i++)
+        out[i] = g_strdup(g_ptr_array_index(js->csp_headers, i));
+    return out;
+}
+
 void
 ns_js_add_csp_header(ns_js *js, const char *header_value)
 {
     if (!js || !header_value || !*header_value) return;
     ns_csp *parsed = ns_csp_parse(header_value);
     if (!parsed) return;
+    if (!js->csp_headers)
+        js->csp_headers = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(js->csp_headers, g_strdup(header_value));
     if (js->csp) {
         ns_csp_merge(js->csp, parsed);
         ns_csp_free(parsed);

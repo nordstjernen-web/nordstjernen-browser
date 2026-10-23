@@ -3,6 +3,16 @@ Changelog:
 
 1.0.36:
 ======
+* Security (CSP): keyword sources match case-insensitively (`'SELF'`,
+  `'Strict-Dynamic'`, `'NONCE-…'`), as the spec says; an ignored
+  `'strict-dynamic'` used to re-enable host allow-lists. A source
+  with an empty host (`https://`) no longer matches everything without
+  a host. Dedicated and shared workers inherit the page's policy, so
+  their `fetch`, XHR and WebSocket obey `connect-src`, and
+  `importScripts` obeys `script-src`. A classic `<script src>` and an
+  `EventSource` are checked again after a redirect.
+  `navigator.serviceWorker.register()` needs a secure context and a
+  scope under the script's directory.
 * Security (extensions): an Adblock cosmetic filter whose selector holds
   `}`, `/*` or a trailing backslash is ignored instead of being pasted
   into the generated stylesheet, where it could inject rules. Match
