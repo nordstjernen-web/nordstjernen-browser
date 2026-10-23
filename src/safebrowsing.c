@@ -8,9 +8,12 @@
 
 #include <openssl/evp.h>
 
+static GMutex      g_lock;
 static GHashTable *g_blocked;
 static GHashTable *g_allow;
 static gboolean    g_loaded;
+
+static gboolean ns_safebrowsing_blocked_locked(const char *host);
 
 static char *
 host_sha256_hex(const char *host)
@@ -112,8 +115,10 @@ ns_safebrowsing_allow_host(const char *host)
 {
     if (!host || !*host)
         return;
+    g_mutex_lock(&g_lock);
     ensure_loaded();
     g_hash_table_add(g_allow, g_ascii_strdown(host, -1));
+    g_mutex_unlock(&g_lock);
 }
 
 gboolean
@@ -121,6 +126,15 @@ ns_safebrowsing_blocked(const char *host)
 {
     if (!host || !*host)
         return FALSE;
+    g_mutex_lock(&g_lock);
+    gboolean hit = ns_safebrowsing_blocked_locked(host);
+    g_mutex_unlock(&g_lock);
+    return hit;
+}
+
+static gboolean
+ns_safebrowsing_blocked_locked(const char *host)
+{
     ensure_loaded();
     if (g_hash_table_size(g_blocked) == 0)
         return FALSE;

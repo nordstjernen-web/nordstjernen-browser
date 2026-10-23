@@ -1527,49 +1527,46 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
                     linkage->provided_table = JS_DupValue(ctx, v);
                 break;
             case WASM_IMPORT_EXPORT_KIND_GLOBAL: {
-                wasm_val_t gval;
-                if (ns_wasm_global_current_value(v, &gval)) {
-                    if (gval.kind ==
-                        wasm_global_type_get_valkind(imp.u.global_type))
-                        wasm_runtime_link_import_global(module, i, &gval);
-                    break;
-                }
-                if (JS_IsNumber(v) || JS_IsBigInt(v)) {
-                    wasm_val_t val;
-                    memset(&val, 0, sizeof(val));
-                    val.kind =
-                        wasm_global_type_get_valkind(imp.u.global_type);
-                    gboolean ok = TRUE;
-                    if (val.kind == WASM_I64 && JS_IsBigInt(v)) {
-                        ok = !JS_ToBigInt64(ctx, &val.of.i64, v);
-                    } else {
-                        double d = 0;
+                wasm_valkind_t want =
+                    wasm_global_type_get_valkind(imp.u.global_type);
+                wasm_val_t val;
+                memset(&val, 0, sizeof(val));
+                gboolean ok = FALSE;
+                if (ns_wasm_global_current_value(v, &val)) {
+                    ok = val.kind == want;
+                } else if (want == WASM_I64 && JS_IsBigInt(v)) {
+                    val.kind = want;
+                    ok = !JS_ToBigInt64(ctx, &val.of.i64, v);
+                } else if (want != WASM_I64 && JS_IsNumber(v)) {
+                    double d = 0;
+                    val.kind = want;
+                    switch (want) {
+                    case WASM_I32:
+                        ok = !JS_ToInt32(ctx, &val.of.i32, v);
+                        break;
+                    case WASM_F32:
                         ok = !JS_ToFloat64(ctx, &d, v);
-                        switch (val.kind) {
-                        case WASM_I32:
-                            val.of.i32 = (int32_t)(int64_t)d;
-                            break;
-                        case WASM_I64:
-                            val.of.i64 = (int64_t)d;
-                            break;
-                        case WASM_F32:
-                            val.of.f32 = (float)d;
-                            break;
-                        case WASM_F64:
-                            val.of.f64 = d;
-                            break;
-                        default:
-                            ok = FALSE;
-                            break;
-                        }
-                    }
-                    if (ok)
-                        wasm_runtime_link_import_global(module, i, &val);
-                    else if (JS_HasException(ctx)) {
-                        JS_FreeValue(ctx, v);
-                        return FALSE;
+                        val.of.f32 = (float)d;
+                        break;
+                    case WASM_F64:
+                        ok = !JS_ToFloat64(ctx, &val.of.f64, v);
+                        break;
+                    default:
+                        break;
                     }
                 }
+                if (!ok) {
+                    JS_FreeValue(ctx, v);
+                    if (!JS_HasException(ctx)) {
+                        char *msg = g_strdup_printf(
+                            "global import %s.%s is missing or has the wrong type",
+                            imp.module_name, imp.name);
+                        ns_wasm_throw_named(ctx, "LinkError", msg);
+                        g_free(msg);
+                    }
+                    return FALSE;
+                }
+                wasm_runtime_link_import_global(module, i, &val);
                 break;
             }
             default:
