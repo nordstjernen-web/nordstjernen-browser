@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a `<link>` stylesheet that redirects to another origin is
+  held to that origin: it must be `text/css` even in quirks mode, and
+  its text is not exposed to page script through `cssRules`. The checks
+  used the URL the page asked for, so a same-origin redirect let a
+  quirks-mode page read a cross-origin response.
 * Security: an `<iframe>` appended as a DOM child of another `<iframe>`
   element belongs to the outer page, not to the outer frame's document,
   so its origin is compared with the page's and not with the outer

@@ -183,11 +183,30 @@ content_type_is_css(const char *ct)
 #define NS_LINKED_CSS_MAX 128
 
 static GHashTable *g_linked_css;
+static GHashTable *g_css_redirected_cross_origin;
+
+static void
+engine_note_css_landing(const char *url, const char *landed)
+{
+    if (!url || !*url) return;
+    if (!g_css_redirected_cross_origin)
+        g_css_redirected_cross_origin =
+            g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    if (landed && !ns_url_same_origin(url, landed))
+        g_hash_table_add(g_css_redirected_cross_origin, g_strdup(url));
+    else
+        g_hash_table_remove(g_css_redirected_cross_origin, url);
+}
 
 static void
 engine_remember_linked_css(const char *url, GBytes *bytes)
 {
     if (!url || !*url || !bytes) return;
+    if (g_css_redirected_cross_origin &&
+        g_hash_table_contains(g_css_redirected_cross_origin, url)) {
+        if (g_linked_css) g_hash_table_remove(g_linked_css, url);
+        return;
+    }
     if (!g_linked_css)
         g_linked_css = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                              (GDestroyNotify)g_bytes_unref);
@@ -298,8 +317,11 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
     ns_response *resp = engine_fetch_blocking_with_headers(
         url, top_url, ns_net_accept_headers_for(NS_FETCH_DEST_STYLE), NULL);
     GBytes *bytes = NULL;
+    const char *landed = resp && resp->final_url && *resp->final_url
+        ? resp->final_url : url;
+    if (resp) engine_note_css_landing(url, landed);
     gboolean enforce_mime = strict_mime ||
-        (top_url && !ns_url_same_origin(url, top_url)) ||
+        (top_url && !ns_url_same_origin(landed, top_url)) ||
         (resp && ns_net_header_is_nosniff(resp->x_content_type_options));
     gboolean mime_ok = !enforce_mime || !resp ||
                        content_type_is_css(resp->content_type);
