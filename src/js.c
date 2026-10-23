@@ -10259,6 +10259,9 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         return promise;
     }
 
+    g_ptr_array_remove_index(extras, extras->len - 1);
+    g_ptr_array_add(extras, g_strdup("X-ND-CORS: 1"));
+    g_ptr_array_add(extras, NULL);
     ns_net_request_async(send_url, top, use_method,
                          body, body_len,
                          content_type,
@@ -22023,6 +22026,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         }
         g_ptr_array_add(hdr_terminated, hdrs->pdata[i]);
     }
+    g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-CORS: 1");
     g_ptr_array_add(hdr_terminated, NULL);
 
     const char *effective_ct = NULL;
