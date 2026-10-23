@@ -1460,6 +1460,12 @@ ns_js_can_compile_strings(JSContext *ctx)
 }
 
 bool
+ns_js_eval_compile_allowed(JSContext *ctx)
+{
+    return ns_js_string_compile_allowed(ctx, FALSE);
+}
+
+bool
 ns_wasm_compile_allowed(JSContext *ctx)
 {
     return ns_js_string_compile_allowed(ctx, TRUE);

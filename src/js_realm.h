@@ -5,5 +5,6 @@
 #include "ns_quickjs.h"
 
 void ns_js_realm_install(JSContext *ctx, JSValueConst global);
+bool ns_js_eval_compile_allowed(JSContext *ctx);
 
 #endif
