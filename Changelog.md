@@ -3,6 +3,9 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a web font whose SFNT table directory lists the same tag
+  twice is refused instead of being rebuilt with the first table's bytes
+  in the second table's slot.
 * JavaScript: QuickJS fork synced with quickjs-ng master `270b8c9`; fixes an
   infinite loop in `unicode_script()` on allocation failure.
 * CI: Gradle 9.8.2 in the Android and Java workflows and the Android wrapper;

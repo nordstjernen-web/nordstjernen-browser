@@ -549,6 +549,9 @@ ns_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
     for (FT_UInt i = 0; i < num; i++) {
         FT_ULong tag = 0, tlen = 0;
         if (FT_Sfnt_Table_Info(face, i, &tag, &tlen)) { bad = TRUE; break; }
+        for (FT_UInt j = 0; j < i; j++)
+            if (tabs[j].tag == tag) bad = TRUE;
+        if (bad) break;
         tabs[i].tag = tag;
         tabs[i].len = tlen;
         if (tag == FT_MAKE_TAG('C', 'F', 'F', ' ')) cff = TRUE;
