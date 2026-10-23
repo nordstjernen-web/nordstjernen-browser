@@ -6987,8 +6987,9 @@ filter_apply_drop_shadow(guchar *data, int stride, int w, int h,
                          const image_drop_shadow *shadow, double scale)
 {
     guchar *src = g_memdup2(data, (gsize)stride * h);
-    int dx = (int)lround(shadow->x * scale);
-    int dy = (int)lround(shadow->y * scale);
+    double off_x = shadow->x * scale, off_y = shadow->y * scale;
+    int dx = isfinite(off_x) ? (int)lround(CLAMP(off_x, -1e6, 1e6)) : 0;
+    int dy = isfinite(off_y) ? (int)lround(CLAMP(off_y, -1e6, 1e6)) : 0;
     rgba c = shadow->color;
     for (int y = 0; y < h; y++) {
         guchar *row = data + y * stride;
@@ -9106,7 +9107,7 @@ filter_blur_sigma(const char *filter)
         }
         p = next;
     }
-    return sigma;
+    return sigma > 512.0 ? 512.0 : sigma;
 }
 
 static const char *
@@ -10200,7 +10201,9 @@ backdrop_capture(cairo_t *cr, const ns_box *b, const char *filter,
     int px1 = MIN(tw, (int)ceil(x1 * scale_x + off_x));
     int py1 = MIN(th, (int)ceil(y1 * scale_y + off_y));
     int iw = px1 - px0, ih = py1 - py0;
-    int pad = (int)ceil(filter_blur_sigma(filter) * 3.0 * MAX(scale_x, scale_y));
+    double pad_px = filter_blur_sigma(filter) * 3.0 * MAX(scale_x, scale_y);
+    int pad = pad_px >= 0.0 && pad_px <= 4096.0 ? (int)ceil(pad_px)
+            : pad_px > 4096.0 ? 4096 : 0;
     if (iw <= 0 || ih <= 0) return;
     int w = iw + 2 * pad, h = ih + 2 * pad;
     if ((gint64)w * h > NS_BACKDROP_MAX_PIXELS) return;
