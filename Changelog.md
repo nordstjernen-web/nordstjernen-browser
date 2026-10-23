@@ -3,6 +3,13 @@ Changelog:
 
 1.0.36:
 ======
+* Security: an `<iframe>` appended as a DOM child of another `<iframe>`
+  element belongs to the outer page, not to the outer frame's document,
+  so its origin is compared with the page's and not with the outer
+  frame's URL. Cross-origin and sandboxed frames get their own
+  `document.location`, `document.defaultView` and
+  `document.adoptedStyleSheets` instead of objects created by the
+  embedding page.
 * Security: three routes past the CORS preflight are closed. A
   307/308 redirect that keeps a non-simple method is preflighted again
   at its new origin. `navigator.sendBeacon()` with a non-safelisted
