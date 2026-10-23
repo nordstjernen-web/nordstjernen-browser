@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* Security: `<input type="file">` no longer reads a file from disk
+  because of an internal `data-nd-file-path` attribute. Nothing in the
+  browser sets that attribute; the code was only reachable if a page
+  managed to set an internal attribute, and then it would have read any
+  path the renderer can open into `input.files`.
 * Security: a `blob:` URL only resolves for documents of the origin
   that created it. The network-side resolver searched every page's
   blob table, so one site could read another site's object URLs if it
