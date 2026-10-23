@@ -9,6 +9,9 @@
 #include <string.h>
 
 #include <glib/gstdio.h>
+#ifdef G_OS_WIN32
+#include <windows.h>
+#endif
 #include <libpsl.h>
 
 #include "config.h"
@@ -220,6 +223,176 @@ ns_ext_js_base(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_ext_resolved(JSContext *ctx, JSValue value)
+{
+    JSValue funcs[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, funcs);
+    if (JS_IsException(promise)) {
+        JS_FreeValue(ctx, value);
+        return promise;
+    }
+    JSValue r = JS_Call(ctx, funcs[0], JS_UNDEFINED, 1, (JSValueConst *)&value);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, value);
+    JS_FreeValue(ctx, funcs[0]);
+    JS_FreeValue(ctx, funcs[1]);
+    return promise;
+}
+
+static JSValue
+ns_ext_storage_load(JSContext *ctx, const char *id, const char *area)
+{
+    g_autofree char *path = ns_ext_storage_path(id, area);
+    char *data = NULL;
+    gsize len = 0;
+    JSValue v = JS_UNDEFINED;
+    if (path && g_file_get_contents(path, &data, &len, NULL)) {
+        v = JS_ParseJSON(ctx, data, len, "<extension-storage>");
+        if (JS_IsException(v)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            v = JS_UNDEFINED;
+        }
+        g_free(data);
+    }
+    if (!JS_IsObject(v) || JS_IsArray(v)) {
+        JS_FreeValue(ctx, v);
+        v = JS_NewObject(ctx);
+    }
+    return v;
+}
+
+static gboolean
+ns_ext_storage_save(JSContext *ctx, const char *id, const char *area,
+                    JSValueConst obj)
+{
+    g_autofree char *path = ns_ext_storage_path(id, area);
+    if (!path) return FALSE;
+    JSValue json_v = JS_JSONStringify(ctx, obj, JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(json_v)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    const char *json = JS_IsString(json_v) ? JS_ToCString(ctx, json_v) : NULL;
+    gboolean ok = json && g_file_set_contents_full(path, json, -1,
+                                                   G_FILE_SET_CONTENTS_CONSISTENT |
+                                                   G_FILE_SET_CONTENTS_ONLY_EXISTING,
+                                                   0600, NULL);
+    if (json) JS_FreeCString(ctx, json);
+    JS_FreeValue(ctx, json_v);
+    return ok;
+}
+
+static void
+ns_ext_copy_own(JSContext *ctx, JSValueConst dst, JSValueConst src,
+                JSAtom atom, JSValueConst fallback, gboolean use_fallback)
+{
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, src, atom);
+    if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    if (has > 0) {
+        JS_DefinePropertyValue(ctx, dst, atom, JS_DupValue(ctx, desc.value),
+                               JS_PROP_C_W_E);
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+    } else if (use_fallback) {
+        JS_DefinePropertyValue(ctx, dst, atom, JS_DupValue(ctx, fallback),
+                               JS_PROP_C_W_E);
+    }
+}
+
+static JSValue
+ns_ext_js_storage_op(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv, int magic,
+                     JSValueConst *func_data)
+{
+    (void)this_val;
+    const char *id = JS_ToCString(ctx, func_data[0]);
+    const char *area = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    JSValueConst arg = argc > 1 ? argv[1] : JS_UNDEFINED;
+    JSValue stored = ns_ext_storage_load(ctx, id, area);
+    JSValue result = JS_UNDEFINED;
+    if (magic == 0) {
+        if (JS_IsUndefined(arg) || JS_IsNull(arg)) {
+            result = JS_DupValue(ctx, stored);
+        } else {
+            result = JS_NewObject(ctx);
+            if (JS_IsString(arg)) {
+                JSAtom atom = JS_ValueToAtom(ctx, arg);
+                ns_ext_copy_own(ctx, result, stored, atom, JS_UNDEFINED, FALSE);
+                JS_FreeAtom(ctx, atom);
+            } else if (JS_IsObject(arg)) {
+                gboolean is_array = JS_IsArray(arg);
+                JSPropertyEnum *tab = NULL;
+                uint32_t n = 0;
+                if (JS_GetOwnPropertyNames(ctx, &tab, &n, arg,
+                                           JS_GPN_STRING_MASK |
+                                           JS_GPN_ENUM_ONLY) == 0) {
+                    for (uint32_t i = 0; i < n; i++) {
+                        JSValue key_or_default =
+                            JS_GetProperty(ctx, arg, tab[i].atom);
+                        if (is_array) {
+                            JSAtom k = JS_ValueToAtom(ctx, key_or_default);
+                            ns_ext_copy_own(ctx, result, stored, k,
+                                            JS_UNDEFINED, FALSE);
+                            JS_FreeAtom(ctx, k);
+                        } else {
+                            ns_ext_copy_own(ctx, result, stored, tab[i].atom,
+                                            key_or_default, TRUE);
+                        }
+                        JS_FreeValue(ctx, key_or_default);
+                    }
+                    JS_FreePropertyEnum(ctx, tab, n);
+                }
+            }
+        }
+    } else {
+        if (magic == 1 && JS_IsObject(arg)) {
+            JSPropertyEnum *tab = NULL;
+            uint32_t n = 0;
+            if (JS_GetOwnPropertyNames(ctx, &tab, &n, arg,
+                                       JS_GPN_STRING_MASK |
+                                       JS_GPN_ENUM_ONLY) == 0) {
+                for (uint32_t i = 0; i < n; i++)
+                    JS_DefinePropertyValue(ctx, stored, tab[i].atom,
+                        JS_GetProperty(ctx, arg, tab[i].atom), JS_PROP_C_W_E);
+                JS_FreePropertyEnum(ctx, tab, n);
+            }
+        } else if (magic == 2) {
+            JSValue list = JS_IsArray(arg) ? JS_DupValue(ctx, arg)
+                                           : JS_NewArray(ctx);
+            if (!JS_IsArray(arg))
+                JS_DefinePropertyValueUint32(ctx, list, 0, JS_DupValue(ctx, arg),
+                                             JS_PROP_C_W_E);
+            uint32_t n = 0;
+            JSValue len_v = JS_GetPropertyStr(ctx, list, "length");
+            JS_ToUint32(ctx, &n, len_v);
+            JS_FreeValue(ctx, len_v);
+            for (uint32_t i = 0; i < n && i < 100000; i++) {
+                JSValue k = JS_GetPropertyUint32(ctx, list, i);
+                JSAtom atom = JS_ValueToAtom(ctx, k);
+                JS_DeleteProperty(ctx, stored, atom, 0);
+                JS_FreeAtom(ctx, atom);
+                JS_FreeValue(ctx, k);
+            }
+            JS_FreeValue(ctx, list);
+        } else if (magic == 3) {
+            JS_FreeValue(ctx, stored);
+            stored = JS_NewObject(ctx);
+        }
+        ns_ext_storage_save(ctx, id, area, stored);
+    }
+    if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, stored);
+    if (id) JS_FreeCString(ctx, id);
+    if (area) JS_FreeCString(ctx, area);
+    return ns_ext_resolved(ctx, result);
+}
+
+static JSValue
 ns_ext_js_sread(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv, int magic,
                 JSValueConst *func_data)
@@ -312,19 +485,11 @@ static const char ns_ext_shim_prelude[] =
 "var PL=N.p,UL=N.l,OK=Object.keys,AI=Array.isArray,P=Promise;"
 "function each(l,f){for(var i=0;i<l.length;i++)f(l[i]);}"
 "function area(X,name){"
-"function rd(){var o=X.r(name);return o&&typeof o==='object'?o:{};}"
-"function wr(o){return X.w(name,o);}"
-"return {get:function(keys){return new P(function(res){var a=rd(),o={};"
-"if(keys==null)o=a;"
-"else if(typeof keys==='string'){if(keys in a)o[keys]=a[keys];}"
-"else if(AI(keys)){each(keys,function(k){if(k in a)o[k]=a[k];});}"
-"else if(typeof keys==='object'){each(OK(keys),function(k){o[k]=(k in a)?a[k]:keys[k];});}"
-"res(o);});},"
-"set:function(items){return new P(function(res){var a=rd();"
-"each(OK(items||{}),function(k){a[k]=items[k];});wr(a);res();});},"
-"remove:function(keys){return new P(function(res){var a=rd();"
-"each(AI(keys)?keys:[keys],function(k){delete a[k];});wr(a);res();});},"
-"clear:function(){return new P(function(res){wr({});res();});}};}"
+"var g=X.sg,s=X.ss,d=X.sd,c=X.sc;"
+"return {get:function(keys){return g(name,keys);},"
+"set:function(items){return s(name,items);},"
+"remove:function(keys){return d(name,keys);},"
+"clear:function(){return c(name);}};}"
 "function make_api(X){"
 "var id=X.id,man=null;"
 "function getManifest(){if(man===null){try{man=JSON.parse(X.m());}catch(e){man={};}}return man;}"
@@ -393,7 +558,24 @@ static char *
 ns_ext_resolved_path(const char *path)
 {
 #ifdef G_OS_WIN32
-    return g_canonicalize_filename(path, NULL);
+    wchar_t *wpath = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
+    if (!wpath) return NULL;
+    HANDLE h = CreateFileW(wpath, 0,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    g_free(wpath);
+    if (h == INVALID_HANDLE_VALUE) return NULL;
+    wchar_t buf[32768];
+    DWORD n = GetFinalPathNameByHandleW(h, buf, G_N_ELEMENTS(buf),
+                                        FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (n == 0 || n >= G_N_ELEMENTS(buf)) return NULL;
+    const wchar_t *start = buf;
+    if (wcsncmp(start, L"\\\\?\\", 4) == 0) start += 4;
+    char *utf8 = g_utf16_to_utf8((const gunichar2 *)start, -1, NULL, NULL, NULL);
+    char *out = utf8 ? g_canonicalize_filename(utf8, NULL) : NULL;
+    g_free(utf8);
+    return out;
 #else
     char *r = realpath(path, NULL);
     char *out = r ? g_strdup(r) : NULL;
@@ -416,7 +598,8 @@ ns_ext_safe_path(const char *base_dir, const char *rel)
         g_free(canon);
         return NULL;
     }
-    return canon;
+    g_free(canon);
+    return g_steal_pointer(&real);
 }
 
 static char *
@@ -974,6 +1157,10 @@ ns_ext_bridge_new(JSContext *ctx, const ns_ext *e)
         JS_NewCFunctionData(ctx, ns_ext_js_sread, 1, 0, 1, &id), 0);
     JS_DefinePropertyValueStr(ctx, bridge, "w",
         JS_NewCFunctionData(ctx, ns_ext_js_swrite, 2, 0, 1, &id), 0);
+    static const char *const op_names[] = { "sg", "ss", "sd", "sc" };
+    for (int op = 0; op < 4; op++)
+        JS_DefinePropertyValueStr(ctx, bridge, op_names[op],
+            JS_NewCFunctionData(ctx, ns_ext_js_storage_op, 2, op, 1, &id), 0);
     JS_FreeValue(ctx, id);
     return bridge;
 }

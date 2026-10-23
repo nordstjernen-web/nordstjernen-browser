@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security (extensions): `chrome.storage.local/sync/managed` `get`,
+  `set`, `remove` and `clear` run entirely in C and return the engine's
+  own promises, defining result properties rather than assigning them.
+  The shim no longer calls anything a page could have replaced
+  (`Promise`, `Object.keys`, setters on `Object.prototype`). Files an
+  extension loads are opened by their resolved path, and on Windows
+  symlinks and junctions are resolved too, so a link inside an
+  extension cannot point outside it.
 * Security (CSP): an `EventSource` whose server redirects outside the
   page's `connect-src` is stopped before the redirected request is
   sent; it was only refused after libcurl had already followed it.
