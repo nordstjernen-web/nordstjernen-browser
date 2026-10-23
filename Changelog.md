@@ -3,6 +3,18 @@ Changelog:
 
 1.0.36:
 ======
+* Security (sandbox): unpacked extensions load from
+  `~/.local/share/nordstjernen-extensions` (an existing
+  `nordstjernen/extensions` directory is moved there at startup), which
+  the renderer cannot write, so a compromised renderer can no longer
+  plant an extension that runs on every site. The renderer loses write
+  access to the download directory, which only the UI process uses.
+  Landlock asks the kernel to bind all threads and logs threads left
+  unconfined on kernels that cannot. Profile directories created by
+  older builds are tightened to `0700`. The renderer self-test is
+  started with `--selftest URL` instead of an inherited environment
+  variable, and the remaining `NS_NO_*`/`NS_PRIVATE`/`NS_DEELEVATED`
+  switches treat `0`, `false`, `no` and `off` as unset.
 * Security: SQLite profile databases (IndexedDB, history and the other
   stores opened through `ns_db_open`) are set to mode `0600` when
   opened. IndexedDB files were created with SQLite's default `0644`.

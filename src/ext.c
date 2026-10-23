@@ -584,6 +584,25 @@ ns_ext_resolved_path(const char *path)
 #endif
 }
 
+char *
+ns_ext_default_root(void)
+{
+    g_autofree char *leaf = g_strconcat(NS_APP_DIR_NAME, "-extensions", NULL);
+    return g_build_filename(g_get_user_data_dir(), leaf, NULL);
+}
+
+void
+ns_ext_migrate_default_root(void)
+{
+    g_autofree char *old = g_build_filename(g_get_user_data_dir(),
+                                            NS_APP_DIR_NAME, "extensions",
+                                            NULL);
+    g_autofree char *root = ns_ext_default_root();
+    if (g_file_test(old, G_FILE_TEST_IS_DIR) &&
+        !g_file_test(root, G_FILE_TEST_EXISTS))
+        g_rename(old, root);
+}
+
 static char *
 ns_ext_safe_path(const char *base_dir, const char *rel)
 {
@@ -1104,9 +1123,7 @@ ns_ext_do_init(void)
             if (**p) ns_ext_scan_root(*p, ctx);
         g_strfreev(parts);
     }
-    g_autofree char *def = g_build_filename(g_get_user_data_dir(),
-                                            NS_APP_DIR_NAME,
-                                            "extensions", NULL);
+    g_autofree char *def = ns_ext_default_root();
     ns_ext_scan_root(def, ctx);
 
     JS_FreeContext(ctx);

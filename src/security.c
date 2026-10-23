@@ -293,7 +293,7 @@ ns_security_refuse_root(void)
                   "NS_ALLOW_ROOT is set");
         return TRUE;
     }
-    if (!g_getenv("NS_DEELEVATED") && ns_win_relaunch_deelevated()) {
+    if (!ns_security_env_flag("NS_DEELEVATED") && ns_win_relaunch_deelevated()) {
         g_warning("nordstjernen: dropped Administrator rights by relaunching "
                   "as the current desktop user");
         return FALSE;
@@ -379,6 +379,21 @@ ns_security_add_exec_dir(const char *dir)
 #ifndef LANDLOCK_ACCESS_FS_TRUNCATE
 #define LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
 #endif
+
+#ifndef LANDLOCK_RESTRICT_SELF_TSYNC
+#define LANDLOCK_RESTRICT_SELF_TSYNC (1U << 3)
+#endif
+
+static int
+ns_security_thread_count(void)
+{
+    GDir *d = g_dir_open("/proc/self/task", 0, NULL);
+    if (!d) return 0;
+    int n = 0;
+    while (g_dir_read_name(d)) n++;
+    g_dir_close(d);
+    return n;
+}
 
 #ifndef LANDLOCK_CREATE_RULESET_VERSION
 #define LANDLOCK_CREATE_RULESET_VERSION (1U << 0)
@@ -559,18 +574,21 @@ ns_security_sandbox_init(const char *self_exe)
     char *ns_cfg_root =
         g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_cfg_root, 0700);
+    chmod(ns_cfg_root, 0700);
     add_path_rw(rfd, fs_rw, ns_cfg_root);
     g_free(ns_cfg_root);
 
     char *ns_data_root =
         g_build_filename(g_get_user_data_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_data_root, 0700);
+    chmod(ns_data_root, 0700);
     add_path_rw(rfd, fs_rw, ns_data_root);
     g_free(ns_data_root);
 
     char *ns_cache_top =
         g_build_filename(g_get_user_cache_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_cache_top, 0700);
+    chmod(ns_cache_top, 0700);
     add_path_rw(rfd, fs_rw, ns_cache_top);
     g_free(ns_cache_top);
 
@@ -588,7 +606,8 @@ ns_security_sandbox_init(const char *self_exe)
         else if (home)
             dl_dir = g_build_filename(home, "Downloads", NULL);
         gsize home_len = home ? strlen(home) : 0;
-        if (dl_dir && home_len > 1 && g_str_has_prefix(dl_dir, home) &&
+        if (dl_dir && ns_runtime_dir_writable && home_len > 1 &&
+            g_str_has_prefix(dl_dir, home) &&
             dl_dir[home_len] == G_DIR_SEPARATOR && dl_dir[home_len + 1]) {
             g_mkdir_with_parents(dl_dir, 0700);
             if (g_file_test(dl_dir, G_FILE_TEST_IS_DIR))
@@ -661,12 +680,14 @@ ns_security_sandbox_init(const char *self_exe)
         }
     }
 
-    int restricted = -1;
-#ifdef LANDLOCK_RESTRICT_SELF_TSYNC
-    restricted = landlock_restrict_self_(rfd, LANDLOCK_RESTRICT_SELF_TSYNC);
-#endif
-    if (restricted != 0)
+    int restricted = landlock_restrict_self_(rfd, LANDLOCK_RESTRICT_SELF_TSYNC);
+    if (restricted != 0) {
         restricted = landlock_restrict_self_(rfd, 0);
+        if (restricted == 0 && ns_security_thread_count() > 1)
+            g_info("landlock: kernel lacks TSYNC; %d threads that predate the "
+                   "sandbox are not filesystem-confined",
+                   ns_security_thread_count() - 1);
+    }
     if (restricted != 0) {
         g_info("landlock: restrict_self failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("Landlock enforcement (restrict_self) failed");

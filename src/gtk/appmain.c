@@ -33,6 +33,7 @@
 #include "font.h"
 #include "media_os.h"
 #include "engine.h"
+#include "ext.h"
 #include "headless.h"
 #include "spellcheck.h"
 #include "history.h"
@@ -616,6 +617,7 @@ main(int argc, char **argv)
         }
     }
 
+    ns_ext_migrate_default_root();
     ns_security_win32_mitigations_init(proc_mode);
     ns_add_screenshot_writable_dirs(argc, argv);
     ns_add_gtk_cache_writable_dir();
