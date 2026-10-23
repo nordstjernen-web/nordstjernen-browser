@@ -9485,6 +9485,16 @@ ns_cors_exposed_raw_headers(const char *raw)
     return g_string_free(out, FALSE);
 }
 
+static char **
+ns_strv_with_cors_marker(char **headers)
+{
+    guint n = headers ? g_strv_length(headers) : 0;
+    char **out = g_new0(char *, n + 2);
+    for (guint i = 0; i < n; i++) out[i] = g_strdup(headers[i]);
+    out[n] = g_strdup("X-ND-CORS: 1");
+    return out;
+}
+
 static gboolean
 cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
 {
@@ -10312,7 +10322,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
             memcpy(st->fb_body, body, body_len);
             st->fb_body_len = body_len;
         }
-        st->fb_headers = g_strdupv((char **)extras->pdata);
+        st->fb_headers = ns_strv_with_cors_marker((char **)extras->pdata);
         ns_sw_post_fetch_request(sw, st->id, send_url, use_method,
                                  (const char *const *)extras->pdata,
                                  (const guint8 *)body, body_len);
@@ -56204,11 +56214,12 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
         }
     }
 
+    static const char *const beacon_headers[] = { "X-ND-CORS: 1", NULL };
     ns_net_request_async(abs_url,
                          js ? js->current_url : NULL,
                          "POST", body, body_len,
                          content_type,
-                         NULL, NULL,
+                         beacon_headers, NULL,
                          ns_beacon_done, NULL);
     g_free(abs_url);
     g_free(body);

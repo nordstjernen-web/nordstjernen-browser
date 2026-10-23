@@ -6921,6 +6921,18 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(cur_top);
             cur_top = NULL;
         }
+        char *preflight_failure = ns_fetch_wants_cors(extra_headers)
+            ? ns_fetch_cors_preflight(next, cur_top, cur_method, cur_ct,
+                                      hop_headers, cancellable)
+            : NULL;
+        if (preflight_failure) {
+            ns_response_free(resp);
+            resp = g_new0(ns_response, 1);
+            resp->body = g_byte_array_new();
+            resp->final_url = next;
+            resp->error = preflight_failure;
+            break;
+        }
         g_free(cur_url);
         cur_url = next;
         hops++;
