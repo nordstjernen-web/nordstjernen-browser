@@ -444,6 +444,7 @@ static void ns_js_name_engine_members(JSContext *ctx);
 static void ns_js_link_interfaces(JSContext *ctx);
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
+static void ns_install_cross_window_maker(JSContext *ctx, JSValueConst global);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static void ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global);
 static void ns_target_report_exception(ns_js *js, JSContext *ctx, const char *type);
@@ -15202,6 +15203,7 @@ ns_window_bind_post_message(JSContext *ctx, JSValueConst global)
                ns_window_post_message_this, 3);
     ns_bind_fn(ctx, global, "__nsPostMessageFrom",
                ns_window_post_message_from, 5);
+    ns_install_cross_window_maker(ctx, global);
 }
 
 static JSValue
@@ -28083,7 +28085,8 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndRealmProto",
                                          "__ndRealmProtos",
                                          "__ndPlatformFns",
-                                         "__ndAdoptCss" };
+                                         "__ndAdoptCss",
+                                         "__ndCrossWindowMaker" };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
         JS_AddEnginePrivateName(ctx, names[i]);
     ns_net_add_private_names(ctx);
@@ -50818,7 +50821,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  }"
     "  if ((sandbox & 8192) || ((sandbox & 1) && !(sandbox & 8))) {"
     "    var denyStore = function(){"
-    "      try { return new realWin.DOMException('The operation is insecure.', 'SecurityError'); }"
+    "      try { return new G.DOMException('The operation is insecure.', 'SecurityError'); }"
     "      catch(e){ return new Error('SecurityError'); } };"
     "    var opaqueOrigin = (sandbox & 1) && !(sandbox & 8);"
     "    var ownStore = function(){ var area = null;"
@@ -50832,7 +50835,7 @@ static const char ns_iframe_global_bootstrap[] =
     "    try { Object.defineProperty(iframeDoc, 'requestStorageAccess', {"
     "      configurable: true, writable: true, enumerable: true,"
     "      value: function requestStorageAccess(){ return Promise.reject("
-    "        new realWin.DOMException('Storage access is not allowed in this sandboxed document.', 'NotAllowedError')); } });"
+    "        new G.DOMException('Storage access is not allowed in this sandboxed document.', 'NotAllowedError')); } });"
     "    } catch (e) {}"
     "  }"
     "  var crossOrigin = (sandbox & 8192) !== 0;"
@@ -50851,7 +50854,8 @@ static const char ns_iframe_global_bootstrap[] =
     "  tagAs(hist, 'History');"
     "  try {"
     "    ['timeline', 'pictureInPictureEnabled'].forEach(function(k){"
-    "      if (iframeDoc && !(k in iframeDoc) && realWin.document && k in realWin.document)"
+    "      if (iframeDoc && !(k in iframeDoc) && realWin.document && k in realWin.document &&"
+    "          !(crossOrigin && Object(realWin.document[k]) === realWin.document[k]))"
     "        Object.defineProperty(iframeDoc, k, { configurable: true, enumerable: true,"
     "          value: realWin.document[k] });"
     "    });"
@@ -52066,14 +52070,19 @@ ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 }
 
 static const char ns_cross_window_bootstrap[] =
-    "(function(G, target){"
-    "  var cache = G.__ndCrossWindows;"
-    "  if (!(cache instanceof WeakMap)) {"
-    "    cache = new WeakMap();"
-    "    Object.defineProperty(G, '__ndCrossWindows', { value: cache, configurable: true });"
-    "  }"
-    "  if (cache.has(target)) return cache.get(target);"
+    "(function(G, postFrom){"
+    "  var WM = WeakMap, wmGet = WM.prototype.get, wmSet = WM.prototype.set,"
+    "      wmHas = WM.prototype.has, apply = Reflect.apply, arrayOf = Array.of;"
+    "  var cache = new WM();"
+    "  return (function(Proxy){"
     NS_CROSS_ORIGIN_LOCATION_JS
+    "  function postArgs(target, a){"
+    "    var n = a.length;"
+    "    return n >= 3 ? arrayOf(target, G, a[0], a[1], a[2])"
+    "         : n === 2 ? arrayOf(target, G, a[0], a[1])"
+    "         : n === 1 ? arrayOf(target, G, a[0]) : arrayOf(target, G); }"
+    "  return function(target){"
+    "  if (apply(wmHas, cache, arrayOf(target))) return apply(wmGet, cache, arrayOf(target));"
     "  var proxy;"
     "  function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
     "  var loc = crossLocation(target, denied);"
@@ -52085,7 +52094,7 @@ static const char ns_cross_window_bootstrap[] =
     "      if(p==='parent') return G.window || G;"
     "      if(p==='top') return G.top || G;"
     "      if(p==='opener') return null;"
-    "      if(p==='postMessage') return function(){ return G.__nsPostMessageFrom.apply(G, [target, G].concat(Array.prototype.slice.call(arguments))); };"
+    "      if(p==='postMessage') return function(){ return apply(postFrom, G, postArgs(target, arguments)); };"
     "      if(p==='location') return loc;"
     "      if(p==='closed') return !!target.closed;"
     "      if(p==='length') return target.length >>> 0;"
@@ -52104,21 +52113,49 @@ static const char ns_cross_window_bootstrap[] =
     "    getPrototypeOf:function(){ return null; },"
     "    setPrototypeOf:function(){ return denied(); }"
     "  });"
-    "  cache.set(target, proxy);"
+    "  apply(wmSet, cache, arrayOf(target, proxy));"
     "  return proxy;"
+    "  }; })(Proxy);"
     "})";
+
+static void
+ns_install_cross_window_maker(JSContext *ctx, JSValueConst global)
+{
+    JSValue existing = JS_GetPropertyStr(ctx, global, "__ndCrossWindowMaker");
+    gboolean installed = JS_IsFunction(ctx, existing);
+    JS_FreeValue(ctx, existing);
+    if (installed) return;
+    JSValue outer = JS_Eval(ctx, ns_cross_window_bootstrap,
+                            strlen(ns_cross_window_bootstrap),
+                            "<cross-window>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    JSValue maker = JS_UNDEFINED;
+    if (!JS_IsException(outer) && JS_IsFunction(ctx, outer)) {
+        JSValue post_from = JS_NewCFunction(ctx, ns_window_post_message_from,
+                                            "__nsPostMessageFrom", 5);
+        JSValueConst args[2] = { global, post_from };
+        maker = JS_Call(ctx, outer, JS_UNDEFINED, 2, args);
+        JS_FreeValue(ctx, post_from);
+    }
+    if (JS_IsException(outer) || JS_IsException(maker)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        maker = JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, outer);
+    if (JS_IsFunction(ctx, maker))
+        JS_DefinePropertyValueStr(ctx, global, "__ndCrossWindowMaker", maker, 0);
+    else
+        JS_FreeValue(ctx, maker);
+}
 
 static JSValue
 ns_iframe_cross_origin_window(JSContext *ctx, JSValue target)
 {
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue maker = JS_Eval(ctx, ns_cross_window_bootstrap,
-                            strlen(ns_cross_window_bootstrap),
-                            "<cross-window>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    JSValue maker = JS_GetPropertyStr(ctx, global, "__ndCrossWindowMaker");
     JSValue proxy = JS_NULL;
-    if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
-        JSValueConst args[2] = { global, target };
-        proxy = JS_Call(ctx, maker, JS_UNDEFINED, 2, args);
+    if (JS_IsFunction(ctx, maker)) {
+        JSValueConst args[1] = { target };
+        proxy = JS_Call(ctx, maker, JS_UNDEFINED, 1, args);
         if (JS_IsException(proxy)) {
             JS_FreeValue(ctx, JS_GetException(ctx));
             proxy = JS_NULL;
