@@ -9442,6 +9442,48 @@ ns_fetch_on_signal_abort(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
+ns_cors_header_exposed(const char *name, gsize len, const char *expose)
+{
+    static const char *const safelisted[] = {
+        "cache-control", "content-language", "content-length", "content-type",
+        "expires", "last-modified", "pragma", NULL,
+    };
+    for (int i = 0; safelisted[i]; i++)
+        if (strlen(safelisted[i]) == len &&
+            g_ascii_strncasecmp(name, safelisted[i], len) == 0)
+            return TRUE;
+    if (!expose) return FALSE;
+    gboolean found = FALSE;
+    gchar **parts = g_strsplit(expose, ",", -1);
+    for (int i = 0; parts[i] && !found; i++) {
+        g_strstrip(parts[i]);
+        found = strcmp(parts[i], "*") == 0 ||
+                (strlen(parts[i]) == len &&
+                 g_ascii_strncasecmp(parts[i], name, len) == 0);
+    }
+    g_strfreev(parts);
+    return found;
+}
+
+static char *
+ns_cors_exposed_raw_headers(const char *raw)
+{
+    if (!raw) return NULL;
+    g_autofree char *expose =
+        ns_net_raw_header_values(raw, "Access-Control-Expose-Headers");
+    GString *out = g_string_new(NULL);
+    for (const char *line = raw; *line; ) {
+        const char *eol = strchr(line, '\n');
+        gsize llen = eol ? (gsize)(eol - line + 1) : strlen(line);
+        const char *colon = memchr(line, ':', llen);
+        if (colon && ns_cors_header_exposed(line, (gsize)(colon - line), expose))
+            g_string_append_len(out, line, (gssize)llen);
+        line += llen;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
 cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
 {
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
@@ -9651,7 +9693,12 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         if (allow) {
             gboolean same_origin = ns_url_same_origin(
                 st->js ? st->js->current_url : NULL, resp->final_url);
-            const char *raw = same_origin ? resp->raw_headers : NULL;
+            g_autofree char *exposed = same_origin ? NULL
+                : ns_cors_exposed_raw_headers(resp->raw_headers);
+            g_autofree char *expose = same_origin ? NULL
+                : ns_net_raw_header_values(resp->raw_headers,
+                                           "Access-Control-Expose-Headers");
+            const char *raw = same_origin ? resp->raw_headers : exposed;
             if (raw) ns_headers_init_add_raw(st->ctx, header_init, raw);
             const struct { const char *name; const char *value; } known[] = {
                 { "content-type",                resp->content_type        },
@@ -9663,6 +9710,10 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
                 if (!known[i].value || !*known[i].value) continue;
                 if (ns_raw_headers_have(raw, known[i].name)) continue;
+                if (!same_origin &&
+                    !ns_cors_header_exposed(known[i].name,
+                                            strlen(known[i].name), expose))
+                    continue;
                 JS_SetPropertyStr(st->ctx, header_init, known[i].name,
                                   JS_NewString(st->ctx, known[i].value));
             }
@@ -21237,8 +21288,17 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
                 ns_xhr_serialize_headers_missing(resp, resp->raw_headers);
             hdrs = g_strconcat(resp->raw_headers, missing, NULL);
             g_free(missing);
-        } else {
+        } else if (same_origin) {
             hdrs = ns_xhr_serialize_headers(resp);
+        } else {
+            hdrs = ns_cors_exposed_raw_headers(resp->raw_headers);
+            if (!hdrs || !*hdrs) {
+                g_free(hdrs);
+                hdrs = resp->content_type && *resp->content_type
+                    ? g_strdup_printf("content-type: %s\r\n",
+                                      resp->content_type)
+                    : g_strdup("");
+            }
         }
         JS_SetPropertyStr(ctx, st->obj, "_responseHeaders",
                           JS_NewString(ctx, hdrs));

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a cross-origin `fetch()` or XHR response shows script only
+  the CORS-safelisted headers and those named in
+  `Access-Control-Expose-Headers`. `Content-Disposition`,
+  `Content-Security-Policy`, `X-Frame-Options` and
+  `Access-Control-Allow-Origin` used to be readable on every
+  CORS-allowed response.
 * Security (XML): the XHTML well-formedness check and the XML parser
   find the end of a `<!DOCTYPE … [ … ]>` the same way, skipping quoted
   strings and comments in the internal subset. The check stopped at the
