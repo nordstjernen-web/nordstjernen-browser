@@ -2,6 +2,9 @@
 
 #include "db.h"
 
+#include <string.h>
+#include <glib/gstdio.h>
+
 void
 ns_db_harden(sqlite3 *db)
 {
@@ -31,6 +34,8 @@ ns_db_open(const char *path, int flags, const char *tag)
         if (db) sqlite3_close(db);
         return NULL;
     }
+    if (path && *path && strcmp(path, ":memory:") != 0)
+        g_chmod(path, 0600);
     ns_db_harden(db);
     sqlite3_busy_timeout(db, 2500);
     return db;
