@@ -129,6 +129,7 @@ char      **ns_net_navigator_languages(void);
 typedef GBytes *(*ns_net_blob_resolver)(const char *url, char **out_type,
                                         gpointer user_data);
 void ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data);
+gboolean ns_net_blob_url_visible_to(const char *blob_url, const char *doc_url);
 
 void ns_net_fetch_async(const char        *url,
                         const char        *top_url,

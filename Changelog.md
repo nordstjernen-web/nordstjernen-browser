@@ -3,6 +3,10 @@ Changelog:
 
 1.0.36:
 ======
+* Security: a `blob:` URL only resolves for documents of the origin
+  that created it. The network-side resolver searched every page's
+  blob table, so one site could read another site's object URLs if it
+  learned the URL.
 * Security: a function passed into a `ShadowRealm` through a wrapped
   function now reaches the realm as a wrapper created in that realm, as
   the proposal specifies. It used to arrive unwrapped, so code in the
