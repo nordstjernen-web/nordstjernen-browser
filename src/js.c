@@ -63329,6 +63329,7 @@ ns_js_free(ns_js *js)
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
+    if (js->csp_headers) ns_net_csp_unregister(js);
     g_clear_pointer(&js->csp_headers, g_ptr_array_unref);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
@@ -68863,6 +68864,10 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
     if (!js->csp_headers)
         js->csp_headers = g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(js->csp_headers, g_strdup(header_value));
+    if (!js->worker_host) {
+        g_auto(GStrv) all = ns_js_csp_headers_dup(js);
+        ns_net_csp_register(js, js->current_url, (const char *const *)all);
+    }
     if (js->csp) {
         ns_csp_merge(js->csp, parsed);
         ns_csp_free(parsed);

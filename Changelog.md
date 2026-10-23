@@ -3,6 +3,14 @@ Changelog:
 
 1.0.36:
 ======
+* Security (CSP): `img-src`, `font-src`, `style-src` (linked
+  stylesheets and `@import`) and `connect-src` are enforced on every
+  request, including each redirect hop before it is sent. Before, the
+  engine loaded images, fonts and stylesheets without consulting the
+  page's policy at all, and the speculative preloader fetched scripts
+  and styles before any policy was known. The page's policy is now
+  registered from its response header and `<meta>` tags before the
+  first subresource request.
 * Security: every in-page `blob:` lookup (scripts, module imports,
   workers, images, `fetch`) checks that the URL belongs to the
   document's origin, and the internal hook that refreshes a blob URL's
