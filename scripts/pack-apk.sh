@@ -70,14 +70,17 @@ log "runtime packages: $LIB_DEPS"
 
 cat > "$BUILDTOP/nordstjernen.post-install" <<'EOF'
 #!/bin/sh
-[ -e /usr/bin/internet-browser ] || \
-    ln -sf nordstjernen /usr/bin/internet-browser
+if [ "$(readlink /usr/bin/internet-browser)" = nordstjernen ]; then
+    rm -f /usr/bin/internet-browser
+fi
+[ -e /usr/bin/open-browser-nordstjernen ] || \
+    ln -sf nordstjernen /usr/bin/open-browser-nordstjernen
 exit 0
 EOF
 cat > "$BUILDTOP/nordstjernen.pre-deinstall" <<'EOF'
 #!/bin/sh
-if [ "$(readlink /usr/bin/internet-browser)" = nordstjernen ]; then
-    rm -f /usr/bin/internet-browser
+if [ "$(readlink /usr/bin/open-browser-nordstjernen)" = nordstjernen ]; then
+    rm -f /usr/bin/open-browser-nordstjernen
 fi
 exit 0
 EOF

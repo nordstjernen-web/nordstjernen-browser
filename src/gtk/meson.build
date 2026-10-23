@@ -54,7 +54,7 @@ executable(
 
 if host_machine.system() != 'windows'
   install_symlink(
-    'internet-browser',
+    'open-browser-nordstjernen',
     pointing_to: 'nordstjernen',
     install_dir: get_option('bindir'),
   )

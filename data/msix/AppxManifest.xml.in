@@ -84,7 +84,7 @@
                         EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="nordstjernen.exe"/>
-            <desktop:ExecutionAlias Alias="internet-browser.exe"/>
+            <desktop:ExecutionAlias Alias="open-browser-nordstjernen.exe"/>
           </uap3:AppExecutionAlias>
         </uap3:Extension>
       </Extensions>

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.36:
 ======
+* The browser's second command name is now `open-browser-nordstjernen`
+  (it was `internet-browser`): the installed symlink, the `.deb`/`.rpm`
+  alternative, the Alpine link, the Windows App Paths alias and the MSIX
+  execution alias. Upgrading removes the old `internet-browser`
+  registration, and the Arch package now ships the link.
 * Docs: SECURITY.md now states that W^X is a property of the code
   rather than something seccomp enforces (GPU shader compilers need
   executable mappings). It also lists the developer environment knobs
