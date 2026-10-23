@@ -3,6 +3,9 @@ Changelog:
 
 1.0.36:
 ======
+* Security (CSP): an `EventSource` whose server redirects outside the
+  page's `connect-src` is stopped before the redirected request is
+  sent; it was only refused after libcurl had already followed it.
 * Security (CSP): `img-src`, `font-src`, `style-src` (linked
   stylesheets and `@import`) and `connect-src` are enforced on every
   request, including each redirect hop before it is sent. Before, the
