@@ -35314,11 +35314,19 @@ ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
     ns_css_mark_childlist_replaced(parent, added, NULL, 0);
 }
 
+static gboolean
+incr_node_connected(const ns_node *n)
+{
+    const ns_node *root = ns_node_root(n);
+    return root && root->kind == NS_NODE_DOCUMENT &&
+           !(root->flags & NS_NODE_FRAGMENT);
+}
+
 void
 ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
                                ns_node *const *removed, guint n_removed)
 {
-    if (!parent) return;
+    if (!parent || !incr_node_connected(parent)) return;
     gboolean gated = added &&
                      incr_has_mut_begin_replaced(added, removed, n_removed);
     incr_mark_childlist(parent, added);
@@ -35330,7 +35338,7 @@ ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
                               guint n_removed, ns_node *next_sibling,
                               ns_node *previous_sibling)
 {
-    if (!parent) return;
+    if (!parent || !incr_node_connected(parent)) return;
     gboolean gated = n_removed > 0 &&
                      incr_has_mut_begin_nodes(removed, n_removed, FALSE);
     incr_mark_childlist(parent, NULL);

@@ -1,6 +1,16 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.37:
+======
+* Performance: appending children to an element that is not in the
+  document no longer slows down with every child. Each append ran the
+  incremental style invalidation, which checks every existing child of
+  the parent, so building a list of 20,000 items off-document took about
+  8 seconds; it now takes about 30 ms. Elements outside the document have
+  no styles to invalidate, and the subtree is restyled when it is
+  inserted.
+
 1.0.36:
 ======
 * Build: `config_free_strings` casts the string slot through `void *`,
