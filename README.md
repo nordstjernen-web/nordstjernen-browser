@@ -16,7 +16,7 @@ Supported platforms:
 * Java
 * iOS (experimental port, simulator builds — see [docs/iOS.md](docs/iOS.md))
 
-**Current release:** **1.0.35** (October 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.36** (October 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope
@@ -52,8 +52,10 @@ one person to read and audit end-to-end. See
 [docs/Software-Architecture.md](docs/Software-Architecture.md) for a map of
 the whole system.
 
-See [Northstar](https://github.com/nordstjernen-web/northstar-browser)
-for the GPL-licensed sibling project.
+Sibling projects: [Nordstjernen Web Browser](https://github.com/nordstjernen-web/northstar-web-browser)
+(formerly Northstar), the GPL-licensed minimalist edition with one process
+and no tabs, and [Southstar](https://github.com/nordstjernen-web/southstar-browser),
+this browser rewritten in Rust.
 
 <img src="docs/nordstjernen-now.gif" alt="Nordstjernen Now!" width="140">
 
